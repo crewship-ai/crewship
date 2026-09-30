@@ -242,6 +242,16 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 	// Admin › Security across workspaces (admin_instance_keeper.go).
 	instanceWsRef := map[string]any{"workspace_id": str(), "workspace_name": str(), "workspace_slug": str()}
 	instanceWsRequired := []string{"workspace_id", "workspace_name", "workspace_slug"}
+	// Admin › Data retention (admin_instance_retention.go). Every window is a
+	// number of days, or null for forever.
+	retentionKeys := []string{"routine_runs_days", "approvals_days", "audit_days", "credential_audit_days",
+		"memory_versions_days", "page_panel_data_days", "inbox_days", "chats_days", "keeper_decisions_days"}
+	retentionProps := map[string]any{}
+	for _, k := range retentionKeys {
+		retentionProps[k] = nullable(integer())
+	}
+	retentionWindows := object(retentionProps, retentionKeys...)
+	retentionPatch := object(retentionProps)
 	instanceGovSettings := map[string]any{
 		"enabled": boolean(), "security_contact_user_id": str(), "deny_notify_min_risk": integer(),
 		"watch_spec": str(), "watch_presets": stringArray(), "require_second_approver": boolean(),
@@ -347,6 +357,128 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 				"alarm": nullable(object(map[string]any{"kind": str(), "summary": str(), "at": str()})), "oldest": str(), "newest": str(),
 			}, "workspace_id", "workspace_name", "samples", "min_samples")),
 		}, "workspaces")},
+		"GET /api/v1/admin/instance/retention": {Response: object(map[string]any{
+			"workspaces":          array(object(withProps(instanceWsRef, map[string]any{"windows": retentionWindows}), append([]string{"windows"}, instanceWsRequired...)...)),
+			"defaults":            retentionWindows,
+			"defaults_configured": stringArray(),
+			"keys": array(object(map[string]any{
+				"key": str(), "label": str(), "default_days": nullable(integer()), "forever_allowed": boolean(),
+				"min_days": integer(), "max_days": integer(), "detail": str(),
+			}, "key", "label", "default_days", "forever_allowed", "min_days", "max_days", "detail")),
+			"housekeeping": array(object(map[string]any{"key": str(), "label": str(), "value": str(), "detail": str()},
+				"key", "label", "value", "detail")),
+		}, "workspaces", "defaults", "defaults_configured", "keys", "housekeeping")},
+		"PUT /api/v1/admin/instance/retention": {
+			Request: object(map[string]any{
+				"workspace_ids": nullable(stringArray()), "windows": retentionPatch, "dry_run": boolean(), "expect_preview": str(),
+			}, "workspace_ids", "windows"),
+			Response: object(map[string]any{
+				"applied": boolean(), "dry_run": boolean(), "changed": integer(), "rows_affected_next_sweep": integer(),
+				"preview_id": str(),
+				"workspaces": array(object(withProps(instanceWsRef, map[string]any{
+					"changes": array(object(map[string]any{
+						"key": str(), "from": nullable(integer()), "to": nullable(integer()), "rows_affected_next_sweep": integer(),
+					}, "key", "from", "to", "rows_affected_next_sweep")),
+				}), append([]string{"changes"}, instanceWsRequired...)...)),
+			}, "applied", "dry_run", "changed", "rows_affected_next_sweep", "workspaces", "preview_id")},
+		"GET /api/v1/admin/instance/retention/defaults": {Response: object(map[string]any{
+			"defaults": retentionWindows, "configured": stringArray(),
+		}, "defaults", "configured")},
+		"PUT /api/v1/admin/instance/retention/defaults": {
+			Request: object(map[string]any{"windows": retentionPatch, "dry_run": boolean()}, "windows"),
+			Response: object(map[string]any{
+				"applied": boolean(), "dry_run": boolean(), "affects_existing": boolean(),
+				"changes":  array(object(map[string]any{"key": str(), "from": nullable(integer()), "to": nullable(integer())}, "key", "from", "to")),
+				"defaults": retentionWindows,
+			}, "applied", "dry_run", "affects_existing", "changes", "defaults")},
+		// Admin › Backups across workspaces. incomplete is null when the
+		// bundle's gaps were never recorded and [] when there are none;
+		// proof_level is 1 checksum, 2 contents checked, 3 test restore.
+		"GET /api/v1/admin/instance/backups/bundles": {Response: object(map[string]any{
+			"bundles": array(object(map[string]any{
+				"id": str(), "path": str(), "file_name": str(), "scope": str(), "scope_level": str(), "kind": str(), "slug": str(),
+				"workspace_id": str(), "workspace_name": str(), "workspace_slug": str(), "created_at": str(), "created_by": str(),
+				"size_bytes": integer(), "payload_sha256": str(), "encrypted": boolean(), "format_version": integer(),
+				"plan_id": str(), "run_id": str(), "pinned": boolean(), "proof_level": integer(), "proof_checked_at": nullable(str()),
+				"drill_result": str(), "drill_at": nullable(str()), "drill_report": nullable(map[string]any{}),
+				"incomplete": nullable(array(object(map[string]any{"kind": str(), "detail": str(), "count": integer(), "workspace": str()}, "kind", "detail", "count"))),
+			}, "id", "path", "file_name", "scope", "scope_level", "kind", "workspace_id", "created_at", "size_bytes", "payload_sha256",
+				"encrypted", "format_version", "pinned", "proof_level", "proof_checked_at", "drill_result", "drill_at", "incomplete")),
+		}, "bundles")},
+		"POST /api/v1/admin/instance/backups/bundles/pin": {
+			Request:  object(map[string]any{"path": str()}, "path"),
+			Response: object(map[string]any{"path": str(), "pinned": boolean()}, "path", "pinned")},
+		"POST /api/v1/admin/instance/backups/bundles/unpin": {
+			Request:  object(map[string]any{"path": str()}, "path"),
+			Response: object(map[string]any{"path": str(), "pinned": boolean()}, "path", "pinned")},
+		// kind restore | dry_run | drill; result ok | partial | failed; report
+		// is the full restore report the server returned at the time.
+		"GET /api/v1/admin/instance/backups/restores": {Response: object(map[string]any{
+			"restores": array(object(map[string]any{
+				"id": str(), "kind": str(), "actor_user_id": str(), "actor_email": str(), "bundle_path": str(),
+				"target": str(), "result": str(), "report": map[string]any{}, "created_at": str(),
+			}, "id", "kind", "actor_user_id", "actor_email", "bundle_path", "target", "result", "report", "created_at")),
+		}, "restores")},
+		// Whole-instance backup and recovery. Runs (POST …/run, GET
+		// …/run/{runId}) are backup_runs rows: see backupPlanSchemaCatalog.
+		// Counts only: no key material leaves the server.
+		"GET /api/v1/admin/instance/backups/vault-keys": {Response: object(map[string]any{
+			"versions": array(object(map[string]any{
+				"version": str(), "env": str(), "active": boolean(), "envelopes": integer(), "present": boolean(),
+			}, "version", "env", "active", "envelopes", "present")),
+			"recovery_kit": object(map[string]any{"available": boolean(), "enabled": boolean()}, "available", "enabled"),
+		}, "versions", "recovery_kit")},
+		"PUT /api/v1/admin/instance/backups/settings/recovery-kit": {
+			Request:  object(map[string]any{"enabled": boolean()}, "enabled"),
+			Response: object(map[string]any{"enabled": boolean()}, "enabled")},
+		// The key is used for this check only and never stored.
+		"POST /api/v1/admin/instance/backups/bundles/check": {
+			Request: object(map[string]any{"path": str(), "identity": str(), "passphrase": str()}, "path"),
+			Response: object(map[string]any{
+				"ok": boolean(), "proof_level": integer(), "detail": str(), "problems": stringArray(),
+				"absent":  array(object(map[string]any{"kind": str(), "detail": str(), "count": integer(), "workspace": str()}, "kind", "detail", "count")),
+				"entries": integer(), "tables": integer(), "files": integer(),
+			}, "ok", "proof_level", "detail", "problems", "absent")},
+		"POST /api/v1/admin/instance/backups/restore/checks": {
+			Request: object(map[string]any{"path": str(), "target": str(), "identity": str(), "passphrase": str()}, "path", "target"),
+			Response: object(map[string]any{
+				"space":   object(map[string]any{"ok": boolean(), "need_bytes": integer(), "free_bytes": integer()}, "ok", "need_bytes", "free_bytes"),
+				"format":  object(map[string]any{"ok": boolean(), "version": integer(), "converter": boolean()}, "ok", "version", "converter"),
+				"runtime": object(map[string]any{"ok": boolean(), "detail": str(), "warnings": stringArray()}, "ok", "detail", "warnings"),
+				// One runtime check per complete container environment (Track E).
+				"environments": array(object(map[string]any{
+					"crew": str(), "action": str(), "platform": str(), "host_platform": str(),
+					"missing_blobs": integer(), "need_bytes": integer(), "detail": str(),
+				}, "crew", "action", "platform", "host_platform", "missing_blobs", "need_bytes", "detail")),
+				"unsafe":    stringArray(),
+				"conflicts": object(map[string]any{"ok": boolean(), "detail": str()}, "ok", "detail"),
+			}, "space", "format", "runtime", "unsafe", "conflicts", "environments")},
+		// Loads the complete container environments `crewship recover`
+		// staged; each one restored, rebuilt or skipped with its reason.
+		"POST /api/v1/admin/instance/backups/environments/land": {
+			Request: object(map[string]any{"dry_run": boolean()}),
+			Response: object(map[string]any{
+				"dir": str(), "staged": boolean(), "dry_run": boolean(),
+				"environments": array(object(map[string]any{
+					"workspace": str(), "crew": str(), "result": str(), "reason": str(), "image": str(), "container": str(),
+					"volumes": stringArray(), "unsafe": stringArray(), "notes": stringArray(),
+				}, "workspace", "crew", "result", "unsafe")),
+			}, "dir", "staged", "dry_run", "environments")},
+		"POST /api/v1/admin/instance/backups/drills": {
+			Request: object(map[string]any{"path": str(), "sha256": str(), "result": str(), "report": map[string]any{}}, "path", "sha256", "result"),
+			Response: object(map[string]any{
+				"path": str(), "proof_level": integer(), "drill_result": str(), "drill_at": str(), "report_id": str(),
+			}, "path", "proof_level", "drill_result", "drill_at", "report_id")},
+		"GET /api/v1/admin/instance/backups/drills": {Response: array(object(map[string]any{
+			"id": str(), "kind": str(), "actor": str(), "bundle_path": str(), "source_scope": str(), "source_name": str(),
+			"source_date": str(), "target": str(), "result": str(), "warnings": integer(), "created_at": str(),
+		}, "id", "kind", "actor", "bundle_path", "source_scope", "source_name", "source_date", "target", "result", "warnings", "created_at"))},
+		"GET /api/v1/admin/instance/holds": {Response: array(object(map[string]any{
+			"key": str(), "reason": str(), "count": integer(), "detail": str(), "created_at": str(),
+		}, "key", "reason", "count", "detail", "created_at"))},
+		"POST /api/v1/admin/instance/holds/resume": {
+			Request:  object(map[string]any{"key": str()}, "key"),
+			Response: object(map[string]any{"key": str(), "resumed": boolean()}, "key", "resumed")},
 		"GET /api/v1/admin/instance/audit": {Response: array(object(map[string]any{
 			"id": str(), "user_id": nullable(str()), "user_email": nullable(str()), "action": str(), "entity_type": str(),
 			"entity_id": nullable(str()), "target_workspace_id": nullable(str()), "metadata": str(), "created_at": str(),

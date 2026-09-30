@@ -31,7 +31,7 @@ func TestBK3_Create_NoUser401(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	h, _, wsID := backupMutationRig(t)
 	rr := httptest.NewRecorder()
-	h.Create(rr, covBk3NoUserReq("POST", "/x", `{"scope":"workspace","no_encrypt":true}`, wsID, "OWNER"))
+	h.Create(rr, covBk3NoUserReq("POST", "/x", `{"scope":"workspace","passphrase":"cov-bk3-passphrase-123"}`, wsID, "OWNER"))
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401; body=%s", rr.Code, rr.Body.String())
 	}
@@ -82,10 +82,13 @@ func TestBK3_Create_AgeRecipient_EncryptedBundle(t *testing.T) {
 	}
 }
 
-// covBk3CreateBundle runs a real no-encrypt Create and returns the path.
+// covBk3CreateBundle runs a real Create (sealed with covBk3Passphrase —
+// new bundles are always encrypted) and returns the path.
+const covBk3Passphrase = "cov-bk3-passphrase-123"
+
 func covBk3CreateBundle(t *testing.T, h *BackupHandler, userID, wsID string) string {
 	t.Helper()
-	body := `{"scope":"workspace","no_encrypt":true}`
+	body := `{"scope":"workspace","passphrase":"` + covBk3Passphrase + `"}`
 	req := withWorkspaceUser(httptest.NewRequest("POST", "/x", strings.NewReader(body)), userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
 	h.Create(rr, req)
@@ -117,7 +120,7 @@ func TestBK3_Restore_DryRunOwnBundle(t *testing.T) {
 	h, userID, wsID := backupMutationRig(t)
 	path := covBk3CreateBundle(t, h, userID, wsID)
 
-	body := `{"path":"` + path + `","dry_run":true}`
+	body := `{"path":"` + path + `","passphrase":"` + covBk3Passphrase + `","dry_run":true}`
 	rr := httptest.NewRecorder()
 	h.Restore(rr, withWorkspaceUser(httptest.NewRequest("POST", "/x", strings.NewReader(body)), userID, wsID, "OWNER"))
 	if rr.Code != http.StatusOK {

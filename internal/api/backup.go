@@ -62,6 +62,12 @@ type BackupHandler struct {
 	// "empty BlobRoot disables versioning" convention).
 	memoryBlobRoot   string
 	pageProjectsPath string
+	// attachmentRoot is the storage root attachment blobs live under
+	// (attachments/<workspace>/<sha[:2]>/<sha>) — the router's storagePath,
+	// the same root AttachmentHandler writes to. Create collects the blobs
+	// the dump's attachments rows reference; Restore writes them back.
+	// Empty collects/lands none, and the manifest / report say so.
+	attachmentRoot string
 }
 
 // NewBackupHandler constructs a BackupHandler. dockerOps may be nil
@@ -102,11 +108,20 @@ func (h *BackupHandler) SetMemoryBlobRoot(root string) {
 	h.memoryBlobRoot = root
 }
 
+// SetAttachmentRoot wires the storage root attachment blobs live under so
+// bundles carry the files and not only the attachments rows.
+func (h *BackupHandler) SetAttachmentRoot(root string) {
+	h.attachmentRoot = root
+}
+
 // createRequest is the JSON body of POST /api/v1/admin/backups.
 //
-// Exactly one of Passphrase, Recipient or NoEncrypt must be set (the
-// CLI enforces this before calling). Recipient is an `age1…` X25519
-// public key; Passphrase is a user-supplied secret run through scrypt.
+// Exactly one of Passphrase or Recipient must be set. Recipient is an
+// `age1…` X25519 public key; Passphrase is a user-supplied secret run
+// through scrypt. NoEncrypt is still parsed so a client that sends it gets
+// a clear refusal rather than a silently encrypted bundle it cannot open:
+// every new bundle is encrypted, because agent home folders inside it can
+// hold credentials (~/.aws, ~/.ssh, tool logins) the vault never sealed.
 
 type createRequest struct {
 	Scope string `json:"scope"` // "crew" or "workspace"
@@ -138,7 +153,15 @@ type createResponse struct {
 	// complete bundle) so a client never has to distinguish absent from
 	// empty.
 	MissingContainerCrews []string `json:"missing_container_crews"`
+	// Attachment files the bundle carries / could not carry, and every gap
+	// the manifest records (always an array).
+	AttachmentsIncluded int                     `json:"attachments_included"`
+	AttachmentsMissing  int                     `json:"attachments_missing"`
+	Incomplete          []backup.IncompleteItem `json:"incomplete"`
 }
+
+// errNoEncryptRefused is the answer to no_encrypt=true on a new bundle.
+const errNoEncryptRefused = "no_encrypt is no longer accepted: every new backup is encrypted, because agent home folders in a bundle can hold credentials (~/.aws, ~/.ssh, tool logins). Supply a passphrase or an age recipient"
 
 // Create handles POST /api/v1/admin/backups. Runs the backup inline;
 // typical durations are seconds-to-minute so no async job queue yet.
@@ -186,8 +209,16 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	trimmedPassphrase := strings.TrimSpace(req.Passphrase)
 	trimmedRecipient := strings.TrimSpace(req.Recipient)
 
-	// Exactly-one encryption selector. Passphrase, Recipient, or
-	// NoEncrypt — never multiple.
+	// New bundles are always encrypted. A bundle carries agent home
+	// folders, and those can hold credentials the vault never sealed
+	// (~/.aws, ~/.ssh, tool logins) — a plaintext bundle is a plaintext
+	// copy of them. NoEncrypt survives only for reading legacy bundles and
+	// for library-level tests.
+	if req.NoEncrypt {
+		replyError(w, http.StatusBadRequest, errNoEncryptRefused)
+		return
+	}
+	// Exactly-one encryption selector: Passphrase or Recipient.
 	encryptionSelectors := 0
 	if trimmedPassphrase != "" {
 		encryptionSelectors++
@@ -195,15 +226,12 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if trimmedRecipient != "" {
 		encryptionSelectors++
 	}
-	if req.NoEncrypt {
-		encryptionSelectors++
-	}
 	if encryptionSelectors == 0 {
-		replyError(w, http.StatusBadRequest, "passphrase, recipient, or no_encrypt=true required")
+		replyError(w, http.StatusBadRequest, "passphrase or recipient required: every backup is encrypted")
 		return
 	}
 	if encryptionSelectors > 1 {
-		replyError(w, http.StatusBadRequest, "exactly one of passphrase / recipient / no_encrypt may be supplied")
+		replyError(w, http.StatusBadRequest, "exactly one of passphrase / recipient may be supplied")
 		return
 	}
 
@@ -266,11 +294,11 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Actor:             backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
 		Passphrase:        passphrase,
 		Recipients:        recipients,
-		NoEncrypt:         req.NoEncrypt,
 		CrewContainerName: h.resolveCrewContainerName(),
 		DockerOps:         ops,
 		BlobRoot:          h.memoryBlobRoot,
 		PageProjectsPath:  h.pageProjectsPath,
+		AttachmentRoot:    h.attachmentRoot,
 	})
 	if err != nil {
 		h.logger.Warn("backup create failed", "error", err, "workspace", workspaceID, "user", user.ID)
@@ -314,6 +342,9 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:             result.Manifest.CreatedAt,
 		Encrypted:             result.Manifest.Encryption.Enabled,
 		MissingContainerCrews: result.MissingContainerCrews,
+		AttachmentsIncluded:   result.Manifest.Contents.AttachmentsIncluded,
+		AttachmentsMissing:    result.Manifest.Contents.AttachmentsMissing,
+		Incomplete:            nonNilIncomplete(result.Manifest.Contents.Incomplete),
 	})
 	if len(result.MissingContainerCrews) > 0 {
 		h.logger.Warn("backup created without files for crews whose containers are gone from the daemon",
@@ -449,13 +480,22 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		ContainerFor:      h.resolveCrewContainerName(),
 		BlobRoot:          h.memoryBlobRoot,
 		PageProjectsPath:  h.pageProjectsPath,
+		AttachmentRoot:    h.attachmentRoot,
 		Logger: func(msg string) {
 			h.logger.Info("backup restore", "message", msg, "path", req.Path, "workspace_id", workspaceID)
 		},
 	})
 	if err != nil {
 		h.logger.Warn("backup restore failed", "error", err, "path", req.Path, "user", user.ID)
-		writeJSON(w, statusForBackupError(err), map[string]string{"error": err.Error()})
+		// A failed restore is recorded too — "what went wrong last Tuesday"
+		// is exactly what an operator comes back to ask. A no-op restore
+		// returns a result alongside its error; keep what it says.
+		failed := map[string]any{"error": err.Error()}
+		if result != nil {
+			failed["result"] = restoreResponseFrom(result)
+		}
+		reportID := h.recordRestoreReport(ctx, req, user.ID, restoreTarget(req, result, workspaceID), backup.ClassifyRestore(result, err), failed)
+		writeJSON(w, statusForBackupError(err), map[string]string{"error": err.Error(), "report_id": reportID})
 		return
 	}
 
@@ -542,7 +582,54 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 			})
 	}
 
-	writeJSON(w, http.StatusOK, backupRestoreResponse{
+	resp := restoreResponseFrom(result)
+	resp.Result = backup.ClassifyRestore(result, nil)
+	resp.ReportID = h.recordRestoreReport(ctx, req, user.ID, restoreTarget(req, result, workspaceID), resp.Result, resp)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// restoreTarget names what a restore landed in, for restore_reports: the
+// restored workspace's slug when the restore got that far, else the slug
+// the caller asked for, else the caller's workspace id.
+func restoreTarget(req restoreRequest, result *backup.RestoreResult, workspaceID string) string {
+	switch {
+	case result != nil && result.RestoredWs != "":
+		return result.RestoredWs
+	case req.AsWorkspace != "":
+		return req.AsWorkspace
+	case req.AsCrew != "":
+		return req.AsCrew
+	}
+	return workspaceID
+}
+
+// recordRestoreReport persists one restore or dry run with its report and
+// returns the report id ("" if it could not be written). Best effort: the
+// restore already happened, and failing the response because its record
+// could not be written would hide the result it describes.
+func (h *BackupHandler) recordRestoreReport(ctx context.Context, req restoreRequest, userID, target, result string, report any) string {
+	raw, err := json.Marshal(report)
+	if err != nil {
+		h.logger.Warn("backup restore report encode failed", "error", err, "path", req.Path)
+		return ""
+	}
+	kind := backup.RestoreKindRestore
+	if req.DryRun {
+		kind = backup.RestoreKindDryRun
+	}
+	rec, err := backup.RecordRestoreReport(ctx, h.db, backup.RestoreReport{
+		Kind: kind, ActorUserID: userID, BundlePath: req.Path, Target: target, Result: result, Report: raw,
+	})
+	if err != nil {
+		h.logger.Warn("backup restore report not recorded", "error", err, "path", req.Path)
+		return ""
+	}
+	return rec.ID
+}
+
+// restoreResponseFrom maps a RestoreResult onto the wire shape.
+func restoreResponseFrom(result *backup.RestoreResult) backupRestoreResponse {
+	return backupRestoreResponse{
 		Manifest:                   result.Manifest,
 		RestoredWs:                 result.RestoredWs,
 		RestoredWorkspaceID:        result.RestoredWorkspaceID,
@@ -561,7 +648,29 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		JournalEntriesResigned:     result.JournalEntriesResigned,
 		JournalCheckpointsResigned: result.JournalCheckpointsResigned,
 		CapabilityTokensReminted:   result.CapabilityTokensReminted,
-	})
+		AttachmentsRestored:        result.AttachmentsRestored,
+		AttachmentsAlreadyPresent:  result.AttachmentsAlreadyPresent,
+		AttachmentsMissing:         result.AttachmentsMissing,
+		AttachmentsConflicts:       result.AttachmentsConflicts,
+		Incomplete:                 nonNilIncomplete(result.Incomplete),
+		Environments:               nonNilEnvironments(result.Environments),
+	}
+}
+
+// nonNilEnvironments keeps `environments` an array on the wire.
+func nonNilEnvironments(v []backup.EnvironmentOutcome) []backup.EnvironmentOutcome {
+	if v == nil {
+		return []backup.EnvironmentOutcome{}
+	}
+	return v
+}
+
+// nonNilIncomplete keeps `incomplete` an array on the wire, never null.
+func nonNilIncomplete(items []backup.IncompleteItem) []backup.IncompleteItem {
+	if items == nil {
+		return []backup.IncompleteItem{}
+	}
+	return items
 }
 
 // backupRestoreResponse is the body of POST /api/v1/admin/backups/restore. It
@@ -622,6 +731,26 @@ type backupRestoreResponse struct {
 	// operator can see WHICH capabilities arrived revoked. nil (not an
 	// empty map) on a plain restore, which re-keys nothing.
 	CapabilityTokensReminted map[string]int `json:"capability_tokens_reminted"`
+	// Attachment files: written, already there, absent from the bundle
+	// (their downloads will 404), and left alone because a DIFFERENT file
+	// already sat at the path. On a dry run, what would happen.
+	AttachmentsRestored       int `json:"attachments_restored"`
+	AttachmentsAlreadyPresent int `json:"attachments_already_present"`
+	AttachmentsMissing        int `json:"attachments_missing"`
+	AttachmentsConflicts      int `json:"attachments_conflicts"`
+	// Incomplete is every gap this restore could not close — the bundle's
+	// own recorded gaps plus what the restore found. Always an array.
+	Incomplete []backup.IncompleteItem `json:"incomplete"`
+	// Environments reports each crew's complete environment: restored,
+	// rebuilt (architecture or missing layers) or skipped, with the reason
+	// and the settings not carried over for safety. Always an array.
+	Environments []backup.EnvironmentOutcome `json:"environments"`
+	// Result is ok | partial | failed (backup.ClassifyRestore): partial when
+	// the report names anything skipped, missing or lowered. ReportID is the
+	// restore_reports row this restore was recorded as ("" if the record
+	// could not be written).
+	Result   string `json:"result"`
+	ReportID string `json:"report_id"`
 }
 
 // clampedToTier reports the tier the restore clamped to, read off the

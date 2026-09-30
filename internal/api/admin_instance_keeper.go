@@ -61,7 +61,13 @@ type instanceWorkspaceRef struct {
 // and the panel need them all, and a list that silently stopped at 100 would
 // be the admin-wide version of the bug this surface fixes.
 func (h *InstanceKeeperHandler) workspaces(ctx context.Context) ([]instanceWorkspaceRef, error) {
-	rows, err := h.db.QueryContext(ctx, `
+	return instanceWorkspaces(ctx, h.db)
+}
+
+// instanceWorkspaces is every live workspace by name, for any instance route
+// that sets something for one, several or all of them.
+func instanceWorkspaces(ctx context.Context, db *sql.DB) ([]instanceWorkspaceRef, error) {
+	rows, err := db.QueryContext(ctx, `
 		SELECT id, name, slug FROM workspaces WHERE deleted_at IS NULL
 		ORDER BY name COLLATE NOCASE, id`)
 	if err != nil {

@@ -26,8 +26,8 @@ var backupCmd = &cobra.Command{
 ADMIN role on the workspace; MEMBER and VIEWER roles are refused.
 
 Bundles live under the server's data dir (CREWSHIP_DATA_DIR/backups, or
-~/.crewship/backups when that env var is unset) by default and are
-AGE-encrypted with a passphrase unless --no-encrypt is supplied.
+~/.crewship/backups when that env var is unset) by default and are always
+AGE-encrypted, with a passphrase or an age recipient key.
 
 Examples:
   crewship backup create --scope=workspace
@@ -260,7 +260,7 @@ you need to know who acquired the lock (or wait for its TTL).`,
 func init() {
 	backupCreateCmd.Flags().String("scope", "workspace", "Backup scope: workspace | crew")
 	backupCreateCmd.Flags().String("crew", "", "Crew slug or ID (required for --scope=crew)")
-	backupCreateCmd.Flags().Bool("no-encrypt", false, "Write a plaintext payload instead of AGE-encrypting it")
+	backupCreateCmd.Flags().Bool("no-encrypt", false, "Refused: every new backup is encrypted (kept so old scripts get a clear error)")
 	backupCreateCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
 	backupCreateCmd.Flags().Bool("use-keyring", false, "Store and reuse the passphrase via the local backup keyring (~/.crewship/backup-keyring.enc)")
 	backupCreateCmd.Flags().String("recipient", "", "AGE X25519 public key (age1…) for asymmetric encryption")

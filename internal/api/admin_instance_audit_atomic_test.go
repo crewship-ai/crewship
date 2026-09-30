@@ -88,6 +88,16 @@ func TestInstanceMutationsRollBackWhenTheAuditCannotBeWritten(t *testing.T) {
 			}},
 		{name: "keeper governance", method: "PUT", path: "/api/v1/admin/instance/keeper/governance", body: `{"all":true,"set":{"enabled":true}}`,
 			state: func(f *instanceFixture) string { return scalar(f, `SELECT COUNT(*) FROM keeper_governance_settings`) }},
+		{name: "retention", method: "PUT", path: "/api/v1/admin/instance/retention", body: `{"workspace_ids":null,"windows":{"inbox_days":30,"routine_runs_days":14}}`,
+			state: func(f *instanceFixture) string {
+				return scalar(f, `SELECT COUNT(*) FROM retention_settings`) + "|" +
+					scalar(f, `SELECT COALESCE(GROUP_CONCAT(COALESCE(run_retention_days,'-')),'') FROM workspaces`) + "|" +
+					scalar(f, `SELECT COUNT(*) FROM app_settings WHERE key = 'retention.defaults'`)
+			}},
+		{name: "retention defaults", method: "PUT", path: "/api/v1/admin/instance/retention/defaults", body: `{"windows":{"inbox_days":30}}`,
+			state: func(f *instanceFixture) string {
+				return scalar(f, `SELECT COUNT(*) FROM app_settings WHERE key = 'retention.defaults'`)
+			}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

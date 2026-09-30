@@ -93,6 +93,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // attachmentGCInterval is how often the collector walks the blob tree.
@@ -163,6 +165,10 @@ func sweepAttachmentBlobs(ctx context.Context, db *sql.DB, logger *slog.Logger, 
 		// Not merely defensive: filepath.Join("", "attachments") is a RELATIVE
 		// path, so an unconfigured root would have this walking whatever
 		// ./attachments happens to be in the process's working directory.
+		return 0
+	}
+	// Never delete under an instance backup's consistent copy.
+	if quiesce.WaitReleased(ctx) != nil {
 		return 0
 	}
 	base := filepath.Join(root, "attachments")

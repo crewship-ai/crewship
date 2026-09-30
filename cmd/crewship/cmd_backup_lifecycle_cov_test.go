@@ -69,16 +69,8 @@ func TestBackupCreateRunE_RecipientExclusions(t *testing.T) {
 	covSetupCli5(t)
 	covResetBackupCreateFlags(t)
 	covSetFlagCli5(t, backupCreateCmd, "recipient", "age1xyz")
-	covSetFlagCli5(t, backupCreateCmd, "no-encrypt", "true")
-
-	err := backupCreateCmd.RunE(backupCreateCmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "--recipient and --no-encrypt are mutually exclusive") {
-		t.Errorf("expected recipient/no-encrypt exclusion; got %v", err)
-	}
-
-	covSetFlagCli5(t, backupCreateCmd, "no-encrypt", "false")
 	covSetFlagCli5(t, backupCreateCmd, "passphrase-file", "/tmp/x")
-	err = backupCreateCmd.RunE(backupCreateCmd, nil)
+	err := backupCreateCmd.RunE(backupCreateCmd, nil)
 	if err == nil || !strings.Contains(err.Error(), "--recipient and --passphrase-file are mutually exclusive") {
 		t.Errorf("expected recipient/passphrase-file exclusion; got %v", err)
 	}
@@ -106,38 +98,18 @@ func TestBackupCreateRunE_NoAuth(t *testing.T) {
 
 // ─── backup create: happy paths ──────────────────────────────────────────
 
-func TestBackupCreateRunE_NoEncrypt(t *testing.T) {
+// New bundles are always encrypted: --no-encrypt is refused before anything
+// reaches the server, with a message that says why and what to use instead.
+func TestBackupCreateRunE_NoEncryptIsRefused(t *testing.T) {
 	stub := covSetupCli5(t)
 	covResetBackupCreateFlags(t)
 	covSetFlagCli5(t, backupCreateCmd, "no-encrypt", "true")
-	covSetFlagCli5(t, backupCreateCmd, "output", "/backups")
-	stub.OnPost("/api/v1/admin/backups", clitest.JSONResponse(200, map[string]any{
-		"path": "/backups/ws.tar", "size_bytes": 2048, "payload_sha256": strings.Repeat("ab", 32),
-		"format_version": 2, "scope": "workspace", "encrypted": false,
-	}))
-
-	var err error
-	out := covCaptureAll(t, func() { err = backupCreateCmd.RunE(backupCreateCmd, nil) })
-	if err != nil {
-		t.Fatalf("RunE: %v", err)
+	err := backupCreateCmd.RunE(backupCreateCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "no longer accepted") || !strings.Contains(err.Error(), "--recipient") {
+		t.Fatalf("expected --no-encrypt refusal; got %v", err)
 	}
-	if !strings.Contains(out, "Backup created: /backups/ws.tar") {
-		t.Errorf("missing success line; got:\n%s", out)
-	}
-	if !strings.Contains(out, "plaintext data") {
-		t.Errorf("missing no-encrypt warning; got:\n%s", out)
-	}
-	calls := stub.CallsFor("POST", "/api/v1/admin/backups")
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 POST, got %d", len(calls))
-	}
-	var body map[string]any
-	clitest.MustDecodeJSONBody(calls[0].Body, &body)
-	if body["no_encrypt"] != true || body["scope"] != "workspace" || body["output_dir"] != "/backups" {
-		t.Errorf("body = %v", body)
-	}
-	if body["passphrase"] != "" {
-		t.Errorf("no-encrypt must not send a passphrase; got %v", body["passphrase"])
+	if calls := stub.CallsFor("POST", "/api/v1/admin/backups"); len(calls) != 0 {
+		t.Fatalf("refused create still POSTed %d time(s)", len(calls))
 	}
 }
 
@@ -222,7 +194,7 @@ func TestBackupCreateRunE_NoPassphraseOnStdin(t *testing.T) {
 func TestBackupCreateRunE_APIError(t *testing.T) {
 	stub := covSetupCli5(t)
 	covResetBackupCreateFlags(t)
-	covSetFlagCli5(t, backupCreateCmd, "no-encrypt", "true")
+	covSetFlagCli5(t, backupCreateCmd, "recipient", "age1qqqqqqqq")
 	stub.OnPost("/api/v1/admin/backups", clitest.ErrorResponse(500, "disk full"))
 
 	var err error
@@ -683,7 +655,7 @@ func TestBackupCreateRunE_UnknownCrewSlug(t *testing.T) {
 	covResetBackupCreateFlags(t)
 	covSetFlagCli5(t, backupCreateCmd, "scope", "crew")
 	covSetFlagCli5(t, backupCreateCmd, "crew", "ghost")
-	covSetFlagCli5(t, backupCreateCmd, "no-encrypt", "true")
+	covSetFlagCli5(t, backupCreateCmd, "recipient", "age1qqqqqqqq")
 	stub.OnGet("/api/v1/crews", clitest.JSONResponse(200, []map[string]string{}))
 
 	var err error
@@ -760,7 +732,7 @@ func TestBackupCreateRunE_PreflightHonorsActiveProfile(t *testing.T) {
 func TestBackupCreateRunE_TransportError(t *testing.T) {
 	stub := covSetupCli5(t)
 	covResetBackupCreateFlags(t)
-	covSetFlagCli5(t, backupCreateCmd, "no-encrypt", "true")
+	covSetFlagCli5(t, backupCreateCmd, "recipient", "age1qqqqqqqq")
 	stub.Close()
 
 	var err error
@@ -773,7 +745,7 @@ func TestBackupCreateRunE_TransportError(t *testing.T) {
 func TestBackupCreateRunE_MalformedResponse(t *testing.T) {
 	stub := covSetupCli5(t)
 	covResetBackupCreateFlags(t)
-	covSetFlagCli5(t, backupCreateCmd, "no-encrypt", "true")
+	covSetFlagCli5(t, backupCreateCmd, "recipient", "age1qqqqqqqq")
 	stub.OnPost("/api/v1/admin/backups", clitest.TextResponse(200, "not json at all"))
 
 	var err error

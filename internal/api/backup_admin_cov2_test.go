@@ -45,7 +45,7 @@ func covBak2CreateBundle(t *testing.T, h *BackupHandler, userID, wsID string) st
 	t.Helper()
 	req := withWorkspaceUser(
 		httptest.NewRequest("POST", "/api/v1/admin/backups",
-			strings.NewReader(`{"scope":"workspace","no_encrypt":true}`)),
+			strings.NewReader(`{"scope":"workspace","passphrase":"cov-bak2-passphrase-123"}`)),
 		userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
 	h.Create(rr, req)

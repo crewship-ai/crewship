@@ -17,6 +17,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/retention"
 	wshub "github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -693,6 +694,10 @@ func (h *InstanceAdminHandler) CreateWorkspace(w http.ResponseWriter, r *http.Re
 		`INSERT INTO workspaces (id, name, slug, preferred_language, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		wsID, req.Name, req.Slug, req.PreferredLanguage, now, now); err != nil {
 		replyInternalError(w, h.logger, "create workspace: insert", err)
+		return
+	}
+	if err := retention.ApplyDefaults(ctx, tx, wsID); err != nil {
+		replyInternalError(w, h.logger, "create workspace: retention defaults", err)
 		return
 	}
 	if _, err := tx.ExecContext(ctx,

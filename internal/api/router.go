@@ -15,6 +15,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/backupplan"
 	"github.com/crewship-ai/crewship/internal/buildinfo"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
@@ -180,9 +181,12 @@ type Router struct {
 	catalogFetcher                   *devcontainer.CatalogFetcher
 	runtimeFetcher                   *devcontainer.RuntimeFetcher
 	dockerClient                     *dockerclient.Client
-	imageBuilder                     devcontainer.ImageBuilder
-	featureCacheDir                  string
-	portExposeRegistry               *PortExposeRegistry // closed via Shutdown() on server stop
+	// instanceBackups is Admin › Backups across the instance, kept so tests
+	// can point its instance backup at a temp directory.
+	instanceBackups    *InstanceBackupsHandler
+	imageBuilder       devcontainer.ImageBuilder
+	featureCacheDir    string
+	portExposeRegistry *PortExposeRegistry // closed via Shutdown() on server stop
 	// providerLogins owns the device-code sign-in pollers (#2428); stopped
 	// via Shutdown() so a pending sign-in is left for the next process to
 	// resume rather than polled by a goroutine outliving the listener.
@@ -247,6 +251,10 @@ type Router struct {
 	// the boot path can give it the automation registry-refresh hook and start
 	// its freshness sweeper on the same instance.
 	pages *PageHandler
+	// backupPlans is the backup scheduler and run executor behind Admin ›
+	// Backups (plans, runs, overview), exposed via BackupPlans() so the boot
+	// path starts its loop on the same instance the routes queue runs into.
+	backupPlans *backupplan.Service
 	// PipelinesHandler is exposed (capitalised) so the orchestrator
 	// boot path can hand it the AgentRunner adapter post-construction.
 	// The router builds handlers before the orchestrator is fully
@@ -728,6 +736,13 @@ func (r *Router) Pages() *PageHandler {
 	return r.pages
 }
 
+// BackupPlans returns the backup scheduler service so server startup can
+// Start its loop (boot recovery, due plans, the run queue). Nil before the
+// admin routes are registered.
+func (r *Router) BackupPlans() *backupplan.Service {
+	return r.backupPlans
+}
+
 // AuthHandler returns the registered AuthHandler so server startup code can
 // call MaybeGenerateSetupToken on the same instance the /api/v1/bootstrap
 // route dispatches to. Returns nil when registerAuthRoutes hasn't run yet
@@ -940,8 +955,10 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// same everything-gets-it slot so even error responses let a skewed CLI
 	// self-diagnose; EnforceOrigin runs next so a cross-site state-changing
 	// request is rejected before it can even consume a rate-limit token
-	// (and before per-handler logic); rate limiting and routing follow.
-	SecurityHeaders(VersionHeader(r.version, EnforceOrigin(http.HandlerFunc(r.routeWithRateLimiting)))).ServeHTTP(w, req)
+	// (and before per-handler logic); quiesceGate then holds writes during an
+	// instance backup's quiet window and inbound webhooks while held
+	// (quiesce_gate.go); rate limiting and routing follow.
+	SecurityHeaders(VersionHeader(r.version, EnforceOrigin(quiesceGate(http.HandlerFunc(r.routeWithRateLimiting))))).ServeHTTP(w, req)
 }
 
 // Shutdown releases background resources the router owns — the port-expose

@@ -36,6 +36,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -182,6 +183,10 @@ func SweepAllWorkspacesAuditRetention(ctx context.Context, db *sql.DB, logger *s
 	}
 	if logger == nil {
 		logger = slog.Default()
+	}
+	// Never delete under an instance backup's consistent copy.
+	if err := quiesce.WaitReleased(ctx); err != nil {
+		return err
 	}
 
 	rows, err := db.QueryContext(ctx,

@@ -20,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/mailer"
+	"github.com/crewship-ai/crewship/internal/retention"
 )
 
 // AuthHandler provides user authentication endpoints including signup, login, and WebSocket token exchange.
@@ -429,6 +430,10 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	// The new workspace's own copy of the Keeper defaults (a template).
 	if err := governance.SeedWorkspace(r.Context(), tx, workspaceID); err != nil {
 		replyInternalError(w, h.logger, "keeper template", err)
+		return
+	}
+	if err := retention.ApplyDefaults(r.Context(), tx, workspaceID); err != nil {
+		replyInternalError(w, h.logger, "retention defaults", err)
 		return
 	}
 

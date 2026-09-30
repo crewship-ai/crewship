@@ -500,6 +500,12 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	for key, schema := range backupPlanSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range backupSettingsSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	for key, schema := range remainingExecutionDomainSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}

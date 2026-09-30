@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/harbormaster"
+	"github.com/crewship-ai/crewship/internal/retention"
 )
 
 type createWorkspaceRequest struct {
@@ -86,6 +87,11 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// The new workspace's own copy of the Keeper defaults (a template).
 	if err := governance.SeedWorkspace(r.Context(), tx, wsID); err != nil {
 		replyInternalError(w, h.logger, "keeper template", err)
+		return
+	}
+	// The retention windows an instance admin last saved for all workspaces.
+	if err := retention.ApplyDefaults(r.Context(), tx, wsID); err != nil {
+		replyInternalError(w, h.logger, "retention defaults", err)
 		return
 	}
 

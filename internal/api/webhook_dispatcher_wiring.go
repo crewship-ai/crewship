@@ -8,6 +8,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/dispatch"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/work"
 )
@@ -114,6 +115,9 @@ func (r *Router) startAgentWorkDispatcher(ctx context.Context, logger *slog.Logg
 		// only the guarantee behind it.
 		PollInterval:        2 * time.Second,
 		ConfirmPollInterval: time.Second,
+		// An instance restore's queue hold and a backup's quiet window keep
+		// accepted work queued (internal/quiesce).
+		Paused: quiesce.QueuePaused,
 	}, logger)
 
 	// The hint. Deliberately assigned after the dispatcher exists and

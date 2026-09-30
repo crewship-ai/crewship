@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/backupplan"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/usermodel"
 )
@@ -96,6 +97,58 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("GET", "/api/v1/admin/instance/keeper/requests", ik.ListRequests)
 	// openapi: responses 200,401,403,500
 	r.authedInstance("GET", "/api/v1/admin/instance/keeper/health", ik.Health)
+
+	// Admin › Data retention: how long every workspace keeps each kind of
+	// data, set for one, several or every existing workspace (dry_run
+	// previews what the next sweep would delete), the fixed instance limits,
+	// and separately the defaults a workspace created later starts with.
+	ret := NewInstanceRetentionHandler(r.db, r.logger)
+	// openapi: responses 200,401,403,404,500
+	r.authedInstance("GET", "/api/v1/admin/instance/retention", ret.Get)
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedInstance("PUT", "/api/v1/admin/instance/retention", ret.Put)
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/retention/defaults", ret.GetDefaults)
+	// openapi: responses 200,400,401,403,500
+	r.authedInstance("PUT", "/api/v1/admin/instance/retention/defaults", ret.PutDefaults)
+	// Admin › Backups across workspaces: the catalog of every workspace's
+	// bundles (proof level, pin, recorded gaps), pins no retention rule may
+	// override, and every restore / dry run the server has run.
+	ib := NewInstanceBackupsHandler(r.db, r.logger)
+	r.instanceBackups = ib
+	// openapi: responses 200,401,403,404,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/bundles", ib.ListBundles)
+	// openapi: responses 200,400,401,403,404,500
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/bundles/pin", ib.Pin)
+	// openapi: responses 200,400,401,403,404,500
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/bundles/unpin", ib.Unpin)
+	// openapi: responses 200,400,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/restores", ib.ListRestores)
+
+	// Whole-instance backup and recovery: an instance bundle (the whole
+	// database, every file store and crew container, one quiet window), the
+	// recovery kit, contents checks, restore checks, drills recorded by the
+	// offline `crewship backup drill`, and the automations an offline
+	// `crewship recover` left held.
+	ib.SetRecovery(r.instanceRecoveryConfig())
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/vault-keys", ib.VaultKeys)
+	// openapi: responses 200,400,401,403,500
+	r.authedInstance("PUT", "/api/v1/admin/instance/backups/settings/recovery-kit", ib.SetRecoveryKit)
+	// openapi: responses 200,400,401,403,404,422,500
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/bundles/check", ib.CheckBundle)
+	// openapi: responses 200,400,401,403,404,422,500
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/restore/checks", ib.RestoreChecks)
+	// openapi: responses 201,400,401,403,404,409,500
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/drills", ib.RecordDrill)
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/drills", ib.ListDrills)
+	// openapi: responses 200,400,401,403,500
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/environments/land", ib.LandEnvironments)
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/holds", ib.ListHolds)
+	// openapi: responses 200,400,401,403,404,500
+	r.authedInstance("POST", "/api/v1/admin/instance/holds/resume", ib.ResumeHold)
 
 	// Admin observability: runtime log-level toggle + disk/health read.
 	obs := NewAdminObservabilityHandler(r.db, r.logger)
@@ -316,6 +369,9 @@ func (r *Router) registerAdminRoutes() {
 	// restore. Empty when memory versioning isn't configured, which
 	// disables the section (see internal/backup/memoryblobs.go).
 	backupH.SetMemoryBlobRoot(r.memoryVersionsBlobRoot)
+	// Attachment blobs live under the same storage root AttachmentHandler
+	// writes to (attachments/<workspace>/<sha[:2]>/<sha>).
+	backupH.SetAttachmentRoot(r.storagePath)
 	backupH.pageProjectsPath = r.pageProjectsPath
 	// Wire the slug→container-name mapping from the active container
 	// provider so the backup runner uses the per-instance prefix
@@ -332,6 +388,78 @@ func (r *Router) registerAdminRoutes() {
 	if r.journal != nil {
 		backupH.SetJournal(r.journal)
 	}
+	// Admin › Backups plans, runs and overview. The scheduler service runs
+	// every backup in a server goroutine (never through an agent), writes
+	// workspace bundles with the same wiring as backupH, and is started by
+	// the boot path through BackupPlans().
+	// Instance runs write Track B's instance bundle inside the quiet window;
+	// scheduled runs are skipped while an instance restore's schedule hold
+	// is set (admin_instance_backup_bridge.go).
+	svc := backupplan.New(r.db, r.logger)
+	svc.Workspace = &backupplan.WorkspaceExecutor{
+		DB: r.db, DockerOps: backupDockerOps, CrewContainerName: backupH.resolveCrewContainerName(),
+		BlobRoot: r.memoryVersionsBlobRoot, AttachmentRoot: r.storagePath, PageProjectsPath: r.pageProjectsPath,
+		CrewshipVersion: os.Getenv("CREWSHIP_VERSION"),
+		EnvInline:       backup.EnvironmentInlineDefault(),
+	}
+	svc.Instance = &instanceExecutor{h: ib, db: r.db}
+	svc.Quiesce = backupQuiescer{h: ib, db: r.db}
+	svc.Pause = holdsPauser{db: r.db}
+	// Incidents reach every instance admin's inbox (admin_instance_backup_alerts.go),
+	// and a recorded drill raises or clears the plan's drill incident.
+	svc.Alerts = backupIncidentAlerter{db: r.db, logger: r.logger}
+	ib.onDrill = svc.RecordDrillOutcome
+	r.backupPlans = svc
+	bp := NewInstanceBackupPlansHandler(ib, svc)
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/plans", bp.ListPlans)
+	// openapi: responses 201,400,401,403,500
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/plans", bp.CreatePlan)
+	// openapi: responses 200,400,401,403,500
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/plans/preview-contents", bp.PreviewContents)
+	// openapi: responses 200,401,403,404,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/plans/{id}", bp.GetPlan)
+	// openapi: responses 200,400,401,403,404,500
+	r.authedInstance("PUT", "/api/v1/admin/instance/backups/plans/{id}", bp.UpdatePlan)
+	// openapi: responses 204,401,403,404,500
+	r.authedInstance("DELETE", "/api/v1/admin/instance/backups/plans/{id}", bp.DeletePlan)
+	// openapi: query n:integer; responses 200,400,401,403,404,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/plans/{id}/next", bp.NextRuns)
+	// openapi: query from:string to:string; responses 200,400,401,403,404,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/plans/{id}/calendar", bp.Calendar)
+	// openapi: query plan:string scope:string ws:string limit:integer; responses 200,400,401,403,404,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/runs", bp.ListRuns)
+	// openapi: responses 202,400,401,403,404,500
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/run", bp.StartRun)
+	// openapi: responses 200,401,403,404,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/run/{runId}", bp.GetRun)
+	// openapi: query scope:string ws:string; responses 200,400,401,403,404,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/overview", bp.Overview)
+	// Settings, backup keys, off-site destinations, incidents and the
+	// recovery sheet (admin_instance_backup_settings.go).
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/settings", bp.GetSettings)
+	// openapi: responses 200,400,401,403,500
+	r.authedInstance("PUT", "/api/v1/admin/instance/backups/settings", bp.PutSettings)
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/recipients", bp.ListRecipients)
+	// openapi: responses 201,400,401,403,409,500
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/recipients", bp.CreateRecipient)
+	// openapi: responses 204,401,403,404,409,500
+	r.authedInstance("DELETE", "/api/v1/admin/instance/backups/recipients/{id}", bp.DeleteRecipient)
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/destinations", bp.ListDestinations)
+	// openapi: responses 201,400,401,403,409,422,500
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/destinations", bp.CreateDestination)
+	// openapi: responses 200,401,403,404,500
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/destinations/{id}/test", bp.TestDestination)
+	// openapi: responses 204,401,403,404,409,500
+	r.authedInstance("DELETE", "/api/v1/admin/instance/backups/destinations/{id}", bp.DeleteDestination)
+	// openapi: query state:string limit:integer; responses 200,400,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/incidents", bp.ListIncidents)
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/recovery-sheet", bp.RecoverySheet)
+
 	r.authedMut("POST", "/api/v1/admin/backups", roleManage, backupH.Create)
 	r.authedAdmin("GET", "/api/v1/admin/backups", backupH.List)
 	r.authedAdmin("GET", "/api/v1/admin/backups/status", backupH.Status)
