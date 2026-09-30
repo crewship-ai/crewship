@@ -23,6 +23,7 @@ DELETE /api/v1/automations/{id} roleManage
 DELETE /api/v1/cache/images/{tag} roleManage
 DELETE /api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji} roleSelf
 DELETE /api/v1/chats/{chatId}/participants/{userId} roleSelf
+DELETE /api/v1/chats/{chatId}/restricted-memory/{entryId} roleSelf
 DELETE /api/v1/checkpoints/{id} roleCreate
 DELETE /api/v1/conversations/{conversationId}/agents/{agentId} roleSelf
 DELETE /api/v1/conversations/{conversationId}/participants/{userId} roleSelf
@@ -176,6 +177,7 @@ POST /api/v1/automations/preview roleCreate
 POST /api/v1/chats/{chatId}/messages/{messageId}/reactions roleSelf
 POST /api/v1/chats/{chatId}/participants roleSelf
 POST /api/v1/chats/{chatId}/restricted-cli-run roleSelf
+POST /api/v1/chats/{chatId}/restricted-memory roleSelf
 POST /api/v1/chats/{chatId}/restricted-run roleSelf
 POST /api/v1/chats/{chatId}/steer roleSelf
 POST /api/v1/checkpoints/{id}/fork roleCreate
