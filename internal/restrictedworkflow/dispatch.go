@@ -121,7 +121,7 @@ func (s *Service) DispatchNext(ctx context.Context) (bool, error) {
 	defer cancel()
 	monitorDone := make(chan struct{})
 	defer close(monitorDone)
-	go func() {
+	go func(monitored job) {
 		ticker := time.NewTicker(50 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -131,13 +131,13 @@ func (s *Service) DispatchNext(ctx context.Context) (bool, error) {
 			case <-runCtx.Done():
 				return
 			case <-ticker.C:
-				if s.checkJob(runCtx, s.db, j, handle) != nil {
+				if s.checkJob(runCtx, s.db, monitored, handle) != nil {
 					cancel()
 					return
 				}
 			}
 		}
-	}()
+	}(j)
 	outputs, proofs, err := s.executeGraph(runCtx, j, handle)
 	if err != nil || s.checkJob(runCtx, s.db, j, handle) != nil {
 		return true, ErrDenied

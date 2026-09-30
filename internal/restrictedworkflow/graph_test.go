@@ -162,3 +162,64 @@ func TestGraphMissingDelegateCannotEscalate(t *testing.T) {
 		t.Fatal("nested target run substituted for delegate")
 	}
 }
+
+func TestNestedInputSourceRevocationStopsTargetAndReturn(t *testing.T) {
+	s, runner := graphFixture(t)
+	base := runner.StartSession
+	var starts int
+	runner.StartSession = func(ctx context.Context, handle string) (restricteddispatch.TextSession, error) {
+		a, err := runner.Authority.Store.Resolve(ctx, handle)
+		if err != nil {
+			return nil, err
+		}
+		starts++
+		if a.Agent == "other" {
+			var first string
+			if err = s.db.QueryRowContext(ctx, `SELECT id FROM access_attempts WHERE principal_id='h1' AND agent_id='agent' AND completed_at IS NOT NULL AND parent_id IS NOT NULL ORDER BY generation LIMIT 1`).Scan(&first); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = s.db.ExecContext(ctx, `UPDATE access_attempts SET revoked_at='2026-09-30T13:00:00Z' WHERE id=?`, first); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = runner.Authority.Store.Resolve(ctx, handle); err == nil {
+				t.Fatal("nested input lost source provenance")
+			}
+		}
+		return base(ctx, handle)
+	}
+	receipt, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "classified-source"}, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := s.DispatchNext(t.Context()); !worked || err == nil {
+		t.Fatal("revoked nested source completed graph", worked, err)
+	}
+	if starts != 2 {
+		t.Fatal("return A launched after source revoke", starts)
+	}
+	if _, err = s.Result(t.Context(), "h1", "w", receipt.ID); err == nil {
+		t.Fatal("revoked graph result leaked")
+	}
+}
+
+func TestNestedGraphRejectsCyclesAndUnsupportedSteps(t *testing.T) {
+	for name, raw := range map[string]string{
+		"cycle":  `{"dsl_version":"1.0","name":"cycle","steps":[{"id":"again","type":"call_pipeline","pipeline_slug":"private-work"}]}`,
+		"script": `{"dsl_version":"1.0","name":"script","steps":[{"id":"shell","type":"script","command":"echo secret"}]}`,
+		"http":   `{"dsl_version":"1.0","name":"http","steps":[{"id":"network","type":"http","url":"https://example.test"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, _ := graphFixture(t)
+			if _, err := s.db.ExecContext(t.Context(), `UPDATE pipelines SET definition_json=?,definition_hash=? WHERE id='nested'`, raw, hash(raw)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "secret"}, "", 0); err == nil {
+				t.Fatal("unsupported nested graph admitted")
+			}
+			var n int
+			if err := s.db.QueryRowContext(t.Context(), `SELECT count(*) FROM restricted_workflow_jobs`).Scan(&n); err != nil || n != 0 {
+				t.Fatal("unsupported graph reached durable queue", n, err)
+			}
+		})
+	}
+}

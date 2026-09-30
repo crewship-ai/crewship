@@ -7,6 +7,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 func TestDelegationUsesFrozenIndependentTargetKey(t *testing.T) {
@@ -54,7 +55,7 @@ func testFrozenDelegation(t *testing.T, mutationKey string) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	_, err = a.Store.DB.ExecContext(ctx, `INSERT INTO restricted_workflow_jobs(id,workspace_id,principal_id,member_id,member_revision,pipeline_id,recipe_hash,recipe_json,agent_id,execution_profile,chat_id,origin_attempt_id,origin_handle_ciphertext,source_kind,inputs_json,created_at,fire_at,expires_at) VALUES('job','w','h1',?,?,'recipe','fixture','{}','a','responses_text','c1',?,?,'manual','{}',?,?,?)`, origin.Member, origin.Revision, origin.ID, originCipher, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano))
+	_, err = a.Store.DB.ExecContext(ctx, `INSERT INTO restricted_workflow_jobs(id,workspace_id,principal_id,member_id,member_revision,pipeline_id,recipe_hash,recipe_json,agent_id,execution_profile,chat_id,origin_attempt_id,origin_handle_ciphertext,source_kind,inputs_json,created_at,fire_at,expires_at) VALUES('job','w','h1',?,?,'recipe','fixture','{}','a','responses_text','c1',?,?,'manual','{}',?,?,?)`, origin.Member, origin.Revision, origin.ID, originCipher, tsformat.Format(now), tsformat.Format(now), tsformat.Format(now.Add(time.Hour)))
 	if err != nil {
 		t.Fatal(err)
 	}

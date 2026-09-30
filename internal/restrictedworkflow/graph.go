@@ -101,7 +101,7 @@ func (s *Service) checkGraph(ctx context.Context, q interface {
 				if q.QueryRowContext(ctx, `SELECT expires_at FROM restricted_workflow_provider_policies WHERE job_id=? AND agent_id=? AND policy_hash=? AND max_output_tokens>=4096`, j.ID, step.Agent, step.ProviderHash).Scan(&expiry) != nil {
 					return ErrDenied
 				}
-				deadline, err := time.Parse(time.RFC3339Nano, expiry)
+				deadline, err := time.Parse(time.RFC3339Nano, expiry) // tsformat:allow: read-only immutable policy deadline validation, never a SQL timestamp write
 				if err != nil || !deadline.After(time.Now()) {
 					return ErrDenied
 				}

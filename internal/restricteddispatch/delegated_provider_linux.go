@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // ProviderDelegationHash is a trusted planning API. It reveals neither the key
@@ -58,7 +59,7 @@ func (a Authority) CheckWorkflowProvider(ctx context.Context, q providerQuery, j
 	if err != nil {
 		return access.ErrDenied
 	}
-	deadline, err := time.Parse(time.RFC3339Nano, expires)
+	deadline, err := time.Parse(time.RFC3339Nano, expires) // tsformat:allow: read-only deadline parsing; SQL timestamp writes use tsformat.Format
 	if err != nil || (state != "completed" && !deadline.After(time.Now())) {
 		return access.ErrDenied
 	}
@@ -85,7 +86,7 @@ func (a Authority) FreezeWorkflowProvider(ctx context.Context, tx *sql.Tx, jobID
 	if err != nil || state != "pending" || json.Unmarshal([]byte(rights), &origin.Rights) != nil || !hasAgentRight(origin.Rights, agent, "run") || (agent != origin.Agent && !hasAgentRight(origin.Rights, agent, "delegate")) {
 		return access.ErrDenied
 	}
-	deadline, err := time.Parse(time.RFC3339Nano, expires)
+	deadline, err := time.Parse(time.RFC3339Nano, expires) // tsformat:allow: read-only deadline parsing; SQL timestamp writes use tsformat.Format
 	if err != nil || !deadline.After(time.Now()) {
 		return access.ErrDenied
 	}
@@ -98,7 +99,7 @@ func (a Authority) FreezeWorkflowProvider(ctx context.Context, tx *sql.Tx, jobID
 	if err != nil {
 		return access.ErrDenied
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO restricted_workflow_provider_policies(job_id,agent_id,credential_id,grant_id,policy_hash,max_output_tokens,expires_at) VALUES(?,?,?,?,?,?,?)`, jobID, agent, s.Credential, s.Grant, expectedHash, limit, providerExpiry.UTC().Format(time.RFC3339Nano))
+	_, err = tx.ExecContext(ctx, `INSERT INTO restricted_workflow_provider_policies(job_id,agent_id,credential_id,grant_id,policy_hash,max_output_tokens,expires_at) VALUES(?,?,?,?,?,?,?)`, jobID, agent, s.Credential, s.Grant, expectedHash, limit, tsformat.Format(providerExpiry))
 	return err
 }
 
