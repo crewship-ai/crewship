@@ -32,6 +32,23 @@ const pnpmDir = "node_modules/.pnpm";
 // Adding an entry requires citing where the declaration is observable and a
 // review note; versions not listed here fail hard.
 const EXCEPTIONS = {
+  // Dependency refresh (2026-09-30): inspected each exact installed package
+  // in node_modules/.pnpm. These versions still omit license files and
+  // declare the same license as their previously reviewed versions below.
+  "@ai-sdk/provider-utils@5.0.52": "package.json declares Apache-2.0",
+  "@esbuild/linux-x64@0.28.2": "package.json declares MIT",
+  "@img/sharp-libvips-linux-x64@1.3.4": "package.json declares LGPL-3.0-or-later",
+  "@img/sharp-libvips-linuxmusl-x64@1.3.4": "package.json declares LGPL-3.0-or-later",
+  "@napi-rs/canvas-linux-x64-gnu@1.0.9": "package.json declares MIT",
+  "@napi-rs/canvas-linux-x64-musl@1.0.9": "package.json declares MIT",
+  "@next/env@16.3.7": "package.json declares MIT",
+  "@next/swc-linux-x64-gnu@16.3.7": "package.json declares MIT",
+  "@next/swc-linux-x64-musl@16.3.7": "package.json declares MIT",
+  "@rolldown/binding-linux-x64-gnu@1.2.11": "package.json declares MIT",
+  "@rolldown/binding-linux-x64-musl@1.2.11": "package.json declares MIT",
+  "@rollup/rollup-linux-x64-gnu@4.63.5": "package.json declares MIT",
+  "@rollup/rollup-linux-x64-musl@4.63.5": "package.json declares MIT",
+  "@sentry/server-utils@10.75.3": "package.json declares MIT",
   // Reviewed, version-scoped allowlist (2026-09-28 S1/S4 fix): every entry
   // ships NO license file while its installed package.json declares the
   // license noted in the evidence string. Declarations were read from the
