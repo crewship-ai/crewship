@@ -169,4 +169,5 @@
 #                     SKIP-WAIVER(#2472 precedent): every CI lane that
 #                     builds the seed carries python3, so the guard is
 #                     honest where it fires and enforced where it matters.
-145
+# 2026-09-30          145 -> 148. #2703: two root/unprivileged assertions and one forked-identity helper retain explicit platform waivers; physical acceptance uses opt-in build tags.
+148

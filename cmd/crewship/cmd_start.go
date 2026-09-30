@@ -45,6 +45,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
 	"github.com/crewship-ai/crewship/internal/quartermaster"
+	"github.com/crewship-ai/crewship/internal/quota"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/secrets"
@@ -1511,7 +1512,12 @@ type containerProviderCandidate struct {
 // value, or the providers' `if gate == nil` short-circuit stops working and
 // every start is routed through a controller that is not there.
 func dockerProviderConfig(cfg *config.Config, gate provider.AdmissionGate) docker.Config {
+	var catalog quota.Catalog
+	if cfg.Container.QuotaHelperSocket != "" {
+		catalog = quota.Client{Socket: cfg.Container.QuotaHelperSocket, Namespace: cfg.Container.QuotaHelperNamespace}
+	}
 	return docker.Config{
+		QuotaCatalog:      catalog,
 		RuntimeImage:      cfg.Container.RuntimeImage,
 		DefaultRuntime:    cfg.Container.DefaultRuntime,
 		Network:           cfg.Container.Network,

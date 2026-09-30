@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Crew Settings expose service disk quota policy, per-volume capacity and immutable generations, with an explicit legacy trusted storage label. Snapshot preconditions prevent quota edits from replacing concurrent service changes; private settings remain preserved. (#2703)
+- Crew services enforce swap, rotated log and temporary filesystem limits and audit Docker limits before reusing a container. Opt-in `quota_enforced` services use a readonly root and fixed-size helper-backed ext4 volumes (`quota_bytes`, immutable `generation`); unavailable helpers fail closed. Legacy roots and named data volumes remain trusted and unbounded. Quota service recovery is controller-owned rather than automatic Docker restart. Production installs use a root helper with paired `quota_helper_socket`/`quota_helper_namespace` configuration, immutable per-database catalogs and readiness ordering before reconciliation. (#2703)
+
 ### Improved
 
 - Backup creation rejects crews and workspaces with standalone quota service volumes until their snapshot transport is available, preventing successful bundles that omit service data. (#2703)

@@ -102,14 +102,16 @@ type IPCConfig struct {
 // ContainerConfig holds container runtime settings including provider type,
 // runtime image, resource limits, and sidecar configuration.
 type ContainerConfig struct {
-	Provider        string  `yaml:"provider"` // "docker" | "apple" | "auto"
-	RuntimeImage    string  `yaml:"runtime_image"`
-	DefaultRuntime  string  `yaml:"default_runtime"` // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"
-	Network         string  `yaml:"network"`
-	ContainerPrefix string  `yaml:"container_prefix"` // Container name prefix for multi-instance isolation
-	DefaultMemoryMB int     `yaml:"default_memory_mb"`
-	DefaultCPUs     float64 `yaml:"default_cpus"`
-	SidecarEnabled  bool    `yaml:"sidecar_enabled"` // enable sidecar proxy for credential injection
+	QuotaHelperNamespace string  `yaml:"quota_helper_namespace"` // immutable per-database helper identity
+	QuotaHelperSocket    string  `yaml:"quota_helper_socket"`    // trusted root helper; empty disables enforced persistent quotas
+	Provider             string  `yaml:"provider"`               // "docker" | "apple" | "auto"
+	RuntimeImage         string  `yaml:"runtime_image"`
+	DefaultRuntime       string  `yaml:"default_runtime"` // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"
+	Network              string  `yaml:"network"`
+	ContainerPrefix      string  `yaml:"container_prefix"` // Container name prefix for multi-instance isolation
+	DefaultMemoryMB      int     `yaml:"default_memory_mb"`
+	DefaultCPUs          float64 `yaml:"default_cpus"`
+	SidecarEnabled       bool    `yaml:"sidecar_enabled"` // enable sidecar proxy for credential injection
 
 	// SidecarBinaryPath is the host path to the crewship-sidecar binary to
 	// bind-mount into crew containers. When set, it overrides whatever the
@@ -392,6 +394,25 @@ func (c *Config) Validate() error {
 	if c.IPC.SocketPath == "" {
 		return fmt.Errorf("ipc.socket_path is required")
 	}
+	if (c.Container.QuotaHelperSocket == "") != (c.Container.QuotaHelperNamespace == "") {
+		return fmt.Errorf("quota helper socket and namespace must be configured together")
+	}
+	if c.Container.QuotaHelperNamespace != "" {
+		if strings.HasPrefix(c.Container.QuotaHelperNamespace, "-") || strings.HasPrefix(c.Container.QuotaHelperNamespace, "_") {
+			return fmt.Errorf("quota helper namespace must start with an alphanumeric character")
+		}
+		for _, r := range c.Container.QuotaHelperNamespace {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+				return fmt.Errorf("quota helper namespace must be an immutable instance identifier")
+			}
+		}
+		if len(c.Container.QuotaHelperNamespace) > 128 {
+			return fmt.Errorf("quota helper namespace too long")
+		}
+	}
+	if v := c.Container.QuotaHelperSocket; v != "" && (!filepath.IsAbs(v) || filepath.Clean(v) != v || strings.ContainsAny(v, " \t\n")) {
+		return fmt.Errorf("container.quota_helper_socket must be a clean absolute socket path")
+	}
 	if !validContainerProviders[c.Container.Provider] {
 		return fmt.Errorf("container.provider must be 'docker', 'apple', or 'auto', got %q", c.Container.Provider)
 	}
@@ -463,6 +484,12 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_SOCKET_PATH"); v != "" {
 		cfg.IPC.SocketPath = v
+	}
+	if v := os.Getenv("CREWSHIP_QUOTA_HELPER_NAMESPACE"); v != "" {
+		cfg.Container.QuotaHelperNamespace = v
+	}
+	if v := os.Getenv("CREWSHIP_QUOTA_HELPER_SOCKET"); v != "" {
+		cfg.Container.QuotaHelperSocket = v
 	}
 	if v := os.Getenv("CREWSHIP_CONTAINER_PROVIDER"); v != "" {
 		cfg.Container.Provider = v
