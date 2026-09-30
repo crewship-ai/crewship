@@ -46,6 +46,7 @@ import { ChatComposer } from "./composer/chat-composer"
 import { checkChatMessageSize } from "./hooks/use-message-submit"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
 import { ArtifactPane } from "./artifact/artifact-pane"
+import { RestrictedFiles } from "./files/restricted-files"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { isClientArtifactPath } from "./artifact/artifact-scope"
 import { relativeToAgent } from "./files/file-scope"
@@ -225,7 +226,12 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     sessionLoadedFor.current = sessionId
   }, [sessionId])
 
+  const executionProfileRef = useRef<"trusted" | "restricted" | "pending">("pending")
   const openFilePreview = useCallback((path: string) => {
+    if (executionProfileRef.current !== "trusted") {
+      toast.info("Use Output files to download files from this conversation.")
+      return
+    }
     const relative = relativeToAgent(path, chatAgent?.crewId, chatAgent?.slug)
     if (!isClientArtifactPath(relative)) {
       toast.error("This file is not available in Artifacts")
@@ -306,7 +312,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     }
   }, [pageContextSlug])
 
-  const executionProfileRef = useRef<"trusted" | "restricted" | "pending">("pending")
   const [sharedRestrictedChat,setSharedRestrictedChat] = useState(false)
   const [executionProfile, setExecutionProfile] = useState<"trusted" | "restricted" | "pending">("pending")
   useEffect(() => {
@@ -917,6 +922,11 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   )
 
   if (mobilePanel === "artifacts" || mobilePanel === "work") {
+    if (executionProfile !== "trusted") return <div className="h-full overflow-auto">
+      {executionProfile === "restricted" && sessionId && workspaceId
+        ? <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />
+        : <p className="p-4 text-sm text-muted-foreground">Checking conversation access…</p>}
+    </div>
     return (
       <div className="relative h-full">
         <RightPanel
@@ -926,7 +936,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           initialTab={mobilePanel}
           style={{ width: "100%", height: "100%" }}
         />
-        <ArtifactPane agentId={agentId} />
+        {executionProfile === "trusted" && <ArtifactPane agentId={agentId} />}
       </div>
     )
   }
@@ -964,6 +974,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
         </div>
+        {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {turns.length === 0 && !historyLoading && sessionKind === "direct" && (
           <div className="px-4 pb-2 shrink-0">
             <AskRail
@@ -1016,7 +1027,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         )}
         <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
         <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
-        <ArtifactPane agentId={agentId} />
+        {executionProfile === "trusted" && <ArtifactPane agentId={agentId} />}
       </div>
     )
   }
@@ -1025,7 +1036,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const pushOpen = drawerOpen && drawerMode === "push"
   return (
     <div className="relative flex h-full">
-      <div className={cn("flex flex-col overflow-hidden min-w-0", artifactFocus && artifactOpen ? "hidden" : "flex-1")}>
+      <div className={cn("flex flex-col overflow-hidden min-w-0", executionProfile === "trusted" && artifactFocus && artifactOpen ? "hidden" : "flex-1")}>
         <ReconnectBanner status={connectionStatus} />
         {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         {/* Who you are talking to, not the session id. The strip carries the
@@ -1064,6 +1075,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
         </div>
+        {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {/* Starter chips are for a conversation; a routine step or an issue
             chat is a transcript, and "Help me get started" under one is
             noise. */}
@@ -1120,8 +1132,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         />
       </div>
 
-      <ArtifactPane agentId={agentId} expanded={artifactFocus} />
-      {(!artifactOpen || artifactFocus) && <RightDrawer>
+      {executionProfile === "trusted" && <ArtifactPane agentId={agentId} expanded={artifactFocus} />}
+      {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightDrawer>
         <RightPanel
           key={`${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
@@ -1132,7 +1144,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         />
       </RightDrawer>}
 
-      {(!artifactOpen || artifactFocus) && <RightRail className={cn(pushOpen && "border-l-0")} />}
+      {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightRail className={cn(pushOpen && "border-l-0")} />}
       {/* workspaceId is what makes the server-driven Actions group exist at
           all: useSlashCommands(undefined) never runs its query, so the palette
           rendered without it could only ever show the client rows. */}
