@@ -224,9 +224,9 @@ func TestCrewSummary_HasFilesystemSections_LegacyBundleStillRestores(t *testing.
 }
 
 // TestFormatVersion_LegacyBundlesStayReadable pins the N-2 window across
-// the v3 bump: the fix must not orphan bundles taken last month.
+// the current version bump: the supported N-2 window remains readable.
 func TestFormatVersion_LegacyBundlesStayReadable(t *testing.T) {
-	for _, v := range []int{1, 2, FormatVersion} {
+	for _, v := range []int{MinSupportedFormatVersion, FormatVersion - 1, FormatVersion} {
 		if !IsCompatible(v) {
 			t.Errorf("format v%d is no longer readable; bundles taken before the fix must still restore", v)
 		}

@@ -423,6 +423,11 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		return nil, err
 	}
 	defer func() { _ = extracted.Close() }()
+	// A quota section cannot be treated as optional filesystem data: restarting
+	// the saved intent without its image would silently initialize empty data.
+	if manifest.Contents.ServiceSnapshots > 0 {
+		return nil, fmt.Errorf("backup: quota service restore requires verified image import transport")
+	}
 
 	// Drain any trailer bytes the AGE reader may hold back, then
 	// verify checksum. Mismatch means corruption or tampering and
