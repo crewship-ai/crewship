@@ -351,6 +351,11 @@ var startCmd = &cobra.Command{
 		}
 
 		srv := server.New(cfg, logger, deps)
+		closeRestricted, err := startRestrictedTextRuntime(ctx, db.DB, db.Path(), srv.APIRouter(), noDocker, logger)
+		if err != nil {
+			return fmt.Errorf("initialize restricted text runtime: %w", err)
+		}
+		defer closeRestricted()
 
 		resolver := chatbridge.NewIPCResolver(cfg.Auth.NextjsURL, cfg.Auth.InternalToken, logger)
 		bridge := chatbridge.New(
