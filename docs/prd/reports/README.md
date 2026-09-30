@@ -1,11 +1,9 @@
-# Release 1.0 reports
+# Release 1.0 report artifacts
 
-Two kinds of file live here, and they are not maintained the same way.
-
-**Authored.** `release-1-0-test-readiness.md`, `wp21-go-todo-triage.md` and
-`track-a-live-validation-2026-09-03.md` (what the Track A packages did on a
-real instance, and the three defects that found) are written by hand and
-reviewed like any other document.
+Dated instance audits and acceptance reports were preserved in the versioned
+internal archive before removal from the public working tree. The public tree
+retains maintained specifications and the regression source fixture needed by
+contributors. Historical public versions remain available through Git history.
 
 **Generated, and deliberately not checked in.**
 `release-1-0-api-cli-inventory.json` and `release-1-0-api-cli-inventory.md` are
