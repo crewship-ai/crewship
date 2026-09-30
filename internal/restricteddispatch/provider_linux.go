@@ -30,6 +30,7 @@ type providerQuery interface {
 }
 
 var providerModel = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$`)
+var providerBearer = regexp.MustCompile(`^[a-zA-Z0-9._~+/-]+=*$`)
 
 // PrepareResponses pins one explicit agent API-key grant before building any
 // prompt. It does not use crew/workspace credentials, provider-login refresh or
@@ -186,7 +187,10 @@ func (a Authority) BrokerSecret(ctx context.Context, handle, credentialID string
 		return restrictedruntime.BoundSecret{}, err
 	}
 	value, err := encryption.Decrypt(s.Ciphertext)
-	if err != nil || value == "" {
+	// Only native OPENAI API_KEY rows are selected, never endpoint objects.
+	// Reject structured values even if a malformed row labels one OPENAI:
+	// its endpoint and custom headers must never become bearer material.
+	if err != nil || len(value) > 64<<10 || !providerBearer.MatchString(value) {
 		return restrictedruntime.BoundSecret{}, access.ErrDenied
 	}
 	// Credential/grant mutations atomically revoke the attempt. Recheck after

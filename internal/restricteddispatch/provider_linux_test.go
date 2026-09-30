@@ -157,15 +157,16 @@ func TestProviderAdmissionPrecedesPromptAndCannotWidenParent(t *testing.T) {
 
 func TestProviderExpiryAndUnsupportedCredentialModes(t *testing.T) {
 	for name, query := range map[string]string{
-		"expired grant":    `UPDATE agent_credentials SET expires_at='2000-01-01T00:00:00Z'`,
-		"malformed expiry": `UPDATE agent_credentials SET expires_at=''`,
-		"expired key":      `UPDATE credentials SET token_expires_at='2000-01-01T00:00:00Z'`,
-		"login credential": `UPDATE credentials SET type='PROVIDER_LOGIN'`,
-		"wrong provider":   `UPDATE credentials SET provider='ANTHROPIC'`,
-		"keeper mediated":  `UPDATE credentials SET security_level=3`,
-		"crew only":        `DELETE FROM agent_credentials`,
-		"wrong slot":       `UPDATE agent_credentials SET env_var_name='OTHER_KEY'`,
-		"ambiguous keys":   `INSERT INTO credentials(id,workspace_id,name,encrypted_value,type,provider,created_by) SELECT 'key2',workspace_id,'Second',encrypted_value,type,provider,created_by FROM credentials; INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('grant2','a','key2','OPENAI_API_KEY')`,
+		"expired grant":     `UPDATE agent_credentials SET expires_at='2000-01-01T00:00:00Z'`,
+		"malformed expiry":  `UPDATE agent_credentials SET expires_at=''`,
+		"expired key":       `UPDATE credentials SET token_expires_at='2000-01-01T00:00:00Z'`,
+		"login credential":  `UPDATE credentials SET type='PROVIDER_LOGIN'`,
+		"wrong provider":    `UPDATE credentials SET provider='ANTHROPIC'`,
+		"endpoint provider": `UPDATE credentials SET provider='OPENAI_COMPAT'`,
+		"keeper mediated":   `UPDATE credentials SET security_level=3`,
+		"crew only":         `DELETE FROM agent_credentials`,
+		"wrong slot":        `UPDATE agent_credentials SET env_var_name='OTHER_KEY'`,
+		"ambiguous keys":    `INSERT INTO credentials(id,workspace_id,name,encrypted_value,type,provider,created_by) SELECT 'key2',workspace_id,'Second',encrypted_value,type,provider,created_by FROM credentials; INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('grant2','a','key2','OPENAI_API_KEY')`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			a := providerFixture(t)
@@ -246,5 +247,25 @@ func TestProviderBindingCannotUpgradePreparedOfflineLaunch(t *testing.T) {
 	p, err := a.Resolve(t.Context(), h)
 	if err != nil || p.Network != nil {
 		t.Fatal("rejected upgrade changed offline launch", err)
+	}
+}
+
+func TestProviderRejectsStructuredSecretInsteadOfForwardingIt(t *testing.T) {
+	a := providerFixture(t)
+	for _, value := range []string{`{"baseURL":"https://foreign.example","apiKey":"private","headers":{"X-Secret":"private"}}`, `["private"]`, `"private"`, " key", "key\n", "\ufeff{}"} {
+		cipher, err := encryption.Encrypt(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.Store.DB.ExecContext(t.Context(), `UPDATE credentials SET encrypted_value=? WHERE id='key'`, cipher); err != nil {
+			t.Fatal(err)
+		}
+		h, _, err := a.PrepareResponses(t.Context(), "h1", "w", "a", "c1", "", nil, 64, command("true"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.BrokerSecret(t.Context(), h, "key"); !errors.Is(err, access.ErrDenied) {
+			t.Fatal("structured or malformed credential released", err)
+		}
 	}
 }
