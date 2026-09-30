@@ -17,6 +17,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/safepath"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
@@ -438,6 +439,11 @@ func (p *Provider) migrateLegacyVolumeLabeled(ctx context.Context, legacy, targe
 // per-crew mutex makes the second caller see the freshly-created
 // container and reuse it instead.
 func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (containerID string, err error) {
+	if p.cfg.OwnerActive != nil {
+		if err := p.cfg.OwnerActive(ctx, team.ID); err != nil {
+			return "", err
+		}
+	}
 	// emitProv routes a runtime container-prep event to the optional sink
 	// (no-op when nil), stamping the canonical provision phase. This is the
 	// agent-run/ensure-container half of the provisioning audit trail: the
@@ -734,6 +740,11 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					return "", false, fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
 				}
 				inspect := inspectResult.Container
+				if inspect.Config != nil && p.cfg.InstanceID != "" {
+					if id := inspect.Config.Labels[resourcelifecycle.InstanceLabel]; id != "" && id != p.cfg.InstanceID {
+						return "", false, fmt.Errorf("existing runtime belongs to another installation")
+					}
+				}
 				// The reused container may still be running a previously
 				// provisioned cached image, while desiredImage falls back to the
 				// provider default when the caller left Image/CachedImage empty.
@@ -1264,6 +1275,9 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 	if digest := p.crewRuntimeContractDigest(); digest != "" {
 		cfg.Labels[crewRuntimeContractLabel] = digest
 	}
+	// Installation attribution is not runtime-contract drift: existing legacy
+	// containers remain report-only until naturally replaced.
+	cfg.Labels = resourcelifecycle.WithInstanceLabel(cfg.Labels, p.cfg.InstanceID)
 	return cfg, hostCfg, nil
 }
 

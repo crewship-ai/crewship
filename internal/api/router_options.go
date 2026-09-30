@@ -19,6 +19,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/ws"
 	dockerclient "github.com/moby/moby/client"
 )
@@ -455,4 +456,8 @@ func WithPageRuntime(runtime, studio string, developmentSameOrigin ...bool) Rout
 // WithMemoryInventoryRoot enables read-only workspace knowledge discovery.
 func WithMemoryInventoryRoot(path string) RouterOption {
 	return func(r *Router) { r.memoryInventoryRoot = path }
+}
+
+func WithContainerCleanup(c *resourcelifecycle.Controller) RouterOption {
+	return func(r *Router) { r.containerCleanup = c }
 }

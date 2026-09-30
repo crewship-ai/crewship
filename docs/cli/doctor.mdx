@@ -290,3 +290,27 @@ for first-run onboarding, not running surgery on a populated install.
   for the update-availability check.
 - [Troubleshooting](/guides/troubleshooting) — symptom-keyed catalog
   of common failures.
+
+## crewship doctor cleanup
+
+Read historical container cleanup diagnostics from the local SQLite database,
+including failures for a workspace that has been deleted. Local file permissions
+authorize this read; no server login or surviving workspace membership is needed.
+The command never contacts Docker, creates a database, applies migrations, or
+removes a resource. `DATABASE_URL` selects the local file, as with other doctor
+probes. An old database without the diagnostic tables reports an error.
+
+```bash
+crewship doctor cleanup --format json
+```
+
+| Flag | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `--json` | `bool` | `false` | Deprecated alias for `--format json`. |
+| `--format` | `string` | `table` | Global flag; supports `table` or `json`. |
+
+JSON contains `scope=containers`, `observation=persisted`, and `items` with
+installation/crew IDs, state, last observation, completeness, eligible remaining
+count, legacy unattributed count and fixed error code. Observations older than
+90 seconds read as stale `unknown`. Persisted snapshots are not live host
+clearance and do not certify cleanup of volumes, host data or images.

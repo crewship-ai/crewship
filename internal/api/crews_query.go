@@ -285,6 +285,7 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success":          true,
 		"sidecar_teardown": teardown,
+		"cleanup":          h.containerCleanup.Pending(r.Context(), crewID),
 	})
 
 	h.broadcastCrewEvent("crew.deleted", workspaceID, map[string]string{"id": crewID})

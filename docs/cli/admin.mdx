@@ -872,3 +872,24 @@ Use it to remove "is it seeded?" preconditions from a test, and to prove a butto
 
 Seed while the server is running, too: a restart sweeps gates whose pipeline run is missing or terminal (`CancelOrphanedWaitpoints`), which settles the seeded ones out from under you.
 </Warning>
+
+## crewship admin cleanup
+
+Read container cleanup observations from the server selected by the CLI. This
+HTTP read requires login, a selected active workspace, and ADMIN/OWNER role.
+Unlike local recovery commands, it does not open a database file. It is backed
+by `GET /api/v1/admin/resource-cleanup` and never triggers cleanup itself.
+
+```bash
+crewship admin cleanup --format json
+```
+
+The response includes `scope=containers`, controller state and per-crew `items`
+with observation time, completeness, remaining eligible containers, legacy
+unattributed count and fixed error codes. `observed_clear` describes the last
+complete eligible-container scan, not volumes, host data or future creates.
+Stale observations read as `unknown`.
+
+If the last authorized workspace is deleted or the server is unavailable, use
+`crewship doctor cleanup --format json` on the host to read historical local
+snapshots without workspace membership.

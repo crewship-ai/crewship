@@ -5,6 +5,7 @@ package api
 // All require workspace context and (per-handler) OWNER role.
 
 import (
+	"net/http"
 	"os"
 
 	"github.com/crewship-ai/crewship/internal/backup"
@@ -28,6 +29,18 @@ func (r *Router) registerAdminRoutes() {
 	r.authedAdmin("GET", "/api/v1/audit", audit.List)
 
 	// Admin
+	r.authedAdmin("GET", "/api/v1/admin/resource-cleanup", func(w http.ResponseWriter, req *http.Request) {
+		statuses, err := r.containerCleanup.Statuses(req.Context())
+		if err != nil {
+			replyInternalError(w, r.logger, "read container cleanup diagnostics", err)
+			return
+		}
+		state := "disabled"
+		if r.containerCleanup != nil {
+			state = "enabled"
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"scope": "containers", "state": state, "items": statuses})
+	})
 	admin := NewAdminHandler(r.db, r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/stats", admin.Stats)
 	r.authedAdmin("GET", "/api/v1/admin/users", admin.ListUsers)

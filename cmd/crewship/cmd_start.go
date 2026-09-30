@@ -46,6 +46,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
 	"github.com/crewship-ai/crewship/internal/quartermaster"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/secrets"
 	"github.com/crewship-ai/crewship/internal/server"
@@ -132,6 +133,10 @@ var startCmd = &cobra.Command{
 		cfg, err := config.Load(configPath)
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
+		}
+		cfg.Container.InstanceID, err = resourcelifecycle.LoadIdentity(dataDir.Root)
+		if err != nil {
+			return fmt.Errorf("load installation identity: %w", err)
 		}
 
 		debugBuffer := logging.NewRingBuffer(500)
@@ -1515,6 +1520,7 @@ func dockerProviderConfig(cfg *config.Config, gate provider.AdmissionGate) docke
 		RuntimeImage:      cfg.Container.RuntimeImage,
 		DefaultRuntime:    cfg.Container.DefaultRuntime,
 		Network:           cfg.Container.Network,
+		InstanceID:        cfg.Container.InstanceID,
 		OutputBasePath:    cfg.Storage.BasePath,
 		ContainerPrefix:   cfg.Container.ContainerPrefix,
 		SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
@@ -1643,6 +1649,12 @@ func initProviders(ctx context.Context, cfg *config.Config, gate provider.Admiss
 	default:
 		if cfg.Container.Provider != "" && cfg.Container.Provider != "k8s" {
 			logger.Warn("unknown container provider", "provider", cfg.Container.Provider)
+		}
+	}
+
+	if !skipDocker && cfg.Container.InstanceID != "" && cfg.Container.Provider != "apple" {
+		if _, appleSelected := deps.Container.(*apple.Provider); !appleSelected {
+			deps.ContainerCleanup = &resourcelifecycle.Controller{InstanceID: cfg.Container.InstanceID, Connect: func(ctx context.Context) (resourcelifecycle.Runtime, error) { return docker.NewCleanupRuntime(ctx) }}
 		}
 	}
 

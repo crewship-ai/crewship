@@ -23630,6 +23630,144 @@
         ]
       }
     },
+    "/api/v1/admin/resource-cleanup": {
+      "get": {
+        "operationId": "get_api_v1_admin_resource-cleanup",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "properties": {
+                          "complete": {
+                            "type": "boolean"
+                          },
+                          "crew_id": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "string"
+                          },
+                          "observed_at": {
+                            "type": "string"
+                          },
+                          "remaining": {
+                            "type": "integer"
+                          },
+                          "scope": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string"
+                          },
+                          "unattributed": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "crew_id",
+                          "scope",
+                          "state",
+                          "complete",
+                          "remaining",
+                          "unattributed"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "scope": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "state",
+                    "items"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/security-posture": {
       "get": {
         "operationId": "get_api_v1_admin_security-posture",
