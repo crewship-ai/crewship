@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"io"
 	"os"
 	"path/filepath"
@@ -128,7 +129,7 @@ func LandStagedEnvironments(ctx context.Context, ops DockerOps, opts LandOptions
 	}
 	if !opts.DryRun {
 		b, _ := json.MarshalIndent(rep, "", "  ")
-		_ = os.WriteFile(filepath.Join(dir, "landed.json"), b, 0o600)
+		_ = memory.WriteFileDurable(filepath.Join(dir, "landed.json"), b, 0o600)
 	}
 	return rep, nil
 }

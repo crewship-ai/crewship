@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"io"
 	"os"
 	"path/filepath"
@@ -153,6 +154,13 @@ func (s *EnvironmentStore) Put(r io.Reader, want string) (digest string, size in
 	}()
 	h := sha256.New()
 	size, err = io.Copy(io.MultiWriter(f, h), r)
+	if err == nil {
+		// Durable before it gets its final name: a blob that exists under
+		// its digest is trusted and never rewritten (Put keeps a present
+		// blob), so a rename that outran the data after a power cut would
+		// leave a torn layer every later backup silently reuses.
+		err = f.Sync()
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -180,7 +188,23 @@ func (s *EnvironmentStore) Put(r io.Reader, want string) (digest string, size in
 	if err := os.Rename(tmp, dst); err != nil {
 		return "", 0, err
 	}
+	if err := syncDir(filepath.Dir(dst)); err != nil {
+		return "", 0, err
+	}
 	return digest, size, nil
+}
+
+// syncDir fsyncs a directory so a rename into it survives a power cut.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	serr := d.Sync()
+	if cerr := d.Close(); serr == nil {
+		serr = cerr
+	}
+	return serr
 }
 
 // WriteIndex stores the environment record under index/<id>.json.
@@ -193,12 +217,7 @@ func (s *EnvironmentStore) WriteIndex(env *Environment) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	name := filepath.Join(dir, filepath.Base(env.ID)+".json")
-	tmp := name + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, name)
+	return memory.WriteFileDurable(filepath.Join(dir, filepath.Base(env.ID)+".json"), b, 0o600)
 }
 
 // ReadIndex reads an environment record by id.

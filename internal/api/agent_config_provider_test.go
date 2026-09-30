@@ -222,6 +222,7 @@ func TestEveryCredentialLoader_SplitsTheEndpointObject(t *testing.T) {
 	notUpstreamDelivery := map[string]string{
 		"internal/serviceconfig/encryption.go":     "purpose-bound service document for the trusted runtime decoder; never loads an API_KEY row or sends an LLM auth credential",
 		"internal/api/admin_reencrypt.go":          "re-encrypts at rest; the plaintext never leaves the process",
+		"internal/backupplan/destinations.go":      "decrypts an off-site destination's own S3 secret-key column (a vault envelope, not a credential row) to sign SigV4 requests to that bucket; never an API_KEY provider value",
 		"internal/api/credentials.go":              "CRUD over the row itself",
 		"internal/api/credentials_reveal.go":       "shows the value to an authorised human, which is the whole point of the endpoint",
 		"internal/api/credential_rotation.go":      "writes a new value; splits where it must",

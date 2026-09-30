@@ -19,6 +19,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/cli"
 	"net/url"
 	"strings"
 	"text/tabwriter"
@@ -470,7 +471,7 @@ stay. Recorded in the instance audit log.`,
 		if err := deleteJSON(client, instanceBackupsAPI+"/plans/"+url.PathEscape(args[0])); err != nil {
 			return err
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Deleted backup plan %s.\n", args[0])
+		cli.PrintSuccess(fmt.Sprintf("Deleted backup plan %s.", args[0]))
 		return nil
 	},
 }

@@ -228,11 +228,11 @@ Examples:
 }
 
 type drillPostResult struct {
-	Path        string `json:"path"`
-	ProofLevel  int    `json:"proof_level"`
-	DrillResult string `json:"drill_result"`
-	DrillAt     string `json:"drill_at"`
-	ReportID    string `json:"report_id"`
+	Path        string `json:"path" yaml:"path"`
+	ProofLevel  int    `json:"proof_level" yaml:"proof_level"`
+	DrillResult string `json:"drill_result" yaml:"drill_result"`
+	DrillAt     string `json:"drill_at" yaml:"drill_at"`
+	ReportID    string `json:"report_id" yaml:"report_id"`
 }
 
 // drillPostClient returns the client --post records with. A URL other than
