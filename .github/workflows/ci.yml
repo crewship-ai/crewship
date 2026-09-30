@@ -285,6 +285,10 @@ jobs:
         run: bash scripts/test-harness-pr-subset-test.sh
       - name: claim-issue.sh (claim parsing + clone detection)
         run: bash scripts/claim-issue-test.sh
+      - name: check-release-artifacts.sh (argument parsing + channel + content selection)
+        run: bash scripts/check-release-artifacts-test.sh
+      - name: gen-frontend-licenses.mjs (scoped walk, dedup, hard failures)
+        run: bash scripts/gen-frontend-licenses-test.sh
       # The demo use-case suite (scripts/demo): ShellCheck over every script,
       # and its runner against stub use cases — that exit 3 maps to SKIP and
       # never PASS, that every failure is counted, and that a hung use case
