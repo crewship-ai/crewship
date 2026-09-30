@@ -301,7 +301,7 @@ func currentContextAudience(ctx context.Context, q contextQuery, user, workspace
 	if err = chatRead(ctx, q, user, workspace, chat); err != nil {
 		return Attempt{}, err
 	}
-	a := Attempt{Principal: user, Workspace: workspace, Agent: agent, Chat: chat, Member: m.ID, Revision: m.Revision}
+	a := Attempt{AdmissionOperation: "chat", Principal: user, Workspace: workspace, Agent: agent, Chat: chat, Member: m.ID, Revision: m.Revision}
 	err = q.QueryRowContext(ctx, `SELECT authority_generation,authority_revision FROM chats WHERE id=? AND workspace_id=? AND agent_id=?`, chat, workspace, agent).Scan(&a.ChatGeneration, &a.ChatRevision)
 	if err != nil || a.ChatGeneration == "" || a.ChatRevision < 1 {
 		return Attempt{}, ErrDenied
@@ -319,6 +319,10 @@ func currentContextAudience(ctx context.Context, q contextQuery, user, workspace
 		a.Rights = append(a.Rights, r)
 	}
 	if err = rows.Err(); err != nil {
+		return Attempt{}, err
+	}
+	a.ContextAudience, err = contextAudience(ctx, q, a)
+	if err != nil {
 		return Attempt{}, err
 	}
 	a.Scope = scope(a)

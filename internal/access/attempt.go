@@ -19,6 +19,7 @@ import (
 type Attempt struct {
 	ChatGeneration                               string
 	AdmissionOperation                           string
+	ContextAudience                              string
 	ChatRevision                                 int64
 	ID, Workspace, Principal, Agent, Chat, Scope string
 	Member                                       string
@@ -130,6 +131,10 @@ func (s Store) admit(ctx context.Context, user, workspace, agent, chat, parent s
 	if a.ChatGeneration == "" || a.ChatRevision < 1 {
 		return "", Attempt{}, ErrDenied
 	}
+	a.ContextAudience, err = contextAudience(ctx, tx, a)
+	if err != nil {
+		return "", Attempt{}, err
+	}
 	data, err := json.Marshal(unique)
 	if err != nil {
 		return "", Attempt{}, err
@@ -138,8 +143,8 @@ func (s Store) admit(ctx context.Context, user, workspace, agent, chat, parent s
 	if parentID != "" {
 		parentValue = parentID
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO access_attempts(id,handle_hash,member_id,member_revision,workspace_id,principal_id,agent_id,chat_id,parent_id,generation,rights,created_at,chat_generation,chat_revision,admission_operation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		a.ID, digest(handle), m.ID, m.Revision, workspace, user, agent, chat, parentValue, generation, string(data), tsformat.Format(time.Now()), a.ChatGeneration, a.ChatRevision, operation)
+	_, err = tx.ExecContext(ctx, `INSERT INTO access_attempts(id,handle_hash,member_id,member_revision,workspace_id,principal_id,agent_id,chat_id,parent_id,generation,rights,created_at,chat_generation,chat_revision,admission_operation,context_audience) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		a.ID, digest(handle), m.ID, m.Revision, workspace, user, agent, chat, parentValue, generation, string(data), tsformat.Format(time.Now()), a.ChatGeneration, a.ChatRevision, operation, a.ContextAudience)
 	if err != nil {
 		return "", Attempt{}, err
 	}
@@ -151,6 +156,10 @@ func (s Store) admit(ctx context.Context, user, workspace, agent, chat, parent s
 }
 
 func scope(a Attempt) string {
+	if a.ContextAudience != "" {
+		b, _ := json.Marshal([]any{"group", a.Workspace, a.Agent, a.Chat, a.ChatGeneration, a.ChatRevision, a.ContextAudience})
+		return digest(string(b))
+	}
 	b, _ := json.Marshal([]any{a.Workspace, a.Principal, a.Chat, a.Member, a.Revision, a.ChatGeneration, a.ChatRevision})
 	return digest(string(b))
 }
@@ -175,10 +184,10 @@ func resolveState(ctx context.Context, q queryer, key string, byHandle bool, see
 	if history {
 		completion = ""
 	}
-	err := q.QueryRowContext(ctx, `SELECT a.id,a.member_id,a.member_revision,a.workspace_id,a.principal_id,a.agent_id,a.chat_id,COALESCE(a.parent_id,''),a.generation,a.rights,a.chat_generation,a.chat_revision,a.admission_operation
+	err := q.QueryRowContext(ctx, `SELECT a.id,a.member_id,a.member_revision,a.workspace_id,a.principal_id,a.agent_id,a.chat_id,COALESCE(a.parent_id,''),a.generation,a.rights,a.chat_generation,a.chat_revision,a.admission_operation,a.context_audience
  FROM access_attempts a JOIN chats c ON c.id=a.chat_id AND c.authority_generation=a.chat_generation AND c.authority_revision=a.chat_revision
  WHERE a.`+column+`=? AND a.revoked_at IS NULL`+completion, key).
-		Scan(&a.ID, &a.Member, &a.Revision, &a.Workspace, &a.Principal, &a.Agent, &a.Chat, &a.Parent, &a.Generation, &raw, &a.ChatGeneration, &a.ChatRevision, &a.AdmissionOperation)
+		Scan(&a.ID, &a.Member, &a.Revision, &a.Workspace, &a.Principal, &a.Agent, &a.Chat, &a.Parent, &a.Generation, &raw, &a.ChatGeneration, &a.ChatRevision, &a.AdmissionOperation, &a.ContextAudience)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrDenied
 	}
@@ -214,6 +223,11 @@ func resolveState(ctx context.Context, q queryer, key string, byHandle bool, see
 		if p.Principal != a.Principal || p.Workspace != a.Workspace || p.Chat != a.Chat || !subset(a.Rights, p.Rights) || !slices.Contains(p.Rights, Right{"agent", a.Agent, "delegate"}) {
 			return Attempt{}, ErrDenied
 		}
+	}
+
+	audience, err := contextAudience(ctx, q, a)
+	if err != nil || audience != a.ContextAudience {
+		return Attempt{}, ErrDenied
 	}
 	a.Scope = scope(a)
 	return a, nil

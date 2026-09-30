@@ -307,16 +307,18 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   }, [pageContextSlug])
 
   const executionProfileRef = useRef<"trusted" | "restricted" | "pending">("pending")
+  const [sharedRestrictedChat,setSharedRestrictedChat] = useState(false)
   const [executionProfile, setExecutionProfile] = useState<"trusted" | "restricted" | "pending">("pending")
   useEffect(() => {
     executionProfileRef.current = "pending"
     setExecutionProfile("pending")
+    setSharedRestrictedChat(false)
     if (!sessionId || !workspaceId) return
     const controller = new AbortController()
     void apiFetch(`/api/v1/chats/${encodeURIComponent(sessionId)}/execution-profile?workspace_id=${encodeURIComponent(workspaceId)}`,{signal:controller.signal}).then(async response => {
       if (!response.ok) return
-      const profile = await response.json() as {mode:string}
-      if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode)}
+      const profile = await response.json() as {mode:string;audience?:string}
+      if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
     }).catch(() => {})
     return () => controller.abort()
   }, [sessionId,workspaceId])
@@ -600,8 +602,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(sessionId)}/execution-profile?workspace_id=${encodeURIComponent(workspaceId ?? "")}`)
         if (!response.ok) ok = false
         else {
-          const profile = await response.json() as {mode:string}
-          if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode)}
+          const profile = await response.json() as {mode:string;audience?:string}
+          if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
           else ok = false
         }
       } catch {ok = false}
@@ -933,6 +935,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return (
       <div className="relative flex flex-col h-full">
         <ReconnectBanner status={connectionStatus} />
+        {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
           <ConnectionBadge status={connectionStatus} />
           {isGroupChat && (
@@ -1024,6 +1027,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     <div className="relative flex h-full">
       <div className={cn("flex flex-col overflow-hidden min-w-0", artifactFocus && artifactOpen ? "hidden" : "flex-1")}>
         <ReconnectBanner status={connectionStatus} />
+        {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         {/* Who you are talking to, not the session id. The strip carries the
             agent (face, status, role, crew, model, skills, credentials); the
             connection badge still appears when the socket is not connected,

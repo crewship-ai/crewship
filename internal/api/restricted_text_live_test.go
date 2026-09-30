@@ -75,6 +75,14 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO budget_limits(id,workspace_id,scope_kind,scope_id,window,limit_usd,mode) VALUES('text-live-cap',?,'workspace',?,'month',100,'hard')`, workspace, workspace)
 	var calls atomic.Int64
 	release := make(chan struct{})
+	groupRelease := make(chan struct{})
+	defer func() {
+		select {
+		case <-groupRelease:
+		default:
+			close(groupRelease)
+		}
+	}()
 	defer func() {
 		select {
 		case <-release:
@@ -103,6 +111,15 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 		if err := db.QueryRowContext(req.Context(), `SELECT count(*) FROM restricted_cost_reservations WHERE state='pending'`).Scan(&pending); err != nil || pending < 1 {
 			t.Errorf("no pre-provider reservation %d %v", pending, err)
 		}
+
+		if strings.Contains(body.Input, "GROUP_") {
+			if strings.Contains(body.Input, "CANARY_text-") {
+				t.Error("private canary entered group prompt")
+			}
+			if strings.Contains(body.Input, "GROUP_SECOND") && (!strings.Contains(body.Input, "GROUP_FIRST") || !strings.Contains(body.Input, "answer-h1")) {
+				t.Error("shared group history missing")
+			}
+		}
 		text := "answer-h1"
 		if strings.Contains(body.Input, "CANARY_text-h2") {
 			text = "answer-h2"
@@ -113,6 +130,13 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprintf(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":%q}\n\n", text)
 		w.(http.Flusher).Flush()
+		if strings.Contains(body.Input, "GROUP_EPOCH_STREAM") {
+			select {
+			case <-groupRelease:
+			case <-req.Context().Done():
+				return
+			}
+		}
 		if strings.Contains(body.Input, "REVOKE_DURING_STREAM") {
 			select {
 			case <-release:
@@ -169,6 +193,47 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 		if resp.StatusCode != 200 || !done {
 			t.Fatalf("production run %s status=%d done=%v err=%v", user, resp.StatusCode, done, scan.Err())
 		}
+	}
+
+	execOrFatal(t, db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('text-group',?,'text-agent','text-h1','group')`, workspace)
+	execOrFatal(t, db, `INSERT INTO chat_participants(chat_id,user_id,role) VALUES('text-group','text-h2','member')`)
+	for _, turn := range []struct{ user, content string }{{"text-h1", "GROUP_FIRST"}, {"text-h2", "GROUP_SECOND"}} {
+		response := request(turn.user, "text-group", turn.content)
+		scanner := bufio.NewScanner(response.Body)
+		complete := false
+		for scanner.Scan() {
+			if strings.Contains(scanner.Text(), `"type":"done"`) {
+				complete = true
+			}
+		}
+		response.Body.Close()
+		if response.StatusCode != 200 || !complete {
+			t.Fatalf("group run %s status=%d complete=%v", turn.user, response.StatusCode, complete)
+		}
+	}
+	for _, user := range []string{"text-h1", "text-h2"} {
+		entries, err := store.ContextEntriesForChat(t.Context(), user, workspace, "text-agent", "text-group")
+		if err != nil || len(entries) != 4 {
+			t.Fatalf("group history user=%s count=%d err=%v", user, len(entries), err)
+		}
+	}
+	groupResp := request("text-h1", "text-group", "GROUP_EPOCH_STREAM")
+	groupScanner := bufio.NewScanner(groupResp.Body)
+	if !groupScanner.Scan() || !strings.Contains(groupScanner.Text(), `"type":"text"`) {
+		t.Fatal("group text absent")
+	}
+	execOrFatal(t, db, `DELETE FROM chat_participants WHERE chat_id='text-group' AND user_id='text-h2'`)
+	execOrFatal(t, db, `INSERT INTO chat_participants(chat_id,user_id,role) VALUES('text-group','text-h2','member')`)
+	close(groupRelease)
+	for groupScanner.Scan() {
+		if strings.Contains(groupScanner.Text(), `"type":"done"`) {
+			t.Fatal("group completion after audience epoch change")
+		}
+	}
+	groupResp.Body.Close()
+	entries, err := store.ContextEntriesForChat(t.Context(), "text-h2", workspace, "text-agent", "text-group")
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("old epoch group history reused count=%d err=%v", len(entries), err)
 	}
 	before := calls.Load()
 	resp := request("text-h2", "text-h1-chat", "foreign")
