@@ -392,14 +392,15 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// That is deliberate: internal/chain reads deleted rules to explain runs
 	// they caused, so dropping them on restore would make restored history
 	// unexplainable.
-	"automations":                  IntentInclude,
-	"assignments":                  IntentInclude,
-	"budget_limits":                IntentInclude,
-	"captain_chats":                IntentInclude,
-	"checkpoints":                  IntentInclude,
-	"cost_ledger":                  IntentInclude,
-	"restricted_cost_reservations": IntentExcludeRuntime, // ledger debit survives; restored reservations cannot release it
-	"credential_crews":             IntentInclude,
+	"automations":                       IntentInclude,
+	"assignments":                       IntentInclude,
+	"budget_limits":                     IntentInclude,
+	"captain_chats":                     IntentInclude,
+	"checkpoints":                       IntentInclude,
+	"cost_ledger":                       IntentInclude,
+	"restricted_preflight_reservations": IntentExcludeRuntime, // immutable live source authority; never restore runnable reservations
+	"restricted_cost_reservations":      IntentExcludeRuntime, // ledger debit survives; restored reservations cannot release it
+	"credential_crews":                  IntentInclude,
 	// Both new with the credentials-V2 work. They hold durable user content
 	// and losing them on restore is silent: a multi-part credential comes
 	// back with its primary value and no access key id or region, and every
