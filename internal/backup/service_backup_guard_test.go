@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,7 @@ func TestCreateBackupRejectsStandaloneServiceData(t *testing.T) {
 		for _, level := range []ScopeLevel{ScopeLevelQuick, ScopeLevelStandard, ScopeLevelFull} {
 			t.Run(string(scope)+"/"+string(level), func(t *testing.T) {
 				ws, crew := seedCovWorkspace(t, db, string(scope)+string(level))
-				if _, err := db.Exec("UPDATE crews SET services_json = ? WHERE id = ?", guardedQuotaServices, crew); err != nil {
+				if _, err := db.ExecContext(t.Context(), "UPDATE crews SET services_json = ? WHERE id = ?", guardedQuotaServices, crew); err != nil {
 					t.Fatal(err)
 				}
 				out := filepath.Join(t.TempDir(), "not-created")
@@ -77,5 +78,16 @@ func TestCreateBackupRejectsServiceDeclarationChangedAfterAdmission(t *testing.T
 	}
 	if len(entries) != 0 {
 		t.Fatalf("failed backup published files: %v", entries)
+	}
+}
+
+func TestServiceBackupGuardPreservesCancellation(t *testing.T) {
+	db := openMigratedDBCov(t)
+	_, crew := seedCovWorkspace(t, db, "cancelguard")
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	err := requireSupportedServiceBackups(ctx, db, []CrewTarget{{ID: crew}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("lost query cancellation: %v", err)
 	}
 }
