@@ -44,6 +44,7 @@ export interface CrewRecord {
   runtime_image: string | null
   devcontainer_config: string | null
   mcp_config_json?: string | null
+  services_json?: string | null
   mise_config: string | null
   escalation_config: string | null
   cached_image: string | null
