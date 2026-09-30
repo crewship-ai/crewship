@@ -114,5 +114,29 @@ func backupSettingsSchemaCatalog() map[string]DomainSchema {
 			"data": array(backupIncidentSchema()),
 		}, "data")},
 		"GET /api/v1/admin/instance/backups/recovery-sheet": {Response: bpStr(), ResponseMedia: []string{"text/markdown"}},
+		// Restore from an off-site copy (admin_instance_backup_copies.go).
+		"GET /api/v1/admin/instance/backups/copies": {Response: object(map[string]any{
+			"destination_id": bpStr(), "destination_name": bpStr(),
+			"copies": array(object(map[string]any{
+				"key": bpStr(), "size": bpInteger(), "modified": bpStr(), "scope": bpStr(), "workspace_id": bpNullable(bpStr()),
+				"local": bpBoolean(), "local_path": bpNullable(bpStr()),
+			}, "key", "size", "modified", "scope", "workspace_id", "local", "local_path")),
+		}, "destination_id", "destination_name", "copies")},
+		// 202 at once with the job; the download runs on the server.
+		"POST /api/v1/admin/instance/backups/copies/fetch": {
+			SuccessStatuses: []string{"202"},
+			Request:         object(map[string]any{"destination_id": bpStr(), "key": bpStr()}, "destination_id", "key"),
+			Response:        backupCopyFetchSchema(),
+		},
+		"GET /api/v1/admin/instance/backups/copies/fetch/{id}": {Response: backupCopyFetchSchema()},
 	}
+}
+
+// backupCopyFetchSchema is one off-site fetch job: status running, done
+// (path is the local bundle) or failed (error says why).
+func backupCopyFetchSchema() map[string]any {
+	return object(map[string]any{
+		"id": bpStr(), "destination_id": bpStr(), "key": bpStr(), "status": bpStr(), "path": bpNullable(bpStr()),
+		"size": bpInteger(), "layers": bpInteger(), "error": bpNullable(bpStr()), "started_at": bpStr(), "ended_at": bpNullable(bpStr()),
+	}, "id", "destination_id", "key", "status", "path", "size", "layers", "error", "started_at", "ended_at")
 }

@@ -812,7 +812,7 @@ crewship admin instance retention set --all --audit-days 730 --dry-run
 | Flag | Required | Description |
 |---|---|---|
 | `--ws` | one of the two | Workspace slugs or ids, comma-separated. |
-| `--all` | one of the two | Every workspace, and what new workspaces start with. |
+| `--all` | one of the two | Every existing workspace. What new workspaces start with is `retention defaults set`. |
 | `--dry-run` | no | Show what would change and what the next sweep would delete; write nothing. |
 | `--yes` | no | Skip the confirmation. |
 | `--routine-runs-days` | no | Finished routine runs, in days. The last 10 runs of every routine are always kept. |
@@ -836,7 +836,9 @@ administrator set it or it is the product default.
 `PUT /api/v1/admin/instance/retention/defaults`. Changes the retention windows
 a workspace created later starts with. Only the windows you pass change; each
 takes a number of days, 1–3650, or `forever`. No existing workspace changes
-and nothing is deleted. It shows the change first and asks.
+and nothing is deleted. It shows the change first and asks, and the
+confirmation saves exactly what it showed: if another admin changed a default
+in between, the server refuses (`409`) and nothing is written.
 
 ```bash
 crewship admin instance retention defaults set --inbox-days 90 --chats-days 365
@@ -1344,6 +1346,49 @@ secret.
 | Flag | Required | Description |
 |---|---|---|
 | `--out` | no | Write the sheet to this file instead of stdout. |
+
+### backups copies list
+
+`GET /api/v1/admin/instance/backups/copies`. Every bundle an off-site
+destination holds (not its environment layers), with scope, size and date, and
+where this server already has it. Destination ids come from
+`backups destinations list`.
+
+```bash
+crewship admin instance backups copies list --destination bdst_…
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--destination` | yes | The destination id. |
+
+### backups copies fetch
+
+`POST /api/v1/admin/instance/backups/copies/fetch`. Restore from an off-site
+copy: downloads the bundle and the environment layers it needs into this
+server's backups directory, each verified, so it can be restored or drilled
+like a local bundle. The server runs it as a job and answers at once — a large
+download is never cut by the CLI's request timeout. `--wait` follows the job
+and prints where the bundle landed and the `crewship recover` command for it.
+A bundle already on this server is refused with its path.
+
+```bash
+crewship admin instance backups copies fetch --destination bdst_… \
+  --key instance/crewship-instance-20260929T010000Z.tar.zst --wait
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--destination` | yes | The destination id. |
+| `--key` | yes | The bundle's key at the destination, as `copies list` shows it. |
+| `--wait` | no | Follow the fetch until it ends. Exits non-zero when it failed. |
+| `--timeout` | no | With `--wait`: how long to wait, 6h by default. |
+
+### backups copies status \<fetch-id\>
+
+`GET /api/v1/admin/instance/backups/copies/fetch/{id}`. A fetch started
+without `--wait`: running, done (and where the bundle is) or failed. A server
+restart forgets its fetches.
 
 ## `crewship admin instance holds`
 

@@ -146,6 +146,7 @@ POST /api/v1/admin/backups/self-test roleManage
 POST /api/v1/admin/instance/backups/bundles/check roleInstance
 POST /api/v1/admin/instance/backups/bundles/pin roleInstance
 POST /api/v1/admin/instance/backups/bundles/unpin roleInstance
+POST /api/v1/admin/instance/backups/copies/fetch roleInstance
 POST /api/v1/admin/instance/backups/destinations roleInstance
 POST /api/v1/admin/instance/backups/destinations/{id}/test roleInstance
 POST /api/v1/admin/instance/backups/drills roleInstance
