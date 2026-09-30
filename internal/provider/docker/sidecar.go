@@ -56,6 +56,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -64,6 +65,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/quota"
 )
 
 // sidecarSpecHashLabel stores a digest of the full desired spec on
@@ -136,6 +138,7 @@ func computeSidecarSpecHash(svc *provider.CrewService) string {
 	payload := struct {
 		QuotaPolicy       string
 		ControllerManaged bool `json:"controller_managed,omitempty"`
+		QuotaEnforced     bool `json:"quota_enforced,omitempty"`
 		Command           []string
 		Env               [][2]string
 		Ports             []string
@@ -144,6 +147,7 @@ func computeSidecarSpecHash(svc *provider.CrewService) string {
 	}{
 		QuotaPolicy:       serviceQuotaPolicyVersion,
 		ControllerManaged: svc.ControllerManaged,
+		QuotaEnforced:     svc.QuotaEnforced,
 		Command:           svc.Command,
 		Env:               envPairs,
 		Ports:             svc.Ports,
@@ -346,6 +350,10 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 // stop + remove + recreate so apply is true sync for sidecars,
 // not just "fresh creates work."
 func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, svc *provider.CrewService) (string, error) {
+	quotaMounts, err := p.quotaServiceVolumes(ctx, crewID, crewSlug, svc)
+	if err != nil {
+		return "", fmt.Errorf("service quota catalog: %w", err)
+	}
 	name := p.sidecarContainerName(crewID, crewSlug, svc.Name)
 	desiredHash := computeSidecarSpecHash(svc)
 
@@ -382,11 +390,16 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 			if err != nil {
 				return "", fmt.Errorf("inspect service quota enforcement: %w", err)
 			}
-			if err = checkServiceQuotas(inspected.Container.HostConfig); err != nil {
+			if err = checkServiceQuotaProfile(inspected.Container.HostConfig, svc.QuotaEnforced); err != nil {
 				drift = err.Error()
 			}
+			if drift == "" && svc.QuotaEnforced {
+				if err = checkQuotaMounts(inspected.Container.HostConfig.Mounts, quotaMounts); err != nil {
+					drift = err.Error()
+				}
+			}
 			if drift == "" {
-				if err = checkServiceRestartPolicy(inspected.Container.HostConfig, svc.ControllerManaged); err != nil {
+				if err = checkServiceRestartPolicy(inspected.Container.HostConfig, svc.ControllerManaged || svc.QuotaEnforced); err != nil {
 					drift = err.Error()
 				}
 			}
@@ -422,11 +435,21 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 		return "", err
 	}
 
+	if err = p.validateQuotaImage(ctx, svc); err != nil {
+		return "", fmt.Errorf("unclassified image volume: %w", err)
+	}
+
 	// Volumes: ensure each named volume exists before container
 	// create so docker doesn't auto-create unowned anonymous
 	// volumes that we then can't clean up.
 	mounts := make([]mount.Mount, 0, len(svc.Volumes))
+	if svc.QuotaEnforced {
+		mounts = quotaMounts
+	}
 	for _, vol := range svc.Volumes {
+		if svc.QuotaEnforced {
+			break
+		}
 		fullName := p.sidecarVolumeName(crewID, crewSlug, vol.Name)
 		if err := p.ensureVolumeLabeled(ctx, fullName,
 			sidecarVolumeLabels(crewID, crewSlug, svc.Name, vol.Name)); err != nil {
@@ -523,8 +546,12 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 	}
 
 	applyServiceQuotas(hostCfg)
-	if svc.ControllerManaged {
+	if svc.ControllerManaged || svc.QuotaEnforced {
 		hostCfg.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyDisabled}
+	}
+	if svc.QuotaEnforced {
+		hostCfg.ReadonlyRootfs = true
+		hostCfg.Tmpfs["/run"] = "rw,nosuid,nodev,noexec,size=16777216,mode=0755"
 	}
 
 	// NetworkingConfig wires the sidecar to the crew bridge with a
@@ -701,6 +728,31 @@ func (p *Provider) RemoveCrewServiceVolumes(ctx context.Context, crewID, crewSlu
 	var failures []error
 	for _, vol := range volList.Items {
 		if !sidecarMatchesCrew(vol.Labels, crewID, sidecarVolumeKind) {
+			continue
+		}
+		if vol.Labels[quotaBytesLabel] != "" {
+			catalog, ok := p.cfg.QuotaCatalog.(quota.ReferenceCatalog)
+			if !ok || catalog == nil {
+				failures = append(failures, quota.ErrUnavailable)
+				continue
+			}
+			generation, err := strconv.ParseInt(vol.Labels[quotaGenerationLabel], 10, 64)
+			if err != nil {
+				failures = append(failures, quota.ErrDenied)
+				continue
+			}
+			key := quota.Key{Crew: crewID, Service: vol.Labels[sidecarSvcLabel], Volume: vol.Labels[sidecarVolNameLabel], Generation: generation}
+			if _, err = p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); err != nil {
+				failures = append(failures, err)
+				continue
+			}
+			if err = catalog.Release(key, vol.Name); err != nil {
+				failures = append(failures, err)
+				continue
+			}
+			if err = catalog.Remove(key); err != nil {
+				failures = append(failures, err)
+			}
 			continue
 		}
 		if _, err := p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); err != nil {

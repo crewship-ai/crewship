@@ -23,6 +23,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/quota"
 )
 
 var _ provider.ContainerProvider = (*Provider)(nil)
@@ -32,6 +33,7 @@ var _ provider.VolumeManager = (*Provider)(nil)
 
 // Config holds Docker provider configuration for container creation and runtime selection.
 type Config struct {
+	QuotaCatalog    quota.Catalog // trusted host helper; nil rejects quota-enabled services
 	RuntimeImage    string
 	DefaultRuntime  string // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"
 	Network         string
