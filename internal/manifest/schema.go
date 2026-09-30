@@ -291,6 +291,7 @@ type CrewFile = crewfile.File
 // network at provision time (provisioner support pending — see
 // CrewSpec.Services for the deferred-implementation note).
 type Service struct {
+	QuotaEnforced bool `yaml:"quota_enforced,omitempty" json:"quota_enforced,omitempty"`
 	// Name is the network alias inside the crew bridge. Agents
 	// reach the service via this name (e.g. "redis:6379"). Must be
 	// a valid DNS label and unique within the crew.
@@ -460,8 +461,10 @@ func (a *AutoCredential) EffectiveLength() int {
 
 // ServiceVolume is a named-volume → mount-path binding.
 type ServiceVolume struct {
-	Name  string `yaml:"name"  json:"name"`
-	Mount string `yaml:"mount" json:"mount"`
+	QuotaBytes int64  `yaml:"quota_bytes,omitempty" json:"quota_bytes,omitempty"`
+	Generation int64  `yaml:"generation,omitempty" json:"generation,omitempty"`
+	Name       string `yaml:"name"  json:"name"`
+	Mount      string `yaml:"mount" json:"mount"`
 }
 
 // ServiceHealthcheck is a small projection of Docker's healthcheck

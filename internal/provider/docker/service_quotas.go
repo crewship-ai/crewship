@@ -24,12 +24,23 @@ func applyServiceQuotas(h *container.HostConfig) {
 	// that tmpfs, not the writable image root or persistent data volumes.
 	h.Tmpfs = map[string]string{"/tmp": "rw,nosuid,nodev,size=67108864,mode=1777"}
 }
-func checkServiceQuotas(h *container.HostConfig) error {
+func checkServiceQuotas(h *container.HostConfig) error { return checkServiceQuotaProfile(h, false) }
+func checkServiceQuotaProfile(h *container.HostConfig, hard bool) error {
 	if h == nil {
 		return fmt.Errorf("service HostConfig unavailable")
 	}
 	want := &container.HostConfig{}
 	applyServiceQuotas(want)
+	if hard {
+		if h.RestartPolicy.Name != container.RestartPolicyDisabled {
+			return fmt.Errorf("quota service autonomous restart bypass")
+		}
+		want.ReadonlyRootfs = true
+		want.Tmpfs["/run"] = "rw,nosuid,nodev,noexec,size=16777216,mode=0755"
+	}
+	if h.ReadonlyRootfs != want.ReadonlyRootfs {
+		return fmt.Errorf("service root write policy drift")
+	}
 	if h.Memory != want.Memory || h.MemorySwap != want.MemorySwap || h.NanoCPUs != want.NanoCPUs || h.PidsLimit == nil || *h.PidsLimit != *want.PidsLimit {
 		return fmt.Errorf("service cgroup quota drift")
 	}

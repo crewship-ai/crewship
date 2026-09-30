@@ -116,11 +116,12 @@ type CrewConfig struct {
 type CrewService struct {
 	// ControllerManaged is server-derived durable intent, never public config.
 	ControllerManaged bool `json:"-" yaml:"-"`
+	QuotaEnforced     bool // opt-in readonly root and helper-backed bounded durable volumes
 	Name              string
 	Image             string
 	Command           []string
-	Env               map[string]string // literal env vars (already resolved)
-	Ports             []string          // "5432" or "5432/tcp"
+	Env               map[string]string
+	Ports             []string
 	Volumes           []CrewServiceVolume
 	Healthcheck       *CrewServiceHealthcheck
 }
@@ -128,8 +129,10 @@ type CrewService struct {
 // CrewServiceVolume names a per-crew named volume and where it
 // mounts inside the sidecar.
 type CrewServiceVolume struct {
-	Name  string
-	Mount string
+	QuotaBytes int64 // required when QuotaEnforced; physical capacity in MiB multiples
+	Generation int64 // immutable volume generation; zero decodes as1
+	Name       string
+	Mount      string
 }
 
 // CrewServiceHealthcheck mirrors docker's healthcheck shape so the

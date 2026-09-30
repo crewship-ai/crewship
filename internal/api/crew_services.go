@@ -18,24 +18,29 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/quota"
 )
 
 // serviceWire is the JSON shape we accept on the wire and emit back
 // to GET. Field tags match the manifest's Service struct.
 type serviceWire struct {
-	Name        string                  `json:"name"`
-	Image       string                  `json:"image"`
-	Command     []string                `json:"command,omitempty"`
-	Env         map[string]string       `json:"env,omitempty"`
-	EnvRefs     []string                `json:"env_refs,omitempty"`
-	Ports       []string                `json:"ports,omitempty"`
-	Volumes     []serviceVolumeWire     `json:"volumes,omitempty"`
-	Healthcheck *serviceHealthcheckWire `json:"healthcheck,omitempty"`
+	QuotaEnforced bool                    `json:"quota_enforced,omitempty"`
+	Name          string                  `json:"name"`
+	Image         string                  `json:"image"`
+	Command       []string                `json:"command,omitempty"`
+	Env           map[string]string       `json:"env,omitempty"`
+	EnvRefs       []string                `json:"env_refs,omitempty"`
+	Ports         []string                `json:"ports,omitempty"`
+	Volumes       []serviceVolumeWire     `json:"volumes,omitempty"`
+	Healthcheck   *serviceHealthcheckWire `json:"healthcheck,omitempty"`
 }
 
 type serviceVolumeWire struct {
-	Name  string `json:"name"`
-	Mount string `json:"mount"`
+	QuotaBytes int64  `json:"quota_bytes,omitempty"`
+	Generation int64  `json:"generation,omitempty"`
+	Name       string `json:"name"`
+	Mount      string `json:"mount"`
 }
 
 type serviceHealthcheckWire struct {
@@ -84,6 +89,9 @@ func validateServicesJSON(body string) error {
 		}
 		seenVol := map[string]bool{}
 		for j, v := range s.Volumes {
+			if err := quota.ValidateVolume(s.QuotaEnforced, s.Name, v.Name, v.Mount, v.Generation, v.QuotaBytes); err != nil {
+				return fmt.Errorf("services[%q].volumes[%d]: invalid quota policy", s.Name, j)
+			}
 			if v.Name == "" || v.Mount == "" {
 				return fmt.Errorf("services[%q].volumes[%d]: name and mount are required", s.Name, j)
 			}
