@@ -77,7 +77,7 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close()
-	router, err := NewRouter(db, secret, newTestLogger(), WithInternalToken("synthetic-wf-host-token"))
+	router, err := NewRouter(db, secret, newTestLogger(), WithInternalToken("synthetic-wf-host-token"), WithRestrictedTextRunner(runner))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,10 +97,15 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 			t.Fatalf("ordinary routine start %d starts=%d body=%s", rec.Code, starts, rec.Body.String())
 		}
 		var accepted struct {
-			ID string `json:"run_id"`
+			ID     string `json:"run_id"`
+			ChatID string `json:"chat_id"`
 		}
 		if json.Unmarshal(rec.Body.Bytes(), &accepted) != nil || accepted.ID == "" {
 			t.Fatal("missing durable private identity")
+		}
+		tamper := request(user, http.MethodPost, "/api/v1/chats/"+accepted.ChatID+"/restricted-cli-run", `{"content":"TAMPER_WORKFLOW_INPUT"}`)
+		if tamper.Code != 403 || starts != 0 {
+			t.Fatalf("routine context externally executable %d starts%d", tamper.Code, starts)
 		}
 		jobs[user] = accepted.ID
 	}

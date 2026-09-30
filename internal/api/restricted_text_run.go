@@ -19,6 +19,13 @@ type RestrictedTextExecutor interface {
 	ExecuteRun(context.Context, string, string, string, string, func(string, string) error) error
 }
 
+// RestrictedProjectFileExecutor is implemented only by host-owned native
+// dispatchers. A text adapter cannot silently reinterpret a source selection.
+type RestrictedProjectFileExecutor interface {
+	ExecuteWithProjectFiles(context.Context, string, string, string, string, []string, func(string, string) error) error
+	ExecuteRunWithProjectFiles(context.Context, string, string, string, string, []string, func(string, string) error) error
+}
+
 // SetRestrictedTextRunner is called once during bootstrap, before serving.
 func (r *Router) SetRestrictedTextRunner(executor RestrictedTextExecutor) {
 	r.restrictedText = executor
@@ -46,12 +53,13 @@ func (r *Router) restrictedTextExecute(w http.ResponseWriter, req *http.Request,
 		return
 	}
 	var body struct {
-		Content string `json:"content"`
+		Content             string   `json:"content"`
+		ProjectFileVersions []string `json:"project_file_versions,omitempty"`
 	}
 	req.Body = http.MaxBytesReader(w, req.Body, 128<<10)
 	decoder := json.NewDecoder(req.Body)
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&body) != nil || decoder.Decode(new(any)) != io.EOF || body.Content == "" || len(body.Content) > 32768 {
+	if decoder.Decode(&body) != nil || decoder.Decode(new(any)) != io.EOF || body.Content == "" || len(body.Content) > 32768 || len(body.ProjectFileVersions) > 16 {
 		replyError(w, http.StatusBadRequest, "invalid text request")
 		return
 	}
@@ -73,9 +81,27 @@ func (r *Router) restrictedTextExecute(w http.ResponseWriter, req *http.Request,
 		}
 		return controller.Flush()
 	}
+	var origin string
+	if r.db.QueryRowContext(req.Context(), `SELECT COALESCE(origin,'CHAT') FROM chats WHERE id=? AND workspace_id=?`, req.PathValue("chatId"), workspace).Scan(&origin) != nil || origin == "ROUTINE" {
+		replyError(w, http.StatusForbidden, "restricted text run denied or unavailable")
+		return
+	}
 	execute := r.restrictedText.Execute
 	if runOperation {
 		execute = r.restrictedText.ExecuteRun
+	}
+	if len(body.ProjectFileVersions) != 0 {
+		native, ok := r.restrictedText.(RestrictedProjectFileExecutor)
+		if !ok {
+			replyError(w, http.StatusBadRequest, "project source selection requires a native runtime")
+			return
+		}
+		execute = func(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error) error {
+			if runOperation {
+				return native.ExecuteRunWithProjectFiles(ctx, user, workspace, chat, input, body.ProjectFileVersions, emit)
+			}
+			return native.ExecuteWithProjectFiles(ctx, user, workspace, chat, input, body.ProjectFileVersions, emit)
+		}
 	}
 	err := execute(req.Context(), user.ID, workspace, req.PathValue("chatId"), body.Content, send)
 	if err != nil {
