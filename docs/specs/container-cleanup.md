@@ -7,21 +7,28 @@ well as running containers. Missing owners, legacy containers without instance
 labels, and foreign installation labels are never automatic cleanup candidates.
 Container names and slugs do not establish ownership.
 
-The installation identity is bound to both the database and the data
+The installation identity is bound to the database, its location and the data
 directory. The database holds only a random nonce; the identity itself lives in
-`CREWSHIP_DATA_DIR/installations/<nonce>`, outside SQLite and workspace backups.
-Several servers sharing one data directory (for example `~/.crewship` on a
-development host) therefore get distinct identities, and a database copied to
-another data directory gets a new one. The running server holds an exclusive
-lock on that identity; a second live server on the same database and data
-directory starts with automatic cleanup disabled and an empty instance label.
+`CREWSHIP_DATA_DIR/installations/<nonce>`, outside SQLite and workspace backups,
+next to the canonical database location that claimed it. Several servers
+sharing one data directory (for example `~/.crewship` on a development host)
+therefore get distinct identities. A database found at a different location
+than the one that claimed its nonce (a copy, or a moved file) is re-keyed with
+a fresh nonce and gets a new identity, in the same data directory as well as in
+another one, and even after the original has stopped. Moving a database file
+therefore re-keys it: runtimes labelled with the old identity are no longer
+adopted and must be removed by hand once. The running server holds an exclusive
+lock on its identity; a second live server on the same database file starts
+with automatic cleanup disabled and an empty instance label, as does a server
+whose database has no stable location (for example in-memory).
 Do not copy the `installations` directory to another installation sharing a
 daemon. New runtime
 and service containers explicitly set the instance label, including an empty
 value when identity is unavailable, to mask inherited image labels. Labels do
 not cause an otherwise current legacy runtime to be rebuilt. Existing containers
-labelled for another installation cannot be adopted by the runtime/service
-creator; the start error names the container. If this installation's identity
+labelled for another installation cannot be adopted, recreated or torn down
+by the runtime/service creator, including when this server's own identity is
+empty; the start error names the container. If this installation's identity
 was reset (a new data directory), remove that container by hand without `-v`
 so its volumes are kept, and the next run recreates it. An unreadable or
 invalid installation identity fails server startup.
@@ -76,7 +83,8 @@ only locally through `crewship doctor cleanup`.
 Freshness comes from one per-installation scan record written on every
 complete scan. Per-owner records are written only when their state changes, and
 a tombstone that never had a container needs no record at all, so the steady
-write load does not grow with the number of deleted crews. When the last
+write load does not grow with the number of deleted crews. A record whose crew
+has since been revived is dropped rather than reported as current. When the last
 complete scan predates process boot, is older than 90 seconds, or the latest
 scan failed, every observation reads as `unknown` with `complete=false`; the
 owner's or the scan's error code remains visible.

@@ -342,6 +342,26 @@ func (c *Controller) Tick(ctx context.Context) {
 		return
 	}
 	writeFailed := false
+	// A row whose owner is no longer a tombstone describes the past: the crew
+	// was revived, so its old error or pending state must not be reported as
+	// confirmed by this scan. Drop it; mount evidence stays in its own table.
+	for id := range stored {
+		if _, ok := states[id]; ok {
+			continue
+		}
+		var live int
+		err := c.DB.QueryRowContext(ctx, `SELECT 1 FROM crews WHERE id=? AND deleted_at IS NULL`, id).Scan(&live)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err == nil {
+			_, err = c.DB.ExecContext(ctx, `DELETE FROM resource_cleanup_status WHERE instance_id=? AND crew_id=?`, c.InstanceID, id)
+		}
+		if err != nil {
+			writeFailed = true
+			c.logWriteFailure(ctx)
+		}
+	}
 	for id, s := range states {
 		s.ObservedAt = tsformat.Format(time.Now())
 		s.Complete = true

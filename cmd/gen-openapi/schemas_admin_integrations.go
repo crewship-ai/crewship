@@ -68,10 +68,6 @@ func operationalDomainSchemaCatalog() map[string]map[string]DomainSchema {
 
 	cleanupResponse := objectSchema(map[string]any{"scope": stringSchema(), "state": stringSchema(), "items": arraySchema(containerCleanupStatusSchema())})
 	cleanupResponse["required"] = []string{"scope", "state", "items"}
-	sidecarOutcome := objectSchema(map[string]any{"status": stringSchema(), "reason": stringSchema()})
-	sidecarOutcome["required"] = []string{"status"}
-	crewDeleteResponse := objectSchema(map[string]any{"success": boolSchema(), "cleanup": containerCleanupStatusSchema(), "sidecar_teardown": sidecarOutcome})
-	crewDeleteResponse["required"] = []string{"success", "cleanup", "sidecar_teardown"}
 	admin := map[string]DomainSchema{
 		"GET /api/v1/admin/resource-cleanup":    {Response: cleanupResponse},
 		"GET /api/v1/admin/stats":               {Response: anyObject()},
@@ -186,8 +182,7 @@ func operationalDomainSchemaCatalog() map[string]map[string]DomainSchema {
 	}
 	return map[string]map[string]DomainSchema{
 		"admin": admin, "backups": backups, "memory": memory,
-		"container-cleanup": {"DELETE /api/v1/crews/{crewId}": {Response: crewDeleteResponse}},
-		"notifications":     notifications, "integrations": integrations,
+		"notifications": notifications, "integrations": integrations,
 		"files-media": filesMedia, "auth-public": authPublic, "system": system,
 	}
 }

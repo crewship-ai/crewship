@@ -740,7 +740,11 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					return "", false, fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
 				}
 				inspect := inspectResult.Container
-				if inspect.Config != nil && p.cfg.InstanceID != "" {
+				// Applies with an empty local identity too (cleanup disabled): the
+				// drift paths below tear down with RemoveVolumes, so adopting a
+				// container another installation labelled would destroy its
+				// anonymous volumes. Only unlabelled legacy containers are reused.
+				if inspect.Config != nil {
 					if id := inspect.Config.Labels[resourcelifecycle.InstanceLabel]; id != "" && id != p.cfg.InstanceID {
 						return "", false, fmt.Errorf("existing runtime %s is labelled for another installation; if this installation's identity was reset, remove that container by hand (volumes are kept) so it can be recreated", containerName)
 					}

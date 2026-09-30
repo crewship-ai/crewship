@@ -222,9 +222,16 @@ func TestOwnerReviveAndImmutableIdentityRecheck(t *testing.T) {
 		})
 	}
 }
-func migratedDB(t *testing.T) *sql.DB {
+
+type testDB struct {
+	*sql.DB
+	location string
+}
+
+func migratedDB(t *testing.T) testDB {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "crewship.db"))
+	path := filepath.Join(t.TempDir(), "crewship.db")
+	db, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,17 +243,30 @@ func migratedDB(t *testing.T) *sql.DB {
 	if _, err = db.Exec(string(b)); err != nil {
 		t.Fatal(err)
 	}
-	return db
+	location, err := DatabaseLocation("file:" + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return testDB{DB: db, location: location}
 }
 
-func loadID(t *testing.T, root string, db *sql.DB) string {
+func loadID(t *testing.T, root string, db testDB) string {
 	t.Helper()
-	identity, err := LoadIdentity(context.Background(), root, db)
+	identity, err := LoadIdentity(context.Background(), root, db.DB, db.location)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { identity.Close() })
 	return identity.ID
+}
+
+func nonceOf(t *testing.T, db testDB) string {
+	t.Helper()
+	var nonce string
+	if err := db.QueryRow(`SELECT db_nonce FROM resource_cleanup_installation`).Scan(&nonce); err != nil {
+		t.Fatal(err)
+	}
+	return nonce
 }
 
 // Dev servers on one host share ~/.crewship; each database must still get its
@@ -259,6 +279,32 @@ func TestInstallationIdentitySharedDataDirDistinctDatabases(t *testing.T) {
 	}
 }
 
+// A copied database carries the original's nonce. In the same data directory,
+// once the original stops and releases its lock, the copy must still not take
+// the original's identity: it would then remove the original's runtimes.
+func TestInstallationIdentityCopiedDatabaseSameDataDir(t *testing.T) {
+	root, original := t.TempDir(), migratedDB(t)
+	first, err := LoadIdentity(context.Background(), root, original.DB, original.location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalID, originalNonce := first.ID, nonceOf(t, original)
+	first.Close()
+	copied := migratedDB(t)
+	if _, err := copied.Exec(`INSERT INTO resource_cleanup_installation(id,db_nonce) VALUES(1,?)`, originalNonce); err != nil {
+		t.Fatal(err)
+	}
+	if loadID(t, root, copied) == originalID {
+		t.Fatal("database copy in the same data directory took the original's identity")
+	}
+	if nonceOf(t, copied) == originalNonce {
+		t.Fatal("copy was not re-keyed")
+	}
+	if loadID(t, root, original) != originalID {
+		t.Fatal("original lost its identity after the copy started")
+	}
+}
+
 // A database copied to another data directory must not inherit authority.
 func TestInstallationIdentityCopiedDatabaseElsewhereIsNew(t *testing.T) {
 	db := migratedDB(t)
@@ -268,21 +314,41 @@ func TestInstallationIdentityCopiedDatabaseElsewhereIsNew(t *testing.T) {
 	}
 }
 
-// Two live servers on the same database and data directory: the second must not
-// act on the first one's containers, and a restart reclaims the same identity.
+// Two live servers on the same database file: the second must not act on the
+// first one's containers, and a restart reclaims the same identity.
 func TestInstallationIdentitySecondHolderAndRestart(t *testing.T) {
 	root, db := t.TempDir(), migratedDB(t)
-	first, err := LoadIdentity(context.Background(), root, db)
+	first, err := LoadIdentity(context.Background(), root, db.DB, db.location)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadIdentity(context.Background(), root, db); !errors.Is(err, ErrIdentityInUse) {
+	if _, err := LoadIdentity(context.Background(), root, db.DB, db.location); !errors.Is(err, ErrIdentityInUse) {
 		t.Fatalf("second live holder: %v", err)
 	}
 	id := first.ID
 	first.Close()
 	if again := loadID(t, root, db); again != id {
 		t.Fatal("restart changed the installation identity")
+	}
+}
+
+func TestDatabaseLocationCanonical(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	rel, err := DatabaseLocation("file:./crewship.db?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	abs, err := DatabaseLocation("file:" + filepath.Join(dir, "crewship.db"))
+	if err != nil || rel != abs {
+		t.Fatalf("relative %q vs absolute %q (%v)", rel, abs, err)
+	}
+	pg, err := DatabaseLocation("postgresql://user:secret@db.internal:5432/crewship?sslmode=require")
+	if err != nil || pg != "postgresql://db.internal:5432/crewship" {
+		t.Fatalf("postgres location %q %v", pg, err)
+	}
+	if _, err := DatabaseLocation("file::memory:?cache=shared"); err == nil {
+		t.Fatal("in-memory database accepted as a stable location")
 	}
 }
 
@@ -402,5 +468,23 @@ func TestStatusesAreScopedToTheCallersWorkspace(t *testing.T) {
 	other, err := c.Statuses(context.Background(), "ws-b")
 	if err != nil || len(other) != 1 || other[0].CrewID != "other" || other[0].Error != "remove_failed" {
 		t.Fatalf("ws-b sees %+v %v", other, err)
+	}
+}
+
+// After a revive the old row is history, not a fresh observation.
+func TestRevivedOwnerRowIsNotReportedAsCurrent(t *testing.T) {
+	c, f := fixture(t)
+	f.items["x"] = item("x", "deleted", c.InstanceID)
+	f.failStage = "remove"
+	c.Tick(context.Background())
+	if s := status(t, c); s.State != "error" || s.Error != "remove_failed" {
+		t.Fatalf("setup %+v", s)
+	}
+	if _, err := c.DB.Exec(`UPDATE crews SET deleted_at=NULL WHERE id='deleted'`); err != nil {
+		t.Fatal(err)
+	}
+	c.Tick(context.Background())
+	if s, err := c.Statuses(context.Background(), "ws-a"); err != nil || len(s) != 0 {
+		t.Fatalf("revived crew still reported: %+v %v", s, err)
 	}
 }

@@ -218,11 +218,21 @@ var startCmd = &cobra.Command{
 			return fmt.Errorf("failed to run migrations: %w", err)
 		}
 		// Installation identity needs the migrated database: it is keyed by a
-		// per-database nonce so servers sharing a data directory stay distinct.
-		// A second live holder (copied database) keeps cleanup disabled instead
-		// of failing boot; an empty label is never a cleanup candidate.
-		identity, err := resourcelifecycle.LoadIdentity(context.Background(), dataDir.Root, db.DB)
+		// per-database nonce and the database location, so servers sharing a
+		// data directory and copied databases stay distinct. A database without
+		// a stable location, or a second live server on the same one, keeps
+		// cleanup disabled instead of failing boot; an empty label is never a
+		// cleanup candidate.
+		var identity *resourcelifecycle.Identity
+		dbLocation, err := resourcelifecycle.DatabaseLocation(databaseURL)
+		if err == nil {
+			identity, err = resourcelifecycle.LoadIdentity(context.Background(), dataDir.Root, db.DB, dbLocation)
+		} else {
+			logger.Warn("container cleanup disabled: database has no stable location", "error", err)
+			err = nil
+		}
 		switch {
+		case identity == nil && err == nil:
 		case errors.Is(err, resourcelifecycle.ErrIdentityInUse):
 			logger.Warn("container cleanup disabled: another running server holds this database's installation identity")
 		case err != nil:

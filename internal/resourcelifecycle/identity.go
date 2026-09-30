@@ -3,6 +3,7 @@ package resourcelifecycle
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
@@ -15,8 +16,8 @@ import (
 const InstanceLabel = "crewship.instance-id"
 
 // ErrIdentityInUse means another live process already holds this database's
-// installation identity in this data directory: a copied database, or a second
-// server pointed at the same one. Automatic cleanup must stay disabled.
+// installation identity: a second server pointed at the same database file.
+// Automatic cleanup must stay disabled.
 var ErrIdentityInUse = errors.New("installation identity is held by another running process")
 
 // Identity is the installation label value plus the lock that proves this
@@ -33,20 +34,44 @@ func (i *Identity) Close() error {
 	return i.lock.Close()
 }
 
-// LoadIdentity binds the installation identity to both this database and this
-// data directory. Neither alone is enough: several dev servers share
-// ~/.crewship, and a database copied elsewhere must not inherit authority over
-// the original's containers. The database keeps only a random nonce; the
-// identity itself lives in the data directory under that nonce, outside SQLite
-// and workspace backups. Never copy the installations directory to create a
-// second installation sharing a daemon.
-func LoadIdentity(ctx context.Context, root string, db *sql.DB) (*Identity, error) {
+// LoadIdentity binds the installation identity to this database, its location
+// and this data directory. None alone is enough: several dev servers share
+// ~/.crewship, and a copied database carries the original's nonce. The
+// database keeps only a random nonce; the data directory keeps the identity
+// under that nonce together with the database location that claimed it. A
+// database found at another location (a copy, or a moved file) is re-keyed
+// with a fresh nonce and gets a new identity, so it never inherits authority
+// over the original's containers, even after the original stops. location is
+// the canonical database location from DatabaseLocation. Never copy the
+// installations directory to create a second installation sharing a daemon.
+func LoadIdentity(ctx context.Context, root string, db *sql.DB, location string) (*Identity, error) {
+	if location == "" {
+		return nil, fmt.Errorf("database location is required")
+	}
+	sum := sha256.Sum256([]byte(location))
+	dir := filepath.Join(root, "installations")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	return loadIdentity(ctx, dir, db, hex.EncodeToString(sum[:]), false)
+}
+
+var errLocationClaimed = errors.New("installation identity belongs to another database location")
+
+func loadIdentity(ctx context.Context, dir string, db *sql.DB, locator string, rekeyed bool) (*Identity, error) {
 	nonce, err := databaseNonce(ctx, db)
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(root, "installations")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	owner, err := os.ReadFile(filepath.Join(dir, nonce+".db"))
+	switch {
+	case err == nil && strings.TrimSpace(string(owner)) != locator:
+		// Same nonce, different database location: take a new nonce rather
+		// than the original's identity.
+		if nonce, err = rekeyDatabase(ctx, db); err != nil {
+			return nil, err
+		}
+	case err != nil && !os.IsNotExist(err):
 		return nil, err
 	}
 	lock, err := os.OpenFile(filepath.Join(dir, nonce+".lock"), os.O_CREATE|os.O_RDWR, 0o600)
@@ -61,12 +86,75 @@ func LoadIdentity(ctx context.Context, root string, db *sql.DB) (*Identity, erro
 		}
 		return nil, ErrIdentityInUse
 	}
+	// Re-check under the lock: a copy starting at the same moment may have
+	// claimed this nonce first. Re-key once and take a fresh identity.
+	if err := claimLocation(filepath.Join(dir, nonce+".db"), locator); err != nil {
+		lock.Close()
+		if !errors.Is(err, errLocationClaimed) || rekeyed {
+			return nil, err
+		}
+		if _, err := rekeyDatabase(ctx, db); err != nil {
+			return nil, err
+		}
+		return loadIdentity(ctx, dir, db, locator, true)
+	}
 	id, err := readOrCreateID(filepath.Join(dir, nonce))
 	if err != nil {
 		lock.Close()
 		return nil, err
 	}
 	return &Identity{ID: id, lock: lock}, nil
+}
+
+// DatabaseLocation canonicalizes a database URL so that the same database
+// always yields the same location. SQLite file URLs resolve to an absolute,
+// symlink-free path without query options; other URLs keep scheme, host and
+// path but never credentials.
+func DatabaseLocation(databaseURL string) (string, error) {
+	raw := strings.TrimSpace(databaseURL)
+	if raw == "" {
+		return "", fmt.Errorf("empty database URL")
+	}
+	if strings.Contains(raw, "://") && !strings.HasPrefix(raw, "file://") {
+		scheme, rest, _ := strings.Cut(raw, "://")
+		if at := strings.LastIndex(rest, "@"); at >= 0 {
+			rest = rest[at+1:]
+		}
+		rest, _, _ = strings.Cut(rest, "?")
+		return scheme + "://" + rest, nil
+	}
+	path := strings.TrimPrefix(strings.TrimPrefix(raw, "file://"), "file:")
+	path, _, _ = strings.Cut(path, "?")
+	if path == "" || path == ":memory:" {
+		return "", fmt.Errorf("database has no stable location")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	// Resolve the directory, not the file: the database file may not exist
+	// yet on a first start, but its directory does.
+	dir, err := filepath.EvalSymlinks(filepath.Dir(abs))
+	if err != nil {
+		return "", err
+	}
+	return "file:" + filepath.Join(dir, filepath.Base(abs)), nil
+}
+
+// claimLocation records which database location owns a nonce, or confirms it.
+// Called under the nonce lock, so the check-then-write cannot race a peer.
+func claimLocation(path, locator string) error {
+	owner, err := os.ReadFile(path)
+	if err == nil {
+		if strings.TrimSpace(string(owner)) != locator {
+			return errLocationClaimed
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return err
+	}
+	return os.WriteFile(path, []byte(locator+"\n"), 0o600)
 }
 
 func databaseNonce(ctx context.Context, db *sql.DB) (string, error) {
@@ -85,6 +173,17 @@ func databaseNonce(ctx context.Context, db *sql.DB) (string, error) {
 		return "", fmt.Errorf("invalid database nonce")
 	}
 	return nonce, nil
+}
+
+func rekeyDatabase(ctx context.Context, db *sql.DB) (string, error) {
+	fresh, err := randomHex()
+	if err != nil {
+		return "", err
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE resource_cleanup_installation SET db_nonce=? WHERE id=1`, fresh); err != nil {
+		return "", fmt.Errorf("re-key copied database: %w", err)
+	}
+	return fresh, nil
 }
 
 func randomHex() (string, error) {

@@ -9651,16 +9651,63 @@
       },
       "RemainingCrewDeletedV1": {
         "properties": {
-          "message": {
-            "type": "string"
+          "cleanup": {
+            "properties": {
+              "complete": {
+                "type": "boolean"
+              },
+              "crew_id": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "observed_at": {
+                "type": "string"
+              },
+              "remaining": {
+                "type": "integer"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "unattributed": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "crew_id",
+              "scope",
+              "state",
+              "complete",
+              "remaining",
+              "unattributed"
+            ],
+            "type": "object"
           },
-          "status": {
-            "type": "string"
+          "sidecar_teardown": {
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "type": "object"
           },
           "success": {
             "type": "boolean"
           }
         },
+        "required": [
+          "success",
+          "sidecar_teardown",
+          "cleanup"
+        ],
         "type": "object"
       },
       "RemainingCrewFileDeletedV1": {

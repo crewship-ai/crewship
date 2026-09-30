@@ -367,10 +367,10 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 			continue
 		}
 
-		if p.cfg.InstanceID != "" {
-			if id := c.Labels[resourcelifecycle.InstanceLabel]; id != "" && id != p.cfg.InstanceID {
-				return "", fmt.Errorf("existing service container %s is labelled for another installation; if this installation's identity was reset, remove it by hand (volumes are kept) so it can be recreated", name)
-			}
+		// Also with an empty local identity: never adopt or recreate a service
+		// container another installation labelled.
+		if id := c.Labels[resourcelifecycle.InstanceLabel]; id != "" && id != p.cfg.InstanceID {
+			return "", fmt.Errorf("existing service container %s is labelled for another installation; if this installation's identity was reset, remove it by hand (volumes are kept) so it can be recreated", name)
 		}
 
 		// Drift detection in two passes so the operator log gets

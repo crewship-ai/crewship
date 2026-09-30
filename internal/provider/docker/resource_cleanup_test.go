@@ -59,25 +59,33 @@ func TestRuntimeInstanceLabelsDoNotChangeContract(t *testing.T) {
 		t.Fatalf("create instance label %q", got)
 	}
 }
+
+// A server whose own identity is empty (cleanup disabled: second live holder,
+// unstable database location) must still refuse: the image-drift path would
+// otherwise tear the other installation's runtime down with RemoveVolumes.
 func TestForeignInstanceRuntimeNeverReusedOrRemoved(t *testing.T) {
-	p, close := newFakeDockerProvider(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Fatalf("foreign mutation %s %s", r.Method, r.URL.Path)
-		}
-		if strings.HasSuffix(r.URL.Path, "/containers/json") {
-			w.Write([]byte(`[{"Id":"foreign-container","Names":["/same-name"]}]`))
-			return
-		}
-		if strings.HasSuffix(r.URL.Path, "/containers/foreign-container/json") {
-			w.Write([]byte(`{"Id":"foreign-container","Config":{"Labels":{"crewship.instance-id":"installation-b"}}}`))
-			return
-		}
-		t.Errorf("unexpected %s", r.URL.Path)
-	})
-	defer close()
-	p.cfg.InstanceID = "installation-a"
-	if _, _, err := p.reconcileExistingContainer(context.Background(), provider.CrewConfig{ID: "crew"}, "same-name", "image", false, func(devcontainer.ProvisionEvent) {}); err == nil {
-		t.Fatal("foreign reuse accepted")
+	for _, local := range []string{"installation-a", ""} {
+		t.Run("local="+local, func(t *testing.T) {
+			p, close := newFakeDockerProvider(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Fatalf("foreign mutation %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+				}
+				if strings.HasSuffix(r.URL.Path, "/containers/json") {
+					w.Write([]byte(`[{"Id":"foreign-container","Names":["/same-name"]}]`))
+					return
+				}
+				if strings.HasSuffix(r.URL.Path, "/containers/foreign-container/json") {
+					w.Write([]byte(`{"Id":"foreign-container","Config":{"Image":"drifted-image","Labels":{"crewship.instance-id":"installation-b"}}}`))
+					return
+				}
+				t.Errorf("unexpected %s", r.URL.Path)
+			})
+			defer close()
+			p.cfg.InstanceID = local
+			if _, _, err := p.reconcileExistingContainer(context.Background(), provider.CrewConfig{ID: "crew"}, "same-name", "image", false, func(devcontainer.ProvisionEvent) {}); err == nil {
+				t.Fatal("foreign reuse accepted")
+			}
+		})
 	}
 }
 
