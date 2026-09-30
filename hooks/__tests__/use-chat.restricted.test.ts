@@ -37,4 +37,29 @@ describe("restricted chat transport",()=>{
   act(()=>{expect(result.current.sendMessage("question")).toBe(false)})
   expect(request).not.toHaveBeenCalled()
  })
+ it("forwards only explicit selected version IDs to the authenticated native route",async()=>{
+  let delivered=false
+  request.mockResolvedValue({ok:true,body:{getReader:()=>({read:async()=>delivered?{done:true}:{done:false,value:(delivered=true,new TextEncoder().encode('data: {"type":"done","text":""}\n\n'))}})}})
+  const {result}=renderHook(()=>useChat({wsUrl:"ws://test",getToken:async()=>"token",sessionId:"native-chat",workspaceId:"workspace",executionProfile:"restricted"}))
+  const ids=["selected-version"]
+  act(()=>{expect(result.current.sendMessage("Read this brief",{project_file_versions:ids})).toBe(true)})
+  ids.push("later-foreign-version")
+  await waitFor(()=>expect(result.current.isStreaming).toBe(false))
+  const body=JSON.parse(request.mock.calls[0][1].body)
+  expect(body).toEqual({content:"Read this brief",project_file_versions:["selected-version"]})
+  expect(send.mock.calls.some(call=>call[0]?.type==="send_message")).toBe(false)
+ })
+ it("refuses arbitrary metadata, duplicate, path and oversized selections before dispatch",()=>{
+  const {result}=renderHook(()=>useChat({wsUrl:"ws://test",getToken:async()=>"token",sessionId:"native-chat",workspaceId:"workspace",executionProfile:"restricted"}))
+  for(const metadata of [
+   {project_file_versions:["selected"],host_path:"/srv/crew"},
+   {project_file_versions:["selected","selected"]},
+   {project_file_versions:["../foreign"]},
+   {project_file_versions:Array.from({length:17},(_,i)=>`version${i}`)},
+   {project_file_versions:"selected"},
+  ]) act(()=>{expect(result.current.sendMessage("question",metadata)).toBe(false)})
+  expect(request).not.toHaveBeenCalled()
+  expect(result.current.turns).toHaveLength(0)
+ })
+
 })

@@ -78,3 +78,109 @@ Verification: `TestProjectFilesTwoHumansAndImmutableSelection`,
 `TestProjectFilesAuthenticatedRoutesAndStreamingRevocation`, and
 `TestLiveNativeInputFreezeReadonlyAndRestartCleanup` (explicit disposable Docker
 acceptance gate).
+
+For restricted native private chats, the composer offers **Project inputs**.
+For a new draft, **Prepare project inputs** explicitly creates the conversation
+and checks its current profile without sending a model message. The picker
+appears only after the native profile and current source grants permit it.
+Selections start empty, reset when the user, workspace or conversation changes,
+and are cleared after sending. Filename, project and size identify each file;
+users do not need to enter version IDs. Refresh clears the selection and reloads
+current metadata. A changed grant, version or runtime profile can make a selected
+file unavailable; the server rechecks it before context or model execution.
+
+`GET /api/v1/chats/{chatId}/project-input-options?workspace_id=...&search=...`
+returns `{files, has_more}` with live head-version metadata and project names
+only. It requires the caller's exact private-chat audience, current native
+profile, agent.chat and project.read grants. It returns at most 100 matches;
+search is a substring of filename or project name and is limited to 128 bytes.
+This read does not admit an attempt, load source bytes, or reveal uploader
+identity. Text, group and routine transcript chats do not offer the picker. Selected IDs travel in
+the existing structured `project_file_versions` request field, separate from
+message content; arbitrary metadata stays unsupported on the restricted route.
+
+## API wire contracts
+
+The version metadata below is returned for live heads. Authentication uses the
+normal workspace session or JWT; resource grants remain an additional ceiling.
+Errors use `application/json` with the response body `{"error":"message"}`.
+
+| Metadata field | Type | Meaning |
+| --- | --- | --- |
+| `version_id` | string | Immutable selected version ID |
+| `file_id` | string | Stable file identity across replacement |
+| `project_id` | string | Source project |
+| `name` | string | Portable relative filename |
+| `revision` | integer | Positive file revision |
+| `size_bytes` | integer | Decoded size, 0 through 1048576 |
+| `sha256` | string | 64 lowercase hexadecimal characters |
+| `created_at` | string | RFC3339 creation time |
+
+### GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files
+
+Auth: workspace membership and current project.read.
+Request: workspace and project path parameters; no request body.
+Response: `200 application/json`, `{"files":[version_metadata]}`; an empty list
+is `[]`, not null, and at most 256 live heads are returned.
+Statuses: `200` success, `401` unauthenticated, `403` workspace/token ceiling,
+`404` unavailable project or source, `500` middleware/database failure.
+
+### POST /api/v1/workspaces/{workspaceId}/projects/{projectId}/files
+
+Auth: MANAGER or higher plus current project.write.
+Request: workspace and project path parameters and a strict JSON request body:
+
+| Request field | Type | Requirement |
+| --- | --- | --- |
+| `name` | string | Required portable name, at most 240 UTF-8 bytes; unchanged on replacement |
+| `file_id` | string | Omitted for creation; current file ID for replacement |
+| `expected_revision` | integer | Zero/default for creation; current positive revision for replacement |
+| `content_base64` | string or null | Standard base64, at most 1 MiB decoded; omitted, null or empty string gives empty content |
+
+Unknown request fields are rejected. A new upload omits `file_id`; a replacement
+matches both current identity and revision. Aggregate storage limits are checked
+in the write transaction.
+Response: `201 application/json`, the complete version metadata object.
+Statuses: `201` success, `400` malformed JSON/base64, `401` unauthenticated,
+`403` role or workspace/token ceiling, `404` unavailable source/authority,
+`409` stale revision or capacity conflict, `500` middleware/database failure.
+
+### DELETE /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{fileId}
+
+Auth: MANAGER or higher plus current project.write.
+Request: workspace, project and file path parameters and strict JSON
+`{"expected_revision":positive_integer}`; no unknown fields.
+Response: `204`, no response body. Retirement retains immutable provenance and
+removes current bytes in the same transaction.
+Statuses: `204` success, `400` malformed request, `401` unauthenticated,
+`403` role or workspace/token ceiling, `404` unavailable source/authority,
+`409` stale revision, `500` middleware/database failure.
+
+### GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{versionId}/download
+
+Auth: workspace membership and current project.read for the exact live head.
+Request: workspace, project and version path parameters; no request body.
+Response: `200 application/octet-stream`, exact decoded bytes with
+`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, the exact
+`Content-Length`, and immutable `X-Content-SHA256`.
+The filename uses the source basename. Revocation during streaming terminates
+further delivery. A short body is an interrupted response, not a complete
+download; verify length and SHA256 against version metadata before publishing
+the downloaded file.
+Statuses: `200` success, `401` unauthenticated, `403` workspace/token ceiling,
+`404` unavailable version/authority, `500` middleware/database failure.
+
+### GET /api/v1/chats/{chatId}/project-input-options
+
+Auth: the authenticated restricted principal's own private chat, current native
+profile and agent.chat; every returned source independently requires current
+project.read. A broad workspace, agent assignment or chat grant is insufficient.
+Request: chat path parameter, required `workspace_id` query parameter, optional
+`search` query substring of filename/project name up to 128 UTF-8 bytes; no body.
+Response: `200 application/json`, `{"files":[option_metadata],"has_more":boolean}`.
+Each option contains all version metadata fields and `project_name`; at most 100
+matches are returned. `has_more` asks the user to narrow the search. No source
+bytes, uploader identity or attempt admission are included.
+Statuses: `200` success, `400` oversized search, `401` unauthenticated,
+`403` workspace/token ceiling, `404` unavailable chat/native profile/authority,
+`503` projection/database unavailable, `500` middleware failure.

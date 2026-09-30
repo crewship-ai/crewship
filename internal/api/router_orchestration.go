@@ -61,6 +61,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/chats/{chatId}/execution-profile", authed(wsCtx(http.HandlerFunc(r.executionProfile))))
 
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight", roleSelf, r.restrictedIssuePreflight)
+	r.mux.Handle("GET /api/v1/chats/{chatId}/project-input-options", authed(wsCtx(http.HandlerFunc(r.projectInputOptions))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files", authed(wsCtx(http.HandlerFunc(r.projectFiles))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{versionId}/download", authed(wsCtx(http.HandlerFunc(r.projectFiles))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/projects/{projectId}/files", roleCreate, r.projectFiles)
