@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/serviceconfig"
@@ -17,7 +18,7 @@ func requireSupportedServiceBackups(ctx context.Context, db *sql.DB, crews []Cre
 	for _, crew := range crews {
 		var raw string
 		if err := db.QueryRowContext(ctx, "SELECT COALESCE(services_json, '') FROM crews WHERE id = ?", crew.ID).Scan(&raw); err != nil {
-			return errors.New("backup: cannot read service configuration")
+			return fmt.Errorf("backup: cannot read service configuration: %w", err)
 		}
 		if err := requireSupportedServiceConfig(raw); err != nil {
 			return err
