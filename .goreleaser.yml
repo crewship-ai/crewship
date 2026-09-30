@@ -187,6 +187,13 @@ archives:
       - LICENSE*
       - README*
       - CHANGELOG*
+      - NOTICE
+      - THIRD-PARTY-NOTICES.md
+      # Distribution license bundle (scripts/gen-license-bundle.sh): Go
+      # dependency texts under LICENSES/go, npm attribution inventory under
+      # LICENSES/frontend, project legal files under LICENSES/project.
+      - src: build/licenses
+        dst: LICENSES
       - src: scripts/entrypoint.sh
         dst: .
         strip_parent: true
@@ -207,6 +214,10 @@ archives:
       - LICENSE*
       - README*
       - CHANGELOG*
+      - NOTICE
+      - THIRD-PARTY-NOTICES.md
+      - src: build/licenses
+        dst: LICENSES
       - src: scripts/entrypoint.sh
         dst: .
         strip_parent: true
@@ -228,6 +239,10 @@ archives:
       - LICENSE*
       - README*
       - CHANGELOG*
+      - NOTICE
+      - THIRD-PARTY-NOTICES.md
+      - src: build/licenses
+        dst: LICENSES
       - src: scripts/entrypoint.sh
         dst: .
         strip_parent: true
@@ -240,6 +255,14 @@ archives:
     builds:
       - crewship-cli
     formats: [tar.gz]
+    files:
+      - LICENSE*
+      - README*
+      - CHANGELOG*
+      - NOTICE
+      - THIRD-PARTY-NOTICES.md
+      - src: build/licenses
+        dst: LICENSES
     # Windows convention is zip; AssetNameForTag (internal/update) and any
     # installer must pick .zip for GOOS=windows.
     format_overrides:
@@ -409,9 +432,9 @@ nfpms:
     builds:
       - crewship
       - crewship-sidecar
-    vendor: Crewship
+    vendor: "Unify Technology, s.r.o."
     homepage: "https://crewship.ai"
-    maintainer: "Crewship <support@crewship.ai>"
+    maintainer: "Unify Technology, s.r.o. <support@crewship.ai>"
     description: "Self-hosted runtime for AI coding agents — daemon + CLI + web UI in one binary"
     license: "Apache-2.0"
     formats:
@@ -422,6 +445,17 @@ nfpms:
     # would pollute it, so that one lands in libexec instead (mirrors #920).
     bindir: /usr/bin
     contents:
+      # Distribution legal files (scripts/gen-license-bundle.sh): project
+      # LICENSE/NOTICE/THIRD-PARTY-NOTICES.md plus dependency texts. The
+      # FHS home for package license material on both deb and rpm.
+      - src: LICENSE
+        dst: /usr/share/doc/crewship/LICENSE
+      - src: NOTICE
+        dst: /usr/share/doc/crewship/NOTICE
+      - src: THIRD-PARTY-NOTICES.md
+        dst: /usr/share/doc/crewship/THIRD-PARTY-NOTICES.md
+      - src: build/licenses-flat/*
+        dst: /usr/share/doc/crewship/licenses/
       # autodetectSidecarPaths probes <bin>/../libexec/crewship/entrypoint.sh
       # for exactly this FHS layout, so `crewship start` boots with no override.
       - src: scripts/entrypoint.sh
