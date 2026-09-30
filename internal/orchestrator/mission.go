@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -355,119 +356,141 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			status, err := e.getMissionStatus(ctx, ms.ID)
-			if err != nil {
-				e.logger.Error("check mission status", "mission_id", ms.ID, "error", err)
+			// One tick is one writer in the backup's quiet window barrier: a
+			// window waits for a tick in progress, and no tick runs while one
+			// is closing or held — the mission picks up on the first tick after
+			// release. Dispatches a tick starts are admitted runs (StartRun), so
+			// the window counts them as busy until they return.
+			wr, ok := quiesce.Enter(ctx)
+			if !ok {
 				continue
 			}
-
-			// Mission is no longer in progress -- stop orchestrating
-			if status != "IN_PROGRESS" {
-				e.logger.Info("mission no longer in progress", "mission_id", ms.ID, "status", status)
-				return
-			}
-
-			// Fence stale revisions before dispatching another task, not after.
-			executionHandled, executionErr := e.checkIssueExecution(ctx, ms)
-			if executionErr != nil {
-				e.logger.Error("issue execution tick", "error", executionErr)
-				continue
-			}
-			if executionHandled {
-				current, err := e.getMissionStatus(ctx, ms.ID)
-				if err != nil || current != "IN_PROGRESS" {
-					continue
-				}
-			}
-
-			// Lead planning phase: if mission has 0 tasks, dispatch to lead
-			// so they can plan and create tasks autonomously.
-			e.mu.Lock()
-			alreadyPlanning := ms.planningDispatched
-			e.mu.Unlock()
-			if !alreadyPlanning {
-				var boundRoutine bool
-				err := e.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_executions WHERE mission_id=? AND routine_run_id IS NOT NULL AND stage IN ('working','reviewing'))`, ms.ID).Scan(&boundRoutine)
-				if err != nil {
-					e.logger.Error("check issue routine", "error", err)
-					continue
-				}
-				if boundRoutine {
-					alreadyPlanning = true
-					e.mu.Lock()
-					ms.planningDispatched = true
-					e.mu.Unlock()
-				}
-			}
-
-			if !alreadyPlanning {
-				taskCount, countErr := e.countTasks(ctx, ms.ID)
-				if countErr != nil {
-					e.logger.Error("count tasks", "mission_id", ms.ID, "error", countErr)
-				} else if taskCount == 0 {
-					if planErr := e.dispatchLeadPlanning(ctx, ms); planErr != nil {
-						// A deferral is a wait, not a breakage: the lead is
-						// held for an operator and dispatchLeadPlanning wrote
-						// nothing. Logging it at ERROR every three seconds
-						// was how a standing hold read as a broken instance.
-						if isDeferredDispatch(planErr) {
-							e.logger.Info("lead planning is waiting for an operator",
-								"mission_id", ms.ID, "reason", planErr.Error())
-						} else {
-							e.logger.Error("lead planning failed", "mission_id", ms.ID, "error", planErr)
-						}
-					} else {
-						e.mu.Lock()
-						ms.planningDispatched = true
-						e.mu.Unlock()
-					}
-					continue // wait for lead to create tasks
-				}
-			}
-
-			if err := e.scheduleReadyTasks(ctx, ms); err != nil {
-				e.logger.Error("schedule ready tasks", "mission_id", ms.ID, "error", err)
-			}
-
-			// Load the post-schedule task snapshot once and share it with
-			// both the completion and deadlock checks. They are read-only
-			// over mission_tasks and run back-to-back, so a single query
-			// replaces the two they each previously issued every tick.
-			tasks, tasksErr := e.loadTasks(ctx, ms.ID)
-			if tasksErr != nil {
-				e.logger.Error("load tasks for tick", "mission_id", ms.ID, "error", tasksErr)
-				continue
-			}
-
-			if !executionHandled {
-				if err := e.checkMissionCompletionWithTasks(ctx, ms, tasks); err != nil {
-					e.logger.Error("check mission completion", "mission_id", ms.ID, "error", err)
-				}
-			}
-
-			// Deadlock detection: all tasks BLOCKED with nothing making progress
-			if deadlockFromTasks(tasks) {
-				e.logger.Error("deadlock detected — all tasks BLOCKED with no progress possible",
-					"mission_id", ms.ID)
-				now := time.Now().UTC().Format(time.RFC3339)
-				// Audit #481 follow-up: ctx is still live here (we're
-				// inside the active loop tick) but the FAILED write
-				// must NOT be cancelled by an inbound shutdown -- the
-				// deadlock annotation belongs in the record even if
-				// the engine is going down. WithoutCancel keeps trace
-				// continuity while shedding cancellation.
-				e.db.ExecContext(context.WithoutCancel(ctx),
-					`UPDATE missions SET status = 'FAILED', updated_at = ?, completed_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
-					now, now, ms.ID)
-				e.broadcastMissionStatus(ms, "FAILED")
-				e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
-					Type:      "mission_deadlock",
-					MissionID: ms.ID,
-				})
+			stop := func() bool {
+				defer wr.Leave()
+				return e.missionTick(wr.Context(), ms)
+			}()
+			if stop {
 				return
 			}
 		}
 	}
+}
+
+// missionTick is one pass of the orchestration loop. It reports whether the
+// loop should stop.
+func (e *MissionEngine) missionTick(ctx context.Context, ms *missionState) (stop bool) {
+	status, err := e.getMissionStatus(ctx, ms.ID)
+	if err != nil {
+		e.logger.Error("check mission status", "mission_id", ms.ID, "error", err)
+		return false
+	}
+
+	// Mission is no longer in progress -- stop orchestrating
+	if status != "IN_PROGRESS" {
+		e.logger.Info("mission no longer in progress", "mission_id", ms.ID, "status", status)
+		return true
+	}
+
+	// Fence stale revisions before dispatching another task, not after.
+	executionHandled, executionErr := e.checkIssueExecution(ctx, ms)
+	if executionErr != nil {
+		e.logger.Error("issue execution tick", "error", executionErr)
+		return false
+	}
+	if executionHandled {
+		current, err := e.getMissionStatus(ctx, ms.ID)
+		if err != nil || current != "IN_PROGRESS" {
+			return false
+		}
+	}
+
+	// Lead planning phase: if mission has 0 tasks, dispatch to lead
+	// so they can plan and create tasks autonomously.
+	e.mu.Lock()
+	alreadyPlanning := ms.planningDispatched
+	e.mu.Unlock()
+	if !alreadyPlanning {
+		var boundRoutine bool
+		err := e.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_executions WHERE mission_id=? AND routine_run_id IS NOT NULL AND stage IN ('working','reviewing'))`, ms.ID).Scan(&boundRoutine)
+		if err != nil {
+			e.logger.Error("check issue routine", "error", err)
+			return false
+		}
+		if boundRoutine {
+			alreadyPlanning = true
+			e.mu.Lock()
+			ms.planningDispatched = true
+			e.mu.Unlock()
+		}
+	}
+
+	if !alreadyPlanning {
+		taskCount, countErr := e.countTasks(ctx, ms.ID)
+		if countErr != nil {
+			e.logger.Error("count tasks", "mission_id", ms.ID, "error", countErr)
+		} else if taskCount == 0 {
+			if planErr := e.dispatchLeadPlanning(ctx, ms); planErr != nil {
+				// A deferral is a wait, not a breakage: the lead is
+				// held for an operator and dispatchLeadPlanning wrote
+				// nothing. Logging it at ERROR every three seconds
+				// was how a standing hold read as a broken instance.
+				if isDeferredDispatch(planErr) {
+					e.logger.Info("lead planning is waiting for an operator",
+						"mission_id", ms.ID, "reason", planErr.Error())
+				} else {
+					e.logger.Error("lead planning failed", "mission_id", ms.ID, "error", planErr)
+				}
+			} else {
+				e.mu.Lock()
+				ms.planningDispatched = true
+				e.mu.Unlock()
+			}
+			return false // wait for lead to create tasks
+		}
+	}
+
+	if err := e.scheduleReadyTasks(ctx, ms); err != nil {
+		e.logger.Error("schedule ready tasks", "mission_id", ms.ID, "error", err)
+	}
+
+	// Load the post-schedule task snapshot once and share it with
+	// both the completion and deadlock checks. They are read-only
+	// over mission_tasks and run back-to-back, so a single query
+	// replaces the two they each previously issued every tick.
+	tasks, tasksErr := e.loadTasks(ctx, ms.ID)
+	if tasksErr != nil {
+		e.logger.Error("load tasks for tick", "mission_id", ms.ID, "error", tasksErr)
+		return false
+	}
+
+	if !executionHandled {
+		if err := e.checkMissionCompletionWithTasks(ctx, ms, tasks); err != nil {
+			e.logger.Error("check mission completion", "mission_id", ms.ID, "error", err)
+		}
+	}
+
+	// Deadlock detection: all tasks BLOCKED with nothing making progress
+	if deadlockFromTasks(tasks) {
+		e.logger.Error("deadlock detected — all tasks BLOCKED with no progress possible",
+			"mission_id", ms.ID)
+		now := time.Now().UTC().Format(time.RFC3339)
+		// Audit #481 follow-up: ctx is still live here (we're
+		// inside the active loop tick) but the FAILED write
+		// must NOT be cancelled by an inbound shutdown -- the
+		// deadlock annotation belongs in the record even if
+		// the engine is going down. WithoutCancel keeps trace
+		// continuity while shedding cancellation.
+		e.db.ExecContext(context.WithoutCancel(ctx),
+			`UPDATE missions SET status = 'FAILED', updated_at = ?, completed_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
+			now, now, ms.ID)
+		e.broadcastMissionStatus(ms, "FAILED")
+		e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
+			Type:      "mission_deadlock",
+			MissionID: ms.ID,
+		})
+		return true
+	}
+	return false
 }
 
 func (e *MissionEngine) updateTaskStatus(ctx context.Context, ms *missionState, taskID, status, errMsg string) {
@@ -588,4 +611,24 @@ func generateID() string {
 		return fmt.Sprintf("m_%d", time.Now().UnixNano())
 	}
 	return fmt.Sprintf("m_%x%x", time.Now().UnixMilli(), b[:6])
+}
+
+// admitDispatch admits an assignment dispatch as a run of the backup's quiet
+// window before its goroutine starts, so a window that closes while the
+// goroutine is being scheduled still counts it. Inside a tick (a writer in
+// the gate) the admission is immediate; otherwise the goroutine waits out an
+// open window before it dispatches. The returned func runs in the goroutine:
+// it yields the context to dispatch with and the func that ends the
+// admission.
+func admitDispatch(ctx context.Context) func() (context.Context, func()) {
+	if adm, ok := quiesce.StartRun(ctx); ok {
+		return func() (context.Context, func()) { return adm.Context(), adm.Done }
+	}
+	return func() (context.Context, func()) {
+		adm, err := quiesce.StartRunWait(ctx)
+		if err != nil {
+			return ctx, func() {}
+		}
+		return adm.Context(), adm.Done
+	}
 }

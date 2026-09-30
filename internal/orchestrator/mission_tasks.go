@@ -588,9 +588,12 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 	// under the same trace ID, while the parent request's
 	// cancellation does not propagate (the scheduler tick has
 	// returned to its loop before this goroutine runs).
-	dispatchCtx := context.WithoutCancel(ctx)
+	baseCtx := context.WithoutCancel(ctx)
 	if e.dispatcher != nil {
+		admit := admitDispatch(baseCtx)
 		go func() {
+			dispatchCtx, done := admit()
+			defer done()
 			dispatchErr := e.dispatcher.DispatchAssignment(dispatchCtx, DispatchRequest{
 				AssignmentID:    assignmentID,
 				AgentID:         *task.AssignedAgentID,
