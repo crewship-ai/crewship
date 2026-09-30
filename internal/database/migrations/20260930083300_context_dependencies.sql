@@ -12,8 +12,12 @@ CREATE TRIGGER access_context_dependencies_immutable BEFORE UPDATE ON access_con
 END;
 CREATE TRIGGER access_context_dependencies_validate BEFORE INSERT ON access_context_dependencies
 BEGIN
- SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM access_context c JOIN access_attempts a ON a.id=c.attempt_id
- WHERE c.id=NEW.context_id AND c.attempt_id=NEW.source_attempt_id AND c.scope=NEW.scope AND a.revoked_at IS NULL)
+ SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM access_context c JOIN access_attempts a ON a.id=c.attempt_id JOIN access_attempts consumer ON consumer.id=NEW.attempt_id
+ WHERE c.id=NEW.context_id AND c.attempt_id=NEW.source_attempt_id AND c.scope=NEW.scope AND a.revoked_at IS NULL AND consumer.revoked_at IS NULL AND consumer.completed_at IS NULL
+ AND consumer.workspace_id=a.workspace_id AND consumer.principal_id=a.principal_id
+ AND consumer.agent_id=a.agent_id AND consumer.chat_id=a.chat_id
+ AND consumer.member_id=a.member_id AND consumer.member_revision=a.member_revision
+ AND consumer.chat_generation=a.chat_generation AND consumer.chat_revision=a.chat_revision)
  THEN RAISE(ABORT,'invalid context origin') END;
  SELECT CASE WHEN EXISTS(WITH RECURSIVE parents(id) AS (
  SELECT NEW.source_attempt_id UNION SELECT d.source_attempt_id FROM access_context_dependencies d JOIN parents p ON d.attempt_id=p.id
@@ -39,4 +43,9 @@ BEGIN
  UNION SELECT c.id FROM access_attempts c JOIN affected a ON c.parent_id=a.id
  ) SELECT id FROM affected);
  DELETE FROM access_context WHERE attempt_id=OLD.id;
+END;
+
+CREATE TRIGGER access_context_dependency_delete BEFORE DELETE ON access_context_dependencies
+BEGIN
+ UPDATE access_attempts SET revoked_at=COALESCE(revoked_at,strftime('%Y-%m-%dT%H:%M:%fZ','now')) WHERE id=OLD.attempt_id;
 END;

@@ -30,11 +30,12 @@ const (
 )
 
 type ContextEntry struct {
-	ID      string      `json:"id"`
-	Kind    ContextKind `json:"kind"`
-	Role    string      `json:"role"`
-	Content string      `json:"content"`
-	Sources []string    `json:"sources,omitempty"`
+	CreatedAt string      `json:"created_at"`
+	ID        string      `json:"id"`
+	Kind      ContextKind `json:"kind"`
+	Role      string      `json:"role"`
+	Content   string      `json:"content"`
+	Sources   []string    `json:"sources,omitempty"`
 }
 type ScopedPrompt struct{ System, Input string }
 
@@ -73,13 +74,13 @@ func (s Store) writeContext(ctx context.Context, handle string, kind ContextKind
 			return ContextEntry{}, err
 		}
 	}
-	e := ContextEntry{randomID(), kind, role, text, slices.Clone(sources)}
+	e := ContextEntry{ID: randomID(), Kind: kind, Role: role, Content: text, Sources: slices.Clone(sources), CreatedAt: tsformat.Format(time.Now())}
 	raw := "[]"
 	if len(sources) > 0 {
 		b, _ := json.Marshal(sources)
 		raw = string(b)
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO access_context(id,attempt_id,scope,agent_id,kind,role,content,sources,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, e.ID, a.ID, a.Scope, a.Agent, kind, role, text, raw, tsformat.Format(time.Now()))
+	_, err = tx.ExecContext(ctx, `INSERT INTO access_context(id,attempt_id,scope,agent_id,kind,role,content,sources,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, e.ID, a.ID, a.Scope, a.Agent, kind, role, text, raw, e.CreatedAt)
 	if err != nil {
 		return ContextEntry{}, err
 	}
@@ -99,7 +100,7 @@ func readContext(ctx context.Context, q queryer, a Attempt, id string, seen map[
 	defer delete(seen, id)
 	var e ContextEntry
 	var source, raw string
-	err := q.QueryRowContext(ctx, `SELECT id,attempt_id,kind,role,content,sources FROM access_context WHERE id=? AND scope=? AND agent_id=?`, id, a.Scope, a.Agent).Scan(&e.ID, &source, &e.Kind, &e.Role, &e.Content, &raw)
+	err := q.QueryRowContext(ctx, `SELECT id,attempt_id,kind,role,content,sources,created_at FROM access_context WHERE id=? AND scope=? AND agent_id=?`, id, a.Scope, a.Agent).Scan(&e.ID, &source, &e.Kind, &e.Role, &e.Content, &raw, &e.CreatedAt)
 	if err != nil {
 		return ContextEntry{}, ErrDenied
 	}
