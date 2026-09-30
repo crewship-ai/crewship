@@ -265,11 +265,19 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
 		return nil, err
 	}
 
+	var data json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, fmt.Errorf("decode %s response: %w", o.name(), err)
+	}
 	var raw openaiResponse
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("decode %s response: %w", o.name(), err)
 	}
 	out := raw.toResponse()
+	out.UsageKnown = openAIUsageKnown(data) && len(raw.Choices) == 1
+	if out.UsageKnown {
+		_, out.UsageKnown = openAIStopReasonTable[raw.Choices[0].FinishReason]
+	}
 	// toResponse resolves finish_reason through the built-in map only — its
 	// signature is pinned by the existing tests, so the per-backend overlay is
 	// applied here, where the config is in scope.
@@ -584,6 +592,8 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 	// covers that case so a compliant-but-terse backend isn't mistaken for a
 	// truncated one.
 	var sawFinishReason bool
+	usageBlocks := 0
+	ambiguousUsage := false
 
 	sawDoneSentinel, fnErr, scanErr := forEachSSEData(r, 64*1024, 1024*1024, func(data string) (bool, error) {
 		var chunk struct {
@@ -610,9 +620,15 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			ambiguousUsage = true
 			return false, nil
 		}
+		if usageObject([]byte(data)) == nil {
+			ambiguousUsage = true
+		}
 		if chunk.Usage != nil {
+			usageBlocks++
+			final.UsageKnown = usageBlocks == 1 && openAIUsageKnown([]byte(data))
 			// Recomputed from THIS chunk's own pair, never subtracted from
 			// the already-stored final.InputToks: a backend that repeats the
 			// usage block on more than one chunk would otherwise subtract the
@@ -659,6 +675,7 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 		return final, fnErr
 	}
 
+	final.UsageKnown = final.UsageKnown && !ambiguousUsage
 	final.Content = strings.Join(textParts, "")
 	// Iterate the map's own keys in order, not 0..len-1. The counting loop that
 	// used to be here assumed every backend numbers its tool_calls contiguously

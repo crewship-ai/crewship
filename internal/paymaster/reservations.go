@@ -27,6 +27,7 @@ type Reservation struct{ ID string }
 // Unknown usage (including transport failure) charges the entire reservation.
 type ReservationUsage struct {
 	Known                                        bool
+	Conservative                                 bool
 	InputTokens, OutputTokens, CachedInputTokens int64
 }
 
@@ -38,7 +39,18 @@ var ErrReservationDenied = errors.New("paymaster: reservation denied")
 // An enabled workspace hard/tiered budget is mandatory for restricted traffic.
 // The ledger debit is never automatically refunded, including after restart.
 func Reserve(ctx context.Context, db *sql.DB, r ReservationRequest) (Reservation, error) {
-	if db == nil || r.Scope.WorkspaceID == "" || r.Scope.AgentID == "" || r.PrincipalID == "" || r.AttemptID == "" || r.CredentialID == "" || r.MaxInputTokens < 1 || r.MaxInputTokens > 2<<20 || r.MaxOutputTokens < 1 || r.MaxOutputTokens > 32768 {
+	return reserve(ctx, db, r, reservationPolicy{requireWorkspace: true, maxOutput: 32768})
+}
+
+type reservationPolicy struct {
+	requireWorkspace bool
+	maxOutput        int64
+	rate             *modelPrice
+}
+
+func reserve(ctx context.Context, db *sql.DB, r ReservationRequest, policy reservationPolicy) (Reservation, error) {
+	missingRestrictedIdentity := policy.requireWorkspace && (r.Scope.AgentID == "" || r.CredentialID == "")
+	if db == nil || r.Scope.WorkspaceID == "" || missingRestrictedIdentity || r.PrincipalID == "" || r.AttemptID == "" || r.MaxInputTokens < 1 || r.MaxInputTokens > 2<<20 || r.MaxOutputTokens < 1 || r.MaxOutputTokens > policy.maxOutput {
 		return Reservation{}, ErrReservationDenied
 	}
 	// A fallback rate cannot prove a maximum for an unknown model.
@@ -46,6 +58,9 @@ func Reserve(ctx context.Context, db *sql.DB, r ReservationRequest) (Reservation
 	rate, ok := priceTable[provider+"/"+model]
 	if !ok {
 		rate, ok = catalogPrice(provider, model)
+	}
+	if policy.rate != nil {
+		rate, ok = *policy.rate, true
 	}
 	if !ok || !positiveFinite(rate.InputPerM) || !positiveFinite(rate.OutputPerM) || rate.CachedInputPerM < 0 || !finite(rate.CachedInputPerM) || rate.CachedInputPerM > rate.InputPerM {
 		return Reservation{}, ErrReservationDenied
@@ -73,7 +88,7 @@ func Reserve(ctx context.Context, db *sql.DB, r ReservationRequest) (Reservation
 		if (b.Mode != ModeHard && b.Mode != ModeTiered) || !positiveFinite(b.LimitUSD) {
 			return Reservation{}, ErrReservationDenied
 		}
-		if b.ScopeKind == ScopeWorkspace {
+		if !policy.requireWorkspace || b.ScopeKind == ScopeWorkspace {
 			capped = true
 		}
 		spent, err := conservativeSumSpend(ctx, conn, b, r.Scope, now)
@@ -88,7 +103,11 @@ func Reserve(ctx context.Context, db *sql.DB, r ReservationRequest) (Reservation
 		return Reservation{}, ErrReservationDenied
 	}
 	id := newLedgerID()
-	_, err = conn.ExecContext(ctx, `INSERT INTO cost_ledger(id,workspace_id,crew_id,agent_id,mission_id,ts,provider,model,cost_usd,tags,billing_mode,cost_confidence,credential_id,rate_input_per_m,rate_output_per_m,rate_cached_in_per_m,rate_cache_write_per_m) VALUES(?,?,?,?,?,?,?,?,?,'{"restricted_reservation":true}','metered','estimate',?,?,?,?,?)`, id, r.Scope.WorkspaceID, nullable(r.Scope.CrewID), nullable(r.Scope.AgentID), nullable(r.Scope.MissionID), tsformat.Format(now), provider, model, cost, r.CredentialID, rate.InputPerM, rate.OutputPerM, rate.CachedInputPerM, rate.CacheWritePerM)
+	tags := `{"restricted_reservation":true}`
+	if !policy.requireWorkspace {
+		tags = `{"trusted_reservation":true}`
+	}
+	_, err = conn.ExecContext(ctx, `INSERT INTO cost_ledger(id,workspace_id,crew_id,agent_id,mission_id,ts,provider,model,cost_usd,tags,billing_mode,cost_confidence,credential_id,rate_input_per_m,rate_output_per_m,rate_cached_in_per_m,rate_cache_write_per_m) VALUES(?,?,?,?,?,?,?,?,?,?,'metered','estimate',?,?,?,?,?)`, id, r.Scope.WorkspaceID, nullable(r.Scope.CrewID), nullable(r.Scope.AgentID), nullable(r.Scope.MissionID), tsformat.Format(now), provider, model, cost, tags, nullable(r.CredentialID), rate.InputPerM, rate.OutputPerM, rate.CachedInputPerM, rate.CacheWritePerM)
 	if err != nil {
 		return Reservation{}, err
 	}
@@ -148,6 +167,9 @@ func Settle(ctx context.Context, db *sql.DB, id string, usage ReservationUsage) 
 		out = usage.OutputTokens
 		cache = usage.CachedInputTokens
 		confidence = ConfidencePrecise
+		if usage.Conservative {
+			confidence = ConfidenceEstimate
+		}
 	}
 	_, err = conn.ExecContext(ctx, `UPDATE restricted_cost_reservations SET state=?,input_tokens=?,output_tokens=?,cached_input_tokens=? WHERE id=? AND state='pending'`, want, in, out, cache, id)
 	if err != nil {

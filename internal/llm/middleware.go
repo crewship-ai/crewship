@@ -140,6 +140,7 @@ func (w *wrappedProvider) Name() string { return w.base.Name() }
 func (w *wrappedProvider) Complete(ctx context.Context, req Request) (*Response, error) {
 	scope, _ := paymasterScopeFromContext(ctx)
 	callReq := paymaster.CallRequest{
+		Bounds:   providerBudgetBounds(w.base, req),
 		Scope:    scope,
 		Provider: w.base.Name(),
 		Model:    req.Model,
@@ -181,6 +182,7 @@ func (w *wrappedProvider) Stream(ctx context.Context, req Request, handler func(
 	caller = hooksCaller(caller, w.db, w.j)
 
 	resp, err := caller.Call(ctx, paymaster.CallRequest{
+		Bounds:   providerBudgetBounds(w.base, req),
 		Scope:    scope,
 		Provider: w.base.Name(),
 		Model:    req.Model,
@@ -224,6 +226,7 @@ func (s *streamCaller) Call(ctx context.Context, req paymaster.CallRequest) (pay
 		var partial paymaster.CallResponse
 		if resp != nil {
 			partial = paymaster.CallResponse{
+				UsageKnown:          resp.UsageKnown,
 				Output:              resp,
 				InputTokens:         int64(resp.InputToks),
 				OutputTokens:        int64(resp.OutputToks),
@@ -235,6 +238,7 @@ func (s *streamCaller) Call(ctx context.Context, req paymaster.CallRequest) (pay
 		return partial, err
 	}
 	return paymaster.CallResponse{
+		UsageKnown:          resp.UsageKnown,
 		Output:              resp,
 		InputTokens:         int64(resp.InputToks),
 		OutputTokens:        int64(resp.OutputToks),
@@ -261,6 +265,7 @@ func (c providerCaller) Call(ctx context.Context, req paymaster.CallRequest) (pa
 		return paymaster.CallResponse{}, err
 	}
 	return paymaster.CallResponse{
+		UsageKnown:          resp.UsageKnown,
 		Output:              resp,
 		InputTokens:         int64(resp.InputToks),
 		OutputTokens:        int64(resp.OutputToks),
