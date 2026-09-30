@@ -53,8 +53,28 @@ task text. This source API does not by itself enable native mounts or change
 Page input selection. Runtime adapters must separately freeze and audit an
 explicit read-only snapshot before launching a model.
 
+The native adapter accepts the optional structured `project_file_versions` list.
+A text adapter rejects a nonempty selection. The host binds versions before
+building context and passes source metadata as task data, never instructions.
+The trusted native catalog creates an attempt-specific 32 MiB tmpfs volume;
+selected content remains limited to 16 MiB. It stages validated regular files
+through a fixed keyless UID1001 worker, mounts the volume read-only into the
+UID1002 hold container, removes the staging writer, and checks every remaining
+alias before verifying UID1001 ownership, immutable modes and exact hashes.
+The provider broker and model start only after that verification succeeds.
+No caller host path, selector from task text, or arbitrary mount is accepted.
+
+The catalog journals its random instance identity and owned Docker objects in
+an owner-private directory. Reconciliation removes abandoned snapshots only
+after consumers have been removed; an unexpected alias or unavailable Docker
+daemon fails closed. The worker image must include the fixed verifier command;
+a selected-file attempt cannot silently fall back to an older image. Empty
+selections retain the existing native path. Pages remain text-only.
+
 Implementation: `internal/access/project_files.go`, `internal/api/project_files.go`.
 Verification: `TestProjectFilesTwoHumansAndImmutableSelection`,
 `TestProjectVersionReplaceRetireAndTransitiveRevocation`,
 `TestProjectFileRoleCASCapacityAndBytes`, and
-`TestProjectFilesAuthenticatedRoutesAndStreamingRevocation`.
+`TestProjectFilesAuthenticatedRoutesAndStreamingRevocation`, and
+`TestLiveNativeInputFreezeReadonlyAndRestartCleanup` (explicit disposable Docker
+acceptance gate).
