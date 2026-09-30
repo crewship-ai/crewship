@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // RetainPageProjects keeps 64 recent revisions/builds and 32 publications per
@@ -132,9 +134,13 @@ func (h *PageHandler) StartProjectRetention(ctx context.Context) {
 					if ctx.Err() != nil {
 						return
 					}
-					bounded, cancel := context.WithTimeout(ctx, 2*time.Minute)
-					err := h.RetainPageProjects(bounded, id)
-					cancel()
+					// One workspace's retention (rows and project files) is
+					// one writer in the backup's quiet window barrier.
+					err := quiesce.Do(ctx, func(ctx context.Context) error {
+						bounded, cancel := context.WithTimeout(ctx, 2*time.Minute)
+						defer cancel()
+						return h.RetainPageProjects(bounded, id)
+					})
 					if err != nil {
 						h.logger.Warn("pages: retention failed", "workspace_id", id, "error", err)
 					}

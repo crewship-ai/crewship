@@ -156,6 +156,10 @@ func sweepAuditTable(
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return deleted, false, ctxErr
 		}
+		// Between batches: step out of a closing quiet window.
+		if yieldErr := quiesce.Yield(ctx); yieldErr != nil {
+			return deleted, false, yieldErr
+		}
 		batchArgs := append(append([]any{}, args...), cutoff, auditRetentionBatchRows)
 		res, execErr := db.ExecContext(ctx, stmt, batchArgs...)
 		if execErr != nil {
@@ -184,10 +188,15 @@ func SweepAllWorkspacesAuditRetention(ctx context.Context, db *sql.DB, logger *s
 	if logger == nil {
 		logger = slog.Default()
 	}
-	// Never delete under an instance backup's consistent copy.
-	if err := quiesce.WaitReleased(ctx); err != nil {
+	// Never delete under an instance backup's consistent copy: the whole sweep
+	// is a writer in the quiet window's barrier, and it yields between
+	// workspaces so a backup's drain never waits on it.
+	wr, err := quiesce.EnterWait(ctx)
+	if err != nil {
 		return err
 	}
+	defer wr.Leave()
+	ctx = wr.Context()
 
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, credential_audit_retention_days, audit_log_retention_days FROM workspaces`)
@@ -244,6 +253,9 @@ func SweepAllWorkspacesAuditRetention(ctx context.Context, db *sql.DB, logger *s
 	for _, e := range entries {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
+		}
+		if yieldErr := wr.Yield(ctx); yieldErr != nil {
+			return yieldErr
 		}
 		for _, job := range []struct {
 			t    auditRetentionTable

@@ -24,11 +24,19 @@ func StartRetentionSweeper(ctx context.Context, store *Store, logger *slog.Logge
 		interval = 24 * time.Hour
 	}
 	run := func() {
-		// Never delete under an instance backup's consistent copy.
-		if ctx.Err() != nil || quiesce.WaitReleased(ctx) != nil {
+		// Never delete under an instance backup's consistent copy: the
+		// whole sweep is a writer in the quiet window's barrier, and it
+		// yields between batches (Sweep) so a backup's drain never waits
+		// on it.
+		if ctx.Err() != nil {
 			return
 		}
-		res, err := store.Sweep(ctx, DefaultRetentionPolicy())
+		wr, err := quiesce.EnterWait(ctx)
+		if err != nil {
+			return
+		}
+		defer wr.Leave()
+		res, err := store.Sweep(wr.Context(), DefaultRetentionPolicy())
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Warn("work retention sweep failed", "error", err)

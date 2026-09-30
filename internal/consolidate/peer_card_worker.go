@@ -144,10 +144,15 @@ func runSweepAllWorkspaces(
 	logger *slog.Logger,
 	cfg PeerCardWorkerConfig,
 ) {
-	// Never write memory under an instance backup's consistent copy.
-	if quiesce.WaitReleased(ctx) != nil {
+	// Never write memory under an instance backup's consistent copy: the whole
+	// sweep is a writer in the quiet window's barrier, yielding between
+	// workspaces so a backup's drain never waits on it.
+	wr, err := quiesce.EnterWait(ctx)
+	if err != nil {
 		return
 	}
+	defer wr.Leave()
+	ctx = wr.Context()
 	workspaces, err := loadActiveWorkspaceIDs(ctx, db)
 	if err != nil {
 		logger.Error("peer card sync: load workspaces failed", "err", err)
@@ -164,6 +169,9 @@ func runSweepAllWorkspaces(
 		// have to wait for every workspace's sweep to finish before
 		// the goroutine returns.
 		if ctx.Err() != nil {
+			return
+		}
+		if wr.Yield(ctx) != nil {
 			return
 		}
 		sum, err := RunPeerCardSync(ctx, db, logger, wsID, PeerCardSyncOptions{
