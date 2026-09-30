@@ -28,6 +28,17 @@ import { RunNeedsHumanActions, type InboxActFn } from "./run-needs-human-actions
 // The chat_url guard lives in inbox-derive now — jumpFor needs the same rule
 // and two copies of a security check drift. See safeChatURL there.
 
+/**
+ * A backup incident's link into Admin › Backups, from the server's payload.
+ * Only an in-app /admin link is followed; anything else is dropped rather
+ * than rendered as a navigation target.
+ */
+export function backupIncidentURL(item: InboxItem): string | null {
+  const url = item.payload?.view_url
+  if (typeof url !== "string") return null
+  return /^\/admin\?[\w=&%.-]*$/.test(url) ? url : null
+}
+
 // =============================================================================
 // KindActions — the buttons that resolve an item, one branch per source.
 //
@@ -971,6 +982,66 @@ export function KindActions({
         <RunNeedsHumanActions item={item} onAct={onAct} onRefresh={onRefresh} disabled={disabled} />
       )
     case "message":
+      // A backup incident, delivered to every instance admin: View failure
+      // opens the run in Admin › Backups › Backup history, Retry starts the
+      // plan again. The server resolves the card itself when the incident
+      // clears (the next good run), so Retry does not resolve it here.
+      if (item.payload?.subkind === "backup_incident") {
+        const viewURL = backupIncidentURL(item)
+        const planID = typeof item.payload?.plan_id === "string" ? item.payload.plan_id : ""
+        return (
+          <div className="flex flex-wrap items-center gap-2">
+            {viewURL && (
+              <Button asChild size="sm" variant="outline" className="gap-1.5">
+                <Link href={viewURL}>
+                  <ScrollText className="h-3 w-3" />
+                  View failure
+                </Link>
+              </Button>
+            )}
+            {planID && (
+              <Button
+                size="sm"
+                disabled={disabled || busy !== null}
+                className="gap-1.5"
+                onClick={() =>
+                  wrap("retry", async () => {
+                    let res: Response
+                    try {
+                      res = await apiFetch("/api/v1/admin/instance/backups/run", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ plan_id: planID }),
+                      })
+                    } catch (e) {
+                      toast.error(e instanceof Error ? `Retry failed: ${e.message}` : "Retry failed (network error)")
+                      return
+                    }
+                    if (!res.ok) {
+                      const body = (await res.json().catch(() => null)) as { error?: string } | null
+                      toast.error(body?.error ?? `Retry failed (${res.status})`)
+                      return
+                    }
+                    toast.success("Backup started · the card clears when it succeeds")
+                  })
+                }
+              >
+                <Play className="h-3 w-3" />
+                {busy === "retry" ? "Starting…" : "Retry"}
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled || busy !== null}
+              onClick={() => wrap("dismissed", async () => onResolve("dismissed"))}
+              className="gap-1.5"
+            >
+              Dismiss
+            </Button>
+          </div>
+        )
+      }
       // Messages from the orchestrator (e.g. "ENG-1 ready for review")
       // carry the issue identifier in payload so the inbox can offer
       // a one-click jump to the issue. Without this the user reads

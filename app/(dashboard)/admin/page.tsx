@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import {
-  Shield, AlertTriangle, ChevronRight, Menu,
+  Shield, AlertTriangle, ChevronRight, ChevronDown, Menu,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -18,14 +18,16 @@ import {
   SidebarToolbar, SidebarSearch, SidebarSection, SidebarRow, SIDEBAR_WIDTH,
 } from "@/components/layout/sidebar-kit"
 
-import { sections, initialAdminTab, movedAdminTabHref, ALL_TABS } from "./navigation"
+import {
+  initialAdminTab, initialBackupsSection, movedAdminTabHref, adminSectionLabel, filterNav, ALL_TABS,
+  type BackupsSection,
+} from "./navigation"
 import type { TabKey, Stats, KeeperStatus } from "./types"
 import { useAdminOverview } from "./hooks/use-admin-overview"
 import { OverviewTab } from "./tabs/overview-tab"
 import { RuntimeTab } from "./tabs/runtime-tab"
 import type { RuntimeEntry } from "./tabs/runtime-tab"
-import { BackupsTab } from "./tabs/backups-tab"
-import { MemoryConfigCard } from "@/components/features/admin/memory-config-card"
+import { BackupsConsole } from "@/components/features/admin/backups/backups-console"
 import { NotificationsTab } from "./tabs/notifications-tab"
 import { RateLimitsTab } from "./tabs/rate-limits-tab"
 
@@ -48,7 +50,10 @@ import { RateLimitsTab } from "./tabs/rate-limits-tab"
  * No heading repeats the section inside the page: the sub-bar already names
  * it, exactly as Settings does, and each card says what it is for.
  */
-const SETTINGS_TABS: ReadonlySet<TabKey> = new Set<TabKey>(["providers", "notifications", "ratelimits", "retention", "backups"])
+const SETTINGS_TABS: ReadonlySet<TabKey> = new Set<TabKey>(["providers", "notifications", "ratelimits"])
+
+/** Backups and Data retention draw their own scope strip and column. */
+const CONSOLE_TABS: ReadonlySet<TabKey> = new Set<TabKey>(["backups", "retention"])
 
 export default function AdminPage() {
   const router = useRouter()
@@ -66,29 +71,39 @@ export default function AdminPage() {
   const [tab, _setTab] = useState<TabKey>(() =>
     typeof window === "undefined" ? "overview" : initialAdminTab(window.location.search),
   )
-  const setTab = useCallback((next: TabKey) => {
+  // Admin › Backups has six pages of its own (?section=); an old ?tab=backups
+  // link lands on its Overview.
+  const [backupSection, _setBackupSection] = useState<BackupsSection>(() =>
+    typeof window === "undefined" ? "overview" : initialBackupsSection(window.location.search),
+  )
+  const setTab = useCallback((next: TabKey, section?: BackupsSection) => {
     _setTab(next)
+    if (section) _setBackupSection(section)
     // replaceState, not a route push: this is the same document, and a history
     // entry per sidebar click would turn Back into "undo my last five clicks".
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href)
       url.searchParams.set("tab", next)
+      if (next === "backups") url.searchParams.set("section", section ?? initialBackupsSection(url.search))
+      else url.searchParams.delete("section")
+      // The scope (whole instance / which workspaces) is shared by Backups
+      // and Data retention, and means nothing anywhere else.
+      if (!CONSOLE_TABS.has(next)) {
+        url.searchParams.delete("scope")
+        url.searchParams.delete("ws")
+      }
       window.history.replaceState(null, "", url.toString())
     }
   }, [])
+  // The Backups row folds its six pages away; open while one is on screen.
+  const [backupsOpen, setBackupsOpen] = useState(true)
   // Universal search doubles as a command-finder — filters the nav live.
   const [navQuery, setNavQuery] = useState("")
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const isMobile = useIsMobile()
   const navQ = navQuery.trim().toLowerCase()
   // Hooks must run before the early returns below, so keep this memo up here.
-  const filteredSections = useMemo(
-    () =>
-      sections
-        .map((s) => ({ ...s, items: s.items.filter((i) => !navQ || i.label.toLowerCase().includes(navQ)) }))
-        .filter((s) => s.items.length > 0),
-    [navQ],
-  )
+  const filteredSections = useMemo(() => filterNav(navQ), [navQ])
   const firstNavMatch = filteredSections[0]?.items[0]
   const [stats, setStats] = useState<Stats | null>(null)
   // The Overview's reads, each landing on its own (hooks/use-admin-overview):
@@ -259,14 +274,6 @@ export default function AdminPage() {
     }
 
 
-    if (tab === "retention") {
-      return <MemoryConfigCard workspaceId={workspaceId} />
-    }
-
-    if (tab === "backups") {
-      return <BackupsTab workspaceId={workspaceId ?? undefined} />
-    }
-
     if (tab === "notifications") {
       return <NotificationsTab workspaceId={workspaceId} />
     }
@@ -281,7 +288,7 @@ export default function AdminPage() {
     return null
   }
 
-  const activeItem = sections.flatMap((s) => s.items).find((i) => !i.href && i.key === tab)
+  const sectionLabel = adminSectionLabel(tab, backupSection)
 
   /* One nav body, rendered into a permanent column on a desktop and into a
      Sheet on a phone. Choosing a section closes the Sheet — on a desktop
@@ -299,7 +306,7 @@ export default function AdminPage() {
           onKeyDown={(e) => {
             if (e.key === "Enter" && firstNavMatch) {
               if (firstNavMatch.href) router.push(firstNavMatch.href)
-              else setTab(firstNavMatch.key as TabKey)
+              else setTab(firstNavMatch.key as TabKey, firstNavMatch.children?.[0]?.key)
               setMobileNavOpen(false)
             }
           }}
@@ -311,6 +318,46 @@ export default function AdminPage() {
             {section.items.map((item) => {
               const Icon = item.icon
               const isActive = item.key === tab
+              if (item.children) {
+                // Backups: a parent row that folds, and its pages indented
+                // under it. A search that matches a page keeps it open.
+                const open = backupsOpen || !!navQ
+                return (
+                  <div key={item.key} data-slot="nav-group">
+                    <SidebarRow
+                      selected={isActive && !open}
+                      onSelect={() => {
+                        if (!isActive) {
+                          setTab(item.key as TabKey, "overview")
+                          setBackupsOpen(true)
+                          setMobileNavOpen(false)
+                        } else setBackupsOpen(!backupsOpen)
+                      }}
+                      aria-label={item.label}
+                      aria-expanded={open}
+                    >
+                      <Icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
+                      <span className="truncate flex-1">{item.label}</span>
+                      <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 opacity-50 transition-transform", !open && "-rotate-90")} aria-hidden />
+                    </SidebarRow>
+                    {open && item.children.map((child) => (
+                      <SidebarRow
+                        key={child.key}
+                        indent
+                        selected={isActive && backupSection === child.key}
+                        onSelect={() => {
+                          setTab(item.key as TabKey, child.key)
+                          setMobileNavOpen(false)
+                        }}
+                        aria-label={`${item.label} › ${child.label}`}
+                        data-nav-child={child.key}
+                      >
+                        <span className="truncate flex-1">{child.label}</span>
+                      </SidebarRow>
+                    ))}
+                  </div>
+                )
+              }
               return (
                 <SidebarRow
                   key={item.key}
@@ -340,7 +387,7 @@ export default function AdminPage() {
       <SubBar
         icon={Shield}
         title="Admin Console"
-        section={activeItem?.label}
+        section={sectionLabel}
         ariaLabel="Admin Console"
         /* The console's own nav is a 280px column. On a phone that leaves the
            page 109px to render into, which is not a narrow layout — it is no
@@ -391,8 +438,11 @@ export default function AdminPage() {
           className="flex-1 min-w-0 overflow-y-auto"
           tabIndex={0}
           role="region"
-          aria-label={activeItem ? `Admin ${activeItem.label}` : "Admin content"}
+          aria-label={sectionLabel ? `Admin ${sectionLabel}` : "Admin content"}
         >
+        {CONSOLE_TABS.has(tab) ? (
+          <BackupsConsole page={tab === "retention" ? "retention" : backupSection} onNavigate={(s) => setTab("backups", s)} />
+        ) : (
         <div className={cn("mx-auto space-y-4 p-4 md:p-6", SETTINGS_TABS.has(tab) ? "max-w-3xl" : "max-w-5xl")}>
           {fetchError && (
             <div
@@ -405,6 +455,7 @@ export default function AdminPage() {
           )}
           {renderContent()}
         </div>
+        )}
       </div>
       </div>
     </div>

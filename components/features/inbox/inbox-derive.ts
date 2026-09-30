@@ -68,6 +68,10 @@ export function categoryOf(item: InboxItem): string {
   if (item.kind === "message" && payloadString(item, "subkind") === "routine_update") {
     return "routines.completed"
   }
+  // A backup incident is the server's health (internal/notify.CategoryForItem).
+  if (item.kind === "message" && payloadString(item, "subkind") === "backup_incident") {
+    return "system.health"
+  }
   return CATEGORY_BY_KIND[item.kind] ?? item.kind
 }
 
