@@ -16,6 +16,8 @@ The architectural choice that shapes everything else is "one bundle, one file". 
 
 Restores are intentionally cautious. `--dry-run` walks the entire restore plan — schema diff, row counts, blob deltas — and prints what *would* happen without writing a single byte to the destination database. Advisory locking (`backup_locks` table, per-workspace) prevents two concurrent `restore` runs from corrupting each other, and the lock file records the host + PID so `crewship backup status` can tell you who's holding it. If a host crashes mid-restore, `crewship backup unlock` is the manual recovery — admin-only with a confirmation prompt, because clearing a real lock from another live process is how you trash a workspace.
 
+Quota-enforced services with persistent volumes currently block crew and workspace bundle creation at every backup level. Their standalone disks require snapshot transport before a complete backup can be produced; the runner returns an explicit error rather than omitting those disks. Legacy service storage retains its existing backup behavior.
+
 ## When to use it
 
 Backups are cheap to make and expensive to wish you'd made. The five canonical reasons to run `crewship backup create`:
