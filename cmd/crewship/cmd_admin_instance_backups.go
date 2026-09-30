@@ -12,6 +12,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/cli"
 	"net/url"
 	"strings"
 	"text/tabwriter"
@@ -127,7 +128,7 @@ not (missing attachment files, memory blobs, crew containers). --workspace
 narrows it to comma-separated slugs or ids, --scope to workspace or crew.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -167,7 +168,7 @@ narrows it to comma-separated slugs or ids, --scope to workspace or crew.`,
 }
 
 func runInstanceBackupPin(cmd *cobra.Command, path string, pin bool) error {
-	client, err := requireAuthAndWorkspace()
+	client, err := requireInstanceAdminClient()
 	if err != nil {
 		return err
 	}
@@ -219,7 +220,7 @@ missing or lowered — the report says what) or failed. --format json carries
 each full report.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -252,4 +253,15 @@ func init() {
 	adminInstanceBackupsCmd.AddCommand(adminInstanceBackupsBundlesCmd, adminInstanceBackupsPinCmd,
 		adminInstanceBackupsUnpinCmd, adminInstanceBackupsRestoresCmd)
 	adminInstanceCmd.AddCommand(adminInstanceBackupsCmd)
+}
+
+// requireInstanceAdminClient is requireAuthAndWorkspace without the
+// workspace: every `admin instance backups|retention|holds …` route is
+// instance-wide (authedInstance) and answers without one, so an instance
+// admin need not select a workspace — or be a member of any — to use them.
+func requireInstanceAdminClient() (*cli.Client, error) {
+	if err := requireAuth(); err != nil {
+		return nil, err
+	}
+	return newAPIClient(), nil
 }

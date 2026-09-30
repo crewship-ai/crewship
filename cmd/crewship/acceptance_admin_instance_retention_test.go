@@ -73,6 +73,18 @@ func TestAcceptance_AdminInstanceRetention(t *testing.T) {
 		return d
 	}
 
+	// Instance commands need no selected workspace: an instance admin may
+	// belong to none (found live on dev3 — the CLI refused before the call).
+	noWs := filepath.Join(t.TempDir(), "cli-nows.yaml")
+	if err := os.WriteFile(noWs, []byte("server: "+srv.URL+"\ntoken: "+token+"\nformat: table\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	nws := exec.Command(binary, "admin", "instance", "retention", "get")
+	nws.Env = append(os.Environ(), "CREWSHIP_CONFIG="+noWs, "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=", "NO_COLOR=1", "DATABASE_URL=")
+	if out, err := nws.CombinedOutput(); err != nil || !strings.Contains(string(out), "lab") {
+		t.Fatalf("retention get without a selected workspace: %v\n%s", err, out)
+	}
+
 	// Everything starts forever for the new windows.
 	out := must("", "admin", "instance", "retention", "get")
 	if !strings.Contains(out, "lab") || !strings.Contains(out, "people") || !strings.Contains(out, "forever") || !strings.Contains(out, "Fixed instance limits") {

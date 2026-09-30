@@ -60,7 +60,7 @@ privileged mode, host paths, added capabilities, devices) stay off.
 Processes start fresh. --dry-run only checks.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}

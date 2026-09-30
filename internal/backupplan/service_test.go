@@ -339,6 +339,29 @@ func TestScheduler_InterruptedRunIsRetriedOnce(t *testing.T) {
 	}
 }
 
+// A held instance (after a restore) does not retry an interrupted run on its
+// own: found live — a recovered server retried the run that had taken its
+// bundle on the source and wrote a backup nobody asked for.
+func TestScheduler_InterruptedRunIsNotRetriedWhileHeld(t *testing.T) {
+	h := newHarness(t, "2026-09-30T03:30:00Z")
+	h.svc.Pause = fakePause{reason: "an instance restore left schedules held"}
+	p := h.plan(nil)
+	started := mustTime(t, "2026-09-30T03:00:00Z")
+	dead := &Run{PlanID: p.ID, Trigger: TriggerManual, Scope: ScopeWorkspaces, WorkspaceID: "ws_a", Status: StatusRunning,
+		Phase: PhaseCopy, Phases: initialPhases(false), Recipients: []string{h.key}, StartedAt: started}
+	if _, err := insertRun(context.Background(), h.db, dead); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.RecoverAtBoot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.tick()
+	rs := h.runs(p.ID)
+	if len(rs) != 1 || rs[0].Status != StatusInterrupted {
+		t.Fatalf("runs = %d (first status %s); want only the interrupted one, no retry", len(rs), rs[0].Status)
+	}
+}
+
 func TestScheduler_ConcurrencyQueuesTheRest(t *testing.T) {
 	h := newHarness(t, "2026-09-30T02:00:00Z")
 	p := h.plan(func(p *Plan) { p.WorkspaceIDs = []string{} }) // every workspace: three runs

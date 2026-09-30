@@ -39,7 +39,7 @@ func TestCollectCrew_ARefusedSectionKeepsTheRestOfTheCrew(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if len(capture.FailedSections) != 1 || !strings.HasPrefix(capture.FailedSections[0], ContainerWorkspacePath+": ") {
+	if len(capture.FailedSections) != 1 || capture.FailedSections[0] != ContainerWorkspacePath+": Error response from daemon: error while mounting volume: no such file or directory" {
 		t.Fatalf("FailedSections = %q", capture.FailedSections)
 	}
 	if capture.CrewMemoryFiles != 1 || capture.WorkspaceFiles != 0 {

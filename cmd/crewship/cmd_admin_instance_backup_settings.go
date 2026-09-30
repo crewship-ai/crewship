@@ -183,7 +183,7 @@ ping, which incidents reach the instance admins, the drill reminder, the
 recovery kit, and where copies are kept.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -260,7 +260,7 @@ others are still recorded. Recorded in the instance audit log.`,
 		if len(body) == 0 {
 			return errors.New("nothing to change: pass at least one flag (see --help)")
 		}
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -286,7 +286,7 @@ var adminInstanceBackupsRecipientsListCmd = &cobra.Command{
 	Long:  `GET /api/v1/admin/instance/backups/recipients. Public halves only; the private halves never reach the server.`,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -333,7 +333,7 @@ is refused. Recorded in the instance audit log.`,
 		if strings.TrimSpace(name) == "" || strings.TrimSpace(key) == "" {
 			return errors.New("--name and --public-key are required")
 		}
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -355,7 +355,7 @@ still encrypts to the key: change the plan first. Backups already made stay
 readable with the key's private half.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -381,7 +381,7 @@ var adminInstanceBackupsDestinationsListCmd = &cobra.Command{
 	Long:  `GET /api/v1/admin/instance/backups/destinations. The secret access key is never shown.`,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -467,7 +467,7 @@ there. Recorded in the instance audit log.`,
 			"prefix": get("prefix"), "access_key_id": get("access-key-id"), "secret_access_key": secret,
 			"path_style": pathStyle, "allow_private_network": private, "skip_test": skip,
 		}
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -496,7 +496,7 @@ var adminInstanceBackupsDestinationsTestCmd = &cobra.Command{
 	Long:  `POST /api/v1/admin/instance/backups/destinations/{id}/test. Puts, reads back and deletes one small object. The outcome is stored with the destination.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -521,7 +521,7 @@ still copies there. The copies already uploaded stay in the bucket; only the
 server's record of them goes.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -557,7 +557,7 @@ condition clears). Open ones first.`,
 		if len(q) > 0 {
 			path += "?" + q.Encode()
 		}
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -594,7 +594,7 @@ crewship recover and drill commands, and who the instance admins are. It holds
 no secret. --out writes it to a file.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}

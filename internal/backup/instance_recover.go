@@ -628,6 +628,19 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 				rep.RuntimeReset = append(rep.RuntimeReset, fmt.Sprintf("%s (%d)", r.what, n))
 			}
 		}
+		// Backup runs that were in flight (or queued) on the source when the
+		// bundle was taken — the run that took it, usually — are not this
+		// server's to finish: left "running", the scheduler would treat them
+		// as interrupted by a crash and retry them on first boot.
+		if res, err := db.ExecContext(ctx, `UPDATE backup_runs SET status = 'interrupted',
+			error = 'was running on the source server when this backup was taken; not retried after a restore',
+			ended_at = ? WHERE status = 'running'`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			if !strings.Contains(strings.ToLower(err.Error()), "no such table") {
+				return fmt.Errorf("backup: close source backup runs: %w", err)
+			}
+		} else if n, _ := res.RowsAffected(); n > 0 {
+			rep.RuntimeReset = append(rep.RuntimeReset, fmt.Sprintf("backup runs in flight on the source (%d)", n))
+		}
 		// The new host fills in its own identity at first boot.
 		if _, err := db.ExecContext(ctx, `UPDATE instance_config SET hostname = '' WHERE id = 1`); err != nil && !strings.Contains(err.Error(), "no such table") {
 			return err

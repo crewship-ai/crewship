@@ -939,6 +939,16 @@ func (s *Service) RecoverAtBoot(ctx context.Context) (int, error) {
 			s.afterRun(ctx, r, s.planOf(ctx, r.PlanID))
 			continue
 		}
+		if s.Pause != nil {
+			// A held instance (after a restore, typically) starts no
+			// backup on its own, a retry included: it would write a
+			// bundle nobody asked for on a server nobody has checked.
+			if paused, reason := s.Pause.Paused(ctx); paused {
+				s.Logger.Info("backup scheduler: interrupted run not retried while the instance is held", "run", r.ID, "reason", reason)
+				s.afterRun(ctx, r, s.planOf(ctx, r.PlanID))
+				continue
+			}
+		}
 		retry := &Run{
 			PlanID: r.PlanID, Trigger: r.Trigger, Note: "retry after interruption", Scope: r.Scope,
 			WorkspaceID: r.WorkspaceID, Kind: r.Kind, Categories: r.Categories, Environments: r.Environments,

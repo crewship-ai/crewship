@@ -272,7 +272,7 @@ var adminInstanceBackupsPlansListCmd = &cobra.Command{
 	Long:  `GET /api/v1/admin/instance/backups/plans.`,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -297,7 +297,7 @@ var adminInstanceBackupsPlansGetCmd = &cobra.Command{
 	Long:  `GET /api/v1/admin/instance/backups/plans/{id}.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -419,7 +419,7 @@ categories in --contents). --recipient is required: every backup is
 encrypted. Recorded in the instance audit log.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -441,7 +441,7 @@ var adminInstanceBackupsPlansUpdateCmd = &cobra.Command{
 change; the next run time is recomputed. Recorded in the instance audit log.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -463,7 +463,7 @@ var adminInstanceBackupsPlansDeleteCmd = &cobra.Command{
 stay. Recorded in the instance audit log.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -481,7 +481,7 @@ var adminInstanceBackupsPlansNextCmd = &cobra.Command{
 	Long:  `GET /api/v1/admin/instance/backups/plans/{id}/next?n=5.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -510,7 +510,7 @@ are YYYY-MM-DD in the plan's timezone; the default is the last 7 and the
 next 28 days.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -542,7 +542,7 @@ var adminInstanceBackupsPlansPreviewCmd = &cobra.Command{
 	Long:  `POST /api/v1/admin/instance/backups/plans/preview-contents.`,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -585,7 +585,7 @@ skipped), phases, and the bundle's proof level. --ws takes workspace slugs
 or ids.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -631,7 +631,7 @@ plan that covers the scope are used. The passphrase is held in the server's
 memory until the run starts and never stored.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -743,7 +743,7 @@ of 'backups runs'. Exits non-zero when the run failed, was interrupted or was
 skipped.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -767,7 +767,7 @@ selection (custom backups never count): verified, partial, failed,
 contents_checked, checksum_only or none.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}

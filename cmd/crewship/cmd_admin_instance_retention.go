@@ -130,7 +130,7 @@ the server applies on its own. --ws narrows it to some workspaces
 (comma-separated slugs or ids).`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -190,7 +190,7 @@ does not change what a workspace created later starts with — that is
 'retention defaults set'.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -320,7 +320,7 @@ created now starts with. SOURCE says whether an administrator set it or it is
 the product default.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -357,7 +357,7 @@ created later starts with. It shows the change first and asks; --yes skips the
 question, --dry-run only shows.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}

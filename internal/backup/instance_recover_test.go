@@ -172,6 +172,12 @@ func (f *instanceFixture) create(t *testing.T, kit bool) *backup.InstanceResult 
 func TestInstanceBackupRecoverRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	f := newInstanceFixture(t)
+	// The run that takes a bundle is itself "running" in the snapshot; a
+	// restored server must not retry it (found live on dev3).
+	if _, err := f.db.ExecContext(ctx, `INSERT INTO backup_runs (id, trigger, scope, status, phase, started_at)
+		VALUES ('br_inflight', 'manual', 'instance', 'running', 'copy', '2026-09-30T14:52:12Z')`); err != nil {
+		t.Fatal(err)
+	}
 	created := f.create(t, true)
 
 	m := created.Manifest
@@ -236,6 +242,12 @@ func TestInstanceBackupRecoverRoundTrip(t *testing.T) {
 			t.Fatalf("%s: %v", q, err)
 		}
 		return n
+	}
+	if n := count(`SELECT COUNT(*) FROM backup_runs WHERE status = 'running'`); n != 0 {
+		t.Fatalf("%d backup run(s) left running in the restored database; the server would retry them", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM backup_runs WHERE id = 'br_inflight' AND status = 'interrupted' AND error LIKE 'was running on the source%'`); n != 1 {
+		t.Fatal("the source's in-flight run is not marked interrupted-without-retry")
 	}
 	if n := count(`SELECT COUNT(*) FROM workspaces`); n != 2 {
 		t.Errorf("workspaces = %d", n)

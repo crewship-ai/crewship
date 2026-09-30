@@ -226,7 +226,7 @@ func collectCrewSections(ctx context.Context, ops DockerOps, dst *TarZstWriter, 
 			}
 			res, err := copyContainerPath(ctx, ops, dst, crew.ContainerID, p.src, p.prefix, p.excludes)
 			if err != nil && errors.Is(err, errSectionUnavailable) && ctx.Err() == nil {
-				capture.FailedSections = append(capture.FailedSections, fmt.Sprintf("%s: %v", p.src, errors.Unwrap(err)))
+				capture.FailedSections = append(capture.FailedSections, fmt.Sprintf("%s: %s", p.src, strings.TrimPrefix(err.Error(), errSectionUnavailable.Error()+": ")))
 				slog.Warn("backup: crew section could not be copied; the rest of the crew is kept",
 					"crew", crew.Slug, "path", p.src, "error", err)
 				continue

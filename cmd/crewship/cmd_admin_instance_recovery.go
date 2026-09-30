@@ -150,7 +150,7 @@ integration keys) use it, and whether the recovery kit is on. Counts only:
 no key material is shown.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -190,7 +190,7 @@ secret in the instance. Recorded in the instance audit log.`,
 		default:
 			return errors.New("say on or off")
 		}
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -220,7 +220,7 @@ bundle is recorded as "contents checked". The key is sent for this check only
 and never stored. Nothing is restored.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -266,7 +266,7 @@ mounts, privileged mode, host path binds. --target is empty_server, isolated,
 replace, new_workspace or crew.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -317,7 +317,7 @@ var adminInstanceBackupsDrillsCmd = &cobra.Command{
 partial (the WARN column counts what did not pass) or failed.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -353,7 +353,7 @@ var adminInstanceHoldsListCmd = &cobra.Command{
 	Long:  `GET /api/v1/admin/instance/holds.`,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
@@ -383,7 +383,7 @@ var adminInstanceHoldsResumeCmd = &cobra.Command{
 	Args:      cobra.ExactArgs(1),
 	ValidArgs: []string{"routines", "webhooks", "queue", "all"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireInstanceAdminClient()
 		if err != nil {
 			return err
 		}
