@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 var ErrNotFound = errors.New("container not found")
@@ -97,7 +99,7 @@ func (c *Controller) Statuses(ctx context.Context) ([]Status, error) {
 		return nil, err
 	}
 	fresh := false
-	if t, parseErr := time.Parse(time.RFC3339Nano, scan.observedAt); err == nil && parseErr == nil {
+	if t, parseErr := time.Parse(time.RFC3339, scan.observedAt); err == nil && parseErr == nil {
 		fresh = scan.complete && !t.Before(c.BootAt) && time.Since(t) <= StaleAfter && !c.lastScanFailed.Load()
 	}
 	rows, err := c.DB.QueryContext(ctx, `SELECT crew_id,state,complete,remaining,unattributed,error_code FROM resource_cleanup_status WHERE instance_id=? ORDER BY crew_id`, c.InstanceID)
@@ -164,7 +166,7 @@ func (c *Controller) storedStatuses(ctx context.Context) (map[string]storedStatu
 
 func (c *Controller) storeScan(ctx context.Context, complete bool, code string) error {
 	_, err := c.DB.ExecContext(ctx, `INSERT INTO resource_cleanup_scans(instance_id,observed_at,complete,error_code) VALUES(?,?,?,?)
- ON CONFLICT(instance_id) DO UPDATE SET observed_at=excluded.observed_at,complete=excluded.complete,error_code=excluded.error_code`, c.InstanceID, time.Now().UTC().Format(time.RFC3339Nano), complete, code)
+ ON CONFLICT(instance_id) DO UPDATE SET observed_at=excluded.observed_at,complete=excluded.complete,error_code=excluded.error_code`, c.InstanceID, tsformat.Format(time.Now()), complete, code)
 	return err
 }
 func (c *Controller) deleted(ctx context.Context, crew string) (bool, error) {
@@ -275,7 +277,7 @@ func (c *Controller) Tick(ctx context.Context) {
 				if jsonErr != nil {
 					code = "mount_snapshot_failed"
 				} else {
-					_, saveErr := c.DB.ExecContext(stepCtx, `INSERT INTO resource_cleanup_mounts(instance_id,crew_id,container_id,mounts_json,observed_at) VALUES(?,?,?,?,?) ON CONFLICT(instance_id,container_id) DO NOTHING`, c.InstanceID, x.CrewID, x.ID, string(b), time.Now().UTC().Format(time.RFC3339Nano))
+					_, saveErr := c.DB.ExecContext(stepCtx, `INSERT INTO resource_cleanup_mounts(instance_id,crew_id,container_id,mounts_json,observed_at) VALUES(?,?,?,?,?) ON CONFLICT(instance_id,container_id) DO NOTHING`, c.InstanceID, x.CrewID, x.ID, string(b), tsformat.Format(time.Now()))
 					if saveErr != nil {
 						code = "mount_snapshot_failed"
 					} else if saveErr = c.store(stepCtx, s); saveErr != nil {
@@ -333,7 +335,7 @@ func (c *Controller) Tick(ctx context.Context) {
 	}
 	writeFailed := false
 	for id, s := range states {
-		s.ObservedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		s.ObservedAt = tsformat.Format(time.Now())
 		s.Complete = true
 		if s.Error != "" {
 			s.State = "error"

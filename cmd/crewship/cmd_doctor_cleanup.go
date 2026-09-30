@@ -42,7 +42,7 @@ func readLocalCleanup(ctx context.Context) ([]localCleanupSnapshot, error) {
 		if err := rows.Scan(&s.InstanceID, &s.CrewID, &s.State, &s.ObservedAt, &s.Complete, &s.Remaining, &s.Unattributed, &s.Error); err != nil {
 			return nil, err
 		}
-		observed, err := time.Parse(time.RFC3339Nano, s.ObservedAt)
+		observed, err := time.Parse(time.RFC3339, s.ObservedAt)
 		s.Stale = err != nil || !s.Complete || time.Since(observed) > resourcelifecycle.StaleAfter
 		// All local results are historical observations, never live host clearance.
 		if s.Stale {
