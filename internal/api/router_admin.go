@@ -30,7 +30,9 @@ func (r *Router) registerAdminRoutes() {
 
 	// Admin
 	r.authedAdmin("GET", "/api/v1/admin/resource-cleanup", func(w http.ResponseWriter, req *http.Request) {
-		statuses, err := r.containerCleanup.Statuses(req.Context())
+		// Scoped to the caller's workspace like every other admin read; a
+		// deleted workspace's rows remain readable locally via doctor cleanup.
+		statuses, err := r.containerCleanup.Statuses(req.Context(), WorkspaceIDFromContext(req.Context()))
 		if err != nil {
 			replyInternalError(w, r.logger, "read container cleanup diagnostics", err)
 			return

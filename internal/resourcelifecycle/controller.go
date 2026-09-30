@@ -71,24 +71,30 @@ func (c *Controller) Run(ctx context.Context) {
 		}
 	}
 }
-func (c *Controller) Pending(ctx context.Context, crew string) Status {
+
+// Pending records that the crew was just deleted. workspace scopes who may
+// read the observation back through the admin API.
+func (c *Controller) Pending(ctx context.Context, workspace, crew string) Status {
 	s := Status{CrewID: crew, Scope: "containers", State: "pending"}
 	if c == nil || c.InstanceID == "" || c.Connect == nil || c.DB == nil {
 		s.State = "disabled"
 		return s
 	}
-	if err := c.store(ctx, s); err != nil {
+	if err := c.store(ctx, workspace, s); err != nil {
 		s.State = "error"
 		s.Error = "diagnostic_write_failed"
 	}
 	return s
 }
-func (c *Controller) store(ctx context.Context, s Status) error {
-	_, err := c.DB.ExecContext(ctx, `INSERT INTO resource_cleanup_status(instance_id,crew_id,state,observed_at,complete,remaining,unattributed,error_code)
- VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(instance_id,crew_id) DO UPDATE SET state=excluded.state,observed_at=excluded.observed_at,complete=excluded.complete,remaining=excluded.remaining,unattributed=excluded.unattributed,error_code=excluded.error_code`, c.InstanceID, s.CrewID, s.State, s.ObservedAt, s.Complete, s.Remaining, s.Unattributed, s.Error)
+func (c *Controller) store(ctx context.Context, workspace string, s Status) error {
+	_, err := c.DB.ExecContext(ctx, `INSERT INTO resource_cleanup_status(instance_id,crew_id,workspace_id,state,observed_at,complete,remaining,unattributed,error_code)
+ VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(instance_id,crew_id) DO UPDATE SET workspace_id=excluded.workspace_id,state=excluded.state,observed_at=excluded.observed_at,complete=excluded.complete,remaining=excluded.remaining,unattributed=excluded.unattributed,error_code=excluded.error_code`, c.InstanceID, s.CrewID, workspace, s.State, s.ObservedAt, s.Complete, s.Remaining, s.Unattributed, s.Error)
 	return err
 }
-func (c *Controller) Statuses(ctx context.Context) ([]Status, error) {
+
+// Statuses returns this installation's observations for one workspace. Rows
+// are instance-wide, but workspace admins must not see other tenants' crews.
+func (c *Controller) Statuses(ctx context.Context, workspace string) ([]Status, error) {
 	out := []Status{}
 	if c == nil || c.DB == nil || c.InstanceID == "" {
 		return out, nil
@@ -102,7 +108,7 @@ func (c *Controller) Statuses(ctx context.Context) ([]Status, error) {
 	if t, parseErr := time.Parse(time.RFC3339, scan.observedAt); err == nil && parseErr == nil {
 		fresh = scan.complete && !t.Before(c.BootAt) && time.Since(t) <= StaleAfter && !c.lastScanFailed.Load()
 	}
-	rows, err := c.DB.QueryContext(ctx, `SELECT crew_id,state,complete,remaining,unattributed,error_code FROM resource_cleanup_status WHERE instance_id=? ORDER BY crew_id`, c.InstanceID)
+	rows, err := c.DB.QueryContext(ctx, `SELECT crew_id,state,complete,remaining,unattributed,error_code FROM resource_cleanup_status WHERE instance_id=? AND workspace_id=? ORDER BY crew_id`, c.InstanceID, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -187,20 +193,22 @@ func (c *Controller) Tick(ctx context.Context) {
 	if c == nil || c.DB == nil || c.InstanceID == "" || c.Connect == nil {
 		return
 	}
-	rows, err := c.DB.QueryContext(ctx, `SELECT id FROM crews WHERE deleted_at IS NOT NULL`)
+	rows, err := c.DB.QueryContext(ctx, `SELECT id,workspace_id FROM crews WHERE deleted_at IS NOT NULL`)
 	if err != nil {
 		c.invalidate(ctx, "owner_inventory_failed")
 		return
 	}
 	states := map[string]Status{}
+	workspaces := map[string]string{}
 	for rows.Next() {
-		var id string
-		if rows.Scan(&id) != nil {
+		var id, workspace string
+		if rows.Scan(&id, &workspace) != nil {
 			rows.Close()
 			c.invalidate(ctx, "owner_inventory_failed")
 			return
 		}
 		states[id] = Status{CrewID: id, Scope: "containers", State: "pending"}
+		workspaces[id] = workspace
 	}
 	rowErr := rows.Err()
 	rows.Close()
@@ -280,7 +288,7 @@ func (c *Controller) Tick(ctx context.Context) {
 					_, saveErr := c.DB.ExecContext(stepCtx, `INSERT INTO resource_cleanup_mounts(instance_id,crew_id,container_id,mounts_json,observed_at) VALUES(?,?,?,?,?) ON CONFLICT(instance_id,container_id) DO NOTHING`, c.InstanceID, x.CrewID, x.ID, string(b), tsformat.Format(time.Now()))
 					if saveErr != nil {
 						code = "mount_snapshot_failed"
-					} else if saveErr = c.store(stepCtx, s); saveErr != nil {
+					} else if saveErr = c.store(stepCtx, workspaces[x.CrewID], s); saveErr != nil {
 						code = "diagnostic_write_failed"
 					} else {
 						stopErr := rt.Stop(stepCtx, x.ID)
@@ -352,7 +360,7 @@ func (c *Controller) Tick(ctx context.Context) {
 		if !ok && s.State == "observed_clear" && s.Unattributed == 0 {
 			continue
 		}
-		if err := c.store(ctx, s); err != nil {
+		if err := c.store(ctx, workspaces[id], s); err != nil {
 			writeFailed = true
 			c.logWriteFailure(ctx)
 		}

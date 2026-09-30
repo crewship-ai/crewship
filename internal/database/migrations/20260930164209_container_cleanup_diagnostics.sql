@@ -3,6 +3,9 @@
 CREATE TABLE resource_cleanup_status (
  instance_id TEXT NOT NULL,
  crew_id TEXT NOT NULL,
+ -- Owning workspace at deletion time: the admin API shows a caller only its
+ -- own workspace's rows. No FK, for the same reason as above.
+ workspace_id TEXT NOT NULL DEFAULT '',
  state TEXT NOT NULL,
  observed_at TEXT NOT NULL DEFAULT '',
  complete INTEGER NOT NULL DEFAULT 0,

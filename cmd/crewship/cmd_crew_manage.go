@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"unicode"
 
@@ -467,7 +466,7 @@ var crewDeleteCmd = &cobra.Command{
 
 		cli.PrintSuccess("Crew deleted.")
 		if deleted.Cleanup != nil {
-			fmt.Fprintf(os.Stderr, "Runtime cleanup (%s): %s. Inspect with crewship admin cleanup or local doctor cleanup.\n", deleted.Cleanup.Scope, deleted.Cleanup.State)
+			fmt.Fprintf(cmd.ErrOrStderr(), "Runtime cleanup (%s): %s. Inspect with crewship admin cleanup or local doctor cleanup.\n", deleted.Cleanup.Scope, deleted.Cleanup.State)
 		}
 		switch {
 		case unreadable:

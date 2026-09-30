@@ -79,13 +79,13 @@ func fixture(t *testing.T) (*Controller, *fakeRuntime) {
 	if _, err = db.Exec(string(b)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec(`CREATE TABLE crews(id TEXT PRIMARY KEY,deleted_at TEXT);INSERT INTO crews VALUES('deleted','2026-09-30'),('live',NULL)`); err != nil {
+	if _, err = db.Exec(`CREATE TABLE crews(id TEXT PRIMARY KEY,deleted_at TEXT,workspace_id TEXT NOT NULL DEFAULT 'ws-a');INSERT INTO crews(id,deleted_at) VALUES('deleted','2026-09-30'),('live',NULL)`); err != nil {
 		t.Fatal(err)
 	}
 	f := &fakeRuntime{items: map[string]Container{}}
 	c := &Controller{DB: db, InstanceID: "installation-a", BootAt: time.Now().UTC(), Connect: func(context.Context) (Runtime, error) { return f, nil }}
 	// The crew DELETE handler records the pending owner.
-	c.Pending(context.Background(), "deleted")
+	c.Pending(context.Background(), "ws-a", "deleted")
 	return c, f
 }
 func item(id, owner, instance string) Container {
@@ -93,7 +93,7 @@ func item(id, owner, instance string) Container {
 }
 func status(t *testing.T, c *Controller) Status {
 	t.Helper()
-	s, err := c.Statuses(context.Background())
+	s, err := c.Statuses(context.Background(), "ws-a")
 	if err != nil || len(s) != 1 {
 		t.Fatalf("statuses %v %v", s, err)
 	}
@@ -324,7 +324,7 @@ func TestInstallationIdentityConcurrentCreateAndInvalid(t *testing.T) {
 func TestSteadyStateTicksWriteOnlyTheScanRow(t *testing.T) {
 	c, _ := fixture(t)
 	for i := 0; i < 50; i++ {
-		if _, err := c.DB.Exec(`INSERT INTO crews VALUES(?, '2026-09-30')`, fmt.Sprintf("old-%d", i)); err != nil {
+		if _, err := c.DB.Exec(`INSERT INTO crews(id,deleted_at) VALUES(?, '2026-09-30')`, fmt.Sprintf("old-%d", i)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -359,9 +359,9 @@ func TestOwnerInventoryIterationFailureInvalidatesPriorClear(t *testing.T) {
 			}
 			var err error
 			if mode == "scan" {
-				_, err = c.DB.Exec(`INSERT INTO crews VALUES(NULL,'deleted')`)
+				_, err = c.DB.Exec(`INSERT INTO crews(id,deleted_at) VALUES(NULL,'deleted')`)
 			} else {
-				_, err = c.DB.Exec(`ALTER TABLE crews RENAME TO owners; CREATE VIEW crews AS SELECT id,deleted_at FROM owners UNION ALL SELECT json_extract('invalid-json','$'),'deleted'`)
+				_, err = c.DB.Exec(`ALTER TABLE crews RENAME TO owners; CREATE VIEW crews AS SELECT id,deleted_at,workspace_id FROM owners UNION ALL SELECT json_extract('invalid-json','$'),'deleted','ws-a'`)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -383,5 +383,24 @@ func TestFinalDiagnosticWriteFailureInvalidatesPriorClear(t *testing.T) {
 	c.Tick(context.Background())
 	if s := status(t, c); s.State != "unknown" || s.Complete || s.Error != "diagnostic_write_failed" {
 		t.Fatalf("false persisted clear %+v", s)
+	}
+}
+
+// Status rows are instance-wide; a workspace admin must see only its own crews.
+func TestStatusesAreScopedToTheCallersWorkspace(t *testing.T) {
+	c, f := fixture(t)
+	if _, err := c.DB.Exec(`INSERT INTO crews(id,deleted_at,workspace_id) VALUES('other','2026-09-30','ws-b')`); err != nil {
+		t.Fatal(err)
+	}
+	f.items["b"] = item("b", "other", c.InstanceID)
+	f.failStage = "remove"
+	c.Tick(context.Background())
+	own, err := c.Statuses(context.Background(), "ws-a")
+	if err != nil || len(own) != 1 || own[0].CrewID != "deleted" {
+		t.Fatalf("ws-a sees %+v %v", own, err)
+	}
+	other, err := c.Statuses(context.Background(), "ws-b")
+	if err != nil || len(other) != 1 || other[0].CrewID != "other" || other[0].Error != "remove_failed" {
+		t.Fatalf("ws-b sees %+v %v", other, err)
 	}
 }

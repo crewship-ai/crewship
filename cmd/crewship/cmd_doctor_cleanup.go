@@ -14,6 +14,7 @@ import (
 
 type localCleanupSnapshot struct {
 	InstanceID               string `json:"instance_id" yaml:"instance_id"`
+	WorkspaceID              string `json:"workspace_id" yaml:"workspace_id"`
 	resourcelifecycle.Status `json:",inline" yaml:",inline"`
 	Stale                    bool `json:"stale" yaml:"stale"`
 }
@@ -29,7 +30,7 @@ func readLocalCleanup(ctx context.Context) ([]localCleanupSnapshot, error) {
 	defer db.Close()
 	// Owner rows change only on transitions; the installation scan row carries
 	// when they were last confirmed and whether that scan was complete.
-	rows, err := db.QueryContext(ctx, `SELECT s.instance_id,s.crew_id,s.state,COALESCE(sc.observed_at,''),COALESCE(sc.complete,0),s.remaining,s.unattributed,
+	rows, err := db.QueryContext(ctx, `SELECT s.instance_id,s.workspace_id,s.crew_id,s.state,COALESCE(sc.observed_at,''),COALESCE(sc.complete,0),s.remaining,s.unattributed,
  CASE WHEN s.error_code<>'' THEN s.error_code ELSE COALESCE(sc.error_code,'') END
  FROM resource_cleanup_status s LEFT JOIN resource_cleanup_scans sc ON sc.instance_id=s.instance_id ORDER BY s.instance_id,s.crew_id`)
 	if err != nil {
@@ -39,7 +40,7 @@ func readLocalCleanup(ctx context.Context) ([]localCleanupSnapshot, error) {
 	out := []localCleanupSnapshot{}
 	for rows.Next() {
 		s := localCleanupSnapshot{Status: resourcelifecycle.Status{Scope: "containers"}}
-		if err := rows.Scan(&s.InstanceID, &s.CrewID, &s.State, &s.ObservedAt, &s.Complete, &s.Remaining, &s.Unattributed, &s.Error); err != nil {
+		if err := rows.Scan(&s.InstanceID, &s.WorkspaceID, &s.CrewID, &s.State, &s.ObservedAt, &s.Complete, &s.Remaining, &s.Unattributed, &s.Error); err != nil {
 			return nil, err
 		}
 		observed, err := time.Parse(time.RFC3339, s.ObservedAt)

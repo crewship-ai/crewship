@@ -69,8 +69,10 @@ An incomplete scan or disconnected Docker is `unknown`; a failed candidate step
 is `error`; a removal backlog is `pending`.
 
 `GET /api/v1/admin/resource-cleanup` and `crewship admin cleanup` read persisted diagnostics. It uses the
-existing authenticated ADMIN/OWNER workspace gate. Results survive deletion of
-their original workspace and can be read from another authorized workspace.
+existing authenticated ADMIN/OWNER workspace gate and, like every other admin
+read, returns only crews of the caller's workspace; other tenants' crew IDs and
+states are never visible. Once a workspace is deleted its rows are readable
+only locally through `crewship doctor cleanup`.
 Freshness comes from one per-installation scan record written on every
 complete scan. Per-owner records are written only when their state changes, and
 a tombstone that never had a container needs no record at all, so the steady

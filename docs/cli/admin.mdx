@@ -885,11 +885,11 @@ crewship admin cleanup --format json
 ```
 
 The response includes `scope=containers`, controller state and per-crew `items`
-with observation time, completeness, remaining eligible containers, legacy
+for crews of the selected workspace only, with observation time, completeness, remaining eligible containers, legacy
 unattributed count and fixed error codes. `observed_clear` describes the last
 complete eligible-container scan, not volumes, host data or future creates.
 Stale observations read as `unknown`.
 
-If the last authorized workspace is deleted or the server is unavailable, use
+If the crew's workspace is deleted or the server is unavailable, use
 `crewship doctor cleanup --format json` on the host to read historical local
 snapshots without workspace membership.
