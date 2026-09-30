@@ -41,3 +41,15 @@ func checkServiceQuotas(h *container.HostConfig) error {
 	}
 	return nil
 }
+
+// Managed service desired state belongs to the leased controller. Docker must
+// not independently resurrect a stopped service before controller startup.
+func checkServiceRestartPolicy(h *container.HostConfig, managed bool) error {
+	if h == nil {
+		return fmt.Errorf("service HostConfig unavailable")
+	}
+	if managed && (h.RestartPolicy.Name != container.RestartPolicyDisabled || h.RestartPolicy.MaximumRetryCount != 0) {
+		return fmt.Errorf("managed service automatic restart drift")
+	}
+	return nil
+}
