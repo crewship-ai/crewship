@@ -66,6 +66,42 @@ type CreateOptions struct {
 	// BlobRoot disables versioning" convention.
 	BlobRoot         string
 	PageProjectsPath string
+	// AttachmentRoot is the storage root attachment blobs live under on
+	// THIS (source) instance — the directory holding attachments/<workspace>/
+	// <sha[:2]>/<sha> (internal/api attachmentBlobPath). When set, every blob
+	// the dump's `attachments` rows reference is collected into the bundle.
+	// Empty collects none, and every referenced blob is then recorded as
+	// missing in the manifest rather than silently left behind.
+	AttachmentRoot string
+	// Categories, when non-empty, makes this a custom bundle that carries
+	// only these contents categories (categories.go): the dump keeps the
+	// tables of those categories plus the anchor rows, and the collectors
+	// skip every section outside them. The caller passes the resolved list
+	// (dependencies included, see ResolveContents). The manifest records
+	// kind=custom and the list, and such a bundle never counts as
+	// protecting a workspace. Empty means a full bundle.
+	Categories []string
+	// Progress, when set, is told as the run enters each phase: "copy"
+	// (crew files and the database dump), "pack" (closing the payload),
+	// "encrypt" (sealing it) and "write" (the bundle file). Called from
+	// CreateBackup's goroutine; it must not block for long.
+	Progress func(phase string)
+	// EnvMode "complete" also captures each crew container's complete
+	// environment (environment.go) under the same pause as its files: the
+	// committed image goes into the environment store beside the bundle,
+	// the configuration and extra mounts into the payload. "" or "files"
+	// takes the files alone.
+	EnvMode string
+	// EnvInline puts the environment blobs in the payload too, so the
+	// bundle restores without the store — what an off-site copy needs.
+	EnvInline bool
+	// EncoderConcurrency caps the zstd encoder's goroutines (the backup
+	// settings' cpu_cores). <= 0 keeps the library default.
+	EncoderConcurrency int
+	// DiskThrottle caps the bytes written to staging and to the bundle
+	// file (the backup settings' disk_mbps, one limiter shared by every
+	// run). Nil: no cap.
+	DiskThrottle Throttle
 }
 
 // Validate returns an error if opts lack the fields required by its
@@ -154,6 +190,15 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	if err := opts.Validate(); err != nil {
 		return nil, err
 	}
+	filter, err := newCategoryFilter(opts.Categories)
+	if err != nil {
+		return nil, err
+	}
+	progress := func(phase string) {
+		if opts.Progress != nil {
+			opts.Progress(phase)
+		}
+	}
 	st := resolveStorage(opts.Storage)
 
 	// Observability: capture duration + classify outcome regardless of
@@ -199,7 +244,6 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	// 1. Resolve targets. `target` is declared in the deferred webhook
 	// block above so crew-scope events can populate WorkspaceID from
 	// the resolved target.ID.
-	var err error
 	switch opts.Scope {
 	case ScopeWorkspace:
 		target, err = LoadWorkspaceTarget(ctx, db, opts.WorkspaceID, opts.CrewContainerName)
@@ -229,43 +273,8 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	// buildContents turns that into the manifest's per-crew flag and
 	// Contents.MissingContainerCrews, and CreateResult reads it back
 	// from there — one source, three surfaces (#2612).
-	if opts.DockerOps != nil {
-		for i := range target.CrewTargets {
-			c := &target.CrewTargets[i]
-			if c.ContainerID == "" {
-				continue
-			}
-			exists, exErr := opts.DockerOps.ContainerExists(ctx, c.ContainerID)
-			if exErr != nil {
-				// Daemon hiccup / permission error — fail loudly. The
-				// previous behaviour silently zeroed ContainerID and
-				// kept going, which produced "successful" bundles
-				// where every crew's filesystem was missing — much
-				// worse than a clear backup error the operator can
-				// retry. Only the definite-absent case (exists=false
-				// below) skips the section.
-				return nil, fmt.Errorf("backup: probe container %s for crew %s: %w", c.ContainerID, c.Slug, exErr)
-			}
-			if !exists {
-				// cached_image is what the provisioning flow sets on a
-				// crew whose container was actually built, so its
-				// presence separates "container vanished" (a provisioned
-				// crew whose files are now MISSING from this bundle) from
-				// "never provisioned" (a DB-only crew, nothing missing).
-				// The first is recorded on the result and the manifest —
-				// an incomplete export must not read as a complete one
-				// (#2612); the second is a normal state and is not.
-				if c.CachedImageDigest != "" {
-					c.ContainerMissing = true
-					slog.Warn("backup: crew's container is gone from the daemon; bundle carries DB rows only",
-						"crew", c.Slug, "container", c.ContainerID, "workspace_id", target.ID)
-				} else {
-					slog.Info("backup: crew was never provisioned; backing up DB rows only",
-						"crew", c.Slug, "workspace_id", target.ID)
-				}
-				c.ContainerID = ""
-			}
-		}
+	if err := reconcileCrewContainers(ctx, opts.DockerOps, target); err != nil {
+		return nil, err
 	}
 
 	// 2a. Acquire the in-process workspace guard BEFORE the DB lock.
@@ -327,39 +336,57 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	}
 	cleanupStalePartials(ctx, st, outDir, cleanupSlug, time.Hour)
 
-	// 5. Build the payload tar to a temp file so peak memory is bounded
-	// by the zstd encoder's window (a few MB) rather than the full
-	// workspace size. A multi-GB workspace therefore stays within
-	// reasonable RAM even on modest hosts.
+	progress("copy")
+	// 5. Stream the payload tar through zstd and the sealer straight into
+	// one temp file (seal_stream.go): peak memory is bounded by the zstd
+	// encoder's window, and no plaintext payload ever touches disk — the
+	// only staging file is ciphertext, hashed and counted as it is written.
 	now := time.Now().UTC()
-	payloadFile, err := st.CreateTemp(ctx, "", "crewship-backup-payload-*.tar.zst")
+	sealedFile, err := st.CreateTemp(ctx, "", "crewship-backup-sealed-*")
 	if err != nil {
-		return nil, fmt.Errorf("backup: create payload temp: %w", err)
+		return nil, fmt.Errorf("backup: create sealed temp: %w", err)
 	}
-	payloadPath := payloadFile.Name()
+	sealedPath := sealedFile.Name()
 	// Cleanup must run even if the request ctx is cancelled — we
 	// still need to remove the temp file, otherwise a client
 	// disconnect leaks GBs of staging data.
-	defer func() { _ = st.Remove(context.Background(), payloadPath) }()
+	defer func() { _ = st.Remove(context.Background(), sealedPath) }()
 
-	payloadWriter, err := NewTarZstWriter(payloadFile)
+	sealer, err := NewSealWriter(NewThrottledWriter(ctx, sealedFile, opts.DiskThrottle), WriteBundleOptions{
+		Recipients: opts.Recipients,
+		Passphrase: opts.Passphrase,
+		NoEncrypt:  opts.NoEncrypt,
+	})
 	if err != nil {
-		_ = payloadFile.Close()
+		_ = sealedFile.Close()
+		return nil, err
+	}
+	payloadWriter, err := NewTarZstWriterConcurrency(sealer, opts.EncoderConcurrency)
+	if err != nil {
+		_ = sealedFile.Close()
 		return nil, err
 	}
 
-	// 5a. Per-crew live data.
+	// 5a. Per-crew live data, and each crew's complete environment when
+	// asked for.
 	level := opts.Level
 	if !level.Valid() {
 		level = DefaultScopeLevel
 	}
+	envRun := newEnvironmentRun(db, outDir, opts.EnvMode, opts.EnvInline, now)
+	level = envRun.level(level)
+	defer func() {
+		if retErr != nil {
+			envRun.release()
+		}
+	}()
 	captures := map[string]CrewCapture{}
 	for _, crew := range target.CrewTargets {
 		if opts.DockerOps != nil && crew.ContainerID != "" {
-			capture, err := CollectCrew(ctx, opts.DockerOps, payloadWriter, crew, level)
+			capture, err := envRun.collect(ctx, opts.DockerOps, payloadWriter, crew, level, filter.section)
 			if err != nil {
 				_ = payloadWriter.Close()
-				_ = payloadFile.Close()
+				_ = sealedFile.Close()
 				return nil, err
 			}
 			captures[crew.Slug] = capture
@@ -376,20 +403,26 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		}
 	}
 
-	// 5b. Devcontainer / mise config per crew.
-	if err := WriteDevcontainerSection(payloadWriter, target.CrewTargets, now); err != nil {
-		_ = payloadWriter.Close()
-		_ = payloadFile.Close()
-		return nil, err
+	// 5b. Devcontainer / mise config per crew (crew settings).
+	if filter.has(CategoryAgents) {
+		if err := WriteDevcontainerSection(payloadWriter, target.CrewTargets, now); err != nil {
+			_ = payloadWriter.Close()
+			_ = sealedFile.Close()
+			return nil, err
+		}
 	}
 
 	// 5c. DB dump.
 	var pageRelease func()
-	if opts.PageProjectsPath != "" && opts.Scope == ScopeWorkspace {
-		pageRelease, err = (&pages.ProjectStore{Directory: opts.PageProjectsPath}).Lease(ctx, target.ID, false)
+	pageProjectsPath := opts.PageProjectsPath
+	if !filter.has(CategoryPages) {
+		pageProjectsPath = ""
+	}
+	if pageProjectsPath != "" && opts.Scope == ScopeWorkspace {
+		pageRelease, err = (&pages.ProjectStore{Directory: pageProjectsPath}).Lease(ctx, target.ID, false)
 		if err != nil {
 			_ = payloadWriter.Close()
-			_ = payloadFile.Close()
+			_ = sealedFile.Close()
 			return nil, err
 		}
 		defer pageRelease()
@@ -405,20 +438,24 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	}
 	if err != nil {
 		_ = payloadWriter.Close()
-		_ = payloadFile.Close()
+		_ = sealedFile.Close()
 		return nil, err
 	}
+	// A custom bundle keeps only its categories' tables (plus the anchor
+	// rows). Filtered before anything reads the dump, so the row counts,
+	// the memory and attachment sections and the page files all follow.
+	filter.filterDump(dump)
 	if dump != nil {
 		if err := WriteDBSection(payloadWriter, dump, now); err != nil {
 			_ = payloadWriter.Close()
-			_ = payloadFile.Close()
+			_ = sealedFile.Close()
 			return nil, err
 		}
 	}
 
-	if err := WritePageProjectsSection(ctx, payloadWriter, opts.PageProjectsPath, dump, now); err != nil {
+	if err := WritePageProjectsSection(ctx, payloadWriter, pageProjectsPath, dump, now); err != nil {
 		_ = payloadWriter.Close()
-		_ = payloadFile.Close()
+		_ = sealedFile.Close()
 		return nil, err
 	}
 	if pageRelease != nil {
@@ -432,11 +469,11 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	// memory_versions rode every workspace bundle already; the blob
 	// files it points at did not.
 	var memoryBlobsResult *MemoryBlobsResult
-	if dump != nil {
+	if dump != nil && filter.has(CategoryMemory) {
 		memoryBlobsResult, err = WriteMemoryBlobsSection(payloadWriter, opts.BlobRoot, dump, now)
 		if err != nil {
 			_ = payloadWriter.Close()
-			_ = payloadFile.Close()
+			_ = sealedFile.Close()
 			return nil, err
 		}
 		if len(memoryBlobsResult.Missing) > 0 {
@@ -448,40 +485,37 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 				"count", len(memoryBlobsResult.Missing), "workspace_id", target.ID)
 		}
 	}
+	// 5e. Attachment blobs referenced by the dump's attachments rows —
+	// same ordering constraint as 5d. See attachmentblobs.go.
+	var attachmentBlobsResult *AttachmentBlobsResult
+	if dump != nil && filter.has(CategoryAtt) {
+		attachmentBlobsResult, err = WriteAttachmentBlobsSection(payloadWriter, opts.AttachmentRoot, dump, now)
+		if err != nil {
+			_ = payloadWriter.Close()
+			_ = sealedFile.Close()
+			return nil, err
+		}
+		if len(attachmentBlobsResult.Missing) > 0 {
+			slog.Warn("backup: attachment rows reference files that are not in the bundle",
+				"count", len(attachmentBlobsResult.Missing), "root_unset", attachmentBlobsResult.RootUnset, "workspace_id", target.ID)
+		}
+	}
+	progress("pack")
 	if err := payloadWriter.Close(); err != nil {
-		_ = payloadFile.Close()
+		_ = sealedFile.Close()
 		return nil, fmt.Errorf("backup: close payload tar: %w", err)
 	}
-	if err := payloadFile.Close(); err != nil {
-		return nil, fmt.Errorf("backup: close payload file: %w", err)
-	}
 
-	// 6. Seal the payload (encrypt + hash) into a second temp file so
-	// we know its size and SHA-256 before writing the outer bundle.
-	// The sealed temp is streamed directly into the final .partial
-	// output in step 8 without loading it into memory.
-	sealedFile, err := st.CreateTemp(ctx, "", "crewship-backup-sealed-*")
-	if err != nil {
-		return nil, fmt.Errorf("backup: create sealed temp: %w", err)
-	}
-	sealedPath := sealedFile.Name()
-	defer func() { _ = st.Remove(context.Background(), sealedPath) }()
-
-	rawPayload, err := st.Open(ctx, payloadPath)
-	if err != nil {
-		_ = sealedFile.Close()
-		return nil, fmt.Errorf("backup: reopen payload: %w", err)
-	}
-	sha, sealedSize, err := SealPayload(sealedFile, rawPayload, WriteBundleOptions{
-		Recipients: opts.Recipients,
-		Passphrase: opts.Passphrase,
-		NoEncrypt:  opts.NoEncrypt,
-	})
-	_ = rawPayload.Close()
-	if err != nil {
+	// 6. Flush the sealer. The payload was encrypted as it was written, so
+	// "encrypt" only finishes the last age chunk; the size and SHA-256 of
+	// the sealed bytes are known without re-reading them. The sealed temp
+	// is streamed into the final .partial output in step 8.
+	progress("encrypt")
+	if err := sealer.Close(); err != nil {
 		_ = sealedFile.Close()
 		return nil, err
 	}
+	sha, sealedSize := sealer.Sum(), sealer.Size()
 	if err := sealedFile.Close(); err != nil {
 		return nil, fmt.Errorf("backup: close sealed temp: %w", err)
 	}
@@ -498,6 +532,13 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		contents.MemoryBlobsIncluded = memoryBlobsResult.Included
 		contents.MemoryBlobsMissing = len(memoryBlobsResult.Missing)
 	}
+	if attachmentBlobsResult != nil {
+		contents.AttachmentsIncluded = attachmentBlobsResult.Included
+		contents.AttachmentsMissing = len(attachmentBlobsResult.Missing)
+	}
+	contents.Incomplete = buildIncomplete(target, contents, attachmentBlobsResult)
+	contents.Environments = envRun.summaries()
+	contents.Incomplete = append(contents.Incomplete, envRun.incompleteItems()...)
 	// #2009: record what the dump actually carries so verify and restore
 	// have something to compare the payload against later. Read from dump
 	// itself (the exact object WriteDBSection just serialised into the
@@ -519,6 +560,10 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		Contents:                contents,
 		Checksums:               Checksums{PayloadSHA256: sha},
 	}
+	if filter != nil {
+		manifest.Kind = KindCustom
+		manifest.Categories = filter.sorted()
+	}
 	switch {
 	case opts.NoEncrypt:
 		manifest.Encryption = Encryption{Enabled: false}
@@ -531,6 +576,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		manifest.Encryption = Encryption{Enabled: true, Algorithm: EncryptionAlgorithm, KeyDerivation: "scrypt"}
 	}
 
+	progress("write")
 	// 8. Stream the outer bundle into .partial and atomic-rename.
 	fname := BundleFileName(opts.Scope, target.Slug, now)
 	if opts.Scope == ScopeCrew && len(target.CrewTargets) > 0 {
@@ -548,7 +594,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		_ = st.Remove(context.Background(), partialPath)
 		return nil, fmt.Errorf("backup: reopen sealed: %w", err)
 	}
-	err = WriteBundleStream(outFile, manifest, sealedIn, sealedSize)
+	err = WriteBundleStream(NewThrottledWriter(ctx, outFile, opts.DiskThrottle), manifest, sealedIn, sealedSize)
 	_ = sealedIn.Close()
 	if cerr := outFile.Close(); err == nil {
 		err = cerr
@@ -565,6 +611,11 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	if err := st.Rename(ctx, partialPath, finalPath); err != nil {
 		_ = st.Remove(context.Background(), partialPath)
 		return nil, fmt.Errorf("backup: rename final bundle: %w", err)
+	}
+	if err := envRun.commit(ctx, finalPath); err != nil {
+		// The bundle is written; its layers stay under the pending ref,
+		// which protects them for a day. Loud, not fatal.
+		slog.Warn("backup: could not record which environment layers the bundle needs", "path", finalPath, "error", err)
 	}
 
 	return &CreateResult{
@@ -646,7 +697,82 @@ func buildContents(t *WorkspaceTarget, level ScopeLevel, captures map[string]Cre
 	return contents
 }
 
+// buildIncomplete derives the manifest's Incomplete list from the same
+// observations the per-kind counters were set from, so the two never
+// disagree: one item for missing attachment files, one for missing memory
+// blobs, one per provisioned crew whose container was gone.
+func buildIncomplete(t *WorkspaceTarget, c Contents, att *AttachmentBlobsResult) []IncompleteItem {
+	var out []IncompleteItem
+	if item := attachmentIncomplete(att, t.ID); item != nil {
+		out = append(out, *item)
+	}
+	if c.MemoryBlobsMissing > 0 {
+		out = append(out, IncompleteItem{
+			Kind:      IncompleteMemoryBlobMissing,
+			Detail:    fmt.Sprintf("%d memory version(s) had no content file in the version store; their history rows are in the bundle without content", c.MemoryBlobsMissing),
+			Count:     c.MemoryBlobsMissing,
+			Workspace: t.ID,
+		})
+	}
+	for _, slug := range c.MissingContainerCrews {
+		out = append(out, IncompleteItem{
+			Kind:      IncompleteContainerMissing,
+			Detail:    fmt.Sprintf("crew %s had a provisioned container that was gone when the backup ran, so none of its files are in the bundle", slug),
+			Count:     1,
+			Workspace: t.ID,
+		})
+	}
+	return out
+}
+
 // rewriteWorkspaceSlug updates the single workspace row in the dump so
 // a restore with --as-workspace <slug> lands under the new identity.
 // It does NOT change the workspace ID (primary key) — callers that
 // want a new ID regenerate one before insert. We only change the slug
+
+// reconcileCrewContainers clears ContainerID on every crew whose container
+// is not on the daemon, and marks provisioned crews whose container vanished
+// (ContainerMissing) — see CreateBackup step 2. A nil ops leaves target as
+// resolved.
+func reconcileCrewContainers(ctx context.Context, ops DockerOps, target *WorkspaceTarget) error {
+	if ops == nil {
+		return nil
+	}
+	for i := range target.CrewTargets {
+		c := &target.CrewTargets[i]
+		if c.ContainerID == "" {
+			continue
+		}
+		exists, exErr := ops.ContainerExists(ctx, c.ContainerID)
+		if exErr != nil {
+			// Daemon hiccup / permission error — fail loudly. The
+			// previous behaviour silently zeroed ContainerID and
+			// kept going, which produced "successful" bundles
+			// where every crew's filesystem was missing — much
+			// worse than a clear backup error the operator can
+			// retry. Only the definite-absent case (exists=false
+			// below) skips the section.
+			return fmt.Errorf("backup: probe container %s for crew %s: %w", c.ContainerID, c.Slug, exErr)
+		}
+		if !exists {
+			// cached_image is what the provisioning flow sets on a
+			// crew whose container was actually built, so its
+			// presence separates "container vanished" (a provisioned
+			// crew whose files are now MISSING from this bundle) from
+			// "never provisioned" (a DB-only crew, nothing missing).
+			// The first is recorded on the result and the manifest —
+			// an incomplete export must not read as a complete one
+			// (#2612); the second is a normal state and is not.
+			if c.CachedImageDigest != "" {
+				c.ContainerMissing = true
+				slog.Warn("backup: crew's container is gone from the daemon; bundle carries DB rows only",
+					"crew", c.Slug, "container", c.ContainerID, "workspace_id", target.ID)
+			} else {
+				slog.Info("backup: crew was never provisioned; backing up DB rows only",
+					"crew", c.Slug, "workspace_id", target.ID)
+			}
+			c.ContainerID = ""
+		}
+	}
+	return nil
+}

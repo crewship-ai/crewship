@@ -52,6 +52,7 @@ var workspaceTablesNotBundled = map[string]string{
 	// --- This instance's own backup / audit bookkeeping ---
 	"audit_logs":              "instance audit trail; stays with the instance that produced it",
 	"backup_catalog":          "catalogue of THIS instance's bundles; a restored copy would describe files the target does not hold",
+	"backup_runs":             "THIS instance's backup run history; a restored copy would describe runs the target never ran",
 	"backup_locks":            "in-flight backup mutex rows; process-local by definition",
 	"backup_restore_origins":  "lineage evidence for DR resume authorisation (#1716); carrying it forward asserts a history the target never had",
 	"crew_audit_log":          "crew action audit trail (operational)",

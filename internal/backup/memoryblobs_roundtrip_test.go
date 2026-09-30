@@ -371,24 +371,34 @@ func TestRestoreMemoryBlobFile_DurableWriteSequence(t *testing.T) {
 	}
 	lines := strings.Split(string(src), "\n")
 
-	start := -1
-	for i, line := range lines {
-		if strings.HasPrefix(line, "func restoreMemoryBlobFile(") {
-			start = i
-			break
+	locate := func(prefix string) (int, int) {
+		start := -1
+		for i, line := range lines {
+			if strings.HasPrefix(line, prefix) {
+				start = i
+				break
+			}
 		}
-	}
-	if start == -1 {
-		t.Fatal("func restoreMemoryBlobFile not found in memoryblobs.go — did it get renamed?")
-	}
-	end := len(lines)
-	for i := start + 1; i < len(lines); i++ {
-		if strings.HasPrefix(lines[i], "func ") {
-			end = i
-			break
+		if start == -1 {
+			t.Fatalf("%s not found in memoryblobs.go — did it get renamed?", prefix)
 		}
+		end := len(lines)
+		for i := start + 1; i < len(lines); i++ {
+			if strings.HasPrefix(lines[i], "func ") {
+				end = i
+				break
+			}
+		}
+		return start, end
 	}
+	start, end := locate("func restoreMemoryBlobFile(")
 	body := strings.Join(lines[start:end], "\n")
+	// restoreMemoryBlobFile delegates to writeBlobDurable, which the
+	// attachment-blob restore shares; the durability shape lives there.
+	if !strings.Contains(body, "os.Rename(") && strings.Contains(body, "writeBlobDurable(") {
+		start, end = locate("func writeBlobDurable(")
+		body = strings.Join(lines[start:end], "\n")
+	}
 
 	renameIdx := indexOfSubstring(lines[start:end], "os.Rename(")
 	if renameIdx == -1 {

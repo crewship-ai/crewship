@@ -93,6 +93,15 @@ func SnapshotBeforeMigrate(ctx context.Context, db *DB, logger *slog.Logger) err
 	return nil
 }
 
+// SnapshotTo copies the whole live database into dstPath with SQLite's online
+// backup API — the same page-level copy the pre-migration snapshot takes, and
+// under the same rules: dstPath must not exist (a snapshot never merges into
+// another file), and a failed copy leaves nothing behind. The instance backup
+// takes its consistent copy with it.
+func SnapshotTo(ctx context.Context, db *sql.DB, dstPath string) error {
+	return snapshotDatabase(ctx, db, dstPath)
+}
+
 // sqliteOnlineBackup is the sliver of modernc.org/sqlite's driver connection
 // we need: the constructor for SQLite's online backup API
 // (sqlite3_backup_init/step/finish). The concrete driver type is unexported,

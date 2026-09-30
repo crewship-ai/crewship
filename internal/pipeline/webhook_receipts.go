@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -91,6 +92,10 @@ func StartRoutineReceiptRetentionSweeper(ctx context.Context, db *sql.DB, logger
 		logger = slog.Default()
 	}
 	sweep := func() {
+		// Never delete under an instance backup's consistent copy.
+		if quiesce.WaitReleased(ctx) != nil {
+			return
+		}
 		n, err := SweepRoutineWebhookReceipts(ctx, db, time.Now())
 		switch {
 		case err != nil && ctx.Err() == nil:

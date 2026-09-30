@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -45,6 +46,57 @@ const DefaultRunRetentionDays = 90
 // operator-facing knob; this floor exists so a low-traffic pipeline never
 // loses its entire history to a strict window.
 const DefaultKeepLastNRunsPerPipeline = 10
+
+// runRetentionRanked numbers each workspace's runs 1..N per pipeline_id,
+// newest first; runRetentionEligible is the WHERE clause both the sweep and
+// CountRunRetention apply to it, so a preview cannot disagree with what the
+// sweep then deletes. Arguments, in order: workspace_id (CTE), workspace_id,
+// cutoff, keepLastN.
+const runRetentionRanked = `
+WITH ranked AS (
+    SELECT id, ROW_NUMBER() OVER (
+        PARTITION BY pipeline_id ORDER BY started_at DESC
+    ) AS rn
+    FROM pipeline_runs
+    WHERE workspace_id = ?
+)`
+
+const runRetentionEligible = `workspace_id = ?
+  AND status IN ('completed', 'failed', 'cancelled', 'interrupted')
+  AND started_at < ?
+  AND id IN (SELECT id FROM ranked WHERE rn > ?)
+  AND NOT EXISTS (
+      SELECT 1 FROM pipeline_waitpoints wp
+      WHERE wp.pipeline_run_id = pipeline_runs.id AND wp.status = 'pending'
+  )
+  AND id NOT IN (
+      SELECT replay_of FROM pipeline_runs WHERE replay_of IS NOT NULL
+  )`
+
+// RowQuerier is what CountRunRetention reads through: a *sql.DB or a *sql.Tx.
+type RowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// CountRunRetention reports how many pipeline_runs rows SweepRunRetention
+// would delete for one workspace under the given window, deleting nothing.
+// retentionDays <= 0 counts nothing, because the sweep then deletes nothing.
+func CountRunRetention(ctx context.Context, q RowQuerier, workspaceID string, retentionDays, keepLastN int, now time.Time) (int64, error) {
+	if retentionDays <= 0 || workspaceID == "" {
+		return 0, nil
+	}
+	if keepLastN < 0 {
+		keepLastN = 0
+	}
+	cutoff := tsformat.Format(now.Add(-time.Duration(retentionDays) * 24 * time.Hour).UTC())
+	var n int64
+	if err := q.QueryRowContext(ctx, runRetentionRanked+`
+SELECT COUNT(*) FROM pipeline_runs
+WHERE `+runRetentionEligible, workspaceID, workspaceID, cutoff, keepLastN).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count pipeline_runs retention for %s: %w", workspaceID, err)
+	}
+	return n, nil
+}
 
 // SweepRunRetention deletes terminal pipeline_runs rows for one workspace
 // older than (now - retentionDays), excluding the most recent keepLastN
@@ -84,26 +136,9 @@ func SweepRunRetention(
 	// first, so "rn > keepLastN" identifies everything outside the
 	// always-keep floor. The DELETE's own WHERE re-applies workspace_id,
 	// terminal-status, and age so the CTE only needs to compute rank.
-	res, err := db.ExecContext(ctx, `
-WITH ranked AS (
-    SELECT id, ROW_NUMBER() OVER (
-        PARTITION BY pipeline_id ORDER BY started_at DESC
-    ) AS rn
-    FROM pipeline_runs
-    WHERE workspace_id = ?
-)
+	res, err := db.ExecContext(ctx, runRetentionRanked+`
 DELETE FROM pipeline_runs
-WHERE workspace_id = ?
-  AND status IN ('completed', 'failed', 'cancelled', 'interrupted')
-  AND started_at < ?
-  AND id IN (SELECT id FROM ranked WHERE rn > ?)
-  AND NOT EXISTS (
-      SELECT 1 FROM pipeline_waitpoints wp
-      WHERE wp.pipeline_run_id = pipeline_runs.id AND wp.status = 'pending'
-  )
-  AND id NOT IN (
-      SELECT replay_of FROM pipeline_runs WHERE replay_of IS NOT NULL
-  )`,
+WHERE `+runRetentionEligible,
 		workspaceID, workspaceID, cutoff, keepLastN,
 	)
 	if err != nil {
@@ -156,6 +191,10 @@ WHERE workspace_id = ?
 // Errors are accumulated with errors.Join so one bad workspace doesn't
 // stop the sweep for the rest.
 func SweepAllWorkspacesRunRetention(ctx context.Context, db *sql.DB, emitter journal.Emitter, keepLastN int) error {
+	// Never delete under an instance backup's consistent copy.
+	if err := quiesce.WaitReleased(ctx); err != nil {
+		return err
+	}
 	if db == nil {
 		return errors.New("sweep all workspaces (runs): db is nil")
 	}

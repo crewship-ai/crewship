@@ -264,6 +264,11 @@ type Config struct {
 	// expires skips it on the way up, and if nothing runs again the work hangs
 	// forever. §4 wants a scan at least every few seconds.
 	RecoveryInterval time.Duration
+	// Paused, when set and true, stops the dispatcher from CLAIMING new work.
+	// Running attempts are untouched and queued work stays queued; recovery
+	// still runs. It is how an instance restore's "queue" hold and a backup's
+	// quiet window keep accepted work from starting (internal/quiesce).
+	Paused func() bool
 }
 
 func (c Config) withDefaults() Config {

@@ -255,6 +255,11 @@ const SubkindRoutineUpdate = "routine_update"
 // is; TestDigestSubkindMatchesProducer keeps the two spellings honest.
 const SubkindDigest = "digest"
 
+// SubkindBackupIncident marks a backup incident delivered to an instance
+// admin (internal/api admin_instance_backup_alerts.go). It routes under
+// system.health: a backup that fails is the server's health, not a routine's.
+const SubkindBackupIncident = "backup_incident"
+
 // CategoryForItem resolves an inbox row to its notification category.
 //
 // Kind alone is not always enough. A chat reply and a routine's progress notice
@@ -277,6 +282,8 @@ func CategoryForItem(kind string, payload map[string]interface{}) string {
 			// setting for both, rather than a digest-specific category
 			// nobody has tuned yet.
 			return CategoryRoutinesCompleted
+		case SubkindBackupIncident:
+			return CategorySystemHealth
 		}
 	}
 	return CategoryForKind(kind)

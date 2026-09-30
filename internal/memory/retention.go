@@ -48,6 +48,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // DefaultRetentionDays is the cutoff applied when a workspace has
@@ -172,6 +173,10 @@ func SweepStaleVersions(
 // Pass a nil emitter to disable the journal trail (test paths
 // exercising the row-delete logic without the journal dependency).
 func SweepAllWorkspaces(ctx context.Context, db *sql.DB, emitter journal.Emitter) error {
+	// Never delete under an instance backup's consistent copy.
+	if err := quiesce.WaitReleased(ctx); err != nil {
+		return err
+	}
 	if db == nil {
 		return errors.New("sweep all workspaces: db is nil")
 	}

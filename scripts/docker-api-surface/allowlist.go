@@ -89,12 +89,12 @@ const proxyVarPOST = "POST"
 var allowList = []Endpoint{
 	{
 		Method: "ContainerCommit", HTTP: "POST /commit", ProxyVars: []string{"COMMIT", proxyVarPOST},
-		Tier: TierDevcontainer, Packages: []string{"internal/devcontainer"},
-		Why: "final step of crew provisioning: bakes the provisioned container into a cached image",
+		Tier: TierDevcontainer, Packages: []string{"internal/backup", "internal/devcontainer"},
+		Why: "final step of crew provisioning: bakes the provisioned container into a cached image; also commits a crew for a complete-environment backup",
 	},
 	{
 		Method: "ContainerCreate", HTTP: "POST /containers/create", ProxyVars: []string{"CONTAINERS", proxyVarPOST},
-		Tier: TierCore, Packages: []string{"internal/devcontainer", "internal/provider/docker"},
+		Tier: TierCore, Packages: []string{"internal/backup", "internal/devcontainer", "internal/provider/docker"},
 		Why: "creates every agent, sidecar and provisioning container",
 	},
 	{
@@ -114,12 +114,12 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "ContainerRemove", HTTP: "DELETE /containers/{id}", ProxyVars: []string{"CONTAINERS", proxyVarPOST},
-		Tier: TierCore, Packages: []string{"internal/api", "internal/devcontainer", "internal/provider/docker"},
+		Tier: TierCore, Packages: []string{"internal/api", "internal/backup", "internal/devcontainer", "internal/provider/docker"},
 		Why: "tears down crews, temp provisioning containers and stranded runtime",
 	},
 	{
 		Method: "ContainerStart", HTTP: "POST /containers/{id}/start", ProxyVars: []string{"CONTAINERS", proxyVarPOST},
-		Tier: TierCore, Packages: []string{"internal/devcontainer", "internal/provider/docker"},
+		Tier: TierCore, Packages: []string{"internal/backup", "internal/devcontainer", "internal/provider/docker"},
 		Why: "starts agent, sidecar and provisioning containers",
 	},
 	{
@@ -179,7 +179,7 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "ImageInspect", HTTP: "GET /images/{name}/json", ProxyVars: []string{"IMAGES"},
-		Tier: TierCore, Packages: []string{"internal/api", "internal/devcontainer", "internal/provider/docker"},
+		Tier: TierCore, Packages: []string{"internal/api", "internal/backup", "internal/devcontainer", "internal/provider/docker"},
 		Why: "checks an image is present locally and reads its baked-in env",
 	},
 	{
@@ -188,18 +188,28 @@ var allowList = []Endpoint{
 		Why: "finds cached provisioning images for reuse and garbage collection",
 	},
 	{
+		Method: "ImageLoad", HTTP: "POST /images/load", ProxyVars: []string{"IMAGES", proxyVarPOST},
+		Tier: TierCore, Packages: []string{"internal/backup"},
+		Why: "restores a crew's complete environment: loads the image archive a backup saved",
+	},
+	{
 		Method: "ImagePull", HTTP: "POST /images/create", ProxyVars: []string{"IMAGES", proxyVarPOST},
 		Tier: TierCore, Packages: []string{"internal/devcontainer", "internal/provider/docker"},
 		Why: "pulls the base image for a crew and the sidecar image",
 	},
 	{
 		Method: "ImageRemove", HTTP: "DELETE /images/{name}", ProxyVars: []string{"IMAGES", proxyVarPOST},
-		Tier: TierCore, Packages: []string{"internal/api"},
+		Tier: TierCore, Packages: []string{"internal/api", "internal/backup"},
 		Why: "garbage-collects unreferenced crewship-cache:* images",
 	},
 	{
+		Method: "ImageSave", HTTP: "GET /images/get", ProxyVars: []string{"IMAGES"},
+		Tier: TierCore, Packages: []string{"internal/backup"},
+		Why: "captures a crew's complete environment: saves the committed image's layers into the environment store",
+	},
+	{
 		Method: "ImageTag", HTTP: "POST /images/{name}/tag", ProxyVars: []string{"IMAGES", proxyVarPOST},
-		Tier: TierCore, Packages: []string{"internal/provider/docker"},
+		Tier: TierCore, Packages: []string{"internal/backup", "internal/provider/docker"},
 		Why: "restores the local tag after a digest-pinned pull (#1825) — `docker pull repo@sha256:…` fetches the manifest but leaves the image unnamed, and everything downstream still addresses it by tag",
 	},
 	{
@@ -224,7 +234,7 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "ServerVersion", HTTP: "GET /version", ProxyVars: []string{"VERSION"},
-		Tier: TierCore, Packages: []string{"internal/provider/docker"},
+		Tier: TierCore, Packages: []string{"internal/backup", "internal/provider/docker"},
 		Why: "distinguishes dockerd from a nerdctl-style shim during detection",
 	},
 	{

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // StartRetentionSweeper runs the work delivery retention policy at startup and
@@ -22,7 +24,8 @@ func StartRetentionSweeper(ctx context.Context, store *Store, logger *slog.Logge
 		interval = 24 * time.Hour
 	}
 	run := func() {
-		if ctx.Err() != nil {
+		// Never delete under an instance backup's consistent copy.
+		if ctx.Err() != nil || quiesce.WaitReleased(ctx) != nil {
 			return
 		}
 		res, err := store.Sweep(ctx, DefaultRetentionPolicy())

@@ -60,6 +60,9 @@ type PendingRunDispatcher struct {
 
 	startOnce sync.Once
 	stopOnce  sync.Once
+
+	// paused, when set, holds every sweep (internal/quiesce.QueuePaused).
+	paused func() bool
 }
 
 // NewPendingRunDispatcher builds the dispatcher. A 5s tick keeps short
@@ -78,6 +81,10 @@ func NewPendingRunDispatcher(store *PendingRunStore, executor runExecutor, logge
 		stopped:        make(chan struct{}),
 	}
 }
+
+// SetPaused makes every sweep a no-op while fn reports true (see sweep).
+// Call before Start.
+func (d *PendingRunDispatcher) SetPaused(fn func() bool) { d.paused = fn }
 
 // Start spawns the dispatch loop. Idempotent.
 func (d *PendingRunDispatcher) Start(ctx context.Context) {
@@ -127,6 +134,12 @@ func (d *PendingRunDispatcher) run(ctx context.Context) {
 // The pool acquire is interruptible so a Stop() mid-sweep abandons the
 // not-yet-dispatched tail promptly rather than blocking on a full pool.
 func (d *PendingRunDispatcher) sweep(ctx context.Context) {
+	// Held (an instance restore's queue hold, a backup's quiet window):
+	// neither fire nor expire. A row that would have expired meanwhile is
+	// decided on the first sweep after the hold, not lost during it.
+	if d.paused != nil && d.paused() {
+		return
+	}
 	now := time.Now().UTC()
 	if n, err := d.store.ExpireDue(ctx, now); err != nil {
 		d.logger.Warn("pending dispatcher: expire", "error", err)

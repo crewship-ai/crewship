@@ -1,0 +1,5 @@
+# TEST-ONLY age identity for the compat fixture bundles in this directory.
+# It protects nothing: it is committed so CI can decrypt the fixtures.
+# Never use it for a real backup.
+# public key: age1w2tdj88rxc56eqa73j9xzsezjmdzf7qaagvrxy5ys8deggcj0gvqlufgn5
+AGE-SECRET-KEY-12LCQS3L6S5VA9FE7MV8KFS5HVQC5A808ST37ZKEHMAVJ2S226J9QUCVMMN

@@ -136,6 +136,20 @@ func (c CrewCapture) Volumes() []string {
 // The returned CrewCapture reports what was actually written. Callers
 // build the manifest from it — see CrewCapture's doc comment.
 func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew CrewTarget, level ScopeLevel) (CrewCapture, error) {
+	return collectCrewSections(ctx, ops, dst, crew, level, nil, nil)
+}
+
+// collectCrewSections is CollectCrew with a section filter: want(name) says
+// whether a section (SectionCrew* in categories.go) goes into the bundle. A
+// nil want takes every section the level selects — a custom bundle passes
+// its category filter, so a memory-only bundle carries the crew memory tree
+// and none of the working files. A crew with nothing wanted is not paused.
+//
+// inPause, when set, runs inside the same pause after the sections — the
+// complete-environment commit, so the image and the files are one
+// consistent state. A crew with nothing wanted but an inPause is still
+// paused for it.
+func collectCrewSections(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew CrewTarget, level ScopeLevel, want func(string) bool, inPause func() error) (CrewCapture, error) {
 	capture := CrewCapture{Slug: crew.Slug}
 	if crew.ContainerID == "" {
 		// Container was never created or was removed. The crew's DB rows
@@ -146,8 +160,18 @@ func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew Cre
 	if !level.Valid() {
 		level = DefaultScopeLevel
 	}
+	if want != nil && inPause == nil {
+		wanted := false
+		for s := range sectionCategory {
+			wanted = wanted || want(s)
+		}
+		if !wanted {
+			return capture, nil
+		}
+	}
 	err := WithPaused(ctx, ops, crew.ContainerID, func() error {
 		type pair struct {
+			section     string
 			src, prefix string
 			excludes    []string
 			files       *int
@@ -161,9 +185,9 @@ func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew Cre
 		// trees (tiny, no exclusions to apply); /output = the agent's
 		// declared outputs.
 		pairs := []pair{
-			{ContainerWorkspacePath, fmt.Sprintf("workspace/%s", crew.Slug), nil, &capture.WorkspaceFiles, nil},
-			{ContainerCrewPath, fmt.Sprintf("crew/%s", crew.Slug), nil, &capture.CrewFiles, &capture.CrewMemoryFiles},
-			{ContainerOutputPath, fmt.Sprintf("memory/%s", crew.Slug), nil, &capture.OutputFiles, nil},
+			{SectionCrewWorkspace, ContainerWorkspacePath, fmt.Sprintf("workspace/%s", crew.Slug), nil, &capture.WorkspaceFiles, nil},
+			{SectionCrewMemory, ContainerCrewPath, fmt.Sprintf("crew/%s", crew.Slug), nil, &capture.CrewFiles, &capture.CrewMemoryFiles},
+			{SectionCrewOutput, ContainerOutputPath, fmt.Sprintf("memory/%s", crew.Slug), nil, &capture.OutputFiles, nil},
 		}
 		// Standard adds the named volumes (home dotfiles + installed
 		// tools). volumeExclusions trims regenerable caches (mise,
@@ -172,18 +196,21 @@ func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew Cre
 		// (~/.config/<tool>/, ~/.aws, ~/.ssh, ~/.docker, ~/.gitconfig).
 		if level == ScopeLevelStandard || level == ScopeLevelFull {
 			pairs = append(pairs,
-				pair{ContainerHomePath, fmt.Sprintf("volumes/%s/home", crew.Slug), volumeExclusions, &capture.HomeFiles, nil},
-				pair{ContainerToolsPath, fmt.Sprintf("volumes/%s/tools", crew.Slug), volumeExclusions, &capture.ToolsFiles, nil},
+				pair{SectionCrewHome, ContainerHomePath, fmt.Sprintf("volumes/%s/home", crew.Slug), volumeExclusions, &capture.HomeFiles, nil},
+				pair{SectionCrewTools, ContainerToolsPath, fmt.Sprintf("volumes/%s/tools", crew.Slug), volumeExclusions, &capture.ToolsFiles, nil},
 			)
 		}
 		// Full adds /var/lib so any service the agent installed
 		// (redis, postgresql, mysql, mongo) round-trips its data dir.
 		if level == ScopeLevelFull {
 			pairs = append(pairs,
-				pair{ContainerVarLibPath, fmt.Sprintf("system/%s/var-lib", crew.Slug), varLibExclusions, &capture.VarLibFiles, nil},
+				pair{SectionCrewVarLib, ContainerVarLibPath, fmt.Sprintf("system/%s/var-lib", crew.Slug), varLibExclusions, &capture.VarLibFiles, nil},
 			)
 		}
 		for _, p := range pairs {
+			if want != nil && !want(p.section) {
+				continue
+			}
 			res, err := copyContainerPath(ctx, ops, dst, crew.ContainerID, p.src, p.prefix, p.excludes)
 			if err != nil {
 				return fmt.Errorf("backup: collect %s:%s: %w", crew.Slug, p.src, err)
@@ -192,6 +219,9 @@ func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew Cre
 			if p.memoryFiles != nil {
 				*p.memoryFiles = res.MemoryFiles
 			}
+		}
+		if inPause != nil {
+			return inPause()
 		}
 		return nil
 	})

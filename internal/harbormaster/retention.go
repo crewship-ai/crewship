@@ -107,6 +107,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 const (
@@ -168,6 +170,53 @@ var sweepableApprovalKinds = []Kind{
 	KindEphemeralHire,
 }
 
+// approvalsRetentionWhere is the eligibility clause shared by the sweep and
+// CountApprovalsRetention, so a preview cannot disagree with what the sweep
+// then deletes. The kind IN (...) list is built from sweepableApprovalKinds
+// rather than a fixed placeholder count so the allowlist has exactly one place
+// to edit — see the package comment and sweepableApprovalKinds' doc comment.
+func approvalsRetentionWhere(workspaceID, cutoff string) (string, []any) {
+	placeholders := make([]string, len(sweepableApprovalKinds))
+	args := make([]any, 0, len(sweepableApprovalKinds)+3)
+	args = append(args, workspaceID)
+	for i, k := range sweepableApprovalKinds {
+		placeholders[i] = "?"
+		args = append(args, string(k))
+	}
+	args = append(args, cutoff)
+	return `workspace_id = ?
+		  AND status IN ('approved', 'denied', 'timeout', 'cancelled')
+		  AND kind IN (` + strings.Join(placeholders, ", ") + `)
+		  AND decided_at IS NOT NULL
+		  AND decided_at < ?`, args
+}
+
+// RowQuerier is what CountApprovalsRetention reads through: a *sql.DB or a
+// *sql.Tx.
+type RowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// CountApprovalsRetention reports how many approvals_queue rows
+// SweepApprovalsRetention would delete for one workspace under the given
+// window, deleting nothing. retentionDays <= 0 counts nothing.
+func CountApprovalsRetention(ctx context.Context, q RowQuerier, workspaceID string, retentionDays int, now time.Time) (int64, error) {
+	if retentionDays <= 0 || workspaceID == "" {
+		return 0, nil
+	}
+	if retentionDays > MaxApprovalsRetentionDays {
+		return 0, fmt.Errorf("harbormaster: count approvals retention: retention_days %d exceeds the maximum of %d days",
+			retentionDays, MaxApprovalsRetentionDays)
+	}
+	cutoff := now.UTC().Add(-time.Duration(retentionDays) * 24 * time.Hour).Format(timeFmt)
+	where, args := approvalsRetentionWhere(workspaceID, cutoff)
+	var n int64
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM approvals_queue WHERE `+where, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("harbormaster: count approvals retention: %w", err)
+	}
+	return n, nil
+}
+
 // SweepApprovalsRetention deletes terminal approvals_queue rows for one
 // workspace whose decided_at is older than (now - retentionDays), in
 // bounded batches. Returns the number deleted and whether it stopped at the
@@ -218,25 +267,12 @@ func SweepApprovalsRetention(
 	// comment warns about.
 	cutoff := time.Now().UTC().Add(-time.Duration(retentionDays) * 24 * time.Hour).Format(timeFmt)
 
-	// kind IN (...) is built from sweepableApprovalKinds rather than a fixed
-	// placeholder count so the allowlist has exactly one place to edit — see
-	// the package comment and sweepableApprovalKinds' doc comment.
-	placeholders := make([]string, len(sweepableApprovalKinds))
-	args := make([]any, 0, len(sweepableApprovalKinds)+3)
-	args = append(args, workspaceID)
-	for i, k := range sweepableApprovalKinds {
-		placeholders[i] = "?"
-		args = append(args, string(k))
-	}
-	args = append(args, cutoff, approvalsRetentionBatchRows)
+	where, args := approvalsRetentionWhere(workspaceID, cutoff)
+	args = append(args, approvalsRetentionBatchRows)
 
 	stmt := `DELETE FROM approvals_queue WHERE id IN (
 		SELECT id FROM approvals_queue
-		WHERE workspace_id = ?
-		  AND status IN ('approved', 'denied', 'timeout', 'cancelled')
-		  AND kind IN (` + strings.Join(placeholders, ", ") + `)
-		  AND decided_at IS NOT NULL
-		  AND decided_at < ?
+		WHERE ` + where + `
 		LIMIT ?
 	)`
 
@@ -264,6 +300,10 @@ func SweepApprovalsRetention(
 // returned on the first failure, so one bad workspace does not stop the
 // sweep for the rest — same as SweepAllWorkspacesAuditRetention.
 func SweepAllWorkspacesApprovalsRetention(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
+	// Never delete under an instance backup's consistent copy.
+	if err := quiesce.WaitReleased(ctx); err != nil {
+		return err
+	}
 	if db == nil {
 		return errors.New("harbormaster: sweep approvals retention: db is nil")
 	}

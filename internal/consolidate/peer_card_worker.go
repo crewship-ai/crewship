@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // PR-E F6 — PeerCardSync server-bootstrap integration.
@@ -142,6 +144,10 @@ func runSweepAllWorkspaces(
 	logger *slog.Logger,
 	cfg PeerCardWorkerConfig,
 ) {
+	// Never write memory under an instance backup's consistent copy.
+	if quiesce.WaitReleased(ctx) != nil {
+		return
+	}
 	workspaces, err := loadActiveWorkspaceIDs(ctx, db)
 	if err != nil {
 		logger.Error("peer card sync: load workspaces failed", "err", err)

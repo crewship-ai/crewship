@@ -26,7 +26,11 @@ type TarZstWriter struct {
 // into sink. Standard compression level is used; tuning is deferred to
 // V2 when we benchmark against real workload sizes.
 func NewTarZstWriter(sink io.Writer) (*TarZstWriter, error) {
-	zw, err := zstd.NewWriter(sink)
+	return newTarZstWriter(sink)
+}
+
+func newTarZstWriter(sink io.Writer, opts ...zstd.EOption) (*TarZstWriter, error) {
+	zw, err := zstd.NewWriter(sink, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("backup: init zstd writer: %w", err)
 	}

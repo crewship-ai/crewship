@@ -566,7 +566,13 @@ func reconcilePriority(atEmit, livePriority string, edits []priorityEdit) bool {
 // clean while a DB-write attacker who lacks the key cannot forge either an
 // entry_hash or a checkpoint.
 func VerifyChain(ctx context.Context, db *sql.DB, workspaceID string) (*VerifyResult, error) {
-	key := ChainKeyFromEnv()
+	return VerifyChainWithKey(ctx, db, workspaceID, ChainKeyFromEnv())
+}
+
+// VerifyChainWithKey is VerifyChain with an explicit chain key — for a backup
+// drill that verifies a restored database with the recovery kit's
+// ENCRYPTION_KEY (DeriveChainKey of it) rather than this process's.
+func VerifyChainWithKey(ctx context.Context, db *sql.DB, workspaceID string, key []byte) (*VerifyResult, error) {
 	res := &VerifyResult{WorkspaceID: workspaceID, OK: true}
 
 	removed, applied, err := loadCheckpointedRemovals(ctx, db, key, workspaceID)

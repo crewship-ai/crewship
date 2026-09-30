@@ -154,6 +154,12 @@ func (d *Dispatcher) recover(ctx context.Context) error {
 // claimOne takes at most one piece of work and starts it. It reports whether it
 // claimed anything, so the caller can drain.
 func (d *Dispatcher) claimOne(ctx context.Context) (bool, error) {
+	// Held: nothing is claimed, so nothing is burned — the work stays queued
+	// with its attempt budget intact and the next poll after the hold lifts
+	// picks it up.
+	if d.cfg.Paused != nil && d.cfg.Paused() {
+		return false, nil
+	}
 	c, err := d.store.Claim(ctx, work.ClaimOptions{
 		LeaseOwner: d.cfg.Owner,
 		Limits:     d.cfg.Limits,

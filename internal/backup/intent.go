@@ -97,17 +97,22 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// Keeper watchdog governance (workspace toggle, security contact,
 	// DENY-notify threshold). Workspace-scoped; plain columns, round-trips.
 	"keeper_governance_settings": IntentInclude,
+	// Data retention windows without a workspaces column (inbox, chats, Keeper decisions). Workspace data; round-trips.
+	"retention_settings": IntentInclude,
 
 	// === Files & memory (round-trip) ==========================
 	// attachments is the single table behind every attached file — issue,
 	// issue comment and chat — replacing the never-written chat_attachments
 	// (dropped by 20260806194500_attachments.sql, and gone from this map with
-	// it). It round-trips the METADATA only: the blob itself lives under the
-	// storage root at attachments/<workspace>/<sha[0:2]>/<sha>, which the file
-	// half of a bundle carries, and the row is what makes a restored blob
-	// findable again. A restored row whose blob is missing degrades to a 404 on
-	// download rather than to a corrupt read — the sha256 column is what lets a
-	// verify pass say which of the two happened.
+	// it). The row is the METADATA: the blob itself lives under the storage
+	// root at attachments/<workspace>/<sha[0:2]>/<sha>, outside the DB and
+	// outside every crew container. Until attachmentblobs.go no part of a
+	// bundle carried those files — this comment used to claim "the file half"
+	// did, and every restore landed rows whose downloads 404'd. The bundle's
+	// attachment-blobs/ section now carries one file per referenced sha256,
+	// restore writes each back under the row's (post-remap) workspace id, and
+	// a blob missing at create time is recorded in the manifest
+	// (contents.attachments_missing + an incomplete item), never silent.
 	"attachments":             IntentInclude,
 	"chat_branches":           IntentInclude,
 	"chat_participants":       IntentInclude,
@@ -635,6 +640,39 @@ var NonBackedUpTables = map[string]struct{}{
 	"rate_limit_overrides":    {}, // instance-global limiter tuning (v168); must not clobber the target's own on restore
 	"keeper_runtime_settings": {}, // instance-global judge wiring; a restored workspace must not repoint the target's gatekeeper at the source's model server
 	"instance_audit_logs":     {}, // instance-level admin actions (Admin › People & workspaces); the target instance keeps its own trail
+	// restore_reports records every restore / dry run / drill THIS instance
+	// ran. Instance bookkeeping, like backup_catalog: a bundle carrying it
+	// would hand the target a restore history it never had.
+	"restore_reports": {},
+	// backup_plans / backup_runs are the instance's backup schedule and its
+	// run history: instance-level, no workspace FK, and a bundle carrying
+	// them would hand the target a schedule it never set and a history of
+	// runs it never ran.
+	"backup_plans": {},
+	"backup_runs":  {},
+	// instance_holds (automations an instance restore left stopped) and
+	// backup_settings (the recovery-kit switch, Track C's limits) are this
+	// instance's runtime and configuration. They never ride a workspace
+	// bundle. An INSTANCE bundle is the whole database file, so both are in
+	// it byte for byte; `crewship recover` then rewrites instance_holds with
+	// fresh holds and keeps backup_settings as the source had it.
+	"instance_holds":  {},
+	"backup_settings": {},
+	// environment_blobs / bundle_environment_refs are the environment
+	// store's reference counts (Track E): which local bundle files need
+	// which image blobs in <backups dir>/environments. Facts about THIS
+	// instance's backup directory, meaningless anywhere else.
+	"environment_blobs":       {},
+	"bundle_environment_refs": {},
+	// Track C2: backup keys (public halves), incidents, off-site
+	// destinations (the secret is a vault envelope) and the verified copies
+	// made there. The instance's own backup configuration and history — a
+	// workspace bundle carrying them would hand the target keys, alerts and
+	// buckets it never set up.
+	"backup_recipients":           {},
+	"backup_incidents":            {},
+	"backup_offsite_destinations": {},
+	"backup_copies":               {},
 	// keeper_aux_settings moved to BackupTableIntent (IntentExcludeOperational)
 	// in #1554: its new credential_id FK makes the reverse-FK walk discover it,
 	// and a discovered table must be classified there, not here. Same verdict —

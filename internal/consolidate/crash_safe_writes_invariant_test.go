@@ -190,6 +190,18 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 		"../backup/runner_create.go|outFile, err := st.Create(ctx, partialPath, 0o600)":                              "runner_create.go: CreateBackup's final bundle, written as <bundle>.partial and st.Rename'd into place — the partial is removed on any failure, so a torn bundle never carries the real name. No fsync before the rename. Through LocalStorageOps.Create.",
 		"../backup/storage.go|f, err := os.CreateTemp(cleanDir, pattern)":                                            "storage.go: LocalStorageOps.CreateTemp, the primitive the four entries above reach — a fresh O_EXCL file with a random name, so it can never truncate anything a reader holds. Same standing as LocalStorageOps.Create above.",
 
+		// Instance bundles (Track B). Create stages everything in a private
+		// 0700 directory under the backups dir that is removed on every exit
+		// path and swept when stale; nothing outside the run reads those
+		// files. Recover writes into a data directory nothing uses until it
+		// reports success, fsyncing each file.
+		"../backup/instance_create.go|f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)":         "instance_create.go: a crew archive or the payload tar in the run's private staging dir — fresh O_EXCL files, removed with the staging dir.",
+		"../backup/instance_create.go|out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)":        "instance_create.go: copyFileHashed copying a file store into the staging dir — fresh O_EXCL files, removed with the staging dir.",
+		"../backup/instance_create.go|out, err := os.OpenFile(sealedPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)": "instance_create.go: the sealed payload in the staging dir, streamed into the bundle and removed with the staging dir.",
+		"../backup/instance_create.go|out, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)":       "instance_create.go: the final bundle written as <bundle>.partial and renamed into place, removed on any failure — the same idiom as runner_create.go's outFile.",
+		"../backup/instance_recover.go|f, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)":        "instance_recover.go: writeExtracted landing a file in the recovered data dir, which no server uses until recover succeeds; each file is fsynced before close and checked against the bundle's index.",
+		"../backup/instance_recover.go|f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)":         "instance_recover.go: writeEnvFile — secrets.env / recovered-keys.env written to a temp, fsynced, and renamed into place.",
+
 		// ---- #2124: cmd/crewship, read one site at a time ----
 		//
 		// #1999 widened dirs to cover cmd/crewship for two named sites

@@ -284,6 +284,7 @@ var BackupTables = []string{
 	"routine_step_overrides",     // FK pipeline_id; has workspace_id
 	"composio_settings",          // workspace_id PK
 	"keeper_governance_settings", // workspace_id PK
+	"retention_settings",         // (workspace_id, key) PK
 	"user_models",                // has workspace_id
 	"user_model_provenance",      // has workspace_id; FK users(id) — dumped after users; no FK on message_id by design
 
