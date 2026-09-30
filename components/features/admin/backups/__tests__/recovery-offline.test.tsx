@@ -9,7 +9,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 const h = vi.hoisted(() => ({ api: vi.fn(), toast: { success: vi.fn(), error: vi.fn(), message: vi.fn(), info: vi.fn() } }))
 vi.mock("sonner", () => ({ toast: h.toast }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => h.api(...a) }))
-vi.mock("../use-backup-runs", () => ({ useBackupRuns: () => ({ data: [], status: "ready", source: "runs", reload: vi.fn() }) }))
+vi.mock("../use-backup-runs", () => ({ useBackupRuns: () => ({ data: [], status: "ready", source: "runs", reload: vi.fn() }), workspaceFor: () => null }))
 vi.mock("../use-backup-settings", () => ({
   useVaultKeys: () => ({ data: { recovery_kit: { enabled: false }, versions: [] } }),
   useBackupSettings: () => ({ status: "unavailable", data: null }),

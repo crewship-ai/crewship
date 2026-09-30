@@ -13,7 +13,7 @@ import {
   type RestoreChecks, type RestoreRecord, type RestoreReport, type RestoreTarget,
 } from "./backups-model"
 import { checksFixture, dryRunFixture, restorePhasesFixture } from "./__fixtures__/backups"
-import { useBackupRuns } from "./use-backup-runs"
+import { useBackupRuns, workspaceFor } from "./use-backup-runs"
 import { restore, restoreChecks, resumeHold, useHolds, useRestores } from "./use-backup-recovery"
 import { saveBackupSettings, useBackupSettings, useVaultKeys } from "./use-backup-settings"
 import { perform } from "./use-backups-data"
@@ -98,6 +98,8 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
   const req = { path: path ?? "", target, ...key, as_workspace: target === "new_workspace" ? asName : undefined, as_crew: target === "crew" ? asName : undefined }
   const pool = (runs.data ?? []).filter((r) => r.bundle_path && (runs.source === "legacy" || (instance ? r.scope === "instance" : r.scope === "workspaces")))
   const picked = pool.find((r) => r.bundle_path === path) ?? null
+  // The workspace a workspace/crew restore acts on, named explicitly.
+  const restoreWs = workspaceFor(ctx, picked?.workspace_id)
 
   const runChecks = async () => {
     setBusy(true)
@@ -118,12 +120,12 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
   }
   const dryRun = async () => {
     setBusy(true)
-    const out = ctx.demo ? dryRunFixture(ctx.scope) : await perform(false, () => restore({ ...req, dry_run: true }, ctx.currentWorkspaceId), "", "The dry run failed")
+    const out = ctx.demo ? dryRunFixture(ctx.scope) : await perform(false, () => restore({ ...req, dry_run: true }, restoreWs), "", "The dry run failed")
     setBusy(false)
     if (out) { setReport(out); setStep(5) }
   }
   const doRestore = async () => {
-    const out = ctx.demo ? restorePhasesFixture() : await perform(false, () => restore({ ...req, dry_run: false }, ctx.currentWorkspaceId), "Restore finished", "The restore failed")
+    const out = ctx.demo ? restorePhasesFixture() : await perform(false, () => restore({ ...req, dry_run: false }, restoreWs), "Restore finished", "The restore failed")
     if (!out) throw new Error("restore failed")
     setProgress(out)
     setStep(6)

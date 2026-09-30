@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Chip, Gate, SmallButton, TD, TH, WsName } from "./backups-kit"
 import { formatPhases, formatSize, formatWhen, proofLabel, runPlanLabel, runResult, type BackupRun } from "./backups-model"
-import { checkBundle, downloadHref, pinBundle, useBackupRuns } from "./use-backup-runs"
+import { checkBundle, downloadHref, pinBundle, useBackupRuns, workspaceFor } from "./use-backup-runs"
 import { perform } from "./use-backups-data"
 import type { SectionCtx } from "./backups-console"
 
@@ -104,7 +104,7 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
       <CheckDialog run={checking} legacy={!!legacy} onClose={() => setChecking(null)}
         onCheck={async (key) => {
           if (!checking?.bundle_path) return
-          const out = await perform(ctx.demo, () => checkBundle(checking.bundle_path!, key, ctx.currentWorkspaceId), "", "The check could not run")
+          const out = await perform(ctx.demo, () => checkBundle(checking.bundle_path!, key, workspaceFor(ctx, checking.workspace_id)), "", "The check could not run")
           if (out) setChecked((c) => ({ ...c, [checking.bundle_path!]: out }))
           setChecking(null)
         }} />
@@ -116,7 +116,7 @@ function RunDrawer({ run, now, ctx, check, onPin, onCheck }: {
   run: BackupRun; now: Date; ctx: SectionCtx; check?: { level: 1 | 2; ok: boolean; detail: string }
   onPin: () => void; onCheck: () => void
 }) {
-  const href = run.bundle_path ? downloadHref(run.bundle_path, ctx.currentWorkspaceId) : null
+  const href = run.bundle_path ? downloadHref(run.bundle_path, workspaceFor(ctx, run.workspace_id)) : null
   const proof = Math.max(run.proof_level, check?.ok ? check.level : 0)
   const missing = run.incomplete.reduce((a, i) => a + i.count, 0)
   return (

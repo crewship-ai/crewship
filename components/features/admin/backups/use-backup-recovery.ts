@@ -72,13 +72,17 @@ export function legacyReport(r: LegacyRestoreReport): RestoreReport {
 }
 
 /**
- * POST /admin/instance/backups/restore (workspace/crew targets and dry runs).
- * Until it exists, a workspace or crew restore goes through the legacy
- * per-workspace endpoint, which already restores, forks and dry-runs.
+ * A workspace or crew restore (and its dry run), through the per-workspace
+ * POST /admin/backups/restore, which restores, forks and dry-runs. The
+ * workspace is always named: an instance admin may restore one they are not a
+ * member of. A whole-instance target is never sent — the server has no
+ * instance restore route; that restore runs offline with `crewship recover`.
  */
 export async function restore(req: RestoreRequest, workspaceId: string | null): Promise<SendResult<RestoreReport>> {
-  const r = await send<RestoreReport>(`${INSTANCE_BACKUPS}/restore`, "POST", req)
-  if (r.ok || !r.unavailable || !workspaceId || req.target === "empty_server" || req.target === "isolated") return r
+  if (req.target === "empty_server" || req.target === "isolated") {
+    return { ok: false, unavailable: false, error: "A whole-instance restore runs from the command line (crewship recover)" }
+  }
+  if (!workspaceId) return { ok: false, unavailable: false, error: "Choose the workspace to restore in the bar above" }
   try {
     const res = await apiFetch(`/api/v1/admin/backups/restore?workspace_id=${encodeURIComponent(workspaceId)}`, {
       method: "POST",
