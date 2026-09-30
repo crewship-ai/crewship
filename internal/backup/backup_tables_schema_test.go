@@ -43,6 +43,7 @@ import (
 // either add it to BackupTables (FK-safe order, plus BackupTableIntent) or
 // write its reason here. "It is not important" is not a reason; see #1437.
 var workspaceTablesNotBundled = map[string]string{
+	"access_files":    "classified output authority depends on attempts excluded from restore",
 	"access_attempts": "execution capabilities and generations must be issued anew on a restored instance",
 	// --- Migration artefacts / archives (derived, never read by the app) ---
 	"agent_runs_archive":       "one-off snapshot taken by v61 drop_agent_runs; the live data was folded into journal_entries, which rides the bundle",
