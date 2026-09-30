@@ -7,6 +7,7 @@ package main
 //
 //	settings get                           GET    /api/v1/admin/instance/backups/settings
 //	settings set [flags]                   PUT    /api/v1/admin/instance/backups/settings
+//	test-alert --channel <id>              POST   /api/v1/admin/instance/backups/settings/test-alert
 //	recipients list                        GET    /api/v1/admin/instance/backups/recipients
 //	recipients add --name --public-key     POST   /api/v1/admin/instance/backups/recipients
 //	recipients remove <id>                 DELETE /api/v1/admin/instance/backups/recipients/{id}
@@ -56,6 +57,37 @@ type backupSettingsDestination struct {
 	Available bool    `json:"available" yaml:"available"`
 }
 
+type backupAlertDeliveryView struct {
+	Status     string  `json:"status" yaml:"status"`
+	Error      *string `json:"error" yaml:"error"`
+	At         string  `json:"at" yaml:"at"`
+	IncidentID string  `json:"incident_id" yaml:"incident_id"`
+}
+
+type backupAlertChannelView struct {
+	ID            string                   `json:"id" yaml:"id"`
+	Name          string                   `json:"name" yaml:"name"`
+	Kind          string                   `json:"kind" yaml:"kind"`
+	Provider      string                   `json:"provider" yaml:"provider"`
+	WorkspaceID   string                   `json:"workspace_id" yaml:"workspace_id"`
+	WorkspaceName string                   `json:"workspace_name" yaml:"workspace_name"`
+	LastDelivery  *backupAlertDeliveryView `json:"last_delivery" yaml:"last_delivery"`
+}
+
+type backupAlertRouteView struct {
+	ID           string                   `json:"id" yaml:"id"`
+	Available    bool                     `json:"available" yaml:"available"`
+	LastDelivery *backupAlertDeliveryView `json:"last_delivery" yaml:"last_delivery"`
+}
+
+type backupTestAlertView struct {
+	OK        bool    `json:"ok" yaml:"ok"`
+	ChannelID string  `json:"channel_id" yaml:"channel_id"`
+	Channel   string  `json:"channel" yaml:"channel"`
+	Error     *string `json:"error" yaml:"error"`
+	SentAt    string  `json:"sent_at" yaml:"sent_at"`
+}
+
 type backupSettingsView struct {
 	Limits             backupLimitsView            `json:"limits" yaml:"limits"`
 	HeartbeatURL       *string                     `json:"heartbeat_url" yaml:"heartbeat_url"`
@@ -70,6 +102,8 @@ type backupSettingsView struct {
 	Destinations       []backupSettingsDestination `json:"destinations" yaml:"destinations"`
 	InstanceAdmins     int                         `json:"instance_admins" yaml:"instance_admins"`
 	LocalPath          *string                     `json:"local_path" yaml:"local_path"`
+	AvailableChannels  []backupAlertChannelView    `json:"available_channels" yaml:"available_channels"`
+	ChannelStatus      []backupAlertRouteView      `json:"channel_status" yaml:"channel_status"`
 }
 
 type backupRecipientRow struct {
@@ -150,8 +184,33 @@ func printBackupSettings(cmd *cobra.Command, s backupSettingsView) {
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Alerts:       failed %s · incomplete %s · stale after %d h %s · off-site %s · drill %s → %d instance admin(s)\n",
 		onOff(s.Events.Failed), onOff(s.Events.Incomplete), s.StaleAlertHours, onOff(s.Events.Stale), onOff(s.Events.Offsite), onOff(s.Events.Drill), s.InstanceAdmins)
-	if len(s.Channels) > 0 {
-		fmt.Fprintf(w, "Channels:     %s\n", strings.Join(s.Channels, ", "))
+	names := map[string]string{}
+	for _, c := range s.AvailableChannels {
+		names[c.ID] = c.Name
+	}
+	routed := map[string]bool{}
+	for _, c := range s.ChannelStatus {
+		routed[c.ID] = true
+		name := names[c.ID]
+		if name == "" {
+			name = "unavailable"
+		}
+		state := "no alert sent yet"
+		if d := c.LastDelivery; d != nil {
+			state = "last alert " + d.Status + " " + d.At
+			if d.Status == "failed" {
+				state += ": " + backupStrOr(d.Error, "no reason recorded")
+			}
+		}
+		fmt.Fprintf(w, "Also tell:    %s (%s) · %s\n", name, c.ID, state)
+	}
+	for _, c := range s.AvailableChannels {
+		if !routed[c.ID] {
+			fmt.Fprintf(w, "Could tell:   %s (%s) · add with --channel\n", c.Name, c.ID)
+		}
+	}
+	if len(s.AvailableChannels) == 0 && len(s.ChannelStatus) == 0 {
+		fmt.Fprintln(w, "Also tell:    no notification channel can carry backup alerts; add a workspace-wide one under Settings › Notifications (providers are switched in Admin › Notifications)")
 	}
 	fmt.Fprintf(w, "Drills:       remind %s\n", s.DrillReminder)
 	fmt.Fprintf(w, "Recovery kit: %s\n", onOff(s.RecoveryKitEnabled))
@@ -206,7 +265,11 @@ var adminInstanceBackupsSettingsSetCmd = &cobra.Command{
 the rest keep their value. --disk-mbps 0 and --upload-mbps 0 mean no limit.
 --heartbeat-url "" clears the heartbeat. --alerts lists the incident kinds
 that reach instance admins (failed, incomplete, stale, offsite, drill); the
-others are still recorded. Recorded in the instance audit log.`,
+others are still recorded. --channel names a notification channel (its id,
+from "settings get") that hears every alert beside the inboxes; repeat it for
+several, and --channel "" empties the list. Only a workspace-wide, switched-on
+channel that admits System health can be added. Recorded in the instance
+audit log.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		f := cmd.Flags()
@@ -257,7 +320,13 @@ others are still recorded. Recorded in the instance audit log.`,
 		}
 		if f.Changed("channel") {
 			v, _ := f.GetStringSlice("channel")
-			body["channels"] = v
+			chans := []string{}
+			for _, c := range v {
+				if c = strings.TrimSpace(c); c != "" {
+					chans = append(chans, c)
+				}
+			}
+			body["channels"] = chans
 		}
 		if len(body) == 0 {
 			return errors.New("nothing to change: pass at least one flag (see --help)")
@@ -271,6 +340,37 @@ others are still recorded. Recorded in the instance audit log.`,
 			return err
 		}
 		return resolvedFormatter(cmd).AutoHuman(out, func() { printBackupSettings(cmd, out) })
+	},
+}
+
+var adminInstanceBackupsTestAlertCmd = &cobra.Command{
+	Use:   "test-alert",
+	Short: "Send a test backup alert to a notification channel",
+	Long: `POST /api/v1/admin/instance/backups/settings/test-alert. Sends a test alert
+to one notification channel now, through the same delivery a real backup alert
+uses (the channel's provider, its sealed secret, the SSRF guard), and says
+whether it arrived. The channel need not be on the alert route yet; "settings
+get" lists the ones that can be. Exits non-zero when the send failed.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		ch, _ := cmd.Flags().GetString("channel")
+		if strings.TrimSpace(ch) == "" {
+			return errors.New("--channel is required (a channel id from `crewship admin instance backups settings get`)")
+		}
+		client, err := requireInstanceAdminClient()
+		if err != nil {
+			return err
+		}
+		var out backupTestAlertView
+		if err := postJSON(client, instanceBackupsAPI+"/settings/test-alert", map[string]string{"channel_id": strings.TrimSpace(ch)}, &out); err != nil {
+			return err
+		}
+		if !out.OK {
+			return fmt.Errorf("test alert to %s was not delivered: %s", out.Channel, backupStrOr(out.Error, "unknown error"))
+		}
+		return resolvedFormatter(cmd).AutoHuman(out, func() {
+			fmt.Fprintf(cmd.OutOrStdout(), "Test alert delivered to %s (%s).\n", out.Channel, out.ChannelID)
+		})
 	},
 }
 
@@ -654,7 +754,8 @@ func init() {
 	s.StringSlice("alerts", nil, "Incident kinds that reach instance admins: failed,incomplete,stale,offsite,drill (none = no alerts)")
 	s.Int("stale-hours", 36, "Raise a stale incident when a plan's newest good backup is older than this")
 	s.String("drill-reminder", "monthly", "weekly | monthly | off")
-	s.StringSlice("channel", nil, "Extra delivery routes, recorded with the settings; repeatable (replaces the list)")
+	s.StringSlice("channel", nil, "Notification channel id that hears every alert beside the inboxes; repeatable, replaces the list (\"\" empties it)")
+	adminInstanceBackupsTestAlertCmd.Flags().String("channel", "", "Notification channel id to send the test alert to (required)")
 	adminInstanceBackupsSettingsCmd.AddCommand(adminInstanceBackupsSettingsGetCmd, adminInstanceBackupsSettingsSetCmd)
 
 	ra := adminInstanceBackupsRecipientsAddCmd.Flags()
@@ -682,5 +783,5 @@ func init() {
 	adminInstanceBackupsRecoverySheetCmd.Flags().String("out", "", "Write the sheet to this file instead of stdout")
 
 	adminInstanceBackupsCmd.AddCommand(adminInstanceBackupsSettingsCmd, adminInstanceBackupsRecipientsCmd, adminInstanceBackupsDestinationsCmd,
-		adminInstanceBackupsIncidentsCmd, adminInstanceBackupsRecoverySheetCmd)
+		adminInstanceBackupsIncidentsCmd, adminInstanceBackupsRecoverySheetCmd, adminInstanceBackupsTestAlertCmd)
 }
