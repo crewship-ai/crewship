@@ -748,7 +748,7 @@ func (s *Service) execute(ctx context.Context, r *Run, plan *Plan) {
 		s.endPhase(r, PhaseOffsite, "skipped", "the bundle failed its check; nothing was copied")
 	} else {
 		persist()
-		status, detail := s.copyOffsite(ctx, r, plan, res.Path, uploadLimiter)
+		status, detail := s.copyOffsite(ctx, r, plan, res.Path, res.Manifest, uploadLimiter)
 		s.endPhase(r, PhaseOffsite, status, detail)
 	}
 	if r.Environments {

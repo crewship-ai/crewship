@@ -178,4 +178,42 @@ func TestService_InstancePlanRotatesItsBundles(t *testing.T) {
 			t.Errorf("remote copy of kept %s deleted", filepath.Base(keep))
 		}
 	}
+	// The layers went off-site with the bundles; b2's own layer left the
+	// destination with it, the ones the kept copies need stayed.
+	layerKey := func(d string) string { k, _ := offsite.EnvironmentBlobKey("", d); return k }
+	if _, ok := remote.objects[layerKey(own2)]; ok {
+		t.Error("b2's own layer is still at the destination")
+	}
+	for _, d := range []string{shared, own1, own3} {
+		if _, ok := remote.objects[layerKey(d)]; !ok {
+			t.Errorf("layer %s a kept remote bundle needs was deleted", d[:15])
+		}
+	}
+
+	// Restore from off-site onto a server that has neither the bundle nor
+	// its layers: both come back, and the layers are the bundle's refs.
+	fresh := t.TempDir()
+	got, tr, err := FetchOffsiteCopy(ctx, h.db, h.svc.Destinations, d.ID, ObjectKey(ScopeInstance, "", b3), fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Environments.Transferred != 2 {
+		t.Fatalf("fetch = %+v", tr)
+	}
+	if m, err := backup.Inspect(ctx, got); err != nil || m.Scope != backup.ScopeInstance {
+		t.Fatalf("fetched bundle: %+v, %v", m, err)
+	}
+	freshStore := backup.EnvironmentStoreFor(fresh)
+	for _, d := range []string{shared, own3} {
+		if !freshStore.Has(d) {
+			t.Errorf("layer %s not restored from off-site", d[:15])
+		}
+	}
+	_ = h.db.QueryRow(`SELECT COUNT(*) FROM bundle_environment_refs WHERE bundle_ref = ?`, got).Scan(&refs)
+	if refs != 2 {
+		t.Errorf("fetched bundle holds %d refs, want 2", refs)
+	}
+	if _, _, err := FetchOffsiteCopy(ctx, h.db, h.svc.Destinations, d.ID, ObjectKey(ScopeInstance, "", b3), fresh); err == nil {
+		t.Error("fetching over an existing bundle must be refused")
+	}
 }

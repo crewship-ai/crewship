@@ -463,11 +463,18 @@ func offsiteTargets(plan *Plan) []string {
 // destination of the plan, through the shared upload limiter, and record a
 // copy only once offsite.Upload has verified it at the destination. Returns
 // the phase status ("done" | "failed" | "skipped") and its detail.
-func (s *Service) copyOffsite(ctx context.Context, r *Run, plan *Plan, path string, upload *offsite.Limiter) (string, string) {
+//
+// A bundle whose environment layers stay in the shared store (not inline)
+// takes them along: offsite.UploadBundle writes the refs object, uploads
+// every layer the destination lacks, then the bundle.
+func (s *Service) copyOffsite(ctx context.Context, r *Run, plan *Plan, path string, m *backup.Manifest, upload *offsite.Limiter) (string, string) {
 	targets := offsiteTargets(plan)
 	if len(targets) == 0 {
 		return "skipped", "not configured"
 	}
+	layers := StoreEnvironmentBlobs(m)
+	store := backup.EnvironmentStoreFor(filepath.Dir(path))
+	var layerNotes []string
 	open := s.Destinations
 	if open == nil {
 		open = DBDestinations(s.DB)
@@ -484,10 +491,14 @@ func (s *Service) copyOffsite(ctx context.Context, r *Run, plan *Plan, path stri
 			continue
 		}
 		key := ObjectKey(r.Scope, r.WorkspaceID, path)
-		obj, err := offsite.Upload(ctx, dst, path, key, offsite.UploadOptions{Limiter: upload})
+		tr, err := offsite.UploadBundle(ctx, dst, store, path, key, layers, offsite.UploadOptions{Limiter: upload})
 		if err != nil {
 			failed = append(failed, fmt.Sprintf("%s: %v", name, err))
 			continue
+		}
+		obj := tr.Bundle
+		if len(layers) > 0 {
+			layerNotes = append(layerNotes, fmt.Sprintf("%s: %d environment layer(s) uploaded, %d already there", name, tr.Environments.Transferred, tr.Environments.Present))
 		}
 		if err := RecordCopy(ctx, s.DB, Copy{BundlePath: path, DestinationID: id, Key: obj.Key, Size: obj.Size, SHA256: obj.SHA256, VerifiedAt: ts(s.now())}); err != nil {
 			failed = append(failed, fmt.Sprintf("%s: uploaded and verified, but the copy could not be recorded: %v", name, err))
@@ -506,7 +517,60 @@ func (s *Service) copyOffsite(ctx context.Context, r *Run, plan *Plan, path stri
 		return "failed", detail
 	}
 	s.resolve(ctx, r.PlanID, IncidentOffsite)
-	return "done", "copied and verified to " + strings.Join(ok, ", ")
+	detail := "copied and verified to " + strings.Join(ok, ", ")
+	if len(layerNotes) > 0 {
+		detail += " (" + strings.Join(layerNotes, "; ") + ")"
+	}
+	return "done", detail
+}
+
+// StoreEnvironmentBlobs is the environment layers a bundle needs from the
+// shared store: those of its environments that are not inline. A
+// self-contained bundle needs none.
+func StoreEnvironmentBlobs(m *backup.Manifest) []string {
+	if m == nil {
+		return nil
+	}
+	var shared backup.Manifest
+	for _, e := range m.Contents.Environments {
+		if !e.Inline {
+			shared.Contents.Environments = append(shared.Contents.Environments, e)
+		}
+	}
+	return backup.BundleEnvironmentBlobs(&shared)
+}
+
+// FetchOffsiteCopy is a restore from off-site: it downloads the copy of a
+// bundle at a destination into dir, with the environment layers the copy's
+// refs object names into dir's environment store, and records those layers
+// as the bundle's refs so retention keeps them. The bundle is then an
+// ordinary local bundle for restore, drill or check. Returns its path.
+func FetchOffsiteCopy(ctx context.Context, db *sql.DB, open DestinationOpener, destinationID, key, dir string) (string, offsite.BundleTransfer, error) {
+	if open == nil {
+		open = DBDestinations(db)
+	}
+	dst, _, err := open(ctx, destinationID)
+	if err != nil {
+		return "", offsite.BundleTransfer{}, err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", offsite.BundleTransfer{}, err
+	}
+	path := filepath.Join(dir, filepath.Base(key))
+	if _, err := os.Lstat(path); err == nil {
+		return "", offsite.BundleTransfer{}, fmt.Errorf("%s already exists here; restore it from this server", filepath.Base(path))
+	}
+	store := backup.EnvironmentStoreFor(dir)
+	tr, err := offsite.DownloadBundle(ctx, dst, store, key, path, offsite.DownloadOptions{})
+	if err != nil {
+		return "", tr, err
+	}
+	if len(tr.Blobs) > 0 {
+		if err := backup.AddEnvironmentRefs(ctx, db, store, path, tr.Blobs); err != nil {
+			return path, tr, err
+		}
+	}
+	return path, tr, nil
 }
 
 func failedNames(failed []string) []string {
@@ -535,7 +599,9 @@ func (s *Service) dropRemoteCopies(ctx context.Context, paths []string) {
 		for _, c := range copies {
 			dst, _, err := open(ctx, c.DestinationID)
 			if err == nil {
-				err = dst.Delete(ctx, c.Key)
+				// The bundle, its refs object, and the layers no other
+				// remote bundle still needs.
+				_, err = offsite.DeleteBundle(ctx, dst, c.Key)
 			}
 			if err != nil && !errors.Is(err, ErrNotFound) {
 				s.Logger.Warn("backup retention: remote copy not deleted", "bundle", p, "destination", c.DestinationID, "error", err)

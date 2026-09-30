@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -95,7 +96,18 @@ func (m *memDest) Get(_ context.Context, key string) (io.ReadCloser, offsite.Obj
 	}
 	return io.NopCloser(bytes.NewReader(b)), offsite.Object{Key: key, Size: int64(len(b)), SHA256: m.sums[key]}, nil
 }
-func (m *memDest) List(context.Context, string) ([]offsite.Object, error) { return nil, nil }
+func (m *memDest) List(_ context.Context, prefix string) ([]offsite.Object, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []offsite.Object
+	for k, b := range m.objects {
+		if strings.HasPrefix(k, prefix) {
+			out = append(out, offsite.Object{Key: k, Size: int64(len(b))})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out, nil
+}
 func (m *memDest) Head(_ context.Context, key string) (offsite.Object, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
