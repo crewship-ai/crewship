@@ -35,8 +35,8 @@ execution. Official Sign in with ChatGPT uses a separate preview API, typed scop
 tokens, application-managed refresh, and subscription quota. Its preview does not
 support `max_output_tokens`; legacy auth files do not prove eligibility or provide
 the bounded per-call accounting contract required here. See the official
-[SIWC token reference](https://developers.openai.com/siwc/token-reference) and
-[preview limitations](https://developers.openai.com/siwc/preview-limitations).
+[SIWC token reference](https://developers.openai.com/siwc/token-sharing-open-source/token-reference) and
+[preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
 
 Acceptance uses synthetic TLS upstreams and real pinned CLI/tool execution; no
 paid provider calls. Run the explicit tagged native live canary with
