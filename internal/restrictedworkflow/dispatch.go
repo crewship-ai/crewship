@@ -32,6 +32,24 @@ func (s *Service) checkJob(ctx context.Context, q pipeline.PageActionQuery, j jo
 	if err != nil || hash(j.Recipe) != j.RecipeHash {
 		return ErrDenied
 	}
+	if j.SourceFacet != "" {
+		if j.SourceFacet != "issue" || s.SourceChecker == nil || s.SourceChecker(ctx, q, j.Origin) != nil {
+			return ErrDenied
+		}
+	}
+	var rights []access.Right
+	if json.Unmarshal([]byte(j.Rights), &rights) != nil {
+		return ErrDenied
+	}
+	for _, right := range rights {
+		if right.Kind != "project" || right.Operation != "read" || right.ID == "" {
+			return ErrDenied
+		}
+		var allowed int
+		if q.QueryRowContext(ctx, `SELECT 1 FROM access_grants g JOIN projects p ON p.id=g.project_id AND p.workspace_id=? WHERE g.member_id=? AND g.resource_kind='project' AND g.project_id=? AND g.operation='read'`, j.Workspace, j.Member, right.ID).Scan(&allowed) != nil {
+			return ErrDenied
+		}
+	}
 	if j.Source == "manual" {
 		return manualPolicy(ctx, q, j.Principal, j.Workspace)
 	}
@@ -53,7 +71,7 @@ func (s *Service) checkJob(ctx context.Context, q pipeline.PageActionQuery, j jo
 }
 func (s *Service) load(ctx context.Context, id string) (job, error) {
 	var j job
-	err := s.db.QueryRowContext(ctx, `SELECT id,workspace_id,principal_id,member_id,member_revision,pipeline_id,recipe_hash,recipe_json,agent_id,execution_profile,chat_id,origin_attempt_id,origin_handle_ciphertext,source_kind,page_id,page_action_json,page_spec_hash,inputs_json,idempotency_key_hash,state,outputs_json,created_at,fire_at,expires_at FROM restricted_workflow_jobs WHERE id=?`, id).Scan(&j.ID, &j.Workspace, &j.Principal, &j.Member, &j.Revision, &j.Pipeline, &j.RecipeHash, &j.Recipe, &j.Agent, &j.Profile, &j.Chat, &j.Origin, &j.Handle, &j.Source, &j.Page, &j.PageAction, &j.PageHash, &j.Inputs, &j.Idempotency, &j.State, &j.Outputs, &j.Created, &j.FireAt, &j.Expires)
+	err := s.db.QueryRowContext(ctx, `SELECT id,workspace_id,principal_id,member_id,member_revision,pipeline_id,recipe_hash,recipe_json,agent_id,execution_profile,chat_id,origin_attempt_id,origin_handle_ciphertext,source_kind,page_id,page_action_json,page_spec_hash,inputs_json,idempotency_key_hash,state,outputs_json,created_at,fire_at,expires_at,additional_rights_json,source_facet FROM restricted_workflow_jobs WHERE id=?`, id).Scan(&j.ID, &j.Workspace, &j.Principal, &j.Member, &j.Revision, &j.Pipeline, &j.RecipeHash, &j.Recipe, &j.Agent, &j.Profile, &j.Chat, &j.Origin, &j.Handle, &j.Source, &j.Page, &j.PageAction, &j.PageHash, &j.Inputs, &j.Idempotency, &j.State, &j.Outputs, &j.Created, &j.FireAt, &j.Expires, &j.Rights, &j.SourceFacet)
 	return j, err
 }
 
@@ -133,7 +151,7 @@ func (s *Service) DispatchNext(ctx context.Context) (bool, error) {
 		}
 		var result strings.Builder
 		done := false
-		err = s.executor.ExecuteRun(stepCtx, j.Principal, j.Workspace, j.Chat, prompt, func(kind, text string) error {
+		emit := func(kind, text string) error {
 			if s.checkJob(stepCtx, s.db, j, handle) != nil {
 				return ErrDenied
 			}
@@ -146,7 +164,22 @@ func (s *Service) DispatchNext(ctx context.Context) (bool, error) {
 				return nil
 			}
 			return ErrDenied
-		})
+		}
+		var rights []access.Right
+		if json.Unmarshal([]byte(j.Rights), &rights) != nil {
+			stop()
+			return true, ErrDenied
+		}
+		if len(rights) != 0 {
+			executor, ok := s.executor.(RightsExecutor)
+			if !ok {
+				stop()
+				return true, ErrDenied
+			}
+			err = executor.ExecuteRunWithRights(stepCtx, j.Principal, j.Workspace, j.Chat, prompt, rights, emit)
+		} else {
+			err = s.executor.ExecuteRun(stepCtx, j.Principal, j.Workspace, j.Chat, prompt, emit)
+		}
 		stop()
 		if err != nil || !done {
 			if err == nil {
