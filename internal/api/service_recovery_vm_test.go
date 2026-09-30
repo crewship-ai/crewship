@@ -26,7 +26,7 @@ import (
 func TestServiceRecoveryVM(t *testing.T) {
 	phase := os.Getenv("CREWSHIP_SERVICE_VM_PHASE")
 	if phase == "" {
-		t.Skip("disposable VM acceptance only")
+		t.Fatal("explicit service_recovery_vm acceptance requires a disposable guest phase")
 	}
 	switch phase {
 	case "seed", "initialize", "start", "verify-running", "stop", "verify-stopped":

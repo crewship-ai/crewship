@@ -98,8 +98,9 @@ func (h *PageHandler) DispatchApplicationAction(w http.ResponseWriter, r *http.R
 		return
 	}
 	var request struct {
-		Publication int64          `json:"publication" yaml:"publication"`
-		Inputs      map[string]any `json:"inputs" yaml:"inputs"`
+		ExpectedIntentHash string         `json:"expected_intent_hash,omitempty" yaml:"expected_intent_hash,omitempty"`
+		Publication        int64          `json:"publication" yaml:"publication"`
+		Inputs             map[string]any `json:"inputs" yaml:"inputs"`
 	}
 	if err := pages.DecodeProjectJSON(raw, &request); err != nil || request.Publication < 1 {
 		replyError(w, 400, "publication and declared action inputs are required")
@@ -157,7 +158,7 @@ func (h *PageHandler) DispatchApplicationAction(w http.ResponseWriter, r *http.R
 		replyError(w, 400, "Idempotency-Key (at most 128 bytes) is required")
 		return
 	}
-	body, err := json.Marshal(dispatchRequest{Inputs: request.Inputs})
+	body, err := json.Marshal(dispatchRequest{Inputs: request.Inputs, ExpectedIntentHash: request.ExpectedIntentHash})
 	if err != nil {
 		replyError(w, 400, "invalid action inputs")
 		return

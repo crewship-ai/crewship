@@ -56,5 +56,5 @@ func (r *Router) restrictedFiles(w http.ResponseWriter, req *http.Request) {
 		replyError(w, http.StatusNotFound, "Files not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"files": files})
+	writeJSON(w, http.StatusOK, restrictedOutputFilesResponse{Files: files})
 }

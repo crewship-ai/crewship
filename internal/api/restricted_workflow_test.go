@@ -85,6 +85,9 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 	request := func(user, method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path+"?workspace_id="+workspace, strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+tokens[user])
+		if method == http.MethodPost && strings.Contains(path, "/application/actions/") {
+			req.Header.Set("Idempotency-Key", "published-intent-fixture")
+		}
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		return rec
@@ -192,7 +195,53 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 	if rec.Code != 403 {
 		t.Fatalf("Page operation floor bypassed %d %s", rec.Code, rec.Body.String())
 	}
-	rec = request("wf-h1", http.MethodPost, pagePath, `{"inputs":{}}`)
+	var shown []restrictedPage
+	if err = json.Unmarshal(pageCatalog.Body.Bytes(), &shown); err != nil || len(shown) != 1 {
+		t.Fatal("missing Page fingerprint", err)
+	}
+	intent := shown[0].Actions[0].Intent
+	if intent == "" {
+		t.Fatal("empty Page intent")
+	}
+	pageBody := `{"inputs":{},"expected_intent_hash":"` + intent + `"}`
+	if missing := request("wf-h1", http.MethodPost, pagePath, `{"inputs":{}}`); missing.Code != 400 {
+		t.Fatal("missing intent accepted", missing.Code)
+	}
+	execOrFatal(t, db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status) VALUES('wf-alt',?,'alternate-work','Alternate',?,'fixture-hash','wf-crew','active')`, workspace, privateRoutine)
+	for _, changed := range []string{strings.Replace(spec, "PAGE_PRIVATE_CANARY", "CHANGED_FIXED", 1), strings.Replace(spec, `"routine":"private-work"`, `"routine":"alternate-work"`, 1)} {
+		execOrFatal(t, db, `UPDATE pages SET spec_json=? WHERE id='wf-page'`, changed)
+		if stale := request("wf-h1", http.MethodPost, pagePath, pageBody); stale.Code != 404 {
+			t.Fatal("stale Page action accepted", stale.Code, stale.Body.String())
+		}
+	}
+	execOrFatal(t, db, `UPDATE pages SET spec_json=? WHERE id='wf-page'`, spec)
+	nested := `{"dsl_version":"1.0","name":"private-work","inputs":[{"name":"task","type":"string","required":true}],"steps":[{"id":"nested","type":"call_pipeline","pipeline_slug":"alternate-work","inputs":{"task":"{{ inputs.task }}"}}]}`
+	execOrFatal(t, db, `UPDATE pipelines SET definition_json=? WHERE id='wf-routine'`, nested)
+	nestedCatalog := request("wf-h1", http.MethodGet, pageCatalogPath, "")
+	var nestedShown []restrictedPage
+	if json.Unmarshal(nestedCatalog.Body.Bytes(), &nestedShown) != nil || len(nestedShown) != 1 {
+		t.Fatal("nested Page missing", nestedCatalog.Body.String())
+	}
+	nestedBody := `{"inputs":{},"expected_intent_hash":"` + nestedShown[0].Actions[0].Intent + `"}`
+	execOrFatal(t, db, `UPDATE pipelines SET definition_json=? WHERE id='wf-alt'`, strings.Replace(privateRoutine, "{{ inputs.task }}", "Changed {{ inputs.task }}", 1))
+	if stale := request("wf-h1", http.MethodPost, pagePath, nestedBody); stale.Code != 404 {
+		t.Fatal("nested drift accepted", stale.Code, stale.Body.String())
+	}
+	execOrFatal(t, db, `UPDATE pipelines SET definition_json=? WHERE id='wf-routine'`, privateRoutine)
+	rotated, encryptErr := encryption.Encrypt("synthetic-rotated-workflow-key")
+	if encryptErr != nil {
+		t.Fatal(encryptErr)
+	}
+	execOrFatal(t, db, `UPDATE credentials SET encrypted_value=? WHERE id='wf-key'`, rotated)
+	if stale := request("wf-h1", http.MethodPost, pagePath, pageBody); stale.Code != 404 {
+		t.Fatal("provider rotation accepted stale intent", stale.Code)
+	}
+	refreshed := request("wf-h1", http.MethodGet, pageCatalogPath, "")
+	if json.Unmarshal(refreshed.Body.Bytes(), &shown) != nil || len(shown) != 1 {
+		t.Fatal("fresh provider intent missing")
+	}
+	pageBody = `{"inputs":{},"expected_intent_hash":"` + shown[0].Actions[0].Intent + `"}`
+	rec = request("wf-h1", http.MethodPost, pagePath, pageBody)
 	if rec.Code != 202 {
 		t.Fatalf("Page private queue %d %s", rec.Code, rec.Body.String())
 	}
@@ -245,6 +294,18 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO page_project_live(page_id,version) VALUES('wf-page',1)`)
 	if catalog := request("wf-h1", http.MethodGet, pageCatalogPath, ""); catalog.Code != 200 || catalog.Header().Get("X-Total-Count") != "1" || !strings.Contains(catalog.Body.String(), `"publication":1`) {
 		t.Fatal("current publication missing from filtered Page directory", catalog.Code)
+	}
+	if stale := request("wf-h1", http.MethodPost, "/api/v1/pages/private-page/application/actions/panel/do-work", `{"inputs":{},"publication":2,"expected_intent_hash":"`+shown[0].Actions[0].Intent+`"}`); stale.Code != 409 {
+		t.Fatal("old/wrong publication accepted", stale.Code, stale.Body.String())
+	}
+	published := request("wf-h1", http.MethodGet, pageCatalogPath, "")
+	var publishedShown []restrictedPage
+	if json.Unmarshal(published.Body.Bytes(), &publishedShown) != nil || len(publishedShown) != 1 {
+		t.Fatal("published fingerprint missing")
+	}
+	pubBody := `{"inputs":{},"publication":1,"expected_intent_hash":"` + publishedShown[0].Actions[0].Intent + `"}`
+	if admitted := request("wf-h1", http.MethodPost, "/api/v1/pages/private-page/application/actions/panel/do-work", pubBody); admitted.Code != 202 {
+		t.Fatal("published intent forwarding", admitted.Code, admitted.Body.String())
 	}
 	execOrFatal(t, db, `UPDATE pages SET spec_json=? WHERE id='wf-page'`, strings.Replace(spec, "Private work", "Changed work", 1))
 	if catalog := request("wf-h1", http.MethodGet, pageCatalogPath, ""); catalog.Code != 200 || catalog.Header().Get("X-Total-Count") != "0" || strings.Contains(catalog.Body.String(), "Changed work") {

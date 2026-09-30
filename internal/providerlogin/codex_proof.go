@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // IdentityVerifier is configured only by trusted host code.
@@ -94,7 +95,7 @@ func (s *CodexProofStore) Enroll(ctx context.Context, workspace, credential stri
  access_cipher_hash=excluded.access_cipher_hash,refresh_cipher_hash=excluded.refresh_cipher_hash,id_cipher_hash=excluded.id_cipher_hash,
  access_expires_at=excluded.access_expires_at,id_expires_at=excluded.id_expires_at,verified_at=excluded.verified_at`,
 		identity.Issuer, identity.ClientID, identity.Subject, identity.AccountID, identity.UserID, identity.Plan,
-		proofHash(m.access), proofHash(m.refresh), proofHash(m.id), identity.AccessExpires.UTC().Format(time.RFC3339), identity.IDExpires.UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339Nano),
+		proofHash(m.access), proofHash(m.refresh), proofHash(m.id), identity.AccessExpires.UTC().Format(time.RFC3339), identity.IDExpires.UTC().Format(time.RFC3339), tsformat.Format(time.Now()),
 		credential, workspace, m.access, m.refresh, m.id, m.account)
 	if e != nil {
 		return e
@@ -183,7 +184,7 @@ func (s *CodexProofStore) CommitRotation(ctx context.Context, tx *sql.Tx, creden
 	if decryptErr != nil || refreshErr != nil || idErr != nil || proofHash(access) != proof.accessTokenHash || proofHash(refresh) != proof.refreshTokenHash || proofHash(id) != proof.idTokenHash {
 		return ErrUnverifiedCodexIdentity
 	}
-	result, e := tx.ExecContext(ctx, `UPDATE codex_login_proofs SET generation=generation+1,access_cipher_hash=?,refresh_cipher_hash=?,id_cipher_hash=?,access_expires_at=?,id_expires_at=?,verified_at=? WHERE credential_id=? AND generation=?`, proofHash(m.access), proofHash(m.refresh), proofHash(m.id), proof.after.AccessExpires.UTC().Format(time.RFC3339), proof.after.IDExpires.UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339Nano), credential, current.generation)
+	result, e := tx.ExecContext(ctx, `UPDATE codex_login_proofs SET generation=generation+1,access_cipher_hash=?,refresh_cipher_hash=?,id_cipher_hash=?,access_expires_at=?,id_expires_at=?,verified_at=? WHERE credential_id=? AND generation=?`, proofHash(m.access), proofHash(m.refresh), proofHash(m.id), proof.after.AccessExpires.UTC().Format(time.RFC3339), proof.after.IDExpires.UTC().Format(time.RFC3339), tsformat.Format(time.Now()), credential, current.generation)
 	if e != nil {
 		return e
 	}

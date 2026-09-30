@@ -168,6 +168,11 @@ func (s *Service) AdmitManualFrozen(ctx context.Context, user, workspace, slug s
 	return s.admit(ctx, user, workspace, slug, inputs, expectedHash, delay, nil, key, nil, expectedExecutionHash)
 }
 func (s *Service) AdmitPage(ctx context.Context, user, workspace string, action pipeline.PageActionInvocation, inputs map[string]any, keys ...string) (Receipt, error) {
+	return s.AdmitPageFrozen(ctx, user, workspace, action, inputs, "", keys...)
+}
+
+// AdmitPageFrozen checks the caller-observed Page intent before creating execution authority.
+func (s *Service) AdmitPageFrozen(ctx context.Context, user, workspace string, action pipeline.PageActionInvocation, inputs map[string]any, expectedIntent string, keys ...string) (Receipt, error) {
 	if err := pipeline.CheckDeclaredPageAction(ctx, s.db, user, workspace, action); err != nil {
 		return Receipt{}, ErrDenied
 	}
@@ -182,7 +187,7 @@ func (s *Service) AdmitPage(ctx context.Context, user, workspace string, action 
 	if len(keys) == 1 {
 		key = keys[0]
 	}
-	return s.admit(ctx, user, workspace, slug, inputs, "", 0, &action, key, nil)
+	return s.admit(ctx, user, workspace, slug, inputs, "", 0, &action, key, nil, expectedIntent)
 }
 func (s *Service) admit(ctx context.Context, user, workspace, slug string, supplied map[string]any, expectedHash string, delay time.Duration, page *pipeline.PageActionInvocation, key string, prepared *PreparedInvocation, expectedExecutions ...string) (Receipt, error) {
 	if len(expectedExecutions) > 1 {
@@ -225,7 +230,11 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 		return receipt, ErrDenied
 	}
 	graphHash := hash(string(rawGraph))
-	if len(expectedExecutions) == 1 && expectedExecutions[0] != "" && expectedExecutions[0] != graphHash {
+	intentHash := graphHash
+	if page != nil {
+		intentHash = pageIntentHash(*page, graphHash)
+	}
+	if len(expectedExecutions) == 1 && expectedExecutions[0] != "" && expectedExecutions[0] != intentHash {
 		return receipt, ErrDenied
 	}
 	if err = store.Check(ctx, user, workspace, access.Right{Kind: "agent", ID: agent, Operation: "run"}); err != nil {

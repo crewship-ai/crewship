@@ -140,5 +140,5 @@ func (r *Router) executionProfile(w http.ResponseWriter, req *http.Request) {
 		replyError(w, http.StatusNotFound, "chat not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"mode": member.Mode, "audience": visibility})
+	writeJSON(w, http.StatusOK, restrictedChatModeResponse{Mode: member.Mode, Audience: visibility})
 }

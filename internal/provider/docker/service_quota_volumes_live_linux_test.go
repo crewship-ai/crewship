@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && quota_live
 
 package docker
 
@@ -18,7 +18,7 @@ import (
 
 func TestLivePersistentQuotaService(t *testing.T) {
 	if os.Getenv("CREWSHIP_LIVE_PERSISTENT_QUOTAS") != "1" || os.Geteuid() != 0 {
-		t.Skip("requires explicit isolated root guest Docker acceptance")
+		t.Fatal("requires explicit isolated root guest Docker acceptance")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()

@@ -67,5 +67,5 @@ func (r *Router) restrictedContext(w http.ResponseWriter, req *http.Request) {
 			result = append(result, entry)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": result, "limit": 256})
+	writeJSON(w, http.StatusOK, restrictedContextListResponse{Entries: result, Limit: 256})
 }

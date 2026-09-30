@@ -36,7 +36,7 @@ export function RestrictedRoutines({ workspaceId }: { workspaceId: string }) {
   }, [workspaceId])
 
   useEffect(() => {
-    if (!runId || !runState || !["pending", "running"].includes(runState)) return
+    if (!runId || !runState || !["SCHEDULED", "DEDUPED", "pending", "running"].includes(runState)) return
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     const poll = async () => {
@@ -46,7 +46,7 @@ export function RestrictedRoutines({ workspaceId }: { workspaceId: string }) {
         const body = await response.json() as Result
         if (controller.signal.aborted) return
         setRun(body)
-        if (["pending", "running"].includes(body.status)) timer = setTimeout(poll, 1000)
+        if (["SCHEDULED", "DEDUPED", "pending", "running"].includes(body.status)) timer = setTimeout(poll, 1000)
       } catch (cause) {
         if (controller.signal.aborted) return
         setRun(null)
@@ -74,7 +74,7 @@ export function RestrictedRoutines({ workspaceId }: { workspaceId: string }) {
         request.current = { key: crypto.randomUUID(), slug: routine.slug, body: JSON.stringify({ inputs, expected_definition_hash: routine.definition_hash, expected_execution_hash: routine.execution_hash }) }
       }
       const attempt = request.current
-      const response = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspace)}/pipelines/${encodeURIComponent(attempt.slug)}/run`, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": attempt.key }, body: attempt.body })
+      const response = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspace)}/pipelines/${encodeURIComponent(attempt.slug)}/run`, { method: "POST", headers: { "Content-Type": "application/json", Prefer: "respond-async", "Idempotency-Key": attempt.key }, body: attempt.body })
       const body = await response.json()
       if (owner.current !== workspace) return
       if (!response.ok) { request.current = null; throw new Error(body.error ?? "Routine unavailable.") }
@@ -84,7 +84,7 @@ export function RestrictedRoutines({ workspaceId }: { workspaceId: string }) {
       if (owner.current === workspace) setError(cause instanceof TypeError ? "Could not confirm the outcome. Retry sends the same request ID." : cause instanceof Error ? cause.message : "Routine unavailable.")
     } finally { if (owner.current === workspace) setSubmitting(false) }
   }
-  const active = submitting || !!run && ["pending", "running"].includes(run.status)
+  const active = submitting || !!run && ["SCHEDULED", "DEDUPED", "pending", "running"].includes(run.status)
   return <div className="mx-auto w-full max-w-3xl space-y-5 overflow-auto p-4 md:p-6">
     <h1 className="text-xl font-semibold">Private routines</h1>
     <p className="text-sm text-muted-foreground">Run an allowed routine. Its results are visible to you.</p>

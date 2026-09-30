@@ -613,6 +613,7 @@
           "timeout_seconds",
           "tool_profile",
           "pays_with",
+          "restricted_execution_profile",
           "memory_enabled",
           "schedule_enabled",
           "webhook_require_timestamp",
@@ -10871,6 +10872,9 @@
             },
             "type": "array"
           },
+          "intent_hash": {
+            "type": "string"
+          },
           "label": {
             "type": "string"
           },
@@ -10879,6 +10883,7 @@
           }
         },
         "required": [
+          "intent_hash",
           "panel_id",
           "id",
           "label",
@@ -10998,6 +11003,27 @@
           "action",
           "restricted",
           "status_url"
+        ],
+        "type": "object"
+      },
+      "RestrictedPageWorkflowRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_intent_hash": {
+            "type": "string"
+          },
+          "inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "publication": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "inputs",
+          "expected_intent_hash"
         ],
         "type": "object"
       },
@@ -95507,20 +95533,27 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": false,
-                "properties": {
-                  "inputs": {
-                    "type": "object"
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RestrictedPageWorkflowRequest"
                   },
-                  "publication": {
-                    "minimum": 1,
-                    "type": "integer"
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "inputs": {
+                        "type": "object"
+                      },
+                      "publication": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "publication"
+                    ],
+                    "type": "object"
                   }
-                },
-                "required": [
-                  "publication"
-                ],
-                "type": "object"
+                ]
               }
             }
           },
@@ -97465,14 +97498,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "inputs": {
-                    "additionalProperties": true,
-                    "description": "The inputs the action declares. An Idempotency-Key header is bound to the RESOLVED inputs, so retrying is safe and replaying the same key with different inputs answers 409.",
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RestrictedPageWorkflowRequest"
+                  },
+                  {
+                    "properties": {
+                      "inputs": {
+                        "additionalProperties": true,
+                        "description": "The inputs the action declares. An Idempotency-Key header is bound to the RESOLVED inputs, so retrying is safe and replaying the same key with different inputs answers 409.",
+                        "type": "object"
+                      }
+                    },
                     "type": "object"
                   }
-                },
-                "type": "object"
+                ]
               }
             }
           }

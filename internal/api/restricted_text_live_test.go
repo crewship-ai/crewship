@@ -28,7 +28,7 @@ import (
 func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 	image := os.Getenv("CREWSHIP_RESTRICTED_PRODUCTION_IMAGE")
 	if image == "" {
-		t.Skip("owned production worker image required")
+		t.Fatal("explicit restrictedruntime_live acceptance requires an owned production worker image")
 	}
 	setTestEncryptionKey(t)
 	db := setupTestDB(t)

@@ -24,7 +24,7 @@ func restrictedWorkflowSchemaCatalog() (map[string]DomainSchema, map[string]any)
 
 	components["RestrictedPageInput"] = obj(map[string]any{"name": str(), "label": str(), "type": map[string]any{"type": "string", "enum": []string{"text", "textarea", "number", "boolean", "select"}}, "required": map[string]any{"type": "boolean"}, "options": arr(str())}, "name", "type", "required")
 	components["RestrictedPageConfirmation"] = obj(map[string]any{"title": str(), "body": str(), "confirm_label": str(), "cancel_label": str()}, "title", "body")
-	components["RestrictedPageAction"] = obj(map[string]any{"panel_id": str(), "id": str(), "label": str(), "inputs": arr(ref("RestrictedPageInput")), "confirm": ref("RestrictedPageConfirmation")}, "panel_id", "id", "label", "inputs")
+	components["RestrictedPageAction"] = obj(map[string]any{"intent_hash": str(), "panel_id": str(), "id": str(), "label": str(), "inputs": arr(ref("RestrictedPageInput")), "confirm": ref("RestrictedPageConfirmation")}, "intent_hash", "panel_id", "id", "label", "inputs")
 	components["RestrictedPage"] = obj(map[string]any{"slug": str(), "name": str(), "publication": map[string]any{"type": "integer", "minimum": 1}, "actions": arr(ref("RestrictedPageAction"))}, "slug", "name", "actions")
 	prefix := "/api/v1/workspaces/{workspaceId}/"
 	routes := map[string]DomainSchema{
@@ -55,6 +55,12 @@ func restrictedWorkflowSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		if previous.Response != nil {
 			variants = append(variants, previous.Response)
 		}
+		components["RestrictedPageWorkflowRequest"] = obj(map[string]any{"inputs": map[string]any{"type": "object", "additionalProperties": true}, "publication": map[string]any{"type": "integer", "minimum": 1}, "expected_intent_hash": str()}, "inputs", "expected_intent_hash")
+		requests := []any{ref("RestrictedPageWorkflowRequest")}
+		if previous.Request != nil {
+			requests = append(requests, previous.Request)
+		}
+		previous.Request = map[string]any{"anyOf": requests}
 		previous.Response = map[string]any{"anyOf": variants}
 		previous.SuccessStatuses = []string{"202"}
 		routes["POST "+path] = previous

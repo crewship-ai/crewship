@@ -10,7 +10,7 @@ const workspace = vi.hoisted(() => ({ mode: "restricted" }))
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "workspace", workspace: { currentUserAccessMode: workspace.mode }, loading: false }) }))
 vi.mock("../pages-layout", () => ({ PagesLayout: () => <div>Trusted Page editor</div> }))
 afterEach(() => { cleanup(); api.mockReset(); vi.restoreAllMocks(); Reflect.deleteProperty(window, "confirm"); workspace.mode = "restricted" })
-const catalog = [{ slug: "allowed", name: "Allowed Page", publication: 7, actions: [{ panel_id: "panel", id: "work", label: "Allowed action", inputs: [{ name: "task", type: "text", required: true }], confirm: { title: "Confirm work", body: "Run this declared action?" } }] }]
+const catalog = [{ slug: "allowed", name: "Allowed Page", publication: 7, actions: [{ intent_hash: "frozen-intent", panel_id: "panel", id: "work", label: "Allowed action", inputs: [{ name: "task", type: "text", required: true }], confirm: { title: "Confirm work", body: "Run this declared action?" } }] }]
 const key = JSON.stringify(["allowed", "panel", "work"])
 function response(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }) }
 
@@ -19,7 +19,7 @@ it("submits a publication-bound declared action after host confirmation and poll
   Object.defineProperty(window, "confirm", { value: confirm, configurable: true })
   api.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.endsWith("/restricted-pages")) return response(catalog)
-    if (init?.method === "POST") return response({ run_id: "private-run", status: "pending" }, 202)
+    if (init?.method === "POST") return response({ run_id: "private-run", status: "SCHEDULED" }, 202)
     if (url.endsWith("/restricted-routine-runs/private-run")) return response({ run_id: "private-run", status: "completed", step_outputs: { answer: "OWN_PAGE_RESULT" } })
     throw new Error("Unexpected shared request")
   })
@@ -31,8 +31,8 @@ it("submits a publication-bound declared action after host confirmation and poll
   await screen.findByText("OWN_PAGE_RESULT")
   expect(confirm).toHaveBeenCalledWith("Confirm work\n\nRun this declared action?")
   const submit = api.mock.calls.find(([, init]) => init?.method === "POST")!
-  expect(submit[0]).toBe("/api/v1/pages/allowed/application/actions/panel/work")
-  expect(JSON.parse(submit[1].body)).toEqual({ inputs: { task: "private input" }, publication: 7 })
+  expect(submit[0]).toBe("/api/v1/pages/allowed/application/actions/panel/work?workspace_id=workspace")
+  expect(JSON.parse(submit[1].body)).toEqual({ inputs: { task: "private input" }, publication: 7, expected_intent_hash:"frozen-intent" })
   expect(submit[1].headers["Idempotency-Key"]).toBeTruthy()
   expect(api.mock.calls.some(([url]) => url.includes("/journal") || url.includes("/assets") || url.endsWith("/pages") || url.includes("/panels/panel/data"))).toBe(false)
 })
@@ -43,7 +43,7 @@ it("retries the same frozen Page admission and clears a revoked private result",
   let polls = 0
   api.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.endsWith("/restricted-pages")) return response(catalog)
-    if (init?.method === "POST") { if (++submitted === 1) throw new TypeError("network disconnected"); return response({ run_id: "private-run", status: "pending" }, 202) }
+    if (init?.method === "POST") { if (++submitted === 1) throw new TypeError("network disconnected"); return response({ run_id: "private-run", status: "DEDUPED" }, 202) }
     if (url.endsWith("/restricted-routine-runs/private-run")) { if (++polls === 1) return response({ run_id: "private-run", status: "running", step_outputs: { answer: "REVOKED_PAGE_RESULT" } }); return response({ error: "unavailable" }, 404) }
     throw new Error("Unexpected shared request")
   })

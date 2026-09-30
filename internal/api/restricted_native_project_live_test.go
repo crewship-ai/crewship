@@ -25,7 +25,7 @@ import (
 func TestLiveNativeHTTPSelectedProjectFilesStayScopedAndReadonly(t *testing.T) {
 	image := os.Getenv("CREWSHIP_RESTRICTED_NATIVE_IMAGE")
 	if image == "" {
-		t.Skip("owned pinned native worker image required")
+		t.Fatal("explicit restrictedruntime_live acceptance requires an owned pinned native worker image")
 	}
 	setTestEncryptionKey(t)
 	db := setupTestDB(t)

@@ -1,3 +1,5 @@
+//go:build linux && quota_live
+
 package docker
 
 import (
@@ -18,7 +20,7 @@ import (
 // restarts Docker or the host and never attaches existing data volumes.
 func TestLiveServiceQuotaBounds(t *testing.T) {
 	if os.Getenv("CREWSHIP_LIVE_SERVICE_QUOTAS") != "1" {
-		t.Skip("set CREWSHIP_LIVE_SERVICE_QUOTAS=1 for isolated Docker quota probe")
+		t.Fatal("set CREWSHIP_LIVE_SERVICE_QUOTAS=1 for isolated Docker quota probe")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()

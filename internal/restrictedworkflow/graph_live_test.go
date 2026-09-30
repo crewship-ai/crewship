@@ -29,7 +29,7 @@ func TestLiveNestedGraphProductionTextWorker(t *testing.T) {
 func TestLiveNestedGraphMixedProductionWorkers(t *testing.T) {
 	image := os.Getenv("CREWSHIP_RESTRICTED_NATIVE_IMAGE")
 	if image == "" {
-		t.Skip("owned native production image required")
+		t.Fatal("explicit mixed acceptance requires an owned native production image")
 	}
 	liveProductionGraph(t, image)
 }
@@ -83,7 +83,7 @@ func (e liveMixedGraphExecutor) ExecuteWorkflowRun(ctx context.Context, request 
 func liveProductionGraph(t *testing.T, nativeImage string) {
 	image := os.Getenv("CREWSHIP_RESTRICTED_PRODUCTION_IMAGE")
 	if image == "" {
-		t.Skip("owned production worker image required")
+		t.Fatal("explicit restrictedruntime_live acceptance requires an owned production worker image")
 	}
 	s, runner := graphFixture(t)
 	if nativeImage != "" {

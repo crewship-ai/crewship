@@ -23,7 +23,7 @@ import (
 func TestLivePreflightSameEventReplay(t *testing.T) {
 	image := os.Getenv("CREWSHIP_RESTRICTED_PRODUCTION_IMAGE")
 	if image == "" {
-		t.Skip("owned production worker image required")
+		t.Fatal("explicit restrictedruntime_live acceptance requires an owned production worker image")
 	}
 	events := []string{"missing", "projectless", "i2", "i1", "i1", "i1", "missing", "i1"}
 	for _, mode := range []string{"forced-model-poll", "durable-preflight"} {

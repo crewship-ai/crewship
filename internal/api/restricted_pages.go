@@ -18,6 +18,7 @@ type restrictedPageInput struct {
 	Options  []string `json:"options,omitempty"`
 }
 type restrictedPageAction struct {
+	Intent  string                    `json:"intent_hash"`
 	Panel   string                    `json:"panel_id"`
 	ID      string                    `json:"id"`
 	Label   string                    `json:"label"`
@@ -93,10 +94,11 @@ func (h *PageHandler) RestrictedCatalog(w http.ResponseWriter, req *http.Request
 					continue
 				}
 				authority := pipeline.PageActionInvocation{PageID: rec.ID, PanelID: panel.ID, ActionID: action.ID, PipelineID: pipelineID, ActionDigest: pipeline.PageActionDigest(action), Publication: publication}
-				if h.restrictedWorkflow().PageActionAvailable(req.Context(), user.ID, workspace, authority) != nil {
+				fingerprint, fingerprintErr := h.restrictedWorkflow().PageActionFingerprint(req.Context(), user.ID, workspace, authority)
+				if fingerprintErr != nil {
 					continue
 				}
-				wire := restrictedPageAction{Panel: panel.ID, ID: action.ID, Label: action.Label, Confirm: action.Confirm, Inputs: []restrictedPageInput{}}
+				wire := restrictedPageAction{Intent: fingerprint, Panel: panel.ID, ID: action.ID, Label: action.Label, Confirm: action.Confirm, Inputs: []restrictedPageInput{}}
 				for _, input := range action.Inputs {
 					wire.Inputs = append(wire.Inputs, restrictedPageInput{Name: input.Name, Label: input.Label, Type: input.EffectiveType(), Required: input.Required && input.Default == "", Options: input.Options})
 				}

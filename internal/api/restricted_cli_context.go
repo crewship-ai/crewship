@@ -31,7 +31,7 @@ func (r *Router) restrictedRunProfile(w http.ResponseWriter, req *http.Request) 
 		replyError(w, http.StatusNotFound, "execution unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"mode": m.Mode})
+	writeJSON(w, http.StatusOK, restrictedOperationModeResponse{Mode: m.Mode})
 }
 
 // createRestrictedCLIContext is a run operation, not a chat grant. Its private
@@ -67,5 +67,5 @@ func (r *Router) createRestrictedCLIContext(w http.ResponseWriter, req *http.Req
 		replyError(w, http.StatusNotFound, "execution unavailable")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+	writeJSON(w, http.StatusCreated, restrictedCLIContextResponse{ID: id})
 }

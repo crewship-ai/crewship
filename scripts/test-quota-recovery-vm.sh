@@ -16,7 +16,11 @@ wait_guest() {
  done
  echo 'owned guest recovery timed out' >&2;exit 1
 }
+# Build the fixture with: go test -c -tags quota_vm ./internal/provider/docker
 # Binaries, installer and production unit must already be installed in guest.
+# Reject an untagged binary before creating resources or restarting the guest.
+QUOTA_VM_TESTS=$("${QUOTA_SSH[@]}" "/var/lib/crewship-quota-probe-fixture/crewship-quota-recovery-tests -test.list '^TestVMQuotaServiceRecovery$'")
+[[ $QUOTA_VM_TESTS == TestVMQuotaServiceRecovery ]] || { echo 'guest test binary must include -tags quota_vm' >&2; exit 2; }
 run_stage create
 "${QUOTA_SSH[@]}" 'sudo systemctl restart docker'
 run_stage pre-controller

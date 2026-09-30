@@ -31,7 +31,7 @@ func (h *AgentHandler) GetRestrictedProfile(w http.ResponseWriter, r *http.Reque
 		replyError(w, http.StatusServiceUnavailable, "profile unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"profile": profile})
+	writeJSON(w, http.StatusOK, restrictedAgentProfileResponse{Profile: profile})
 }
 func (h *AgentHandler) UpdateRestrictedProfile(w http.ResponseWriter, r *http.Request) {
 	if !h.restrictedProfileAuthorized(w, r) {
@@ -50,5 +50,5 @@ func (h *AgentHandler) UpdateRestrictedProfile(w http.ResponseWriter, r *http.Re
 		replyError(w, http.StatusServiceUnavailable, "profile unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"profile": body.Profile})
+	writeJSON(w, http.StatusOK, restrictedAgentProfileResponse{Profile: body.Profile})
 }
