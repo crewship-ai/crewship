@@ -98,6 +98,7 @@ type Proxy struct {
 	allowPrivate       bool // #961: permit RFC1918/loopback dial targets (crew opt-in); link-local/metadata always blocked
 	onEgress           EgressObserver
 	onLLMCall          LLMCallObserver
+	onLLMAdmission     func(context.Context, string, string, string) error
 	onGraceFallback    GraceFallbackObserver
 	resolveLLMIdentity func(*http.Request) (agentID, configFingerprint string, present, ok bool)
 	billingMode        string // "metered" | "flat_rate" | "" — set from env at startup
@@ -156,6 +157,8 @@ type ProxyConfig struct {
 	// OnLLMCall is invoked after a successful LLM-provider call, with the
 	// parsed usage and quota signal. Optional. See LLMCallObserver.
 	OnLLMCall LLMCallObserver
+	// OnLLMAdmission checks host policy before every provider attempt.
+	OnLLMAdmission func(context.Context, string, string, string) error
 	// OnGraceFallback is invoked after a request was replayed with a
 	// rotation's grace value (#1882). Optional. See GraceFallbackObserver.
 	OnGraceFallback GraceFallbackObserver
@@ -208,6 +211,7 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 		allowPrivate:       cfg.AllowPrivate,
 		onEgress:           cfg.OnEgress,
 		onLLMCall:          cfg.OnLLMCall,
+		onLLMAdmission:     cfg.OnLLMAdmission,
 		onGraceFallback:    cfg.OnGraceFallback,
 		resolveLLMIdentity: cfg.ResolveLLMIdentity,
 		billingMode:        cfg.BillingMode,
@@ -469,6 +473,9 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "no credential available for "+provider, http.StatusServiceUnavailable)
 			return
 		}
+		if !p.admitLLM(w, r, actorID, cred, spec.ID) {
+			return
+		}
 		var ok bool
 		if replay, ok = captureGraceReplay(w, r, cred); !ok {
 			return
@@ -554,6 +561,10 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 // into HTTPS tunnels (the agent must use HTTP_PROXY path for credential injection).
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	host := r.Host
+	// Opaque TLS cannot provide a trustworthy payer/model/usage contract.
+	if !p.admitLLM(w, r, "", nil, "OPAQUE_TUNNEL") {
+		return
+	}
 
 	if !p.freeMode && !p.allowlist.IsAllowed(host) {
 		p.logger.Warn("blocked CONNECT to non-allowed domain", "host", host)
@@ -763,6 +774,9 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 
+	if !p.admitLLM(w, r, actorID, cred, s.ID) {
+		return
+	}
 	var credBaseURL string
 	var credHeaders map[string]string
 	if cred != nil {
@@ -954,6 +968,11 @@ func (p *Proxy) forwardWithGraceRetry(r, outReq *http.Request, spec llmroute.Spe
 		return resp, false, nil
 	}
 
+	if p.onLLMAdmission != nil {
+		if err := p.onLLMAdmission(r.Context(), actorID, cred.ID, spec.ID); err != nil {
+			return resp, false, nil
+		}
+	}
 	// The 401 is consumed here: record it as the egress it was, then drain
 	// and close so the connection can be reused for the replay.
 	if p.onEgress != nil {

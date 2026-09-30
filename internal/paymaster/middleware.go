@@ -15,6 +15,7 @@ import (
 // about the others. Provider/Model are required so the budget pre-check can
 // price-estimate when a layer above us wants to short-circuit.
 type CallRequest struct {
+	Bounds   *CallBounds
 	Scope    Scope
 	Provider string
 	Model    string
@@ -26,7 +27,8 @@ type CallRequest struct {
 
 	// EstimatedInputTokens lets a caller hint at the post-tokenization size
 	// before the call. Optional; used only for finer-grained pre-check
-	// estimates and ignored if zero. Final ledger row uses CallResponse.
+	// estimates and ignored if zero. It NEVER proves a hard-cap upper bound.
+	// Final ledger row uses CallResponse.
 	EstimatedInputTokens int64
 
 	// BillingMode tells Enforce which kind of budget rules apply. Default
@@ -44,6 +46,7 @@ type CallRequest struct {
 // provider-reported; CostUSD may be zero (middleware will fill it via
 // Estimate before recording).
 type CallResponse struct {
+	UsageKnown          bool
 	Output              any
 	InputTokens         int64
 	OutputTokens        int64
@@ -89,14 +92,14 @@ func (f CallerFunc) Call(ctx context.Context, req CallRequest) (CallResponse, er
 
 // Middleware wraps next with the paymaster control plane:
 //
-//  1. before — Enforce; if a hard budget is exceeded the call is rejected
+//  1. before — Enforce and, for hard caps, reserve a proven maximum; if a hard budget is exceeded the call is rejected
 //     and never reaches the underlying Caller. The error propagates as a
 //     *BudgetExceededError so callers can render a friendly message.
 //  2. call — invoke next.Call; record the response timestamp if the caller
 //     left it zero so the ledger TS reflects when the round-trip ended.
-//  3. after — fill CostUSD via Estimate when the upstream didn't price the
-//     call itself (most providers don't bill per-call inline), then Record
-//     the ledger row + journal entries.
+//  3. after — settle the same reservation from validated terminal usage,
+//     retaining the maximum for errors or missing usage. Uncapped/soft-only
+//     calls fill CostUSD via Estimate and Record normally.
 //
 // The middleware does NOT block on Record errors — billing failures bubble
 // up the same way provider errors do, so the caller can decide whether to
@@ -104,16 +107,8 @@ func (f CallerFunc) Call(ctx context.Context, req CallRequest) (CallResponse, er
 // because the work has already been done and refusing it would also waste
 // the budget.
 //
-// KNOWN RACE (security audit H1, partial mitigation only):
-// Between step (1) Enforce and step (3) Record there's a window — the LLM
-// round-trip — where this call's cost has not been written to cost_ledger.
-// Two parallel Middleware invocations against the same scope can both pass
-// Enforce because neither's cost is committed yet, and overspend by up to
-// one call each. enforceLocks (in budgets.go) serializes the Check half of
-// Enforce so they don't both read the same pre-decision snapshot, but the
-// LLM-call gap remains. Closing it requires a reservation row written
-// inside the same SQLite transaction as the Check (needs a schema flag for
-// pending rows) — out of scope for the audit fix; tracked separately.
+// Hard-capped metered requests reserve a proven maximum before invoking the
+// provider. Uncapped/soft-only and subscription calls retain legacy recording.
 func Middleware(next LLMCaller, j journal.Emitter, db *sql.DB) LLMCaller {
 	return CallerFunc(func(ctx context.Context, req CallRequest) (CallResponse, error) {
 		// Flat-rate requests bypass $ enforcement. The subscription is already
@@ -133,6 +128,16 @@ func Middleware(next LLMCaller, j journal.Emitter, db *sql.DB) LLMCaller {
 			}
 		}
 
+		if req.BillingMode != BillingFlatRate {
+			reservation, reserved, err := trustedReservation(ctx, db, req)
+			if err != nil {
+				return CallResponse{}, err
+			}
+			if reserved {
+				resp, callErr := next.Call(context.WithValue(ctx, reservationContextKey{}, true), req)
+				return settleTrusted(ctx, db, j, req, resp, callErr, reservation)
+			}
+		}
 		resp, callErr := next.Call(ctx, req)
 		if callErr != nil {
 			// Even on failure, attempt to record what we know — providers bill

@@ -14,6 +14,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Improved
 
+- ⚠️ **Behaviour change:** Legacy sidecar provider traffic is denied when an enabled hard budget cannot be attributed or reserved. Missing terminal usage retains a conservative debit; managed sidecars must be reconciled after upgrade. (#2711)
+
 - Backup creation rejects crews and workspaces with standalone quota service volumes until their snapshot transport is available, preventing successful bundles that omit service data. (#2703)
 - Restricted runtime preparation can pin an explicit agent provider-key grant before building context. Credential revocation, rotation and model changes invalidate prepared attempts and descendants; regrant cannot revive them. Production restricted dispatch remains gated. (#2711)
 - The isolated runtime prototype can broker stateless text Responses requests with a server-selected model and output ceiling. Remote resource references and tools are denied; application model execution remains gated. (#2711)
