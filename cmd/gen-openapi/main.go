@@ -1781,7 +1781,7 @@ func responseContent(path string, schema map[string]any) map[string]any {
 		types = []string{"text/event-stream"}
 	case path == "/api/v1/memory/export":
 		types = []string{"application/json", "application/zip"}
-	case path == "/api/v1/admin/backups/download":
+	case path == "/api/v1/admin/backups/download", path == "/api/v1/admin/instance/backups/bundles/download":
 		types = []string{"application/zstd"}
 	case strings.HasSuffix(path, "/memory/versions/{id}/content"):
 		types = []string{"text/markdown", "application/octet-stream"}

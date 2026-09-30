@@ -116,7 +116,7 @@ function RunDrawer({ run, now, ctx, check, onPin, onCheck }: {
   run: BackupRun; now: Date; ctx: SectionCtx; check?: { level: 1 | 2; ok: boolean; detail: string }
   onPin: () => void; onCheck: () => void
 }) {
-  const href = run.bundle_path ? downloadHref(run.bundle_path, workspaceFor(ctx, run.workspace_id)) : null
+  const href = run.bundle_path ? downloadHref(run.bundle_path, workspaceFor(ctx, run.workspace_id), run.legacy ? undefined : run.scope) : null
   const proof = Math.max(run.proof_level, check?.ok ? check.level : 0)
   const missing = run.incomplete.reduce((a, i) => a + i.count, 0)
   return (

@@ -119,6 +119,14 @@ crewship backup download /var/crewship/backups/bundle.tar.zst --out ~/restores/b
 The endpoint sends `no-store`/`no-cache` headers and a half-written
 file is removed on copy failure — partial bundles never land on disk.
 
+An **instance bundle** (from `crewship admin instance backups run --scope
+instance`, or a Complete recovery plan) belongs to no workspace, so the
+per-workspace route answers 404 for it. `download`, `inspect` and `verify`
+then ask the instance route (`GET /api/v1/admin/instance/backups/bundles/download`,
+`…/inspect`, `…/verify`), which serves any bundle in the catalog to an
+instance administrator — use the path `crewship admin instance backups
+bundles` or `runs` shows.
+
 ---
 
 ## `crewship backup inspect`
@@ -129,7 +137,11 @@ touches the encrypted payload, so no passphrase is needed.
 
 ```bash
 crewship backup inspect ~/.crewship/backups/crewship-workspace-acme-...tar.zst
+crewship backup inspect /var/lib/crewship/backups/crewship-instance-20260930T020000Z.tar.zst   # an instance bundle
 ```
+
+An instance bundle is read through the instance route (see
+[`download`](#crewship-backup-download)); the manifest is plaintext there too.
 
 ---
 

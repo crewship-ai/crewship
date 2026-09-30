@@ -244,6 +244,14 @@ crewship backup verify nightly.tar.zst
 One more limit, worth being precise about: the recorded count is `len(dump.Tables[table])`, read from the exact same in-memory dump that gets written into the payload — not an independent re-derivation. A create-time scoping bug that silently drops every row for a table (the shape of #1973) produces a dump that already agrees with itself, so this check would not have caught THAT bug on its own. What it catches is the payload diverging from what its own manifest claims — a corrupted or hand-edited bundle, or the two numbers drifting apart in a future refactor. "The bundle is intact" is the guarantee; "the bundle is everything" (independent re-derivation, or reconciling against the source instance) is stronger and out of scope here.
 </Note>
 
+
+An **instance bundle** belongs to no workspace, so the per-workspace routes
+answer 404 for it; `inspect`, `verify` and `download` then read it through the
+instance routes (`GET /api/v1/admin/instance/backups/bundles/inspect`,
+`…/verify`, `…/download`), which serve any catalogued bundle to an instance
+administrator. Backup history's **Download** uses the same route for an
+instance bundle, and each download is recorded in the instance audit log.
+
 ## Restore
 
 ```bash
@@ -809,6 +817,41 @@ missing from the storage root, memory versions without content, a provisioned
 crew whose container was gone, a vault key the server could not resolve — is
 recorded in `contents.incomplete`, never left out silently.
 
+#### What the window guarantees, and what it does not
+
+Covered — nothing below can write while the copy runs:
+
+- **Routine runs.** A run is admitted by the window before it writes anything
+  (its idempotency reservation, its run row, its steps) and counts as running
+  work from that moment until it returns — not only once its row says
+  `running`. Admission is refused while the window is closing or held: a due
+  schedule stays due, a deferred run stays pending and fires on the first
+  sweep after the release, and any other start (a resume after an approval
+  or a signal, a boot-time resume) waits for the release. A run admitted a
+  moment before the window closed is still counted when the server checks
+  running work again after the write drain, so the window does not hold and
+  retries instead. A run started inside a request, or by another run (a
+  nested routine), is admitted with its parent and counted the same way.
+- **Queued work and scheduled agent work.** A work item is `starting` from the
+  moment it is claimed, and the claim itself is a write the drain waits for.
+- **Agent runs started from a request** (assignments, webhooks, queries) hold
+  their workspace's guard, which the window takes as its last step; a run that
+  arrives after that is refused with "workspace is being backed up".
+- **Missions.** Each pass of a mission's loop is a write the drain waits for,
+  and no pass runs while the window is open; an assignment a pass dispatches is
+  admitted like a routine run.
+
+Not covered:
+
+- **Another server process.** Admission and the run count live in this
+  process's memory. A second replica writing to the same database is only seen
+  through its rows (`running` agents, routine runs and started work items), so
+  its runs are still counted only once their row says so.
+- **Work that ignores the gate.** A code path that writes without entering the
+  gate or being admitted — a mission's timeout clean-up, for one — is not held
+  back. The gate is enforced by review and by the guard tests, not by the
+  database.
+
 ### The recovery kit
 
 Credentials and other sealed values are encrypted with vault keys
@@ -982,10 +1025,7 @@ Every run is a row with its phases, shown in Backup history and by
 | `copy` | Crew files are read and the database rows dumped. |
 | `pack` | The payload is closed. It was encrypted as it was written: no unencrypted copy of it ever reaches the disk. |
 | `encrypt` | The last encrypted chunk is flushed and the bundle written. |
-| `pack` | The payload is closed. It was encrypted as it was written: no unencrypted copy of it ever reaches the disk. |
-| `encrypt` | The last encrypted chunk is flushed and the bundle written. |
 | `check` | The written bundle's checksum is verified (proof level 1). |
-| `off-site` | The bundle is uploaded to each off-site destination of the plan and counted only once the copy is verified there; `skipped` ("not configured") for a plan that keeps copies on this server only. |
 | `off-site` | The bundle is uploaded to each off-site destination of the plan and counted only once the copy is verified there; `skipped` ("not configured") for a plan that keeps copies on this server only. |
 | `environments` | Only on runs that take complete environments: `done` with the count and the size of their image layers, `failed` when a crew's environment could not be captured (its files are still in the bundle, and the run is `incomplete`), `skipped` with no crew container to capture. |
 
@@ -994,10 +1034,8 @@ what it lacks), `failed`, `skipped` or `interrupted`. When the server stops in
 the middle of a run, the next start marks it `interrupted`, removes its
 partial bundle file and its staging (for an instance run, the staging
 directory and partial bundle too), and retries it **once**; the
-partial bundle file and its staging (for an instance run, the staging
-directory and partial bundle too), and retries it **once**; the
 interrupted row gets `retried_at` when the retry finishes, and a retry that is
-itself interrupted is not retried again.
+itself interrupted is not retried again. A held instance (after `crewship recover`) retries nothing on its own, and a restored server never re-runs a backup that was in flight on the source.
 
 `crewship admin instance backups run` (or **Back up now**) starts a run at
 once. It answers with the run id immediately and the backup finishes on the
@@ -1234,7 +1272,8 @@ Before a run starts, the server compares the room it needs (twice the largest
 recent bundle of the same scope) with the free space where bundles are kept.
 A run that would leave less than 10 % of the disk free does not start: it is
 recorded as `skipped` with the figures and what to do, and an incident is
-raised. The refusal is not silent anywhere: the run's reason in Backup
+raised when it happens a second time in a row (see
+[Incidents and alerts](#incidents-and-alerts)). The refusal is not silent anywhere: the run's reason in Backup
 history, the first Needs attention item on the Overview (with a link to
 Storage), the Space card ("New backup runs will not start") and
 `crewship admin instance backups overview` all say it.
@@ -1282,12 +1321,21 @@ instance. One incident per plan and kind:
 
 | Kind | Raised when | Resolved when |
 |---|---|---|
-| `failed` | A run failed, was skipped (busy too long, not enough space) or was interrupted twice. | The plan's next good run. |
+| `failed` | A run failed or was interrupted twice, or the plan's runs were **skipped twice in a row** (for the same workspace, or the instance). The message says why: "Nightly backup skipped 2 times: writes did not drain" — or `workspace busy`, `not enough space`, `backups are held`. | The plan's next good run. |
 | `incomplete` | A run wrote a bundle with recorded gaps. | The next run without gaps. |
 | `stale` | The plan's newest good backup is older than `stale_alert_hours` (36). | A good run. |
 | `offsite` | An upload failed or did not verify. | The next verified upload. |
 | `drill` | A recorded test restore failed or was partial. | A drill that passes. |
 | `drill` (reminder) | No test restore for longer than `drill_reminder`: weekly (7 days) or monthly (31 days, the default). Counts from the oldest backup when none was ever drilled; nothing is raised while no backup exists. One instance-wide incident, not per plan. | Any recorded drill (`crewship backup drill --post`, or a drill recorded under Recovery), or `drill_reminder` set to `off`. |
+
+A single skipped run pages nobody: one night the server stayed busy, or the
+writes in progress did not drain in time, is shown as `skipped` with its reason
+in Backup history, as a skipped night in the Overview's nights strip and as a
+Needs attention item — and the next night usually runs. The second skipped run
+in a row raises the incident (set `CREWSHIP_BACKUP_SKIP_ALERT_AFTER` on the
+server, 1–30, to change how many; `1` pages on every skip), and a plan that
+keeps skipping past `stale_alert_hours` also raises `stale`. A good run
+resolves both and starts the count over.
 
 The reminder's message names the command to run, for example "No test
 restore in 32 days — run `crewship backup drill --bundle <newest bundle>

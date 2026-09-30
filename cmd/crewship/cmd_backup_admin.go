@@ -36,6 +36,9 @@ var backupVerifyCmd = &cobra.Command{
 		}
 		client := newAPIClient()
 		resp, err := client.Get(backupRoute("/api/v1/admin/backups/verify?path=" + encodeQuery(args[0])))
+		if tryInstanceBundleRoute(resp, err) { // an instance bundle
+			resp, err = client.Get("/api/v1/admin/instance/backups/bundles/verify?path=" + encodeQuery(args[0]))
+		}
 		if err != nil {
 			return err
 		}
@@ -182,6 +185,9 @@ points elsewhere.`,
 		client := newAPIClient()
 		path := args[0]
 		resp, err := client.Get(backupRoute("/api/v1/admin/backups/download?path=" + encodeQuery(path)))
+		if tryInstanceBundleRoute(resp, err) { // an instance bundle
+			resp, err = client.Get("/api/v1/admin/instance/backups/bundles/download?path=" + encodeQuery(path))
+		}
 		if err != nil {
 			return err
 		}

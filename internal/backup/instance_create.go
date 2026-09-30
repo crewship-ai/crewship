@@ -272,7 +272,11 @@ var ErrEncryptionRequired = errors.New("backup: encryption required")
 
 // InstanceBusy is the drain probe: in-process agent runs holding a workspace
 // guard, agents the database says are running, durable work that has
-// started, and routine runs in flight.
+// started (claimed work items are 'starting' from the claim), and routine
+// runs whose row says running. Routine runs and mission dispatches started
+// in this process are also counted from their admission — before their row
+// exists — by the quiet window itself (quiesce.StartRun, added to every
+// busy check Begin makes).
 func InstanceBusy(db *sql.DB) quiesce.BusyFunc {
 	return func(ctx context.Context) (int, string, error) {
 		var parts []string

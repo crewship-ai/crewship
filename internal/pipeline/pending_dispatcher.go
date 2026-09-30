@@ -183,10 +183,18 @@ func (d *PendingRunDispatcher) sweep(ctx context.Context) {
 // fireOne claims a due pending row (winner-takes-once) and dispatches it
 // through the executor, then backfills the resulting run id.
 func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
+	// The run is admitted by the backup's quiet window BEFORE the claim, so
+	// it counts as busy from the claim on — not only once its row reaches
+	// running. A window that is closing or held refuses: the row is not
+	// claimed and stays due for the first sweep after release.
+	adm, ok := quiesce.StartRun(ctx)
+	if !ok {
+		return
+	}
+	defer adm.Done()
 	// Claim the row first so a second tick (or replica) can't double-fire.
-	// The claim is a writer in the backup's quiet window barrier: a window
-	// that closed since the sweep leaves the row due for the first sweep
-	// after release. The run it starts is running work from then on.
+	// The claim is a writer in the barrier too; a window that closed since
+	// the admission refuses it, and the row stays due.
 	wr, ok := quiesce.Enter(ctx)
 	if !ok {
 		return
@@ -229,7 +237,7 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 	}
 
 	triggeredVia, triggeredByID := effectivePendingTrigger(pr)
-	res, runErr := d.executor.Run(ctx, RunInput{
+	res, runErr := d.executor.Run(adm.Context(), RunInput{
 		PinnedVersion: pr.PinnedVersion,
 		PipelineID:    pr.PipelineID,
 		WorkspaceID:   pr.WorkspaceID,

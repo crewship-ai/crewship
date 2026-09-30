@@ -126,6 +126,14 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("POST", "/api/v1/admin/instance/backups/bundles/unpin", ib.Unpin)
 	// openapi: responses 200,400,401,403,500
 	r.authedInstance("GET", "/api/v1/admin/instance/backups/restores", ib.ListRestores)
+	// One catalogued bundle of any scope, instance bundles included: the
+	// manifest, the checksum, the bytes.
+	// openapi: responses 200,400,401,403,404,422,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/bundles/inspect", ib.InspectBundle)
+	// openapi: responses 200,400,401,403,404,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/bundles/verify", ib.VerifyBundle)
+	// openapi: responses 200,400,401,403,404,500
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/bundles/download", ib.DownloadBundle)
 
 	// Whole-instance backup and recovery: an instance bundle (the whole
 	// database, every file store and crew container, one quiet window), the

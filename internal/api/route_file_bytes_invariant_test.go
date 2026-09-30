@@ -70,6 +70,9 @@ var fileBytesExemptHandlers = map[string]string{
 	"BackupHandler.Download": "requires the manage/admin role and streams a whole backup archive from an " +
 		"admin-configured path (validateBackupPath) — a different subsystem entirely, not a per-file read " +
 		"of the crew/agent output tree",
+	"InstanceBackupsHandler.DownloadBundle": "instance admins only (authedInstance); streams a whole backup archive " +
+		"whose path must be a backup_catalog row (catalogued) — the catalog, not the request, names the file, and it " +
+		"is never a per-file read of the crew/agent output tree",
 	"InstanceBackupPlansHandler.RecoverySheet": "instance admins only (authedInstance); writes a Markdown page it " +
 		"composes in memory from backup settings, plans and recipient names (no secret, no private key) — it " +
 		"reads no file at all, let alone the crew/agent output tree",

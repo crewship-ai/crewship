@@ -471,9 +471,12 @@ func TestBackupDownloadRunE_APIError(t *testing.T) {
 	covSetupCli6(t, stub)
 
 	stub.OnGet("/api/v1/admin/backups/download", clitest.ErrorResponse(404, "bundle not found"))
+	// A workspace 404 is asked again on the instance route (instance
+	// bundles live there); its answer is the one surfaced.
+	stub.OnGet("/api/v1/admin/instance/backups/bundles/download", clitest.ErrorResponse(404, "no catalogued backup at that path"))
 
 	err := backupDownloadCmd.RunE(backupDownloadCmd, []string{"ghost.bin"})
-	if err == nil || !strings.Contains(err.Error(), "bundle not found") {
+	if err == nil || !strings.Contains(err.Error(), "no catalogued backup at that path") {
 		t.Errorf("expected 404 surfaced, got %v", err)
 	}
 }

@@ -107,9 +107,18 @@ export async function checkBundle(path: string, key: { identity?: string; passph
   }
 }
 
-/** The download link: the legacy streaming endpoint, for the workspace named. */
-export function downloadHref(path: string, workspaceId: string | null): string | null {
-  return workspaceId ? buildDownloadUrl(workspaceId, path) : null
+/**
+ * The download link. An instance bundle belongs to no workspace, so it (and
+ * a run's bundle with no workspace on screen) streams from the instance
+ * route, which resolves any catalogued bundle; a workspace bundle keeps the
+ * legacy per-workspace endpoint. scope is the run's, and is left out for a
+ * row read from a server without the runs API (only the legacy route there).
+ */
+export function downloadHref(path: string, workspaceId: string | null, scope?: BackupScope): string | null {
+  const instanceRoute = `${INSTANCE_BACKUPS}/bundles/download?path=${encodeURIComponent(path)}`
+  if (scope === "instance") return instanceRoute
+  if (workspaceId) return buildDownloadUrl(workspaceId, path)
+  return scope ? instanceRoute : null
 }
 
 /**

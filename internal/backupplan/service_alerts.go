@@ -198,21 +198,28 @@ func (s *Service) resolve(ctx context.Context, planID string, kinds ...string) {
 	}
 }
 
-// afterRun turns a run's terminal state into incidents: failed and skipped
-// runs raise (or repeat) the plan's "failed" incident; an incomplete run
-// raises "incomplete" and clears "failed" and "stale"; a done run clears all
-// three and pings the heartbeat. Called once per terminal state.
+// afterRun turns a run's terminal state into incidents: failed runs raise
+// (or repeat) the plan's "failed" incident, and so do skipped runs once
+// SkipAlertAfter of them come in a row — a single skip stays in history and
+// the nights strip without paging anyone; an incomplete run raises
+// "incomplete" and clears "failed" and "stale"; a done run clears all three
+// and pings the heartbeat. Called once per terminal state.
 func (s *Service) afterRun(ctx context.Context, r *Run, plan *Plan) {
 	set := s.settings(ctx)
 	label := incidentLabel(plan)
 	last := Ago(lastGoodRun(ctx, s.DB, r.PlanID), s.now())
 	switch r.Status {
-	case StatusFailed, StatusSkipped, StatusInterrupted:
+	case StatusSkipped:
+		n := consecutiveSkips(ctx, s.DB, r.PlanID, r.WorkspaceID)
+		if n < skipAlertAfter() {
+			s.Logger.Info("backup run skipped; no incident until it repeats", "run", r.ID, "plan", r.PlanID, "in_a_row", n, "reason", r.Error)
+			return
+		}
+		msg := fmt.Sprintf("%s backup skipped %d times: %s. Last successful backup: %s.", label, n, SkipReason(r.Error), last)
+		s.raise(ctx, set, r.PlanID, IncidentFailed, msg, r.ID, r.Error, true)
+	case StatusFailed, StatusInterrupted:
 		verb := "failed"
-		switch r.Status {
-		case StatusSkipped:
-			verb = "did not run"
-		case StatusInterrupted:
+		if r.Status == StatusInterrupted {
 			verb = "was interrupted twice"
 		}
 		msg := fmt.Sprintf("%s backup %s. Last successful backup: %s.", label, verb, last)
