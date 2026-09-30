@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Improved
 
+- ⚠️ **Behaviour change:** Legacy sidecar provider traffic is denied when an enabled hard budget cannot be attributed or reserved. Missing terminal usage retains a conservative debit; managed sidecars must be reconciled after upgrade. (#2711)
+
 - Restricted manual routines and declared Page actions can queue bounded nested workflows with explicit agent delegation, independent frozen provider slots, private proof-bound results and live declaration checks. Unsupported execution profiles are denied before any leaf starts.
 
 - Ordinary restricted CLI runs create their own private run context under the exact run permission, independently of chat permission.

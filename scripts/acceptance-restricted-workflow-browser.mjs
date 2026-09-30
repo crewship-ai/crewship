@@ -14,7 +14,7 @@ try {
     const successfulSharedReads = []
     page.on('response', response => {
       const path = new URL(response.url()).pathname
-      if (response.ok() && (path.includes('/journal') || path.includes('/panels/panel/data') || path.endsWith('/pipelines') || path.endsWith('/page-folders'))) successfulSharedReads.push(path)
+      if (response.ok() && path.startsWith('/api/') && (path.includes('/journal') || path.includes('/panels/panel/data') || path.endsWith('/pipelines') || path.endsWith('/page-folders'))) successfulSharedReads.push(path)
     })
     try {
       await page.goto(`${fixture.server}/routines`, { waitUntil: 'domcontentloaded', timeout: 90000 })
