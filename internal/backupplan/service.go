@@ -801,8 +801,17 @@ func (s *Service) execute(ctx context.Context, r *Run, plan *Plan) {
 			s.Logger.Warn("backup run: mark retried", "run", r.RetryOf, "error", err)
 		}
 	}
-	if plan != nil && r.WorkspaceID != "" {
-		dropped, err := backup.RotatePlanWithPolicy(ctx, s.DB, filepath.Dir(res.Path), r.WorkspaceID, plan.ID, plan.Policy(), false)
+	if plan != nil && (r.WorkspaceID != "" || r.Scope == ScopeInstance) {
+		// The plan's keep rules, after every good run: workspace bundles per
+		// workspace, instance bundles as one group. Deleted bundles give
+		// back their environment layers and lose their off-site copies.
+		var dropped []string
+		var err error
+		if r.Scope == ScopeInstance {
+			dropped, err = backup.RotateInstancePlanWithPolicy(ctx, s.DB, filepath.Dir(res.Path), plan.ID, plan.Policy(), false)
+		} else {
+			dropped, err = backup.RotatePlanWithPolicy(ctx, s.DB, filepath.Dir(res.Path), r.WorkspaceID, plan.ID, plan.Policy(), false)
+		}
 		if err != nil {
 			s.Logger.Warn("backup run: retention failed", "run", r.ID, "plan", plan.ID, "error", err)
 		} else if len(dropped) > 0 {

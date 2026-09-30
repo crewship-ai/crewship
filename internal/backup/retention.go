@@ -161,7 +161,12 @@ func startOfMonth(t time.Time) time.Time {
 // — without it nothing counts as pinned or checked. Returns the dropped
 // paths, newest first.
 func RotateWithPolicy(ctx context.Context, db *sql.DB, dir, workspaceID string, p RetentionPolicy, dryRun bool) ([]string, error) {
-	return rotateWithPolicy(ctx, db, dir, workspaceID, p, dryRun, nil)
+	return rotateWithPolicy(ctx, db, dir, workspaceID, p, dryRun, workspaceBundles(workspaceID), nil)
+}
+
+// workspaceBundles matches the bundles on disk that belong to workspaceID.
+func workspaceBundles(workspaceID string) func(ListEntry) bool {
+	return func(e ListEntry) bool { return e.WorkspaceID != "" && e.WorkspaceID == workspaceID }
 }
 
 // RotatePlanWithPolicy is RotateWithPolicy narrowed to the bundles one backup
@@ -172,10 +177,27 @@ func RotatePlanWithPolicy(ctx context.Context, db *sql.DB, dir, workspaceID, pla
 	if db == nil || planID == "" {
 		return nil, fmt.Errorf("backup: rotate plan: a database and a plan id are required")
 	}
-	return rotateWithPolicy(ctx, db, dir, workspaceID, p, dryRun, func(c RetentionCandidate) bool { return c.PlanID == planID })
+	return rotateWithPolicy(ctx, db, dir, workspaceID, p, dryRun, workspaceBundles(workspaceID), func(c RetentionCandidate) bool { return c.PlanID == planID })
 }
 
-func rotateWithPolicy(ctx context.Context, db *sql.DB, dir, workspaceID string, p RetentionPolicy, dryRun bool, only func(RetentionCandidate) bool) ([]string, error) {
+// RotateInstancePlanWithPolicy applies a plan's keep rules to the instance
+// bundles that plan made: the same floor (keep_min, never below 1), pins,
+// checked copies and grandfather-father-son buckets as a workspace plan.
+// Deleted bundles release their environment layers and the store is
+// collected, exactly as for workspace bundles. db is required.
+func RotateInstancePlanWithPolicy(ctx context.Context, db *sql.DB, dir, planID string, p RetentionPolicy, dryRun bool) ([]string, error) {
+	if db == nil || planID == "" {
+		return nil, fmt.Errorf("backup: rotate plan: a database and a plan id are required")
+	}
+	return rotateWithPolicy(ctx, db, dir, "", p, dryRun,
+		func(e ListEntry) bool { return e.Scope == ScopeInstance },
+		func(c RetentionCandidate) bool { return c.PlanID == planID })
+}
+
+// rotateWithPolicy: match picks the bundles on disk to consider, only (when
+// set) narrows them by what the catalog says; workspaceID narrows the
+// catalog read ("" reads all of it).
+func rotateWithPolicy(ctx context.Context, db *sql.DB, dir, workspaceID string, p RetentionPolicy, dryRun bool, match func(ListEntry) bool, only func(RetentionCandidate) bool) ([]string, error) {
 	entries, err := ListBackups(ctx, dir)
 	if err != nil {
 		return nil, err
@@ -192,7 +214,7 @@ func rotateWithPolicy(ctx context.Context, db *sql.DB, dir, workspaceID string, 
 	}
 	var cands []RetentionCandidate
 	for _, e := range entries {
-		if e.WorkspaceID == "" || e.WorkspaceID != workspaceID {
+		if !match(e) {
 			continue
 		}
 		c := RetentionCandidate{
@@ -222,6 +244,13 @@ func rotateWithPolicy(ctx context.Context, db *sql.DB, dir, workspaceID string, 
 	for _, path := range out {
 		if err := Delete(ctx, path); err != nil {
 			return out, err
+		}
+		// A deleted bundle leaves the catalog too, or the console keeps
+		// listing a copy that no longer exists.
+		if db != nil {
+			if err := DeleteCatalogEntry(ctx, db, path); err != nil {
+				return out, err
+			}
 		}
 		// The bundle is gone: it no longer holds its environment layers.
 		if err := ReleaseEnvironmentRefs(ctx, db, path); err != nil {
