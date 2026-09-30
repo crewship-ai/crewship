@@ -2,7 +2,7 @@
 
 import { apiFetch } from "@/lib/api-fetch"
 import { holdsFixture, restoresFixture } from "./__fixtures__/backups"
-import type { EnvironmentOutcome, InstanceHold, RestoreChecks, RestoreRecord, RestoreReport, RestoreTarget } from "./backups-model"
+import type { EnvironmentOutcome, InstanceHold, OffsiteCopyList, OffsiteFetch, RestoreChecks, RestoreRecord, RestoreReport, RestoreTarget } from "./backups-model"
 import { INSTANCE_BACKUPS, isUnavailableStatus, listOf, readError, send, useResource, type SendResult } from "./use-backups-data"
 
 /** GET /admin/instance/backups/restores — every restore, dry run and drill. */
@@ -22,6 +22,44 @@ export function useHolds() {
 
 export function resumeHold(key: string): Promise<SendResult<unknown>> {
   return send("/api/v1/admin/instance/holds/resume", "POST", { key })
+}
+
+/** GET /admin/instance/backups/copies?destination= — the bundles a destination holds. */
+export function useOffsiteCopies(destinationId: string | null) {
+  return useResource<OffsiteCopyList>(destinationId ? `${INSTANCE_BACKUPS}/copies?destination=${encodeURIComponent(destinationId)}` : null, () => ({
+    destination_id: destinationId ?? "", destination_name: "r2",
+    copies: [{ key: "instance/crewship-instance-20260929T010000Z.tar.zst", size: 538_181_632, modified: "2026-09-29T01:04:10Z", scope: "instance", workspace_id: null, local: false, local_path: null }],
+  }))
+}
+
+/** POST /admin/instance/backups/copies/fetch — starts the download as a server job (202). */
+export function fetchOffsiteCopy(destinationId: string, key: string): Promise<SendResult<OffsiteFetch>> {
+  return send(`${INSTANCE_BACKUPS}/copies/fetch`, "POST", { destination_id: destinationId, key })
+}
+
+/** GET /admin/instance/backups/copies/fetch/{id} — follow a fetch. */
+export function offsiteFetchStatus(id: string): Promise<SendResult<OffsiteFetch>> {
+  return send(`${INSTANCE_BACKUPS}/copies/fetch/${encodeURIComponent(id)}`, "GET")
+}
+
+/**
+ * Start a fetch and follow it until it ends. Resolves with the local bundle
+ * path, or an error saying why. `signal` stops following (the server job
+ * carries on and is still reachable by id).
+ */
+export async function fetchAndWait(destinationId: string, key: string, opts: { intervalMs?: number; signal?: AbortSignal } = {}): Promise<SendResult<string>> {
+  const started = await fetchOffsiteCopy(destinationId, key)
+  if (!started.ok) return started
+  let job = started.data
+  while (job.status === "running") {
+    await new Promise((r) => setTimeout(r, opts.intervalMs ?? 1500))
+    if (opts.signal?.aborted) return { ok: false, unavailable: false, error: "stopped following the fetch; it carries on on the server" }
+    const next = await offsiteFetchStatus(job.id)
+    if (!next.ok) return next
+    job = next.data
+  }
+  if (job.status === "failed" || !job.path) return { ok: false, unavailable: false, error: job.error ?? "the fetch failed" }
+  return { ok: true, data: job.path }
 }
 
 export interface RestoreRequest {

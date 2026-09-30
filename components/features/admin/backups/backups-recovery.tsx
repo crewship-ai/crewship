@@ -14,8 +14,8 @@ import {
 } from "./backups-model"
 import { checksFixture, dryRunFixture, restorePhasesFixture } from "./__fixtures__/backups"
 import { useBackupRuns, workspaceFor } from "./use-backup-runs"
-import { restore, restoreChecks, resumeHold, useHolds, useRestores } from "./use-backup-recovery"
-import { saveBackupSettings, useBackupSettings, useVaultKeys } from "./use-backup-settings"
+import { fetchAndWait, restore, restoreChecks, resumeHold, useHolds, useOffsiteCopies, useRestores } from "./use-backup-recovery"
+import { saveBackupSettings, useBackupSettings, useDestinations, useVaultKeys } from "./use-backup-settings"
 import { perform } from "./use-backups-data"
 import type { SectionCtx } from "./backups-console"
 
@@ -92,6 +92,7 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
   const [progress, setProgress] = React.useState<RestoreReport | null>(null)
   const [busy, setBusy] = React.useState(false)
   const [confirm, setConfirm] = React.useState(false)
+  const [offsite, setOffsite] = React.useState(false)
   const instance = ctx.scope === "instance"
   const cliOnly = target === "empty_server" || target === "isolated"
   const key = { identity: identity.trim() || undefined, passphrase: passphrase || undefined }
@@ -143,8 +144,16 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
         ))}
       </ol>
 
-      {step === 1 && (
-        <SettingsCard title="Pick a backup" actions={<SmallButton disabled title="Uploading a backup from another machine comes later">Upload a backup…</SmallButton>}>
+      {step === 1 && offsite && (
+        <OffsitePicker demo={ctx.demo} onClose={() => setOffsite(false)}
+          onPicked={(p) => { setPath(p); setOffsite(false); setStep(2) }} />
+      )}
+
+      {step === 1 && !offsite && (
+        <SettingsCard title="Pick a backup" actions={<>
+          <SmallButton onClick={() => setOffsite(true)}>From off-site storage…</SmallButton>
+          <SmallButton disabled title="Uploading a backup from another machine comes later">Upload a backup…</SmallButton>
+        </>}>
           <Gate resource={runs} what="Backups">
             {() => pool.length === 0 ? <p className="px-4 py-3 text-[12.5px] text-muted-foreground">No backup in this scope yet.</p> : (
               <div className="overflow-x-auto">
@@ -272,6 +281,82 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
 
       {step === 7 && <HeldCard ctx={ctx} onReset={reset} />}
     </>
+  )
+}
+
+/**
+ * Recovery step 1 from an off-site copy: pick a destination, see the bundles
+ * it holds, fetch one back (a server job, followed here) or use the copy this
+ * server already has, then carry on with that bundle.
+ */
+function OffsitePicker({ demo, onPicked, onClose }: { demo: boolean; onPicked: (path: string) => void; onClose: () => void }) {
+  const dests = useDestinations()
+  const [chosen, setChosen] = React.useState<string | null>(null)
+  const destId = chosen ?? dests.data?.[0]?.id ?? null
+  const copies = useOffsiteCopies(destId)
+  const [fetching, setFetching] = React.useState<string | null>(null)
+  const follow = React.useRef<AbortController | null>(null)
+  React.useEffect(() => () => follow.current?.abort(), [])
+
+  const fetchOne = async (key: string) => {
+    if (!destId) return
+    if (demo) { toast.message("Demo data · nothing was sent"); return }
+    setFetching(key)
+    follow.current = new AbortController()
+    const r = await fetchAndWait(destId, key, { signal: follow.current.signal })
+    setFetching(null)
+    if (r.ok) {
+      toast.success("Fetched · the bundle is on this server now")
+      onPicked(r.data)
+    } else if (!follow.current.signal.aborted) {
+      toast.error(`The copy could not be fetched: ${r.error}`)
+    }
+  }
+
+  return (
+    <SettingsCard title="From off-site storage" description="a bundle is fetched back to this server, verified, then restored like any other"
+      actions={<SmallButton onClick={onClose}>Back to this server's backups</SmallButton>}>
+      <Gate resource={dests} what="Off-site destinations">
+        {(list) => list.length === 0 ? (
+          <p className="px-4 py-3 text-[12.5px] text-muted-foreground">No off-site destination is set up. Add one in Storage.</p>
+        ) : (
+          <>
+            {list.length > 1 && (
+              <div className="border-b border-border px-4 py-2.5">
+                <SettingsSegmented<string> label="Destination" value={destId ?? ""} onChange={setChosen}
+                  options={list.map((d) => ({ value: d.id, label: d.name }))} />
+              </div>
+            )}
+            <Gate resource={copies} what="Off-site copies">
+              {(data) => data.copies.length === 0 ? (
+                <p className="px-4 py-3 text-[12.5px] text-muted-foreground">No bundle at {data.destination_name}.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full tabular-nums">
+                    <thead><tr>{["Bundle", "Scope", "Size", "Copied", ""].map((h) => <th key={h} className={TH}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {data.copies.map((c) => (
+                        <tr key={c.key} className="[&:last-child>td]:border-b-0">
+                          <td className={cn(TD, "font-mono text-[12px]")}>{c.key}</td>
+                          <td className={TD}>{c.scope === "instance" ? "Whole instance" : `Workspace ${c.workspace_id ?? ""}`}</td>
+                          <td className={TD}>{formatSize(c.size)}</td>
+                          <td className={TD}>{shortDate(new Date(c.modified))}</td>
+                          <td className={cn(TD, "text-right")}>
+                            {c.local && c.local_path
+                              ? <SmallButton onClick={() => onPicked(c.local_path!)} title={`Already on this server: ${c.local_path}`}>Use</SmallButton>
+                              : <SmallButton primary disabled={fetching !== null} onClick={() => void fetchOne(c.key)}>{fetching === c.key ? "Fetching…" : "Fetch"}</SmallButton>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Gate>
+          </>
+        )}
+      </Gate>
+    </SettingsCard>
   )
 }
 
