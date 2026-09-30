@@ -2,7 +2,7 @@
 
 import { destinationsFixture, incidentsFixture, recipientsFixture, settingsFixture, vaultKeysFixture } from "./__fixtures__/backups"
 import type {
-  BackupIncident, BackupRecipient, BackupSettings, DestinationCreated, DestinationTest, NewOffsiteDestination, OffsiteDestination, VaultKeysResponse,
+  AlertTestResult, BackupIncident, BackupRecipient, BackupSettings, DestinationCreated, DestinationTest, NewOffsiteDestination, OffsiteDestination, VaultKeysResponse,
 } from "./backups-model"
 import { INSTANCE_BACKUPS, listOf, send, useResource, type SendResult } from "./use-backups-data"
 
@@ -23,6 +23,15 @@ export function saveBackupSettings(patch: Partial<BackupSettings>): Promise<Send
  */
 export function setRecoveryKit(enabled: boolean): Promise<SendResult<{ enabled: boolean }>> {
   return send(`${INSTANCE_BACKUPS}/settings/recovery-kit`, "PUT", { enabled })
+}
+
+/**
+ * POST /admin/instance/backups/settings/test-alert {channel_id} — a test alert
+ * through the same delivery as a real one. A send that did not arrive is a
+ * 200 with ok false and the error.
+ */
+export function sendTestAlert(channelId: string): Promise<SendResult<AlertTestResult>> {
+  return send(`${INSTANCE_BACKUPS}/settings/test-alert`, "POST", { channel_id: channelId })
 }
 
 /** GET /admin/instance/backups/recipients — AGE public keys. */

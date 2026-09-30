@@ -226,6 +226,35 @@ export interface Destination {
 
 export interface AlertEvents { failed: boolean; incomplete: boolean; stale: boolean; offsite: boolean; drill: boolean }
 
+/** The outcome of the newest backup alert sent to a notification channel. */
+export interface AlertDelivery {
+  status: "pending" | "sent" | "failed"
+  error: string | null
+  at: string
+  incident_id: string
+}
+
+/** A notification channel backup alerts can go to (the Tell picker). */
+export interface AlertChannel {
+  id: string
+  /** "Slack · Platform", "Webhook hooks.example.com · Platform". */
+  name: string
+  kind: "chat" | "push" | "incident" | "email" | "webhook"
+  provider: string
+  workspace_id: string
+  workspace_name: string
+  last_delivery: AlertDelivery | null
+}
+
+/** POST /api/v1/admin/instance/backups/settings/test-alert */
+export interface AlertTestResult {
+  ok: boolean
+  channel_id: string
+  channel: string
+  error: string | null
+  sent_at: string
+}
+
 /** GET/PUT /api/v1/admin/instance/backups/settings */
 export interface BackupSettings {
   /** disk_mbps / upload_mbps: 0 is no limit. */
@@ -236,7 +265,12 @@ export interface BackupSettings {
   heartbeat_last_ok?: boolean | null
   heartbeat_last_error?: string | null
   recovery_kit_enabled: boolean
+  /** Notification channel ids every alert also goes to, beside the inboxes. */
   channels: string[]
+  /** The channels that can carry backup alerts now (absent on older servers). */
+  available_channels?: AlertChannel[]
+  /** Per chosen channel: still available, and how its newest alert went. */
+  channel_status?: { id: string; available: boolean; last_delivery: AlertDelivery | null }[]
   events: AlertEvents
   stale_alert_hours: number
   drill_reminder: "weekly" | "monthly" | "off"
