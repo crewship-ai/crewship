@@ -67,7 +67,7 @@ export interface AdminUser {
   failed_login_count?: number
   email_verified?: boolean
   /** Administers the instance, and by which rule: "env" (CREWSHIP_OWNER_EMAIL),
-   *  "role" (named) or "oldest_workspace_owner" (the fallback while nobody is). */
+   *  "role" (named; the one-time bootstrap names the first ones). */
   instance_admin?: boolean
   instance_admin_source?: string | null
   /** Set while an instance admin has suspended the account. */

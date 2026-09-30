@@ -553,9 +553,11 @@ for an admin who is signed in. Every action writes an audit-log entry.
 
 What an instance administrator does across the whole server. People are named
 by email and workspaces by slug. Only an **instance administrator** may run
-these: `CREWSHIP_OWNER_EMAIL` on the server, anyone named with `add-admin`, or,
-while neither is set, the owners of the oldest workspace. Being ADMIN or OWNER
-of a workspace is not enough. Every action is recorded in the instance audit.
+these: `CREWSHIP_OWNER_EMAIL` on the server, or anyone named with `add-admin`.
+An install that names nobody names the owners of its oldest workspace once,
+the first time it is asked, and never again. Being ADMIN or OWNER of a
+workspace is not enough. Every action is recorded in the instance audit. The
+last active instance administrator cannot be removed or suspended.
 
 ```bash
 crewship admin instance add-person lucie@acme.example --name "Lucie H" --access acme-ops=MEMBER
@@ -654,8 +656,9 @@ one; anyone else resets their own password.
 ### add-admin \<email\>
 
 `PUT /api/v1/admin/instance/admins/{userId}`. Names an instance administrator.
-Naming anyone turns off the oldest-workspace fallback: from then on the named
-admins and `CREWSHIP_OWNER_EMAIL` are the whole list.
+The named admins and `CREWSHIP_OWNER_EMAIL` are the whole list. When nobody
+who could run this can sign in, `--local` writes the database file on the
+host — the one way back once the last admin is gone.
 
 | Flag | Required | Description |
 |---|---|---|

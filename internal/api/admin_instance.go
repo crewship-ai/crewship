@@ -79,6 +79,32 @@ func (h *InstanceAdminHandler) inTx(w http.ResponseWriter, r *http.Request, what
 	return true
 }
 
+// isAdminAndLastTx: the target is a named, active instance admin and the last
+// one — suspending them would leave nobody.
+func (h *InstanceAdminHandler) isAdminAndLastTx(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
+	var role sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT instance_role FROM users WHERE id = ? AND suspended_at IS NULL`, id).Scan(&role); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	if role.String != "ADMIN" {
+		return false, nil
+	}
+	return lastActiveInstanceAdminTx(ctx, tx, id)
+}
+
+// lastAdminNow is isAdminAndLastTx in a read-only transaction of its own.
+func (h *InstanceAdminHandler) lastAdminNow(ctx context.Context, id string) (bool, error) {
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	return h.isAdminAndLastTx(ctx, tx, id)
+}
+
 // ── People ──────────────────────────────────────────────────────────────────
 
 type instanceMembershipInput struct {
@@ -265,6 +291,15 @@ func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 	if s := strings.TrimSpace(req.Reason); s != "" {
 		reason = s
 	}
+	// The last active admin stays: someone must be left who can undo this.
+	// Checked here, before any session ends, and again inside the change.
+	if l, err := h.lastAdminNow(ctx, id); err != nil {
+		replyInternalError(w, h.logger, "suspend: admin count", err)
+		return
+	} else if l {
+		replyError(w, http.StatusConflict, errLastInstanceAdmin.Error())
+		return
+	}
 	// Order: the sessions end first, then the suspension, the CLI tokens and
 	// the audit entry commit together. Sessions live in their own store and
 	// cannot join the transaction; ending them is harmless on its own (the
@@ -286,6 +321,13 @@ func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if l, err := h.isAdminAndLastTx(ctx, tx, id); err != nil {
+		replyInternalError(w, h.logger, "suspend: admin count", err)
+		return
+	} else if l {
+		replyError(w, http.StatusConflict, errLastInstanceAdmin.Error())
+		return
+	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE users SET suspended_at = ?, suspended_reason = ? WHERE id = ?`, now, reason, id); err != nil {
 		replyInternalError(w, h.logger, "suspend", err)
@@ -458,8 +500,16 @@ func (h *InstanceAdminHandler) RevokeAdmin(w http.ResponseWriter, r *http.Reques
 		replyError(w, http.StatusConflict, "this account is the instance owner (CREWSHIP_OWNER_EMAIL); change the server's environment instead")
 		return
 	}
-	notNamed := false
+	notNamed, last := false, false
 	if !h.inTx(w, r, "revoke admin", func(tx *sql.Tx) error {
+		// Someone must be left who can undo this, also when two admins
+		// remove each other at the same moment.
+		if l, err := lastActiveInstanceAdminTx(r.Context(), tx, id); err != nil {
+			return err
+		} else if l {
+			last = true
+			return errNothingToDo
+		}
 		res, err := tx.ExecContext(r.Context(), `UPDATE users SET instance_role = NULL WHERE id = ? AND instance_role IS NOT NULL`, id)
 		if err != nil {
 			return err
@@ -470,7 +520,10 @@ func (h *InstanceAdminHandler) RevokeAdmin(w http.ResponseWriter, r *http.Reques
 		}
 		return auditInstance(r.Context(), r, tx, "instance.admin_revoked", "user", id, "", nil)
 	}) {
-		if notNamed {
+		switch {
+		case last:
+			replyError(w, http.StatusConflict, errLastInstanceAdmin.Error())
+		case notNamed:
 			replyError(w, http.StatusNotFound, "this person is not a named instance admin")
 		}
 		return

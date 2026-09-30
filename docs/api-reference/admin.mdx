@@ -325,14 +325,24 @@ The routes under `/api/v1/admin/instance/` act on the whole server: every
 account and every workspace, whether or not the caller belongs to it. They
 take no `workspace_id`.
 
-**Who may call them: an instance administrator.** That is, in order:
+**Who may call them: an instance administrator.** That is:
 
 1. the account whose email is `CREWSHIP_OWNER_EMAIL` on the server, which
    cannot be removed or suspended over the API;
 2. anyone named with `PUT /api/v1/admin/instance/admins/{userId}`
-   (`users.instance_role`);
-3. while neither of those exists, the OWNERs of the oldest workspace, so a
-   new or upgraded install always has one. Naming anyone turns this off.
+   (`users.instance_role`).
+
+The list is always explicit. On an install that names nobody and has no
+`CREWSHIP_OWNER_EMAIL`, the first time anyone's status is asked the server
+names the OWNERs of the oldest workspace — the people it treated as admins
+before — records that in `app_settings` and in the instance audit
+(`instance.admin_bootstrapped`), and never does it again. Removing every
+named admin later does not bring that rule back; the way in when nobody can
+administer is `crewship admin instance add-admin --local` on the host.
+
+The last active instance administrator cannot be removed or suspended
+(`409`): with no `CREWSHIP_OWNER_EMAIL`, someone named and unsuspended has to
+be left.
 
 A suspended account is never an instance administrator. Being ADMIN or OWNER
 of a workspace is not enough for these routes, nor for the instance-wide
@@ -354,7 +364,7 @@ An instance administrator also passes the ADMIN floor of every other
 sign-out routes, also answer an instance administrator who names no
 workspace, since they need not belong to one; anyone else still needs
 `workspace_id`. Those lists carry `instance_admin` and
-`instance_admin_source` (`env`, `role` or `oldest_workspace_owner`),
+`instance_admin_source` (`env` or `role`),
 `suspended_at`, `suspended_reason` and `setup_link_expires_at` per person, and
 `owners` per workspace. `GET /api/auth/session` returns `is_instance_admin`
 for the signed-in user.
@@ -549,7 +559,7 @@ password.
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
 | `404` | No such person. |
-| `409` | Your own account, or the `CREWSHIP_OWNER_EMAIL` account. |
+| `409` | Your own account, the `CREWSHIP_OWNER_EMAIL` account, or the last active instance administrator. |
 | `500` | A write failed. |
 
 ## `POST /api/v1/admin/instance/people/{userId}/reactivate`
@@ -607,8 +617,7 @@ Content`.
 
 ## `PUT /api/v1/admin/instance/admins/{userId}`
 
-Names a person an instance administrator. The first name switches off the
-oldest-workspace fallback.
+Names a person an instance administrator.
 
 **Auth:** instance administrator. **Request:** no body. **Response:** `204 No
 Content`.
@@ -637,7 +646,7 @@ Content`.
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
 | `404` | No such person, or they are not a named administrator. |
-| `409` | Your own account, or the `CREWSHIP_OWNER_EMAIL` account. |
+| `409` | Your own account, the `CREWSHIP_OWNER_EMAIL` account, or the last active instance administrator. |
 | `500` | A write failed. |
 
 ## `GET /api/v1/admin/instance/audit`
@@ -670,7 +679,7 @@ Actions: `instance.user_created`, `instance.member_added`,
 `instance.workspace_deleted`, `instance.user_suspended`,
 `instance.user_reactivated`, `instance.setup_link_issued`,
 `instance.setup_link_revoked`, `instance.admin_granted`,
-`instance.admin_revoked`, `instance.keeper_governance_updated`,
+`instance.admin_revoked`, `instance.admin_bootstrapped`, `instance.keeper_governance_updated`,
 `instance.keeper_defaults_updated`.
 
 | Status | Condition |

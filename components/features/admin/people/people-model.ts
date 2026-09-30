@@ -108,8 +108,6 @@ export function adminSourceLabel(source: string | null | undefined): string {
       return "Instance owner (CREWSHIP_OWNER_EMAIL)"
     case "role":
       return "Named instance admin"
-    case "oldest_workspace_owner":
-      return "Owner of the oldest workspace, while nobody is named"
     default:
       return ""
   }

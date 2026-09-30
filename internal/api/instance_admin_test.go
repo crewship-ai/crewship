@@ -26,8 +26,10 @@ func seedInstanceWorkspace(t *testing.T, db *sql.DB, id, created string) {
 
 // TestInstanceAdminStatus pins who administers the instance, and why. The
 // env owner always does; a named instance admin does; with neither, the
-// OWNERs of the oldest workspace do, so a fresh or seeded install is never
-// left without one — and the fallback switches off the moment anyone is named.
+// one-time bootstrap names the OWNERs of the oldest workspace the first time
+// anyone asks, so a fresh or seeded install is never left without one — and
+// it does nothing on an install that already names someone
+// (instance_admin_bootstrap_test.go pins that it never runs twice).
 func TestInstanceAdminStatus(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -55,14 +57,14 @@ func TestInstanceAdminStatus(t *testing.T) {
 			user: "ann", want: true, wantSource: instanceAdminSourceRole,
 		},
 		{
-			name: "with nobody named, the oldest workspace's owner is one",
+			name: "with nobody named, the bootstrap names the oldest workspace's owner",
 			setup: func(t *testing.T, db *sql.DB) {
 				seedInstanceWorkspace(t, db, "old", "2026-01-01 00:00:00")
 				seedInstanceWorkspace(t, db, "new", "2026-06-01 00:00:00")
 				seedInstanceUser(t, db, "first", "first@ex.com", "old", "OWNER")
 				seedInstanceUser(t, db, "later", "later@ex.com", "new", "OWNER")
 			},
-			user: "first", want: true, wantSource: instanceAdminSourceFallback,
+			user: "first", want: true, wantSource: instanceAdminSourceRole,
 		},
 		{
 			name: "owning a newer workspace is not enough",
@@ -84,7 +86,7 @@ func TestInstanceAdminStatus(t *testing.T) {
 			user: "adm", want: false,
 		},
 		{
-			name: "naming anyone switches the fallback off",
+			name: "an install that names someone is not bootstrapped",
 			setup: func(t *testing.T, db *sql.DB) {
 				seedInstanceWorkspace(t, db, "old", "2026-01-01 00:00:00")
 				seedInstanceUser(t, db, "first", "first@ex.com", "old", "OWNER")
@@ -94,7 +96,7 @@ func TestInstanceAdminStatus(t *testing.T) {
 			user: "first", want: false,
 		},
 		{
-			name:     "a configured env owner switches the fallback off",
+			name:     "an install with an env owner is not bootstrapped",
 			envOwner: "boss@ex.com",
 			setup: func(t *testing.T, db *sql.DB) {
 				seedInstanceWorkspace(t, db, "old", "2026-01-01 00:00:00")
@@ -103,14 +105,14 @@ func TestInstanceAdminStatus(t *testing.T) {
 			user: "first", want: false,
 		},
 		{
-			name: "the fallback skips a deleted workspace",
+			name: "the bootstrap skips a deleted workspace",
 			setup: func(t *testing.T, db *sql.DB) {
 				seedInstanceWorkspace(t, db, "gone", "2025-01-01 00:00:00")
 				mustExec(t, db, `UPDATE workspaces SET deleted_at = '2026-01-01' WHERE id = 'gone'`)
 				seedInstanceWorkspace(t, db, "old", "2026-01-01 00:00:00")
 				seedInstanceUser(t, db, "first", "first@ex.com", "old", "OWNER")
 			},
-			user: "first", want: true, wantSource: instanceAdminSourceFallback,
+			user: "first", want: true, wantSource: instanceAdminSourceRole,
 		},
 		{
 			name: "a suspended account administers nothing",

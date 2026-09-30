@@ -33,9 +33,8 @@ import (
 // A suspended account administers nothing, whichever rule would name it.
 
 const (
-	instanceAdminSourceEnv      = "env"
-	instanceAdminSourceRole     = "role"
-	instanceAdminSourceFallback = "oldest_workspace_owner"
+	instanceAdminSourceEnv  = "env"
+	instanceAdminSourceRole = "role"
 
 	// roleInstance declares a route behind the instance gate; scopeInstanceAdmin
 	// is the CLI-token scope it requires.
@@ -81,67 +80,131 @@ func instanceAdminStatus(ctx context.Context, db *sql.DB, userID, email string) 
 	if role.String == "ADMIN" {
 		return true, instanceAdminSourceRole, nil
 	}
-	if !instanceFallbackActive(ctx, db) {
-		return false, "", nil
-	}
-	var n int
-	err = db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM workspace_members
-		WHERE user_id = ? AND role = 'OWNER' AND workspace_id = (
-			SELECT id FROM workspaces WHERE deleted_at IS NULL ORDER BY created_at, id LIMIT 1
-		)`, userID).Scan(&n)
+	promoted, err := ensureInstanceAdminBootstrap(ctx, db)
 	if err != nil {
 		return false, "", err
 	}
-	if n > 0 {
-		return true, instanceAdminSourceFallback, nil
+	if promoted[userID] {
+		return true, instanceAdminSourceRole, nil
 	}
 	return false, "", nil
 }
 
-// instanceFallbackActive reports whether rule 3 applies: nobody is named and
-// no env owner is configured.
-func instanceFallbackActive(ctx context.Context, db *sql.DB) bool {
-	if backup.InstanceOwnerConfigured() {
-		return false
+// instanceAdminBootstrapKey is the app_settings row recording that the
+// one-time bootstrap has run (or was not needed).
+const instanceAdminBootstrapKey = "instance.admin_bootstrapped"
+
+// ensureInstanceAdminBootstrap names the first instance admins, once.
+//
+// It replaces a rule that used to hold forever: "while nobody is named and no
+// env owner is configured, the OWNERs of the oldest workspace are instance
+// admins". That rule switched itself back on whenever the last named admin
+// went, handing the instance to whoever owned that workspace. Now the first
+// time anyone's admin status is asked, an install with nobody named and no
+// env owner names exactly those owners — the people the old rule already
+// treated as admins, so nobody gains or loses anything — records that it did
+// (app_settings + the instance audit) and never runs again. An install that
+// already names someone, or has an env owner, is only marked done. An install
+// with no workspace yet waits for its first one.
+//
+// Recovery when nobody can sign in to administer: `crewship admin instance
+// add-admin --local`, which writes the database on the host.
+func ensureInstanceAdminBootstrap(ctx context.Context, db *sql.DB) (map[string]bool, error) {
+	var done int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM app_settings WHERE key = ?`, instanceAdminBootstrapKey).Scan(&done); err != nil {
+		return nil, err
+	}
+	if done > 0 {
+		return nil, nil
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM app_settings WHERE key = ?`, instanceAdminBootstrapKey).Scan(&done); err != nil {
+		return nil, err
+	}
+	if done > 0 {
+		return nil, nil
+	}
+	mark := func(how string) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)`,
+			instanceAdminBootstrapKey, how, time.Now().UTC().Format(time.RFC3339))
+		return err
 	}
 	var named int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE instance_role = 'ADMIN' AND suspended_at IS NULL`).Scan(&named); err != nil {
-		// Fail closed: an unreadable list names nobody by fallback.
-		return false
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE instance_role = 'ADMIN' AND suspended_at IS NULL`).Scan(&named); err != nil {
+		return nil, err
 	}
-	return named == 0
-}
-
-// instanceFallbackOwners returns the users rule 3 names — the OWNERs of the
-// oldest live workspace — or an empty set when the fallback is off.
-func instanceFallbackOwners(ctx context.Context, db *sql.DB) (map[string]bool, error) {
-	out := map[string]bool{}
-	if !instanceFallbackActive(ctx, db) {
-		return out, nil
+	if named > 0 || backup.InstanceOwnerConfigured() {
+		if err := mark("already named"); err != nil {
+			return nil, err
+		}
+		return nil, tx.Commit()
 	}
-	rows, err := db.QueryContext(ctx, `
-		SELECT user_id FROM workspace_members
-		WHERE role = 'OWNER' AND workspace_id = (
+	rows, err := tx.QueryContext(ctx, `
+		SELECT wm.user_id FROM workspace_members wm JOIN users u ON u.id = wm.user_id
+		WHERE wm.role = 'OWNER' AND u.suspended_at IS NULL AND wm.workspace_id = (
 			SELECT id FROM workspaces WHERE deleted_at IS NULL ORDER BY created_at, id LIMIT 1
 		)`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	var owners []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		out[id] = true
+		owners = append(owners, id)
 	}
-	return out, rows.Err()
+	rows.Close()
+	if len(owners) == 0 {
+		return nil, nil // no workspace yet: ask again once there is one
+	}
+	promoted := map[string]bool{}
+	for _, id := range owners {
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET instance_role = 'ADMIN' WHERE id = ?`, id); err != nil {
+			return nil, err
+		}
+		promoted[id] = true
+	}
+	if err := mark("oldest workspace owners"); err != nil {
+		return nil, err
+	}
+	if err := auditInstance(ctx, nil, tx, "instance.admin_bootstrapped", "instance", "", "", map[string]any{"user_ids": owners}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return promoted, nil
+}
+
+// errLastInstanceAdmin ends a change that would leave no active admin.
+var errLastInstanceAdmin = errors.New("this is the last active instance administrator; name another one first")
+
+// lastActiveInstanceAdminTx reports whether taking targetID's instance power
+// away would leave nobody who can administer the instance: no other named,
+// unsuspended admin and no env owner. Run it in the change's transaction, so
+// two admins removing each other at once cannot both pass it.
+func lastActiveInstanceAdminTx(ctx context.Context, tx *sql.Tx, targetID string) (bool, error) {
+	if backup.InstanceOwnerConfigured() {
+		return false, nil
+	}
+	var others int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM users WHERE instance_role = 'ADMIN' AND suspended_at IS NULL AND id != ?`, targetID).Scan(&others); err != nil {
+		return false, err
+	}
+	return others == 0, nil
 }
 
 // instanceAdminSourceFor is instanceAdminStatus for a row already in hand
-// (a list), given whether rule 3 names this user. "" means not an admin.
-func instanceAdminSourceFor(email, instanceRole string, suspended, fallbackOwner bool) string {
+// (a list). "" means not an admin.
+func instanceAdminSourceFor(email, instanceRole string, suspended bool) string {
 	switch {
 	case suspended:
 		return ""
@@ -149,8 +212,6 @@ func instanceAdminSourceFor(email, instanceRole string, suspended, fallbackOwner
 		return instanceAdminSourceEnv
 	case instanceRole == "ADMIN":
 		return instanceAdminSourceRole
-	case fallbackOwner:
-		return instanceAdminSourceFallback
 	}
 	return ""
 }
@@ -263,11 +324,16 @@ func auditInstance(ctx context.Context, r *http.Request, tx instanceAuditExecer,
 		}
 		return s
 	}
+	// r is nil for a change the server makes on its own (the bootstrap).
+	ip, ua := "", ""
+	if r != nil {
+		ip, ua = clientIP(r), r.UserAgent()
+	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO instance_audit_logs (id, user_id, action, entity_type, entity_id, target_workspace_id, metadata, ip_address, user_agent, created_at)
 		VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nullable(userID), action, entityType, nullable(entityID), nullable(targetWorkspaceID), meta,
-		nullable(clientIP(r)), nullable(r.UserAgent()), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		nullable(ip), nullable(ua), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return fmt.Errorf("instance audit %s: %w", action, err)
 	}
 	return nil

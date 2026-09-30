@@ -25,7 +25,7 @@ const FUTURE = new Date(Date.now() + 3 * 86_400_000).toISOString()
 const m = (workspace_id: string, name: string, role: string) => ({ member_id: `m-${workspace_id}`, workspace_id, name, slug: name.toLowerCase(), role, joined_at: "2026-09-01T00:00:00Z" })
 const USERS = [
   { id: "u-boss", email: "boss@ex.com", full_name: "Boss", created_at: "2026-09-01T00:00:00Z", workspace: null, role: "OWNER",
-    memberships: [m("ws-a", "Acme", "OWNER")], active_sessions: 2, instance_admin: true, instance_admin_source: "oldest_workspace_owner" },
+    memberships: [m("ws-a", "Acme", "OWNER")], active_sessions: 2, instance_admin: true, instance_admin_source: "role" },
   { id: "u-jana", email: "jana@ex.com", full_name: "Jana", created_at: "2026-09-02T00:00:00Z", workspace: null, role: "MEMBER",
     memberships: [m("ws-a", "Acme", "MEMBER")], locked_until: FUTURE, failed_login_count: 50 },
   { id: "u-perko", email: "perko@ex.com", full_name: "Perko", created_at: "2026-09-03T00:00:00Z", workspace: null, role: null,

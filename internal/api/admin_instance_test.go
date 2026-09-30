@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -11,8 +12,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/backup"
 )
 
-// instanceFixture: two workspaces. "boss" owns the oldest one and so is the
-// instance admin by fallback; "wsadmin" is ADMIN of it and nothing more;
+// instanceFixture: two workspaces. "boss" owns the oldest one and so is named
+// instance admin by the one-time bootstrap on first use; "wsadmin" is ADMIN of it and nothing more;
 // "carol" owns the second one and is not a member of the first.
 type instanceFixture struct {
 	t       *testing.T
@@ -34,6 +35,11 @@ func newInstanceFixture(t *testing.T) *instanceFixture {
 	seedInstanceUser(t, db, "boss", "boss@ex.com", "ws-old", "OWNER")
 	seedInstanceUser(t, db, "wsadmin", "wsadmin@ex.com", "ws-old", "ADMIN")
 	seedInstanceUser(t, db, "carol", "carol@ex.com", "ws-new", "OWNER")
+	// The one-time bootstrap names boss, as it would have long before any of
+	// these tests' requests on a real install.
+	if _, err := ensureInstanceAdminBootstrap(context.Background(), db); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
 	r, err := NewRouter(db, "this-is-a-32-char-test-secret-pad", newTestLogger())
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
@@ -294,8 +300,10 @@ func TestInstanceAdminSeesTheWholeInstance(t *testing.T) {
 	seen := map[string]bool{}
 	for _, u := range users {
 		seen[u.ID] = u.InstanceAdmin
-		if u.ID == "boss" && (u.InstanceAdminSource == nil || *u.InstanceAdminSource != instanceAdminSourceFallback) {
-			t.Errorf("boss source = %v, want fallback", u.InstanceAdminSource)
+		// boss owns the oldest workspace and was named by the one-time
+		// bootstrap the first time anyone asked (instance_admin.go).
+		if u.ID == "boss" && (u.InstanceAdminSource == nil || *u.InstanceAdminSource != instanceAdminSourceRole) {
+			t.Errorf("boss source = %v, want role (named by the bootstrap)", u.InstanceAdminSource)
 		}
 	}
 	if len(users) != 3 || !seen["boss"] || seen["carol"] || seen["wsadmin"] {

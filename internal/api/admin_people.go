@@ -307,7 +307,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		FailedLoginCount int          `json:"failed_login_count"`
 		EmailVerified    bool         `json:"email_verified"`
 		// InstanceAdmin and its source ("env", "role" or
-		// "oldest_workspace_owner") — see instance_admin.go.
+		// ) — see instance_admin.go.
 		InstanceAdmin       bool    `json:"instance_admin"`
 		InstanceAdminSource *string `json:"instance_admin_source"`
 		SuspendedAt         *string `json:"suspended_at"`
@@ -315,12 +315,6 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		// SetupLinkExpiresAt is set while an unused setup link is pending:
 		// the account exists and nobody has chosen its password yet.
 		SetupLinkExpiresAt *string `json:"setup_link_expires_at"`
-	}
-
-	fallbackOwners, err := instanceFallbackOwners(ctx, h.db)
-	if err != nil {
-		replyInternalError(w, h.logger, "list users: instance admins", err)
-		return
 	}
 
 	result := []*userRow{}
@@ -355,7 +349,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		if setupExp.Valid && setupExp.String != "" {
 			u.SetupLinkExpiresAt = &setupExp.String
 		}
-		if src := instanceAdminSourceFor(u.Email, instRole.String, u.SuspendedAt != nil, fallbackOwners[u.ID]); src != "" {
+		if src := instanceAdminSourceFor(u.Email, instRole.String, u.SuspendedAt != nil); src != "" {
 			u.InstanceAdmin = true
 			u.InstanceAdminSource = &src
 		}

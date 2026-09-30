@@ -132,9 +132,11 @@ func TestAcceptance_AdminInstanceVerbs(t *testing.T) {
 		}
 	}
 
-	// Naming carol turns the fallback off: boss is no instance admin now.
+	// boss was named by the one-time bootstrap the first time anyone asked
+	// (he owns the oldest workspace). Naming carol adds an admin and takes
+	// nothing away: there is no fallback left to switch off.
 	must("admin", "instance", "add-admin", "carol@lab.invalid")
-	if out, err := run("admin", "instance", "audit"); err == nil || !strings.Contains(strings.ToLower(out), "instance administrator") {
-		t.Fatalf("boss after naming carol: %v\n%s", err, out)
+	if out := must("admin", "instance", "audit"); !strings.Contains(out, "instance.admin_bootstrapped") || !strings.Contains(out, "instance.admin_granted") {
+		t.Fatalf("boss after naming carol:\n%s", out)
 	}
 }
