@@ -1,5 +1,13 @@
 # Agent Access / Runtime — pokračování na dev1, 29. 9. 2026
 
+**Aktualizace 30. 9., 07:15 UTC:** #2722 je sloučené jako `50a9ea900066144581e9ddfa6ad506cfca47ad6d`.
+Finální head `5eacc19ba` schválil CodeRabbit bez připomínek. Vzdálené CI včetně
+všech race jobů prošlo; Linux ARM64 vyžadoval jedno opakování kvůli desetisekundovému
+timeoutu existujícího Pages collector testu. Kód ani timeout nebyl při opakování
+změněn. Po přerušení sandboxem je přístup k dev1 opět funkční.
+Navazuje aplikační provider binding ve větvi `feat/restricted-provider-binding-2711`.
+Release 1.0 stále není přijatý a #2711 zůstává otevřené.
+
 **Aktualizace 21:13 UTC:** #2721 je sloučené jako `272b43f58793872c6db9241f715cf33fd8a0cdf1`.
 Finální head `939a30827` má skutečné schválení CodeRabbit, dokončený walkthrough
 a úspěšné CI včetně všech Go/race/frontend jobů. Security i CodeQL prošly;
