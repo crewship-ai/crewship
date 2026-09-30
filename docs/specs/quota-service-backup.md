@@ -37,9 +37,24 @@ capacity, verifies the complete offline ext4 image, and publishes recoverable
 metadata only after verification. Archive paths never select a helper root or
 host mount location. UID/GID and file modes are retained by the filesystem image.
 
-At this checkpoint, restore explicitly rejects bundles that advertise service
-snapshots. Verified archive-to-destination import, restored intent fencing,
-explicit operator recovery and disposable roundtrip acceptance must land before
-this behavior can be described as complete. The targeted maintenance tests
-exercise two SQLite connections competing for a fence and a controller lease;
-the opt-in physical test exercises image ownership and quota preservation.
+The library restore validates image hashes and exact owner/intent revisions,
+selects a fresh host generation after ID remapping, and holds restored desired
+state behind maintenance until every image import and database commit succeeds.
+Existing service operations use durable leases and re-admit immediately before
+Docker Start. Unknown outcomes retain maintenance or bounded operation leases.
+
+Expired producer maintenance can only be adopted by an explicit recovery option;
+a live producer/controller/service operation rejects adoption. Publication holds
+the SQLite writer lock while proving the exact unexpired epoch, so an old
+producer cannot publish after recovery takes over. Failures never auto-resume.
+
+The existing admin API carries the host-configured transport. Backup create and
+restore expose `--recover-services`; status lists only maintenance in the selected
+workspace, including whether its producer is still live. The option never clears
+a live producer or writer lease.
+
+This remains an implementation checkpoint: the complete encrypted two-owner
+disposable roundtrip and controller restart proof are pending. It must not be described as completed backup/restore
+acceptance. Targeted tests cover fresh generation selection, missing legacy data,
+and stale publication; opt-in physical tests cover filesystem ownership, quota,
+namespace binding and partial import rejection.

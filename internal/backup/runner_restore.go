@@ -22,6 +22,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/servicelifecycle"
 )
 
 // RestoreOptions collects the parameters for RestoreBackup.
@@ -95,8 +96,10 @@ type RestoreOptions struct {
 	// untouched would restore rows pointing at a path this instance
 	// never had. Empty skips both steps — matches CreateOptions.BlobRoot's
 	// "empty disables" convention.
-	BlobRoot         string
-	PageProjectsPath string
+	BlobRoot                  string
+	PageProjectsPath          string
+	ServiceSnapshots          ServiceSnapshotRuntime
+	RecoverServiceMaintenance bool
 }
 
 // RestoreResult summarises what was restored.
@@ -423,9 +426,11 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		return nil, err
 	}
 	defer func() { _ = extracted.Close() }()
-	// A quota section cannot be treated as optional filesystem data: restarting
-	// the saved intent without its image would silently initialize empty data.
-	if manifest.Contents.ServiceSnapshots > 0 {
+	servicePlan, err := extracted.prepareServiceRestorePlan(ctx, manifest.Contents.ServiceSnapshots)
+	if err != nil {
+		return nil, err
+	}
+	if len(servicePlan.items) > 0 && !opts.FilesOnly && (opts.ServiceSnapshots == nil || opts.ServiceSnapshots.QuotaSnapshotNamespace() == "") {
 		return nil, fmt.Errorf("backup: quota service restore requires verified image import transport")
 	}
 
@@ -881,6 +886,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		warnRowCountMismatches(opts.Logger, "payload row counts", payloadMismatches)
 	}
 
+	if !opts.FilesOnly {
+		if err := servicePlan.selectGenerations(); err != nil {
+			return nil, err
+		}
+	}
+
 	// Dry-run short-circuit: all validation already ran (manifest
 	// parse, checksum verify, payload extract, schema-skew). Nothing
 	// left mutates state, so return early with a synthetic success
@@ -1000,6 +1011,29 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}, nil
 	}
 
+	restoreCtx, cancelRestore := context.WithCancel(ctx)
+	defer cancelRestore()
+	ctx = restoreCtx
+	leaseCtx, stopServiceLease := context.WithCancel(ctx)
+	defer stopServiceLease()
+	restoreKeeper := &serviceFenceKeeper{db: db}
+	go restoreKeeper.run(leaseCtx, cancelRestore)
+	if err := servicePlan.fenceExistingTargets(ctx, db, opts.ServiceSnapshots, opts.Replace, opts.RecoverServiceMaintenance, manifest.Scope, restoreKeeper.add); err != nil {
+		return nil, err
+	}
+	defer func() {
+		if retErr != nil {
+			return
+		}
+		for _, fence := range servicePlan.fences {
+			if err := servicelifecycle.EndBackupFence(context.WithoutCancel(ctx), db, fence.crew, fence.token); err != nil {
+				result = nil
+				retErr = err
+				return
+			}
+		}
+	}()
+
 	var stats RestoreStats
 	// Set inside the ReconcileUsersByEmail preInsertStep below, to however
 	// many bundle users it aligned onto a matching target id by email —
@@ -1071,6 +1105,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			}
 			return nil
 		})
+		var commitTx *sql.Tx
 		hooks := &RestoreDumpHooks{
 			// Provenance for the DR resume (#1716), written only for a
 			// rewritten restore — that is the only case that creates a
@@ -1078,21 +1113,37 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			// later. Inside the tx, so a rolled back restore leaves no
 			// claim behind.
 			PostInsert: func(ctx context.Context, tx *sql.Tx) error {
+				if err := servicePlan.insertFences(ctx, tx); err != nil {
+					return err
+				}
+				commitTx = tx
 				if !skipDocker {
 					return nil
 				}
 				return recordForkOrigin(ctx, tx, opts, manifest, extracted.DBDump, bundleCrewSlugs)
 			},
 			PreCommit: func(ctx context.Context) error {
+				if err := servicePlan.importImages(ctx, opts.ServiceSnapshots); err != nil {
+					return err
+				}
 				if err := pageApply(ctx); err != nil {
 					return err
 				}
 				if err := memoryBlobsRestore(ctx); err != nil {
 					return err
 				}
-				return dockerRestore(ctx)
+				if err := dockerRestore(ctx); err != nil {
+					return err
+				}
+				return servicePlan.renewCommitFences(ctx, commitTx)
 			},
 			PreInsert: func(ctx context.Context, tx *sql.Tx) error {
+				// The writer transaction now excludes all cross-process
+				// admissions. Publish renewed target leases just before commit.
+				stopServiceLease()
+				if err := servicePlan.dropOldFences(ctx, tx); err != nil {
+					return err
+				}
 				for _, step := range preInsertSteps {
 					if err := step(ctx, tx); err != nil {
 						return err

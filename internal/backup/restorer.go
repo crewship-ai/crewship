@@ -89,6 +89,8 @@ type ExtractedPayload struct {
 	// backup time).
 	memoryBlobsPath  string
 	pageProjectsPath string
+	serviceImages    map[string]string
+	serviceMetadata  map[string]serviceSnapshot
 }
 
 // storageOrDefault returns the payload's captured StorageOps, or the
@@ -265,6 +267,8 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 	}
 	out := &ExtractedPayload{
 		storage:             st,
+		serviceImages:       map[string]string{},
+		serviceMetadata:     map[string]serviceSnapshot{},
 		DevcontainerBySlug:  map[string][]byte{},
 		MiseBySlug:          map[string][]byte{},
 		tempDir:             tempDir,
@@ -296,6 +300,7 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 	// materialising the whole thing. sink type declared at file scope.
 	sinks := map[string]*sink{}
 	var pageBytes int64
+	var serviceImageBytes int64
 	pageEntries := 0
 	sinkFor := func(key string) (*sink, error) {
 		if s, ok := sinks[key]; ok {
@@ -372,6 +377,10 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 		}
 
 		switch {
+		case strings.HasPrefix(name, serviceSnapshotsPrefix):
+			if err := out.extractServiceSnapshot(ctx, tr, hdr, name, &serviceImageBytes); err != nil {
+				return nil, err
+			}
 		case name == "db/dump.json":
 			// PR #493 follow-up: bound at maxBackupDBDumpBytes so an
 			// attacker-claimed hdr.Size of 10 GB can't OOM the restorer

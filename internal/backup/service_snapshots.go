@@ -100,7 +100,7 @@ type serviceBackupFence struct{ crew, token string }
 // captureServiceSnapshots leaves every acquired fence intact on failure. This
 // intentionally requires explicit operator recovery instead of restarting a
 // database whose capture may have failed midway through a consistent snapshot.
-func captureServiceSnapshots(ctx context.Context, db *sql.DB, runtime ServiceSnapshotRuntime, w *TarZstWriter, crews []CrewTarget, now time.Time) ([]serviceBackupFence, int, error) {
+func captureServiceSnapshots(ctx context.Context, db *sql.DB, runtime ServiceSnapshotRuntime, w *TarZstWriter, crews []CrewTarget, now time.Time, recoverMaintenance bool, register func(serviceBackupFence)) ([]serviceBackupFence, int, error) {
 	var fences []serviceBackupFence
 	count := 0
 	for _, crew := range crews {
@@ -119,10 +119,17 @@ func captureServiceSnapshots(ctx context.Context, db *sql.DB, runtime ServiceSna
 			return fences, count, fmt.Errorf("backup: quota service snapshot transport unavailable")
 		}
 		token, err := servicelifecycle.BeginBackupFence(ctx, db, crew.ID, "backup")
-		if err != nil {
-			return fences, count, err
+		if err != nil && recoverMaintenance {
+			token, err = servicelifecycle.AdoptBackupFence(ctx, db, crew.ID, "backup")
 		}
-		fences = append(fences, serviceBackupFence{crew.ID, token})
+		if err != nil {
+			return fences, count, fmt.Errorf("%w: inspect backup status; only after the producer stops retry with --recover-services", err)
+		}
+		fence := serviceBackupFence{crew.ID, token}
+		fences = append(fences, fence)
+		if register != nil {
+			register(fence)
+		}
 		// Re-read after the atomic mutation fence closes the declaration race.
 		if err = db.QueryRowContext(ctx, `SELECT COALESCE(services_json,'') FROM crews WHERE id=?`, crew.ID).Scan(&body); err != nil {
 			return fences, count, err

@@ -272,7 +272,7 @@ func sidecarMatchesCrew(labels map[string]string, crewID, kind string) bool {
 // upstream image declares a HEALTHCHECK, and we don't synthesise
 // one — services without a healthcheck are considered ready as
 // soon as the container reports running.
-func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewConfig) (map[string]string, error) {
+func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewConfig) (ids map[string]string, retErr error) {
 	if len(team.Services) == 0 {
 		return nil, nil
 	}
@@ -302,6 +302,31 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 	mu.Lock()
 	defer mu.Unlock()
 
+	// Bound every legacy/controller service mutation and admit it under the
+	// durable fence while holding the same lock used by backup drain/stop.
+	opCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	ctx = opCtx
+	if gate := p.serviceGate(); gate != nil {
+		release, err := gate(ctx, team.ID)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			// A lost Docker response can leave an uncertain Start/Create. Keep
+			// admission charged until the bounded lease expires; backup then
+			// removes exact owned containers before any alias/image capture.
+			if retErr != nil {
+				return
+			}
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cleanupCancel()
+			if err := release(cleanupCtx); err != nil {
+				p.logger.Warn("service operation lease release failed", "crew_id", team.ID)
+			}
+		}()
+	}
+
 	// Re-key any sidecars this crew created under the pre-#1732 slug-only
 	// names before we go looking for the id-scoped ones. Silently creating a
 	// fresh id-scoped postgres next to a still-running legacy one would leave
@@ -313,7 +338,7 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 		return nil, err
 	}
 
-	ids := make(map[string]string, len(team.Services))
+	ids = make(map[string]string, len(team.Services))
 	for i := range team.Services {
 		svc := &team.Services[i]
 		id, err := p.ensureSidecar(ctx, team.ID, team.Slug, svc)
@@ -423,7 +448,7 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 			break // fall through to create
 		}
 		if c.State != "running" {
-			if _, err := p.client.ContainerStart(ctx, c.ID, client.ContainerStartOptions{}); err != nil {
+			if err := p.startAdmittedService(ctx, crewID, c.ID); err != nil {
 				return "", fmt.Errorf("start existing sidecar: %w", err)
 			}
 		}
@@ -574,8 +599,13 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 	if err != nil {
 		return "", fmt.Errorf("create sidecar: %w", err)
 	}
-	if _, err := p.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
-		return "", fmt.Errorf("start sidecar: %w", err)
+	if err := p.startAdmittedService(ctx, crewID, created.ID); err != nil {
+		// The Create response can arrive after cancellation. Remove only this
+		// newly created exact ID so a queued Start cannot attach it later.
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cleanupCancel()
+		_, cleanupErr := p.client.ContainerRemove(cleanupCtx, created.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: false})
+		return "", errors.Join(fmt.Errorf("start sidecar: %w", err), cleanupErr)
 	}
 	p.logger.Info("sidecar started", "crew", crewSlug, "crew_id", crewID,
 		"service", svc.Name, "container", created.ID, "image", svc.Image)

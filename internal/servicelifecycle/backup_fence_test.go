@@ -36,11 +36,17 @@ func fenceDB(t *testing.T) (*sql.DB, *sql.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err = a.Exec(`CREATE TABLE service_operation_leases(token TEXT PRIMARY KEY,crew_id TEXT,workspace_id TEXT,lease_until TEXT)`); err != nil {
+		t.Fatal(err)
+	}
 	migration, err := os.ReadFile("../database/migrations/20260930182000_service_backup_fences.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = a.Exec(string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.Exec(`ALTER TABLE service_backup_fences ADD COLUMN producer_until TEXT NOT NULL DEFAULT ''`); err != nil {
 		t.Fatal(err)
 	}
 	return a, b
@@ -131,6 +137,54 @@ func TestBackupFenceAndControllerLeaseAreMutuallyExclusive(t *testing.T) {
 		}
 		if (fenceErr == nil) == (claimed == 1) {
 			t.Fatalf("claim conservation violated: fence=%v lease=%d token=%s", fenceErr, claimed, token)
+		}
+	}
+}
+
+func TestBackupFenceDrainsLegacyServiceOperation(t *testing.T) {
+	a, b := fenceDB(t)
+	ctx := context.Background()
+	release, err := ServiceOperations(a)(ctx, "crew")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An operation paused after admission still prevents capture on another DB
+	// connection; maintenance cannot rely on an in-process provider mutex.
+	if _, err = BeginBackupFence(ctx, b, "crew", "backup"); err == nil {
+		t.Fatal("backup admitted an in-flight legacy start")
+	}
+	if err = release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	token, err := BeginBackupFence(ctx, b, "crew", "backup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ServiceOperations(a)(ctx, "crew"); err == nil {
+		t.Fatal("legacy start bypassed durable maintenance")
+	}
+	if err = EndBackupFence(ctx, a, "crew", token); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBackupFenceAndLegacyServiceAdmissionAreAtomic(t *testing.T) {
+	a, b := fenceDB(t)
+	ctx := context.Background()
+	for trial := 0; trial < 20; trial++ {
+		if _, err := a.Exec(`DELETE FROM service_backup_fences;DELETE FROM service_operation_leases`); err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		var fenceErr, opErr error
+		go func() { defer wg.Done(); <-start; _, fenceErr = BeginBackupFence(ctx, a, "crew", "backup") }()
+		go func() { defer wg.Done(); <-start; _, opErr = ServiceOperations(b)(ctx, "crew") }()
+		close(start)
+		wg.Wait()
+		if (fenceErr == nil) == (opErr == nil) {
+			t.Fatalf("maintenance/start conservation failed: fence=%v operation=%v", fenceErr, opErr)
 		}
 	}
 }
