@@ -245,6 +245,9 @@ func (r *Router) registerAdminRoutes() {
 		backupDockerOps = &backup.MobyDockerOps{Client: r.dockerClient}
 	}
 	backupH := NewBackupHandler(r.db, r.logger, backupDockerOps, os.Getenv("CREWSHIP_VERSION"))
+	if transport, ok := r.keeperContainer.(backup.ServiceSnapshotRuntime); ok {
+		backupH.serviceSnapshots = transport
+	}
 	// Same content-addressed blob root the memory-versions content
 	// endpoint uses (memContent above) — wiring it here lets
 	// Create/Restore carry memory_versions blobs through the bundle

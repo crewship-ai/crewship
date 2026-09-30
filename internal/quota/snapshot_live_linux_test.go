@@ -121,3 +121,74 @@ func snapshotOwnerMatches(info os.FileInfo, uid, gid uint32) bool {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	return ok && stat.Uid == uid && stat.Gid == gid
 }
+
+func TestLiveQuotaSnapshotProtocolBindsNamespaceAndRejectsPartialImport(t *testing.T) {
+	if os.Geteuid() != 0 || os.Getenv("CREWSHIP_LIVE_QUOTA_BACKEND") != "1" {
+		t.Fatal("requires explicitly selected owned root quota fixture")
+	}
+	root := t.TempDir()
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	b, err := NewBackend(root, 128<<20, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = b.BindNamespace("snapshot-protocol-fixture"); err != nil {
+		b.Close()
+		t.Fatal(err)
+	}
+	source := Key{"protocol-source", "database", "data", 1}
+	target := Key{"protocol-target", "database", "data", 1}
+	partial := Key{"protocol-partial", "database", "data", 1}
+	if _, err = b.Ensure(source, MinBytes); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan struct{})
+	done := make(chan error, 1)
+	socket := filepath.Join(root, "snapshot.sock")
+	go func() {
+		done <- ServeNamespace(ctx, socket, 0, b, "snapshot-protocol-fixture", func() error { close(ready); return nil })
+	}()
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+		for _, key := range []Key{source, target, partial} {
+			if err := b.Remove(key); err != nil {
+				t.Error(err)
+			}
+		}
+		if err := b.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	client := Client{Socket: socket, Namespace: "snapshot-protocol-fixture"}
+	var image bytes.Buffer
+	if err = client.Export(context.Background(), source, MinBytes, &image); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.Import(context.Background(), target, MinBytes, bytes.NewReader(image.Bytes())); err != nil {
+		t.Fatal(err)
+	}
+	wrong := Client{Socket: socket, Namespace: "wrong-instance"}
+	if err = wrong.Export(context.Background(), source, MinBytes, io.Discard); err == nil {
+		t.Fatal("foreign namespace exported source image")
+	}
+	if _, err = client.Import(context.Background(), partial, MinBytes, bytes.NewReader(image.Bytes()[:1024])); err == nil {
+		t.Fatal("partial image published")
+	}
+	// The server observes the closed stream before handling this next request.
+	// A complete retry at the same unpublished key proves no resumable metadata
+	// or silently mounted partial image survived the interrupted transfer.
+	if _, err = client.Import(context.Background(), partial, MinBytes, bytes.NewReader(image.Bytes())); err != nil {
+		t.Fatal(err)
+	}
+}

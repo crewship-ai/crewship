@@ -166,15 +166,22 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type statusResp struct {
-		Held        bool   `json:"held"`
-		WorkspaceID string `json:"workspace_id,omitempty"`
-		AcquiredBy  string `json:"acquired_by,omitempty"`
-		AcquiredAt  string `json:"acquired_at,omitempty"`
-		ExpiresAt   string `json:"expires_at,omitempty"`
+		ServiceMaintenance []backup.ServiceMaintenance `json:"service_maintenance" yaml:"service_maintenance"`
+		Held               bool                        `json:"held"`
+		WorkspaceID        string                      `json:"workspace_id,omitempty"`
+		AcquiredBy         string                      `json:"acquired_by,omitempty"`
+		AcquiredAt         string                      `json:"acquired_at,omitempty"`
+		ExpiresAt          string                      `json:"expires_at,omitempty"`
 	}
 
 	var out statusResp
 	out.WorkspaceID = workspaceID
+	maintenance, err := backup.ServiceMaintenanceStatus(ctx, h.db, workspaceID)
+	if err != nil {
+		replyError(w, http.StatusInternalServerError, "Failed to query service maintenance status")
+		return
+	}
+	out.ServiceMaintenance = maintenance
 	held, err := backup.IsLockHeld(ctx, h.db, workspaceID, time.Now())
 	if err != nil {
 		h.logger.Error("backup lock status", "workspace_id", workspaceID, "error", err)

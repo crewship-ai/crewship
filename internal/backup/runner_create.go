@@ -50,8 +50,9 @@ type CreateOptions struct {
 	// unique across tenants (audit C1). Nil is valid for tests.
 	CrewContainerName func(id, slug string) string
 	// DockerOps executes pause/unpause/CopyFrom against the daemon.
-	DockerOps        DockerOps
-	ServiceSnapshots ServiceSnapshotRuntime
+	DockerOps                 DockerOps
+	ServiceSnapshots          ServiceSnapshotRuntime
+	RecoverServiceMaintenance bool
 	// Storage overrides the file-system operations used for bundle
 	// output. Nil uses LocalStorageOps; tests can inject an in-memory
 	// or S3-backed implementation via package-level SetDefaultStorage
@@ -350,7 +351,12 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		return nil, err
 	}
 
-	serviceFences, serviceSnapshotCount, err := captureServiceSnapshots(ctx, db, opts.ServiceSnapshots, payloadWriter, target.CrewTargets, now)
+	captureCtx, cancelCapture := context.WithCancel(ctx)
+	defer cancelCapture()
+	ctx = captureCtx
+	fenceKeeper := &serviceFenceKeeper{db: db}
+	go fenceKeeper.run(ctx, cancelCapture)
+	serviceFences, serviceSnapshotCount, err := captureServiceSnapshots(ctx, db, opts.ServiceSnapshots, payloadWriter, target.CrewTargets, now, opts.RecoverServiceMaintenance, fenceKeeper.add)
 	if err != nil {
 		_ = payloadWriter.Close()
 		_ = payloadFile.Close()
@@ -604,7 +610,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		_ = st.Remove(context.Background(), partialPath)
 		return nil, fmt.Errorf("backup: stat partial: %w", err)
 	}
-	if err := st.Rename(ctx, partialPath, finalPath); err != nil {
+	if err := publishServiceSnapshotBundle(ctx, db, serviceFences, func() error { return st.Rename(ctx, partialPath, finalPath) }); err != nil {
 		_ = st.Remove(context.Background(), partialPath)
 		return nil, fmt.Errorf("backup: rename final bundle: %w", err)
 	}

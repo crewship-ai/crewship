@@ -53,11 +53,11 @@ func TestServiceCaptureRequiresTransportAndRetainsFailureFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	targets := []CrewTarget{{ID: crew, Slug: "crew-quota_snapshot"}}
-	if _, _, err = captureServiceSnapshots(context.Background(), db, nil, writer, targets, time.Now()); err == nil {
+	if _, _, err = captureServiceSnapshots(context.Background(), db, nil, writer, targets, time.Now(), false, nil); err == nil {
 		t.Fatal("missing transport silently lost quota data")
 	}
 	probe := &snapshotProbe{fail: true}
-	fences, _, err := captureServiceSnapshots(context.Background(), db, probe, writer, targets, time.Now())
+	fences, _, err := captureServiceSnapshots(context.Background(), db, probe, writer, targets, time.Now(), false, nil)
 	if err == nil || len(fences) != 1 || probe.stop != 1 || probe.export != 1 {
 		t.Fatalf("capture failure fence=%v err=%v stop=%d export=%d", fences, err, probe.stop, probe.export)
 	}

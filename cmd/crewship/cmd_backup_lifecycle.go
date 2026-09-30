@@ -125,13 +125,15 @@ var backupCreateCmd = &cobra.Command{
 		}
 
 		outputDir, _ := cmd.Flags().GetString("output")
+		recoverServices, _ := cmd.Flags().GetBool("recover-services")
 		body := map[string]any{
-			"scope":      scope,
-			"crew_id":    crewID,
-			"passphrase": passphrase,
-			"recipient":  recipient,
-			"no_encrypt": noEncrypt,
-			"output_dir": outputDir,
+			"scope":            scope,
+			"crew_id":          crewID,
+			"passphrase":       passphrase,
+			"recipient":        recipient,
+			"no_encrypt":       noEncrypt,
+			"output_dir":       outputDir,
+			"recover_services": recoverServices,
 		}
 		// Transport-security pre-flight before the encryption passphrase
 		// rides the wire — mirrors cmd_login.go / cmd_setup.go. Blocks on
@@ -276,19 +278,21 @@ var backupRestoreCmd = &cobra.Command{
 		}
 
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		recoverServices, _ := cmd.Flags().GetBool("recover-services")
 		replace, _ := cmd.Flags().GetBool("replace")
 		filesOnly, _ := cmd.Flags().GetBool("files-only")
 		if filesOnly && (asWorkspace != "" || asCrew != "" || replace) {
 			return fmt.Errorf("--files-only cannot be combined with --as-workspace, --as-crew or --replace: it lands container state into crews that already exist")
 		}
 		body := map[string]any{
-			"path":         args[0],
-			"passphrase":   passphrase,
-			"as_workspace": asWorkspace,
-			"as_crew":      asCrew,
-			"replace":      replace,
-			"dry_run":      dryRun,
-			"files_only":   filesOnly,
+			"path":             args[0],
+			"passphrase":       passphrase,
+			"as_workspace":     asWorkspace,
+			"as_crew":          asCrew,
+			"replace":          replace,
+			"dry_run":          dryRun,
+			"files_only":       filesOnly,
+			"recover_services": recoverServices,
 		}
 		client := newAPIClient()
 		resp, err := client.Post("/api/v1/admin/backups/restore", body)
