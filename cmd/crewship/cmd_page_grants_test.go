@@ -1,7 +1,7 @@
 package main
 
 // cmd_page_grants_test.go — the acceptance test for `crewship page
-// grant|revoke|grants` (docs/prd/pages.md §7.1b, §11, §11b decision 13).
+// grant|revoke|grants` (docs/specs/pages.md §7.1b, §11, §11b decision 13).
 //
 // Epic #1935. The endpoint half is proved in internal/api/pages_grants_test.go;
 // this file proves the client half, which only the CLI can:

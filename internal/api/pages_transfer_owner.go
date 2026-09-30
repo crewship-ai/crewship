@@ -1,6 +1,6 @@
 package api
 
-// Owner-departure transfer (docs/prd/pages.md §7.1 rule 1b, issue #1944,
+// Owner-departure transfer (docs/specs/pages.md §7.1 rule 1b, issue #1944,
 // epic #1935).
 //
 // pages.owner_user_id carries ON DELETE RESTRICT

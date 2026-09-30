@@ -2,7 +2,7 @@ package database
 
 // migrationAddAssignmentQueue (v93) lays the schema groundwork for the
 // per-crew admission queue described in
-// .claude/context/prd/QUEUE-MECHANISM-2026.md.
+// docs/prd/QUEUE-MECHANISM-2026.md.
 //
 // Three additive changes — none of them touch existing rows beyond a
 // NULL default, so the upgrade is non-blocking and a downgrade is a

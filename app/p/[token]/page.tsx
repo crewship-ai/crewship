@@ -3,7 +3,7 @@ import type { Metadata } from "next"
 import { PublicPageClient } from "./page-client"
 
 /**
- * `/p/{token}` — the public page (PRD `docs/prd/pages.md` §7.3.1).
+ * `/p/{token}` — the public page (PRD `docs/specs/pages.md` §7.3.1).
  *
  * "A public page is served from a SEPARATE URL SPACE (/p/{token}) that shares
  * no session, no cookie and no workspace context with the app." That is why

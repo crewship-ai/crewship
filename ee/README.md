@@ -1,5 +1,8 @@
 # Enterprise add-ons
 
+Crewship is maintained by **Unify Technology, s.r.o.** See
+[project governance](../GOVERNANCE.md) and [company identification](../NOTICE).
+
 This directory holds source for commercial Crewship features that are
 distributed under a separate license from the rest of the project.
 
@@ -21,6 +24,11 @@ top-level LICENSE.
 If you are evaluating Crewship for production use today, you only need
 the core Apache-2.0 distribution. No feature in shipped releases
 depends on anything under `ee/`.
+
+Paid editions with higher resource allowances and enterprise capabilities are
+planned. See [commercial direction](../GOVERNANCE.md#commercial-direction) for
+the distinction between product limits and license permissions. No numerical
+quota, price or new restriction on Apache-2.0 code is set by this policy.
 
 ## Contributing
 

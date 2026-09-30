@@ -294,4 +294,4 @@ server, and the approvals surface rendered zero rows in production.
 Note `denullable()`: JSON Schema has no `nullable` keyword — that is OpenAPI
 3.0's spelling. Schemathesis understands it natively; a plain validator does
 not, and reported nine false failures the first time this ran, every one a
-legitimate `null`. See `docs/prd/response-shape-contract.md`.
+legitimate `null`. See `docs/specs/response-shape-contract.md`.

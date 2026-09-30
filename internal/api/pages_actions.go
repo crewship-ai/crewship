@@ -1,6 +1,6 @@
 package api
 
-// Pages — action dispatch (docs/prd/pages.md §8b, the v1 slice §12 calls
+// Pages — action dispatch (docs/specs/pages.md §8b, the v1 slice §12 calls
 // "actions, which is what the surface is for").
 //
 // ── The shape IS the security property ──────────────────────────────────────

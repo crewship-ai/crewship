@@ -1,6 +1,6 @@
 package api
 
-// Pages — the ROUTINE write path (docs/prd/pages.md §0, §4, §7.1 rule 4,
+// Pages — the ROUTINE write path (docs/specs/pages.md §0, §4, §7.1 rule 4,
 // §7.1b, §11; issue #1945).
 //
 //	PUT /api/v1/internal/pages/{page}/data

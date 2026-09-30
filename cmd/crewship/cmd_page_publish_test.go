@@ -1,7 +1,7 @@
 package main
 
 // cmd_page_publish_test.go — the acceptance test for `crewship page
-// publish|links|unpublish` (docs/prd/pages.md §7.3, §11).
+// publish|links|unpublish` (docs/specs/pages.md §7.3, §11).
 //
 // Epic #1935. The server half is proved in internal/api/pages_public_test.go;
 // this file proves the client half, which only the CLI can:

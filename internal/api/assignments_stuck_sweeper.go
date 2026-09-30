@@ -1,7 +1,7 @@
 package api
 
 // Stuck-QUEUED sweeper — Phase 2 of the queue mechanism described in
-// .claude/context/prd/QUEUE-MECHANISM-2026.md. The completion-path
+// docs/prd/QUEUE-MECHANISM-2026.md. The completion-path
 // pump (Phase 1B) drains the queue under normal operation, but
 // crashes between "set status QUEUED" and "next completion fires"
 // can leave rows queued forever. The sweeper catches these.

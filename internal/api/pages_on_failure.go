@@ -1,6 +1,6 @@
 package api
 
-// Pages — `on_failure` and the thing that notices (docs/prd/pages.md §4 rule 4).
+// Pages — `on_failure` and the thing that notices (docs/specs/pages.md §4 rule 4).
 //
 //	4. on_failure: {issue: crew/<slug>} opens an issue on the owning crew.
 //	   A page that quietly stops updating must generate work for a human.
@@ -209,7 +209,7 @@ func (h *PageHandler) reportPanelLapse(ctx context.Context, row panelFreshnessRo
 				"Panel **%s** on page **%s** is **%s**: %s.\n\n"+
 					"Its producer is `%s`. Look at page `%s` and either fix the producer "+
 					"or change what the page claims to show.\n\n"+
-					"_Opened by `on_failure: {issue: crew/%s}` on the page spec (docs/prd/pages.md §4 rule 4). "+
+					"_Opened by `on_failure: {issue: crew/%s}` on the page spec (docs/specs/pages.md §4 rule 4). "+
 					"One issue per lapse: this will not be re-opened while it stands, and the alert clears when "+
 					"the panel reports inside its SLA again._",
 				row.panelID, row.pageSlug, verdict.State, reason, row.producer, row.pageSlug, crewSlug),

@@ -1,9 +1,9 @@
-// Standalone dev1 acceptance. CREWSHIP_CLARITY_ACCOUNT points to a private
+// Standalone browser acceptance against a dev instance (CREWSHIP_SERVER, default localhost). CREWSHIP_CLARITY_ACCOUNT points to a private
 // JSON file {email,password,workspace_id}; no credentials or session are logged.
 import fs from "node:fs"
 import assert from "node:assert/strict"
 import { chromium, expect } from "@playwright/test"
-const base = "https://crewship-dev1.unifylab.cz"
+const base = process.env.CREWSHIP_SERVER || "http://localhost:8081"
 const account = JSON.parse(fs.readFileSync(process.env.CREWSHIP_CLARITY_ACCOUNT, "utf8"))
 const output = process.env.CREWSHIP_CLARITY_REPORT || "/tmp/crewship-1-clarity-browser.json"
 const browser = await chromium.launch({ headless: true })

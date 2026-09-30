@@ -9,7 +9,7 @@
 > [`RELEASE-1-0-READINESS-2026-08-10.md`](RELEASE-1-0-READINESS-2026-08-10.md)**
 > — every claim there re-measured at `69a8ceb9`, including the ones that turned
 > out to be stale. The remaining routine work is broken into executable
-> packages in [`CODEX-WORK-ORDER-RELEASE-1-0.md`](CODEX-WORK-ORDER-RELEASE-1-0.md).
+> packages in [`CODEX-WORK-ORDER-RELEASE-1-0.md`](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md).
 
 ## Purpose
 

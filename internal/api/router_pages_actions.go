@@ -1,6 +1,6 @@
 package api
 
-// Pages action routes (docs/prd/pages.md §8b.2, §11).
+// Pages action routes (docs/specs/pages.md §8b.2, §11).
 //
 // ⚠ The `router_` prefix on this filename is load-bearing. Two build gates glob
 // exactly `router_*.go` — cmd/gen-openapi/main.go:97, which is why these routes

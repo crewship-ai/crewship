@@ -79,7 +79,7 @@ func WithManagedWAL() Option {
 // SQLite's inline autocheckpoint, which this daemon never uses; with
 // autocheckpoint off the WAL grows between checkpointer ticks, so each commit's
 // fsync flushes more. The numbers and the harness are in
-// docs/prd/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md.
+// docs/decisions/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md.
 //
 // Pass SynchronousNormal only where losing the last few commits to a power cut
 // is genuinely acceptable — a rebuildable index, a throwaway fixture — and say

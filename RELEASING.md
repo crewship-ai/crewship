@@ -58,7 +58,7 @@ Only these verified assets are uploaded to a draft GitHub Release, which is
 published after upload completes. Image aliases and the atomic stable
 Homebrew update follow publication. Homebrew has a separate retryable job.
 Package signing credentials are required; a missing key stops publication.
-See [the CI/CD runbook](docs/prd/reports/ci-cd-implementation-2026-09-11.md)
+See [the CI/CD runbook](docs/runbooks/ci-cd-implementation-2026-09-11.md)
 for exact identity checks and rollout requirements.
 
 ## After the release lands

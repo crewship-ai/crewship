@@ -2,7 +2,7 @@
 #
 # fleet-watch.sh — a real producer for the `flotila` page.
 #
-# This is what docs/prd/pages.md §0 means by "the page has no datasource".
+# This is what docs/specs/pages.md §0 means by "the page has no datasource".
 # The script runs next to the thing it measures, computes whatever it likes
 # with whatever it has, and pushes a typed payload. The page holds no query,
 # no connection string and no credential; the only way data gets in is a

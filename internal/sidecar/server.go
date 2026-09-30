@@ -798,7 +798,7 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				s.handlePipelinesDryRun(w, r, slug)
 				return
 
-			// Pages producer route (docs/prd/pages.md §7.1 rule 4, #1946).
+			// Pages producer route (docs/specs/pages.md §7.1 rule 4, #1946).
 			// One arm, because one push writes one panel; pages.go refuses
 			// any other shape rather than guessing at it.
 			case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/pages/"):

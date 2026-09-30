@@ -1,5 +1,5 @@
 /**
- * The panel icon vocabulary (PRD `docs/prd/pages.md` §3, §9b.2) and the parity
+ * The panel icon vocabulary (PRD `docs/specs/pages.md` §3, §9b.2) and the parity
  * that keeps it honest.
  *
  * The load-bearing assertion is the first one: the Go enum and this map name

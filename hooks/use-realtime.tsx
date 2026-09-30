@@ -155,7 +155,7 @@ export type RealtimeEventType =
   // `page:{pageId}` and carrying NO payload, only "panel X changed" — the
   // client re-reads through the normal authorised path so the per-panel
   // permission filter cannot be bypassed by a broadcast reaching a subscriber
-  // who should not see the data (docs/prd/pages.md §10b.5b).
+  // who should not see the data (docs/specs/pages.md §10b.5b).
   | "page.updated"
   | "page.deleted"
   | "page.panel.updated"
@@ -305,7 +305,7 @@ export const VALID_REALTIME_TYPES: Set<string> = new Set([
   "chat_renamed",
   // Pages liveness. handleMessage drops any type missing from this set, so
   // without the entry an open page would simply never update — the exact
-  // "easy to forget" step docs/prd/pages.md §10b.5b calls out by name.
+  // "easy to forget" step docs/specs/pages.md §10b.5b calls out by name.
   "page.updated",
   "page.deleted",
   "page.panel.updated",

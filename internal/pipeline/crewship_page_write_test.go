@@ -9,7 +9,7 @@ import (
 
 // #1945 — `page.write` is the verb the Pages feature turns on: a routine
 // writing its analysis back onto the page a script pushed to
-// (docs/prd/pages.md §0). Everything below is a SAVE-time property, which is
+// (docs/specs/pages.md §0). Everything below is a SAVE-time property, which is
 // where a routine author learns things; the run-time half lives in
 // internal/api/pages_internal_test.go.
 

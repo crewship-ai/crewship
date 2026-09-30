@@ -31,7 +31,7 @@
 # invokes it) and overwritten on every run.
 #
 # Usage:
-#   CREWSHIP=/path/to/crewship CREWSHIP_SERVER=https://crewship-dev3.unifylab.cz \
+#   CREWSHIP=/path/to/crewship CREWSHIP_SERVER=http://localhost:8083 \
 #     bash test-redteam-insider.sh
 # Env: CREWSHIP_REDTEAM_CREW (default: engineering)
 #

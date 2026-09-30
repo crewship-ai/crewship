@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 const statePath=process.env.TEAM_CHAT_STATE;if(!statePath)throw new Error('TEAM_CHAT_STATE required');
 const state = await readPrivateJson(statePath);
-const base='https://crewship-dev2.unifylab.cz';
+const base = process.env.CREWSHIP_SERVER || 'http://localhost:8082';
 const report={server:base,user_id:state.accounts.emma.user_id,checks:[],page_errors:[],audio_evidence:'Native oscillator starts in running AudioContexts; physical output not measured.'};
 const browser=await chromium.launch({headless:true});const ctx=await browser.newContext({viewport:{width:1440,height:1000}});
 const artifacts = await createPrivateArtifacts('agent-reply-sounds-live');

@@ -174,7 +174,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "automation.throttled",
   "automation.depth_exceeded",
   "automation.enqueue_failed",
-  // Pages — docs/prd/pages.md §5, §7.1b. Unknown types are forwarded to the
+  // Pages — docs/specs/pages.md §5, §7.1b. Unknown types are forwarded to the
   // activity feed by design (internal/journal/feed_filter.go:33-35).
   "page.produce_denied",
   "page.panel.updated",

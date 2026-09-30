@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 const statePath = process.env.TEAM_CHAT_STATE;
 if (!statePath) throw new Error('TEAM_CHAT_STATE must point to private demo credentials');
 const state = await readPrivateJson(statePath);
-const base = 'https://crewship-dev2.unifylab.cz';
+const base = process.env.CREWSHIP_SERVER || 'http://localhost:8082';
 const report = { server: base, fixture: 'browser-only-authorized-inbox', checks: [], page_errors: [], audio_evidence: 'Original native OscillatorNode.start calls, not physical speaker output. Inbox rows and invalidation frames are simulated only in this browser.' };
 const artifacts = await createPrivateArtifacts('notification-sounds-inbox');
 const browser = await chromium.launch({ headless: true });

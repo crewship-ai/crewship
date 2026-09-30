@@ -17,7 +17,7 @@
 #            for the rest.
 #
 # Usage (Tier A live):
-#   CREWSHIP_SERVER=https://crewship-dev3.unifylab.cz \
+#   CREWSHIP_SERVER=http://localhost:8083 \
 #   CREWSHIP=/path/to/crewship  bash test-attack-surface.sh
 #
 # Token: $CREWSHIP_ATTACK_TOKEN, else the token of the cli-config profile whose
@@ -266,7 +266,7 @@ section "Tier A · Internal surface must be UNREACHABLE from the edge (#audit L0
 # against a surface that answers 403.
 if [[ -z "$EDGE" ]]; then
   skip "B1–B6 internal surface unreachable from the edge" \
-    "no public target: \$SERVER ($SERVER) is loopback or RFC1918, and CREWSHIP_ATTACK_EDGE_URL is unset. Set it to the PUBLIC url (e.g. https://crewship-stage.unifylab.cz). Probing the app port directly cannot answer this: every host that can reach it is on a private LAN, which requireInternal treats as internal"
+    "no public target: \$SERVER ($SERVER) is loopback or RFC1918, and CREWSHIP_ATTACK_EDGE_URL is unset. Set it to the PUBLIC url (e.g. https://crewship.example.com). Probing the app port directly cannot answer this: every host that can reach it is on a private LAN, which requireInternal treats as internal"
 elif ! _is_public_url "$EDGE"; then
   skip "B1–B6 internal surface unreachable from the edge" \
     "CREWSHIP_ATTACK_EDGE_URL=$EDGE is a loopback or RFC1918 address — requireInternal treats every caller from there as internal, so these probes could not tell a working fence from a deleted one"

@@ -28,7 +28,7 @@ Důkazy rozlišuji takto:
 | Historicky | Výsledek předchozí etapy, nyní znovu zkontrolovaný v logu nebo handoffu; nebyl v tomto auditu znovu spuštěn. |
 | Návrh / riziko | Úsudek autora nebo požadavek na další ověření, nikoli prokázaná chyba. |
 
-Tento audit nepouští další plnou testovací sadu a nemění produktový kód. Kontroluje dokončené výsledky, zdroje a aktuální provozní údaje. Soubor `reports/pages-apps-review-evidence-2026-09-09.json` obsahuje identifikátory a SHA256 vybraných zdrojů a dostupných důkazů; hash prokazuje identitu souboru, nikoli jeho správnost.
+Tento audit nepouští další plnou testovací sadu a nemění produktový kód. Kontroluje dokončené výsledky, zdroje a aktuální provozní údaje. Soubor https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/pages-apps-review-evidence-2026-09-09.json obsahuje identifikátory a SHA256 vybraných zdrojů a dostupných důkazů; hash prokazuje identitu souboru, nikoli jeho správnost.
 
 **3. Původní vize versus skutečně dodaná v1**
 
@@ -144,7 +144,7 @@ tools/pages-build/
 
 Hash adresáře není šifrování ani anonymizace. Přístup chrání filesystem a API. Toto živé úložiště není automaticky šifrované; šifrovaná záloha je samostatná schopnost backup systému. Sources adresář nesmí být připojen do agentových crew kontejnerů.
 
-Dev3: veřejná adresa `https://crewship-dev3.unifylab.cz/pages/custom-operations`, Go listener 8083, embedded Next static export, instance-specific systemd override, binárka `/srv/crewship/dev3-pages-release/crewship`. Dřívější Next dev server není potřebný pro tuto nasazenou ukázku. Novou doménu pro každou Page nepotřebujeme. Produkční runtime adresa a její DNS/TLS jsou však stále nedokončenou instalační povinností.
+Dev3: veřejná adresa `http://localhost:8083/pages/custom-operations`, Go listener 8083, embedded Next static export, instance-specific systemd override, binárka `/srv/crewship/dev3-pages-release/crewship`. Dřívější Next dev server není potřebný pro tuto nasazenou ukázku. Novou doménu pro každou Page nepotřebujeme. Produkční runtime adresa a její DNS/TLS jsou však stále nedokončenou instalační povinností.
 
 Git je lokální CLI závislost, nikoli Git server. SQLite už v Crewshipu existuje; nepřidáváme další DB službu. Docker pro agenty už existuje, Pages přidávají jiný, omezený typ dočasného buildu. Není přidaný Kubernetes, Redis, PostgreSQL, samostatná realtime služba ani trvalý app server na každou Page.
 
