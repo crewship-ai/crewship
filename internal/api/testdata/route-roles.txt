@@ -161,6 +161,7 @@ POST /api/v1/agents/{agentId}/credentials roleManage
 POST /api/v1/agents/{agentId}/integrations roleCreate
 POST /api/v1/agents/{agentId}/persona/suggest roleCreate
 POST /api/v1/agents/{agentId}/rehire roleCreate
+POST /api/v1/agents/{agentId}/restricted-cli-chats roleSelf
 POST /api/v1/agents/{agentId}/skills roleCreate
 POST /api/v1/agents/{agentId}/stop roleCreate
 POST /api/v1/agents/{agentId}/webhook-secret/rotate roleInline
@@ -174,6 +175,8 @@ POST /api/v1/automations roleManage
 POST /api/v1/automations/preview roleCreate
 POST /api/v1/chats/{chatId}/messages/{messageId}/reactions roleSelf
 POST /api/v1/chats/{chatId}/participants roleSelf
+POST /api/v1/chats/{chatId}/restricted-cli-run roleSelf
+POST /api/v1/chats/{chatId}/restricted-run roleSelf
 POST /api/v1/chats/{chatId}/steer roleSelf
 POST /api/v1/checkpoints/{id}/fork roleCreate
 POST /api/v1/checkpoints/{id}/restore roleCreate
@@ -339,8 +342,6 @@ POST /api/v1/workspaces/{workspaceId}/skills/import roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve roleCreate
-PUT /api/v1/crews/{crewId}/services/{serviceName}/state roleCreate
-PUT /api/v1/crew-connections/{connectionId}/file-access roleCreate
 PUT /api/v1/admin/keeper/aux/{slot} roleManage
 PUT /api/v1/admin/keeper/config roleManage
 PUT /api/v1/admin/keeper/governance roleManage
@@ -350,16 +351,19 @@ PUT /api/v1/agents/{agentId}/avatar roleInline
 PUT /api/v1/agents/{agentId}/chats/{chatId}/read roleSelf
 PUT /api/v1/agents/{agentId}/files/save roleCreate
 PUT /api/v1/agents/{agentId}/persona roleCreate
+PUT /api/v1/agents/{agentId}/restricted-execution roleInline
 PUT /api/v1/conversations/{conversationId}/activity roleSelf
 PUT /api/v1/credentials/reveal-policy roleInline
 PUT /api/v1/credentials/{credentialId} roleCreate
 PUT /api/v1/credentials/{credentialId}/fields/{fieldKey} roleCreate
 PUT /api/v1/credentials/{credentialId}/sensitivity roleInline
+PUT /api/v1/crew-connections/{connectionId}/file-access roleCreate
 PUT /api/v1/crews/{crewId} roleManage
 PUT /api/v1/crews/{crewId}/files/save roleCreate
 PUT /api/v1/crews/{crewId}/issues/{identifier}/review-policy roleCreate
 PUT /api/v1/crews/{crewId}/persona roleCreate
 PUT /api/v1/crews/{crewId}/policy roleCreate
+PUT /api/v1/crews/{crewId}/services/{serviceName}/state roleCreate
 PUT /api/v1/feature-flags/{key}/override roleManage
 PUT /api/v1/instance/settings/{key} roleManage
 PUT /api/v1/integrations/composio/default roleManage

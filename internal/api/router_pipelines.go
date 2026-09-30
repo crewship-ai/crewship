@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 )
 
 // registerPipelineRoutes wires the public pipeline / schedules /
@@ -27,6 +28,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// draft with a workspace-scoped save proof; the internal test_run route
 	// serves agent authoring. Neither dispatches a real run; /run does.
 	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
+	pipes.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
 	pipes.storagePath = r.storagePath
 	// The routine detail's `files` member reads the author crew's shared
 	// volume over the same crewshipd socket the Files panel proxies to.
@@ -56,6 +58,8 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// run_batch stays roleCreate on purpose: the capability is scoped to
 	// invoking A routine, and fanning one out across a 50-item batch is a
 	// different amount of spend to hand a member.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}", authed(wsCtx(http.HandlerFunc(r.restrictedWorkflowResult))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs", authed(wsCtx(http.HandlerFunc(r.restrictedWorkflowResults))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run", roleInline, pipes.Run)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch", roleCreate, pipes.RunBatch)
 	// Per-step prompt/model override layer (v121) — tweak a step without

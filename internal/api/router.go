@@ -30,6 +30,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
+	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 	"github.com/crewship-ai/crewship/internal/ws"
 	dockerclient "github.com/moby/moby/client"
 )
@@ -58,7 +59,8 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
-	restrictedText RestrictedTextExecutor
+	restrictedWorkflow *restrictedworkflow.Service
+	restrictedText     RestrictedTextExecutor
 	// mux is a recording wrapper around http.ServeMux (router_mux.go).
 	// Same Handle/HandleFunc surface, plus the registered route table —
 	// which the method guards and the spec-drift test both need.
