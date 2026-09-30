@@ -17038,6 +17038,928 @@
         ]
       }
     },
+    "/api/v1/admin/instance/keeper/governance": {
+      "get": {
+        "operationId": "get_api_v1_admin_instance_keeper_governance",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "defaults": {
+                      "properties": {
+                        "auto_lease_seconds": {
+                          "type": "integer"
+                        },
+                        "behavior_sample_every": {
+                          "type": "integer"
+                        },
+                        "configured": {
+                          "type": "boolean"
+                        },
+                        "deny_notify_min_risk": {
+                          "type": "integer"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "gov_model_credential_id": {
+                          "type": "string"
+                        },
+                        "gov_model_id": {
+                          "type": "string"
+                        },
+                        "gov_model_provider": {
+                          "type": "string"
+                        },
+                        "require_second_approver": {
+                          "type": "boolean"
+                        },
+                        "security_contact_user_id": {
+                          "type": "string"
+                        },
+                        "watch_presets": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "watch_spec": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "configured",
+                        "enabled"
+                      ],
+                      "type": "object"
+                    },
+                    "workspaces": {
+                      "items": {
+                        "properties": {
+                          "auto_lease_seconds": {
+                            "type": "integer"
+                          },
+                          "behavior_sample_every": {
+                            "type": "integer"
+                          },
+                          "configured": {
+                            "type": "boolean"
+                          },
+                          "deny_notify_min_risk": {
+                            "type": "integer"
+                          },
+                          "effective_second_approver": {
+                            "additionalProperties": true,
+                            "type": "object"
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "gov_model_credential_id": {
+                            "type": "string"
+                          },
+                          "gov_model_id": {
+                            "type": "string"
+                          },
+                          "gov_model_provider": {
+                            "type": "string"
+                          },
+                          "require_second_approver": {
+                            "type": "boolean"
+                          },
+                          "security_contact_user_id": {
+                            "type": "string"
+                          },
+                          "watch_presets": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "watch_spec": {
+                            "type": "string"
+                          },
+                          "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_name": {
+                            "type": "string"
+                          },
+                          "workspace_slug": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "configured",
+                          "enabled",
+                          "workspace_id",
+                          "workspace_name",
+                          "workspace_slug"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "defaults",
+                    "workspaces"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      },
+      "put": {
+        "operationId": "put_api_v1_admin_instance_keeper_governance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "all": {
+                    "type": "boolean"
+                  },
+                  "dry_run": {
+                    "type": "boolean"
+                  },
+                  "set": {
+                    "properties": {
+                      "auto_lease_seconds": {
+                        "type": "integer"
+                      },
+                      "behavior_sample_every": {
+                        "type": "integer"
+                      },
+                      "deny_notify_min_risk": {
+                        "type": "integer"
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "gov_model_credential_id": {
+                        "type": "string"
+                      },
+                      "gov_model_id": {
+                        "type": "string"
+                      },
+                      "gov_model_provider": {
+                        "type": "string"
+                      },
+                      "require_second_approver": {
+                        "type": "boolean"
+                      },
+                      "security_contact_user_id": {
+                        "type": "string"
+                      },
+                      "watch_presets": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "watch_spec": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "workspaces": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "set"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "applied": {
+                      "type": "boolean"
+                    },
+                    "changed": {
+                      "type": "integer"
+                    },
+                    "defaults_updated": {
+                      "type": "boolean"
+                    },
+                    "workspaces": {
+                      "items": {
+                        "properties": {
+                          "changes": {
+                            "items": {
+                              "properties": {
+                                "after": {},
+                                "before": {},
+                                "field": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "field",
+                                "before",
+                                "after"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "warnings": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_name": {
+                            "type": "string"
+                          },
+                          "workspace_slug": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "changes",
+                          "workspace_id",
+                          "workspace_name",
+                          "workspace_slug"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "applied",
+                    "changed",
+                    "defaults_updated",
+                    "workspaces"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/instance/keeper/health": {
+      "get": {
+        "operationId": "get_api_v1_admin_instance_keeper_health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "workspaces": {
+                      "items": {
+                        "properties": {
+                          "alarm": {
+                            "nullable": true,
+                            "properties": {
+                              "at": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "type": "string"
+                              },
+                              "summary": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "alarm_judge_failure_rate": {
+                            "type": "number"
+                          },
+                          "alarm_progressed_rate": {
+                            "type": "number"
+                          },
+                          "allow": {
+                            "type": "integer"
+                          },
+                          "allow_rate": {
+                            "type": "number"
+                          },
+                          "deny": {
+                            "type": "integer"
+                          },
+                          "deny_rate": {
+                            "type": "number"
+                          },
+                          "escalate": {
+                            "type": "integer"
+                          },
+                          "escalate_rate": {
+                            "type": "number"
+                          },
+                          "judge_failure_rate": {
+                            "type": "number"
+                          },
+                          "judge_failures": {
+                            "type": "integer"
+                          },
+                          "min_samples": {
+                            "type": "integer"
+                          },
+                          "newest": {
+                            "type": "string"
+                          },
+                          "oldest": {
+                            "type": "string"
+                          },
+                          "p95_latency_ms": {
+                            "type": "integer"
+                          },
+                          "progressed_rate": {
+                            "type": "number"
+                          },
+                          "samples": {
+                            "type": "integer"
+                          },
+                          "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_name": {
+                            "type": "string"
+                          },
+                          "workspace_slug": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "workspace_id",
+                          "workspace_name",
+                          "samples",
+                          "min_samples"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "workspaces"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/instance/keeper/requests": {
+      "get": {
+        "operationId": "get_api_v1_admin_instance_keeper_requests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "decision",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "request_type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "by_workspace": {
+                      "items": {
+                        "properties": {
+                          "count": {
+                            "type": "integer"
+                          },
+                          "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_name": {
+                            "type": "string"
+                          },
+                          "workspace_slug": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "workspace_id",
+                          "workspace_name",
+                          "workspace_slug"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "counts": {
+                      "properties": {
+                        "allow": {
+                          "type": "integer"
+                        },
+                        "deny": {
+                          "type": "integer"
+                        },
+                        "escalate": {
+                          "type": "integer"
+                        },
+                        "pending": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "allow",
+                        "deny",
+                        "escalate",
+                        "pending"
+                      ],
+                      "type": "object"
+                    },
+                    "items": {
+                      "items": {
+                        "properties": {
+                          "agent_id": {
+                            "type": "string"
+                          },
+                          "agent_name": {
+                            "type": "string"
+                          },
+                          "command": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "credential_id": {
+                            "type": "string"
+                          },
+                          "credential_name": {
+                            "type": "string"
+                          },
+                          "crew_id": {
+                            "type": "string"
+                          },
+                          "decided_at": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "decision": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "exit_code": {
+                            "nullable": true,
+                            "type": "integer"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "intent": {
+                            "type": "string"
+                          },
+                          "judge_profile": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "ollama_prompt": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "ollama_raw_response": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "reason": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "request_type": {
+                            "type": "string"
+                          },
+                          "risk_score": {
+                            "nullable": true,
+                            "type": "integer"
+                          },
+                          "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "agent_id",
+                          "request_type",
+                          "created_at",
+                          "workspace_id",
+                          "workspace_name"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total",
+                    "counts",
+                    "by_workspace"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/instance/people": {
       "post": {
         "operationId": "post_api_v1_admin_instance_people",

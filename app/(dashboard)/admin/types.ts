@@ -187,6 +187,9 @@ export interface KeeperLogEntry {
   ollama_raw_response: string | null
   created_at: string
   decided_at: string | null
+  /** Present on rows from the instance-wide log (Admin › Security). */
+  workspace_id?: string
+  workspace_name?: string
 }
 
 /** Active tab identifier for the admin panel navigation.

@@ -224,7 +224,7 @@ type judgeTestRequest struct {
 
 // Test runs the three-stage check. POST /api/v1/admin/keeper/judge/test
 func (h *AdminKeeperJudgeHandler) Test(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
@@ -497,7 +497,7 @@ type judgeModelsResponse struct {
 // instead of a free-text field an operator can typo into a fail-closed DENY.
 // GET /api/v1/admin/keeper/judge/models[?endpoint=…]
 func (h *AdminKeeperJudgeHandler) Models(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
@@ -557,7 +557,7 @@ type hostedJudgeTestRequest struct {
 // endpoint to reach and no model to pull, but there IS a key that may be missing,
 // revoked, or of the wrong type — which is the stage a local judge does not have.
 func (h *AdminKeeperJudgeHandler) TestHosted(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}

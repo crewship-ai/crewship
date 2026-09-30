@@ -92,7 +92,6 @@ DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags/{tag} roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust/{grantId} roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId} roleManage
-GET /api/v1/admin/keeper/judge/models roleManage
 GET /api/v1/approvals roleManage
 GET /api/v1/approvals/{id} roleManage
 GET /api/v1/memory/export roleManage
@@ -353,6 +352,7 @@ POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve roleCreate
 PUT /api/v1/admin/instance/admins/{userId} roleInstance
+PUT /api/v1/admin/instance/keeper/governance roleInstance
 PUT /api/v1/admin/instance/workspaces/{workspaceId}/members/{userId} roleInstance
 PUT /api/v1/admin/keeper/aux/{slot} roleInstance
 PUT /api/v1/admin/keeper/config roleInstance

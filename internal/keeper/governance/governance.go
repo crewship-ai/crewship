@@ -4,8 +4,9 @@
 // decision also lands in the inbox.
 //
 // Resolution contract: an explicit workspace row always wins; no row means
-// the watchdog is OFF for that workspace — it is opt-in and default OFF, only
-// running once an OWNER/ADMIN enables it. The resolver is read on hot paths
+// the instance defaults (defaults.go), which leave the watchdog OFF — it is
+// opt-in, running once an OWNER/ADMIN enables it or an instance admin saves
+// it on for all workspaces. The resolver is read on hot paths
 // (the behavior hook fires per sampled tool call), so Resolve never returns an
 // error — a failed read falls back to disabled (fail-safe: monitoring off,
 // never a spurious escalation) and the caller's next sample retries naturally.
@@ -149,9 +150,23 @@ type Settings struct {
 	GovModelCredentialID string `json:"gov_model_credential_id"`
 }
 
+// Querier is what a read needs: a *sql.DB, or a *sql.Tx when the read has to
+// see writes the same transaction has not committed yet.
+type Querier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// Execer is what a write needs: a *sql.DB, or a *sql.Tx so a write across
+// several workspaces lands in all of them or in none.
+type Execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // Get returns the explicit workspace row. found is false when the workspace
-// has never been configured in-app (the watchdog is then off — see Resolve).
-func Get(ctx context.Context, db *sql.DB, workspaceID string) (Settings, bool, error) {
+// has never been configured in-app; the settings are then the instance
+// defaults (see Defaults), which are the built-in opt-out — watchdog off —
+// until an instance admin saves something for all workspaces.
+func Get(ctx context.Context, db Querier, workspaceID string) (Settings, bool, error) {
 	var (
 		s            Settings
 		enabled      int
@@ -167,7 +182,11 @@ func Get(ctx context.Context, db *sql.DB, workspaceID string) (Settings, bool, e
 		Scan(&enabled, &contact, &s.DenyNotifyMinRisk, &s.WatchSpec, &presets, &secondApprov,
 			&s.GovModelProvider, &s.GovModelID, &govCredID, &s.AutoLeaseSeconds, &s.BehaviorSampleEvery)
 	if err == sql.ErrNoRows {
-		return Settings{DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}, false, nil
+		d, _, derr := Defaults(ctx, db)
+		if derr != nil {
+			return Settings{DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}, false, derr
+		}
+		return d, false, nil
 	}
 	if err != nil {
 		return Settings{DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}, false, fmt.Errorf("governance: get: %w", err)
@@ -186,7 +205,44 @@ func Get(ctx context.Context, db *sql.DB, workspaceID string) (Settings, bool, e
 
 // Upsert writes the workspace row. updatedBy is the acting user (may be
 // empty for system writes). DenyNotifyMinRisk outside [1,10] is clamped.
-func Upsert(ctx context.Context, db *sql.DB, workspaceID string, s Settings, updatedBy string) error {
+func Upsert(ctx context.Context, db Execer, workspaceID string, s Settings, updatedBy string) error {
+	s = normalize(s)
+	presets, err := encodePresets(s.WatchPresets)
+	if err != nil {
+		return fmt.Errorf("governance: upsert: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO keeper_governance_settings
+			(workspace_id, enabled, security_contact_user_id, deny_notify_min_risk, watch_spec, watch_presets, require_second_approver,
+			 gov_model_provider, gov_model_id, gov_model_credential_id, auto_lease_seconds, behavior_sample_every, updated_by, created_at, updated_at)
+		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?)
+		ON CONFLICT(workspace_id) DO UPDATE SET
+			enabled = excluded.enabled,
+			security_contact_user_id = excluded.security_contact_user_id,
+			deny_notify_min_risk = excluded.deny_notify_min_risk,
+			watch_spec = excluded.watch_spec,
+			watch_presets = excluded.watch_presets,
+			require_second_approver = excluded.require_second_approver,
+			gov_model_provider = excluded.gov_model_provider,
+			gov_model_id = excluded.gov_model_id,
+			gov_model_credential_id = excluded.gov_model_credential_id,
+			auto_lease_seconds = excluded.auto_lease_seconds,
+			behavior_sample_every = excluded.behavior_sample_every,
+			updated_by = excluded.updated_by,
+			updated_at = excluded.updated_at`,
+		workspaceID, boolToInt(s.Enabled), s.SecurityContactUserID, s.DenyNotifyMinRisk,
+		s.WatchSpec, presets, boolToInt(s.RequireSecondApprover),
+		s.GovModelProvider, s.GovModelID, s.GovModelCredentialID, s.AutoLeaseSeconds, s.BehaviorSampleEvery,
+		updatedBy, now, now)
+	if err != nil {
+		return fmt.Errorf("governance: upsert: %w", err)
+	}
+	return nil
+}
+
+// normalize applies the clamps every stored row gets, whoever writes it.
+func normalize(s Settings) Settings {
 	if s.DenyNotifyMinRisk < 1 {
 		s.DenyNotifyMinRisk = 1
 	}
@@ -221,49 +277,26 @@ func Upsert(ctx context.Context, db *sql.DB, workspaceID string, s Settings, upd
 	if s.BehaviorSampleEvery > MaxBehaviorSampleEvery {
 		s.BehaviorSampleEvery = MaxBehaviorSampleEvery
 	}
-	// Marshal presets to a JSON array; empty → "" for a stable default that
-	// round-trips back to a nil slice in Get.
-	presets := ""
-	if len(s.WatchPresets) > 0 {
-		b, err := json.Marshal(s.WatchPresets)
-		if err != nil {
-			return fmt.Errorf("governance: upsert: encode watch_presets: %w", err)
-		}
-		presets = string(b)
+	return s
+}
+
+// encodePresets stores presets as a JSON array; empty → "" for a stable
+// default that round-trips back to a nil slice in Get.
+func encodePresets(p []string) (string, error) {
+	if len(p) == 0 {
+		return "", nil
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO keeper_governance_settings
-			(workspace_id, enabled, security_contact_user_id, deny_notify_min_risk, watch_spec, watch_presets, require_second_approver,
-			 gov_model_provider, gov_model_id, gov_model_credential_id, auto_lease_seconds, behavior_sample_every, updated_by, created_at, updated_at)
-		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?)
-		ON CONFLICT(workspace_id) DO UPDATE SET
-			enabled = excluded.enabled,
-			security_contact_user_id = excluded.security_contact_user_id,
-			deny_notify_min_risk = excluded.deny_notify_min_risk,
-			watch_spec = excluded.watch_spec,
-			watch_presets = excluded.watch_presets,
-			require_second_approver = excluded.require_second_approver,
-			gov_model_provider = excluded.gov_model_provider,
-			gov_model_id = excluded.gov_model_id,
-			gov_model_credential_id = excluded.gov_model_credential_id,
-			auto_lease_seconds = excluded.auto_lease_seconds,
-			behavior_sample_every = excluded.behavior_sample_every,
-			updated_by = excluded.updated_by,
-			updated_at = excluded.updated_at`,
-		workspaceID, boolToInt(s.Enabled), s.SecurityContactUserID, s.DenyNotifyMinRisk,
-		s.WatchSpec, presets, boolToInt(s.RequireSecondApprover),
-		s.GovModelProvider, s.GovModelID, s.GovModelCredentialID, s.AutoLeaseSeconds, s.BehaviorSampleEvery,
-		updatedBy, now, now)
+	b, err := json.Marshal(p)
 	if err != nil {
-		return fmt.Errorf("governance: upsert: %w", err)
+		return "", fmt.Errorf("encode watch_presets: %w", err)
 	}
-	return nil
+	return string(b), nil
 }
 
 // Resolve returns the watchdog settings a caller should act on: the explicit
-// workspace row when present, otherwise the opt-in default (disabled, default
-// DENY-notify threshold). The watchdog is default-OFF per workspace (#1001) —
+// workspace row when present, otherwise the instance defaults — which are the
+// opt-in default (disabled, default DENY-notify threshold) until an instance
+// admin saves settings for all workspaces. The watchdog is default-OFF per workspace (#1001) —
 // a workspace only participates once an OWNER/ADMIN explicitly enables it, so
 // an unconfigured workspace resolves to Enabled=false regardless of the server
 // config. This is the single fetch-and-warn seam every read site shares
@@ -275,16 +308,14 @@ func Resolve(ctx context.Context, db *sql.DB, logger *slog.Logger, workspaceID s
 	if db == nil || workspaceID == "" {
 		return def
 	}
-	s, found, err := Get(ctx, db, workspaceID)
+	s, _, err := Get(ctx, db, workspaceID)
 	if err != nil {
 		if logger != nil {
 			logger.Warn("keeper governance: resolve failed", "error", err, "workspace_id", workspaceID)
 		}
 		return def
 	}
-	if !found {
-		return def
-	}
+	// No row: Get already answered with the instance defaults.
 	return s
 }
 

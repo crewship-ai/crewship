@@ -89,10 +89,16 @@ func (h *AdminKeeperHealthHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeJSON(w, http.StatusOK, keeperHealthFor(health.Default, wsID))
+}
+
+// keeperHealthFor reads one workspace's window. Shared with the instance route,
+// which reports every workspace in the same shape.
+func keeperHealthFor(m *health.Monitor, wsID string) keeperHealthResponse {
 	// A workspace nobody has decided anything for yet is an empty window, not an
 	// error and not a healthy one. Zero samples is its own answer, and the
 	// response says so by carrying the count rather than an "ok" flag.
-	s, _ := health.Default.Snapshot(wsID)
+	s, _ := m.Snapshot(wsID)
 
 	out := keeperHealthResponse{
 		WorkspaceID:           wsID,
@@ -124,5 +130,5 @@ func (h *AdminKeeperHealthHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, out)
+	return out
 }

@@ -12,7 +12,7 @@ import type { KeeperLogEntry, KeeperStatus } from "@/app/(dashboard)/admin/types
 export type Scope = "instance" | "workspace"
 
 export type SettingsSection = "judge" | "rules" | "workspace-judge" | "background" | "watchdog" | "alerts" | "leases"
-export type Section = "overview" | "activity" | SettingsSection
+export type Section = "overview" | "matrix" | "activity" | SettingsSection
 
 /** Settings sections, in the order an operator meets them, each with the scope
  *  its changes reach. Mirrors the server: the judge, its rules and the
@@ -21,20 +21,20 @@ export type Section = "overview" | "activity" | SettingsSection
 export const SETTINGS: { key: SettingsSection; label: string; scope: Scope; about: string }[] = [
   { key: "judge", label: "Credential judge", scope: "instance", about: "The model that allows, denies or escalates a secret" },
   { key: "rules", label: "Decision rules", scope: "instance", about: "What the judge may use, and when a person confirms" },
-  { key: "workspace-judge", label: "This workspace", scope: "workspace", about: "A different judge here, including a hosted one" },
+  { key: "workspace-judge", label: "Judge per workspace", scope: "workspace", about: "A different judge for some workspaces, including a hosted one" },
   { key: "background", label: "Background checks", scope: "instance", about: "The models behind the scheduled reviews" },
   { key: "watchdog", label: "Watchdog", scope: "workspace", about: "Samples tool calls and raises findings" },
   { key: "alerts", label: "Alerts & approvals", scope: "workspace", about: "Who hears about a finding, who confirms" },
   { key: "leases", label: "Credential leases", scope: "workspace", about: "Whether an approval lasts or expires" },
 ]
 
-export const SCOPE_LABEL: Record<Scope, string> = { instance: "Instance", workspace: "Workspace" }
+export const SCOPE_LABEL: Record<Scope, string> = { instance: "Instance", workspace: "Per workspace" }
 export const SCOPE_HINT: Record<Scope, string> = {
   instance: "Applies to every workspace on this server",
-  workspace: "Applies to this workspace only",
+  workspace: "Set for the workspaces ticked in the panel",
 }
 
-const SECTIONS = new Set<string>(["overview", "activity", ...SETTINGS.map((s) => s.key)])
+const SECTIONS = new Set<string>(["overview", "matrix", "activity", ...SETTINGS.map((s) => s.key)])
 export const isSection = (s: string | null | undefined): s is Section => !!s && SECTIONS.has(s)
 
 // ── Activity streams ────────────────────────────────────────────────────────

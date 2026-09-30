@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Bell, BookOpen, Brain, Building2, Clock, Eye, Gavel, Home, KeyRound, ListChecks, RefreshCw, Shield, Sparkles, Timer, type LucideIcon } from "lucide-react"
+import { Bell, BookOpen, Brain, Building2, Clock, Eye, Gavel, Grid3x3, Home, KeyRound, ListChecks, RefreshCw, Shield, Sparkles, Timer, type LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -13,9 +13,13 @@ import { KeeperJudgeCard } from "@/components/features/admin/keeper-judge-card"
 import { KeeperProfileCard } from "@/components/features/admin/keeper-profile-card"
 import { KeeperGovernancePanel } from "@/components/features/admin/keeper-governance-panel"
 import { JudgeModelsCard } from "@/components/features/admin/judge-models-card"
+import { WorkspaceScopeSection, readScope, writeScope, type ScopeWorkspace } from "@/components/features/admin/workspace-scope"
 import { SecurityOverview } from "./security-overview"
 import { SecurityActivity } from "./security-activity"
 import { useSecurity } from "./use-security"
+import { useInstanceKeeper } from "./use-instance-keeper"
+import { BulkGovernanceForm, type BulkSection } from "./bulk-governance"
+import { WhatsOnWhere } from "./whats-on-where"
 import { SCOPE_HINT, SCOPE_LABEL, SETTINGS, STREAMS, isSection, streamCounts, type Section, type SettingsSection, type Stream } from "./security-model"
 
 const STREAM_ICON: Record<Stream, LucideIcon> = {
@@ -24,10 +28,15 @@ const STREAM_ICON: Record<Stream, LucideIcon> = {
 const SETTINGS_ICON: Record<SettingsSection, LucideIcon> = {
   judge: Gavel, rules: ListChecks, "workspace-judge": Building2, background: Clock, watchdog: Shield, alerts: Bell, leases: Timer,
 }
+const PANEL_SECTION: Record<BulkSection, "judge" | "watchdog" | "alerts" | "leases"> = {
+  "workspace-judge": "judge", watchdog: "watchdog", alerts: "alerts", leases: "leases",
+}
+const isBulk = (s: Section): s is BulkSection => s === "workspace-judge" || s === "watchdog" || s === "alerts" || s === "leases"
 
 interface UrlState { section: Section; stream: Stream | "all" }
 
-/** ?section= and ?stream= keep the page shareable and reload-safe. */
+/** ?section= and ?stream= keep the page shareable and reload-safe; the
+ *  workspace ticks live in ?ws= (workspace-scope.tsx). */
 function readUrl(): UrlState {
   if (typeof window === "undefined") return { section: "overview", stream: "all" }
   const p = new URLSearchParams(window.location.search)
@@ -46,15 +55,16 @@ function writeUrl(s: UrlState) {
 }
 
 /**
- * Admin › Security. Posture, Keeper and Keeper reviews were three tabs, and
- * Keeper alone was a 3,300px wall of seven configuration cards under a status
- * strip and two logs. One nested page now, built like People & workspaces:
- * "← Admin", its own panel (Overview, the activity streams, the settings), and
- * one thing at a time in the middle. Every settings section says whether it
- * reaches the whole instance or this workspace only.
+ * Admin › Security. One nested page for the Keeper of the whole instance:
+ * "← Admin", its own panel, one thing at a time in the middle.
  *
- * The settings cards are the existing ones, unchanged: each keeps its own
- * load, save and error path. This page decides only where they appear.
+ * Admin never depends on the workspace its user sits in. The panel's
+ * Workspaces section starts on all of them: the activity, the overview and
+ * "What's on where" cover what is ticked, and a per-workspace setting edits
+ * the ticked workspace — or, with several ticked, overwrites all of them after
+ * a dialog lists what changes where. Instance-wide settings grey the list out.
+ *
+ * The instance settings cards are the existing ones, unchanged.
  */
 export function SecurityPage() {
   const { workspaceId } = useWorkspace()
@@ -66,16 +76,58 @@ export function SecurityPage() {
     writeUrl(merged)
     return merged
   })
-  const counts = streamCounts(data.entries)
+
+  const [selected, setSelected] = React.useState<Set<string> | null>(null)
+  const [total, setTotal] = React.useState(0)
+  // null asks for every workspace — also when every one is ticked, so a
+  // workspace created meanwhile is not left out of "all".
+  const inst = useInstanceKeeper(selected === null || selected.size === total ? null : [...selected], data.liveTick)
+
+  const workspaces: ScopeWorkspace[] = React.useMemo(() => {
+    const counts = new Map((inst.requests?.by_workspace ?? []).map((b) => [b.workspace_id, b.count]))
+    return (inst.gov?.workspaces ?? []).map((w) => ({ id: w.workspace_id, name: w.workspace_name, slug: w.workspace_slug, count: counts.get(w.workspace_id) ?? 0 }))
+  }, [inst.gov, inst.requests])
+
+  // The ticks start from the URL once the list of workspaces is known.
+  React.useEffect(() => {
+    if (selected !== null || workspaces.length === 0) return
+    setTotal(workspaces.length)
+    setSelected(readScope(workspaces))
+  }, [workspaces, selected])
+  const changeSelection = (next: Set<string>) => {
+    setTotal(workspaces.length)
+    setSelected(next)
+    writeScope(workspaces, next)
+  }
+
+  // Until the URL is read, the page covers every workspace, as it will then.
+  const sel = React.useMemo(() => selected ?? new Set(workspaces.map((w) => w.id)), [selected, workspaces])
+  const allTicked = sel.size === workspaces.length && workspaces.length > 0
+  const entries = inst.requests?.items ?? []
+  const counts = streamCounts(entries)
   const settings = SETTINGS.find((s) => s.key === section)
+  const rows = (inst.gov?.workspaces ?? []).filter((w) => sel.has(w.workspace_id))
+
+  const singleRow = rows.length === 1 ? rows[0] : null
+  const instanceProp = React.useMemo(
+    () => (singleRow ? { row: singleRow, onSaved: () => void inst.reloadGov() } : undefined),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the row object is the identity that matters
+    [singleRow],
+  )
+
+  const scopeMode = isBulk(section) ? "edit" : "view"
+  const scopeInert = settings?.scope === "instance" ? "Instance setting · applies to every workspace" : undefined
 
   const nav = (
     <>
+      <WorkspaceScopeSection workspaces={workspaces} selected={sel} onChange={changeSelection} currentId={workspaceId} mode={scopeMode} inert={scopeInert} />
       <DrillNavSection label="Status" collapsible={false}>
         <DrillNavItem selected={section === "overview"} onSelect={() => update({ section: "overview" })}
           icon={<Home className="h-3.5 w-3.5" />} label="Overview" />
+        <DrillNavItem selected={section === "matrix"} onSelect={() => update({ section: "matrix" })}
+          icon={<Grid3x3 className="h-3.5 w-3.5" />} label="What's on where" />
       </DrillNavSection>
-      <DrillNavSection label="Activity" count={data.entries.length}>
+      <DrillNavSection label="Activity" count={inst.requests?.total ?? 0}>
         {STREAMS.map((s, i) => {
           const Icon = STREAM_ICON[s.key]
           const on = section === "activity" && stream === s.key
@@ -92,7 +144,7 @@ export function SecurityPage() {
           return (
             <DrillNavItem key={s.key} index={i} selected={section === s.key} onSelect={() => update({ section: s.key })}
               icon={<Icon className="h-3.5 w-3.5" />} label={s.label} title={SCOPE_HINT[s.scope]}
-              meta={<span className={cn("rounded px-1 text-[9.5px] uppercase", s.scope === "instance" ? "bg-primary/10 text-primary-hover" : "bg-muted")}>{s.scope === "instance" ? "inst" : "ws"}</span>} />
+              meta={<span className={cn("rounded px-1 text-[9.5px] uppercase", s.scope === "instance" ? "bg-primary/10 text-primary-hover" : "bg-muted")}>{s.scope === "instance" ? "inst" : "per ws"}</span>} />
           )
         })}
       </DrillNavSection>
@@ -100,29 +152,56 @@ export function SecurityPage() {
   )
 
   const mobileNav = (
-    <select aria-label="Section" value={section === "activity" ? `activity:${stream}` : section}
-      onChange={(e) => {
-        const v = e.target.value
-        if (v.startsWith("activity:")) update({ section: "activity", stream: v.slice(9) as Stream | "all" })
-        else update({ section: v as Section })
-      }}
-      className="h-9 w-full rounded-md border border-control-border bg-surface-subtle px-3 text-control">
-      <option value="overview">Overview</option>
-      <option value="activity:all">Activity · all</option>
-      {STREAMS.map((s) => <option key={s.key} value={`activity:${s.key}`}>Activity · {s.label}</option>)}
-      {SETTINGS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-    </select>
+    <div className="flex flex-col gap-2">
+      <select aria-label="Section" value={section === "activity" ? `activity:${stream}` : section}
+        onChange={(e) => {
+          const v = e.target.value
+          if (v.startsWith("activity:")) update({ section: "activity", stream: v.slice(9) as Stream | "all" })
+          else update({ section: v as Section })
+        }}
+        className="h-9 w-full rounded-md border border-control-border bg-surface-subtle px-3 text-control">
+        <option value="overview">Overview</option>
+        <option value="matrix">What&apos;s on where</option>
+        <option value="activity:all">Activity · all</option>
+        {STREAMS.map((s) => <option key={s.key} value={`activity:${s.key}`}>Activity · {s.label}</option>)}
+        {SETTINGS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+      </select>
+      <select aria-label="Workspaces" value={allTicked ? "all" : sel.size === 1 ? [...sel][0] : "some"}
+        onChange={(e) => changeSelection(e.target.value === "all" ? new Set(workspaces.map((w) => w.id)) : new Set([e.target.value]))}
+        className="h-9 w-full rounded-md border border-control-border bg-surface-subtle px-3 text-control">
+        <option value="all">All workspaces</option>
+        {!allTicked && sel.size > 1 && <option value="some">{sel.size} workspaces</option>}
+        {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+      </select>
+    </div>
   )
 
   let body: React.ReactNode
-  if (!workspaceId || (data.loading && !data.status && data.entries.length === 0)) {
+  if (!inst.gov && inst.loading) {
     body = <div className="space-y-3"><Skeleton className="h-8 rounded-lg" /><Skeleton className="h-[280px] rounded-card" /></div>
+  } else if (inst.govError && !inst.gov) {
+    body = <p className="rounded-lg border border-border px-4 py-3 text-[13px] text-destructive">{inst.govError}</p>
   } else if (section === "overview") {
-    body = <SecurityOverview status={data.status} posture={data.posture} postureError={data.postureError} entries={data.entries}
-      workspaceId={workspaceId} onOpenActivity={() => update({ section: "activity", stream: "all" })} />
+    body = <SecurityOverview status={data.status} posture={data.posture} postureError={data.postureError} entries={entries}
+      workspaceId={workspaceId ?? ""} counts={inst.requests ? { total: inst.requests.total, ...inst.requests.counts } : undefined}
+      health={inst.health.filter((h) => sel.has(h.workspace_id))}
+      onOpenActivity={() => update({ section: "activity", stream: "all" })} />
+  } else if (section === "matrix") {
+    body = (
+      <>
+        <SettingsSummary slot="security-scope">
+          <SummaryItem>Every per-workspace setting, one row per workspace. Open a cell to change it there.</SummaryItem>
+        </SettingsSummary>
+        <WhatsOnWhere rows={inst.gov?.workspaces ?? []} selected={sel}
+          onOpen={(s, id) => { changeSelection(new Set([id])); update({ section: s }) }} />
+      </>
+    )
   } else if (section === "activity") {
-    body = <SecurityActivity entries={data.entries} stream={stream} onStream={(s) => update({ stream: s })} live={data.live} error={data.activityError} />
+    body = sel.size === 0
+      ? <p className="text-[13px] text-muted-foreground">Tick a workspace in the panel.</p>
+      : <SecurityActivity entries={entries} stream={stream} onStream={(s) => update({ stream: s })} live={data.live} error={inst.requestsError} />
   } else if (settings) {
+    const bulk = isBulk(section)
     body = (
       <>
         <SettingsSummary slot="security-scope">
@@ -130,17 +209,21 @@ export function SecurityPage() {
             <span className={cn("mr-2 rounded-full px-2 font-mono text-[10.5px]", settings.scope === "instance" ? "bg-primary/10 text-primary-hover" : "bg-muted text-muted-foreground")}>
               {SCOPE_LABEL[settings.scope]}
             </span>
-            {SCOPE_HINT[settings.scope]}
+            {bulk ? (rows.length === 1 ? `Editing ${rows[0].workspace_name}` : rows.length > 1 ? `${rows.length} workspaces selected` : SCOPE_HINT[settings.scope]) : SCOPE_HINT[settings.scope]}
           </SummaryItem>
           <SummaryItem>{settings.about}</SummaryItem>
         </SettingsSummary>
-        {section === "judge" && <KeeperJudgeCard workspaceId={workspaceId} />}
-        {section === "rules" && <KeeperProfileCard workspaceId={workspaceId} />}
-        {section === "workspace-judge" && <KeeperGovernancePanel workspaceId={workspaceId} serverEnabled={data.status?.enabled ?? false} section="judge" />}
-        {section === "background" && <JudgeModelsCard workspaceId={workspaceId} />}
-        {section === "watchdog" && <KeeperGovernancePanel workspaceId={workspaceId} serverEnabled={data.status?.enabled ?? false} section="watchdog" />}
-        {section === "alerts" && <KeeperGovernancePanel workspaceId={workspaceId} serverEnabled={data.status?.enabled ?? false} section="alerts" />}
-        {section === "leases" && <KeeperGovernancePanel workspaceId={workspaceId} serverEnabled={data.status?.enabled ?? false} section="leases" />}
+        {section === "judge" && workspaceId && <KeeperJudgeCard workspaceId={workspaceId} />}
+        {section === "rules" && workspaceId && <KeeperProfileCard workspaceId={workspaceId} />}
+        {section === "background" && workspaceId && <JudgeModelsCard workspaceId={workspaceId} />}
+        {bulk && rows.length === 0 && <p className="text-[13px] text-muted-foreground">Tick one or more workspaces in the panel.</p>}
+        {bulk && instanceProp && (
+          <KeeperGovernancePanel key={instanceProp.row.workspace_id} workspaceId={instanceProp.row.workspace_id}
+            serverEnabled={data.status?.enabled ?? false} section={PANEL_SECTION[section]} instance={instanceProp} />
+        )}
+        {bulk && rows.length > 1 && (
+          <BulkGovernanceForm section={section} rows={rows} all={allTicked} onSaved={() => void inst.reloadGov()} />
+        )}
       </>
     )
   }
@@ -150,19 +233,18 @@ export function SecurityPage() {
       parent={{ href: "/admin", label: "Admin", icon: Shield }}
       title="Security"
       icon={Shield}
-      description="Who may read a secret, and how this server is set up"
+      description="Who may read a secret, and how every workspace is watched"
       nav={nav}
       mobileNav={mobileNav}
       actions={
-        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void data.reload()} disabled={data.loading}>
-          <RefreshCw className={cn(data.loading && "animate-spin")} />Refresh
+        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { void data.reload(); void inst.reload() }} disabled={data.loading || inst.loading}>
+          <RefreshCw className={cn((data.loading || inst.loading) && "animate-spin")} />Refresh
         </Button>
       }
     >
-      <div className={cn("mx-auto space-y-4 p-4 md:p-6", section === "activity" ? "max-w-5xl" : "max-w-3xl")}>
+      <div className={cn("mx-auto space-y-4 p-4 md:p-6", section === "activity" || section === "matrix" ? "max-w-5xl" : "max-w-3xl")}>
         {body}
       </div>
     </DrillPage>
   )
 }
-

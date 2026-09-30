@@ -41,6 +41,10 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `PUT` | [/api/v1/admin/instance/admins/\{userId\}](#put-api-v1-admin-instance-admins-userid) | Name an instance administrator |
 | `DELETE` | [/api/v1/admin/instance/admins/\{userId\}](#delete-api-v1-admin-instance-admins-userid) | Remove a named instance administrator |
 | `GET` | [/api/v1/admin/instance/audit](#get-api-v1-admin-instance-audit) | Instance-level actions, newest first |
+| `GET` | [/api/v1/admin/instance/keeper/governance](#get-api-v1-admin-instance-keeper-governance) | Every workspace's Keeper watchdog settings and the instance defaults |
+| `PUT` | [/api/v1/admin/instance/keeper/governance](#put-api-v1-admin-instance-keeper-governance) | Set the watchdog for one, several or all workspaces |
+| `GET` | [/api/v1/admin/instance/keeper/requests](#get-api-v1-admin-instance-keeper-requests) | Keeper decisions across workspaces |
+| `GET` | [/api/v1/admin/instance/keeper/health](#get-api-v1-admin-instance-keeper-health) | Every workspace's Keeper decision window |
 | `POST` | [/api/v1/admin/prune-legacy-resources](#post-api-v1-admin-prune-legacy-resources) | Remove orphaned pre-C1 Docker resources |
 | `GET` | [/api/v1/admin/legacy-resources](#get-api-v1-admin-legacy-resources) | Detect orphaned pre-C1 Docker resources |
 | `GET` | [/api/v1/admin/health](#get-api-v1-admin-health) | Read uptime, database, disk, and logging health |
@@ -615,7 +619,8 @@ Actions: `instance.user_created`, `instance.member_added`,
 `instance.workspace_deleted`, `instance.user_suspended`,
 `instance.user_reactivated`, `instance.setup_link_issued`,
 `instance.setup_link_revoked`, `instance.admin_granted`,
-`instance.admin_revoked`.
+`instance.admin_revoked`, `instance.keeper_governance_updated`,
+`instance.keeper_defaults_updated`.
 
 | Status | Condition |
 |--------|-----------|
@@ -624,6 +629,195 @@ Actions: `instance.user_created`, `instance.member_added`,
 | `403` | Caller is not an instance administrator. |
 | `500` | A query failed. |
 
+
+## `GET /api/v1/admin/instance/keeper/governance`
+
+The Keeper watchdog settings of every workspace on the instance, including
+workspaces the caller is not a member of, and the instance defaults. A
+workspace with `configured: false` was never set and runs on the defaults.
+The defaults are what the last save for all workspaces set. Until then they
+are the built-in opt-out: watchdog off, DENY alerts from risk 7.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "defaults": { "configured": true, "enabled": true, "deny_notify_min_risk": 5, "behavior_sample_every": 10 },
+  "workspaces": [
+    {
+      "workspace_id": "ws-cuid",
+      "workspace_name": "Lab",
+      "workspace_slug": "lab",
+      "configured": true,
+      "enabled": true,
+      "security_contact_user_id": "",
+      "deny_notify_min_risk": 5,
+      "watch_spec": "",
+      "watch_presets": ["exfiltration"],
+      "require_second_approver": false,
+      "gov_model_provider": "",
+      "gov_model_id": "",
+      "gov_model_credential_id": "",
+      "auto_lease_seconds": 900,
+      "behavior_sample_every": 10,
+      "effective_second_approver": { "min_security_level": 4, "source": "tier" }
+    }
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Every live workspace, by name. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
+
+## `PUT /api/v1/admin/instance/keeper/governance`
+
+Sets the watchdog for one, several or all workspaces. `set` is a partial
+update with the same fields and bounds as the per-workspace
+`PUT /api/v1/admin/keeper/governance`: only the fields sent change.
+
+- `workspaces` names the targets by id or slug. `all: true` targets every
+  workspace and also sets the instance defaults that a workspace created
+  later starts with. Send one or the other.
+- `dry_run: true` computes the changes and writes nothing. The console's
+  confirmation dialog shows this response.
+- The save is one transaction. When the merged settings are invalid in any
+  workspace, the response is `400` naming that workspace, and nothing is
+  written anywhere.
+- A workspace that already has the values is reported with empty `changes`
+  and left alone. Each workspace that changes gets an
+  `instance.keeper_governance_updated` entry in the instance audit, with the
+  fields it changed from and to. A save for all also records
+  `instance.keeper_defaults_updated`.
+- `security_contact_user_id` and `gov_model_credential_id` name something that
+  belongs to one workspace, and are refused for more than one.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{ "all": true, "dry_run": true, "set": { "enabled": true, "deny_notify_min_risk": 5 } }
+```
+
+**Response:**
+
+```json
+{
+  "applied": false,
+  "changed": 1,
+  "defaults_updated": true,
+  "workspaces": [
+    {
+      "workspace_id": "ws-cuid",
+      "workspace_name": "Lab",
+      "workspace_slug": "lab",
+      "changes": [ { "field": "deny_notify_min_risk", "before": 7, "after": 5 } ]
+    },
+    { "workspace_id": "ws-cuid-2", "workspace_name": "Ops", "workspace_slug": "ops", "changes": [] }
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Saved, or previewed with `dry_run`. |
+| `400` | No target, both `all` and `workspaces`, nothing to change, a value out of bounds or incoherent in some workspace, or a per-workspace field sent for several. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | A workspace in `workspaces` does not exist. |
+| `500` | A write failed. Nothing was saved. |
+
+## `GET /api/v1/admin/instance/keeper/requests`
+
+Keeper decisions across workspaces, newest first: credential requests and the
+background reviews, each row with its workspace. A request whose agent is gone
+has no workspace to show under and is left out.
+
+Query parameters:
+
+- `workspace`: ids or slugs, comma-separated. Omitted or `all` means every
+  workspace.
+- `request_type`: one kind, e.g. `access` or `behavior`.
+- `decision`: `ALLOW`, `DENY`, `ESCALATE` or `PENDING`.
+- `limit`: default 200, at most 1000. `offset`: rows to skip.
+
+`total` and `counts` describe everything the filter matches. `by_workspace`
+counts every workspace regardless of the filter, for the panel beside the list.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "items": [
+    {
+      "id": "kr-cuid",
+      "workspace_id": "ws-cuid",
+      "workspace_name": "Lab",
+      "agent_id": "ag-cuid",
+      "agent_name": "Researcher",
+      "crew_id": "crew-cuid",
+      "credential_id": "cred-cuid",
+      "credential_name": "POSTGRES_PASSWORD",
+      "intent": "read the orders table",
+      "request_type": "access",
+      "decision": "DENY",
+      "reason": "Not bound to this crew.",
+      "risk_score": 7,
+      "created_at": "2026-09-30T10:00:00Z",
+      "decided_at": "2026-09-30T10:00:02Z"
+    }
+  ],
+  "total": 1,
+  "counts": { "allow": 0, "deny": 1, "escalate": 0, "pending": 0 },
+  "by_workspace": [ { "workspace_id": "ws-cuid", "workspace_name": "Lab", "workspace_slug": "lab", "count": 12 } ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The page. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | A workspace in `workspace` does not exist. |
+| `500` | A read failed. |
+
+## `GET /api/v1/admin/instance/keeper/health`
+
+The rolling decision window of every workspace, in the shape of
+`GET /api/v1/admin/keeper/health` plus the workspace's name and slug. An empty
+window is listed too: zero samples is its own answer, not a healthy one.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "workspaces": [
+    {
+      "workspace_id": "ws-cuid",
+      "workspace_name": "Lab",
+      "workspace_slug": "lab",
+      "samples": 42,
+      "allow": 30,
+      "deny": 8,
+      "escalate": 4,
+      "judge_failures": 0,
+      "progressed_rate": 0.81,
+      "judge_failure_rate": 0,
+      "p95_latency_ms": 900,
+      "min_samples": 20
+    }
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | One window per workspace. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
 ## Instance administration
 
 These routes require **ADMIN or OWNER** (`manage` permission). The mutation

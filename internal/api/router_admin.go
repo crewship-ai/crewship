@@ -80,6 +80,19 @@ func (r *Router) registerAdminRoutes() {
 	// openapi: responses 200,401,403,500
 	r.authedInstance("GET", "/api/v1/admin/instance/audit", inst.AuditLog)
 
+	// Admin › Security across workspaces: the Keeper of every workspace, set for
+	// one, several or all of them (dry_run previews what a save overwrites),
+	// and its decision log and health windows with each row's workspace.
+	ik := NewInstanceKeeperHandler(r.db, r.logger, r.Journal())
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/keeper/governance", ik.ListGovernance)
+	// openapi: responses 200,400,401,403,404,500
+	r.authedInstance("PUT", "/api/v1/admin/instance/keeper/governance", ik.PutGovernance)
+	// openapi: responses 200,401,403,404,500
+	r.authedInstance("GET", "/api/v1/admin/instance/keeper/requests", ik.ListRequests)
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/keeper/health", ik.Health)
+
 	// Admin observability: runtime log-level toggle + disk/health read.
 	obs := NewAdminObservabilityHandler(r.db, r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/log-level", obs.GetLogLevel)
@@ -148,7 +161,7 @@ func (r *Router) registerAdminRoutes() {
 	// though one of them only returns a model list.
 	keeperJudge := NewAdminKeeperJudgeHandler(r.keeperSettings, r.logger).WithGovJudge(r.govModelJudge)
 	r.authedInstanceMut("POST", "/api/v1/admin/keeper/judge/test", keeperJudge.Test)
-	r.authedMut("GET", "/api/v1/admin/keeper/judge/models", roleManage, keeperJudge.Models)
+	r.authedAdmin("GET", "/api/v1/admin/keeper/judge/models", keeperJudge.Models)
 	// The same check for a HOSTED judge (Anthropic / OpenAI-compatible built from
 	// a vault key). Separate route rather than a mode flag on /test: the stages
 	// differ because the failure modes do — there is no endpoint to reach and no

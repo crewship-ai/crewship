@@ -10,6 +10,7 @@ package api
 // merged, so single-field edits don't clobber each other.
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -183,176 +184,26 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Start from the current row (or the opt-in defaults: disabled, default
-	// threshold, no contact) and apply only what the caller sent.
+	// Start from the current row (or the instance defaults for a workspace
+	// with none) and apply only what the caller sent.
 	cur, _, err := governance.Get(r.Context(), h.db, wsID)
 	if err != nil {
 		h.logger.Error("keeper governance: load current", "error", err)
 		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	if body.Enabled != nil {
-		cur.Enabled = *body.Enabled
-	}
-	if body.DenyNotifyMinRisk != nil {
-		if *body.DenyNotifyMinRisk < 1 || *body.DenyNotifyMinRisk > 10 {
-			replyError(w, http.StatusBadRequest, "deny_notify_min_risk must be between 1 and 10")
-			return
-		}
-		cur.DenyNotifyMinRisk = *body.DenyNotifyMinRisk
-	}
-	if body.SecurityContactUserID != nil {
-		cur.SecurityContactUserID = *body.SecurityContactUserID
-	}
-	if body.WatchSpec != nil {
-		// Cap server-side so the DB row and the compiled prompt block stay
-		// bounded regardless of what the CLI/UI send.
-		if len(*body.WatchSpec) > governance.MaxWatchSpecLen {
-			replyError(w, http.StatusBadRequest, "watch_spec exceeds the maximum length")
-			return
-		}
-		cur.WatchSpec = *body.WatchSpec
-	}
-	if body.WatchPresets != nil {
-		if err := governance.ValidatePresets(*body.WatchPresets); err != nil {
-			replyError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		cur.WatchPresets = *body.WatchPresets
-	}
-	if body.RequireSecondApprover != nil {
-		cur.RequireSecondApprover = *body.RequireSecondApprover
-	}
-	if body.AutoLeaseSeconds != nil {
-		// Reject rather than silently clamp on the API boundary: an operator who
-		// asks for a 10-second lease has misunderstood the control, and returning
-		// 200 with a quietly-rewritten 60s would hide that. governance.Upsert still
-		// clamps as a last-resort invariant for non-HTTP writers.
-		v := *body.AutoLeaseSeconds
-		if v < 0 {
-			replyError(w, http.StatusBadRequest, "auto_lease_seconds must not be negative")
-			return
-		}
-		if v > 0 && v < governance.MinAutoLeaseSeconds {
-			replyError(w, http.StatusBadRequest,
-				"auto_lease_seconds must be 0 (off) or at least 60 — a shorter lease can lapse inside the gatekeeper's own evaluation")
-			return
-		}
-		if v > governance.MaxAutoLeaseSeconds {
-			replyError(w, http.StatusBadRequest, "auto_lease_seconds exceeds the maximum lease of 30 days")
-			return
-		}
-		cur.AutoLeaseSeconds = v
-	}
-	if body.BehaviorSampleEvery != nil {
-		v := *body.BehaviorSampleEvery
-		// 0 gets its own message. It is the value an operator reaches for when
-		// they mean "stop reviewing", and it is the one number that must not do
-		// that here: the hook treats a cadence <= 0 as "never fire", so the row
-		// would say the watchdog is enabled while nothing was ever evaluated.
-		// Point at the control that actually turns it off.
-		if v == 0 {
-			replyError(w, http.StatusBadRequest,
-				"behavior_sample_every cannot be 0 — that would leave the watchdog enabled but never sampling. "+
-					"Turn the watchdog off with `crewship keeper disable` instead.")
-			return
-		}
-		if v < governance.MinBehaviorSampleEvery || v > governance.MaxBehaviorSampleEvery {
-			replyError(w, http.StatusBadRequest, fmt.Sprintf(
-				"behavior_sample_every must be between %d and %d (review every Nth tool call) — "+
-					"below %d there is no cadence to run, and above %d the monitor would never fire "+
-					"within a typical run",
-				governance.MinBehaviorSampleEvery, governance.MaxBehaviorSampleEvery,
-				governance.MinBehaviorSampleEvery, governance.MaxBehaviorSampleEvery))
-			return
-		}
-		cur.BehaviorSampleEvery = v
-	}
-	if body.GovModelProvider != nil {
-		// Empty is allowed and means "use the server/env default". A non-empty
-		// value must be one the resolver actually understands — validate against
-		// the same set governance.ResolveGovModel trusts so the two can't drift.
-		if *body.GovModelProvider != "" && !governance.KnownGovProvider(*body.GovModelProvider) {
-			replyError(w, http.StatusBadRequest, "gov_model_provider must be one of: ollama, anthropic, openai_compat")
-			return
-		}
-		cur.GovModelProvider = *body.GovModelProvider
-	}
-	if body.GovModelID != nil {
-		if len(*body.GovModelID) > governance.MaxGovModelIDLen {
-			replyError(w, http.StatusBadRequest, "gov_model_id exceeds the maximum length")
-			return
-		}
-		cur.GovModelID = *body.GovModelID
-	}
-	if body.GovModelCredentialID != nil {
-		cur.GovModelCredentialID = *body.GovModelCredentialID
-	}
-
-	// Coherence: a provider needs a model, and a credential without a provider
-	// is meaningless. Enforce on the MERGED row so a partial update that leaves
-	// the config half-set is rejected rather than silently producing a broken
-	// (and then degraded) evaluator.
-	if cur.GovModelProvider != "" && cur.GovModelID == "" {
-		replyError(w, http.StatusBadRequest, "gov_model_id is required when gov_model_provider is set")
+	cur, err = mergeGovernancePatch(cur, body)
+	if err != nil {
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if cur.GovModelCredentialID != "" && cur.GovModelProvider == "" {
-		replyError(w, http.StatusBadRequest, "gov_model_provider is required when gov_model_credential_id is set")
+	if status, msg := checkGovernanceRefs(r.Context(), h.db, wsID, body, cur); status != 0 {
+		if status == http.StatusInternalServerError {
+			h.logger.Error("keeper governance: reference check", "error", msg)
+			msg = "internal error"
+		}
+		replyError(w, status, msg)
 		return
-	}
-
-	// The governance-model credential must be a usable ENDPOINT_URL / API_KEY
-	// credential in this workspace. Validate ONLY when this request sets it
-	// (body.GovModelCredentialID != nil and non-empty) — an unrelated partial
-	// update must not be blocked because a previously-stored credential was
-	// since revoked (the resolver's revoke-safety handles that at build time).
-	if body.GovModelCredentialID != nil && cur.GovModelCredentialID != "" {
-		var credType string
-		err := h.db.QueryRowContext(r.Context(), `
-			SELECT type FROM credentials
-			WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-			cur.GovModelCredentialID, wsID).Scan(&credType)
-		if errors.Is(err, sql.ErrNoRows) {
-			replyError(w, http.StatusBadRequest, "gov_model_credential_id is not a credential in this workspace")
-			return
-		}
-		if err != nil {
-			h.logger.Error("keeper governance: gov model credential lookup", "error", err)
-			replyError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-		if credType != governance.CredTypeEndpointURL && credType != governance.CredTypeAPIKey {
-			replyError(w, http.StatusBadRequest, "gov_model_credential_id must reference an ENDPOINT_URL or API_KEY credential")
-			return
-		}
-	}
-
-	// The security contact must be an OWNER/ADMIN member of this workspace —
-	// snitching to someone who can't act on (or shouldn't see) escalations
-	// is a config foot-gun, so reject it at write time. Validate ONLY when this
-	// request is setting/changing the contact (body.SecurityContactUserID != nil):
-	// an unrelated partial update (e.g. watch_spec/presets) must not be blocked
-	// because a previously-stored contact was demoted since it was last validated.
-	if body.SecurityContactUserID != nil && cur.SecurityContactUserID != "" {
-		var role string
-		err := h.db.QueryRowContext(r.Context(), `
-			SELECT role FROM workspace_members
-			WHERE workspace_id = ? AND user_id = ?`,
-			wsID, cur.SecurityContactUserID).Scan(&role)
-		if errors.Is(err, sql.ErrNoRows) {
-			replyError(w, http.StatusBadRequest, "security contact is not a member of this workspace")
-			return
-		}
-		if err != nil {
-			h.logger.Error("keeper governance: contact lookup", "error", err)
-			replyError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-		if role != "OWNER" && role != "ADMIN" {
-			replyError(w, http.StatusBadRequest, "security contact must have OWNER or ADMIN role")
-			return
-		}
 	}
 
 	actor := ""
@@ -399,11 +250,179 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("keeper governance: journal emit failed", "error", jerr)
 	}
 
-	// Non-blocking advisories. Collected rather than assigned so one save that
-	// trips two of them reports both — the previous single-slot version would
-	// have dropped whichever ran second.
-	var warnings []string
+	warnings := governanceWarnings(r.Context(), h.db, h.logger, wsID, body)
 
+	writeJSON(w, http.StatusOK, keeperGovernanceResponse{
+		Configured:              true,
+		Settings:                s,
+		EffectiveSecondApprover: resolveEffectiveSecondApprover(s),
+		Warning:                 strings.Join(warnings, " "),
+	})
+}
+
+// mergeGovernancePatch applies a partial update onto cur and validates the
+// result: the bounds of every field, then the coherence of the merged row.
+// It is the one validation both the workspace route and the instance route
+// (one, several or all workspaces) run, so the two cannot drift. The error is
+// the 400 message.
+func mergeGovernancePatch(cur governance.Settings, body keeperGovernancePutBody) (governance.Settings, error) {
+	if body.Enabled != nil {
+		cur.Enabled = *body.Enabled
+	}
+	if body.DenyNotifyMinRisk != nil {
+		if *body.DenyNotifyMinRisk < 1 || *body.DenyNotifyMinRisk > 10 {
+			return cur, errors.New("deny_notify_min_risk must be between 1 and 10")
+		}
+		cur.DenyNotifyMinRisk = *body.DenyNotifyMinRisk
+	}
+	if body.SecurityContactUserID != nil {
+		cur.SecurityContactUserID = *body.SecurityContactUserID
+	}
+	if body.WatchSpec != nil {
+		// Cap server-side so the DB row and the compiled prompt block stay
+		// bounded regardless of what the CLI/UI send.
+		if len(*body.WatchSpec) > governance.MaxWatchSpecLen {
+			return cur, errors.New("watch_spec exceeds the maximum length")
+		}
+		cur.WatchSpec = *body.WatchSpec
+	}
+	if body.WatchPresets != nil {
+		if err := governance.ValidatePresets(*body.WatchPresets); err != nil {
+			return cur, err
+		}
+		cur.WatchPresets = *body.WatchPresets
+	}
+	if body.RequireSecondApprover != nil {
+		cur.RequireSecondApprover = *body.RequireSecondApprover
+	}
+	if body.AutoLeaseSeconds != nil {
+		// Reject rather than silently clamp on the API boundary: an operator who
+		// asks for a 10-second lease has misunderstood the control, and returning
+		// 200 with a quietly-rewritten 60s would hide that. governance.Upsert still
+		// clamps as a last-resort invariant for non-HTTP writers.
+		v := *body.AutoLeaseSeconds
+		if v < 0 {
+			return cur, errors.New("auto_lease_seconds must not be negative")
+		}
+		if v > 0 && v < governance.MinAutoLeaseSeconds {
+			return cur, errors.New("auto_lease_seconds must be 0 (off) or at least 60 — a shorter lease can lapse inside the gatekeeper's own evaluation")
+		}
+		if v > governance.MaxAutoLeaseSeconds {
+			return cur, errors.New("auto_lease_seconds exceeds the maximum lease of 30 days")
+		}
+		cur.AutoLeaseSeconds = v
+	}
+	if body.BehaviorSampleEvery != nil {
+		v := *body.BehaviorSampleEvery
+		// 0 gets its own message. It is the value an operator reaches for when
+		// they mean "stop reviewing", and it is the one number that must not do
+		// that here: the hook treats a cadence <= 0 as "never fire", so the row
+		// would say the watchdog is enabled while nothing was ever evaluated.
+		// Point at the control that actually turns it off.
+		if v == 0 {
+			return cur, errors.New("behavior_sample_every cannot be 0 — that would leave the watchdog enabled but never sampling. " +
+				"Turn the watchdog off with `crewship keeper disable` instead.")
+		}
+		if v < governance.MinBehaviorSampleEvery || v > governance.MaxBehaviorSampleEvery {
+			return cur, fmt.Errorf(
+				"behavior_sample_every must be between %d and %d (review every Nth tool call) — "+
+					"below %d there is no cadence to run, and above %d the monitor would never fire "+
+					"within a typical run",
+				governance.MinBehaviorSampleEvery, governance.MaxBehaviorSampleEvery,
+				governance.MinBehaviorSampleEvery, governance.MaxBehaviorSampleEvery)
+		}
+		cur.BehaviorSampleEvery = v
+	}
+	if body.GovModelProvider != nil {
+		// Empty is allowed and means "use the server/env default". A non-empty
+		// value must be one the resolver actually understands — validate against
+		// the same set governance.ResolveGovModel trusts so the two can't drift.
+		if *body.GovModelProvider != "" && !governance.KnownGovProvider(*body.GovModelProvider) {
+			return cur, errors.New("gov_model_provider must be one of: ollama, anthropic, openai_compat")
+		}
+		cur.GovModelProvider = *body.GovModelProvider
+	}
+	if body.GovModelID != nil {
+		if len(*body.GovModelID) > governance.MaxGovModelIDLen {
+			return cur, errors.New("gov_model_id exceeds the maximum length")
+		}
+		cur.GovModelID = *body.GovModelID
+	}
+	if body.GovModelCredentialID != nil {
+		cur.GovModelCredentialID = *body.GovModelCredentialID
+	}
+
+	// Coherence: a provider needs a model, and a credential without a provider
+	// is meaningless. Enforce on the MERGED row so a partial update that leaves
+	// the config half-set is rejected rather than silently producing a broken
+	// (and then degraded) evaluator.
+	if cur.GovModelProvider != "" && cur.GovModelID == "" {
+		return cur, errors.New("gov_model_id is required when gov_model_provider is set")
+	}
+	if cur.GovModelCredentialID != "" && cur.GovModelProvider == "" {
+		return cur, errors.New("gov_model_provider is required when gov_model_credential_id is set")
+	}
+
+	return cur, nil
+}
+
+// checkGovernanceRefs validates what the patch points at inside the workspace:
+// the governance-model credential and the security contact. It returns 0 when
+// both are fine, else the status and message (for a 500, the message is the
+// cause, for the log).
+func checkGovernanceRefs(ctx context.Context, db *sql.DB, wsID string, body keeperGovernancePutBody, cur governance.Settings) (int, string) {
+	// The governance-model credential must be a usable ENDPOINT_URL / API_KEY
+	// credential in this workspace. Validate ONLY when this request sets it
+	// (body.GovModelCredentialID != nil and non-empty) — an unrelated partial
+	// update must not be blocked because a previously-stored credential was
+	// since revoked (the resolver's revoke-safety handles that at build time).
+	if body.GovModelCredentialID != nil && cur.GovModelCredentialID != "" {
+		var credType string
+		err := db.QueryRowContext(ctx, `
+			SELECT type FROM credentials
+			WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+			cur.GovModelCredentialID, wsID).Scan(&credType)
+		if errors.Is(err, sql.ErrNoRows) {
+			return http.StatusBadRequest, "gov_model_credential_id is not a credential in this workspace"
+		}
+		if err != nil {
+			return http.StatusInternalServerError, fmt.Sprintf("%s: %v", "keeper governance: gov model credential lookup", err)
+		}
+		if credType != governance.CredTypeEndpointURL && credType != governance.CredTypeAPIKey {
+			return http.StatusBadRequest, "gov_model_credential_id must reference an ENDPOINT_URL or API_KEY credential"
+		}
+	}
+
+	// The security contact must be an OWNER/ADMIN member of this workspace —
+	// snitching to someone who can't act on (or shouldn't see) escalations
+	// is a config foot-gun, so reject it at write time. Validate ONLY when this
+	// request is setting/changing the contact (body.SecurityContactUserID != nil):
+	// an unrelated partial update (e.g. watch_spec/presets) must not be blocked
+	// because a previously-stored contact was demoted since it was last validated.
+	if body.SecurityContactUserID != nil && cur.SecurityContactUserID != "" {
+		var role string
+		err := db.QueryRowContext(ctx, `
+			SELECT role FROM workspace_members
+			WHERE workspace_id = ? AND user_id = ?`,
+			wsID, cur.SecurityContactUserID).Scan(&role)
+		if errors.Is(err, sql.ErrNoRows) {
+			return http.StatusBadRequest, "security contact is not a member of this workspace"
+		}
+		if err != nil {
+			return http.StatusInternalServerError, fmt.Sprintf("%s: %v", "keeper governance: contact lookup", err)
+		}
+		if role != "OWNER" && role != "ADMIN" {
+			return http.StatusBadRequest, "security contact must have OWNER or ADMIN role"
+		}
+	}
+
+	return 0, ""
+}
+
+// governanceWarnings are the non-blocking advisories a save returns. Collected
+// rather than assigned so one save that trips two of them reports both.
+func governanceWarnings(ctx context.Context, db *sql.DB, logger *slog.Logger, wsID string, body keeperGovernancePutBody) []string {
+	var warnings []string
 	// A cadence this tight is a legitimate posture and a real bill: at every
 	// other call or tighter, most of what the workspace's agents do carries a
 	// governance-model round-trip. Say so; do not refuse it.
@@ -422,22 +441,17 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 	// advisory, not a 4xx.
 	if body.RequireSecondApprover != nil && *body.RequireSecondApprover {
 		var eligible int
-		if err := h.db.QueryRowContext(r.Context(), `
+		if err := db.QueryRowContext(ctx, `
 			SELECT COUNT(*) FROM workspace_members
 			WHERE workspace_id = ? AND role IN ('OWNER','ADMIN','MANAGER')`,
 			wsID).Scan(&eligible); err != nil {
-			h.logger.Warn("keeper governance: eligible-approver count failed", "error", err)
+			logger.Warn("keeper governance: eligible-approver count failed", "error", err)
 		} else if eligible < 2 {
 			warnings = append(warnings, "second-approver is enabled, but this workspace has fewer than 2 members who can approve escalations (OWNER/ADMIN/MANAGER). A credential raised via the only eligible member's agent cannot be resolved by anyone else — add another OWNER/ADMIN/MANAGER.")
-			h.logger.Warn("keeper governance: second-approver enabled with <2 eligible approvers",
+			logger.Warn("keeper governance: second-approver enabled with <2 eligible approvers",
 				"workspace_id", wsID, "eligible", eligible)
 		}
 	}
 
-	writeJSON(w, http.StatusOK, keeperGovernanceResponse{
-		Configured:              true,
-		Settings:                s,
-		EffectiveSecondApprover: resolveEffectiveSecondApprover(s),
-		Warning:                 strings.Join(warnings, " "),
-	})
+	return warnings
 }

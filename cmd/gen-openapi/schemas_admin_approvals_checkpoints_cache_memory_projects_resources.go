@@ -239,6 +239,30 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 			"revision": str(), "updated_at": str(), "history_path": str(),
 		}, "id", "name", "scope", "state", "bytes")),
 	}, "source", "peer_generation", "scopes", "documents")
+	// Admin › Security across workspaces (admin_instance_keeper.go).
+	instanceWsRef := map[string]any{"workspace_id": str(), "workspace_name": str(), "workspace_slug": str()}
+	instanceWsRequired := []string{"workspace_id", "workspace_name", "workspace_slug"}
+	instanceGovSettings := map[string]any{
+		"enabled": boolean(), "security_contact_user_id": str(), "deny_notify_min_risk": integer(),
+		"watch_spec": str(), "watch_presets": stringArray(), "require_second_approver": boolean(),
+		"gov_model_provider": str(), "gov_model_id": str(), "gov_model_credential_id": str(),
+		"auto_lease_seconds": integer(), "behavior_sample_every": integer(),
+	}
+	instanceGovPatch := map[string]any{
+		"enabled": boolean(), "security_contact_user_id": str(), "deny_notify_min_risk": integer(),
+		"watch_spec": str(), "watch_presets": stringArray(), "require_second_approver": boolean(),
+		"gov_model_provider": str(), "gov_model_id": str(), "gov_model_credential_id": str(),
+		"auto_lease_seconds": integer(), "behavior_sample_every": integer(),
+	}
+	withProps := func(maps ...map[string]any) map[string]any {
+		out := map[string]any{}
+		for _, m := range maps {
+			for k, v := range m {
+				out[k] = v
+			}
+		}
+		return out
+	}
 	return map[string]DomainSchema{
 		"GET /api/v1/admin/stats":      {Response: stats},
 		"GET /api/v1/admin/users":      {Response: array(adminUser), SuccessHeaders: adminScopeHeader},
@@ -277,6 +301,42 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 				"workspace_id", "owner_user_id", "previous_owner_user_ids")},
 		"DELETE /api/v1/admin/instance/workspaces/{workspaceId}": {SuccessStatuses: []string{"204"},
 			Request: object(map[string]any{"confirm_slug": str()}, "confirm_slug")},
+		"GET /api/v1/admin/instance/keeper/governance": {Response: object(map[string]any{
+			"defaults":   object(withProps(instanceGovSettings, map[string]any{"configured": boolean()}), "configured", "enabled"),
+			"workspaces": array(object(withProps(instanceGovSettings, map[string]any{"configured": boolean(), "effective_second_approver": anyObject()}, instanceWsRef), append([]string{"configured", "enabled"}, instanceWsRequired...)...)),
+		}, "defaults", "workspaces")},
+		"PUT /api/v1/admin/instance/keeper/governance": {
+			Request: object(map[string]any{
+				"workspaces": stringArray(), "all": boolean(), "dry_run": boolean(),
+				"set": object(instanceGovPatch),
+			}, "set"),
+			Response: object(map[string]any{
+				"applied": boolean(), "changed": integer(), "defaults_updated": boolean(),
+				"workspaces": array(object(withProps(instanceWsRef, map[string]any{
+					"changes":  array(object(map[string]any{"field": str(), "before": map[string]any{}, "after": map[string]any{}}, "field", "before", "after")),
+					"warnings": stringArray(),
+				}), append([]string{"changes"}, instanceWsRequired...)...)),
+			}, "applied", "changed", "defaults_updated", "workspaces")},
+		"GET /api/v1/admin/instance/keeper/requests": {Response: object(map[string]any{
+			"items": array(object(withProps(map[string]any{
+				"id": str(), "agent_id": str(), "agent_name": str(), "crew_id": str(), "credential_id": str(), "credential_name": str(),
+				"intent": str(), "request_type": str(), "command": nullable(str()), "decision": nullable(str()), "reason": nullable(str()),
+				"risk_score": nullable(integer()), "exit_code": nullable(integer()), "ollama_prompt": nullable(str()), "ollama_raw_response": nullable(str()),
+				"created_at": str(), "decided_at": nullable(str()), "judge_profile": nullable(str()),
+			}, map[string]any{"workspace_id": str(), "workspace_name": str()}), "id", "agent_id", "request_type", "created_at", "workspace_id", "workspace_name")),
+			"total":        integer(),
+			"counts":       object(map[string]any{"allow": integer(), "deny": integer(), "escalate": integer(), "pending": integer()}, "allow", "deny", "escalate", "pending"),
+			"by_workspace": array(object(withProps(instanceWsRef, map[string]any{"count": integer()}), append([]string{"count"}, instanceWsRequired...)...)),
+		}, "items", "total", "counts", "by_workspace")},
+		"GET /api/v1/admin/instance/keeper/health": {Response: object(map[string]any{
+			"workspaces": array(object(map[string]any{
+				"workspace_id": str(), "workspace_name": str(), "workspace_slug": str(),
+				"samples": integer(), "allow": integer(), "deny": integer(), "escalate": integer(), "judge_failures": integer(),
+				"allow_rate": number(), "deny_rate": number(), "escalate_rate": number(), "progressed_rate": number(), "judge_failure_rate": number(),
+				"p95_latency_ms": integer(), "min_samples": integer(), "alarm_progressed_rate": number(), "alarm_judge_failure_rate": number(),
+				"alarm": nullable(object(map[string]any{"kind": str(), "summary": str(), "at": str()})), "oldest": str(), "newest": str(),
+			}, "workspace_id", "workspace_name", "samples", "min_samples")),
+		}, "workspaces")},
 		"GET /api/v1/admin/instance/audit": {Response: array(object(map[string]any{
 			"id": str(), "user_id": nullable(str()), "user_email": nullable(str()), "action": str(), "entity_type": str(),
 			"entity_id": nullable(str()), "target_workspace_id": nullable(str()), "metadata": str(), "created_at": str(),

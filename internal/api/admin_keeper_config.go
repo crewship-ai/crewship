@@ -159,7 +159,7 @@ func redactEndpointUserinfo(raw string) string {
 // Get returns the effective judge configuration with per-field provenance.
 // GET /api/v1/admin/keeper/config
 func (h *AdminKeeperConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}

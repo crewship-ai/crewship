@@ -46,12 +46,15 @@ beforeEach(() => {
 })
 
 describe("admin cards are workspace-scoped", () => {
+  // The decision log left this hook for the instance routes, which cover
+  // every workspace (use-instance-keeper.ts); what stays is server-wide state
+  // read through the admin's own workspace.
   it("the Security page asks within a workspace, every time", async () => {
     render(<SecurityReads workspaceId="ws-1" />)
-    await waitFor(() => expect(h.apiFetch).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(h.apiFetch).toHaveBeenCalledTimes(2))
     for (const [url] of h.apiFetch.mock.calls) expect(String(url)).toContain("workspace_id=ws-1")
     expect(h.apiFetch.mock.calls.map(([u]) => String(u).split("?")[0]).sort()).toEqual([
-      "/api/v1/admin/keeper/requests", "/api/v1/admin/security-posture", "/api/v1/system/keeper",
+      "/api/v1/admin/security-posture", "/api/v1/system/keeper",
     ])
   })
 

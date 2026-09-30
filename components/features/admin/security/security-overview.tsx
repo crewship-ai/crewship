@@ -10,6 +10,7 @@ import { KeeperHealthCard } from "@/components/features/admin/keeper-health-card
 import { FINDING_ACTIONS } from "@/app/(dashboard)/admin/tabs/overview-tab"
 import type { KeeperLogEntry, KeeperStatus } from "@/app/(dashboard)/admin/types"
 import { DecisionChip } from "./security-activity"
+import type { InstanceHealthRow } from "./use-instance-keeper"
 import { STREAMS, findings, firstSentence, judgeState, setupRows, streamOf, type Posture, type Tone } from "./security-model"
 
 const DOT: Record<Tone, string> = { ok: "bg-success", warn: "bg-warn", bad: "bg-destructive", muted: "bg-muted-foreground/50" }
@@ -21,17 +22,23 @@ const SUMMARY_TONE: Record<Tone, "success" | "warn" | "danger" | undefined> = { 
  * deploy-time setup read-only, the judge's recent record, and the last few
  * events. Everything else is one click away in the side panel.
  */
-export function SecurityOverview({ status, posture, postureError, entries, workspaceId, onOpenActivity }: {
+export function SecurityOverview({ status, posture, postureError, entries, workspaceId, onOpenActivity, counts, health }: {
   workspaceId: string
   status: KeeperStatus | null
   posture: Posture | null
   postureError: string | null
   entries: KeeperLogEntry[]
   onOpenActivity: () => void
+  /** Totals over the ticked workspaces (the instance log). Without them the
+   *  line falls back to the Keeper status counts. */
+  counts?: { total: number; allow: number; deny: number; escalate: number; pending: number }
+  /** Decision windows of the ticked workspaces. Without them, the current
+   *  workspace's health card. */
+  health?: InstanceHealthRow[]
 }) {
   const judge = judgeState(status)
   const list = findings(posture, status, FINDING_ACTIONS)
-  const waiting = entries.filter((e) => e.decision === "ESCALATE" || e.decision === "PENDING").length
+  const waiting = counts ? counts.escalate + counts.pending : entries.filter((e) => e.decision === "ESCALATE" || e.decision === "PENDING").length
   const recent = entries.slice(0, 5)
 
   return (
@@ -39,7 +46,9 @@ export function SecurityOverview({ status, posture, postureError, entries, works
       <SettingsSummary slot="security-summary">
         <SummaryItem tone={status ? (status.enabled ? "success" : "danger") : undefined}>{status ? (status.enabled ? "Keeper on" : "Keeper off") : "Keeper status unknown"}</SummaryItem>
         {status?.enabled && <SummaryItem tone={SUMMARY_TONE[judge.tone]}>{judge.text}</SummaryItem>}
-        {status && <SummaryItem n={status.total_requests}>{`requests · ${status.allow_count} allowed · ${status.deny_count} denied`}</SummaryItem>}
+        {counts
+          ? <SummaryItem n={counts.total}>{`requests · ${counts.allow} allowed · ${counts.deny} denied`}</SummaryItem>
+          : status && <SummaryItem n={status.total_requests}>{`requests · ${status.allow_count} allowed · ${status.deny_count} denied`}</SummaryItem>}
         <SummaryItem n={waiting} tone={waiting ? "warn" : undefined}>waiting for a person</SummaryItem>
       </SettingsSummary>
 
@@ -85,7 +94,7 @@ export function SecurityOverview({ status, posture, postureError, entries, works
         )}
       </SettingsCard>
 
-      <KeeperHealthCard workspaceId={workspaceId} />
+      {health ? <InstanceHealthCard rows={health} /> : <KeeperHealthCard workspaceId={workspaceId} />}
 
       <SettingsCard icon={ActivityIcon} tint="var(--primary)" title="Recent activity" description="Credential decisions and background reviews"
         actions={<button type="button" onClick={onOpenActivity} className="inline-flex items-center gap-1 text-[12px] text-primary-hover hover:underline">All activity<ChevronRight className="h-3 w-3" /></button>}>
@@ -95,6 +104,7 @@ export function SecurityOverview({ status, posture, postureError, entries, works
           <div key={e.id} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0">
             <div className="min-w-0 flex-1">
               <div className="truncate text-[13px]">
+                {e.workspace_name && <span className="mr-1.5 text-muted-foreground">{e.workspace_name} ·</span>}
                 {e.agent_name} <span className="text-muted-foreground">→</span>{" "}
                 <span className={cn(streamOf(e) === "requests" && "font-mono text-[12px]")}>
                   {streamOf(e) === "requests" ? e.credential_name : STREAMS.find((s) => s.key === streamOf(e))?.label}
@@ -107,5 +117,57 @@ export function SecurityOverview({ status, posture, postureError, entries, works
         ))}
       </SettingsCard>
     </>
+  )
+}
+
+/**
+ * How the judge has been deciding, per ticked workspace: its recent window,
+ * how much of it let work go on, how often the judge failed, and any standing
+ * alarm. Below the sample minimum there is too little to judge, which is not
+ * the same as healthy, and the row says so.
+ */
+function InstanceHealthCard({ rows }: { rows: InstanceHealthRow[] }) {
+  const alarms = rows.filter((r) => r.alarm).length
+  return (
+    <SettingsCard icon={ActivityIcon} tint={alarms ? "var(--destructive)" : "var(--success)"} title="Judge health"
+      description={alarms ? `${alarms} workspace${alarms === 1 ? "" : "s"} with a standing alarm` : "Recent decision window per workspace"}>
+      {rows.length === 0 ? (
+        <p className="px-4 py-3 text-[12px] text-muted-foreground">No workspace ticked.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12.5px]">
+            <thead className="border-b border-border text-left text-[11px] text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2 font-medium">Workspace</th>
+                <th className="px-3 py-2 text-right font-medium">Decisions</th>
+                <th className="px-3 py-2 text-right font-medium">Work went on</th>
+                <th className="px-3 py-2 text-right font-medium">Judge failed</th>
+                <th className="px-3 py-2 text-right font-medium">p95</th>
+                <th className="px-4 py-2 font-medium">State</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const thin = r.samples < r.min_samples
+                return (
+                  <tr key={r.workspace_id} className="border-b border-border last:border-b-0">
+                    <td className="px-4 py-2">{r.workspace_name}</td>
+                    <td className="px-3 py-2 text-right font-mono text-[11.5px]">{r.samples}</td>
+                    <td className="px-3 py-2 text-right font-mono text-[11.5px]">{thin ? "—" : `${Math.round(r.progressed_rate * 100)} %`}</td>
+                    <td className="px-3 py-2 text-right font-mono text-[11.5px]">{thin ? "—" : `${Math.round(r.judge_failure_rate * 100)} %`}</td>
+                    <td className="px-3 py-2 text-right font-mono text-[11.5px]">{r.samples ? `${r.p95_latency_ms} ms` : "—"}</td>
+                    <td className="px-4 py-2">
+                      {r.alarm
+                        ? <span className="text-destructive">{r.alarm.summary}</span>
+                        : <span className="text-muted-foreground">{thin ? `too few decisions (${r.min_samples} needed)` : "no alarm"}</span>}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </SettingsCard>
   )
 }

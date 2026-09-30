@@ -50,6 +50,8 @@ export function SecurityActivity({ entries, stream, onStream, live, error }: {
   const rows = filterActivity(entries, stream, decision)
   const count = (d: string) => inStream.filter((e) => (e.decision ?? "PENDING") === d).length
   const meta = STREAMS.find((s) => s.key === stream)
+  // Rows from the instance log carry their workspace; show it.
+  const byWorkspace = entries.some((e) => !!e.workspace_name)
 
   return (
     <>
@@ -81,6 +83,7 @@ export function SecurityActivity({ entries, stream, onStream, live, error }: {
             <thead className="border-b border-border">
               <tr className="text-left text-[11px] text-muted-foreground">
                 <th className="px-3 py-2 font-medium">When</th>
+                {byWorkspace && <th className="px-3 py-2 font-medium">Workspace</th>}
                 <th className="px-3 py-2 font-medium">Agent</th>
                 <th className="px-3 py-2 font-medium">About</th>
                 <th className="px-3 py-2 font-medium">Decision</th>
@@ -92,6 +95,7 @@ export function SecurityActivity({ entries, stream, onStream, live, error }: {
                 <tr key={e.id} tabIndex={0} onClick={() => setOpen(e)} onKeyDown={(k) => { if (k.key === "Enter") setOpen(e) }}
                   className="cursor-pointer border-b border-border last:border-b-0 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none" data-entry={e.id}>
                   <td className="whitespace-nowrap px-3 py-2.5 font-mono text-[11px] text-muted-foreground">{when(e.created_at)}</td>
+                  {byWorkspace && <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">{e.workspace_name}</td>}
                   <td className="px-3 py-2.5">{e.agent_name}</td>
                   <td className="px-3 py-2.5">
                     <span className={cn(streamOf(e) === "requests" && "font-mono text-[12px]")}>{subject(e)}</span>
@@ -102,7 +106,7 @@ export function SecurityActivity({ entries, stream, onStream, live, error }: {
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={5} className="px-3 py-8 text-center text-[12px] text-muted-foreground">
+                <tr><td colSpan={byWorkspace ? 6 : 5} className="px-3 py-8 text-center text-[12px] text-muted-foreground">
                   {inStream.length === 0 && stream !== "requests" && stream !== "all"
                     ? "Nothing recorded yet. These reviews run on a schedule, and behaviour only while the watchdog is on."
                     : "Nothing matches."}

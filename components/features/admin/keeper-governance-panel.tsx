@@ -49,6 +49,7 @@ import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
 import { apiFetch } from "@/lib/api-fetch"
 import { providerDefaultModel, providerModels } from "@/lib/model-catalog"
 import { adminFetch } from "@/lib/admin-api"
+import { saveInstanceGovernance, type InstanceGovRow, type InstanceGovSettings } from "@/components/features/admin/security/use-instance-keeper"
 import { cn } from "@/lib/utils"
 
 interface GovernanceResponse {
@@ -321,22 +322,32 @@ export interface KeeperGovernancePanelProps {
   /** One card at a time for Admin › Security, which gives each its own
    *  section: "watchdog", "alerts" (findings & routing), "leases". */
   section?: "judge" | "policy" | "watchdog" | "alerts" | "leases"
+  /**
+   * Admin › Security across workspaces: edit this workspace's row through the
+   * instance route, which reaches a workspace the admin is not a member of.
+   * The row comes from the instance list, so there is nothing to load, and a
+   * save refreshes that list.
+   */
+  instance?: { row: InstanceGovRow; onSaved?: () => void }
 }
 
 /** Shape shared by every card: commit a partial governance update. */
 type PutGovernance = (body: Record<string, unknown>) => Promise<GovernanceResponse>
 
 export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
-  workspaceId,
+  workspaceId: workspaceProp,
   serverEnabled,
   section = "policy",
+  instance,
 }: KeeperGovernancePanelProps) {
+  const workspaceId = instance ? instance.row.workspace_id : workspaceProp
   // Mirrors AgentLearningToggle: derive edit rights from CASL. The PUT is
   // roleManage (OWNER/ADMIN) server-side; only those roles get "manage" on
   // Workspace, so this lines up exactly. Server stays authoritative — the
   // greyed-out UI is a UX hint, not a security boundary.
   const { abilities } = useAbilities()
-  const canEdit = useMemo(() => abilities.can("manage", "Workspace"), [abilities])
+  // An instance admin edits any workspace; the server gates the route.
+  const canEdit = useMemo(() => !!instance || abilities.can("manage", "Workspace"), [abilities, instance])
 
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -360,9 +371,11 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
     setErr(null)
     try {
       const [govRes, membersRes] = await Promise.all([
-        adminFetch("/api/v1/admin/keeper/governance", workspaceId,
-          { signal },
-        ),
+        instance
+          ? Promise.resolve(new Response(JSON.stringify(instance.row), { status: 200 }))
+          : adminFetch("/api/v1/admin/keeper/governance", workspaceId,
+            { signal },
+          ),
         apiFetch(
           `/api/v1/workspaces/${workspaceId}/members?workspace_id=${encodeURIComponent(workspaceId)}`,
           { signal },
@@ -396,7 +409,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
     } finally {
       if (!signal?.aborted) setLoading(false)
     }
-  }, [workspaceId])
+  }, [workspaceId, instance])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -409,6 +422,14 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
   // silently discard what someone typed into a security control.
   const put = useCallback<PutGovernance>(async (body) => {
     if (!workspaceId) throw new Error("No workspace selected")
+    if (instance) {
+      const r = await saveInstanceGovernance({ workspaces: [workspaceId] }, body as Partial<InstanceGovSettings>)
+      const next = { ...(gov ?? instance.row), ...body, configured: true } as GovernanceResponse
+      setGov(next)
+      for (const w of r.workspaces) for (const warn of w.warnings ?? []) toast.warning(warn)
+      instance.onSaved?.()
+      return next
+    }
     const res = await adminFetch("/api/v1/admin/keeper/governance", workspaceId,
       {
         method: "PUT",
@@ -432,7 +453,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
     // eligible approver) is a warning toast, not an error — the save succeeded.
     if (next.warning) toast.warning(next.warning)
     return next
-  }, [workspaceId])
+  }, [workspaceId, instance, gov])
 
   if (!workspaceId) return null
 
