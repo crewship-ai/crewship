@@ -57,7 +57,7 @@ func newContextCommand() *cobra.Command {
 	preflight.Flags().Bool("claim", false, "Explicitly claim this assigned issue and enqueue its private preflight")
 	runs := &cobra.Command{Use: "routine-runs", Short: "Your private routine receipts and exact authorized results"}
 	runs.AddCommand(contextLeaf("list", "runs-list", 0), contextLeaf("result <run-id>", "runs-result", 1))
-	root.AddCommand(chat, project, profile, preflight, runs, contextLeaf("routines", "routines-list", 0))
+	root.AddCommand(chat, project, profile, preflight, runs, contextLeaf("routines", "routines-list", 0), contextLeaf("pages", "pages-list", 0))
 	return root
 }
 
@@ -141,6 +141,8 @@ func executeContextCommand(cmd *cobra.Command, client *cli.Client, action string
 		endpoint = "/api/v1/chats/" + first + "/restricted-run"
 		body = map[string]any{"content": args[1]}
 		stream = true
+	case "pages-list":
+		endpoint = "/api/v1/workspaces/" + workspace + "/restricted-pages"
 	case "routines-list":
 		endpoint = "/api/v1/workspaces/" + workspace + "/restricted-routines"
 	case "project-list":

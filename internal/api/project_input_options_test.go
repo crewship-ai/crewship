@@ -90,6 +90,34 @@ func TestProjectInputOptionsExactHumansCurrentSourceAndNativeProfile(t *testing.
 	}
 	assertOwn("picker-h1")
 	assertOwn("picker-h2")
+	for _, tc := range []struct {
+		name, header string
+		status       int
+	}{
+		{"missing workspace", "", 400},
+		{"workspace header", workspace, 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/chats/picker-h1-chat/project-input-options", nil)
+			req.Header.Set("Authorization", "Bearer "+tokens["picker-h1"])
+			if tc.header != "" {
+				req.Header.Set("X-Workspace-ID", tc.header)
+			}
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != tc.status {
+				t.Fatalf("workspace transport %d %s", rec.Code, rec.Body.String())
+			}
+			if tc.status == 200 {
+				var response ProjectInputOptionsResponse
+				if json.Unmarshal(rec.Body.Bytes(), &response) != nil || len(response.Files) != 1 || response.Files[0].ID != versions["picker-h1"].ID {
+					t.Fatal("header widened or lost exact source projection")
+				}
+			} else if strings.Contains(rec.Body.String(), "FILE_CANARY") {
+				t.Fatal("missing workspace exposed source metadata")
+			}
+		})
+	}
 	if rec := request("picker-h2", "picker-h1-chat", ""); rec.Code != 404 || strings.Contains(rec.Body.String(), "FILE_CANARY") {
 		t.Fatalf("foreign chat options %d %s", rec.Code, rec.Body.String())
 	}

@@ -10829,6 +10829,121 @@
         ],
         "type": "object"
       },
+      "RestrictedPage": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/RestrictedPageAction"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "publication": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "actions"
+        ],
+        "type": "object"
+      },
+      "RestrictedPageAction": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "$ref": "#/components/schemas/RestrictedPageConfirmation"
+          },
+          "id": {
+            "type": "string"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/RestrictedPageInput"
+            },
+            "type": "array"
+          },
+          "label": {
+            "type": "string"
+          },
+          "panel_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "panel_id",
+          "id",
+          "label",
+          "inputs"
+        ],
+        "type": "object"
+      },
+      "RestrictedPageConfirmation": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "cancel_label": {
+            "type": "string"
+          },
+          "confirm_label": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "body"
+        ],
+        "type": "object"
+      },
+      "RestrictedPageInput": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "type": {
+            "enum": [
+              "text",
+              "textarea",
+              "number",
+              "boolean",
+              "select"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "required"
+        ],
+        "type": "object"
+      },
       "RestrictedPageWorkflowReceipt": {
         "additionalProperties": false,
         "properties": {
@@ -39560,7 +39675,7 @@
             }
           },
           {
-            "description": "Workspace ID or slug.",
+            "description": "Workspace selector when workspace_id query is absent.",
             "in": "header",
             "name": "X-Workspace-ID",
             "required": false,
@@ -39569,9 +39684,10 @@
             }
           },
           {
+            "description": "Workspace selector; required unless X-Workspace-ID supplies it.",
             "in": "query",
             "name": "workspace_id",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -132939,6 +133055,176 @@
               }
             },
             "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/restricted-pages": {
+      "get": {
+        "operationId": "get_api_v1_workspaces_workspaceId_restricted-pages",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RestrictedPage"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "X-Total-Count": {
+                "description": "Number of Pages with currently authorized executable actions",
+                "schema": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [

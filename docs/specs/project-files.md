@@ -199,12 +199,13 @@ GET /api/v1/chats/{chatId}/project-input-options
 Auth: the authenticated restricted principal's own private chat, current native
 profile and agent.chat; every returned source independently requires current
 project.read. A broad workspace, agent assignment or chat grant is insufficient.
-Request: chat path parameter, required `workspace_id` query parameter, optional
+Request: chat path parameter and workspace selector via `workspace_id` query or
+`X-Workspace-ID` header (query takes precedence), optional
 `search` query substring of filename/project name up to 128 UTF-8 bytes; no body.
 Response: `200 application/json`, `{"files":[option_metadata],"has_more":boolean}`.
 Each option contains all version metadata fields and `project_name`; at most 100
 matches are returned. `has_more` asks the user to narrow the search. No source
 bytes, uploader identity or attempt admission are included.
-Statuses: `200` success, `400` oversized search, `401` unauthenticated,
+Statuses: `200` success, `400` missing workspace or oversized search, `401` unauthenticated,
 `403` workspace/token ceiling, `404` unavailable chat/native profile/authority,
 `503` projection/database unavailable, `500` middleware failure.

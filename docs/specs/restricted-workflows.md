@@ -47,3 +47,7 @@ Authentication requires the current actor's workspace bearer token or session.
 The request has no JSON body. The HTTP 200 response contains `run_id`, `status`,
 `step_outputs` and `created_at`; unavailable, foreign or revoked results return
 404. Authentication and workspace middleware apply before projection.
+
+`GET /api/v1/workspaces/{workspaceId}/restricted-pages` returns Pages with at least one currently executable declared action. Each row contains `slug`, `name`, optional current `publication`, and `actions` (`panel_id`, `id`, `label`, collected input descriptors and optional host confirmation). The count includes only returned Pages. Existing Page/panel visibility and action role floors, every graph resource grant and installed profile eligibility apply before disclosure. Page applications additionally require the current published declaration; drafts and publication/declaration mismatches are omitted. Fixed parameters, input defaults and producer data are excluded.
+
+The restricted Pages UI uses this directory and the existing declared action endpoints. Published actions include their `publication` in the request. Confirmation remains in host chrome, scalar inputs are collected locally, and accepted runs poll their own private receipt. Unknown submission retries retain the same body and idempotency key; revoked delivery clears the displayed result. Generic application assets and shared WebSocket data are not enabled by this directory.

@@ -35,7 +35,8 @@ func restrictedProjectFileSchemaCatalog() map[string]DomainSchema {
 		"DELETE " + base + "/{fileId}":          {RequestRequired: true, Request: retire, SuccessStatuses: []string{"204"}},
 		"GET " + base + "/{versionId}/download": {Response: map[string]any{"type": "string", "format": "binary"}, ResponseMedia: []string{"application/octet-stream"}, SuccessStatuses: []string{"200"}, SuccessHeaders: map[string]any{"Content-Length": map[string]any{"schema": map[string]any{"type": "integer", "format": "int64", "minimum": 0, "maximum": 1048576}, "description": "Exact decoded length; interrupted delivery is incomplete, never a successful prefix."}, "X-Content-SHA256": map[string]any{"schema": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"}, "description": "Immutable exact version hash."}, "Content-Disposition": map[string]any{"schema": str(), "description": "Attachment with the source basename."}, "X-Content-Type-Options": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"nosniff"}}}}},
 		"GET /api/v1/chats/{chatId}/project-input-options": {Response: options, SuccessStatuses: []string{"200"}, Parameters: []map[string]any{
-			{"name": "workspace_id", "in": "query", "required": true, "schema": str()},
+			{"name": "workspace_id", "in": "query", "required": false, "schema": str(), "description": "Workspace selector; required unless X-Workspace-ID supplies it."},
+			{"name": "X-Workspace-ID", "in": "header", "required": false, "schema": str(), "description": "Workspace selector when workspace_id query is absent."},
 			{"name": "search", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": 128, "description": "Filename/project substring, at most 128 UTF-8 bytes."}},
 		}},
 	}

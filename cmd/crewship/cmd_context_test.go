@@ -25,6 +25,7 @@ func TestContextCommandsPreserveExactScopedRequests(t *testing.T) {
 		{[]string{"execution-profile", "get", "agent"}, "profile-get", "GET", "/api/v1/agents/agent/restricted-execution", ""},
 		{[]string{"project-files", "list", "project"}, "project-list", "GET", "/api/v1/workspaces/c0000000000000000000000000/projects/project/files", ""},
 		{[]string{"project-files", "download", "project", "version"}, "project-download", "GET", "/api/v1/workspaces/c0000000000000000000000000/projects/project/files/version/download", ""},
+		{[]string{"pages"}, "pages-list", "GET", "/api/v1/workspaces/c0000000000000000000000000/restricted-pages", ""},
 		{[]string{"routines"}, "routines-list", "GET", "/api/v1/workspaces/c0000000000000000000000000/restricted-routines", ""},
 		{[]string{"routine-runs", "list"}, "runs-list", "GET", "/api/v1/workspaces/c0000000000000000000000000/restricted-routine-runs", ""},
 

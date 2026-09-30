@@ -4,7 +4,7 @@ import "testing"
 
 func TestRestrictedWorkflowSchemas(t *testing.T) {
 	routes, components := restrictedWorkflowSchemaCatalog()
-	for _, path := range []string{"restricted-routines", "restricted-routine-runs", "restricted-routine-runs/{runId}"} {
+	for _, path := range []string{"restricted-routines", "restricted-pages", "restricted-routine-runs", "restricted-routine-runs/{runId}"} {
 		route, ok := routes["GET /api/v1/workspaces/{workspaceId}/"+path]
 		if !ok || route.Response == nil {
 			t.Fatalf("missing typed private projection %s", path)
@@ -38,5 +38,12 @@ func TestRestrictedWorkflowSchemas(t *testing.T) {
 	page := routes["GET /api/v1/pages/{slug}/application/actions/{pendingId}"]
 	if len(page.Response["anyOf"].([]any)) != 2 {
 		t.Fatal("Page polling must retain both authorized execution projections")
+	}
+	action := components["RestrictedPageAction"].(map[string]any)["properties"].(map[string]any)
+	input := components["RestrictedPageInput"].(map[string]any)["properties"].(map[string]any)
+	for _, field := range []string{"params", "producer", "source", "recipe", "default"} {
+		if action[field] != nil || input[field] != nil {
+			t.Fatalf("private Page catalog exposes %s", field)
+		}
 	}
 }

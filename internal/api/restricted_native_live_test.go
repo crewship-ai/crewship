@@ -3,7 +3,10 @@
 package api
 
 import (
+	"context"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +26,178 @@ import (
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 	"github.com/crewship-ai/crewship/internal/restrictedruntime"
 )
+
+// liveNativeObserver records only fixed operation/error classes. It never
+// logs handles, principals, requests, outputs, credentials or container IDs.
+type liveNativeObserver struct {
+	mu                sync.Mutex
+	counts            map[string]int
+	durationMaxMillis map[string]int64
+}
+
+func (o *liveNativeObserver) observe(stage string, ctx context.Context, err error) {
+	class := "ok"
+	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
+		class = "context_expired"
+	} else if errors.Is(err, access.ErrDenied) || errors.Is(err, restrictedruntime.ErrDenied) {
+		class = "denied"
+	} else if err != nil {
+		class = "storage_or_runtime_error"
+	}
+	o.mu.Lock()
+	o.counts[stage+":"+class]++
+	o.mu.Unlock()
+}
+func (o *liveNativeObserver) duration(stage string, started time.Time) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.durationMaxMillis == nil {
+		o.durationMaxMillis = map[string]int64{}
+	}
+	elapsed := time.Since(started).Milliseconds()
+	if elapsed > o.durationMaxMillis[stage] {
+		o.durationMaxMillis[stage] = elapsed
+	}
+}
+func (o *liveNativeObserver) dump(t *testing.T, dir string) {
+	o.mu.Lock()
+	counts := make(map[string]int, len(o.counts))
+	for k, v := range o.counts {
+		counts[k] = v
+	}
+	timings := make(map[string]int64, len(o.durationMaxMillis))
+	for k, v := range o.durationMaxMillis {
+		timings[k] = v
+	}
+	o.mu.Unlock()
+	t.Logf("native diagnostics max_operation_millis=%v", timings)
+	t.Logf("native diagnostics operations=%v sandbox_ready=%t", counts, restrictedruntime.NativeSandboxReady(context.WithoutCancel(t.Context())) == nil)
+	// Query only this synthetic manager's immutable owner label. Counts are
+	// diagnostic evidence; uncertainty never becomes successful cleanup.
+	if owner, e := os.ReadFile(filepath.Join(dir, "owner")); e == nil {
+		decoded, e := hex.DecodeString(string(owner))
+		if e == nil && len(decoded) == 8 {
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 3*time.Second)
+			raw, e := exec.CommandContext(ctx, "docker", "ps", "-aq", "--filter", "label=ai.crewship.restricted.owner="+string(owner)).Output()
+			cancel()
+			if e == nil {
+				t.Logf("native diagnostics owned_container_count=%d", len(strings.Fields(string(raw))))
+			} else {
+				t.Log("native diagnostics owned_container_lookup_unconfirmed")
+			}
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Log("native diagnostics records_unavailable")
+		return
+	}
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		raw, e := os.ReadFile(filepath.Join(dir, entry.Name()))
+		var record restrictedruntime.Record
+		if e != nil || json.Unmarshal(raw, &record) != nil {
+			t.Log("native diagnostics record_unreadable")
+			continue
+		}
+		// Status and Reason are fixed runtime states, not model-controlled text.
+		t.Logf("native diagnostics runtime_status=%q runtime_reason=%q", record.Status, record.Reason)
+	}
+}
+
+type liveObservedNativeAuthority struct {
+	restricteddispatch.Authority
+	observer *liveNativeObserver
+}
+
+func (a liveObservedNativeAuthority) Resolve(ctx context.Context, h string) (restrictedruntime.Plan, error) {
+	started := time.Now()
+	p, e := a.Authority.Resolve(ctx, h)
+	a.observer.duration("resolve", started)
+	a.observer.observe("resolve", ctx, e)
+	if e == nil {
+		stage := "resolve_without_inputs"
+		if p.NativeInputs != nil {
+			stage = "resolve_with_inputs"
+		}
+		a.observer.observe(stage, ctx, nil)
+	}
+	return p, e
+}
+func (a liveObservedNativeAuthority) Secrets(ctx context.Context, h string) (map[string]string, error) {
+	v, e := a.Authority.Secrets(ctx, h)
+	a.observer.observe("secrets", ctx, e)
+	return v, e
+}
+func (a liveObservedNativeAuthority) BrokerSecret(ctx context.Context, h, c string) (restrictedruntime.BoundSecret, error) {
+	v, e := a.Authority.BrokerSecret(ctx, h, c)
+	a.observer.observe("broker_secret", ctx, e)
+	return v, e
+}
+func (a liveObservedNativeAuthority) BrokerReserve(ctx context.Context, h, c, m string, i, o int64) (string, error) {
+	v, e := a.Authority.BrokerReserve(ctx, h, c, m, i, o)
+	a.observer.observe("broker_reserve", ctx, e)
+	return v, e
+}
+func (a liveObservedNativeAuthority) BrokerSettle(ctx context.Context, h, r string, u restrictedruntime.BrokerUsage) error {
+	e := a.Authority.BrokerSettle(ctx, h, r, u)
+	a.observer.observe("broker_settle", ctx, e)
+	return e
+}
+func (a liveObservedNativeAuthority) NativeRequest(ctx context.Context, h, c string, raw []byte) ([]byte, string, error) {
+	v, t, e := a.Authority.NativeRequest(ctx, h, c, raw)
+	a.observer.observe("native_request", ctx, e)
+	return v, t, e
+}
+func (a liveObservedNativeAuthority) NativeComplete(ctx context.Context, h, t string, issued []json.RawMessage) error {
+	e := a.Authority.NativeComplete(ctx, h, t, issued)
+	a.observer.observe("native_complete", ctx, e)
+	return e
+}
+
+type liveObservedNativeRunner struct {
+	*restricteddispatch.NativeRunner
+	observer *liveNativeObserver
+}
+
+func (r liveObservedNativeRunner) Execute(ctx context.Context, u, w, c, input string, emit func(string, string) error) error {
+	e := r.NativeRunner.Execute(ctx, u, w, c, input, emit)
+	r.observer.observe("execute_chat", ctx, e)
+	return e
+}
+func (r liveObservedNativeRunner) ExecuteWithProjectFiles(ctx context.Context, u, w, c, input string, ids []string, emit func(string, string) error) error {
+	e := r.NativeRunner.ExecuteWithProjectFiles(ctx, u, w, c, input, ids, emit)
+	r.observer.observe("execute_chat_inputs", ctx, e)
+	return e
+}
+
+type liveObservedNativeCatalog struct {
+	*restrictedruntime.FrozenNativeCatalog
+	observer *liveNativeObserver
+}
+
+func (c liveObservedNativeCatalog) Volume(ctx context.Context, p restrictedruntime.Plan, m restrictedruntime.Mount) (string, error) {
+	v, e := c.FrozenNativeCatalog.Volume(ctx, p, m)
+	c.observer.observe("catalog_volume", ctx, e)
+	return v, e
+}
+func (c liveObservedNativeCatalog) FreezeNativeInputs(ctx context.Context, p restrictedruntime.Plan, id string) error {
+	e := c.FrozenNativeCatalog.FreezeNativeInputs(ctx, p, id)
+	c.observer.observe("catalog_freeze", ctx, e)
+	return e
+}
+func (c liveObservedNativeCatalog) ReleaseNativeInputs(ctx context.Context, p restrictedruntime.Plan) error {
+	e := c.FrozenNativeCatalog.ReleaseNativeInputs(ctx, p)
+	c.observer.observe("catalog_release", ctx, e)
+	return e
+}
+func (c liveObservedNativeCatalog) ReconcileNativeInputs(ctx context.Context) error {
+	e := c.FrozenNativeCatalog.ReconcileNativeInputs(ctx)
+	c.observer.observe("catalog_reconcile", ctx, e)
+	return e
+}
 
 func TestLiveNativeHTTPRetainsOnlyOwnScratchFiles(t *testing.T) {
 	image := os.Getenv("CREWSHIP_RESTRICTED_NATIVE_IMAGE")
@@ -87,7 +263,16 @@ func TestLiveNativeHTTPRetainsOnlyOwnScratchFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := restrictedruntime.NewNative(filepath.Join(t.TempDir(), "native-runtime"), restrictedruntime.Docker{Image: image}, authority, catalog, restrictedruntime.NativeLimits())
+	observer := &liveNativeObserver{counts: map[string]int{}}
+	runtimeDir := filepath.Join(t.TempDir(), "native-runtime")
+	t.Cleanup(func() {
+		if t.Failed() {
+			observer.dump(t, runtimeDir)
+		}
+	})
+	observedAuthority := liveObservedNativeAuthority{Authority: authority, observer: observer}
+	observedCatalog := liveObservedNativeCatalog{FrozenNativeCatalog: catalog, observer: observer}
+	manager, err := restrictedruntime.NewNative(runtimeDir, restrictedruntime.Docker{Image: image}, observedAuthority, observedCatalog, restrictedruntime.NativeLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +324,14 @@ func TestLiveNativeHTTPRetainsOnlyOwnScratchFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := &restricteddispatch.NativeRunner{Authority: authority, Manager: manager, MaxOutputTokens: 128}
-	router, err := NewRouter(db, secret, newTestLogger(), WithRestrictedTextRunner(runner), WithInternalToken("synthetic-native-http-internal"))
+	runner.StartSession = func(ctx context.Context, handle string) (restricteddispatch.TextSession, error) {
+		started := time.Now()
+		session, e := manager.Start(ctx, handle)
+		observer.duration("start", started)
+		observer.observe("start", ctx, e)
+		return session, e
+	}
+	router, err := NewRouter(db, secret, newTestLogger(), WithRestrictedTextRunner(liveObservedNativeRunner{NativeRunner: runner, observer: observer}), WithInternalToken("synthetic-native-http-internal"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +371,7 @@ func TestLiveNativeHTTPRetainsOnlyOwnScratchFiles(t *testing.T) {
 	for _, actor := range []string{"native-h1", "native-h2"} {
 		status, body := request(actor, actor+"-chat", "POST", "/restricted-run", `{"content":"ACTOR_`+actor+`"}`)
 		if status != 200 || !strings.Contains(body, "DONE_"+actor) || !strings.Contains(body, `"type":"done"`) {
+			observer.dump(t, runtimeDir)
 			t.Fatalf("native HTTP completion %d %s", status, body)
 		}
 		files, e := store.FilesForChat(t.Context(), actor, workspace, "native-agent", actor+"-chat")

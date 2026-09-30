@@ -88,6 +88,7 @@ func (r *Router) registerPageRoutes() {
 	// aliases keep the registration lines readable (router_orchestration.go).
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-pages", authed(wsCtx(http.HandlerFunc(p.RestrictedCatalog))))
 
 	r.mux.Handle("GET /api/v1/pages", authed(wsCtx(http.HandlerFunc(p.List))))
 	r.mux.Handle("GET /api/v1/pages/{slug}", authed(wsCtx(http.HandlerFunc(p.Get))))
