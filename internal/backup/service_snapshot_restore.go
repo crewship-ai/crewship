@@ -110,6 +110,9 @@ func (p *serviceRestorePlan) selectGenerations() error {
 		if generation == 0 {
 			generation = 1
 		}
+		if generation == item.source.Generation {
+			generation = generation%((1<<52)-1) + 1
+		}
 		item.target = quota.Key{Crew: crew, Service: item.source.Service, Volume: item.source.Volume, Generation: generation}
 		body, _ := item.crewRow["services_json"].(string)
 		plain, err := serviceconfig.Open(body)

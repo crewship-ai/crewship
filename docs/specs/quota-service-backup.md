@@ -1,9 +1,9 @@
 # Quota service snapshots
 
-This implementation checkpoint provides offline image capture and authenticated
-helper import primitives. Complete service restore and operator recovery wiring
-are release gates; this checkpoint does not claim a service backup/restore
-roundtrip through the HTTP API or CLI.
+Quota service backups capture offline fixed-ext4 images and restore them through
+the authenticated host helper into fresh generations. The existing admin backup
+API and CLI select this host-configured transport; callers cannot select helper
+paths, namespaces or backing image keys.
 
 A backup that declares fixed-ext4 service volumes requires a host snapshot
 transport and a durable service intent. Missing transport or intent rejects the
@@ -53,8 +53,12 @@ restore expose `--recover-services`; status lists only maintenance in the select
 workspace, including whether its producer is still live. The option never clears
 a live producer or writer lease.
 
-This remains an implementation checkpoint: the complete encrypted two-owner
-disposable roundtrip and controller restart proof are pending. It must not be described as completed backup/restore
-acceptance. Targeted tests cover fresh generation selection, missing legacy data,
-and stale publication; opt-in physical tests cover filesystem ownership, quota,
-namespace binding and partial import rejection.
+`TestLiveEncryptedQuotaBackupRestoresTwoOwnersFreshGenerations` under `quota_live`
+exercises an encrypted two-owner archive through the library, separate physical
+helper namespaces and the real Docker service controller. It checks file bytes,
+UID/GID/mode, memberships and exact grants, intent versions, fresh generations,
+controller restart, and explicit recovery after an interrupted real export.
+It requires an explicitly owned root fixture and a preinstalled immutable image.
+API/CLI transport tests are separate; this fixture does not claim an HTTP-router
+roundtrip. Targeted tests additionally reject missing legacy data and stale
+publication; helper tests reject cross-namespace and partial imports.
