@@ -187,7 +187,20 @@ func TestRestrictedTextRouterIsolatesTwoHumansAndHistory(t *testing.T) {
 		router.ServeHTTP(rec, req)
 		return rec
 	}
+	contextRequest := func(method, agent, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/api/v1/agents/"+agent+path+"?workspace_id="+workspace, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+tokens["text-h1"])
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
 	replace("chat")
+	if rec := contextRequest(http.MethodPost, "text-agent", "/restricted-cli-chats", `{}`); rec.Code != 404 {
+		t.Fatalf("chat-only created run context %d", rec.Code)
+	}
+	if rec := contextRequest(http.MethodGet, "text-agent", "/run-profile", ""); rec.Code != 404 {
+		t.Fatalf("chat-only run profile %d", rec.Code)
+	}
 	if rec := request("text-h1", "text-h1-chat", "chat-only"); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"type":"done"`) {
 		t.Fatalf("chat-only failed %d %s", rec.Code, rec.Body.String())
 	}
@@ -196,6 +209,20 @@ func TestRestrictedTextRouterIsolatesTwoHumansAndHistory(t *testing.T) {
 		t.Fatalf("chat-only acquired run %d starts %d", rec.Code, starts)
 	}
 	replace("run")
+	for _, body := range []string{`{"created_by":"text-h2"}`, `{"visibility":"group"}`, `{"agent_id":"foreign-text-agent"}`, `null`, `{} {}`} {
+		if rec := contextRequest(http.MethodPost, "text-agent", "/restricted-cli-chats", body); rec.Code != 400 {
+			t.Fatalf("caller selected context body=%s status=%d", body, rec.Code)
+		}
+	}
+	if rec := contextRequest(http.MethodPost, "foreign-text-agent", "/restricted-cli-chats", `{}`); rec.Code != 404 {
+		t.Fatalf("foreign run context status=%d", rec.Code)
+	}
+	if rec := contextRequest(http.MethodPost, "text-agent", "/chats", `{"origin":"CLI"}`); rec.Code != 404 {
+		t.Fatalf("origin spelling granted chat create %d", rec.Code)
+	}
+	if rec := contextRequest(http.MethodPost, "text-agent", "/restricted-cli-chats", `{}`); rec.Code != 201 {
+		t.Fatalf("run-only create status=%d body=%s", rec.Code, rec.Body.String())
+	}
 	if rec := cliRun(); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"type":"done"`) {
 		t.Fatalf("run-only failed %d %s", rec.Code, rec.Body.String())
 	}
@@ -234,6 +261,14 @@ func TestRestrictedTextRouterIsolatesTwoHumansAndHistory(t *testing.T) {
 	if rec := profilePut(ownerToken, "responses_text"); rec.Code != 200 {
 		t.Fatalf("admin could not configure text profile %d %s", rec.Code, rec.Body.String())
 	}
+	getAgent := httptest.NewRequest(http.MethodGet, "/api/v1/agents/text-agent?workspace_id="+workspace, nil)
+	getAgent.Header.Set("Authorization", "Bearer "+ownerToken)
+	agentRec := httptest.NewRecorder()
+	router.ServeHTTP(agentRec, getAgent)
+	if agentRec.Code != 200 || !strings.Contains(agentRec.Body.String(), `"restricted_execution_profile":"responses_text"`) {
+		t.Fatalf("agent settings lost configured profile %d %s", agentRec.Code, agentRec.Body.String())
+	}
+
 	authority := restricteddispatch.Authority{Store: store}
 	bound, _, err := authority.PrepareResponses(t.Context(), "text-h1", workspace, "text-agent", "text-h1-chat", "", nil, 128, func(context.Context, access.Attempt) ([]string, error) { return []string{"/bin/true"}, nil })
 	if err != nil {

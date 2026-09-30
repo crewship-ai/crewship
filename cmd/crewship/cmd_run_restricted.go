@@ -10,7 +10,13 @@ import (
 )
 
 func restrictedChatProfile(client *cli.Client, chat string) (bool, error) {
-	resp, err := client.Get("/api/v1/chats/" + chat + "/execution-profile")
+	return restrictedExecutionProfile(client, "/api/v1/chats/"+chat+"/execution-profile")
+}
+func restrictedAgentRunProfile(client *cli.Client, agent string) (bool, error) {
+	return restrictedExecutionProfile(client, "/api/v1/agents/"+agent+"/run-profile")
+}
+func restrictedExecutionProfile(client *cli.Client, path string) (bool, error) {
+	resp, err := client.Get(path)
 	if err != nil {
 		return false, err
 	}

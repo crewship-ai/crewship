@@ -149,7 +149,17 @@ Examples:
 			// tell at a glance which sessions were spun up from a
 			// terminal vs the web UI. ChatCreationBody folds in plan /
 			// effort metadata when active.
-			resp, err := client.Post("/api/v1/agents/"+agentID+"/chats", ChatCreationBody())
+			restricted, err := restrictedAgentRunProfile(client, agentID)
+			if err != nil {
+				return err
+			}
+			path := "/api/v1/agents/" + agentID + "/chats"
+			body := ChatCreationBody()
+			if restricted {
+				path = "/api/v1/agents/" + agentID + "/restricted-cli-chats"
+				body = map[string]any{}
+			}
+			resp, err := client.Post(path, body)
 			if err != nil {
 				return fmt.Errorf("create chat: %w", err)
 			}

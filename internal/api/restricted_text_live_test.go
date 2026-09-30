@@ -272,4 +272,46 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 	if !done {
 		t.Fatal("H2 affected by H1 revocation")
 	}
+	// A fresh run-only ordinary CLI context reaches the same production worker,
+	// without acquiring conversational permissions or importing the prior chat.
+	member, err = store.Membership(t.Context(), "text-h2", workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Replace(t.Context(), owner, "text-h2", workspace, "restricted", member, []access.Right{{Kind: "agent", ID: "text-agent", Operation: "run"}, {Kind: "agent", ID: "text-agent", Operation: "discover"}}); err != nil {
+		t.Fatal(err)
+	}
+	cliRequest := func(path, body string) *http.Response {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+path+"?workspace_id="+workspace, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+tokens["text-h2"])
+		response, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	created := cliRequest("/api/v1/agents/text-agent/restricted-cli-chats", `{}`)
+	var contextRow struct {
+		ID string `json:"id"`
+	}
+	if created.StatusCode != 201 || json.NewDecoder(created.Body).Decode(&contextRow) != nil || contextRow.ID == "" {
+		t.Fatal("run-only production CLI context unavailable")
+	}
+	created.Body.Close()
+	runResp := cliRequest("/api/v1/chats/"+contextRow.ID+"/restricted-cli-run", `{"content":"CANARY_text-h2 fresh cli run"}`)
+	scan = bufio.NewScanner(runResp.Body)
+	done = false
+	for scan.Scan() {
+		if strings.Contains(scan.Text(), `"type":"done"`) {
+			done = true
+		}
+	}
+	runResp.Body.Close()
+	if runResp.StatusCode != 200 || !done {
+		t.Fatalf("run-only production CLI status=%d done=%v", runResp.StatusCode, done)
+	}
+
 }

@@ -17,7 +17,8 @@ func TestRunCmdRestrictedAutomaticProfileAndSave(t *testing.T) {
 			setupStubCLICov(t, stub)
 			t.Cleanup(ResetAIFirstLatches)
 			stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]string{{"id": covAgentID, "slug": "viktor"}}))
-			stub.OnPost("/api/v1/agents/"+covAgentID+"/chats", clitest.JSONResponse(200, map[string]string{"id": "private-chat"}))
+			stub.OnGet("/api/v1/agents/"+covAgentID+"/run-profile", clitest.JSONResponse(200, map[string]string{"mode": "restricted"}))
+			stub.OnPost("/api/v1/agents/"+covAgentID+"/restricted-cli-chats", clitest.JSONResponse(200, map[string]string{"id": "private-chat"}))
 			stub.OnGet("/api/v1/chats/private-chat/execution-profile", clitest.JSONResponse(200, map[string]string{"mode": "restricted"}))
 			stream := "data: {\"type\":\"text\",\"text\":\"private answer\"}\n\n"
 			if complete {
