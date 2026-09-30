@@ -134,7 +134,7 @@ const EVENTS: { key: keyof AlertEvents; label: string }[] = [
   { key: "incomplete", label: "contents are incomplete" },
   { key: "stale", label: "newest backup older than {h} h" },
   { key: "offsite", label: "off-site copy unreachable" },
-  { key: "drill", label: "a drill fails" },
+  { key: "drill", label: "a drill fails or is overdue" },
 ]
 
 export function AlertsBody({ settings, incident, ctx, reload }: { settings: BackupSettings; incident: BackupIncident | null; ctx: SectionCtx; reload?: () => void }) {
@@ -162,6 +162,10 @@ export function AlertsBody({ settings, incident, ctx, reload }: { settings: Back
         </div>
       </div>
       <FieldRow label="Who">instance admins ({settings.instance_admins}) · <span className="text-muted-foreground">not workspace owners, who may not administer the instance</span></FieldRow>
+      <FieldRow label="Where">
+        <span data-slot="alert-route">Each instance admin&apos;s inbox, then their own notification channels (Settings › Notifications)</span>
+        <span className="text-muted-foreground"> · backup alerts arrive under System health; there is no separate channel list here</span>
+      </FieldRow>
       <FieldRow label="When">
         <span className="flex flex-wrap gap-x-3.5 gap-y-1.5">
           {EVENTS.map((e) => {
@@ -178,7 +182,7 @@ export function AlertsBody({ settings, incident, ctx, reload }: { settings: Back
       <FieldRow label="Repeats">one incident per plan, updated on each failure, resolved by the next good run</FieldRow>
       <FieldRow label="Server down" hint="the inbox is down too">
         ping <InlineInput aria-label="Heartbeat URL" type="url" className="w-full max-w-[15rem]" placeholder="https://hc.example.com/ping/…" value={url} onChange={(e) => setUrl(e.target.value)} />
-        after every good run; the outside service alerts when pings stop · also Slack, email
+        after every good run; the outside service alerts when pings stop
       </FieldRow>
       {dirty && (
         <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">

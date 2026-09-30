@@ -381,6 +381,18 @@ describe("Keys & alerts", () => {
     expect(screen.getByLabelText("Heartbeat URL")).toHaveValue("https://hc.example.com/ping/…")
   })
 
+  it("says where alerts really go, and offers no channel that routes nothing", async () => {
+    show("keys")
+    expect(await screen.findByText("Each instance admin's inbox, then their own notification channels (Settings › Notifications)")).toBeInTheDocument()
+    expect(screen.queryByText(/Slack/)).toBeNull()
+    expect(screen.queryByText(/email/i)).toBeNull()
+    const checkboxes = screen.getAllByRole("checkbox").map((c) => c.closest("label")?.textContent ?? "")
+    expect(checkboxes).toEqual([
+      "a run fails", "contents are incomplete", "newest backup older than 36 h", "off-site copy unreachable", "a drill fails or is overdue",
+    ])
+    expect(screen.getByLabelText("Heartbeat URL")).toBeInTheDocument()
+  })
+
   it("will not add a key that is not an AGE public key", async () => {
     show("keys")
     fireEvent.click(await screen.findByRole("button", { name: "+ Add a backup key" }))
