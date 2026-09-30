@@ -362,6 +362,14 @@ func (h *PageHandler) DispatchAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authority := pipeline.PageActionInvocation{PageID: res.page.ID, PanelID: panelID, ActionID: actionID, PipelineID: pipelineID, ActionDigest: pipeline.PageActionDigest(res.action)}
+	if fence := pageApplicationFenceFrom(r.Context()); fence != nil {
+		authority.Publication = fence.version
+	}
+	if h.serveRestrictedPageWorkflow(w, r, authority, inputs, pipelineSlug) {
+		return
+	}
+
 	// Idempotency before the in-flight gate, deliberately: a genuine replay of a
 	// click that is still running must get its original receipt back, not the
 	// 429 that a SECOND, different click would correctly get.
@@ -407,7 +415,7 @@ func (h *PageHandler) DispatchAction(w http.ResponseWriter, r *http.Request) {
 		h.forgetActionKeys(r.Context(), wsID, pipelineID, keys)
 		return
 	}
-	authority := pipeline.PageActionInvocation{PageID: res.page.ID, PanelID: panelID, ActionID: actionID, PipelineID: pipelineID, ActionDigest: pipeline.PageActionDigest(res.action)}
+	authority = pipeline.PageActionInvocation{PageID: res.page.ID, PanelID: panelID, ActionID: actionID, PipelineID: pipelineID, ActionDigest: pipeline.PageActionDigest(res.action)}
 	if fence := pageApplicationFenceFrom(r.Context()); fence != nil {
 		authority.Publication = fence.version
 	}

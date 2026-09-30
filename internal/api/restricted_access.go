@@ -39,6 +39,8 @@ func (m *AuthMiddleware) restrictedRequest(w http.ResponseWriter, r *http.Reques
 		if err == nil {
 			err = store.Check(r.Context(), userID, workspace, access.Right{Kind: "agent", ID: r.PathValue("agentId"), Operation: "chat"})
 		}
+	case "POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run", "GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}", "GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs", "POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}", "POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId}":
+		return true
 	case "GET /api/v1/agents/{agentId}/run-profile", "POST /api/v1/agents/{agentId}/restricted-cli-chats", "GET /api/v1/chats/{chatId}/execution-profile", "POST /api/v1/chats/{chatId}/restricted-run", "POST /api/v1/chats/{chatId}/restricted-cli-run", "GET /api/v1/chats/{chatId}/restricted-attempts":
 		// Exact audience and server admission are enforced by these handlers.
 		return true
