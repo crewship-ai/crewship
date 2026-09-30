@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { useWebSocket, type WSStatus, type WSMessage } from "@/hooks/use-websocket"
 import { checkChatMessageSize } from "@/components/features/chat/hooks/use-message-submit"
 import { apiFetch } from "@/lib/api-fetch"
+import { projectInputVersionIds } from "@/components/features/chat/files/project-input-metadata"
 import { randomUUIDv4 } from "@/lib/random-id"
 
 /** Upper bound on out-of-order events held during reassembly. Past this, a gap
@@ -1386,7 +1387,8 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       const profile = getExecutionProfile?.() ?? executionProfile
       if (!content.trim() || isStreaming || profile === "pending") return false
       if (profile === "restricted") {
-        if (!workspaceId || metadata && Object.keys(metadata).length) {toast.error("Restricted chat currently supports plain text only"); return false}
+        const projectFileVersions = projectInputVersionIds(metadata)
+        if (!workspaceId || projectFileVersions === null) {toast.error("Restricted chat supports text and explicitly selected project files only"); return false}
         const controller = new AbortController()
         restrictedAbortRef.current = controller
         setTurns(prev => [...prev, {id:uuid(),role:"user",parts:[{id:uuid(),type:"text",content:content.trim(),timestamp:new Date()}],isStreaming:false,timestamp:new Date()}])
@@ -1398,7 +1400,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
         void (async () => {
           let done = false
           try {
-            const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(sessionId)}/restricted-run?workspace_id=${encodeURIComponent(workspaceId)}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:content.trim()}),signal:controller.signal})
+            const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(sessionId)}/restricted-run?workspace_id=${encodeURIComponent(workspaceId)}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:content.trim(), ...(projectFileVersions.length ? {project_file_versions:projectFileVersions} : {})}),signal:controller.signal})
             if (!response.ok || !response.body) throw new Error("Restricted text run denied or unavailable")
             const reader = response.body.getReader()
             const decoder = new TextDecoder()

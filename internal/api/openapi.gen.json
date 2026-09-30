@@ -39547,6 +39547,198 @@
         ]
       }
     },
+    "/api/v1/chats/{chatId}/project-input-options": {
+      "get": {
+        "operationId": "get_api_v1_chats_chatId_project-input-options",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "description": "Filename/project substring, at most 128 UTF-8 bytes.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "files": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "file_id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "maxLength": 240,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "project_id": {
+                            "type": "string"
+                          },
+                          "project_name": {
+                            "type": "string"
+                          },
+                          "revision": {
+                            "format": "int64",
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "sha256": {
+                            "pattern": "^[0-9a-f]{64}$",
+                            "type": "string"
+                          },
+                          "size_bytes": {
+                            "format": "int64",
+                            "maximum": 1048576,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "version_id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "version_id",
+                          "file_id",
+                          "project_id",
+                          "name",
+                          "revision",
+                          "size_bytes",
+                          "sha256",
+                          "created_at",
+                          "project_name"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 100,
+                      "type": "array"
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "files",
+                    "has_more"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "chats"
+        ]
+      }
+    },
     "/api/v1/chats/{chatId}/restricted-attempts": {
       "get": {
         "operationId": "get_api_v1_chats_chatId_restricted-attempts",
@@ -132190,6 +132382,65 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "files": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "file_id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "maxLength": 240,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "project_id": {
+                            "type": "string"
+                          },
+                          "revision": {
+                            "format": "int64",
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "sha256": {
+                            "pattern": "^[0-9a-f]{64}$",
+                            "type": "string"
+                          },
+                          "size_bytes": {
+                            "format": "int64",
+                            "maximum": 1048576,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "version_id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "version_id",
+                          "file_id",
+                          "project_id",
+                          "name",
+                          "revision",
+                          "size_bytes",
+                          "sha256",
+                          "created_at"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 256,
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "files"
+                  ],
                   "type": "object"
                 }
               }
@@ -132200,6 +132451,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
                   "properties": {
                     "error": {
                       "type": "string"
@@ -132218,6 +132470,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
                   "properties": {
                     "error": {
                       "type": "string"
@@ -132236,6 +132489,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
                   "properties": {
                     "error": {
                       "type": "string"
@@ -132290,26 +132544,104 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "content_base64": {
+                    "description": "Standard base64, at most 1 MiB decoded. Omitted, null or empty string creates empty content. Aggregate project/workspace capacity is checked atomically.",
+                    "format": "byte",
+                    "maxLength": 1398104,
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "expected_revision": {
+                    "default": 0,
+                    "description": "Zero creates; a replacement must match the current positive revision.",
+                    "format": "int64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "file_id": {
+                    "description": "Omit to create; supply the current file ID to replace.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "Portable relative filename, at most 240 UTF-8 bytes; unchanged on replacement.",
+                    "maxLength": 240,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
                 "type": "object"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "maxLength": 240,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "format": "int64",
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sha256": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "size_bytes": {
+                      "format": "int64",
+                      "maximum": 1048576,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "version_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version_id",
+                    "file_id",
+                    "project_id",
+                    "name",
+                    "revision",
+                    "size_bytes",
+                    "sha256",
+                    "created_at"
+                  ],
                   "type": "object"
                 }
               }
             },
-            "description": "OK"
+            "description": "Created"
           },
           "401": {
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
                   "properties": {
                     "error": {
                       "type": "string"
@@ -132328,6 +132660,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
                   "properties": {
                     "error": {
                       "type": "string"
@@ -132388,21 +132721,36 @@
             }
           }
         ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expected_revision": {
+                    "format": "int64",
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "expected_revision"
+                ],
+                "type": "object"
               }
-            },
-            "description": "OK"
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
           },
           "401": {
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
                   "properties": {
                     "error": {
                       "type": "string"
@@ -132421,6 +132769,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
                   "properties": {
                     "error": {
                       "type": "string"
@@ -132493,18 +132842,52 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "application/octet-stream": {
                 "schema": {
-                  "type": "object"
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Disposition": {
+                "description": "Attachment with the source basename.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "description": "Exact decoded length; interrupted delivery is incomplete, never a successful prefix.",
+                "schema": {
+                  "format": "int64",
+                  "maximum": 1048576,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "X-Content-SHA256": {
+                "description": "Immutable exact version hash.",
+                "schema": {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "enum": [
+                    "nosniff"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
                   "properties": {
                     "error": {
                       "type": "string"
@@ -132523,6 +132906,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
                   "properties": {
                     "error": {
                       "type": "string"
@@ -132541,6 +132925,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
                   "properties": {
                     "error": {
                       "type": "string"

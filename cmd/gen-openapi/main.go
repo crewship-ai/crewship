@@ -644,6 +644,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range restrictedContextRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	for key, schema := range restrictedProjectFileSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	restrictedWorkflowRoutes, _ := restrictedWorkflowSchemaCatalog()
 	for key, schema := range restrictedWorkflowRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)

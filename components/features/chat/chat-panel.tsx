@@ -48,6 +48,8 @@ import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
 import { ArtifactPane } from "./artifact/artifact-pane"
 import { RestrictedFiles } from "./files/restricted-files"
 import { RestrictedMemory } from "./restricted-memory"
+import { Button } from "@/components/ui/button"
+import { ProjectInputPicker } from "./files/project-input-picker"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { isClientArtifactPath } from "./artifact/artifact-scope"
 import { relativeToAgent } from "./files/file-scope"
@@ -150,6 +152,7 @@ const CHAT_PALETTE_SHORTCUT = "⌘/"
 /** Cold-start rail cap: two rows at 1280px (PRD §5.1). The rest collapses
  *  into `+N`. Follow-ups keep their own cap of 3, inside FollowUps. */
 const EMPTY_STATE_CHIP_LIMIT = 6
+const NO_PROJECT_INPUTS: string[] = []
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
 export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, pageContextSlug, mobilePanel, onSend, onReplySettled, onNewConversation, onMobilePanelChange }: ChatPanelProps) {
@@ -313,6 +316,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     }
   }, [pageContextSlug])
 
+  const [preparingProjectInputs, setPreparingProjectInputs] = useState(false)
   const [sharedRestrictedChat,setSharedRestrictedChat] = useState(false)
   const [executionProfile, setExecutionProfile] = useState<"trusted" | "restricted" | "pending">("pending")
   useEffect(() => {
@@ -341,7 +345,15 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     onReplyCompleted: onAgentReplyCompleted,
     onOwnMessageSaved: handleOwnMessageSaved,
   })
+  const projectInputScope = JSON.stringify([currentUserId, workspaceId, sessionId])
+  const [projectInputSelection, setProjectInputSelection] = useState<{ scope: string; ids: string[] }>({ scope: "", ids: [] })
+  const selectedProjectInputs = projectInputSelection.scope === projectInputScope ? projectInputSelection.ids : NO_PROJECT_INPUTS
+  const changeProjectInputs = useCallback((ids: string[]) => {
+    setProjectInputSelection({ scope: projectInputScope, ids })
+  }, [projectInputScope])
+  useEffect(() => { setProjectInputSelection({ scope: projectInputScope, ids: [] }) }, [projectInputScope])
   const sendMessageWithPage = useCallback((text: string, metadata?: Record<string, unknown>) => {
+    if (executionProfileRef.current === "restricted" && selectedProjectInputs.length) { metadata = { ...metadata, project_file_versions: [...selectedProjectInputs] } }
     if (pageContextSlug && !pageContextRemoved && !pageContextError) {
       const withPage = { ...metadata, page_context: { slug: pageContextSlug } }
       const sizeCheck = checkChatMessageSize(sessionId, text, withPage)
@@ -360,7 +372,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       if (sent === false) toast.error("Not connected — your message is still here. Try again when chat reconnects.")
       return sent
     }
-  }, [sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId])
+  }, [sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId, selectedProjectInputs])
 
   // Reply-settled hook: when a stream the user watched in THIS session
   // finishes (isStreaming true→false), tell the parent so it can re-fire
@@ -650,7 +662,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   // lives inside the composer, next to the state it clears.
   const handleSent = useCallback(() => {
     setPinNonce((n) => n + 1)
-  }, [])
+    changeProjectInputs([])
+  }, [changeProjectInputs])
 
   // Auto-send the initial prompt once, after the socket is connected.
   // The WS `send` silently drops while not OPEN, so we gate on
@@ -922,6 +935,18 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     </Conversation>
   )
 
+  const prepareProjectInputs = executionProfile === "pending" && sessionKind === "direct" && currentUserId && sessionId && workspaceId ? (
+    <div className="px-4 pb-2">
+      <Button variant="outline" size="sm" className="coarse:min-h-12" disabled={preparingProjectInputs || isStreaming} onClick={async () => {
+        setPreparingProjectInputs(true)
+        try { await ensureSessionForSend() } finally { setPreparingProjectInputs(false) }
+      }}>
+        {preparingProjectInputs ? "Preparing conversation…" : "Prepare project inputs"}
+      </Button>
+      <p className="text-xs text-muted-foreground mt-1">Creates this conversation without sending a message. Available project inputs appear for native chats.</p>
+    </div>
+  ) : null
+
   if (mobilePanel === "artifacts" || mobilePanel === "work") {
     if (executionProfile !== "trusted") return <div className="h-full overflow-auto">
       {executionProfile === "restricted" && sessionId && workspaceId
@@ -989,6 +1014,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
             />
           </div>
         )}
+        {prepareProjectInputs}
+        {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
         <ChatComposer
           agentId={agentId}
@@ -1114,6 +1141,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           }
         />
         </div>
+        {prepareProjectInputs}
+        {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
         <ChatComposer
           agentId={agentId}

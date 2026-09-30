@@ -24,6 +24,9 @@ func (m *AuthMiddleware) restrictedRequest(w http.ResponseWriter, r *http.Reques
 		return true
 	}
 	switch r.Pattern {
+	case "GET /api/v1/chats/{chatId}/project-input-options":
+		return true // native private-chat source projection enforces its own exact resource rights
+
 	case "GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files", "GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{versionId}/download", "POST /api/v1/workspaces/{workspaceId}/projects/{projectId}/files", "DELETE /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{fileId}":
 		return true // dedicated project source handler preserves exact grants and write role floor
 

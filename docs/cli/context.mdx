@@ -180,3 +180,16 @@ Read an exact authorized private receipt and current classified output proof. Re
 ## Authorized routine catalog
 
 `crewship context routines` lists the server-authorized private routine catalog for the selected workspace, with declared scalar input names and frozen definition/execution hashes. It returns no prompts, provider credentials or denied routines.
+
+## chat project-input-options
+
+```bash
+crewship context chat project-input-options <chat-id> --search invoice
+```
+
+List at most 100 currently authorized native project inputs, without source bytes.
+An empty search lists the available metadata; narrow it when `has_more` is true.
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--search` | empty | Filename or project-name substring, at most 128 bytes. |

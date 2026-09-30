@@ -49,6 +49,16 @@ func TestLiveNativeHTTPRetainsOnlyOwnScratchFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	tokens := map[string]string{}
+	selected := map[string]access.ProjectFileVersion{}
+	for _, actor := range []string{"native-h1", "native-h2"} {
+		project := actor + "-project"
+		execOrFatal(t, db, `INSERT INTO projects(id,workspace_id,name,slug) VALUES(?,?,?,?)`, project, workspace, project, project)
+		version, e := store.PutProjectFile(t.Context(), owner, workspace, project, access.ProjectFileWrite{Name: actor + "-brief.txt"}, []byte("SOURCE_"+actor))
+		if e != nil {
+			t.Fatal(e)
+		}
+		selected[actor] = version
+	}
 	for _, user := range []string{"native-h1", "native-h2"} {
 		execOrFatal(t, db, `INSERT INTO users(id,email) VALUES(?,?)`, user, user+"@native.test")
 		execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, user, workspace, user)
@@ -57,7 +67,7 @@ func TestLiveNativeHTTPRetainsOnlyOwnScratchFiles(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if _, e = store.Replace(t.Context(), owner, user, workspace, "restricted", member, []access.Right{{Kind: "agent", ID: "native-agent", Operation: "chat"}, {Kind: "agent", ID: "native-agent", Operation: "discover"}}); e != nil {
+		if _, e = store.Replace(t.Context(), owner, user, workspace, "restricted", member, []access.Right{{Kind: "agent", ID: "native-agent", Operation: "chat"}, {Kind: "agent", ID: "native-agent", Operation: "discover"}, {Kind: "project", ID: user + "-project", Operation: "read"}}); e != nil {
 			t.Fatal(e)
 		}
 		if _, e = store.SaveNote(t.Context(), user, workspace, "native-agent", user+"-chat", "MEMORY_"+user); e != nil {
@@ -73,7 +83,11 @@ func TestLiveNativeHTTPRetainsOnlyOwnScratchFiles(t *testing.T) {
 		}
 	}
 	authority := restricteddispatch.Authority{Store: store}
-	manager, err := restrictedruntime.NewNative(filepath.Join(t.TempDir(), "native-runtime"), restrictedruntime.Docker{Image: image}, authority, authority, restrictedruntime.NativeLimits())
+	catalog, err := restrictedruntime.NewFrozenNativeCatalog(filepath.Join(t.TempDir(), "native-inputs"), restrictedruntime.Docker{Image: image}, restricteddispatch.ProjectInputSource(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := restrictedruntime.NewNative(filepath.Join(t.TempDir(), "native-runtime"), restrictedruntime.Docker{Image: image}, authority, catalog, restrictedruntime.NativeLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +198,7 @@ func TestLiveNativeHTTPRetainsOnlyOwnScratchFiles(t *testing.T) {
 		}
 	}
 	if repo := os.Getenv("CREWSHIP_RESTRICTED_BROWSER_REPO"); repo != "" {
-		fixture, e := json.Marshal(map[string]any{"repo": repo, "server": server.URL, "tokens": tokens, "workspace": workspace})
+		fixture, e := json.Marshal(map[string]any{"repo": repo, "server": server.URL, "tokens": tokens, "workspace": workspace, "project_files": selected})
 		if e != nil {
 			t.Fatal(e)
 		}

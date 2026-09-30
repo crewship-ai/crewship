@@ -25,6 +25,9 @@ func newContextCommand() *cobra.Command {
 	for _, name := range []string{"inspect", "memory", "files", "attempts", "profile"} {
 		chat.AddCommand(contextLeaf(name+" <chat-id>", name, 1))
 	}
+	options := contextLeaf("project-input-options <chat-id>", "project-input-options", 1)
+	options.Flags().String("search", "", "Filename or project-name substring, up to 128 bytes")
+	chat.AddCommand(options)
 	add := contextLeaf("memory-add <chat-id> <content>", "memory-add", 2)
 	chat.AddCommand(add)
 	chat.AddCommand(contextLeaf("memory-delete <chat-id> <entry-id>", "memory-delete", 2))
@@ -100,6 +103,16 @@ func executeContextCommand(cmd *cobra.Command, client *cli.Client, action string
 		endpoint = "/api/v1/chats/" + first + "/restricted-context"
 		if action == "memory" {
 			endpoint += "?kind=memory"
+		}
+	case "project-input-options":
+		search, _ := cmd.Flags().GetString("search")
+		search = strings.TrimSpace(search)
+		if len(search) > 128 {
+			return fmt.Errorf("search must contain at most 128 bytes")
+		}
+		endpoint = "/api/v1/chats/" + first + "/project-input-options"
+		if search != "" {
+			endpoint += "?search=" + url.QueryEscape(search)
 		}
 	case "files":
 		endpoint = "/api/v1/chats/" + first + "/restricted-files"

@@ -19,6 +19,7 @@ func TestContextCommandsPreserveExactScopedRequests(t *testing.T) {
 		command                    []string
 		action, method, path, body string
 	}{
+		{[]string{"chat", "project-input-options", "chat"}, "project-input-options", "GET", "/api/v1/chats/chat/project-input-options", ""},
 		{[]string{"chat", "profile", "chat"}, "profile", "GET", "/api/v1/chats/chat/execution-profile", ""},
 		{[]string{"chat", "download", "chat", "file"}, "chat-download", "GET", "/api/v1/chats/chat/restricted-files/file/download", ""},
 		{[]string{"execution-profile", "get", "agent"}, "profile-get", "GET", "/api/v1/agents/agent/restricted-execution", ""},
