@@ -51,8 +51,9 @@ type instanceAdminRef struct {
 
 // listInstanceAdmins returns every instance admin by isInstanceAdmin's rules.
 func listInstanceAdmins(ctx context.Context, db *sql.DB) ([]instanceAdminRef, error) {
-	fallback, err := instanceFallbackOwners(ctx, db)
-	if err != nil {
+	// An install nobody has asked about yet names its first admins now, so a
+	// backup incident on it still reaches someone.
+	if _, err := ensureInstanceAdminBootstrap(ctx, db); err != nil {
 		return nil, err
 	}
 	rows, err := db.QueryContext(ctx, `SELECT id, email, COALESCE(full_name,''), COALESCE(instance_role,''), COALESCE(suspended_at,'') FROM users ORDER BY email`)
@@ -67,7 +68,7 @@ func listInstanceAdmins(ctx context.Context, db *sql.DB) ([]instanceAdminRef, er
 			_ = rows.Close()
 			return nil, err
 		}
-		if src := instanceAdminSourceFor(a.Email, role, suspended != "", fallback[a.ID]); src != "" {
+		if src := instanceAdminSourceFor(a.Email, role, suspended != ""); src != "" {
 			a.Source = src
 			out = append(out, a)
 		}
