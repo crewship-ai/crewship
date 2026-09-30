@@ -72,6 +72,9 @@ func (h *PipelineHandler) serveRestrictedWorkflow(w http.ResponseWriter, req *ht
 	writeJSON(w, http.StatusAccepted, map[string]any{"run_id": receipt.ID, "chat_id": receipt.ChatID, "status": receipt.State, "restricted": true, "status_url": "/api/v1/workspaces/" + WorkspaceIDFromContext(req.Context()) + "/restricted-routine-runs/" + receipt.ID})
 	return true
 }
+
+type restrictedPageIntentKey struct{}
+
 func (h *PageHandler) serveRestrictedPageWorkflow(w http.ResponseWriter, req *http.Request, action pipeline.PageActionInvocation, inputs map[string]any, routine string) bool {
 	restricted, err := restrictedActor(req, h.db)
 	if err != nil {
@@ -85,7 +88,12 @@ func (h *PageHandler) serveRestrictedPageWorkflow(w http.ResponseWriter, req *ht
 		replyError(w, 503, "restricted workflow unavailable")
 		return true
 	}
-	receipt, err := h.restrictedWorkflow().AdmitPage(req.Context(), UserFromContext(req.Context()).ID, WorkspaceIDFromContext(req.Context()), action, inputs, req.Header.Get("Idempotency-Key"))
+	expected, _ := req.Context().Value(restrictedPageIntentKey{}).(string)
+	if expected == "" {
+		replyError(w, 400, "expected_intent_hash is required")
+		return true
+	}
+	receipt, err := h.restrictedWorkflow().AdmitPageFrozen(req.Context(), UserFromContext(req.Context()).ID, WorkspaceIDFromContext(req.Context()), action, inputs, expected, req.Header.Get("Idempotency-Key"))
 	if err != nil {
 		replyRestrictedWorkflowError(w, err)
 		return true

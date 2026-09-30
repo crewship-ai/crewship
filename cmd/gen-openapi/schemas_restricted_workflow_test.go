@@ -40,6 +40,13 @@ func TestRestrictedWorkflowSchemas(t *testing.T) {
 		t.Fatal("Page polling must retain both authorized execution projections")
 	}
 	action := components["RestrictedPageAction"].(map[string]any)["properties"].(map[string]any)
+	if action["intent_hash"] == nil {
+		t.Fatal("Page catalog lacks intent binding")
+	}
+	pageRequest := components["RestrictedPageWorkflowRequest"].(map[string]any)
+	if pageRequest["properties"].(map[string]any)["expected_intent_hash"] == nil {
+		t.Fatal("Page request lacks expected intent")
+	}
 	input := components["RestrictedPageInput"].(map[string]any)["properties"].(map[string]any)
 	for _, field := range []string{"params", "producer", "source", "recipe", "default"} {
 		if action[field] != nil || input[field] != nil {

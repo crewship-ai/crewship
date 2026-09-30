@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 interface ActionInput { name: string; label?: string; type: string; required: boolean; options?: string[] }
-interface PageAction { panel_id: string; id: string; label: string; inputs: ActionInput[]; confirm?: { title: string; body: string } }
+interface PageAction { intent_hash: string; panel_id: string; id: string; label: string; inputs: ActionInput[]; confirm?: { title: string; body: string } }
 interface Page { slug: string; name: string; publication?: number; actions: PageAction[] }
 interface Invocation extends PageAction { key: string; page: Page }
 interface Result { run_id: string; status: string; step_outputs: Record<string, string> }
@@ -77,7 +77,7 @@ export function RestrictedPages({ workspaceId }: { workspaceId: string }) {
         const path = `/api/v1/pages/${encodeURIComponent(action.page.slug)}`
         const target = `${encodeURIComponent(action.panel_id)}/${encodeURIComponent(action.id)}`
         const published = !!action.page.publication
-        request.current = { key: crypto.randomUUID(), url: published ? `${path}/application/actions/${target}` : `${path}/panels/${encodeURIComponent(action.panel_id)}/actions/${encodeURIComponent(action.id)}`, body: JSON.stringify(published ? { inputs, publication: action.page.publication } : { inputs }) }
+        request.current = { key: crypto.randomUUID(), url: published ? `${path}/application/actions/${target}` : `${path}/panels/${encodeURIComponent(action.panel_id)}/actions/${encodeURIComponent(action.id)}`, body: JSON.stringify(published ? { inputs, publication: action.page.publication, expected_intent_hash: action.intent_hash } : { inputs, expected_intent_hash: action.intent_hash }) }
       }
       const attempt = request.current
       const response = await apiFetch(attempt.url, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": attempt.key }, body: attempt.body })
