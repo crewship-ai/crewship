@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -166,6 +167,22 @@ func TestLiveRestrictedWorkflowBrowser(t *testing.T) {
 	command.Env = append(os.Environ(), "CREWSHIP_WORKFLOW_BROWSER_FIXTURE="+path)
 	command.Stdout, command.Stderr = os.Stdout, os.Stderr
 	if err = command.Run(); err != nil {
+		for _, table := range []string{"restricted_workflow_jobs", "restricted_cost_reservations"} {
+			rows, diagErr := db.QueryContext(context.WithoutCancel(t.Context()), "SELECT state,count(*) FROM "+table+" GROUP BY state")
+			if diagErr != nil {
+				t.Logf("workflow browser diagnostic table=%s query_failed", table)
+				continue
+			}
+			for rows.Next() {
+				var state string
+				var count int
+				if rows.Scan(&state, &count) == nil {
+					t.Logf("workflow browser diagnostic table=%s state=%s count=%d", table, state, count)
+				}
+			}
+			rows.Close()
+		}
+		t.Logf("workflow browser diagnostic upstream_calls=%d", calls.Load())
 		t.Fatal("restricted production workflow browser", err)
 	}
 	var known int

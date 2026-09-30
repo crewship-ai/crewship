@@ -38,7 +38,7 @@ export function RestrictedPages({ workspaceId }: { workspaceId: string }) {
   }, [workspaceId])
 
   useEffect(() => {
-    if (!runId || !runState || !["pending", "running"].includes(runState)) return
+    if (!runId || !runState || !["SCHEDULED", "DEDUPED", "pending", "running"].includes(runState)) return
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     const poll = async () => {
@@ -48,7 +48,7 @@ export function RestrictedPages({ workspaceId }: { workspaceId: string }) {
         const body = await response.json() as Result
         if (controller.signal.aborted) return
         setRun(body)
-        if (["pending", "running"].includes(body.status)) timer = setTimeout(poll, 1000)
+        if (["SCHEDULED", "DEDUPED", "pending", "running"].includes(body.status)) timer = setTimeout(poll, 1000)
       } catch (cause) {
         if (controller.signal.aborted) return
         setRun(null)
@@ -90,7 +90,7 @@ export function RestrictedPages({ workspaceId }: { workspaceId: string }) {
       if (owner.current === workspace) setError(cause instanceof TypeError ? "Could not confirm the outcome. Retry sends the same request ID." : cause instanceof Error ? cause.message : "Page action unavailable.")
     } finally { if (owner.current === workspace) setSubmitting(false) }
   }
-  const active = submitting || !!run && ["pending", "running"].includes(run.status)
+  const active = submitting || !!run && ["SCHEDULED", "DEDUPED", "pending", "running"].includes(run.status)
   return <div className="mx-auto w-full max-w-3xl space-y-5 overflow-auto p-4 md:p-6">
     <h1 className="text-xl font-semibold">Page actions</h1>
     <p className="text-sm text-muted-foreground">Run a declared action. Its results are visible to you.</p>

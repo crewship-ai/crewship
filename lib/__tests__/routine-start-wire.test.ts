@@ -12,6 +12,7 @@ it("T3 every immediate routine start keeps asynchronous delivery and deduplicati
         (/\/run[`"']/.test(source) && !/fire_at:/.test(source)),
     )
   expect(sources.map(({ name }) => name).sort()).toEqual([
+    "restricted-routines.tsx",
     "routine-comparison.tsx",
     "routine-run-detail.tsx",
     "routines-detail-panel.tsx",

@@ -19,7 +19,7 @@ it("submits a publication-bound declared action after host confirmation and poll
   Object.defineProperty(window, "confirm", { value: confirm, configurable: true })
   api.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.endsWith("/restricted-pages")) return response(catalog)
-    if (init?.method === "POST") return response({ run_id: "private-run", status: "pending" }, 202)
+    if (init?.method === "POST") return response({ run_id: "private-run", status: "SCHEDULED" }, 202)
     if (url.endsWith("/restricted-routine-runs/private-run")) return response({ run_id: "private-run", status: "completed", step_outputs: { answer: "OWN_PAGE_RESULT" } })
     throw new Error("Unexpected shared request")
   })
@@ -43,7 +43,7 @@ it("retries the same frozen Page admission and clears a revoked private result",
   let polls = 0
   api.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.endsWith("/restricted-pages")) return response(catalog)
-    if (init?.method === "POST") { if (++submitted === 1) throw new TypeError("network disconnected"); return response({ run_id: "private-run", status: "pending" }, 202) }
+    if (init?.method === "POST") { if (++submitted === 1) throw new TypeError("network disconnected"); return response({ run_id: "private-run", status: "DEDUPED" }, 202) }
     if (url.endsWith("/restricted-routine-runs/private-run")) { if (++polls === 1) return response({ run_id: "private-run", status: "running", step_outputs: { answer: "REVOKED_PAGE_RESULT" } }); return response({ error: "unavailable" }, 404) }
     throw new Error("Unexpected shared request")
   })
