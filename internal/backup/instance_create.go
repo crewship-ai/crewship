@@ -161,6 +161,11 @@ type StoreSummary struct {
 	// Skipped counts entries that are not regular files (symlinks, devices);
 	// they are not copied.
 	Skipped int `json:"skipped,omitempty" yaml:"skipped,omitempty"`
+	// Unreadable counts files the server could not read (permission
+	// denied); UnreadableSample names up to five of them. Every other file
+	// of the store is copied.
+	Unreadable       int      `json:"unreadable,omitempty" yaml:"unreadable,omitempty"`
+	UnreadableSample []string `json:"unreadable_sample,omitempty" yaml:"unreadable_sample,omitempty"`
 }
 
 // InstanceIndex is instance/index.json.
@@ -453,6 +458,14 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 		for _, c := range wc.Crews {
 			contents.Crews = append(contents.Crews, c)
 		}
+		for _, c := range wc.Crews {
+			if len(c.FailedSections) > 0 {
+				contents.Incomplete = append(contents.Incomplete, IncompleteItem{
+					Kind: IncompleteCrewSectionFailed, Count: len(c.FailedSections), Workspace: w.target.ID,
+					Detail: fmt.Sprintf("crew %s in %s: Docker could not copy %s; the crew's other files are in the bundle", c.Slug, w.target.Slug, strings.Join(c.FailedSections, "; ")),
+				})
+			}
+		}
 		for _, slug := range wc.MissingContainerCrews {
 			contents.MissingContainerCrews = append(contents.MissingContainerCrews, w.target.Slug+"/"+slug)
 			contents.Incomplete = append(contents.Incomplete, IncompleteItem{
@@ -472,6 +485,18 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 		return nil, err
 	}
 	contents.TableRowCounts = counts
+
+	for _, name := range InstanceStores {
+		st := stores[name]
+		if st == nil || st.summary.Unreadable == 0 {
+			continue
+		}
+		contents.Incomplete = append(contents.Incomplete, IncompleteItem{
+			Kind: IncompleteFileUnreadable, Count: st.summary.Unreadable,
+			Detail: fmt.Sprintf("%d file(s) in the %s store could not be read by the server (permission denied), e.g. %s; every other file of the store is in the bundle",
+				st.summary.Unreadable, name, strings.Join(st.summary.UnreadableSample, ", ")),
+		})
+	}
 
 	attIncluded, attMissing, err := checkStagedAttachments(ctx, snap, stores[StoreOutput])
 	if err != nil {
@@ -740,10 +765,15 @@ func stageInstanceCopy(ctx context.Context, db *sql.DB, stage string, sc *stagin
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
-		entries, skipped, err := copyTree(ctx, src, st.root, skip, sc)
+		entries, skipped, unreadable, err := copyTree(ctx, src, st.root, skip, sc)
 		if err != nil {
 			return nil, nil, fmt.Errorf("backup: copy %s store: %w", name, err)
 		}
+		st.summary.Unreadable = len(unreadable)
+		if len(unreadable) > 5 {
+			unreadable = unreadable[:5]
+		}
+		st.summary.UnreadableSample = unreadable
 		st.entries = entries
 		for _, e := range entries {
 			st.byPath[e.Path] = e
@@ -821,27 +851,45 @@ func stageInstanceCopy(ctx context.Context, db *sql.DB, stage string, sc *stagin
 // entry per file (paths slash-separated, relative to src). Directories in skip
 // (the staging and output directories) are not descended into. Non-regular
 // entries are counted, not copied.
-func copyTree(ctx context.Context, src, dst string, skip []string, sc *stagingCipher) ([]IndexEntry, int, error) {
+//
+// A file or directory the server may not read (permission denied — agent
+// output owned by a container user with mode 0600, typically) is skipped and
+// returned in unreadable instead of failing the whole instance backup; the
+// caller records it as an incomplete item.
+func copyTree(ctx context.Context, src, dst string, skip []string, sc *stagingCipher) (_ []IndexEntry, _ int, unreadable []string, _ error) {
 	info, err := os.Stat(src)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, 0, nil
+			return nil, 0, nil, nil
 		}
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	if !info.IsDir() {
-		return nil, 0, fmt.Errorf("%s is not a directory", src)
+		return nil, 0, nil, fmt.Errorf("%s is not a directory", src)
 	}
 	srcAbs, err := filepath.Abs(src)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	var entries []IndexEntry
 	skipped := 0
+	relOf := func(p string) string {
+		if r, err := filepath.Rel(srcAbs, p); err == nil {
+			return filepath.ToSlash(r)
+		}
+		return p
+	}
 	err = filepath.WalkDir(srcAbs, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			if os.IsNotExist(walkErr) {
 				return nil // deleted between readdir and stat
+			}
+			if os.IsPermission(walkErr) && p != srcAbs {
+				unreadable = append(unreadable, relOf(p))
+				if d != nil && d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
 			return walkErr
 		}
@@ -873,12 +921,17 @@ func copyTree(ctx context.Context, src, dst string, skip []string, sc *stagingCi
 			if os.IsNotExist(err) {
 				return nil
 			}
+			if os.IsPermission(err) {
+				_ = os.Remove(out)
+				unreadable = append(unreadable, filepath.ToSlash(rel))
+				return nil
+			}
 			return err
 		}
 		entries = append(entries, IndexEntry{Path: filepath.ToSlash(rel), Size: n, SHA256: sha})
 		return nil
 	})
-	return entries, skipped, err
+	return entries, skipped, unreadable, err
 }
 
 // copyFileHashed copies src into the staged file dst, encrypted through sc,

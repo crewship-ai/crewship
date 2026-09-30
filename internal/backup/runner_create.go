@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/pages"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"filippo.io/age"
@@ -688,6 +689,7 @@ func buildContents(t *WorkspaceTarget, level ScopeLevel, captures map[string]Cre
 			SystemIncluded:             capture.VarLibFiles > 0,
 			AgentCount:                 c.AgentCount,
 			ContainerMissing:           c.ContainerMissing,
+			FailedSections:             capture.FailedSections,
 		}
 		contents.Crews = append(contents.Crews, summary)
 		if c.ContainerMissing {
@@ -711,6 +713,17 @@ func buildIncomplete(t *WorkspaceTarget, c Contents, att *AttachmentBlobsResult)
 			Kind:      IncompleteMemoryBlobMissing,
 			Detail:    fmt.Sprintf("%d memory version(s) had no content file in the version store; their history rows are in the bundle without content", c.MemoryBlobsMissing),
 			Count:     c.MemoryBlobsMissing,
+			Workspace: t.ID,
+		})
+	}
+	for _, crew := range c.Crews {
+		if len(crew.FailedSections) == 0 {
+			continue
+		}
+		out = append(out, IncompleteItem{
+			Kind:      IncompleteCrewSectionFailed,
+			Detail:    fmt.Sprintf("crew %s: Docker could not copy %s; the crew's other files are in the bundle", crew.Slug, strings.Join(crew.FailedSections, "; ")),
+			Count:     len(crew.FailedSections),
 			Workspace: t.ID,
 		})
 	}

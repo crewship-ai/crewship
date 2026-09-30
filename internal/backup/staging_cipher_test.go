@@ -136,7 +136,7 @@ func TestStagingCipher_CopyCostIsComparable(t *testing.T) {
 	plain := best(plainCopy)
 	sc, _ := newStagingCipher()
 	enc := best(func(dst string) {
-		if _, _, err := copyTree(t.Context(), src, dst, nil, sc); err != nil {
+		if _, _, _, err := copyTree(t.Context(), src, dst, nil, sc); err != nil {
 			t.Fatal(err)
 		}
 	})

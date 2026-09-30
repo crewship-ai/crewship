@@ -261,6 +261,14 @@ const (
 	// held a DIFFERENT file at the blob's path, which restore never
 	// overwrites.
 	IncompleteAttachmentConflict = "attachment_conflict"
+	// IncompleteCrewSectionFailed: Docker refused to start copying one of a
+	// crew's sections (e.g. a bind mount whose host directory is gone); the
+	// crew's other sections are in the bundle, that one is not.
+	IncompleteCrewSectionFailed = "crew_section_failed"
+	// IncompleteFileUnreadable: files in an instance file store the server
+	// could not read (owned by a container user with mode 0600, say); every
+	// other file of the store is in the bundle.
+	IncompleteFileUnreadable = "file_unreadable"
 )
 
 // IncompleteItem is one kind of gap in a bundle (or, on a RestoreResult, in
@@ -340,6 +348,10 @@ type CrewSummary struct {
 	// never-provisioned crew, where no files ever existed to omit
 	// (#2612). Mirrors Contents.MissingContainerCrews per crew.
 	ContainerMissing bool `json:"container_missing,omitempty" yaml:"container_missing,omitempty"`
+	// FailedSections names the sections Docker refused to start copying
+	// ("/workspace: <daemon error>"); their *_included flags stay false, so
+	// a restore does not look for them.
+	FailedSections []string `json:"failed_sections,omitempty" yaml:"failed_sections,omitempty"`
 }
 
 // HasCrewMemory answers the only question an operator actually asks of

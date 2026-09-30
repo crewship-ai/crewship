@@ -300,14 +300,15 @@ func TestCreateInstanceBackup_StagingHoldsNoPlaintext(t *testing.T) {
 // leaves no staging directory.
 func TestCreateInstanceBackup_StagingWipedOnFailure(t *testing.T) {
 	f := newInstanceFixture(t)
-	// An unreadable file in a store fails the copy.
-	bad := filepath.Join(f.paths.Skills, "custom", "unreadable.md")
-	if err := os.WriteFile(bad, []byte("x"), 0o000); err != nil {
+	// A store whose root the server cannot read fails the copy (a single
+	// unreadable file inside a store is skipped and recorded instead).
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a 0000 directory")
+	}
+	if err := os.Chmod(f.paths.Skills, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	if os.Geteuid() == 0 {
-		t.Skip("root reads a 0000 file")
-	}
+	t.Cleanup(func() { _ = os.Chmod(f.paths.Skills, 0o755) })
 	_, err := backup.CreateInstanceBackup(context.Background(), f.db, backup.InstanceOptions{
 		OutputDir: f.outputDir, Actor: backup.Actor{UserID: "u_admin", Email: "admin@e2e.test"},
 		Recipients: []age.Recipient{f.identity.Recipient()}, Paths: f.paths, Quiesce: quiesce.New(),
