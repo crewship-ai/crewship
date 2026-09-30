@@ -39,6 +39,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"access_grants":                IntentInclude,        // exact member/resource rights survive restore
 	"access_context_dependencies":  IntentExcludeRuntime, // dependency authority requires fresh admission
 	"access_context":               IntentExcludeRuntime, // prompt context requires fresh admission
+	"access_attempt_outcomes":      IntentExcludeRuntime, // own-attempt audit references excluded execution authority
 	"access_attempts":              IntentExcludeRuntime, // restoring a bundle must not revive execution capabilities
 	"restricted_launches":          IntentExcludeRuntime, // frozen execution payloads require fresh admission after restore
 	"restricted_provider_bindings": IntentExcludeRuntime, // provider authority must be admitted anew after restore
