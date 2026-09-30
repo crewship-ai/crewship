@@ -145,6 +145,11 @@ func scope(a Attempt) string {
 }
 
 func resolve(ctx context.Context, q queryer, key string, byHandle bool, seen map[string]bool) (Attempt, error) {
+	return resolveState(ctx, q, key, byHandle, seen, false)
+}
+
+// resolveState admits completed origins only for historical provenance reads.
+func resolveState(ctx context.Context, q queryer, key string, byHandle bool, seen map[string]bool, history bool) (Attempt, error) {
 	var a Attempt
 	if key == "" || seen[key] || len(seen) >= 8 {
 		return a, ErrDenied
@@ -155,9 +160,13 @@ func resolve(ctx context.Context, q queryer, key string, byHandle bool, seen map
 		column = "handle_hash"
 	}
 	var raw string
+	completion := " AND a.completed_at IS NULL"
+	if history {
+		completion = ""
+	}
 	err := q.QueryRowContext(ctx, `SELECT a.id,a.member_id,a.member_revision,a.workspace_id,a.principal_id,a.agent_id,a.chat_id,COALESCE(a.parent_id,''),a.generation,a.rights,a.chat_generation,a.chat_revision
  FROM access_attempts a JOIN chats c ON c.id=a.chat_id AND c.authority_generation=a.chat_generation AND c.authority_revision=a.chat_revision
- WHERE a.`+column+`=? AND a.revoked_at IS NULL`, key).
+ WHERE a.`+column+`=? AND a.revoked_at IS NULL`+completion, key).
 		Scan(&a.ID, &a.Member, &a.Revision, &a.Workspace, &a.Principal, &a.Agent, &a.Chat, &a.Parent, &a.Generation, &raw, &a.ChatGeneration, &a.ChatRevision)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrDenied
@@ -187,7 +196,7 @@ func resolve(ctx context.Context, q queryer, key string, byHandle bool, seen map
 		}
 	}
 	if a.Parent != "" {
-		p, e := resolve(ctx, q, a.Parent, false, seen)
+		p, e := resolveState(ctx, q, a.Parent, false, seen, history)
 		if e != nil {
 			return Attempt{}, e
 		}
@@ -231,4 +240,26 @@ func (s Store) RevokeAttempt(ctx context.Context, handle string) error {
 	}
 	_, err := s.DB.ExecContext(ctx, `UPDATE access_attempts SET revoked_at=? WHERE handle_hash=? AND revoked_at IS NULL`, tsformat.Format(time.Now()), digest(handle))
 	return err
+}
+
+// CompleteAttempt closes execution authority permanently while preserving
+// classified history under its still-current membership/resource provenance.
+func (s Store) CompleteAttempt(ctx context.Context, handle string) error {
+	if s.DB == nil || handle == "" {
+		return ErrDenied
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	a, err := resolve(ctx, tx, digest(handle), true, map[string]bool{})
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE access_attempts SET completed_at=? WHERE id=? AND completed_at IS NULL AND revoked_at IS NULL`, tsformat.Format(time.Now()), a.ID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
