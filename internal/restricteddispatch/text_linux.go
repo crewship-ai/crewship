@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -28,27 +29,48 @@ type TextRunner struct {
 }
 
 func (r *TextRunner) Execute(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error) error {
+	return r.execute(ctx, user, workspace, chat, input, emit, false)
+}
+
+// ExecuteRun is selected only by the dedicated authenticated CLI/run route.
+func (r *TextRunner) ExecuteRun(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error) error {
+	return r.execute(ctx, user, workspace, chat, input, emit, true)
+}
+func (r *TextRunner) execute(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error, runOperation bool) error {
 	if r == nil || (r.Manager == nil && r.StartSession == nil) || emit == nil || len(input) == 0 || len(input) > 32768 {
 		return access.ErrDenied
 	}
 	store := r.Authority.Store
-	allowed, err := chataudience.CanReadInWorkspace(ctx, store.DB, chat, user, workspace)
-	if err != nil {
-		return err
+	var err error
+	if !runOperation {
+		allowed, err := chataudience.CanReadInWorkspace(ctx, store.DB, chat, user, workspace)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return access.ErrDenied
+		}
 	}
-	if !allowed {
+	var agent, profile string
+	if err := store.DB.QueryRowContext(ctx, `SELECT c.agent_id,a.restricted_execution_profile FROM chats c JOIN agents a ON a.id=c.agent_id AND a.workspace_id=c.workspace_id WHERE c.id=? AND c.workspace_id=? AND c.visibility='private'`, chat, workspace).Scan(&agent, &profile); err != nil {
 		return access.ErrDenied
 	}
-	var agent string
-	if err := store.DB.QueryRowContext(ctx, `SELECT agent_id FROM chats WHERE id=? AND workspace_id=? AND visibility='private'`, chat, workspace).Scan(&agent); err != nil {
+	if profile != "responses_text" {
 		return access.ErrDenied
 	}
-	handle, _, err := r.Authority.PrepareResponses(ctx, user, workspace, agent, chat, "", []access.Right{{Kind: "agent", ID: agent, Operation: "chat"}}, r.MaxOutputTokens, func(ctx context.Context, attempt access.Attempt) ([]string, error) {
-		prompt, err := store.BuildContext(ctx, attempt, input)
+	prepare := r.Authority.PrepareChatResponses
+	if runOperation {
+		prepare = r.Authority.PrepareResponses
+	}
+	handle, _, err := prepare(ctx, user, workspace, agent, chat, "", nil, r.MaxOutputTokens, func(ctx context.Context, attempt access.Attempt) ([]string, error) {
+		binding, err := loadProvider(ctx, store.DB, attempt.ID)
 		if err != nil {
 			return nil, err
 		}
-		binding, err := loadProvider(ctx, store.DB, attempt.ID)
+		if binding.Profile != "responses_text" {
+			return nil, access.ErrDenied
+		}
+		prompt, err := store.BuildContext(ctx, attempt, input)
 		if err != nil {
 			return nil, err
 		}
@@ -62,6 +84,19 @@ func (r *TextRunner) Execute(ctx context.Context, user, workspace, chat, input s
 		return err
 	}
 	complete := false
+	defer func() {
+		state := "failed"
+		if complete {
+			state = "completed"
+		} else if ctx.Err() != nil {
+			state = "canceled"
+		}
+		clean, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+		defer cancel()
+		if store.RecordOutcome(clean, handle, state) != nil {
+			slog.Error("record restricted attempt outcome failed")
+		}
+	}()
 	defer func() {
 		if complete {
 			return
@@ -118,12 +153,14 @@ func (r *TextRunner) Execute(ctx context.Context, user, workspace, chat, input s
 				if _, err = store.Resolve(ctx, handle); err != nil {
 					return err
 				}
-				ok, err := chataudience.CanReadInWorkspace(ctx, store.DB, chat, user, workspace)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return access.ErrDenied
+				if !runOperation {
+					ok, err := chataudience.CanReadInWorkspace(ctx, store.DB, chat, user, workspace)
+					if err != nil {
+						return err
+					}
+					if !ok {
+						return access.ErrDenied
+					}
 				}
 				if err = emit("text", frame.Text); err != nil {
 					return err

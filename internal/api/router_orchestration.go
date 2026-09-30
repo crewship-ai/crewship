@@ -50,6 +50,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	wsCtx := r.authMw.RequireWorkspace
 	r.authedMut("POST", "/api/v1/chats/{chatId}/restricted-run", roleSelf, r.restrictedTextRun)
 	r.mux.Handle("GET /api/v1/chats/{chatId}/restricted-attempts", authed(wsCtx(http.HandlerFunc(r.restrictedOutcomes))))
+	r.authedMut("POST", "/api/v1/chats/{chatId}/restricted-cli-run", roleSelf, r.restrictedCLIRun)
 	r.mux.Handle("GET /api/v1/chats/{chatId}/execution-profile", authed(wsCtx(http.HandlerFunc(r.executionProfile))))
 
 	// Human conversations share workspace authentication and enforce their own

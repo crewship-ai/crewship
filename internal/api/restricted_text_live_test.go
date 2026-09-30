@@ -35,7 +35,7 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 	workspace := seedTestWorkspace(t, db, owner)
 	execOrFatal(t, db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('text-crew',?,'Crew','text-crew')`, workspace)
 	seedAgentRow(t, db, "text-agent", workspace, "text-crew", "Text", "text-agent", "AGENT")
-	execOrFatal(t, db, `UPDATE agents SET llm_provider='OPENAI',llm_model='gpt-5-mini',system_prompt_legacy='SHARED_PROMPT_CANARY' WHERE id='text-agent'`)
+	execOrFatal(t, db, `UPDATE agents SET restricted_execution_profile='responses_text',llm_provider='OPENAI',llm_model='gpt-5-mini',system_prompt_legacy='SHARED_PROMPT_CANARY' WHERE id='text-agent'`)
 	cipher, err := encryption.Encrypt("synthetic-text-key")
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = store.Replace(t.Context(), owner, user, workspace, "restricted", member, []access.Right{{Kind: "agent", ID: "text-agent", Operation: "run"}, {Kind: "agent", ID: "text-agent", Operation: "discover"}, {Kind: "agent", ID: "text-agent", Operation: "chat"}})
+		_, err = store.Replace(t.Context(), owner, user, workspace, "restricted", member, []access.Right{{Kind: "agent", ID: "text-agent", Operation: "discover"}, {Kind: "agent", ID: "text-agent", Operation: "chat"}})
 		if err != nil {
 			t.Fatal(err)
 		}

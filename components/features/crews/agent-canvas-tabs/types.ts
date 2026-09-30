@@ -21,6 +21,7 @@ export interface AgentRecord {
   agent_role: string
   lead_mode: string | null
   status: string
+  restricted_execution_profile?: string
   cli_adapter: string
   llm_provider: string | null
   llm_model: string | null

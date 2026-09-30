@@ -78,7 +78,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			a.created_at, a.updated_at,
 			a.created_by_user_id,
 			c.name, c.slug, c.color, c.avatar_style,
-			a.ephemeral, a.expires_at, a.expired_at, a.parent_lead_id, a.hire_reason
+			a.ephemeral, a.expires_at, a.expired_at, a.parent_lead_id, a.hire_reason, a.restricted_execution_profile
 		FROM agents a
 		LEFT JOIN crews c ON c.id = a.crew_id
 		WHERE a.workspace_id = ? AND a.deleted_at IS NULL
@@ -143,7 +143,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&a.CreatedAt, &a.UpdatedAt,
 			&createdByUserID,
 			&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
-			&ephemeral, &a.ExpiresAt, &a.ExpiredAt, &a.ParentLeadID, &a.HireReason); err != nil {
+			&ephemeral, &a.ExpiresAt, &a.ExpiredAt, &a.ParentLeadID, &a.HireReason, &a.RestrictedExecutionProfile); err != nil {
 			replyInternalError(w, h.logger, "scan agent", err)
 			return
 		}

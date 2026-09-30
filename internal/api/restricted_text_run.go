@@ -16,6 +16,7 @@ import (
 // runtime plans, handles, identities, provider models or token limits.
 type RestrictedTextExecutor interface {
 	Execute(context.Context, string, string, string, string, func(string, string) error) error
+	ExecuteRun(context.Context, string, string, string, string, func(string, string) error) error
 }
 
 // SetRestrictedTextRunner is called once during bootstrap, before serving.
@@ -28,6 +29,12 @@ func WithRestrictedTextRunner(executor RestrictedTextExecutor) RouterOption {
 }
 
 func (r *Router) restrictedTextRun(w http.ResponseWriter, req *http.Request) {
+	r.restrictedTextExecute(w, req, false)
+}
+func (r *Router) restrictedCLIRun(w http.ResponseWriter, req *http.Request) {
+	r.restrictedTextExecute(w, req, true)
+}
+func (r *Router) restrictedTextExecute(w http.ResponseWriter, req *http.Request, runOperation bool) {
 	user := UserFromContext(req.Context())
 	workspace := WorkspaceIDFromContext(req.Context())
 	if user == nil || workspace == "" {
@@ -66,7 +73,11 @@ func (r *Router) restrictedTextRun(w http.ResponseWriter, req *http.Request) {
 		}
 		return controller.Flush()
 	}
-	err := r.restrictedText.Execute(req.Context(), user.ID, workspace, req.PathValue("chatId"), body.Content, send)
+	execute := r.restrictedText.Execute
+	if runOperation {
+		execute = r.restrictedText.ExecuteRun
+	}
+	err := execute(req.Context(), user.ID, workspace, req.PathValue("chatId"), body.Content, send)
 	if err != nil {
 		// No error frame after revocation: it would itself be output delivery.
 		if !started {
@@ -84,6 +95,11 @@ func (r *Router) executionProfile(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	ok, err := chataudience.CanReadInWorkspace(req.Context(), r.db, req.PathValue("chatId"), user.ID, workspace)
+	if !ok && err == nil {
+		var one int
+		err = r.db.QueryRowContext(req.Context(), `SELECT 1 FROM chats c JOIN access_grants g ON g.agent_id=c.agent_id AND g.resource_kind='agent' AND g.operation='run' JOIN workspace_members wm ON wm.id=g.member_id AND wm.workspace_id=c.workspace_id AND wm.user_id=? WHERE c.id=? AND c.workspace_id=? AND c.created_by=? AND c.visibility='private'`, user.ID, req.PathValue("chatId"), workspace, user.ID).Scan(&one)
+		ok = err == nil
+	}
 	if err != nil || !ok {
 		replyError(w, http.StatusNotFound, "chat not found")
 		return
@@ -91,15 +107,6 @@ func (r *Router) executionProfile(w http.ResponseWriter, req *http.Request) {
 	member, err := (access.Store{DB: r.db}).Membership(req.Context(), user.ID, workspace)
 	if err != nil {
 		replyError(w, http.StatusForbidden, "execution unavailable")
-		return
-	}
-	var agent string
-	if err = r.db.QueryRowContext(req.Context(), `SELECT agent_id FROM chats WHERE id=? AND workspace_id=?`, req.PathValue("chatId"), workspace).Scan(&agent); err != nil {
-		replyError(w, http.StatusNotFound, "chat not found")
-		return
-	}
-	if err = (access.Store{DB: r.db}).Check(req.Context(), user.ID, workspace, access.Right{Kind: "agent", ID: agent, Operation: "run"}); err != nil {
-		replyError(w, http.StatusNotFound, "chat not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"mode": member.Mode})

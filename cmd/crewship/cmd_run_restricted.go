@@ -35,7 +35,7 @@ func restrictedChatProfile(client *cli.Client, chat string) (bool, error) {
 func runRestrictedText(client *cli.Client, chat, input string, md *cli.MarkdownRenderer, save *cli.AtomicFile, noStream bool) error {
 	format := cli.NewFormatter(cli.ResolveFormat(flagFormat, cliCfg))
 	var result strings.Builder
-	resp, err := client.Post("/api/v1/chats/"+chat+"/restricted-run", map[string]string{"content": input})
+	resp, err := client.Post("/api/v1/chats/"+chat+"/restricted-cli-run", map[string]string{"content": input})
 	if err != nil {
 		return err
 	}
