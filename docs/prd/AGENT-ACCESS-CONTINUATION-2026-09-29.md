@@ -1,5 +1,36 @@
 # Agent Access / Runtime — pokračování na dev1, 29. 9. 2026
 
+**Aktualizace 30. 9., 07:36 UTC:** provider binding ve větvi
+`feat/restricted-provider-binding-2711` je implementovaný a na dev1 ověřený
+z čistého kódu `7c1cad17d6b5328a2040ed8d86ffd58ff3d1c7fa` (backend i web).
+Pokus před sestavením promptu připne jeden explicitní agentí OpenAI API-key
+grant, ciphertext revision, model a výstupní limit. Delegace smí použít tentýž
+klíč/model a menší limit; cizí klíč cílového agenta se odmítne před builderem.
+Změny klíče/grantu/modelu atomicky revokují staré pokusy, včetně jejich potomků;
+rychlé odebrání a vrácení práva je neoživí. Klíč dostává pouze hostový broker,
+nikoli agent přes env/soubor. Podporované jsou pouze explicitní native API_KEY
+úrovní 1/2; login, strukturované endpoint credentials a Keeper grants se odmítají.
+
+Finální celý Go průchod: **150 balíčků, exit 0**; vet, targeted race,
+migration lint a invarianty prošly. Docker harness s race: **15/15** včetně
+aplikační provider revokace/regrant, dvou UID-1001 procesů, ochrany broker UID1002,
+absence klíče v env/souborech a čerstvého přijetí po revokaci. Mutace odstranění
+rodičovské kontroly klíče rozbila regresi. Na živé dev1 DB je nová tabulka a deset
+lifecycle triggerů; health/readiness, CLI a dvouklientská policy akceptace prošly.
+První full test odhalil chybějící klasifikaci loaderu, další se střetl s obnovou
+webového exportu při deployi; finální celý průchod běžel až po čistém nasazení.
+
+Důkazy: [Go](reports/restricted-provider-binding-go-2026-09-30.txt),
+[Docker](reports/restricted-provider-binding-live-2026-09-30.txt),
+[mutace](reports/restricted-provider-binding-mutation-2026-09-30.txt),
+[dev1](reports/restricted-provider-binding-dev1-2026-09-30.txt).
+Tato navazující větev zatím není sloučená. Žádný skutečný placený provider nebyl
+volán. **Běžný restricted chat/CLI/rutiny stále neběží v izolovaném runtime.**
+Další krok je scoped prompt/history/recall a kumulativní provider accounting,
+potom skutečný dispatch/output; nutné zůstávají login/tool-loop adaptéry,
+trvalé kvóty a úplná provozní akceptace. #2711 a Release 1.0 zůstávají otevřené.
+
+
 **Aktualizace 30. 9., 07:15 UTC:** #2722 je sloučené jako `50a9ea900066144581e9ddfa6ad506cfca47ad6d`.
 Finální head `5eacc19ba` schválil CodeRabbit bez připomínek. Vzdálené CI včetně
 všech race jobů prošlo; Linux ARM64 vyžadoval jedno opakování kvůli desetisekundovému

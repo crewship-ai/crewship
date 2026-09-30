@@ -1,0 +1,12 @@
+Source: 7c1cad17d6b5328a2040ed8d86ffd58ff3d1c7fa (clean production code).
+Development 1 only, 2026-09-30. Synthetic credentials, no external provider request.
+
+Go overlay removed parent credential/revision equality checks only.
+Production source unchanged. Test compiled and failed as expected (exit 1).
+
+--- FAIL: TestDelegatedProviderCannotAcquireTargetAgentsDifferentKey (8.27s)
+    provider_linux_test.go:215: different provider key reached delegated prompt
+    provider_linux_test.go:219: delegation acquired target agent's broader credentials <nil>
+FAIL
+FAIL	github.com/crewship-ai/crewship/internal/restricteddispatch	8.363s
+FAIL
