@@ -140,6 +140,9 @@ ehthumbs.db
 *.db-shm
 *.db-wal
 data/
+# Operator-owned restricted runtime state can contain private scoped input.
+restricted-runtime/
+restricted-native-runtime/
 # …but the models.dev snapshot under internal/modelcatalog/data/ is tracked
 # deliberately: go:embed resolves it at compile time, so an untracked file
 # means the whole server and CLI fail to build on a fresh clone and in CI.
