@@ -89,12 +89,15 @@ func main() {
 }
 
 func run(outDir string) error {
-	dirs := moduleDirs()
-	versions := moduleVersions()
+	// go mod download may leave module zips unextracted. Enumerate every
+	// target's imports first; go list -deps materializes the module cache,
+	// so the subsequent go list -m can report a real .Dir for each module.
 	prov, mods, err := linkedModules()
 	if err != nil {
 		return err
 	}
+	dirs := moduleDirs()
+	versions := moduleVersions()
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
