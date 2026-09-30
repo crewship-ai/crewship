@@ -55,6 +55,9 @@ interface OverviewTabProps {
   cost?: TimeseriesPoint[] | null
   /** True while the journal chain is still being walked. */
   journalPending?: boolean
+  /** An instance admin in no workspace: the runs and the host daemon are read
+   *  per workspace, so they say so instead of loading forever. */
+  noWorkspace?: boolean
 }
 
 // ── formatting ───────────────────────────────────────────────────────────
@@ -157,10 +160,10 @@ function keySourceNote(src?: string): string | undefined {
   return undefined
 }
 
-type Check = { key: string; icon: LucideIcon; label: string; detail: string; state: "ok" | "warn" | "bad" | "pending" }
+type Check = { key: string; icon: LucideIcon; label: string; detail: string; state: "ok" | "warn" | "bad" | "pending" | "na" }
 
 const STATE_DOT: Record<Check["state"], string> = {
-  ok: "COMPLETED", warn: "BLOCKED", bad: "FAILED", pending: "PENDING",
+  ok: "COMPLETED", warn: "BLOCKED", bad: "FAILED", pending: "PENDING", na: "UNKNOWN",
 }
 
 // ── the tab ──────────────────────────────────────────────────────────────
@@ -168,7 +171,7 @@ const STATE_DOT: Record<Check["state"], string> = {
 export const OverviewTab = React.memo(function OverviewTab({
   stats, runtimeAvailable, runtimeInfo, health, license, telemetry,
   version, posture, journal, keeper, daemon = null, aux = null, agents = null,
-  keeperHealth = null, runs = null, cost = null, journalPending = false,
+  keeperHealth = null, runs = null, cost = null, journalPending = false, noWorkspace = false,
 }: OverviewTabProps) {
   // runtimeInfo is the runtime actually IN USE, and it is null when runtimes
   // are installed but the server holds no container provider (--no-docker, or
@@ -209,8 +212,8 @@ export const OverviewTab = React.memo(function OverviewTab({
     },
     {
       key: "daemon", icon: Plug, label: "Host daemon",
-      detail: daemon ? `${daemon.connections} connection${daemon.connections === 1 ? "" : "s"}` : "Checking…",
-      state: daemon === null ? "pending" : daemon.status === "ok" ? "ok" : "bad",
+      detail: daemon ? `${daemon.connections} connection${daemon.connections === 1 ? "" : "s"}` : noWorkspace ? "In a workspace" : "Checking…",
+      state: daemon === null ? (noWorkspace ? "na" : "pending") : daemon.status === "ok" ? "ok" : "bad",
     },
     {
       key: "disk", icon: HardDrive, label: "Disk",
@@ -338,7 +341,7 @@ export const OverviewTab = React.memo(function OverviewTab({
           <div className="flex min-w-0 lg:col-span-2">
             <SettingsCard icon={Activity} tint="var(--success)" title="Runs this week" className="flex w-full flex-col" bodyClassName="flex flex-1 flex-col"
               description={cost ? `${formatUsd(cost.reduce((s, p) => s + p.value, 0))} spent in 7 days` : "Agent and routine runs per day"}>
-              <RunBars runs={runs} />
+              <RunBars runs={runs} noWorkspace={noWorkspace} />
             </SettingsCard>
           </div>
         </div>
@@ -358,7 +361,7 @@ export const OverviewTab = React.memo(function OverviewTab({
               <StatusDot status={runtimeAvailable === true ? "COMPLETED" : "BLOCKED"} /> {runtimeLabel}
             </Row>
             <Row icon={Plug} label="Host daemon" description="How agents reach the host">
-              {daemon ? <><StatusDot status={daemon.status === "ok" ? "COMPLETED" : "FAILED"} /> {daemon.connections} conn.{daemonUp !== null ? ` · up ${formatUptime(daemonUp)}` : ""}</> : "Checking…"}
+              {daemon ? <><StatusDot status={daemon.status === "ok" ? "COMPLETED" : "FAILED"} /> {daemon.connections} conn.{daemonUp !== null ? ` · up ${formatUptime(daemonUp)}` : ""}</> : noWorkspace ? "Read in a workspace" : "Checking…"}
             </Row>
             <SettingsRow label={<Label icon={HardDrive}>Disk</Label>} description={health?.disk?.path} border={false}>
               {/* The data volume is the one that fills in practice. A missing
@@ -586,8 +589,11 @@ function formatUsd(v: number): string {
 const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
 /** Seven days of runs as bars, today on the right; fills the card's height. */
-function RunBars({ runs }: { runs: TimeseriesPoint[] | null }) {
+function RunBars({ runs, noWorkspace }: { runs: TimeseriesPoint[] | null; noWorkspace: boolean }) {
   const reduce = useReducedMotion()
+  if (runs === null && noWorkspace) {
+    return <p className="flex flex-1 items-center justify-center p-4 text-center text-[12px] text-muted-foreground">Runs are counted per workspace — open one to see its week.</p>
+  }
   if (runs === null) return <div className="flex-1 p-4"><Skeleton className="h-full min-h-24 w-full" /></div>
   const max = Math.max(1, ...runs.map((r) => r.value))
   const total = runs.reduce((s, p) => s + p.value, 0)

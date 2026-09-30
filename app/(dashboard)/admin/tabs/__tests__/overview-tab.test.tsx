@@ -168,6 +168,18 @@ describe("Admin overview — health checks", () => {
   })
 })
 
+describe("Admin overview — an instance admin with no workspace", () => {
+  it("says the runs and the host daemon belong to a workspace instead of loading forever", () => {
+    renderTab({ noWorkspace: true, daemon: null, runs: null, journal: null })
+    const runs = screen.getByRole("region", { name: "Runs this week" })
+    expect(runs.querySelector('[data-slot="skeleton"]')).toBeNull()
+    expect(runs).toHaveTextContent(/counted per workspace/)
+    expect(document.querySelector('[data-check="daemon"]')?.getAttribute("data-state")).toBe("na")
+    expect(within(screen.getByRole("region", { name: "Platform" })).getByText("Read in a workspace")).toBeInTheDocument()
+    expect(document.querySelectorAll(".animate-spin")).toHaveLength(0)
+  })
+})
+
 describe("Admin overview — integrity", () => {
   it("reports the journal chain's own verdict", () => {
     renderTab()

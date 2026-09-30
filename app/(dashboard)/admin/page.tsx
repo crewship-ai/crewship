@@ -258,6 +258,7 @@ export default function AdminPage() {
           keeperHealth={overview.keeperHealth}
           runs={overview.runs}
           cost={overview.cost}
+          noWorkspace={!workspaceId && !wsLoading}
         />
       )
     }
