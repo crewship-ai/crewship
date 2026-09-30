@@ -117,7 +117,13 @@ func readContext(ctx context.Context, q queryer, a Attempt, id string, seen map[
 		return ContextEntry{}, ErrDenied
 	}
 	for _, parent := range e.Sources {
-		if _, err = readContext(ctx, q, a, parent, seen); err != nil {
+		var delegated int
+		if q.QueryRowContext(ctx, `SELECT 1 FROM access_context_delegations WHERE entry_id=? AND source_context_id=?`, e.ID, parent).Scan(&delegated) == nil {
+			_, err = readDelegatedContextSource(ctx, q, a, e.ID, parent, seen)
+		} else {
+			_, err = readContext(ctx, q, a, parent, seen)
+		}
+		if err != nil {
 			return ContextEntry{}, err
 		}
 	}
