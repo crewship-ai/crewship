@@ -13,9 +13,18 @@ import { DrillNavItem, DrillNavSection } from "@/components/layout/drill-page"
  * admin tick the ones they want, the way Crew links lists "All crews" above
  * each crew.
  *
- * The selection lives in the URL (?ws=slug,slug), so a link shows what its
- * sender saw. No ?ws means all; ?ws=none means nothing ticked.
+ * "All workspaces" is its own choice, not "every row happens to be ticked":
+ * it means every workspace now and every one created later (a save for all
+ * also sets the defaults for new workspaces). Ticking rows by hand — even all
+ * of them, even the only one — picks those workspaces and nothing more, so a
+ * server with a single workspace still reaches that workspace's own editor.
+ *
+ * The selection lives in the URL, so a link shows what its sender saw: no ?ws
+ * means all, ?ws=slug,slug the workspaces ticked, ?ws=none nothing.
  */
+
+/** A selection: all workspaces, or the ones ticked. */
+export interface Scope { all: boolean; ids: Set<string> }
 
 export interface ScopeWorkspace {
   id: string
@@ -25,20 +34,21 @@ export interface ScopeWorkspace {
   count?: number
 }
 
-export function readScope(all: ScopeWorkspace[]): Set<string> {
-  if (typeof window === "undefined") return new Set(all.map((w) => w.id))
+export function readScope(all: ScopeWorkspace[]): Scope {
+  const every = { all: true, ids: new Set(all.map((w) => w.id)) }
+  if (typeof window === "undefined") return every
   const raw = new URLSearchParams(window.location.search).get("ws")
-  if (raw === null) return new Set(all.map((w) => w.id))
-  if (raw === "none") return new Set()
+  if (raw === null) return every
+  if (raw === "none") return { all: false, ids: new Set() }
   const want = new Set(raw.split(",").filter(Boolean))
-  return new Set(all.filter((w) => want.has(w.slug) || want.has(w.id)).map((w) => w.id))
+  return { all: false, ids: new Set(all.filter((w) => want.has(w.slug) || want.has(w.id)).map((w) => w.id)) }
 }
 
-export function writeScope(all: ScopeWorkspace[], selected: Set<string>) {
+export function writeScope(all: ScopeWorkspace[], scope: Scope) {
   const url = new URL(window.location.href)
-  if (selected.size === all.length) url.searchParams.delete("ws")
-  else if (selected.size === 0) url.searchParams.set("ws", "none")
-  else url.searchParams.set("ws", all.filter((w) => selected.has(w.id)).map((w) => w.slug).join(","))
+  if (scope.all) url.searchParams.delete("ws")
+  else if (scope.ids.size === 0) url.searchParams.set("ws", "none")
+  else url.searchParams.set("ws", all.filter((w) => scope.ids.has(w.id)).map((w) => w.slug).join(","))
   window.history.replaceState(window.history.state, "", url.toString())
 }
 
@@ -66,21 +76,21 @@ function Avatar({ name }: { name: string }) {
 }
 
 /** One line under the list saying what the ticks mean for this page. */
-export function scopeSummary(all: ScopeWorkspace[], selected: Set<string>, mode: "edit" | "view"): string {
-  const n = selected.size
+export function scopeSummary(all: ScopeWorkspace[], scope: Scope, mode: "edit" | "view"): string {
+  const n = scope.ids.size
+  if (scope.all) return mode === "view" ? `All ${n} workspace${n === 1 ? "" : "s"}` : "All workspaces · saving overwrites all, and new ones start with it"
   if (n === 0) return "Nothing selected"
-  const one = all.find((w) => selected.has(w.id))
-  if (mode === "view") return n === all.length ? `All ${n} workspaces` : n === 1 ? one!.name : `${n} of ${all.length} workspaces`
-  if (n === 1) return `Editing ${one!.name}`
-  return n === all.length ? `All ${n} workspaces · saving overwrites all` : `${n} workspaces · saving overwrites them`
+  const one = all.find((w) => scope.ids.has(w.id))
+  if (mode === "view") return n === 1 ? one!.name : `${n} of ${all.length} workspaces`
+  return n === 1 ? `Editing ${one!.name}` : `${n} workspaces · saving overwrites them`
 }
 
 export function WorkspaceScopeSection({
-  workspaces, selected, onChange, currentId, mode = "view", inert,
+  workspaces, scope, onChange, currentId, mode = "view", inert,
 }: {
   workspaces: ScopeWorkspace[]
-  selected: Set<string>
-  onChange: (next: Set<string>) => void
+  scope: Scope
+  onChange: (next: Scope) => void
   /** The workspace the admin sits in, marked "here" and nothing more. */
   currentId?: string | null
   mode?: "edit" | "view"
@@ -88,20 +98,22 @@ export function WorkspaceScopeSection({
    *  instance-wide setting): the list is greyed out and this says why. */
   inert?: string
 }) {
+  const selected = scope.ids
   const n = selected.size
-  const all = n === workspaces.length && n > 0
+  const all = scope.all
+  // Unticking a row leaves "all"; ticking rows by hand never enters it.
   const toggle = (id: string) => {
     const next = new Set(selected)
     if (next.has(id)) next.delete(id)
     else next.add(id)
-    onChange(next)
+    onChange({ all: false, ids: next })
   }
   return (
     <DrillNavSection label="Workspaces" count={workspaces.length} collapsible={false}>
       <div data-slot="workspace-scope" className={cn(inert && "pointer-events-none opacity-45")} aria-disabled={inert ? true : undefined}>
         <DrillNavItem
           pressed={all}
-          onSelect={() => onChange(all ? new Set() : new Set(workspaces.map((w) => w.id)))}
+          onSelect={() => onChange(all ? { all: false, ids: new Set() } : { all: true, ids: new Set(workspaces.map((w) => w.id)) })}
           icon={<Box state={all ? "on" : n ? "mixed" : "off"} />}
           label="All workspaces"
         />
@@ -125,7 +137,7 @@ export function WorkspaceScopeSection({
         ))}
       </div>
       <p className="px-2 pb-1 pt-1 text-[11px] text-muted-foreground" data-slot="workspace-scope-summary">
-        {inert ?? scopeSummary(workspaces, selected, mode)}
+        {inert ?? scopeSummary(workspaces, scope, mode)}
       </p>
     </DrillNavSection>
   )

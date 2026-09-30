@@ -57,6 +57,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
 
 ### Fixed
+- Admin › Security: "All workspaces" is its own choice in the panel — every workspace now and later — and ticking workspaces by hand picks just those, so a server with a single workspace still reaches that workspace's full editor (security contact, its own judge key, watch rules). The all-workspaces form links to each workspace's own editor. People & workspaces unlocks an account, and lists a person's sessions, for an instance admin who belongs to no workspace.
 - A suspended account could still sign in through Google: the callback minted a session without checking the suspension. It now refuses, and the login page says only that it could not sign the person in.
 - Removing a member from a workspace hands their pages to a crew in the same transaction as the removal, so a removal that fails (on the instance route, one whose audit entry cannot be written) leaves the pages with the person.
 - Admin › Security: a saved preview is fingerprinted over every workspace's whole settings, so a watch rule rewritten to the same length since the preview is refused too; a preview asked for before the selection went away and came back is dropped; clicking "Load more" twice loads the next page once.

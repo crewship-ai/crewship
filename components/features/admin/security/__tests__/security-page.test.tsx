@@ -345,3 +345,42 @@ describe("All means the same with one workspace (review R9)", () => {
   })
 })
 
+describe("One workspace keeps its full editor (review follow-up)", () => {
+  it("offers the workspace on its own from the all-workspaces form, with the full editor", async () => {
+    const saved = GOV.workspaces.splice(1)
+    try {
+      window.history.replaceState(null, "", "/admin/security?section=watchdog")
+      render(<SecurityPage />)
+      expect(await screen.findByRole("alert")).toHaveTextContent("All 1 workspace selected")
+      fireEvent.click(screen.getByRole("button", { name: "Edit Dess on its own" }))
+      expect(await screen.findByTestId("gov-watchdog")).toHaveAttribute("data-workspace", "ws-a")
+      expect(window.location.search).toContain("ws=dess")
+    } finally {
+      GOV.workspaces.push(...saved)
+    }
+  })
+
+  it("opens the full editor for a workspace named in the link, even when it is the only one", async () => {
+    const saved = GOV.workspaces.splice(1)
+    try {
+      window.history.replaceState(null, "", "/admin/security?section=alerts&ws=dess")
+      render(<SecurityPage />)
+      expect(await screen.findByTestId("gov-alerts")).toHaveAttribute("data-workspace", "ws-a")
+      expect(within(scope()).getByRole("button", { name: "All workspaces" })).toHaveAttribute("aria-pressed", "false")
+    } finally {
+      GOV.workspaces.push(...saved)
+    }
+  })
+
+  it("leaves all-workspaces mode when a single workspace is unticked", async () => {
+    render(<SecurityPage />)
+    await screen.findByRole("button", { name: /^Coolify/ })
+    tick(/^Dess/)
+    expect(within(scope()).getByRole("button", { name: "All workspaces" })).toHaveAttribute("aria-pressed", "false")
+    tick(/^Dess/)
+    // Both ticked by hand is two workspaces, not "all": no defaults for new ones.
+    expect(within(scope()).getByRole("button", { name: "All workspaces" })).toHaveAttribute("aria-pressed", "false")
+    expect(new URLSearchParams(window.location.search).get("ws")).toBe("dess,coolify")
+  })
+})
+

@@ -11,8 +11,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import type { AdminUser, AdminUserSessions } from "@/app/(dashboard)/admin/types"
 import { DrawerSection, ago } from "@/app/(dashboard)/admin/tabs/admin-kit"
 
+// No workspace (an instance admin need not belong to one): the route answers
+// for the whole instance, so the query is left off rather than sent empty.
 const adminUserURL = (userId: string, workspaceId: string, tail: string) =>
-  `/api/v1/admin/users/${encodeURIComponent(userId)}/${tail}?workspace_id=${encodeURIComponent(workspaceId)}`
+  `/api/v1/admin/users/${encodeURIComponent(userId)}/${tail}${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ""}`
 export function UserSessions({ user, workspaceId, isMe, onChanged }: { user: AdminUser; workspaceId: string; isMe: boolean; onChanged: () => void }) {
   const [data, setData] = React.useState<AdminUserSessions | null>(null)
   const [error, setError] = React.useState<string | null>(null)

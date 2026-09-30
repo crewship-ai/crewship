@@ -98,7 +98,7 @@ function Segmented({ field, value, onPick, name }: { field: Field; value: unknow
 }
 
 export function BulkGovernanceForm({
-  section, rows, all, onSaved,
+  section, rows, all, onSaved, onEditOne,
 }: {
   section: BulkSection
   /** The selected workspaces. */
@@ -106,6 +106,9 @@ export function BulkGovernanceForm({
   /** Every workspace is selected: the save also sets the instance defaults. */
   all: boolean
   onSaved: (r: GovSaveResult) => void
+  /** Open one workspace's full editor: the settings that belong to a single
+   *  workspace (contact, judge key, watch rules) are not in this form. */
+  onEditOne?: (workspaceId: string) => void
 }) {
   const fields = BULK_FIELDS[section]
   const [draft, setDraft] = React.useState<Draft>({})
@@ -180,6 +183,20 @@ export function BulkGovernanceForm({
           Fields you leave alone stay as each workspace has them.{all && " New workspaces will start with these settings too."}
         </p>
       </div>
+      {onEditOne && (
+        <p className="text-[12px] text-muted-foreground" data-slot="edit-one">
+          The security contact, a workspace&apos;s own judge key and its watch rules are set one workspace at a time:{" "}
+          {rows.map((r, i) => (
+            <React.Fragment key={r.workspace_id}>
+              {i > 0 && " · "}
+              <button type="button" onClick={() => onEditOne(r.workspace_id)} className="text-primary-hover underline-offset-2 hover:underline coarse:min-h-[2.75rem]"
+                aria-label={`Edit ${r.workspace_name} on its own`}>
+                {r.workspace_name}
+              </button>
+            </React.Fragment>
+          ))}
+        </p>
+      )}
       <SettingsCard title={SECTION_TITLE[section]} description={all ? "Every workspace, and what a new workspace starts with" : `Settings for ${n} workspaces at once`}>
         <div className="flex flex-col gap-3 px-4 py-3">
           {fields.filter((f) => !f.when || f.when(draft, rows)).map((f) => {

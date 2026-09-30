@@ -120,7 +120,9 @@ export function usePeople(workspaceId: string | null, workspaceLoading = false) 
     setInstanceAdmin: (userId: string, on: boolean, done: string) =>
       act(`a:${userId}`, `${INSTANCE}/admins/${enc(userId)}`, on ? "PUT" : "DELETE", on ? {} : undefined, done, "That change was refused"),
     unlock: (userId: string, done: string) =>
-      workspaceId ? act(`u:${userId}`, `/api/v1/admin/users/${enc(userId)}/unlock?workspace_id=${enc(workspaceId)}`, "POST", {}, done, "The account could not be unlocked") : Promise.resolve(null),
+      // Without a workspace the route answers an instance admin for the
+      // whole instance, like the lists above.
+      act(`u:${userId}`, `/api/v1/admin/users/${enc(userId)}/unlock${workspaceId ? `?workspace_id=${enc(workspaceId)}` : ""}`, "POST", {}, done, "The account could not be unlocked"),
   }), [act, workspaceId])
 
   return { people, workspaces, scope, loading, error, busy, reload, actions }

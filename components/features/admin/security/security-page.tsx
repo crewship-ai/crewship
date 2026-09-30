@@ -13,7 +13,7 @@ import { KeeperJudgeCard } from "@/components/features/admin/keeper-judge-card"
 import { KeeperProfileCard } from "@/components/features/admin/keeper-profile-card"
 import { KeeperGovernancePanel } from "@/components/features/admin/keeper-governance-panel"
 import { JudgeModelsCard } from "@/components/features/admin/judge-models-card"
-import { WorkspaceScopeSection, readScope, writeScope, type ScopeWorkspace } from "@/components/features/admin/workspace-scope"
+import { WorkspaceScopeSection, readScope, writeScope, type Scope, type ScopeWorkspace } from "@/components/features/admin/workspace-scope"
 import { SecurityOverview } from "./security-overview"
 import { SecurityActivity } from "./security-activity"
 import { useSecurity } from "./use-security"
@@ -77,8 +77,7 @@ export function SecurityPage() {
     return merged
   })
 
-  const [selected, setSelected] = React.useState<Set<string> | null>(null)
-  const [total, setTotal] = React.useState(0)
+  const [scope, setScope] = React.useState<Scope | null>(null)
   const [decision, setDecision] = React.useState<DecisionFilter>("all")
   // Activity filters on the server, over the whole history (review R6). The
   // overview reads the log unfiltered.
@@ -89,9 +88,8 @@ export function SecurityPage() {
       decision: decision === "all" ? undefined : decision,
     }
   }, [section, stream, decision])
-  // null asks for every workspace — also when every one is ticked, so a
-  // workspace created meanwhile is not left out of "all".
-  const inst = useInstanceKeeper(selected === null || selected.size === total ? null : [...selected], data.liveTick, filter)
+  // null asks for every workspace: "all" includes one created meanwhile.
+  const inst = useInstanceKeeper(scope === null || scope.all ? null : [...scope.ids], data.liveTick, filter)
 
   const workspaces: ScopeWorkspace[] = React.useMemo(() => {
     const counts = new Map((inst.requests?.by_workspace ?? []).map((b) => [b.workspace_id, b.count]))
@@ -100,19 +98,19 @@ export function SecurityPage() {
 
   // The ticks start from the URL once the list of workspaces is known.
   React.useEffect(() => {
-    if (selected !== null || workspaces.length === 0) return
-    setTotal(workspaces.length)
-    setSelected(readScope(workspaces))
-  }, [workspaces, selected])
-  const changeSelection = (next: Set<string>) => {
-    setTotal(workspaces.length)
-    setSelected(next)
+    if (scope !== null || workspaces.length === 0) return
+    setScope(readScope(workspaces))
+  }, [workspaces, scope])
+  const changeScope = (next: Scope) => {
+    setScope(next)
     writeScope(workspaces, next)
   }
+  const pickOne = (id: string) => changeScope({ all: false, ids: new Set([id]) })
 
   // Until the URL is read, the page covers every workspace, as it will then.
-  const sel = React.useMemo(() => selected ?? new Set(workspaces.map((w) => w.id)), [selected, workspaces])
-  const allTicked = sel.size === workspaces.length && workspaces.length > 0
+  // In "all" every workspace counts, including one that appeared since.
+  const allTicked = scope === null || scope.all
+  const sel = React.useMemo(() => allTicked ? new Set(workspaces.map((w) => w.id)) : scope!.ids, [allTicked, scope, workspaces])
   const entries = inst.requests?.items ?? []
   // Per kind from the server, over every workspace ticked and all history.
   const byType = inst.requests?.by_type ?? {}
@@ -127,9 +125,10 @@ export function SecurityPage() {
 
   // "All workspaces" always means the bulk path, which also sets the defaults
   // for new workspaces — with one workspace on the server as with many
-  // (review R9). One workspace ticked out of several is edited on its own.
-  const bulkRows = rows.length > 1 || (allTicked && rows.length > 0)
-  const singleRow = rows.length === 1 && !allTicked ? rows[0] : null
+  // (review R9). A workspace ticked on its own gets its full editor, even the
+  // only one (contact, judge key and watch rules are per workspace).
+  const bulkRows = allTicked ? rows.length > 0 : rows.length > 1
+  const singleRow = !allTicked && rows.length === 1 ? rows[0] : null
   const instanceProp = React.useMemo(
     () => (singleRow ? { row: singleRow, onSaved: () => void inst.reloadGov() } : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the row object is the identity that matters
@@ -141,7 +140,7 @@ export function SecurityPage() {
 
   const nav = (
     <>
-      <WorkspaceScopeSection workspaces={workspaces} selected={sel} onChange={changeSelection} currentId={workspaceId} mode={scopeMode} inert={scopeInert} />
+      <WorkspaceScopeSection workspaces={workspaces} scope={scope ?? { all: true, ids: sel }} onChange={changeScope} currentId={workspaceId} mode={scopeMode} inert={scopeInert} />
       <DrillNavSection label="Status" collapsible={false}>
         <DrillNavItem selected={section === "overview"} onSelect={() => update({ section: "overview" })}
           icon={<Home className="h-3.5 w-3.5" />} label="Overview" />
@@ -188,7 +187,7 @@ export function SecurityPage() {
         {SETTINGS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
       </select>
       <select aria-label="Workspaces" value={allTicked ? "all" : sel.size === 1 ? [...sel][0] : "some"}
-        onChange={(e) => changeSelection(e.target.value === "all" ? new Set(workspaces.map((w) => w.id)) : new Set([e.target.value]))}
+        onChange={(e) => e.target.value === "all" ? changeScope({ all: true, ids: new Set(workspaces.map((w) => w.id)) }) : pickOne(e.target.value)}
         className="h-9 w-full rounded-md border border-control-border bg-surface-subtle px-3 text-control coarse:h-[2.75rem]">
         <option value="all">All workspaces</option>
         {!allTicked && sel.size > 1 && <option value="some">{sel.size} workspaces</option>}
@@ -215,7 +214,7 @@ export function SecurityPage() {
           <SummaryItem>Every per-workspace setting, one row per workspace. Open a cell to change it there.</SummaryItem>
         </SettingsSummary>
         <WhatsOnWhere rows={inst.gov?.workspaces ?? []} selected={sel}
-          onOpen={(s, id) => { changeSelection(new Set([id])); update({ section: s }) }} />
+          onOpen={(s, id) => { pickOne(id); update({ section: s }) }} />
       </>
     )
   } else if (section === "activity") {
@@ -248,7 +247,7 @@ export function SecurityPage() {
             serverEnabled={data.status?.enabled ?? false} section={PANEL_SECTION[section]} instance={instanceProp} />
         )}
         {bulk && bulkRows && (
-          <BulkGovernanceForm section={section} rows={rows} all={allTicked} onSaved={() => void inst.reloadGov()} />
+          <BulkGovernanceForm section={section} rows={rows} all={allTicked} onSaved={() => void inst.reloadGov()} onEditOne={pickOne} />
         )}
       </>
     )

@@ -37,3 +37,14 @@ describe("usePeople", () => {
     await waitFor(() => expect(h.apiFetch).toHaveBeenCalledWith("/api/v1/admin/users?workspace_id=ws-1"))
   })
 })
+
+describe("usePeople actions without a workspace", () => {
+  it("unlocks an account for an instance admin who belongs to no workspace", async () => {
+    const { result } = renderHook(() => usePeople(null, false))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    h.apiFetch.mockClear()
+    h.apiFetch.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) , headers: { get: () => null } })
+    await result.current.actions.unlock("u1", "Unlocked")
+    expect(h.apiFetch).toHaveBeenCalledWith("/api/v1/admin/users/u1/unlock", expect.objectContaining({ method: "POST" }))
+  })
+})
