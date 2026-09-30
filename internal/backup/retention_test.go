@@ -61,6 +61,17 @@ func cand(path string, at time.Time) RetentionCandidate {
 	return RetentionCandidate{Path: path, Scope: ScopeWorkspace, WorkspaceID: "ws", CreatedAt: at, ProofLevel: ProofChecksum}
 }
 
+// withProof sets what the catalog knows about a bundle: its proof level,
+// its last drill result and whether it recorded gaps (complete=false means
+// it did).
+func withProof(c RetentionCandidate, proof int, drill string, complete bool) RetentionCandidate {
+	c.ProofLevel = proof
+	c.DrillResult = drill
+	c.Complete = complete
+	c.Incomplete = !complete
+	return c
+}
+
 func paths(cs []RetentionCandidate) []string {
 	out := make([]string, 0, len(cs))
 	for _, c := range cs {
@@ -138,6 +149,62 @@ func TestPlanRetention(t *testing.T) {
 			},
 			policy: RetentionPolicy{KeepMin: 1},
 			drop:   []string{"ws-old"},
+		},
+		{
+			// Review B4: a newer partial bundle that went through a test
+			// restore must not push out the last complete bundle whose
+			// test restore succeeded.
+			name: "a partial restore never displaces the last complete successful restore",
+			cands: []RetentionCandidate{
+				withProof(cand("partial", day(0)), ProofRestore, "partial", false),
+				withProof(cand("restored", day(90)), ProofRestore, "ok", true),
+				withProof(cand("older", day(120)), ProofChecksum, "", true),
+			},
+			policy: RetentionPolicy{KeepMin: 1},
+			drop:   []string{"older"},
+		},
+		{
+			name: "incomplete checked bundles do not fill the checked floor",
+			cands: []RetentionCandidate{
+				withProof(cand("new", day(0)), ProofChecksum, "", true),
+				withProof(cand("gappy-checked", day(1)), ProofContents, "", false),
+				withProof(cand("complete-checked", day(2)), ProofContents, "", true),
+				cand("old", day(3)),
+			},
+			policy: RetentionPolicy{KeepMin: 1},
+			drop:   []string{"gappy-checked", "old"},
+		},
+		{
+			name: "the newest complete checked bundle outlives newer incomplete ones",
+			cands: []RetentionCandidate{
+				withProof(cand("gap1", day(0)), ProofContents, "", false),
+				withProof(cand("gap2", day(1)), ProofContents, "", false),
+				withProof(cand("gap3", day(2)), ProofRestore, "partial", false),
+				withProof(cand("complete-checked", day(40)), ProofContents, "", true),
+				withProof(cand("complete-older", day(50)), ProofContents, "", true),
+			},
+			policy: RetentionPolicy{KeepMin: 1},
+			drop:   []string{"complete-older", "gap2", "gap3"},
+		},
+		{
+			name: "the newest complete successful restore survives a full checked floor",
+			cands: []RetentionCandidate{
+				withProof(cand("checked-new", day(0)), ProofContents, "", true),
+				withProof(cand("checked-2", day(1)), ProofContents, "", true),
+				withProof(cand("restored", day(30)), ProofRestore, "ok", true),
+				withProof(cand("restored-older", day(60)), ProofRestore, "ok", true),
+			},
+			policy: RetentionPolicy{KeepMin: 1},
+			drop:   []string{"checked-2", "restored-older"},
+		},
+		{
+			name: "a failed or partial drill does not protect a complete bundle",
+			cands: []RetentionCandidate{
+				withProof(cand("new", day(0)), ProofChecksum, "", true),
+				withProof(cand("drill-failed", day(10)), ProofChecksum, "failed", true),
+			},
+			policy: RetentionPolicy{KeepMin: 1},
+			drop:   []string{"drill-failed"},
 		},
 		{
 			name:   "max age keeps everything younger beyond the floor",
@@ -223,5 +290,48 @@ func TestRotatePlanWithPolicy_OnlyTouchesThePlansBundles(t *testing.T) {
 	}
 	if _, err := RotatePlanWithPolicy(ctx, nil, dir, "ws_plan", "plan_a", RetentionPolicy{KeepMin: 1}, true); err == nil {
 		t.Fatal("rotating a plan without the catalog must be refused")
+	}
+}
+
+// Rotation after an incomplete run, through the catalog: a newer partial
+// bundle whose test restore came back partial must not take the place of
+// the last complete bundle whose test restore succeeded (review B4). The
+// rotation actually deletes, so the surviving file is checked on disk too.
+func TestRotatePlanKeepsLastCompleteSuccessfulRestore(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.MigratedSQLDB(t)
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	old := writeBundleFile(t, dir, covManifestForWorkspace("review-ws", now.AddDate(0, 0, -90)), "old")
+	recent := writeBundleFile(t, dir, covManifestForWorkspace("review-ws", now), "recent")
+	for _, e := range []CatalogEntry{
+		{FilePath: old, WorkspaceID: "review-ws", Scope: string(ScopeWorkspace), PlanID: "review-plan", CreatedAt: now.AddDate(0, 0, -90), ProofLevel: ProofRestore, DrillResult: "ok", Incomplete: []IncompleteItem{}},
+		{FilePath: recent, WorkspaceID: "review-ws", Scope: string(ScopeWorkspace), PlanID: "review-plan", CreatedAt: now, ProofLevel: ProofRestore, DrillResult: "partial", Incomplete: []IncompleteItem{{Kind: IncompleteAttachmentMissing, Count: 1}}},
+	} {
+		if err := UpsertCatalogEntry(ctx, db, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := SetCatalogDrill(ctx, db, old, "ok", nil, now.AddDate(0, 0, -90)); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetCatalogDrill(ctx, db, recent, "partial", nil, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, dry := range []bool{true, false} {
+		drop, err := RotatePlanWithPolicy(ctx, db, dir, "review-ws", "review-plan", RetentionPolicy{KeepMin: 1}, dry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range drop {
+			if p == old {
+				t.Fatalf("dry=%v: the last complete successful restore is dropped in favour of a partial bundle (drop %v)", dry, drop)
+			}
+		}
+	}
+	for _, keep := range []string{old, recent} {
+		if _, err := os.Stat(keep); err != nil {
+			t.Errorf("%s deleted: %v", keep, err)
+		}
 	}
 }

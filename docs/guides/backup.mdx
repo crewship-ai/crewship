@@ -928,7 +928,13 @@ refused, because replacing would delete everything the bundle does not hold.
   own bundles — per workspace for a Workspace backup plan, and to the plan's
   instance bundles as one group for a Complete recovery plan — `keep_min`
   newest copies are never aged out, then the newest copy of each of the last
-  `keep_daily` days, `keep_weekly` weeks and `keep_monthly` months. Pinned
+  `keep_daily` days, `keep_weekly` weeks and `keep_monthly` months. The
+  newest `keep_min` checked copies are kept too, and a copy that recorded
+  gaps (incomplete) never counts as one of them. Whatever newer copies exist,
+  retention never removes the newest complete copy whose test restore
+  succeeded, nor the newest complete copy whose contents were checked — a
+  string of incomplete runs cannot rotate away the last copy known to be
+  whole, and those copies keep their off-site copies as well. Pinned
   bundles, manual bundles and other plans' bundles are never touched. A
   bundle retention removes leaves the catalog, gives back the environment
   layers no other bundle needs, and loses its off-site copies.

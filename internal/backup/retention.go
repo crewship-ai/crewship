@@ -9,9 +9,15 @@ package backup
 // old copies were the only ones left. RetentionPolicy replaces it:
 //
 //   - a floor that age never touches: the newest KeepMin bundles, plus the
-//     newest KeepMin that have been checked (proof level >= 2), so a floor
-//     full of unchecked copies still holds a known-good one when one exists.
-//     The floor is never below 1 — no policy deletes the last copy;
+//     newest KeepMin that have been checked (proof level >= 2) and recorded
+//     no gaps, so a floor full of unchecked or partial copies still holds a
+//     known-good one when one exists. The floor is never below 1 — no policy
+//     deletes the last copy;
+//   - a protected set no newer copy displaces: the newest complete bundle
+//     whose test restore succeeded, and the newest complete bundle whose
+//     contents were checked. A run that came out incomplete rotates too, and
+//     a string of them must never push out the last copy known to be whole.
+//     Off-site copies follow: only bundles a rotation drops lose theirs;
 //   - pinned bundles, never deleted by any rule;
 //   - grandfather-father-son beyond the floor: the newest bundle of each of
 //     the last Daily days, Weekly ISO weeks and Monthly months;
@@ -61,6 +67,14 @@ type RetentionCandidate struct {
 	CreatedAt  time.Time
 	Pinned     bool
 	ProofLevel int
+	// DrillResult is the bundle's last test restore: ok | partial | failed,
+	// "" when none ran.
+	DrillResult string
+	// Complete: the catalog recorded no gaps for the bundle. Incomplete: it
+	// recorded some. Both false when the catalog does not know (no row, or a
+	// row written before gaps were recorded).
+	Complete   bool
+	Incomplete bool
 }
 
 func (c RetentionCandidate) groupKey() string {
@@ -90,20 +104,36 @@ func PlanRetention(cands []RetentionCandidate, p RetentionPolicy, now time.Time)
 			return cands[idx[a]].CreatedAt.After(cands[idx[b]].CreatedAt)
 		})
 		checked := 0
+		restoredOK, completeChecked := false, false
 		days, weeks, months := map[string]bool{}, map[string]bool{}, map[string]bool{}
 		for rank, i := range idx {
 			c := cands[i]
 			at := c.CreatedAt.UTC()
+			// A bundle with recorded gaps is never counted as a checked
+			// copy: its check proved it opens, not that it holds everything.
+			countsChecked := c.ProofLevel >= ProofContents && !c.Incomplete
 			switch {
 			case rank < floor, c.Pinned:
 				kept[i] = true
-			case c.ProofLevel >= ProofContents && checked < floor:
+			case countsChecked && checked < floor:
 				kept[i] = true
 			case p.MaxAgeDays > 0 && at.After(now.AddDate(0, 0, -p.MaxAgeDays)):
 				kept[i] = true
 			}
-			if c.ProofLevel >= ProofContents && checked < floor {
+			if countsChecked && checked < floor {
 				checked++
+			}
+			// The protected set, whatever newer copies exist: the newest
+			// complete bundle whose test restore succeeded, and the newest
+			// complete bundle whose contents were checked. Neither can be
+			// displaced by newer partial or unchecked copies.
+			if c.Complete && c.DrillResult == "ok" && !restoredOK {
+				restoredOK = true
+				kept[i] = true
+			}
+			if c.Complete && c.ProofLevel >= ProofContents && !completeChecked {
+				completeChecked = true
+				kept[i] = true
 			}
 			// GFS buckets: the first (newest) bundle seen in a bucket inside
 			// its window claims it, whether or not the floor already kept it.
@@ -224,6 +254,10 @@ func rotateWithPolicy(ctx context.Context, db *sql.DB, dir, workspaceID string, 
 		if m, ok := meta[e.Path]; ok {
 			c.Pinned = m.Pinned
 			c.PlanID = m.PlanID
+			c.DrillResult = m.DrillResult
+			// nil Incomplete is "not recorded", never "complete".
+			c.Complete = m.Incomplete != nil && len(m.Incomplete) == 0
+			c.Incomplete = len(m.Incomplete) > 0
 			if m.ProofLevel > 0 {
 				c.ProofLevel = m.ProofLevel
 			}
