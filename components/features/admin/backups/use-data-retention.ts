@@ -18,6 +18,7 @@ interface RetentionApi {
 /** The server's answer to PUT /admin/instance/retention. */
 interface RetentionPutApi {
   dry_run: boolean
+  preview_id?: string
   workspaces: { workspace_id: string; workspace_name: string; changes: { key: string; from: number | null; to: number | null; rows_affected_next_sweep: number }[] }[]
 }
 
@@ -42,7 +43,7 @@ export function toRetentionChanges(api: RetentionPutApi): RetentionPutResponse {
   const changes: RetentionChange[] = api.workspaces.flatMap((w) => w.changes.map((c) => ({
     workspace_id: w.workspace_id, workspace_name: w.workspace_name, key: c.key, from: c.from, to: c.to, rows_affected: c.rows_affected_next_sweep,
   })))
-  return { dry_run: api.dry_run, changes }
+  return { dry_run: api.dry_run, changes, preview_id: api.preview_id }
 }
 
 /** GET /admin/instance/retention?ws= for the ticked workspaces. */
@@ -57,18 +58,22 @@ export function useDataRetention(selected: Set<string>) {
  * workspace — a selection only; it never changes the defaults new workspaces
  * start with (that is putRetentionDefaults, a separate operation). With
  * dry_run the server lists every value it would overwrite and how many rows
- * the next sweep deletes; nothing changes.
+ * the next sweep deletes; nothing changes. `expectPreview` is the preview_id
+ * of the dry run being confirmed: if the workspaces or their windows changed
+ * since, the server answers 409 and writes nothing.
  */
-export async function putRetention(workspaceIds: string[] | null, changes: { key: string; days: number | null }[], dryRun: boolean): Promise<SendResult<RetentionPutResponse>> {
+export async function putRetention(workspaceIds: string[] | null, changes: { key: string; days: number | null }[], dryRun: boolean, expectPreview?: string): Promise<SendResult<RetentionPutResponse>> {
   const windows = Object.fromEntries(changes.map((c) => [c.key, c.days]))
-  const r = await send<RetentionPutApi>(RETENTION, "PUT", { workspace_ids: workspaceIds, windows, dry_run: dryRun })
+  const r = await send<RetentionPutApi>(RETENTION, "PUT", {
+    workspace_ids: workspaceIds, windows, dry_run: dryRun, ...(expectPreview ? { expect_preview: expectPreview } : {}),
+  })
   return r.ok ? { ok: true, data: toRetentionChanges(r.data) } : r
 }
 
 const DEFAULTS = `${RETENTION}/defaults`
 
 export interface RetentionDefaults { defaults: Record<string, number | null>; configured: string[] }
-export interface RetentionDefaultsPut { applied: boolean; dry_run: boolean; changes: { key: string; from: number | null; to: number | null }[] }
+export interface RetentionDefaultsPut { applied: boolean; dry_run: boolean; changes: { key: string; from: number | null; to: number | null }[]; preview_id?: string }
 
 /** GET /admin/instance/retention/defaults: what a new workspace starts with. */
 export function useRetentionDefaults(enabled: boolean) {
@@ -81,7 +86,8 @@ export function useRetentionDefaults(enabled: boolean) {
 /**
  * PUT /admin/instance/retention/defaults. Changes only what a workspace
  * created from now on starts with; no existing workspace or row is touched.
+ * `expectPreview` holds the save to the dry run it confirms (409 otherwise).
  */
-export function putRetentionDefaults(windows: Record<string, number | null>, dryRun: boolean): Promise<SendResult<RetentionDefaultsPut>> {
-  return send<RetentionDefaultsPut>(DEFAULTS, "PUT", { windows, dry_run: dryRun })
+export function putRetentionDefaults(windows: Record<string, number | null>, dryRun: boolean, expectPreview?: string): Promise<SendResult<RetentionDefaultsPut>> {
+  return send<RetentionDefaultsPut>(DEFAULTS, "PUT", { windows, dry_run: dryRun, ...(expectPreview ? { expect_preview: expectPreview } : {}) })
 }

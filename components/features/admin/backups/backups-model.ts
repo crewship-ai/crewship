@@ -425,7 +425,8 @@ export interface RetentionChange {
   /** Rows the next sweep deletes because of this change. */
   rows_affected: number
 }
-export interface RetentionPutResponse { dry_run: boolean; changes: RetentionChange[] }
+/** preview_id fingerprints the targets and every from → to; a confirmation sends it back as expect_preview. */
+export interface RetentionPutResponse { dry_run: boolean; changes: RetentionChange[]; preview_id?: string }
 
 /** The workspaces the scope bar lists (GET /api/v1/admin/workspaces). */
 export interface ScopeWorkspace { id: string; name: string; slug: string }
