@@ -627,6 +627,12 @@ func (s *Service) execute(ctx context.Context, r *Run, plan *Plan) {
 	preset := backup.PresetWorkspace
 	if plan != nil {
 		preset = plan.Preset
+	} else if r.Scope == ScopeInstance {
+		// A manual instance run has no plan to read the preset from, and an
+		// instance backup is always Complete recovery: without this the run
+		// fell back to the workspace preset and its standard crew scope,
+		// leaving /var/lib out (found live on dev3 after the B2 fix).
+		preset = backup.PresetComplete
 	}
 	if r.Kind == backup.KindCustom {
 		preset = backup.PresetCustom

@@ -437,6 +437,22 @@ func TestScheduler_InstanceScopeRunsTheInstanceExecutor(t *testing.T) {
 	}
 }
 
+// A manual instance run has no plan; it must still run as Complete recovery
+// (the full crew scope, /var/lib included) — found live on dev3.
+func TestManualInstanceRunIsCompleteRecovery(t *testing.T) {
+	h := newHarness(t, "2026-09-30T02:00:00Z")
+	inst := &fakeInstanceExec{}
+	h.svc.Instance = inst
+	if _, err := h.svc.StartManual(context.Background(), ManualRequest{Scope: ScopeInstance, RecipientIDs: []string{h.key}}, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.Wait()
+	specs := inst.calls()
+	if len(specs) != 1 || specs[0].Preset != backup.PresetComplete || specs[0].ScopeLevel() != backup.ScopeLevelFull {
+		t.Fatalf("manual instance spec = %+v", specs)
+	}
+}
+
 type fakePause struct{ reason string }
 
 func (f fakePause) Paused(context.Context) (bool, string) { return f.reason != "", f.reason }
