@@ -104,6 +104,9 @@ func (f CallerFunc) Call(ctx context.Context, req CallRequest) (CallResponse, er
 // because the work has already been done and refusing it would also waste
 // the budget.
 //
+// Restricted Responses broker calls use durable Reserve/Settle rather than
+// this legacy middleware.
+//
 // KNOWN RACE (security audit H1, partial mitigation only):
 // Between step (1) Enforce and step (3) Record there's a window — the LLM
 // round-trip — where this call's cost has not been written to cost_ledger.

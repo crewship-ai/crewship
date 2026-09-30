@@ -37,6 +37,7 @@ import "sort"
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
 	"access_grants":                IntentInclude,        // exact member/resource rights survive restore
+	"access_context":               IntentExcludeRuntime, // prompt context requires fresh admission
 	"access_attempts":              IntentExcludeRuntime, // restoring a bundle must not revive execution capabilities
 	"restricted_launches":          IntentExcludeRuntime, // frozen execution payloads require fresh admission after restore
 	"restricted_provider_bindings": IntentExcludeRuntime, // provider authority must be admitted anew after restore
@@ -385,13 +386,14 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// That is deliberate: internal/chain reads deleted rules to explain runs
 	// they caused, so dropping them on restore would make restored history
 	// unexplainable.
-	"automations":      IntentInclude,
-	"assignments":      IntentInclude,
-	"budget_limits":    IntentInclude,
-	"captain_chats":    IntentInclude,
-	"checkpoints":      IntentInclude,
-	"cost_ledger":      IntentInclude,
-	"credential_crews": IntentInclude,
+	"automations":                  IntentInclude,
+	"assignments":                  IntentInclude,
+	"budget_limits":                IntentInclude,
+	"captain_chats":                IntentInclude,
+	"checkpoints":                  IntentInclude,
+	"cost_ledger":                  IntentInclude,
+	"restricted_cost_reservations": IntentExcludeRuntime, // ledger debit survives; restored reservations cannot release it
+	"credential_crews":             IntentInclude,
 	// Both new with the credentials-V2 work. They hold durable user content
 	// and losing them on restore is silent: a multi-part credential comes
 	// back with its primary value and no access key id or region, and every

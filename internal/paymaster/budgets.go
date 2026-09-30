@@ -27,6 +27,9 @@ import (
 //     can still both pass Enforce because neither's cost has been
 //     written yet; they overspend by up to one call's worth each.
 //
+// Restricted Responses calls use Reserve/Settle (reservations.go) and do not
+// rely on this legacy admission-only path.
+//
 // Closing that second gap requires either pre-debiting a reservation
 // row before the LLM call (needs migration to mark rows pending) or
 // holding the lock through the LLM call (latency disaster — a single
@@ -469,7 +472,7 @@ func budgetPayload(s BudgetStatus) map[string]any {
 // rather one slightly bigger SQL than four serial queries on a path that
 // runs before every LLM call. ORDER BY scope_kind keeps the result in the
 // hierarchy order Check documents (workspace → agent).
-func loadApplicableBudgets(ctx context.Context, db *sql.DB, scope Scope) ([]Budget, error) {
+func loadApplicableBudgets(ctx context.Context, db budgetQuery, scope Scope) ([]Budget, error) {
 	// scopeKindOrder gives the SQL CASE its sort key — workspace=0 first.
 	const q = `
 SELECT id, workspace_id, scope_kind, scope_id, window, limit_usd, mode, enabled
@@ -526,7 +529,7 @@ ORDER BY CASE scope_kind
 // sums everything that crew spent, agent budget only that agent's rows, and
 // so on) and the time window narrows by ts. Mission window is window-less:
 // it sums every row for that mission regardless of time.
-func sumSpend(ctx context.Context, db *sql.DB, b Budget, scope Scope, now time.Time) (float64, error) {
+func sumSpend(ctx context.Context, db budgetQuery, b Budget, scope Scope, now time.Time) (float64, error) {
 	conds := []string{"workspace_id = ?"}
 	args := []any{b.WorkspaceID}
 
@@ -603,4 +606,10 @@ func joinAnd(conds []string) string {
 		out += c
 	}
 	return out
+}
+
+// budgetQuery keeps reservation checks inside the same SQLite write transaction.
+type budgetQuery interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
