@@ -148,7 +148,7 @@ func TestOverview_WorkspacesScope(t *testing.T) {
 	if ov.Status.Verdict != VerdictNone {
 		t.Fatalf("verdict = %s: two of three workspaces have no full backup", ov.Status.Verdict)
 	}
-	if len(ov.Nights) != 14 || ov.Nights[13].Date != "2026-09-30" || ov.Nights[13].Status != "ok" || ov.Nights[13].Proof != 2 || ov.Nights[12].Status != "skipped" {
+	if len(ov.Nights) != 14 || ov.Nights[13].Date != "2026-09-30" || ov.Nights[13].Status != "incomplete" || ov.Nights[13].Proof != 2 || ov.Nights[12].Status != "skipped" {
 		t.Fatalf("nights tail = %+v %+v", ov.Nights[12], ov.Nights[13])
 	}
 	ids := map[string]bool{}

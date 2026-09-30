@@ -68,6 +68,17 @@ describe("Overview", () => {
     expect(screen.getByText("◆ test restore")).toBeInTheDocument()
   })
 
+  it("draws the night of an incomplete backup in the warn tone with its own legend, not as a green ok", async () => {
+    const { container } = show("overview")
+    await screen.findByText("Last 14 nights")
+    const strip = container.querySelector("[data-slot=night-strip]")!
+    const last = strip.children[13] as HTMLElement
+    expect(last).toHaveAttribute("data-status", "incomplete")
+    expect(last.querySelector("[role=img]")).toHaveAttribute("data-tone", "warn")
+    expect(last.querySelector("[role=img]")!.getAttribute("aria-label")).toMatch(/incomplete/)
+    expect(screen.getByText("created · incomplete")).toBeInTheDocument()
+  })
+
   it("shows the space the backups take and what a run and a restore need", async () => {
     show("overview")
     expect(await screen.findByText("26 GB")).toBeInTheDocument()
@@ -331,6 +342,37 @@ describe("Storage", () => {
     expect(screen.getByText(/3 checked copies · 3 GB · used by Complete recovery/)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled()
     expect(screen.queryByText(/Local copy only/)).toBeNull()
+  })
+
+  it.each([
+    ["provider_checksum", /last checked .* · verified by the provider's checksum/],
+    ["download_rehash", /last checked .* · downloaded and re-hashed/],
+    ["", /last checked .* · stored bytes not proven/],
+  ])("says what proved the newest copy's stored bytes (%s)", async (by, text) => {
+    h.apiFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith("/backups/settings")) {
+        return new Response(JSON.stringify({
+          limits: { concurrency: 1, cpu_cores: 2, disk_mbps: 0, upload_mbps: 0 }, heartbeat_url: null, recovery_kit_enabled: false, channels: [],
+          events: { failed: true, incomplete: true, stale: true, offsite: true, drill: true }, stale_alert_hours: 36, drill_reminder: "monthly",
+          instance_admins: 1, local_path: "/b",
+          destinations: [
+            { id: "local", kind: "local", label: "This server", path: "/b", used_bytes: 1, verified: true, available: true },
+            { id: "bdst_1", kind: "s3", label: "r2", path: null, used_bytes: 10, verified: true, available: true },
+          ],
+        }), { status: 200 })
+      }
+      if (url.endsWith("/backups/destinations")) {
+        return new Response(JSON.stringify({ data: [{
+          id: "bdst_1", name: "r2", kind: "s3", endpoint: "https://acct.r2.cloudflarestorage.com", region: "auto", bucket: "crewship-backups",
+          prefix: "prod", access_key_id: "AKID", path_style: false, allow_private_network: false, last_test_at: null, last_test_error: null,
+          created_at: "2026-09-30T08:00:00Z", copies: 3, copy_bytes: 3000000000, last_verified_at: "2026-09-30T03:05:00Z", last_verified_by: by,
+          used_by: ["Complete recovery"],
+        }] }), { status: 200 })
+      }
+      return new Response("{}", { status: 404 })
+    })
+    show("storage", "")
+    expect(await screen.findByText(text)).toBeInTheDocument()
   })
 })
 

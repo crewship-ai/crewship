@@ -56,7 +56,8 @@ export interface AttentionItem {
   action?: { kind: AttentionAction; label: string; workspace_id?: string | null; run_id?: string | null } | null
 }
 
-export type NightStatus = "ok" | "skipped" | "late" | "failed" | "none"
+/** incomplete: a backup was created that night but recorded gaps — never a green ok. */
+export type NightStatus = "ok" | "incomplete" | "skipped" | "late" | "failed" | "none"
 
 export interface Night {
   /** YYYY-MM-DD in the instance's timezone. */
@@ -281,7 +282,24 @@ export interface OffsiteDestination {
   copies: number
   copy_bytes: number
   last_verified_at: string | null
+  /**
+   * What proved the newest copy's stored bytes: the store's own SHA-256
+   * checksum, or a download and re-hash. "" for a copy recorded before this
+   * was kept (counted on size and the uploader's metadata alone).
+   */
+  last_verified_by?: VerifiedBy | null
   used_by: string[]
+}
+
+export type VerifiedBy = "provider_checksum" | "download_rehash" | ""
+
+/** What proved an off-site copy's stored bytes, in words. */
+export function verifiedByText(by: VerifiedBy | null | undefined): string {
+  switch (by) {
+    case "provider_checksum": return "verified by the provider's checksum"
+    case "download_rehash": return "downloaded and re-hashed"
+    default: return "stored bytes not proven"
+  }
 }
 
 /** POST …/destinations body. */
@@ -595,6 +613,7 @@ export interface StripCell {
 
 const NIGHT_TIP: Record<NightStatus, string> = {
   ok: "backup created",
+  incomplete: "created · incomplete",
   failed: "failed",
   skipped: "skipped",
   late: "ran late",

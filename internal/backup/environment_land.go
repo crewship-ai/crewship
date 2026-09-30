@@ -29,9 +29,12 @@ func stagedEnvironmentStore(dataDir string) *EnvironmentStore {
 
 // stageRecoveredEnvironmentLayers copies the layers the bundle's
 // environments need (and does not carry inline) from the store beside the
-// bundle into the staging store, and says what is missing. A drill only
-// checks: its directory is thrown away.
-func stageRecoveredEnvironmentLayers(rep *RecoverReport, m *Manifest, opts RecoverOptions, dataDir string) {
+// bundle into the staging store, and says what is missing. The layers are
+// copied encrypted, as the store holds them; the keys that open them ride
+// the workspaces' environments archives (envArchives). A drill only checks
+// — that every layer is there and opens with the key the bundle carries —
+// and its directory is thrown away.
+func stageRecoveredEnvironmentLayers(rep *RecoverReport, m *Manifest, opts RecoverOptions, dataDir string, envArchives []string) {
 	staged := stagedEnvironmentStore(dataDir)
 	src := EnvironmentStoreFor(filepath.Dir(opts.BundlePath))
 	var missing, copied int
@@ -66,12 +69,53 @@ func stageRecoveredEnvironmentLayers(rep *RecoverReport, m *Manifest, opts Recov
 			bytes += n
 		}
 	}
+	if opts.Drill {
+		checkRecoveredEnvironmentKeys(rep, src, envArchives)
+	}
 	dir := filepath.Join(dataDir, RecoveredEnvironmentsDir)
 	if missing > 0 {
 		rep.Warnings = append(rep.Warnings, fmt.Sprintf("%d environment layer file(s) are neither in the bundle nor in %s: the crews they belong to get their data back and their environment rebuilt from the crew image", missing, src.Dir))
 	}
 	if !opts.Drill {
 		rep.Notes = append(rep.Notes, fmt.Sprintf("%d crew environment(s) are staged under %s (%d layer file(s), %s copied); once the server runs with Docker, land them with `crewship admin instance backups environments land` — processes start fresh, nothing that was only in memory comes back", len(m.Contents.Environments), dir, copied, humanBytes(bytes)))
+	}
+}
+
+// checkRecoveredEnvironmentKeys proves, for a drill, that the keys the
+// bundle carries open the encrypted layers in the store beside it: every
+// object's first chunk is decrypted (the whole object when it is one chunk).
+func checkRecoveredEnvironmentKeys(rep *RecoverReport, src *EnvironmentStore, envArchives []string) {
+	ctx := context.Background()
+	var checked, locked int
+	for _, a := range envArchives {
+		envEx, err := extractArchive(ctx, a)
+		if err != nil {
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf("the environments archive %s does not open: %v", filepath.Base(a), err))
+			continue
+		}
+		keys := envEx.EnvironmentKeys()
+		for _, slug := range envEx.Environments() {
+			env := envEx.EnvironmentBySlug[slug]
+			seen := map[string]bool{}
+			for _, e := range env.Image.Entries {
+				if e.Object == "" || seen[e.Object] || !src.Has(e.Object) {
+					continue
+				}
+				seen[e.Object] = true
+				if err := src.CheckSealed(ctx, e.Object, e.Digest, keys); err != nil {
+					locked++
+					continue
+				}
+				checked++
+			}
+		}
+		_ = envEx.Close()
+	}
+	if locked > 0 {
+		rep.Warnings = append(rep.Warnings, fmt.Sprintf("%d encrypted environment layer file(s) do not open with the key the bundle carries: those crews get their data back and their environment rebuilt from the crew image", locked))
+	}
+	if checked > 0 {
+		rep.Notes = append(rep.Notes, fmt.Sprintf("%d encrypted environment layer file(s) open with the key the bundle carries", checked))
 	}
 }
 
@@ -154,7 +198,7 @@ func landWorkspace(ctx context.Context, ops DockerOps, opts LandOptions, staged 
 	var out []LandedEnvironment
 	for _, slug := range envEx.Environments() {
 		env := envEx.EnvironmentBySlug[slug]
-		ro := EnvironmentRestoreOptions{Open: open, Has: has, DryRun: opts.DryRun, Recreate: true, Name: env.Container}
+		ro := EnvironmentRestoreOptions{Open: open, Has: has, Keys: envEx.EnvironmentKeys(), DryRun: opts.DryRun, Recreate: true, Name: env.Container}
 		if crewEx != nil {
 			ro.MountData = func(ctx context.Context, m EnvironmentMount) (io.ReadCloser, bool, error) {
 				return crewEx.OpenEnvironmentMount(ctx, slug, m)

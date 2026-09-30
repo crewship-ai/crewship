@@ -18159,6 +18159,16 @@
                             "nullable": true,
                             "type": "string"
                           },
+                          "last_verified_by": {
+                            "description": "What proved the newest copy's stored bytes: the store's own SHA-256 checksum, or a download and re-hash. Empty for a copy recorded before this was kept.",
+                            "enum": [
+                              "provider_checksum",
+                              "download_rehash",
+                              ""
+                            ],
+                            "nullable": true,
+                            "type": "string"
+                          },
                           "name": {
                             "type": "string"
                           },
@@ -18195,6 +18205,7 @@
                           "copies",
                           "copy_bytes",
                           "last_verified_at",
+                          "last_verified_by",
                           "used_by"
                         ],
                         "type": "object"
@@ -18384,6 +18395,16 @@
                           "nullable": true,
                           "type": "string"
                         },
+                        "last_verified_by": {
+                          "description": "What proved the newest copy's stored bytes: the store's own SHA-256 checksum, or a download and re-hash. Empty for a copy recorded before this was kept.",
+                          "enum": [
+                            "provider_checksum",
+                            "download_rehash",
+                            ""
+                          ],
+                          "nullable": true,
+                          "type": "string"
+                        },
                         "name": {
                           "type": "string"
                         },
@@ -18420,6 +18441,7 @@
                         "copies",
                         "copy_bytes",
                         "last_verified_at",
+                        "last_verified_by",
                         "used_by"
                       ],
                       "type": "object"

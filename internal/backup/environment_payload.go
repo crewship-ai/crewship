@@ -27,6 +27,9 @@ type environments struct {
 	// envBlobs holds inline blobs (environment-blobs/), verified by digest
 	// as they are extracted. Nil when the bundle carried none.
 	envBlobs *EnvironmentStore
+	// envKeys holds the store generation keys the payload carries
+	// (environment-keys/<gen>), which decrypt its environments' layers.
+	envKeys EnvironmentKeys
 }
 
 const envMountSinkPrefix = "envmount/"
@@ -34,6 +37,18 @@ const envMountSinkPrefix = "envmount/"
 // extractEnvironmentEntry handles one payload entry under environments/ or
 // environment-blobs/.
 func (p *ExtractedPayload) extractEnvironmentEntry(tr *TarZstReader, hdr *tar.Header, name string, sinkFor func(string) (*sink, error)) error {
+	if strings.HasPrefix(name, environmentKeysPrefix) {
+		if hdr.Typeflag != tar.TypeReg {
+			return nil
+		}
+		if gen, key, ok := readStoreKeyEntry(name, tr); ok {
+			if p.envKeys == nil {
+				p.envKeys = EnvironmentKeys{}
+			}
+			p.envKeys[gen] = key
+		}
+		return nil
+	}
 	if rest, ok := strings.CutPrefix(name, environmentBlobsPrefix); ok {
 		if hdr.Typeflag != tar.TypeReg {
 			return nil
@@ -125,6 +140,15 @@ func (p *ExtractedPayload) Environments() []string {
 // InlineEnvironmentBlobs is the store holding the bundle's inline blobs, or
 // nil.
 func (p *ExtractedPayload) InlineEnvironmentBlobs() *EnvironmentStore { return p.envBlobs }
+
+// EnvironmentKeys is the store generation keys the payload carries.
+func (p *ExtractedPayload) EnvironmentKeys() EnvironmentKeys {
+	out := EnvironmentKeys{}
+	for g, k := range p.envKeys {
+		out[g] = k
+	}
+	return out
+}
 
 // OpenEnvironmentMount opens the content of one mount of a crew's
 // environment, entries relative to the mount point. data is the mount's

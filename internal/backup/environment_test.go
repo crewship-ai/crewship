@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"filippo.io/age"
+
 	"github.com/crewship-ai/crewship/internal/backup/offsite"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
@@ -390,7 +392,7 @@ func captureWithFake(t *testing.T, ops *fakeEnvOps, store *EnvironmentStore, db 
 		t.Fatal(err)
 	}
 	env, err := CollectEnvironment(context.Background(), ops, CrewTarget{ID: "c1", Slug: "ops", ContainerID: "ctr-ops"}, store,
-		EnvironmentOptions{DB: db, PendingRef: ref, Payload: tw, Covered: map[string]bool{SectionCrewWorkspace: true, SectionCrewHome: true}})
+		EnvironmentOptions{Key: testStoreKey(t, store), DB: db, PendingRef: ref, Payload: tw, Covered: map[string]bool{SectionCrewWorkspace: true, SectionCrewHome: true}})
 	if err != nil {
 		t.Fatalf("CollectEnvironment: %v", err)
 	}
@@ -529,15 +531,15 @@ func TestRestoreEnvironmentPaths(t *testing.T) {
 		ops, env, store := newEnv(t, true)
 		ops.runtime.Arch = "arm64"
 		open, has := BlobSources(store)
-		out := RestoreEnvironment(ctx, ops, env, EnvironmentRestoreOptions{Open: open, Has: has})
+		out := RestoreEnvironment(ctx, ops, env, EnvironmentRestoreOptions{Open: open, Has: has, Keys: store.ServerKeys()})
 		if out.Result != EnvRebuilt || len(ops.loaded) != 0 {
 			t.Errorf("out = %+v, loads %d", out, len(ops.loaded))
 		}
 	})
 	t.Run("missing layers rebuild", func(t *testing.T) {
-		ops, env, _ := newEnv(t, true)
+		ops, env, store := newEnv(t, true)
 		open, has := BlobSources(&EnvironmentStore{Dir: t.TempDir()})
-		out := RestoreEnvironment(ctx, ops, env, EnvironmentRestoreOptions{Open: open, Has: has})
+		out := RestoreEnvironment(ctx, ops, env, EnvironmentRestoreOptions{Open: open, Has: has, Keys: store.ServerKeys()})
 		if out.Result != EnvRebuilt || !strings.Contains(out.Reason, "not available") {
 			t.Errorf("out = %+v", out)
 		}
@@ -546,7 +548,7 @@ func TestRestoreEnvironmentPaths(t *testing.T) {
 		ops, env, store := newEnv(t, true)
 		ops.rtErr = errors.New("daemon down")
 		open, has := BlobSources(store)
-		out := RestoreEnvironment(ctx, ops, env, EnvironmentRestoreOptions{Open: open, Has: has})
+		out := RestoreEnvironment(ctx, ops, env, EnvironmentRestoreOptions{Open: open, Has: has, Keys: store.ServerKeys()})
 		if out.Result != EnvSkipped {
 			t.Errorf("out = %+v", out)
 		}
@@ -554,7 +556,7 @@ func TestRestoreEnvironmentPaths(t *testing.T) {
 	t.Run("managed crew: image loaded and tagged as the crew image", func(t *testing.T) {
 		ops, env, store := newEnv(t, true)
 		open, has := BlobSources(store)
-		out := RestoreEnvironment(ctx, ops, env, EnvironmentRestoreOptions{Open: open, Has: has, Recreate: true, Name: "x"})
+		out := RestoreEnvironment(ctx, ops, env, EnvironmentRestoreOptions{Open: open, Has: has, Keys: store.ServerKeys(), Recreate: true, Name: "x"})
 		if out.Result != EnvRestored || len(ops.loaded) != 1 {
 			t.Fatalf("out = %+v", out)
 		}
@@ -583,7 +585,7 @@ func TestRestoreEnvironmentPaths(t *testing.T) {
 		env.Mounts[0].Data = "environments/ops/mounts/0"
 		open, has := BlobSources(store)
 		out := RestoreEnvironment(ctx, ops, env, EnvironmentRestoreOptions{
-			Open: open, Has: has, Recreate: true, Name: "restored", VolumePrefix: "rv",
+			Open: open, Has: has, Keys: store.ServerKeys(), Recreate: true, Name: "restored", VolumePrefix: "rv",
 			MountData: func(ctx context.Context, m EnvironmentMount) (io.ReadCloser, bool, error) {
 				return ex.OpenEnvironmentMount(ctx, "ops", m)
 			},
@@ -742,7 +744,7 @@ func TestAssembleImageArchiveRoundTrip(t *testing.T) {
 	env, _ := captureWithFake(t, ops, store, nil, "")
 	open, _ := BlobSources(store)
 	var buf bytes.Buffer
-	if err := AssembleImageArchive(context.Background(), env, &buf, open); err != nil {
+	if err := AssembleImageArchive(context.Background(), env, &buf, EnvironmentBlobOpener(env, store.ServerKeys(), open)); err != nil {
 		t.Fatal(err)
 	}
 	orig, _ := ops.SaveImage(context.Background(), env.ImageRef)
@@ -828,7 +830,7 @@ func TestLandStagedEnvironments(t *testing.T) {
 		t.Fatal(err)
 	}
 	tw, _ := NewTarZstWriter(f)
-	env, err := CollectEnvironment(ctx, ops, CrewTarget{ID: "c1", Slug: "ops", ContainerID: "ctr-ops"}, store, EnvironmentOptions{Payload: tw, Inline: true})
+	env, err := CollectEnvironment(ctx, ops, CrewTarget{ID: "c1", Slug: "ops", ContainerID: "ctr-ops"}, store, EnvironmentOptions{Key: testStoreKey(t, store), Payload: tw, Inline: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -856,6 +858,27 @@ func TestLandStagedEnvironments(t *testing.T) {
 }
 
 var jsonMarshal = json.Marshal
+
+// testIdentity is the backup identity the environment tests seal store keys
+// to.
+var testIdentity = func() *age.X25519Identity {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		panic(err)
+	}
+	return id
+}()
+
+// testStoreKey is the store generation a test's captures share (the same
+// recipients reuse it, so layers deduplicate across captures).
+func testStoreKey(t *testing.T, store *EnvironmentStore) *StoreKey {
+	t.Helper()
+	k, err := store.KeyFor([]age.Recipient{testIdentity.Recipient()}, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
 
 // The off-site layer ships blobs straight out of the environment store.
 var _ offsite.LocalBlobs = (*EnvironmentStore)(nil)

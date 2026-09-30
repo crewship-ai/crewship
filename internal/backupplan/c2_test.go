@@ -640,11 +640,14 @@ func TestService_OffsiteCopyIsRecordedOnlyAfterVerify(t *testing.T) {
 	h.tick()
 	r := h.runs(p.ID)[0]
 	ph := r.Phases[phaseIndex(r, PhaseOffsite)]
-	if r.Status != StatusDone || ph.Status != "done" || ph.Detail == nil || !strings.Contains(*ph.Detail, "copied and verified to good") {
+	if r.Status != StatusDone || ph.Status != "done" || ph.Detail == nil || !strings.Contains(*ph.Detail, "copied and verified to good (downloaded and re-hashed)") {
 		t.Fatalf("run %s, off-site phase %+v", r.Status, ph)
 	}
 	copies, _ := CopiesOf(context.Background(), h.db, r.BundlePath)
-	if len(copies) != 1 || copies[0].DestinationID != "bdst_good" || copies[0].Key != "workspaces/ws_a/"+filepath.Base(r.BundlePath) {
+	// memDest returns no store checksum: the copy was proven by downloading
+	// it, never by the uploader's own metadata (review B7).
+	if len(copies) != 1 || copies[0].DestinationID != "bdst_good" || copies[0].Key != "workspaces/ws_a/"+filepath.Base(r.BundlePath) ||
+		copies[0].VerifiedBy != offsite.VerifiedByDownloadRehash {
 		t.Fatalf("copies = %+v", copies)
 	}
 	if len(good.objects) != 1 {

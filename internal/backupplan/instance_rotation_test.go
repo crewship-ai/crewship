@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"filippo.io/age"
+
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/backup/offsite"
 )
@@ -80,12 +82,22 @@ func TestService_InstancePlanRotatesItsBundles(t *testing.T) {
 	h.svc.BackupsDir = func() (string, error) { return dir, nil }
 
 	store := backup.EnvironmentStoreFor(dir)
+	// The store holds layers encrypted (and the off-site copy refuses any
+	// that is not): each test layer is sealed under one store generation.
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeKey, err := store.KeyFor([]age.Recipient{id.Recipient()}, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
 	put := func(s string) string {
-		d, _, err := store.Put(strings.NewReader(s), "")
+		_, obj, _, err := store.PutSealed(strings.NewReader(s), "", storeKey)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return d
+		return obj
 	}
 	shared, own1, own2, own3 := put("base layer every bundle shares"), put("layer of bundle 1"), put("layer of bundle 2"), put("layer of bundle 3")
 	own := map[int]string{1: own1, 2: own2, 3: own3}

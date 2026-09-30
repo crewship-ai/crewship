@@ -85,6 +85,11 @@ func UploadBundle(ctx context.Context, dst Destination, store LocalBlobs, localP
 		if err != nil {
 			return fail(fmt.Errorf("offsite: environment layers: %w", err))
 		}
+		// The sealed store keys go beside the layers, so the identity alone
+		// opens them even without this bundle.
+		if _, err := UploadEnvironmentKeys(ctx, dst, store, "", out.Blobs, o); err != nil {
+			return fail(fmt.Errorf("offsite: environment store keys: %w", err))
+		}
 		if env.Missing > 0 {
 			return fail(fmt.Errorf("offsite: %d environment layer(s) the bundle needs are not in the local store", env.Missing))
 		}
@@ -112,10 +117,11 @@ func putRefs(ctx context.Context, dst Destination, key string, refs EnvironmentR
 	sum := hex.EncodeToString(h[:])
 	refMu.Lock()
 	defer refMu.Unlock()
-	if _, err := dst.Put(ctx, key, bytes.NewReader(b), int64(len(b)), sum); err != nil {
+	put, err := dst.Put(ctx, key, bytes.NewReader(b), int64(len(b)), sum)
+	if err != nil {
 		return fmt.Errorf("offsite: write environment refs: %w", err)
 	}
-	if _, err := verify(ctx, dst, key, int64(len(b)), sum, false, nil); err != nil {
+	if _, err := verify(ctx, dst, key, int64(len(b)), sum, put.Checksum, false, nil); err != nil {
 		return err
 	}
 	return nil

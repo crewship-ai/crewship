@@ -59,9 +59,11 @@ func backupDestinationSchema() map[string]any {
 		"access_key_id": bpStr(), "path_style": bpBoolean(), "allow_private_network": bpBoolean(),
 		"last_test_at": bpNullable(bpStr()), "last_test_error": bpNullable(bpStr()), "created_by": bpNullable(bpStr()),
 		"created_at": bpStr(), "copies": bpInteger(), "copy_bytes": bpInteger(), "last_verified_at": bpNullable(bpStr()),
+		"last_verified_by": bpNullable(map[string]any{"type": "string", "enum": []string{"provider_checksum", "download_rehash", ""},
+			"description": "What proved the newest copy's stored bytes: the store's own SHA-256 checksum, or a download and re-hash. Empty for a copy recorded before this was kept."}),
 		"used_by": bpStringArray(),
 	}, "id", "name", "kind", "endpoint", "region", "bucket", "prefix", "access_key_id", "path_style", "allow_private_network",
-		"last_test_at", "last_test_error", "created_at", "copies", "copy_bytes", "last_verified_at", "used_by")
+		"last_test_at", "last_test_error", "created_at", "copies", "copy_bytes", "last_verified_at", "last_verified_by", "used_by")
 }
 
 func backupDestinationTestSchema() map[string]any {

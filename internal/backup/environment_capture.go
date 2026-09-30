@@ -37,8 +37,10 @@ const DefaultFlushTimeout = 30 * time.Second
 
 // EnvironmentOptions configure one capture.
 type EnvironmentOptions struct {
-	// Store receives the image blobs (required).
+	// Store receives the image blobs (required), encrypted under Key
+	// (required).
 	Store *EnvironmentStore
+	Key   *StoreKey
 	// DB records the blobs and PendingRef in the reference counts; nil
 	// records nothing (tests, and captures nobody will rotate).
 	DB         *sql.DB
@@ -105,6 +107,9 @@ func beginEnvironment(ctx context.Context, ops DockerOps, crew CrewTarget, opts 
 	if opts.Store == nil {
 		return nil, errors.New("backup: environment capture needs a store")
 	}
+	if opts.Key == nil {
+		return nil, ErrStoreKeyMissing
+	}
 	if crew.ContainerID == "" {
 		return nil, fmt.Errorf("backup: crew %s has no container", crew.Slug)
 	}
@@ -118,7 +123,7 @@ func beginEnvironment(ctx context.Context, ops DockerOps, crew CrewTarget, opts 
 	env := &Environment{
 		Format: EnvironmentFormat, ID: id, Crew: crew.Slug, CrewID: crew.ID, Container: snap.Name,
 		CreatedAt: now, Managed: isManagedContainer(snap),
-		SourceImage: snap.Image, SourceImageID: snap.ImageID, ImageRef: environmentImageRef(crew.Slug, id),
+		SourceImage: snap.Image, SourceImageID: snap.ImageID, ImageRef: environmentImageRef(crew.Slug, id), StoreKey: opts.Key.Gen,
 		Config: cfg, Unsafe: unsafe, Mounts: mounts,
 		Runtime: RuntimeRequirements{Runtime: snap.Runtime},
 		Notes: []string{
@@ -252,6 +257,11 @@ func (c *environmentCapture) finish(ctx context.Context) (*Environment, error) {
 		return nil, fmt.Errorf("backup: write environment index: %w", err)
 	}
 	if c.opts.Payload != nil {
+		// The key rides the (encrypted) payload, so the bundle alone —
+		// opened with its own identity — decrypts the layers.
+		if err := writeStoreKey(c.opts.Payload, c.opts.Key, env.CreatedAt); err != nil {
+			return nil, err
+		}
 		b, err := json.MarshalIndent(env, "", "  ")
 		if err != nil {
 			return nil, err
@@ -301,12 +311,12 @@ func (c *environmentCapture) ingest(ctx context.Context) error {
 			if h, ok := strings.CutPrefix(name, "blobs/sha256/"); ok && len(h) == 64 {
 				want = "sha256:" + h
 			}
-			d, n, err := c.opts.Store.Put(tr, want)
+			d, obj, n, err := c.opts.Store.PutSealed(tr, want, c.opts.Key)
 			if err != nil {
 				return err
 			}
-			e.Digest, e.Size = d, n
-			sizes[d] = n
+			e.Digest, e.Object, e.Size = d, obj, n
+			sizes[obj] = n
 			c.env.Image.Bytes += n
 		default:
 			continue

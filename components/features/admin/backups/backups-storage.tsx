@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { SettingsCard } from "@/components/features/settings/shared"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Chip, FieldRow, Gate, InlineInput, ItemRow, LocalOnlyBar, SmallButton, Unavailable } from "./backups-kit"
-import { formatSize, formatWhen, type BackupSettings, type NewOffsiteDestination, type OffsiteDestination, type SpaceInfo } from "./backups-model"
+import { formatSize, formatWhen, verifiedByText, type BackupSettings, type NewOffsiteDestination, type OffsiteDestination, type SpaceInfo } from "./backups-model"
 import { addDestination, removeDestination, saveBackupSettings, testDestination, useBackupSettings, useDestinations } from "./use-backup-settings"
 import { useBackupsOverview } from "./use-backups-overview"
 import { perform } from "./use-backups-data"
@@ -122,7 +122,7 @@ function destinationDetail(d: OffsiteDestination): string {
   const parts: string[] = []
   parts.push(d.copies > 0 ? `${d.copies} checked cop${d.copies === 1 ? "y" : "ies"} · ${formatSize(d.copy_bytes)}` : "not yet counted: no checked upload")
   if (d.last_test_error) parts.push(`last test failed: ${d.last_test_error}`)
-  else if (d.last_verified_at) parts.push(`last checked ${formatWhen(d.last_verified_at)}`)
+  else if (d.last_verified_at) parts.push(`last checked ${formatWhen(d.last_verified_at)} · ${verifiedByText(d.last_verified_by)}`)
   parts.push(d.used_by.length ? `used by ${d.used_by.join(", ")}` : "no plan copies here yet · choose it under Schedules › Where")
   return parts.join(" · ")
 }

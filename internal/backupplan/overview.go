@@ -51,7 +51,7 @@ type AttentionItem struct {
 
 type Night struct {
 	Date   string  `json:"date"`
-	Status string  `json:"status"` // ok | skipped | late | failed | none
+	Status string  `json:"status"` // ok | incomplete | skipped | late | failed | none
 	Proof  int     `json:"proof"`
 	Detail *string `json:"detail"`
 }
@@ -720,14 +720,18 @@ func joinDetail(cur *string, add string) string {
 }
 
 // buildNights: fourteen nights ending today (in loc), oldest first. A night
-// is ok when a run (or a bundle made by hand) landed on it, late when that
-// was a catch-up, failed or skipped from the runs, none otherwise. proof is
-// the best proof level among that night's bundles.
+// is ok when a run (or a bundle made by hand) landed on it, incomplete when
+// any of that night's bundles recorded gaps (it was created but does not hold
+// everything, so it is never drawn as a green ok), late when it was a
+// catch-up, failed or skipped from the runs, none otherwise. proof is the
+// best proof level among that night's bundles.
 func buildNights(runs []*Run, bundles []backup.CatalogEntry, now time.Time, loc *time.Location) []Night {
 	type agg struct {
 		ok, late, failed, skipped bool
 		proof                     int
 		detail                    string
+		incomplete                bool
+		gaps                      []backup.IncompleteItem
 	}
 	days := map[string]*agg{}
 	get := func(t time.Time) *agg {
@@ -738,10 +742,16 @@ func buildNights(runs []*Run, bundles []backup.CatalogEntry, now time.Time, loc 
 		return days[d]
 	}
 	proofByPath := map[string]int{}
+	gapsByPath := map[string]bool{}
 	for _, b := range bundles {
 		proofByPath[b.FilePath] = b.ProofLevel
 		a := get(b.CreatedAt)
 		a.ok = true
+		gapsByPath[b.FilePath] = len(b.Incomplete) > 0
+		if len(b.Incomplete) > 0 {
+			a.gaps = append(a.gaps, b.Incomplete...)
+			a.incomplete = true
+		}
 		if b.ProofLevel > a.proof {
 			a.proof = b.ProofLevel
 		}
@@ -760,6 +770,12 @@ func buildNights(runs []*Run, bundles []backup.CatalogEntry, now time.Time, loc 
 			}
 			if p := proofByPath[r.BundlePath]; p > a.proof {
 				a.proof = p
+			}
+			// A run's gaps count once: the catalog row of its bundle
+			// already added them.
+			if r.Status == StatusIncomplete && (r.BundlePath == "" || !gapsByPath[r.BundlePath]) {
+				a.gaps = append(a.gaps, r.Incomplete...)
+				a.incomplete = true
 			}
 			a.ok = true
 		case StatusFailed:
@@ -793,6 +809,16 @@ func buildNights(runs []*Run, bundles []backup.CatalogEntry, now time.Time, loc 
 				n.Status = "failed"
 			case a.skipped && !a.ok:
 				n.Status = "skipped"
+			case a.incomplete:
+				n.Status = "incomplete"
+				gapDetail := "created · incomplete"
+				if len(a.gaps) > 0 {
+					gapDetail += ": " + describeIncomplete(a.gaps)
+				}
+				if a.late {
+					gapDetail += " · catch-up after a missed night"
+				}
+				a.detail = gapDetail
 			case a.late:
 				n.Status = "late"
 			case a.ok:

@@ -475,7 +475,7 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 			if err := repackIntoSink(tr, hdr, name, attachmentBlobsSectionPrefix, sinkFor); err != nil {
 				return nil, err
 			}
-		case strings.HasPrefix(name, environmentsPrefix), strings.HasPrefix(name, environmentBlobsPrefix):
+		case strings.HasPrefix(name, environmentsPrefix), strings.HasPrefix(name, environmentBlobsPrefix), strings.HasPrefix(name, environmentKeysPrefix):
 			if err := out.extractEnvironmentEntry(tr, hdr, name, sinkFor); err != nil {
 				return nil, err
 			}

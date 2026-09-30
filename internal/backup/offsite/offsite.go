@@ -20,6 +20,7 @@ package offsite
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -58,12 +59,31 @@ type Destination interface {
 
 // Object is the metadata of one stored object.
 type Object struct {
-	Key      string    `json:"key"`
-	Size     int64     `json:"size"`
-	SHA256   string    `json:"sha256,omitempty"`
+	Key    string `json:"key"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256,omitempty"`
+	// Checksum is the store's own SHA-256 checksum of the object as S3
+	// reports it (x-amz-checksum-sha256: base64, and for a multipart object
+	// the composite "<base64>-<parts>"). From Head it is what the store
+	// computed; from Put it is what the store must report for the bytes that
+	// were sent. Empty when the store returned none.
+	Checksum string    `json:"checksum,omitempty"`
 	ETag     string    `json:"etag,omitempty"`
 	Modified time.Time `json:"modified"`
+	// VerifiedBy says what proved the stored bytes, set by Upload and
+	// Verify: VerifiedByProviderChecksum or VerifiedByDownloadRehash.
+	VerifiedBy string `json:"verified_by,omitempty"`
 }
+
+// What proved a remote copy's stored bytes.
+const (
+	// VerifiedByProviderChecksum: the store's own SHA-256 checksum of the
+	// object matched the one computed locally from the file.
+	VerifiedByProviderChecksum = "provider_checksum"
+	// VerifiedByDownloadRehash: the object was downloaded and its bytes
+	// hashed to the file's SHA-256.
+	VerifiedByDownloadRehash = "download_rehash"
+)
 
 var (
 	// ErrNotFound: the key does not exist at the destination.
@@ -129,9 +149,11 @@ type UploadOptions struct {
 	// already has it for every bundle). Empty → Upload hashes the file
 	// first, which reads it once more.
 	SHA256 string
-	// VerifyDownload additionally downloads the object after upload and
-	// hashes it. Head-level verification (size + stored checksum) always
-	// runs; this is the expensive, stronger proof.
+	// VerifyDownload always downloads the object after upload and hashes
+	// it, even when the store's own checksum already matched. Without it
+	// the store's SHA-256 checksum of the object is the proof, and a store
+	// that returns none is downloaded and re-hashed anyway: a copy is never
+	// counted on its size and the uploader's own sha256 metadata alone.
 	VerifyDownload bool
 	// BytesPerSecond caps upload (and verify-download) throughput. <= 0 is
 	// unlimited. Ignored when Limiter is set.
@@ -152,11 +174,14 @@ func (o UploadOptions) limiter() *Limiter {
 }
 
 // Upload streams the local file at localPath to dst under key and returns
-// only once the remote copy is verified: Head must report the same size and
-// the same stored SHA-256 (and, with VerifyDownload, the re-downloaded bytes
-// must hash to it). On verification failure the remote object is deleted
-// (best effort) so a bad copy is never mistaken for a good one, and the
-// error wraps ErrVerifyFailed.
+// only once the stored bytes are proven: Head must report the same size and
+// sha256 metadata, and then either the store's own SHA-256 checksum of the
+// object matches the one computed from the file, or the re-downloaded bytes
+// hash to the file's SHA-256 (always with VerifyDownload, and whenever the
+// store returns no checksum). The returned Object's VerifiedBy says which.
+// On verification failure the remote object is deleted (best effort) so a
+// bad copy is never mistaken for a good one, and the error wraps
+// ErrVerifyFailed.
 func Upload(ctx context.Context, dst Destination, localPath, key string, opts UploadOptions) (Object, error) {
 	if err := ValidateKey(key); err != nil {
 		return Object{}, err
@@ -190,10 +215,11 @@ func Upload(ctx context.Context, dst Destination, localPath, key string, opts Up
 	}
 
 	lim := opts.limiter()
-	if _, err := dst.Put(ctx, key, NewRateLimitedReader(ctx, f, lim), size, sum); err != nil {
+	put, err := dst.Put(ctx, key, NewRateLimitedReader(ctx, f, lim), size, sum)
+	if err != nil {
 		return Object{}, err
 	}
-	obj, err := verify(ctx, dst, key, size, sum, opts.VerifyDownload, lim)
+	obj, err := verify(ctx, dst, key, size, sum, put.Checksum, opts.VerifyDownload, lim)
 	if err != nil {
 		if errors.Is(err, ErrVerifyFailed) {
 			delCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
@@ -205,15 +231,33 @@ func Upload(ctx context.Context, dst Destination, localPath, key string, opts Up
 	return obj, nil
 }
 
-// Verify checks that key exists at dst with the given size and stored
-// SHA-256; deep additionally downloads and hashes the content. It is the
-// check Upload runs, exported for periodic re-verification of copies already
-// off-site. Mismatches wrap ErrVerifyFailed; a missing key wraps ErrNotFound.
+// Verify checks that key exists at dst with the given size and SHA-256, and
+// proves the stored bytes: by the store's own checksum when it is a whole-
+// object SHA-256 (a composite multipart checksum cannot be recomputed from
+// the SHA-256 alone), otherwise — and always when deep — by downloading and
+// hashing the content. It is the check Upload runs, exported for periodic
+// re-verification of copies already off-site. Mismatches wrap
+// ErrVerifyFailed; a missing key wraps ErrNotFound.
 func Verify(ctx context.Context, dst Destination, key string, size int64, sha256hex string, deep bool) (Object, error) {
-	return verify(ctx, dst, key, size, strings.ToLower(sha256hex), deep, nil)
+	return verify(ctx, dst, key, size, strings.ToLower(sha256hex), "", deep, nil)
 }
 
-func verify(ctx context.Context, dst Destination, key string, size int64, sum string, deep bool, lim *Limiter) (Object, error) {
+// wholeObjectChecksum is the store checksum a single-PUT object of SHA-256
+// sum carries: its raw digest, base64.
+func wholeObjectChecksum(sum string) string {
+	raw, err := hex.DecodeString(sum)
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(raw)
+}
+
+// verify: want is the store checksum the upload's bytes must have ("" when
+// the caller does not know it — then only a whole-object checksum can be
+// compared). The uploader's own sha256 metadata must match too, but it is
+// never the proof: without a matching store checksum the object is
+// downloaded and re-hashed.
+func verify(ctx context.Context, dst Destination, key string, size int64, sum, want string, deep bool, lim *Limiter) (Object, error) {
 	obj, err := dst.Head(ctx, key)
 	if err != nil {
 		return Object{}, fmt.Errorf("offsite: verify %s: %w", key, err)
@@ -227,7 +271,18 @@ func verify(ctx context.Context, dst Destination, key string, size int64, sum st
 		}
 		return Object{}, fmt.Errorf("%w: %s: remote sha256 %s, local sha256 %s", ErrVerifyFailed, key, obj.SHA256, sum)
 	}
-	if !deep {
+	if obj.Checksum != "" {
+		if want == "" && !strings.Contains(obj.Checksum, "-") {
+			want = wholeObjectChecksum(sum)
+		}
+		if want != "" {
+			if obj.Checksum != want {
+				return Object{}, fmt.Errorf("%w: %s: the store's checksum of the object %s, expected %s", ErrVerifyFailed, key, obj.Checksum, want)
+			}
+			obj.VerifiedBy = VerifiedByProviderChecksum
+		}
+	}
+	if obj.VerifiedBy != "" && !deep {
 		return obj, nil
 	}
 	rc, _, err := dst.Get(ctx, key)
@@ -246,6 +301,7 @@ func verify(ctx context.Context, dst Destination, key string, size int64, sum st
 	if got := hex.EncodeToString(h.Sum(nil)); got != sum {
 		return Object{}, fmt.Errorf("%w: %s: downloaded content sha256 %s, expected %s", ErrVerifyFailed, key, got, sum)
 	}
+	obj.VerifiedBy = VerifiedByDownloadRehash
 	return obj, nil
 }
 

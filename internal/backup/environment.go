@@ -62,6 +62,10 @@ type Environment struct {
 	SourceImageID string       `json:"source_image_id,omitempty"`
 	ImageRef      string       `json:"image_ref"`
 	Image         ImageArchive `json:"image"`
+	// StoreKey is the environment store generation whose key encrypts the
+	// image files (environment_crypto.go). Empty for a record written before
+	// the store was encrypted: its files are stored as they are.
+	StoreKey string `json:"store_key,omitempty"`
 
 	Platform Platform            `json:"platform"`
 	Runtime  RuntimeRequirements `json:"runtime"`
@@ -83,15 +87,29 @@ type ImageArchive struct {
 
 // ArchiveEntry is one tar entry of the saved image.
 type ArchiveEntry struct {
-	Path   string `json:"path"`
-	Type   string `json:"type"` // file | dir | symlink
+	Path string `json:"path"`
+	Type string `json:"type"` // file | dir | symlink
+	// Digest is the file's plaintext SHA-256 and Size its plaintext size.
 	Digest string `json:"digest,omitempty"`
+	// Object is the SHA-256 of the encrypted object the store keeps for
+	// the file — what the store, the reference counts and an off-site copy
+	// name it by. Empty in a record written before the store was encrypted
+	// (the file is then stored under Digest, as it is).
+	Object string `json:"object,omitempty"`
 	Size   int64  `json:"size,omitempty"`
 	Mode   int64  `json:"mode"`
 	Link   string `json:"link,omitempty"`
 }
 
-// Blobs returns the distinct digests the environment needs, sorted.
+// stored is the name the store keeps the entry's file under.
+func (a ArchiveEntry) stored() string {
+	if a.Object != "" {
+		return a.Object
+	}
+	return a.Digest
+}
+
+// Blobs returns the distinct stored objects the environment needs, sorted.
 func (e *Environment) Blobs() []string {
 	if e == nil {
 		return nil
@@ -99,22 +117,22 @@ func (e *Environment) Blobs() []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, a := range e.Image.Entries {
-		if a.Digest != "" && !seen[a.Digest] {
-			seen[a.Digest] = true
-			out = append(out, a.Digest)
+		if d := a.stored(); d != "" && !seen[d] {
+			seen[d] = true
+			out = append(out, d)
 		}
 	}
 	sort.Strings(out)
 	return out
 }
 
-// BlobBytes is the total size of the distinct blobs.
+// BlobBytes is the total plaintext size of the distinct blobs.
 func (e *Environment) BlobBytes() int64 {
 	seen := map[string]bool{}
 	var n int64
 	for _, a := range e.Image.Entries {
-		if a.Digest != "" && !seen[a.Digest] {
-			seen[a.Digest] = true
+		if d := a.stored(); d != "" && !seen[d] {
+			seen[d] = true
 			n += a.Size
 		}
 	}
