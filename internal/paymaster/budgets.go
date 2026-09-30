@@ -9,6 +9,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // enforceLocks serializes concurrent Enforce calls within the same scope
@@ -196,11 +197,24 @@ func Check(ctx context.Context, db *sql.DB, scope Scope) ([]BudgetStatus, error)
 	if db == nil {
 		return nil, fmt.Errorf("paymaster: nil db")
 	}
+	return check(ctx, db, scope, false)
+}
+
+// CheckTx is the pure preflight budget projection in the caller's transaction.
+// Pending restricted debits retain capacity across calendar-window changes.
+// It never emits journal events and does not replace paid request reservations.
+func CheckTx(ctx context.Context, tx *sql.Tx, scope Scope) ([]BudgetStatus, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("paymaster: nil transaction")
+	}
+	return check(ctx, tx, scope, true)
+}
+func check(ctx context.Context, q budgetQuery, scope Scope, carryPending bool) ([]BudgetStatus, error) {
 	if scope.WorkspaceID == "" {
 		return nil, fmt.Errorf("paymaster: workspace_id required")
 	}
 
-	budgets, err := loadApplicableBudgets(ctx, db, scope)
+	budgets, err := loadApplicableBudgets(ctx, q, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +222,13 @@ func Check(ctx context.Context, db *sql.DB, scope Scope) ([]BudgetStatus, error)
 	statuses := make([]BudgetStatus, 0, len(budgets))
 	now := time.Now().UTC()
 	for _, b := range budgets {
-		spent, err := sumSpend(ctx, db, b, scope, now)
+		var spent float64
+		var err error
+		if carryPending {
+			spent, err = conservativeSumSpend(ctx, q, b, scope, now)
+		} else {
+			spent, err = sumSpend(ctx, q, b, scope, now)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("paymaster: sum spend for budget %s: %w", b.ID, err)
 		}
@@ -612,4 +632,31 @@ func joinAnd(conds []string) string {
 type budgetQuery interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// conservativeSumSpend adds older-window in-flight debits exactly once.
+func conservativeSumSpend(ctx context.Context, q budgetQuery, b Budget, scope Scope, now time.Time) (float64, error) {
+	spent, err := sumSpend(ctx, q, b, scope, now)
+	if err != nil || b.Window == WindowMission {
+		return spent, err
+	}
+	start, _ := windowStart(b.Window, now)
+	conditions := []string{"l.workspace_id=?", "r.state='pending'", "l.ts<?"}
+	args := []any{b.WorkspaceID, tsformat.Format(start)}
+	switch b.ScopeKind {
+	case ScopeCrew:
+		conditions = append(conditions, "l.crew_id=?")
+		args = append(args, b.ScopeID)
+	case ScopeMission:
+		conditions = append(conditions, "l.mission_id=?")
+		args = append(args, b.ScopeID)
+	case ScopeAgent:
+		conditions = append(conditions, "l.agent_id=?")
+		args = append(args, b.ScopeID)
+	}
+	var carried float64
+	if err = q.QueryRowContext(ctx, "SELECT COALESCE(SUM(l.cost_usd),0) FROM restricted_cost_reservations r JOIN cost_ledger l ON l.id=r.ledger_id WHERE "+joinAnd(conditions), args...).Scan(&carried); err != nil {
+		return 0, err
+	}
+	return spent + carried, nil
 }
