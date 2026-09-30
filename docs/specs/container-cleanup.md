@@ -7,14 +7,24 @@ well as running containers. Missing owners, legacy containers without instance
 labels, and foreign installation labels are never automatic cleanup candidates.
 Container names and slugs do not establish ownership.
 
-The installation identity is stored in `CREWSHIP_DATA_DIR/instance-id`, outside
-SQLite and workspace backups. A new installation gets a new identity. Do not
-copy that identity file to another installation sharing a daemon. New runtime
+The installation identity is bound to both the database and the data
+directory. The database holds only a random nonce; the identity itself lives in
+`CREWSHIP_DATA_DIR/installations/<nonce>`, outside SQLite and workspace backups.
+Several servers sharing one data directory (for example `~/.crewship` on a
+development host) therefore get distinct identities, and a database copied to
+another data directory gets a new one. The running server holds an exclusive
+lock on that identity; a second live server on the same database and data
+directory starts with automatic cleanup disabled and an empty instance label.
+Do not copy the `installations` directory to another installation sharing a
+daemon. New runtime
 and service containers explicitly set the instance label, including an empty
 value when identity is unavailable, to mask inherited image labels. Labels do
 not cause an otherwise current legacy runtime to be rebuilt. Existing containers
 labelled for another installation cannot be adopted by the runtime/service
-creator. An unavailable or invalid installation identity fails server startup.
+creator; the start error names the container. If this installation's identity
+was reset (a new data directory), remove that container by hand without `-v`
+so its volumes are kept, and the next run recreates it. An unreadable or
+invalid installation identity fails server startup.
 
 ## Scope and retry
 
@@ -61,8 +71,13 @@ is `error`; a removal backlog is `pending`.
 `GET /api/v1/admin/resource-cleanup` and `crewship admin cleanup` read persisted diagnostics. It uses the
 existing authenticated ADMIN/OWNER workspace gate. Results survive deletion of
 their original workspace and can be read from another authorized workspace.
-Observations from before process boot or older than 90 seconds are stale and
-read as `unknown`, with `complete=false`; error codes remain visible.
+Freshness comes from one per-installation scan record written on every
+complete scan. Per-owner records are written only when their state changes, and
+a tombstone that never had a container needs no record at all, so the steady
+write load does not grow with the number of deleted crews. When the last
+complete scan predates process boot, is older than 90 seconds, or the latest
+scan failed, every observation reads as `unknown` with `complete=false`; the
+owner's or the scan's error code remains visible.
 
 If no authorized workspace remains, `crewship doctor cleanup --format json`
 reads the existing local database using local file permissions. It never runs
@@ -70,8 +85,9 @@ migrations, creates a database, contacts Docker, or performs cleanup. Its JSON
 marks `observation=persisted`; the records are historical, not a live inventory.
 DATABASE_URL selects the same local file as other readonly doctor probes.
 
-Diagnostics and mount references live in `resource_cleanup_status` and
-`resource_cleanup_mounts`. They have no owner FK, so deleting a workspace cannot
+Diagnostics and mount references live in `resource_cleanup_status`,
+`resource_cleanup_scans` and `resource_cleanup_mounts`; the database nonce lives
+in `resource_cleanup_installation`. None of them is part of a workspace backup. They have no owner FK, so deleting a workspace cannot
 cascade away evidence for surviving mounts. They contain no env, commands,
 container logs, or credential values. Mount evidence is retained until a future
 retention contract authorizes removal; it grants no permission to delete data.
@@ -82,7 +98,9 @@ promised.
 
 The acceptance suite uses disposable SQLite databases and a fake Docker REST
 server. It covers deleted versus live/missing/foreign/legacy owners, runtime and
-sidecar create labels, label-only contract stability, mount evidence before
+sidecar create labels, label-only contract stability, distinct identities
+for databases sharing a data directory, a copied database, a second live holder,
+change-only persistence, mount evidence before
 removal, boot failure/reconnect, late create, removal backlog, restart staleness,
 provider/inspect/stop/remove failures, the HTTP response, and local readonly
 access without workspace membership. It does not execute a cleanup against a

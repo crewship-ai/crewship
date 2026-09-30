@@ -63,7 +63,10 @@ func TestDoctorCleanupLocalSnapshotJSON(t *testing.T) {
 	if _, err := db.Exec(string(schema)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO resource_cleanup_status(instance_id,crew_id,state,observed_at,complete,error_code) VALUES ('instance','deleted-owner','error',?,1,'remove_failed')`, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)); err != nil {
+	if _, err := db.Exec(`INSERT INTO resource_cleanup_status(instance_id,crew_id,state,complete,error_code) VALUES ('instance','deleted-owner','error',1,'remove_failed')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO resource_cleanup_scans(instance_id,observed_at,complete) VALUES ('instance',?,1)`, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()

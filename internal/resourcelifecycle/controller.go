@@ -91,24 +91,81 @@ func (c *Controller) Statuses(ctx context.Context) ([]Status, error) {
 	if c == nil || c.DB == nil || c.InstanceID == "" {
 		return out, nil
 	}
-	rows, err := c.DB.QueryContext(ctx, `SELECT crew_id,state,observed_at,complete,remaining,unattributed,error_code FROM resource_cleanup_status WHERE instance_id=? ORDER BY crew_id`, c.InstanceID)
+	var scan scanRow
+	err := c.DB.QueryRowContext(ctx, `SELECT observed_at,complete,error_code FROM resource_cleanup_scans WHERE instance_id=?`, c.InstanceID).Scan(&scan.observedAt, &scan.complete, &scan.errorCode)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	fresh := false
+	if t, parseErr := time.Parse(time.RFC3339Nano, scan.observedAt); err == nil && parseErr == nil {
+		fresh = scan.complete && !t.Before(c.BootAt) && time.Since(t) <= StaleAfter && !c.lastScanFailed.Load()
+	}
+	rows, err := c.DB.QueryContext(ctx, `SELECT crew_id,state,complete,remaining,unattributed,error_code FROM resource_cleanup_status WHERE instance_id=? ORDER BY crew_id`, c.InstanceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		s := Status{Scope: "containers"}
-		if err := rows.Scan(&s.CrewID, &s.State, &s.ObservedAt, &s.Complete, &s.Remaining, &s.Unattributed, &s.Error); err != nil {
+		if err := rows.Scan(&s.CrewID, &s.State, &s.Complete, &s.Remaining, &s.Unattributed, &s.Error); err != nil {
 			return nil, err
 		}
-		t, err := time.Parse(time.RFC3339Nano, s.ObservedAt)
-		if err != nil || t.Before(c.BootAt) || time.Since(t) > 90*time.Second || c.lastScanFailed.Load() {
+		// A per-owner row is written only when it changes; the installation
+		// scan row says when it was last confirmed.
+		s.ObservedAt = scan.observedAt
+		if !fresh {
 			s.State = "unknown"
 			s.Complete = false
+			if s.Error == "" {
+				s.Error = scan.errorCode
+			}
 		}
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+// StaleAfter is how old the last complete scan may be before observations read
+// as unknown. Three missed 30-second ticks.
+const StaleAfter = 90 * time.Second
+
+type scanRow struct {
+	observedAt string
+	complete   bool
+	errorCode  string
+}
+
+// storedStatus is the comparable part of a persisted per-owner row.
+type storedStatus struct {
+	state        string
+	complete     bool
+	remaining    int
+	unattributed int
+	errorCode    string
+}
+
+func (c *Controller) storedStatuses(ctx context.Context) (map[string]storedStatus, error) {
+	rows, err := c.DB.QueryContext(ctx, `SELECT crew_id,state,complete,remaining,unattributed,error_code FROM resource_cleanup_status WHERE instance_id=?`, c.InstanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]storedStatus{}
+	for rows.Next() {
+		var id string
+		var s storedStatus
+		if err := rows.Scan(&id, &s.state, &s.complete, &s.remaining, &s.unattributed, &s.errorCode); err != nil {
+			return nil, err
+		}
+		out[id] = s
+	}
+	return out, rows.Err()
+}
+
+func (c *Controller) storeScan(ctx context.Context, complete bool, code string) error {
+	_, err := c.DB.ExecContext(ctx, `INSERT INTO resource_cleanup_scans(instance_id,observed_at,complete,error_code) VALUES(?,?,?,?)
+ ON CONFLICT(instance_id) DO UPDATE SET observed_at=excluded.observed_at,complete=excluded.complete,error_code=excluded.error_code`, c.InstanceID, time.Now().UTC().Format(time.RFC3339Nano), complete, code)
+	return err
 }
 func (c *Controller) deleted(ctx context.Context, crew string) (bool, error) {
 	var deleted sql.NullString
@@ -149,19 +206,7 @@ func (c *Controller) Tick(ctx context.Context) {
 		c.invalidate(ctx, "owner_inventory_failed")
 		return
 	}
-	failAll := func(code string) {
-		c.invalidate(ctx, code)
-		for id, s := range states {
-			s.State = "unknown"
-			s.Error = code
-			s.Complete = false
-			s.ObservedAt = time.Now().UTC().Format(time.RFC3339Nano)
-			states[id] = s
-			if err := c.store(ctx, s); err != nil {
-				c.logWriteFailure(ctx)
-			}
-		}
-	}
+	failAll := func(code string) { c.invalidate(ctx, code) }
 	connectCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	rt, err := c.Connect(connectCtx)
 	cancel()
@@ -277,8 +322,17 @@ func (c *Controller) Tick(ctx context.Context) {
 			states[x.CrewID] = s
 		}
 	}
+	// Write only what changed. Every soft-deleted crew ever is an owner here,
+	// so rewriting all of them each tick would be a steady write load that
+	// grows with every reseed. A clean tombstone with no row needs none.
+	stored, err := c.storedStatuses(ctx)
+	if err != nil {
+		c.invalidate(ctx, "diagnostic_write_failed")
+		c.logWriteFailure(ctx)
+		return
+	}
 	writeFailed := false
-	for _, s := range states {
+	for id, s := range states {
 		s.ObservedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		s.Complete = true
 		if s.Error != "" {
@@ -288,6 +342,14 @@ func (c *Controller) Tick(ctx context.Context) {
 		} else {
 			s.State = "pending"
 		}
+		next := storedStatus{state: s.State, complete: true, remaining: s.Remaining, unattributed: s.Unattributed, errorCode: s.Error}
+		prev, ok := stored[id]
+		if ok && prev == next {
+			continue
+		}
+		if !ok && s.State == "observed_clear" && s.Unattributed == 0 {
+			continue
+		}
 		if err := c.store(ctx, s); err != nil {
 			writeFailed = true
 			c.logWriteFailure(ctx)
@@ -295,9 +357,14 @@ func (c *Controller) Tick(ctx context.Context) {
 	}
 	if writeFailed {
 		c.invalidate(ctx, "diagnostic_write_failed")
-	} else {
-		c.lastScanFailed.Store(false)
+		return
 	}
+	if err := c.storeScan(ctx, true, ""); err != nil {
+		c.invalidate(ctx, "diagnostic_write_failed")
+		c.logWriteFailure(ctx)
+		return
+	}
+	c.lastScanFailed.Store(false)
 }
 
 // Bound individual snapshots without truncating ownership evidence. Control
@@ -318,8 +385,7 @@ func mountSnapshot(mounts []Mount) ([]byte, error) {
 
 func (c *Controller) invalidate(ctx context.Context, code string) {
 	c.lastScanFailed.Store(true)
-	_, err := c.DB.ExecContext(ctx, `UPDATE resource_cleanup_status SET state='unknown',complete=0,error_code=? WHERE instance_id=?`, code, c.InstanceID)
-	if err != nil {
+	if err := c.storeScan(ctx, false, code); err != nil {
 		c.logWriteFailure(ctx)
 	}
 }

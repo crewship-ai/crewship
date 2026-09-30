@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -134,11 +135,6 @@ var startCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
-		cfg.Container.InstanceID, err = resourcelifecycle.LoadIdentity(dataDir.Root)
-		if err != nil {
-			return fmt.Errorf("load installation identity: %w", err)
-		}
-
 		debugBuffer := logging.NewRingBuffer(500)
 		innerLogger := logging.New(cfg.Logging.Level, "json", os.Stdout)
 		ringHandler := logging.NewRingHandler(innerLogger.Handler(), debugBuffer)
@@ -220,6 +216,20 @@ var startCmd = &cobra.Command{
 		}
 		if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
 			return fmt.Errorf("failed to run migrations: %w", err)
+		}
+		// Installation identity needs the migrated database: it is keyed by a
+		// per-database nonce so servers sharing a data directory stay distinct.
+		// A second live holder (copied database) keeps cleanup disabled instead
+		// of failing boot; an empty label is never a cleanup candidate.
+		identity, err := resourcelifecycle.LoadIdentity(context.Background(), dataDir.Root, db.DB)
+		switch {
+		case errors.Is(err, resourcelifecycle.ErrIdentityInUse):
+			logger.Warn("container cleanup disabled: another running server holds this database's installation identity")
+		case err != nil:
+			return fmt.Errorf("load installation identity: %w", err)
+		default:
+			defer identity.Close()
+			cfg.Container.InstanceID = identity.ID
 		}
 		// Guaranteed memory mutations may have committed an intent just before
 		// the previous process stopped. Settle those intents before constructing

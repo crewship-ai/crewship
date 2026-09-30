@@ -27,7 +27,11 @@ func readLocalCleanup(ctx context.Context) ([]localCleanupSnapshot, error) {
 		return nil, err
 	}
 	defer db.Close()
-	rows, err := db.QueryContext(ctx, `SELECT instance_id,crew_id,state,observed_at,complete,remaining,unattributed,error_code FROM resource_cleanup_status ORDER BY instance_id,crew_id`)
+	// Owner rows change only on transitions; the installation scan row carries
+	// when they were last confirmed and whether that scan was complete.
+	rows, err := db.QueryContext(ctx, `SELECT s.instance_id,s.crew_id,s.state,COALESCE(sc.observed_at,''),COALESCE(sc.complete,0),s.remaining,s.unattributed,
+ CASE WHEN s.error_code<>'' THEN s.error_code ELSE COALESCE(sc.error_code,'') END
+ FROM resource_cleanup_status s LEFT JOIN resource_cleanup_scans sc ON sc.instance_id=s.instance_id ORDER BY s.instance_id,s.crew_id`)
 	if err != nil {
 		return nil, fmt.Errorf("container cleanup diagnostics unavailable (schema may predate cleanup): %w", err)
 	}
@@ -39,7 +43,7 @@ func readLocalCleanup(ctx context.Context) ([]localCleanupSnapshot, error) {
 			return nil, err
 		}
 		observed, err := time.Parse(time.RFC3339Nano, s.ObservedAt)
-		s.Stale = err != nil || time.Since(observed) > 90*time.Second
+		s.Stale = err != nil || !s.Complete || time.Since(observed) > resourcelifecycle.StaleAfter
 		// All local results are historical observations, never live host clearance.
 		if s.Stale {
 			s.State = "unknown"

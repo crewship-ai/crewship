@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -83,6 +84,8 @@ func fixture(t *testing.T) (*Controller, *fakeRuntime) {
 	}
 	f := &fakeRuntime{items: map[string]Container{}}
 	c := &Controller{DB: db, InstanceID: "installation-a", BootAt: time.Now().UTC(), Connect: func(context.Context) (Runtime, error) { return f, nil }}
+	// The crew DELETE handler records the pending owner.
+	c.Pending(context.Background(), "deleted")
 	return c, f
 }
 func item(id, owner, instance string) Container {
@@ -219,15 +222,79 @@ func TestOwnerReviveAndImmutableIdentityRecheck(t *testing.T) {
 		})
 	}
 }
-func TestInstallationIdentityConcurrentAndCopyIndependent(t *testing.T) {
+func migratedDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "crewship.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	b, err := os.ReadFile("../database/migrations/20260930164209_container_cleanup_diagnostics.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(string(b)); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+func loadID(t *testing.T, root string, db *sql.DB) string {
+	t.Helper()
+	identity, err := LoadIdentity(context.Background(), root, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { identity.Close() })
+	return identity.ID
+}
+
+// Dev servers on one host share ~/.crewship; each database must still get its
+// own label, or one server's controller treats the others' containers as its own.
+func TestInstallationIdentitySharedDataDirDistinctDatabases(t *testing.T) {
 	root := t.TempDir()
+	a, b := loadID(t, root, migratedDB(t)), loadID(t, root, migratedDB(t))
+	if a == b {
+		t.Fatal("two databases sharing a data directory got one installation identity")
+	}
+}
+
+// A database copied to another data directory must not inherit authority.
+func TestInstallationIdentityCopiedDatabaseElsewhereIsNew(t *testing.T) {
+	db := migratedDB(t)
+	original := loadID(t, t.TempDir(), db)
+	if copied := loadID(t, t.TempDir(), db); copied == original {
+		t.Fatal("database copy in another data directory inherited the identity")
+	}
+}
+
+// Two live servers on the same database and data directory: the second must not
+// act on the first one's containers, and a restart reclaims the same identity.
+func TestInstallationIdentitySecondHolderAndRestart(t *testing.T) {
+	root, db := t.TempDir(), migratedDB(t)
+	first, err := LoadIdentity(context.Background(), root, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadIdentity(context.Background(), root, db); !errors.Is(err, ErrIdentityInUse) {
+		t.Fatalf("second live holder: %v", err)
+	}
+	id := first.ID
+	first.Close()
+	if again := loadID(t, root, db); again != id {
+		t.Fatal("restart changed the installation identity")
+	}
+}
+
+func TestInstallationIdentityConcurrentCreateAndInvalid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "identity")
 	var wg sync.WaitGroup
 	ids := make(chan string, 12)
 	for i := 0; i < 12; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			id, err := LoadIdentity(root)
+			id, err := readOrCreateID(path)
 			if err != nil {
 				t.Error(err)
 			}
@@ -245,15 +312,40 @@ func TestInstallationIdentityConcurrentAndCopyIndependent(t *testing.T) {
 			t.Fatal("startup identity race")
 		}
 	}
-	second, err := LoadIdentity(t.TempDir())
-	if err != nil || second == expected {
-		t.Fatal("installation copy collision")
-	}
-	if err := os.WriteFile(filepath.Join(root, "instance-id"), []byte("invalid"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("invalid"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadIdentity(root); err == nil {
+	if _, err := readOrCreateID(path); err == nil {
 		t.Fatal("accepted invalid identity")
+	}
+}
+
+// Every tombstone is an owner, so steady-state ticks must not rewrite them.
+func TestSteadyStateTicksWriteOnlyTheScanRow(t *testing.T) {
+	c, _ := fixture(t)
+	for i := 0; i < 50; i++ {
+		if _, err := c.DB.Exec(`INSERT INTO crews VALUES(?, '2026-09-30')`, fmt.Sprintf("old-%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.Tick(context.Background())
+	if _, err := c.DB.Exec(`CREATE TABLE writes(n INTEGER);INSERT INTO writes VALUES(0);
+CREATE TRIGGER count_insert AFTER INSERT ON resource_cleanup_status BEGIN UPDATE writes SET n=n+1; END;
+CREATE TRIGGER count_update AFTER UPDATE ON resource_cleanup_status BEGIN UPDATE writes SET n=n+1; END;`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		c.Tick(context.Background())
+	}
+	var n, rows int
+	if err := c.DB.QueryRow(`SELECT n FROM writes`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("steady-state status writes %d %v", n, err)
+	}
+	if err := c.DB.QueryRow(`SELECT count(*) FROM resource_cleanup_status`).Scan(&rows); err != nil || rows != 1 {
+		t.Fatalf("clean tombstones without containers got rows: %d %v", rows, err)
+	}
+	if s := status(t, c); s.State != "observed_clear" || !s.Complete {
+		t.Fatalf("%+v", s)
 	}
 }
 
@@ -285,7 +377,7 @@ func TestOwnerInventoryIterationFailureInvalidatesPriorClear(t *testing.T) {
 func TestFinalDiagnosticWriteFailureInvalidatesPriorClear(t *testing.T) {
 	c, _ := fixture(t)
 	c.Tick(context.Background())
-	if _, err := c.DB.Exec(`CREATE TRIGGER deny_clear BEFORE UPDATE ON resource_cleanup_status WHEN NEW.state='observed_clear' BEGIN SELECT RAISE(FAIL,'injected write failure'); END`); err != nil {
+	if _, err := c.DB.Exec(`CREATE TRIGGER deny_clear BEFORE UPDATE ON resource_cleanup_scans WHEN NEW.complete=1 BEGIN SELECT RAISE(FAIL,'injected write failure'); END`); err != nil {
 		t.Fatal(err)
 	}
 	c.Tick(context.Background())

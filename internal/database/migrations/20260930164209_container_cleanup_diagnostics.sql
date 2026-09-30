@@ -19,3 +19,18 @@ CREATE TABLE resource_cleanup_mounts (
  observed_at TEXT NOT NULL,
  PRIMARY KEY(instance_id,container_id)
 );
+-- One row per installation scan: freshness lives here, so per-owner rows are
+-- written only when their state changes instead of on every tick.
+CREATE TABLE resource_cleanup_scans (
+ instance_id TEXT PRIMARY KEY,
+ observed_at TEXT NOT NULL DEFAULT '',
+ complete INTEGER NOT NULL DEFAULT 0,
+ error_code TEXT NOT NULL DEFAULT ''
+);
+-- Random per-database nonce. The installation identity file is keyed by it, so
+-- several databases sharing one data directory never share an identity, and a
+-- database copied to another data directory never inherits one.
+CREATE TABLE resource_cleanup_installation (
+ id INTEGER PRIMARY KEY CHECK (id = 1),
+ db_nonce TEXT NOT NULL
+);

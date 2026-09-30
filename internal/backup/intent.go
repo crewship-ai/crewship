@@ -631,12 +631,14 @@ var NonBackedUpTables = map[string]struct{}{
 
 	// ── Instance-global configuration & operational state. Local to THIS
 	//    instance; carrying it across a restore would clobber the target's own.
-	"app_settings":            {},
-	"instance_config":         {},
-	"rate_limit_overrides":    {}, // instance-global limiter tuning (v168); must not clobber the target's own on restore
-	"keeper_runtime_settings": {}, // instance-global judge wiring; a restored workspace must not repoint the target's gatekeeper at the source's model server
-	"resource_cleanup_status": {}, // source-installation observations, not portable workspace state or target cleanup authority
-	"resource_cleanup_mounts": {}, // source-container mount references retained locally; must never authorize cleanup on a restored instance
+	"app_settings":                  {},
+	"instance_config":               {},
+	"rate_limit_overrides":          {}, // instance-global limiter tuning (v168); must not clobber the target's own on restore
+	"keeper_runtime_settings":       {}, // instance-global judge wiring; a restored workspace must not repoint the target's gatekeeper at the source's model server
+	"resource_cleanup_status":       {}, // source-installation observations, not portable workspace state or target cleanup authority
+	"resource_cleanup_mounts":       {}, // source-container mount references retained locally; must never authorize cleanup on a restored instance
+	"resource_cleanup_scans":        {}, // source-installation scan freshness; a restored copy has not scanned anything
+	"resource_cleanup_installation": {}, // per-database identity nonce; importing it would hand the target the source's cleanup authority
 	// keeper_aux_settings moved to BackupTableIntent (IntentExcludeOperational)
 	// in #1554: its new credential_id FK makes the reverse-FK walk discover it,
 	// and a discovered table must be classified there, not here. Same verdict —

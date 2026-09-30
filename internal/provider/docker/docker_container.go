@@ -742,7 +742,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				inspect := inspectResult.Container
 				if inspect.Config != nil && p.cfg.InstanceID != "" {
 					if id := inspect.Config.Labels[resourcelifecycle.InstanceLabel]; id != "" && id != p.cfg.InstanceID {
-						return "", false, fmt.Errorf("existing runtime belongs to another installation")
+						return "", false, fmt.Errorf("existing runtime %s is labelled for another installation; if this installation's identity was reset, remove that container by hand (volumes are kept) so it can be recreated", containerName)
 					}
 				}
 				// The reused container may still be running a previously
