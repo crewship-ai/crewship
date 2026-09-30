@@ -94,7 +94,11 @@ func (a Authority) FreezeWorkflowProvider(ctx context.Context, tx *sql.Tx, jobID
 	if err != nil || !delegatedProfile(s.Profile) || delegationPolicyHash(s) != expectedHash {
 		return access.ErrDenied
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO restricted_workflow_provider_policies(job_id,agent_id,credential_id,grant_id,policy_hash,max_output_tokens) VALUES(?,?,?,?,?,?)`, jobID, agent, s.Credential, s.Grant, expectedHash, limit)
+	providerExpiry, err := s.deadline(time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC))
+	if err != nil {
+		return access.ErrDenied
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO restricted_workflow_provider_policies(job_id,agent_id,credential_id,grant_id,policy_hash,max_output_tokens,expires_at) VALUES(?,?,?,?,?,?,?)`, jobID, agent, s.Credential, s.Grant, expectedHash, limit, providerExpiry.UTC().Format(time.RFC3339Nano))
 	return err
 }
 

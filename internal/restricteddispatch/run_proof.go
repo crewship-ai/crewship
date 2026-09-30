@@ -30,6 +30,14 @@ func (p RunProof) Check(ctx context.Context, store access.Store, user, workspace
 	_, err := p.Read(ctx, store, user, workspace, agent, chat)
 	return err
 }
+
+func (p RunProof) ReadWorkflow(ctx context.Context, store access.Store, user, workspace, agent, chat, job string) ([]access.ContextEntry, error) {
+	entries, err := p.Read(ctx, store, user, workspace, agent, chat)
+	if err != nil || store.CheckWorkflowContextAttempt(ctx, p.handle, job) != nil {
+		return nil, access.ErrDenied
+	}
+	return entries, nil
+}
 func (p RunProof) Seal() (string, error) {
 	if p.handle == "" || len(p.sources) == 0 || len(p.sources) > 64 {
 		return "", access.ErrDenied

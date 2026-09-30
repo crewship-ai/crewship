@@ -14,15 +14,20 @@ import (
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 type Executor interface {
 	ExecuteRun(context.Context, string, string, string, string, func(string, string) error) error
 }
+type proofExecutor interface {
+	ExecuteWorkflowRun(context.Context, restricteddispatch.DelegatedRunRequest, func(string, string) error) (restricteddispatch.RunProof, error)
+}
 type Service struct {
 	db            *sql.DB
 	executor      Executor
+	providers     providerAuthority
 	lifecycle     sync.Mutex
 	dispatch      sync.Mutex
 	cancel        context.CancelFunc
@@ -46,13 +51,14 @@ type job struct {
 	Page                                                                                                                                                                                              sql.NullString
 	Revision                                                                                                                                                                                          int64
 	Rights, SourceFacet                                                                                                                                                                               string
+	Graph, GraphHash, Proofs                                                                                                                                                                          string
 }
 
 func New(db *sql.DB, executor Executor) (*Service, error) {
 	if db == nil || executor == nil {
 		return nil, ErrDenied
 	}
-	return &Service{db: db, executor: executor, wake: make(chan struct{}, 1)}, nil
+	return &Service{db: db, executor: executor, providers: workflowProviderAuthority(db), wake: make(chan struct{}, 1)}, nil
 }
 func id() string {
 	var raw [24]byte
@@ -189,7 +195,14 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 	if expectedHash != "" && expectedHash != recipeHash {
 		return receipt, ErrDenied
 	}
-	definition, err := compile(recipe)
+	graph, err := s.compileGraph(ctx, user, workspace, pipelineID)
+	if err != nil {
+		return receipt, err
+	}
+	if _, ok := s.executor.(proofExecutor); !ok {
+		return receipt, ErrUnsupported
+	}
+	definition, err := compileTyped(recipe, true)
 	if err != nil {
 		return receipt, err
 	}
@@ -198,23 +211,12 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 		return receipt, err
 	}
 	rawInputs, _ := json.Marshal(inputs)
-	var agent, profile string
-	rows, err := s.db.QueryContext(ctx, `SELECT id,restricted_execution_profile FROM agents WHERE workspace_id=? AND slug=? AND deleted_at IS NULL AND (? IS NULL OR crew_id=?)`, workspace, definition.AgentSlug, crew, crew)
+	agent, profile := graph.Agent, graph.Profile
+	rawGraph, err := json.Marshal(graph)
 	if err != nil {
 		return receipt, ErrDenied
 	}
-	count := 0
-	for rows.Next() {
-		count++
-		if err = rows.Scan(&agent, &profile); err != nil {
-			break
-		}
-	}
-	rowErr := rows.Err()
-	rows.Close()
-	if err != nil || rowErr != nil || count != 1 || (profile != "responses_text" && profile != "native_api_key") {
-		return receipt, ErrDenied
-	}
+	graphHash := hash(string(rawGraph))
 	if err = store.Check(ctx, user, workspace, access.Right{Kind: "agent", ID: agent, Operation: "run"}); err != nil {
 		return receipt, ErrDenied
 	}
@@ -239,7 +241,7 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 		return receipt, ErrDenied
 	}
 	if key != "" {
-		idempotency = hash(fmt.Sprintf("%s:%s:%s:%s:%s", source, pipelineID, recipeHash, pageAction, key))
+		idempotency = hash(fmt.Sprintf("%s:%s:%s:%s:%s", source, pipelineID, graphHash, pageAction, key))
 		var existing string
 		err = s.db.QueryRowContext(ctx, `SELECT id FROM restricted_workflow_jobs WHERE workspace_id=? AND principal_id=? AND idempotency_key_hash=?`, workspace, user, idempotency).Scan(&existing)
 		if err == nil {
@@ -263,6 +265,7 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 		rights = prepared.rights
 		facet = prepared.facet
 	}
+	rights = append(append([]access.Right(nil), rights...), graph.Rights...)
 	rawRights, _ := json.Marshal(rights)
 	chatID := id()
 	if _, err = s.db.ExecContext(ctx, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility,origin) VALUES(?,?,?,?,'private','ROUTINE')`, chatID, workspace, agent, user); err != nil {
@@ -296,6 +299,7 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 		return receipt, ErrDenied
 	}
 	j := job{ID: id(), Workspace: workspace, Principal: user, Member: m.ID, Revision: m.Revision, Pipeline: pipelineID, RecipeHash: recipeHash, Recipe: recipe, Agent: agent, Profile: profile, Chat: chatID, Origin: origin.ID, Handle: ciphertext, Idempotency: idempotency, Source: source, Page: pageID, PageAction: pageAction, PageHash: pageHash, Inputs: string(rawInputs), Rights: string(rawRights), SourceFacet: facet, State: "pending", Created: tsformat.Format(time.Now()), FireAt: tsformat.Format(time.Now().Add(delay)), Expires: tsformat.Format(time.Now().Add(delay + time.Hour))}
+	j.Graph, j.GraphHash, j.Proofs = string(rawGraph), graphHash, "{}"
 	if prepared != nil {
 		prepared.job = j
 		prepared.handle = handle

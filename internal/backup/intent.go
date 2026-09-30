@@ -39,6 +39,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"access_context_delegations":            IntentExcludeRuntime, // cross-agent provenance requires fresh authority after restore
 	"access_context_dependencies":           IntentExcludeRuntime, // live source dependencies cannot survive authority reset
 	"restricted_workflow_jobs":              IntentExcludeRuntime, // encrypted private queue capsules and outputs belong to this instance
+	"restricted_workflow_recipe_bindings":   IntentExcludeRuntime, // frozen private recipe authority requires fresh admission after restore
 	"restricted_workflow_provider_policies": IntentExcludeRuntime, // immutable provider policies belong to private queued authority
 	"restricted_workflow_delegate_slots":    IntentExcludeRuntime, // active host delegation slots cannot survive restore
 	"access_grants":                         IntentInclude,        // exact member/resource rights survive restore
