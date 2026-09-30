@@ -21,11 +21,19 @@ package backup
 //	                                   the workspace bundle's crew layout
 //	recovery-kit/keys.json             vault keys, only when the kit is on
 //
+// Staging never holds plaintext: the database snapshot is taken into memory
+// (database.SnapshotToMemory) and serialized straight into the sealed
+// payload, and every staged file (store copies, crew and environment
+// archives) is encrypted with a per-run key held only in memory
+// (staging_cipher.go). The staging directory is removed on success and on
+// failure, and swept at the next start after a crash.
+//
 // Tables the workspace bundles exclude (sessions, locks, leases, runtime
 // state, instance bookkeeping) are in the snapshot because the snapshot is
 // the database file; RecoverInstance clears the runtime ones afterwards.
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -334,6 +342,14 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 		return nil, fmt.Errorf("backup: create staging dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(stage) }()
+	// Staging is encrypted before it touches disk: every staged file goes
+	// through a key that exists only in this process's memory for this run
+	// (staging_cipher.go), and the database snapshot is never staged at all
+	// — it is held in memory and serialized straight into the sealed payload.
+	sc, err := newStagingCipher()
+	if err != nil {
+		return nil, err
+	}
 	envRun := newEnvironmentRun(db, outAbs, opts.EnvMode, opts.EnvInline, now)
 	level = envRun.level(level)
 	defer func() {
@@ -395,10 +411,17 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 		}
 	}
 	progress("copy")
-	stores, dbBytes, dbSHA, copyErr := stageInstanceCopy(window.Context(), db, stage, opts, level, workspaces, envRun)
+	stores, memSnap, copyErr := stageInstanceCopy(window.Context(), db, stage, sc, opts, level, workspaces, envRun)
 	expired := window.Expired()
 	holdMS := window.Release().Milliseconds()
 	releaseGuards()
+	var closeSnapOnce sync.Once
+	closeSnap := func() {
+		if memSnap != nil {
+			closeSnapOnce.Do(func() { _ = memSnap.Close() })
+		}
+	}
+	defer closeSnap()
 	if expired {
 		return nil, fmt.Errorf("%w (%s)", quiesce.ErrHoldCapExceeded, holdCapLabel(opts.HoldCap))
 	}
@@ -408,7 +431,7 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 	slog.Info("instance backup: consistent copy taken; writes released", "hold_ms", holdMS)
 	progress("pack")
 	// Environments committed inside the window are saved now, outside it.
-	envArchives, err := envRun.finishDeferred(ctx, filepath.Join(stage, "environments"))
+	envArchives, err := envRun.finishDeferred(ctx, filepath.Join(stage, "environments"), sc.Create)
 	if err != nil {
 		return nil, err
 	}
@@ -417,14 +440,10 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 	}
 
 	// Everything below reads the staged copy, never the live server.
-	snap, err := openSnapshot(filepath.Join(stage, "db.sqlite"))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = snap.Close() }()
+	snap := memSnap.DB
 
 	contents := Contents{}
-	inst := &InstanceContents{Stores: map[string]StoreSummary{}, DatabaseBytes: dbBytes, DatabaseSHA256: dbSHA, HoldMS: holdMS}
+	inst := &InstanceContents{Stores: map[string]StoreSummary{}, HoldMS: holdMS}
 	for name, s := range stores {
 		inst.Stores[name] = s.summary
 	}
@@ -497,14 +516,27 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 	contents.Instance = inst
 	contents.InstanceConfigIncluded = true
 	contents.CredstoreIncluded = scan.Total() > 0
+	schemaVersions := AppliedMigrationVersions(ctx, snap)
+	hostname := CurrentInstanceHostname(ctx, snap)
+
+	// The database image goes into the payload from memory; the in-memory
+	// database is freed as soon as it is serialized.
+	dbImage, err := memSnap.Serialize(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("backup: serialize database snapshot: %w", err)
+	}
+	closeSnap()
+	dbSum := sha256.Sum256(dbImage)
+	inst.DatabaseBytes, inst.DatabaseSHA256 = int64(len(dbImage)), hex.EncodeToString(dbSum[:])
 
 	// Pack the payload from the staged copy straight through the sealer:
 	// tar → zstd → age into one file, so the packed payload is never on
 	// disk unencrypted (seal_stream.go).
 	sealedPath := filepath.Join(stage, "sealed")
 	sha, sealedSize, err := sealInstancePayload(ctx, sealedPath, opts, func(w io.Writer) error {
-		return writeInstancePayload(w, opts.EncoderConcurrency, stage, stores, workspaces, kit, now)
+		return writeInstancePayload(w, opts.EncoderConcurrency, dbImage, sc, stores, workspaces, kit, now)
 	}, progress)
+	dbImage = nil
 	if err != nil {
 		return nil, err
 	}
@@ -512,7 +544,7 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 	manifest := &Manifest{
 		FormatVersion:           FormatVersion,
 		CrewshipVersionAtBackup: DetectCrewshipVersion(opts.CrewshipVersion),
-		SchemaMigrationVersions: AppliedMigrationVersions(ctx, snap),
+		SchemaMigrationVersions: schemaVersions,
 		Scope:                   ScopeInstance,
 		ScopeLevel:              level,
 		CompatibleTargets:       compatibleTargetsFor(ScopeInstance),
@@ -530,8 +562,8 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 	} else {
 		manifest.Encryption = Encryption{Enabled: true, Algorithm: EncryptionAlgorithm, KeyDerivation: "scrypt"}
 	}
-	if h := CurrentInstanceHostname(ctx, snap); h != "" {
-		manifest.SourceInstance.Hostname = h
+	if hostname != "" {
+		manifest.SourceInstance.Hostname = hostname
 	}
 
 	finalPath := filepath.Join(outAbs, BundleFileName(ScopeInstance, "all", now))
@@ -680,15 +712,20 @@ type stagedStore struct {
 // stageInstanceCopy is the part that runs inside the quiet window: snapshot
 // the database, copy every file store, capture every crew container. ctx
 // ends when the hold cap fires.
-func stageInstanceCopy(ctx context.Context, db *sql.DB, stage string, opts InstanceOptions, level ScopeLevel, workspaces []*instanceWorkspaceTarget, envRun *environmentRun) (map[string]*stagedStore, int64, string, error) {
-	dbPath := filepath.Join(stage, "db.sqlite")
-	if err := database.SnapshotTo(ctx, db, dbPath); err != nil {
-		return nil, 0, "", fmt.Errorf("backup: snapshot database: %w", err)
-	}
-	dbSHA, dbBytes, err := fileDigest(dbPath)
+//
+// The database snapshot is taken into memory (database.SnapshotToMemory) and
+// every staged file is written through sc, so nothing it stages is readable
+// on disk. On error the snapshot is freed and nil returned.
+func stageInstanceCopy(ctx context.Context, db *sql.DB, stage string, sc *stagingCipher, opts InstanceOptions, level ScopeLevel, workspaces []*instanceWorkspaceTarget, envRun *environmentRun) (_ map[string]*stagedStore, _ *database.MemorySnapshot, retErr error) {
+	ms, err := database.SnapshotToMemory(ctx, db)
 	if err != nil {
-		return nil, 0, "", err
+		return nil, nil, fmt.Errorf("backup: snapshot database: %w", err)
 	}
+	defer func() {
+		if retErr != nil {
+			_ = ms.Close()
+		}
+	}()
 	outAbs, _ := filepath.Abs(opts.OutputDir)
 	skip := []string{stage, outAbs}
 	stores := map[string]*stagedStore{}
@@ -701,11 +738,11 @@ func stageInstanceCopy(ctx context.Context, db *sql.DB, stage string, opts Insta
 		}
 		st.summary.Configured = true
 		if err := ctx.Err(); err != nil {
-			return nil, 0, "", err
+			return nil, nil, err
 		}
-		entries, skipped, err := copyTree(ctx, src, st.root, skip)
+		entries, skipped, err := copyTree(ctx, src, st.root, skip, sc)
 		if err != nil {
-			return nil, 0, "", fmt.Errorf("backup: copy %s store: %w", name, err)
+			return nil, nil, fmt.Errorf("backup: copy %s store: %w", name, err)
 		}
 		st.entries = entries
 		for _, e := range entries {
@@ -717,7 +754,7 @@ func stageInstanceCopy(ctx context.Context, db *sql.DB, stage string, opts Insta
 		st.summary.IndexSHA256 = StoreIndexDigest(entries)
 	}
 	if err := os.MkdirAll(filepath.Join(stage, "crews"), 0o700); err != nil {
-		return nil, 0, "", err
+		return nil, nil, err
 	}
 	now := time.Now().UTC()
 	for _, w := range workspaces {
@@ -737,14 +774,14 @@ func stageInstanceCopy(ctx context.Context, db *sql.DB, stage string, opts Insta
 			continue
 		}
 		path := filepath.Join(stage, "crews", w.target.ID+instanceCrewsSuffix)
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		f, err := sc.Create(path)
 		if err != nil {
-			return nil, 0, "", err
+			return nil, nil, err
 		}
 		tw, err := NewTarZstWriter(f)
 		if err != nil {
 			_ = f.Close()
-			return nil, 0, "", err
+			return nil, nil, err
 		}
 		for _, c := range w.target.CrewTargets {
 			if c.ContainerID == "" || opts.DockerOps == nil {
@@ -753,38 +790,38 @@ func stageInstanceCopy(ctx context.Context, db *sql.DB, stage string, opts Insta
 			if err := ctx.Err(); err != nil {
 				_ = tw.Close()
 				_ = f.Close()
-				return nil, 0, "", err
+				return nil, nil, err
 			}
 			capture, err := envRun.collectDeferred(ctx, opts.DockerOps, tw, c, level, w.target.ID)
 			if err != nil {
 				_ = tw.Close()
 				_ = f.Close()
-				return nil, 0, "", err
+				return nil, nil, err
 			}
 			w.capture[c.Slug] = capture
 		}
 		if err := WriteDevcontainerSection(tw, w.target.CrewTargets, now); err != nil {
 			_ = tw.Close()
 			_ = f.Close()
-			return nil, 0, "", err
+			return nil, nil, err
 		}
 		if err := tw.Close(); err != nil {
 			_ = f.Close()
-			return nil, 0, "", err
+			return nil, nil, err
 		}
 		if err := f.Close(); err != nil {
-			return nil, 0, "", err
+			return nil, nil, err
 		}
 		w.archive = path
 	}
-	return stores, dbBytes, dbSHA, nil
+	return stores, ms, nil
 }
 
 // copyTree copies every regular file under src into dst, returning an index
 // entry per file (paths slash-separated, relative to src). Directories in skip
 // (the staging and output directories) are not descended into. Non-regular
 // entries are counted, not copied.
-func copyTree(ctx context.Context, src, dst string, skip []string) ([]IndexEntry, int, error) {
+func copyTree(ctx context.Context, src, dst string, skip []string, sc *stagingCipher) ([]IndexEntry, int, error) {
 	info, err := os.Stat(src)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -831,7 +868,7 @@ func copyTree(ctx context.Context, src, dst string, skip []string) ([]IndexEntry
 		if err := os.MkdirAll(filepath.Dir(out), 0o700); err != nil {
 			return err
 		}
-		sha, n, err := copyFileHashed(p, out)
+		sha, n, err := copyFileHashed(p, out, sc)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil
@@ -844,13 +881,15 @@ func copyTree(ctx context.Context, src, dst string, skip []string) ([]IndexEntry
 	return entries, skipped, err
 }
 
-func copyFileHashed(src, dst string) (string, int64, error) {
+// copyFileHashed copies src into the staged file dst, encrypted through sc,
+// and returns the plaintext's sha256 and size.
+func copyFileHashed(src, dst string, sc *stagingCipher) (string, int64, error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return "", 0, err
 	}
 	defer func() { _ = in.Close() }()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	out, err := sc.Create(dst)
 	if err != nil {
 		return "", 0, err
 	}
@@ -859,20 +898,6 @@ func copyFileHashed(src, dst string) (string, int64, error) {
 	if cerr := out.Close(); err == nil {
 		err = cerr
 	}
-	if err != nil {
-		return "", 0, err
-	}
-	return hex.EncodeToString(h.Sum(nil)), n, nil
-}
-
-func fileDigest(p string) (string, int64, error) {
-	f, err := os.Open(p)
-	if err != nil {
-		return "", 0, err
-	}
-	defer func() { _ = f.Close() }()
-	h := sha256.New()
-	n, err := io.Copy(h, f)
 	if err != nil {
 		return "", 0, err
 	}
@@ -1054,7 +1079,7 @@ func sealInstancePayload(ctx context.Context, sealedPath string, opts InstanceOp
 	return sealer.Sum(), sealer.Size(), nil
 }
 
-func writeInstancePayload(sink io.Writer, concurrency int, stage string, stores map[string]*stagedStore, workspaces []*instanceWorkspaceTarget, kit *RecoveryKit, now time.Time) error {
+func writeInstancePayload(sink io.Writer, concurrency int, dbImage []byte, sc *stagingCipher, stores map[string]*stagedStore, workspaces []*instanceWorkspaceTarget, kit *RecoveryKit, now time.Time) error {
 	tw, err := NewTarZstWriterConcurrency(sink, concurrency)
 	if err != nil {
 		return err
@@ -1063,7 +1088,7 @@ func writeInstancePayload(sink io.Writer, concurrency int, stage string, stores 
 		_ = tw.Close()
 		return err
 	}
-	if err := writeFileEntry(tw, instanceDBEntry, filepath.Join(stage, "db.sqlite"), now); err != nil {
+	if err := tw.WriteStream(instanceDBEntry, 0o600, now, int64(len(dbImage)), bytes.NewReader(dbImage)); err != nil {
 		return fail(err)
 	}
 	index := InstanceIndex{Stores: map[string][]IndexEntry{}}
@@ -1075,7 +1100,7 @@ func writeInstancePayload(sink io.Writer, concurrency int, stage string, stores 
 		}
 		for _, e := range st.entries {
 			src := filepath.Join(st.root, filepath.FromSlash(e.Path))
-			if err := writeFileEntry(tw, instanceFilesPrefix+name+"/"+e.Path, src, now); err != nil {
+			if err := writeStagedEntry(tw, sc, instanceFilesPrefix+name+"/"+e.Path, src, now); err != nil {
 				return fail(err)
 			}
 		}
@@ -1084,7 +1109,7 @@ func writeInstancePayload(sink io.Writer, concurrency int, stage string, stores 
 		if w.archive == "" {
 			continue
 		}
-		if err := writeFileEntry(tw, instanceCrewsPrefix+w.target.ID+instanceCrewsSuffix, w.archive, now); err != nil {
+		if err := writeStagedEntry(tw, sc, instanceCrewsPrefix+w.target.ID+instanceCrewsSuffix, w.archive, now); err != nil {
 			return fail(err)
 		}
 	}
@@ -1092,7 +1117,7 @@ func writeInstancePayload(sink io.Writer, concurrency int, stage string, stores 
 		if w.envArchive == "" {
 			continue
 		}
-		if err := writeFileEntry(tw, instanceEnvPrefix+w.target.ID+instanceCrewsSuffix, w.envArchive, now); err != nil {
+		if err := writeStagedEntry(tw, sc, instanceEnvPrefix+w.target.ID+instanceCrewsSuffix, w.envArchive, now); err != nil {
 			return fail(err)
 		}
 	}
@@ -1115,17 +1140,14 @@ func writeInstancePayload(sink io.Writer, concurrency int, stage string, stores 
 	return tw.Close()
 }
 
-func writeFileEntry(tw *TarZstWriter, name, src string, now time.Time) error {
-	f, err := os.Open(src)
+// writeStagedEntry decrypts a staged file into the payload.
+func writeStagedEntry(tw *TarZstWriter, sc *stagingCipher, name, src string, now time.Time) error {
+	r, size, err := sc.Open(src)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	return tw.WriteStream(name, 0o600, now, info.Size(), f)
+	defer func() { _ = r.Close() }()
+	return tw.WriteStream(name, 0o600, now, size, r)
 }
 
 func writeInstanceBundleFile(ctx context.Context, throttle Throttle, path string, m *Manifest, sealedPath string, sealedSize int64) error {

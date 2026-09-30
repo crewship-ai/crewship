@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -136,7 +137,9 @@ func (r *environmentRun) collectDeferred(ctx context.Context, ops DockerOps, dst
 // finishDeferred saves every deferred capture. Each workspace's records
 // (and inline blobs) go to <dir>/<workspace>.tar.zst; the returned map
 // names those archives.
-func (r *environmentRun) finishDeferred(ctx context.Context, dir string) (map[string]string, error) {
+// create opens each archive file (the instance backup passes its encrypted
+// staging writer).
+func (r *environmentRun) finishDeferred(ctx context.Context, dir string, create func(path string) (io.WriteCloser, error)) (map[string]string, error) {
 	out := map[string]string{}
 	if r == nil || len(r.deferred) == 0 {
 		return out, nil
@@ -145,7 +148,7 @@ func (r *environmentRun) finishDeferred(ctx context.Context, dir string) (map[st
 		return nil, err
 	}
 	type archive struct {
-		f  *os.File
+		f  io.WriteCloser
 		tw *TarZstWriter
 	}
 	archives := map[string]*archive{}
@@ -159,7 +162,7 @@ func (r *environmentRun) finishDeferred(ctx context.Context, dir string) (map[st
 		a := archives[d.workspace]
 		if a == nil {
 			p := filepath.Join(dir, d.workspace+instanceCrewsSuffix)
-			f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+			f, err := create(p)
 			if err != nil {
 				closeAll()
 				r.abortDeferred(i)

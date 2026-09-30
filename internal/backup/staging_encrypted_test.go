@@ -3,6 +3,7 @@ package backup_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,5 +210,116 @@ func TestSweepInstanceStaging(t *testing.T) {
 	want := "crewship-instance-all-20260930T010203Z.tar.zst crewship-workspace-lab-20260930T010203Z.tar.zst.partial"
 	if strings.Join(names, " ") != want {
 		t.Fatalf("left %v", names)
+	}
+}
+
+// The whole-instance path stages its consistent copy between the quiet
+// window and packing. Nothing it stages may be readable on disk: not the
+// database (never staged — it is held in memory), not any file store's
+// contents, not the packed payload. The probe reads every file under the
+// output directory at every phase, finished bundle included, and looks for
+// SQLite's header, known plaintext from the database and each store, and
+// (in staging) a zstd frame or tar header.
+func TestCreateInstanceBackup_StagingHoldsNoPlaintext(t *testing.T) {
+	f := newInstanceFixture(t)
+	const dbMarker = "STAGING-DB-ROW-MARKER-7f3a"
+	if _, err := f.db.Exec(`UPDATE workspaces SET name = ? WHERE id = 'ws_lab'`, dbMarker); err != nil {
+		t.Fatal(err)
+	}
+	// A store big enough to span many cipher chunks.
+	big := bytes.Repeat([]byte("STAGING-BIG-STORE-MARKER "), 40000)
+	if err := os.WriteFile(filepath.Join(f.paths.Skills, "custom", "big.md"), big, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	markers := [][]byte{
+		[]byte("SQLite format 3"), []byte(dbMarker), []byte("the incident timeline"),
+		[]byte("# what the crew learned"), []byte("working notes"), []byte("STAGING-BIG-STORE-MARKER"),
+	}
+	var offense []string
+	seen, stagedSeen := 0, 0
+	look := func(phase string) {
+		_ = filepath.Walk(f.outputDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
+			}
+			b, err := os.ReadFile(path)
+			if err != nil || len(b) == 0 {
+				return nil
+			}
+			seen++
+			staged := strings.Contains(path, string(filepath.Separator)+".staging-instance-")
+			if staged {
+				stagedSeen++
+			}
+			for _, m := range markers {
+				if bytes.Contains(b, m) {
+					offense = append(offense, fmt.Sprintf("%s: %s holds %q", phase, path, m))
+				}
+			}
+			if staged && !bytes.HasPrefix(b, ageHeader) && (bytes.HasPrefix(b, zstdMagic) || bytes.Contains(b, tarMagic)) {
+				offense = append(offense, fmt.Sprintf("%s: %s is an unencrypted archive", phase, path))
+			}
+			return nil
+		})
+	}
+	res, err := backup.CreateInstanceBackup(context.Background(), f.db, backup.InstanceOptions{
+		OutputDir: f.outputDir, Actor: backup.Actor{UserID: "u_admin", Email: "admin@e2e.test"},
+		Recipients: []age.Recipient{f.identity.Recipient()}, Paths: f.paths, Quiesce: quiesce.New(),
+		Poll: 5 * time.Millisecond, Progress: look, EncoderConcurrency: 1,
+	})
+	if err != nil {
+		t.Fatalf("CreateInstanceBackup: %v", err)
+	}
+	look("done")
+	if len(offense) > 0 {
+		t.Fatalf("plaintext on disk:\n%s", strings.Join(offense, "\n"))
+	}
+	if stagedSeen == 0 || seen == 0 {
+		t.Fatalf("the probe saw %d staged files (%d in all); the test proves nothing", stagedSeen, seen)
+	}
+	t.Logf("hold_ms %d; %d staged file reads checked", res.HoldMS, stagedSeen)
+	// Staging is wiped on success.
+	entries, _ := os.ReadDir(f.outputDir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".staging-instance-") {
+			t.Fatalf("staging directory left behind: %s", e.Name())
+		}
+	}
+	// And the bundle still carries everything, decrypted by its key: the
+	// database image and the big store file come back byte for byte.
+	m := res.Manifest
+	if m.Contents.Instance == nil || m.Contents.Instance.DatabaseBytes == 0 || m.Contents.Instance.DatabaseSHA256 == "" {
+		t.Fatalf("manifest database = %+v", m.Contents.Instance)
+	}
+	if s := m.Contents.Instance.Stores[backup.StoreSkills]; s.Files != 2 || s.Bytes < int64(len(big)) {
+		t.Fatalf("skills store = %+v", s)
+	}
+}
+
+// Staging is wiped on failure too: a copy that fails inside the window
+// leaves no staging directory.
+func TestCreateInstanceBackup_StagingWipedOnFailure(t *testing.T) {
+	f := newInstanceFixture(t)
+	// An unreadable file in a store fails the copy.
+	bad := filepath.Join(f.paths.Skills, "custom", "unreadable.md")
+	if err := os.WriteFile(bad, []byte("x"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a 0000 file")
+	}
+	_, err := backup.CreateInstanceBackup(context.Background(), f.db, backup.InstanceOptions{
+		OutputDir: f.outputDir, Actor: backup.Actor{UserID: "u_admin", Email: "admin@e2e.test"},
+		Recipients: []age.Recipient{f.identity.Recipient()}, Paths: f.paths, Quiesce: quiesce.New(),
+		Poll: 5 * time.Millisecond, EncoderConcurrency: 1,
+	})
+	if err == nil {
+		t.Fatal("the copy of an unreadable store file succeeded")
+	}
+	entries, _ := os.ReadDir(f.outputDir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".staging-instance-") {
+			t.Fatalf("staging directory left behind after a failure: %s", e.Name())
+		}
 	}
 }
