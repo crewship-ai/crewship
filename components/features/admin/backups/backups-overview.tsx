@@ -87,10 +87,17 @@ function NeedsAttention({ items, ctx }: { items: AttentionItem[]; ctx: SectionCt
 
 const NIGHT_BG: Record<Night["status"], string> = {
   ok: "color-mix(in oklch, var(--success) 55%, transparent)",
+  // Hatched warn: created, but not everything is in it — distinct from a
+  // skipped or late night, and never the green of a complete one.
+  incomplete: "repeating-linear-gradient(135deg, var(--warn) 0 4px, color-mix(in oklch, var(--warn) 45%, transparent) 4px 8px)",
   failed: "var(--destructive)",
   skipped: "var(--warn)",
   late: "var(--warn)",
   none: "transparent",
+}
+
+const NIGHT_TONE: Record<Night["status"], "ok" | "warn" | "bad" | "none"> = {
+  ok: "ok", incomplete: "warn", skipped: "warn", late: "warn", failed: "bad", none: "none",
 }
 
 /** Fourteen equal cells, date under each, ✓ contents checked, ◆ test restore. */
@@ -101,7 +108,7 @@ export function NightStrip({ nights, today }: { nights: Night[]; today: string }
       <div className="grid grid-cols-[repeat(14,minmax(0,1fr))] gap-1 px-3.5 pb-1 pt-3" data-slot="night-strip">
         {cells.map((c) => (
           <div key={c.date} className="flex min-w-0 flex-col items-center gap-1" data-status={c.status}>
-            <div role="img" aria-label={c.title} title={c.title} className={cn("h-[30px] w-full rounded-[5px]", c.status === "none" && "border-[1.5px] border-dashed border-control-border")}
+            <div role="img" aria-label={c.title} title={c.title} data-tone={NIGHT_TONE[c.status]} className={cn("h-[30px] w-full rounded-[5px]", c.status === "none" && "border-[1.5px] border-dashed border-control-border")}
               style={{ background: NIGHT_BG[c.status] }} />
             <span className="text-[12px] text-muted-foreground">{c.day}</span>
             <span className="h-3.5 text-[12px]" aria-hidden>{c.mark}</span>
@@ -110,6 +117,7 @@ export function NightStrip({ nights, today }: { nights: Night[]; today: string }
       </div>
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-3.5 pb-3 text-[13px] text-muted-foreground">
         <span><Dot className="bg-success" />backup created</span>
+        <span><Dot style={{ background: NIGHT_BG.incomplete }} />created · incomplete</span>
         <span><Dot className="bg-warn" />skipped or late</span>
         <span><Dot className="bg-destructive" />failed</span>
         <span>✓ contents checked</span>

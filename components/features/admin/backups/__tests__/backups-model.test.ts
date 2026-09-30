@@ -65,6 +65,14 @@ describe("stripCells: the last 14 nights", () => {
     expect(cells[12].mark).toBe("✓")
     expect(cells[11].mark).toBe("")
   })
+  it("shows a created but incomplete night as incomplete, never as a green ok", () => {
+    const cells = stripCells([
+      { date: "2026-09-30", status: "incomplete", proof: 2, detail: null },
+      { date: "2026-09-29", status: "incomplete", proof: 0, detail: "created · incomplete: 12 attachment files missing" },
+    ], "2026-09-30")
+    expect(cells[13]).toMatchObject({ status: "incomplete", mark: "✓", title: "30 Sep · created · incomplete" })
+    expect(cells[12].title).toBe("29 Sep · created · incomplete: 12 attachment files missing")
+  })
   it("crosses a month boundary", () => {
     expect(stripCells([], "2026-10-03")[0].date).toBe("2026-09-20")
   })

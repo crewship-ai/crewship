@@ -68,6 +68,17 @@ describe("Overview", () => {
     expect(screen.getByText("◆ test restore")).toBeInTheDocument()
   })
 
+  it("draws the night of an incomplete backup in the warn tone with its own legend, not as a green ok", async () => {
+    const { container } = show("overview")
+    await screen.findByText("Last 14 nights")
+    const strip = container.querySelector("[data-slot=night-strip]")!
+    const last = strip.children[13] as HTMLElement
+    expect(last).toHaveAttribute("data-status", "incomplete")
+    expect(last.querySelector("[role=img]")).toHaveAttribute("data-tone", "warn")
+    expect(last.querySelector("[role=img]")!.getAttribute("aria-label")).toMatch(/incomplete/)
+    expect(screen.getByText("created · incomplete")).toBeInTheDocument()
+  })
+
   it("shows the space the backups take and what a run and a restore need", async () => {
     show("overview")
     expect(await screen.findByText("26 GB")).toBeInTheDocument()

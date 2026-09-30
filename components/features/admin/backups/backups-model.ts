@@ -56,7 +56,8 @@ export interface AttentionItem {
   action?: { kind: AttentionAction; label: string; workspace_id?: string | null; run_id?: string | null } | null
 }
 
-export type NightStatus = "ok" | "skipped" | "late" | "failed" | "none"
+/** incomplete: a backup was created that night but recorded gaps — never a green ok. */
+export type NightStatus = "ok" | "incomplete" | "skipped" | "late" | "failed" | "none"
 
 export interface Night {
   /** YYYY-MM-DD in the instance's timezone. */
@@ -595,6 +596,7 @@ export interface StripCell {
 
 const NIGHT_TIP: Record<NightStatus, string> = {
   ok: "backup created",
+  incomplete: "created · incomplete",
   failed: "failed",
   skipped: "skipped",
   late: "ran late",

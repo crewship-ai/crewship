@@ -41,12 +41,13 @@ export function fixtureToday(now: Date): string {
 }
 
 function nights(now: Date): Night[] {
-  const S: NightStatus[] = ["ok", "ok", "ok", "ok", "skipped", "ok", "ok", "ok", "ok", "failed", "late", "ok", "ok", "ok"]
+  const S: NightStatus[] = ["ok", "ok", "ok", "ok", "skipped", "ok", "ok", "ok", "ok", "failed", "late", "ok", "ok", "incomplete"]
   const P: ProofLevel[] = [0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 3, 0, 2]
   const tip: Partial<Record<NightStatus, string>> = {
     failed: "failed: lock held by another backup",
     skipped: "skipped: no quiet window within 2 h",
     late: "server down at 03:00; catch-up backup at 07:12",
+    incomplete: "created · incomplete: 12 attachment files missing",
   }
   return S.map((status, i) => ({ date: day(now, 13 - i), status, proof: P[i], detail: tip[status] ?? null }))
 }
