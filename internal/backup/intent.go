@@ -36,18 +36,25 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
-	"codex_login_proofs":           IntentExcludeRuntime, // verified identity is bound to this host's credential generation
-	"access_context_delegations":   IntentExcludeRuntime, // classified cross-agent links require fresh attempt authority
-	"restricted_workflow_jobs":     IntentExcludeRuntime, // copying private queue capsules must not replay paid work
-	"access_files":                 IntentExcludeRuntime, // classified outputs depend on excluded attempt authority
-	"access_grants":                IntentInclude,        // exact member/resource rights survive restore
-	"access_context_dependencies":  IntentExcludeRuntime, // dependency authority requires fresh admission
-	"access_context":               IntentExcludeRuntime, // prompt context requires fresh admission
-	"access_attempt_outcomes":      IntentExcludeRuntime, // own-attempt audit references excluded execution authority
-	"access_attempts":              IntentExcludeRuntime, // restoring a bundle must not revive execution capabilities
-	"restricted_launches":          IntentExcludeRuntime, // frozen execution payloads require fresh admission after restore
-	"restricted_provider_bindings": IntentExcludeRuntime, // provider authority must be admitted anew after restore
-	"restricted_native_sessions":   IntentExcludeRuntime, // frozen context, issued reasoning and in-flight leases require fresh admission
+	"restricted_workflow_recipe_bindings":   IntentExcludeRuntime, // frozen private recipe authority requires fresh admission after restore
+	"restricted_workflow_provider_policies": IntentExcludeRuntime, // immutable provider policies belong to private queued authority
+	"restricted_workflow_delegate_slots":    IntentExcludeRuntime, // active host delegation slots cannot survive restore
+	"codex_login_proofs":                    IntentExcludeRuntime, // verified identity is bound to this host's credential generation
+	"project_files":                         IntentInclude,
+	"project_file_versions":                 IntentInclude,
+	"project_file_blobs":                    IntentInclude,        // base64 TEXT bytes retain their immutable version digest
+	"attempt_project_inputs":                IntentExcludeRuntime, // native input authority must be admitted anew after restore
+	"access_context_delegations":            IntentExcludeRuntime, // classified cross-agent links require fresh attempt authority
+	"restricted_workflow_jobs":              IntentExcludeRuntime, // copying private queue capsules must not replay paid work
+	"access_files":                          IntentExcludeRuntime, // classified outputs depend on excluded attempt authority
+	"access_grants":                         IntentInclude,        // exact member/resource rights survive restore
+	"access_context_dependencies":           IntentExcludeRuntime, // dependency authority requires fresh admission
+	"access_context":                        IntentExcludeRuntime, // prompt context requires fresh admission
+	"access_attempt_outcomes":               IntentExcludeRuntime, // own-attempt audit references excluded execution authority
+	"access_attempts":                       IntentExcludeRuntime, // restoring a bundle must not revive execution capabilities
+	"restricted_launches":                   IntentExcludeRuntime, // frozen execution payloads require fresh admission after restore
+	"restricted_provider_bindings":          IntentExcludeRuntime, // provider authority must be admitted anew after restore
+	"restricted_native_sessions":            IntentExcludeRuntime, // frozen context, issued reasoning and in-flight leases require fresh admission
 	// Durable human collaboration: restore preserves history/ACL but suspends work.
 	"workspace_conversations":              IntentInclude,
 	"workspace_conversation_direct_pairs":  IntentInclude,

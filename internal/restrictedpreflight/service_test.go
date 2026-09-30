@@ -12,11 +12,13 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 type executor struct {
+	runner *restricteddispatch.TextRunner
 	calls  int
 	before func()
 	rights []access.Right
@@ -35,6 +37,27 @@ func (e *executor) ExecuteRunWithRights(ctx context.Context, u, w, c, p string, 
 		return err
 	}
 	return emit("done", "")
+}
+
+type preflightTextSession struct{ done chan struct{} }
+
+func (s *preflightTextSession) Output(context.Context) (string, error) {
+	return "{\"type\":\"text\",\"text\":\"private answer\"}\n{\"type\":\"done\"}\n", nil
+}
+func (s *preflightTextSession) Done() <-chan struct{} { return s.done }
+func (s *preflightTextSession) Stop(string)           {}
+func (e *executor) ExecuteWorkflowRun(ctx context.Context, request restricteddispatch.DelegatedRunRequest, emit func(string, string) error) (restricteddispatch.RunProof, error) {
+	e.calls++
+	e.rights = nil
+	for _, right := range request.Rights {
+		if right.Kind == "project" {
+			e.rights = append(e.rights, right)
+		}
+	}
+	if e.before != nil {
+		e.before()
+	}
+	return e.runner.ExecuteWorkflowRun(ctx, request, emit)
 }
 func fixture(t *testing.T) (*Service, *executor) {
 	t.Helper()
@@ -85,7 +108,12 @@ func fixture(t *testing.T) (*Service, *executor) {
 			t.Fatal(err)
 		}
 	}
-	e := &executor{}
+	e := &executor{runner: &restricteddispatch.TextRunner{Authority: restricteddispatch.Authority{Store: store}, MaxOutputTokens: 128}}
+	e.runner.StartSession = func(context.Context, string) (restricteddispatch.TextSession, error) {
+		done := make(chan struct{})
+		close(done)
+		return &preflightTextSession{done}, nil
+	}
 	wf, err := restrictedworkflow.New(db, e)
 	if err != nil {
 		t.Fatal(err)

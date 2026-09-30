@@ -101,7 +101,9 @@ const (
 // wire value in place bills cache reads at the full input rate — the paymaster
 // prices these three fields as separate channels and adds them.
 type Response struct {
-	Content string `json:"content,omitempty"`
+	// UsageKnown is host-only validated terminal usage presence, never client input.
+	UsageKnown bool   `json:"-"`
+	Content    string `json:"content,omitempty"`
 	// Thinking is a reasoning model's chain of thought when the provider returns
 	// it separately from Content (Ollama does). It is never the answer — but it
 	// is the difference between "the model said nothing" and "the model reasoned

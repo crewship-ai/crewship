@@ -43,10 +43,16 @@ func (r *TextRunner) ExecuteRunWithRights(ctx context.Context, user, workspace, 
 	return r.execute(ctx, user, workspace, chat, input, rights, emit, true, nil)
 }
 func (r *TextRunner) execute(ctx context.Context, user, workspace, chat, input string, rights []access.Right, emit func(string, string) error, runOperation bool, proof *RunProof) error {
+	return r.executeRequest(ctx, user, workspace, chat, input, rights, emit, runOperation, proof, nil)
+}
+func (r *TextRunner) executeRequest(ctx context.Context, user, workspace, chat, input string, rights []access.Right, emit func(string, string) error, runOperation bool, proof *RunProof, delegation *DelegatedRunRequest) error {
 	if r == nil || (r.Manager == nil && r.StartSession == nil) || emit == nil || len(input) == 0 || len(input) > 32768 {
 		return access.ErrDenied
 	}
 	store := r.Authority.Store
+	if store.DB == nil {
+		return access.ErrDenied
+	}
 	var err error
 	if !runOperation {
 		allowed, err := chataudience.CanReadInWorkspace(ctx, store.DB, chat, user, workspace)
@@ -61,6 +67,15 @@ func (r *TextRunner) execute(ctx context.Context, user, workspace, chat, input s
 	if err := store.DB.QueryRowContext(ctx, `SELECT c.agent_id,a.restricted_execution_profile FROM chats c JOIN agents a ON a.id=c.agent_id AND a.workspace_id=c.workspace_id WHERE c.id=? AND c.workspace_id=? AND c.visibility IN ('private','group')`, chat, workspace).Scan(&agent, &profile); err != nil {
 		return access.ErrDenied
 	}
+	if delegation != nil {
+		if !runOperation || delegation.ParentHandle == "" || len(delegation.SourceEntryIDs) == 0 || len(delegation.SourceEntryIDs) > 64 {
+			return access.ErrDenied
+		}
+		agent = delegation.Agent
+		if store.DB.QueryRowContext(ctx, `SELECT restricted_execution_profile FROM agents WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, agent, workspace).Scan(&profile) != nil {
+			return access.ErrDenied
+		}
+	}
 	if profile != "responses_text" {
 		return access.ErrDenied
 	}
@@ -68,13 +83,22 @@ func (r *TextRunner) execute(ctx context.Context, user, workspace, chat, input s
 	if runOperation {
 		prepare = r.Authority.PrepareResponses
 	}
-	handle, _, err := prepare(ctx, user, workspace, agent, chat, "", rights, r.MaxOutputTokens, func(ctx context.Context, attempt access.Attempt) ([]string, error) {
+	build := func(ctx context.Context, childHandle string, attempt access.Attempt) ([]string, error) {
 		binding, err := loadProvider(ctx, store.DB, attempt.ID)
 		if err != nil {
 			return nil, err
 		}
 		if binding.Profile != "responses_text" {
 			return nil, access.ErrDenied
+		}
+		if delegation != nil {
+			importContext := store.ImportDelegatedContext
+			if attempt.WorkflowContinuation {
+				importContext = store.ImportWorkflowContinuation
+			}
+			if _, err := importContext(ctx, delegation.ParentHandle, childHandle, delegation.SourceEntryIDs); err != nil {
+				return nil, err
+			}
 		}
 		prompt, err := store.BuildContext(ctx, attempt, input)
 		if err != nil {
@@ -85,7 +109,13 @@ func (r *TextRunner) execute(ctx context.Context, user, workspace, chat, input s
 			return nil, err
 		}
 		return []string{"/opt/crewship-runner", "responses", string(body)}, nil
-	})
+	}
+	var handle string
+	if delegation != nil {
+		handle, _, err = r.Authority.PrepareDelegatedResponses(ctx, user, workspace, agent, chat, delegation.ParentHandle, rights, r.MaxOutputTokens, build)
+	} else {
+		handle, _, err = prepare(ctx, user, workspace, agent, chat, "", rights, r.MaxOutputTokens, func(ctx context.Context, attempt access.Attempt) ([]string, error) { return build(ctx, "", attempt) })
+	}
 	if err != nil {
 		return err
 	}
@@ -225,17 +255,21 @@ func (r *TextRunner) execute(ctx context.Context, user, workspace, chat, input s
 }
 
 // ExecuteWorkflowRun returns the exact completed output proof to trusted queue
-// code. The delegated parent path stays denied until its frozen slot is bound.
+// code. Delegated targets require an exact immutable host-bound provider slot.
 func (r *TextRunner) ExecuteWorkflowRun(ctx context.Context, request DelegatedRunRequest, emit func(string, string) error) (RunProof, error) {
-	if r == nil || request.ParentHandle != "" || len(request.SourceEntryIDs) != 0 {
+	if r == nil || r.Authority.Store.DB == nil || (request.ParentHandle == "" && len(request.SourceEntryIDs) != 0) {
 		return RunProof{}, access.ErrDenied
 	}
 	var agent string
-	if r.Authority.Store.DB.QueryRowContext(ctx, `SELECT agent_id FROM chats WHERE id=? AND workspace_id=?`, request.Chat, request.Workspace).Scan(&agent) != nil || agent != request.Agent {
+	if r.Authority.Store.DB.QueryRowContext(ctx, `SELECT agent_id FROM chats WHERE id=? AND workspace_id=?`, request.Chat, request.Workspace).Scan(&agent) != nil || (request.ParentHandle == "" && agent != request.Agent) {
 		return RunProof{}, access.ErrDenied
 	}
 	var proof RunProof
-	if err := r.execute(ctx, request.User, request.Workspace, request.Chat, request.Input, request.Rights, emit, true, &proof); err != nil {
+	var delegated *DelegatedRunRequest
+	if request.ParentHandle != "" {
+		delegated = &request
+	}
+	if err := r.executeRequest(ctx, request.User, request.Workspace, request.Chat, request.Input, request.Rights, emit, true, &proof, delegated); err != nil {
 		return RunProof{}, err
 	}
 	return proof, nil

@@ -22,7 +22,7 @@ type definition struct {
 	AgentSlug string
 }
 
-func compile(raw string) (definition, error) {
+func compileTyped(raw string, graph bool) (definition, error) {
 	var d definition
 	if len(raw) > 128<<10 {
 		return d, ErrUnsupported
@@ -58,29 +58,59 @@ func compile(raw string) (definition, error) {
 			return d, ErrUnsupported
 		}
 		for key := range sf {
-			if key != "id" && key != "name" && key != "type" && key != "agent_slug" && key != "prompt" && key != "timeout_seconds" {
+			allowedCall := graph && step.Type == pipeline.StepCallPipeline && (key == "pipeline_slug" || key == "inputs")
+			allowedAgent := step.Type == pipeline.StepAgentRun && (key == "agent_slug" || key == "prompt")
+			if key != "id" && key != "name" && key != "type" && key != "timeout_seconds" && !allowedAgent && !allowedCall {
 				return d, ErrUnsupported
 			}
 		}
-		if step.Type != pipeline.StepAgentRun || step.AgentSlug == "" || step.Prompt == "" || len(step.Prompt) > 32768 || step.TimeoutSec < 0 || step.TimeoutSec > 300 {
+		if step.TimeoutSec < 0 || step.TimeoutSec > 300 {
 			return d, ErrUnsupported
 		}
-		if d.AgentSlug == "" {
-			d.AgentSlug = step.AgentSlug
-		}
-		if step.AgentSlug != d.AgentSlug {
-			return d, ErrUnsupported
-		}
-		for _, match := range refs.FindAllStringSubmatch(step.Prompt, -1) {
-			ref := strings.TrimSpace(match[1])
-			parts := strings.Split(ref, ".")
-			if len(parts) == 2 && parts[0] == "inputs" && inputs[parts[1]] {
-				continue
+		var templates []string
+		switch step.Type {
+		case pipeline.StepAgentRun:
+			if step.AgentSlug == "" || step.Prompt == "" || len(step.Prompt) > 32768 {
+				return d, ErrUnsupported
 			}
-			if len(parts) == 3 && parts[0] == "steps" && previous[parts[1]] && parts[2] == "output" {
-				continue
+			if d.AgentSlug == "" {
+				d.AgentSlug = step.AgentSlug
 			}
+			if !graph && step.AgentSlug != d.AgentSlug {
+				return d, ErrUnsupported
+			}
+			templates = append(templates, step.Prompt)
+		case pipeline.StepCallPipeline:
+			if !graph || step.PipelineSlug == "" {
+				return d, ErrUnsupported
+			}
+			for _, value := range step.NestedInputs {
+				switch v := value.(type) {
+				case string:
+					if len(v) > 16384 {
+						return d, ErrUnsupported
+					}
+					templates = append(templates, v)
+				case float64, bool:
+				default:
+					return d, ErrUnsupported
+				}
+			}
+		default:
 			return d, ErrUnsupported
+		}
+		for _, template := range templates {
+			for _, match := range refs.FindAllStringSubmatch(template, -1) {
+				ref := strings.TrimSpace(match[1])
+				parts := strings.Split(ref, ".")
+				if len(parts) == 2 && parts[0] == "inputs" && inputs[parts[1]] {
+					continue
+				}
+				if len(parts) == 3 && parts[0] == "steps" && previous[parts[1]] && parts[2] == "output" {
+					continue
+				}
+				return d, ErrUnsupported
+			}
 		}
 		previous[step.ID] = true
 	}

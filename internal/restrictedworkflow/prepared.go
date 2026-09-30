@@ -22,8 +22,8 @@ type RightsExecutor interface {
 	ExecuteRunWithRights(context.Context, string, string, string, string, []access.Right, func(string, string) error) error
 }
 type PreparedMetadata struct {
-	OriginAttemptID, WorkspaceID, PrincipalID, MemberID, AgentID, RecipeHash, ChatID, ExecutionProfile, WorkflowID string
-	MemberRevision                                                                                                 int64
+	OriginAttemptID, WorkspaceID, PrincipalID, MemberID, AgentID, RecipeHash, ChatID, ExecutionProfile, WorkflowID, ExecutionHash string
+	MemberRevision                                                                                                                int64
 }
 
 func (p *PreparedInvocation) Metadata() PreparedMetadata {
@@ -31,7 +31,7 @@ func (p *PreparedInvocation) Metadata() PreparedMetadata {
 		return PreparedMetadata{}
 	}
 	j := p.job
-	return PreparedMetadata{j.Origin, j.Workspace, j.Principal, j.Member, j.Agent, j.RecipeHash, j.Chat, j.Profile, j.ID, j.Revision}
+	return PreparedMetadata{j.Origin, j.Workspace, j.Principal, j.Member, j.Agent, j.RecipeHash, j.Chat, j.Profile, j.ID, j.GraphHash, j.Revision}
 }
 func (s *Service) PrepareManualWithRights(ctx context.Context, user, workspace, slug string, inputs map[string]any, expectedHash string, rights []access.Right, sourceFacet string) (*PreparedInvocation, error) {
 	if sourceFacet != "issue" || len(rights) != 1 || rights[0].Kind != "project" || rights[0].Operation != "read" || rights[0].ID == "" {
@@ -71,8 +71,11 @@ func (s *Service) EnqueuePrepared(ctx context.Context, tx *sql.Tx, p *PreparedIn
 	if err := s.checkJob(ctx, tx, j, p.handle); err != nil {
 		return Receipt{}, err
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO restricted_workflow_jobs(id,workspace_id,principal_id,member_id,member_revision,pipeline_id,recipe_hash,recipe_json,agent_id,execution_profile,chat_id,origin_attempt_id,origin_handle_ciphertext,source_kind,page_id,page_action_json,page_spec_hash,inputs_json,idempotency_key_hash,state,created_at,fire_at,expires_at,additional_rights_json,source_facet) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, j.ID, j.Workspace, j.Principal, j.Member, j.Revision, j.Pipeline, j.RecipeHash, j.Recipe, j.Agent, j.Profile, j.Chat, j.Origin, j.Handle, j.Source, j.Page, j.PageAction, j.PageHash, j.Inputs, j.Idempotency, j.State, j.Created, j.FireAt, j.Expires, j.Rights, j.SourceFacet)
+	_, err := tx.ExecContext(ctx, `INSERT INTO restricted_workflow_jobs(id,workspace_id,principal_id,member_id,member_revision,pipeline_id,recipe_hash,recipe_json,agent_id,execution_profile,chat_id,origin_attempt_id,origin_handle_ciphertext,source_kind,page_id,page_action_json,page_spec_hash,inputs_json,idempotency_key_hash,state,created_at,fire_at,expires_at,additional_rights_json,source_facet,graph_json,graph_hash,proofs_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, j.ID, j.Workspace, j.Principal, j.Member, j.Revision, j.Pipeline, j.RecipeHash, j.Recipe, j.Agent, j.Profile, j.Chat, j.Origin, j.Handle, j.Source, j.Page, j.PageAction, j.PageHash, j.Inputs, j.Idempotency, j.State, j.Created, j.FireAt, j.Expires, j.Rights, j.SourceFacet, j.Graph, j.GraphHash, j.Proofs)
 	if err != nil {
+		return Receipt{}, err
+	}
+	if err = s.freezeGraph(ctx, tx, j); err != nil {
 		return Receipt{}, err
 	}
 	return Receipt{j.ID, j.Chat, "SCHEDULED"}, nil

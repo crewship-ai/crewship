@@ -59,7 +59,7 @@ func (p Plan) validateNetwork() error {
 		return nil
 	}
 	n := p.Network
-	if p.NativeSandbox != "" && (p.NativeSandbox != NativeSandboxFingerprint() || len(p.Mounts) != 0 || len(p.Credentials) != 0) {
+	if p.NativeSandbox != "" && (p.NativeSandbox != NativeSandboxFingerprint() || !validNativeInputPlan(p) || len(p.Credentials) != 0) {
 		return ErrDenied
 	}
 	versionOK := n != nil && ((p.Profile == "brokered-http-v1" && n.Version == 1) || (p.Profile == "brokered-http-v2" && n.Version == 2))

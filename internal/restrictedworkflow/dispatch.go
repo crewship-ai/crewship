@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
@@ -42,13 +41,26 @@ func (s *Service) checkJob(ctx context.Context, q pipeline.PageActionQuery, j jo
 		return ErrDenied
 	}
 	for _, right := range rights {
-		if right.Kind != "project" || right.Operation != "read" || right.ID == "" {
+		if right.ID == "" {
+			return ErrDenied
+		}
+		if right.Kind == "agent" && (right.Operation == "run" || right.Operation == "delegate") {
+			var allowed int
+			if q.QueryRowContext(ctx, `SELECT 1 FROM access_grants g JOIN agents a ON a.id=g.agent_id AND a.workspace_id=? AND a.deleted_at IS NULL WHERE g.member_id=? AND g.resource_kind='agent' AND g.agent_id=? AND g.operation=?`, j.Workspace, j.Member, right.ID, right.Operation).Scan(&allowed) != nil {
+				return ErrDenied
+			}
+			continue
+		}
+		if right.Kind != "project" || right.Operation != "read" {
 			return ErrDenied
 		}
 		var allowed int
 		if q.QueryRowContext(ctx, `SELECT 1 FROM access_grants g JOIN projects p ON p.id=g.project_id AND p.workspace_id=? WHERE g.member_id=? AND g.resource_kind='project' AND g.project_id=? AND g.operation='read'`, j.Workspace, j.Member, right.ID).Scan(&allowed) != nil {
 			return ErrDenied
 		}
+	}
+	if err = s.checkGraph(ctx, q, j); err != nil {
+		return err
 	}
 	if j.Source == "manual" {
 		return manualPolicy(ctx, q, j.Principal, j.Workspace)
@@ -71,7 +83,7 @@ func (s *Service) checkJob(ctx context.Context, q pipeline.PageActionQuery, j jo
 }
 func (s *Service) load(ctx context.Context, id string) (job, error) {
 	var j job
-	err := s.db.QueryRowContext(ctx, `SELECT id,workspace_id,principal_id,member_id,member_revision,pipeline_id,recipe_hash,recipe_json,agent_id,execution_profile,chat_id,origin_attempt_id,origin_handle_ciphertext,source_kind,page_id,page_action_json,page_spec_hash,inputs_json,idempotency_key_hash,state,outputs_json,created_at,fire_at,expires_at,additional_rights_json,source_facet FROM restricted_workflow_jobs WHERE id=?`, id).Scan(&j.ID, &j.Workspace, &j.Principal, &j.Member, &j.Revision, &j.Pipeline, &j.RecipeHash, &j.Recipe, &j.Agent, &j.Profile, &j.Chat, &j.Origin, &j.Handle, &j.Source, &j.Page, &j.PageAction, &j.PageHash, &j.Inputs, &j.Idempotency, &j.State, &j.Outputs, &j.Created, &j.FireAt, &j.Expires, &j.Rights, &j.SourceFacet)
+	err := s.db.QueryRowContext(ctx, `SELECT id,workspace_id,principal_id,member_id,member_revision,pipeline_id,recipe_hash,recipe_json,agent_id,execution_profile,chat_id,origin_attempt_id,origin_handle_ciphertext,source_kind,page_id,page_action_json,page_spec_hash,inputs_json,idempotency_key_hash,state,outputs_json,created_at,fire_at,expires_at,additional_rights_json,source_facet,graph_json,graph_hash,proofs_json FROM restricted_workflow_jobs WHERE id=?`, id).Scan(&j.ID, &j.Workspace, &j.Principal, &j.Member, &j.Revision, &j.Pipeline, &j.RecipeHash, &j.Recipe, &j.Agent, &j.Profile, &j.Chat, &j.Origin, &j.Handle, &j.Source, &j.Page, &j.PageAction, &j.PageHash, &j.Inputs, &j.Idempotency, &j.State, &j.Outputs, &j.Created, &j.FireAt, &j.Expires, &j.Rights, &j.SourceFacet, &j.Graph, &j.GraphHash, &j.Proofs)
 	return j, err
 }
 
@@ -105,19 +117,11 @@ func (s *Service) DispatchNext(ctx context.Context) (bool, error) {
 	if j.Expires <= tsformat.Format(time.Now()) || s.checkJob(ctx, s.db, j, handle) != nil {
 		return true, ErrDenied
 	}
-	d, err := compile(j.Recipe)
-	if err != nil {
-		return true, err
-	}
-	var inputs map[string]any
-	if json.Unmarshal([]byte(j.Inputs), &inputs) != nil {
-		return true, ErrDenied
-	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	monitorDone := make(chan struct{})
 	defer close(monitorDone)
-	go func() {
+	go func(monitored job) {
 		ticker := time.NewTicker(50 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -127,73 +131,23 @@ func (s *Service) DispatchNext(ctx context.Context) (bool, error) {
 			case <-runCtx.Done():
 				return
 			case <-ticker.C:
-				if s.checkJob(runCtx, s.db, j, handle) != nil {
+				if s.checkJob(runCtx, s.db, monitored, handle) != nil {
 					cancel()
 					return
 				}
 			}
 		}
-	}()
-	outputs := map[string]string{}
-	for _, step := range d.DSL.Steps {
-		if err = s.checkJob(runCtx, s.db, j, handle); err != nil {
-			break
-		}
-		prompt := pipeline.Render(step.Prompt, pipeline.RenderContext{Inputs: inputs, StepOutputs: outputs})
-		if len(prompt) == 0 || len(prompt) > 32768 {
-			err = ErrDenied
-			break
-		}
-		stepCtx, stop := context.WithTimeout(runCtx, 5*time.Minute)
-		if step.TimeoutSec > 0 {
-			stop()
-			stepCtx, stop = context.WithTimeout(runCtx, time.Duration(step.TimeoutSec)*time.Second)
-		}
-		var result strings.Builder
-		done := false
-		emit := func(kind, text string) error {
-			if s.checkJob(stepCtx, s.db, j, handle) != nil {
-				return ErrDenied
-			}
-			if kind == "text" && !done && result.Len()+len(text) <= 32768 {
-				result.WriteString(text)
-				return nil
-			}
-			if kind == "done" && !done {
-				done = true
-				return nil
-			}
-			return ErrDenied
-		}
-		var rights []access.Right
-		if json.Unmarshal([]byte(j.Rights), &rights) != nil {
-			stop()
-			return true, ErrDenied
-		}
-		if len(rights) != 0 {
-			executor, ok := s.executor.(RightsExecutor)
-			if !ok {
-				stop()
-				return true, ErrDenied
-			}
-			err = executor.ExecuteRunWithRights(stepCtx, j.Principal, j.Workspace, j.Chat, prompt, rights, emit)
-		} else {
-			err = s.executor.ExecuteRun(stepCtx, j.Principal, j.Workspace, j.Chat, prompt, emit)
-		}
-		stop()
-		if err != nil || !done {
-			if err == nil {
-				err = ErrDenied
-			}
-			break
-		}
-		outputs[step.ID] = result.String()
-	}
+	}(j)
+	outputs, proofs, err := s.executeGraph(runCtx, j, handle)
 	if err != nil || s.checkJob(runCtx, s.db, j, handle) != nil {
 		return true, ErrDenied
 	}
 	raw, err := json.Marshal(outputs)
 	if err != nil || len(raw) > 256<<10 {
+		return true, ErrDenied
+	}
+	j.Outputs, j.Proofs = string(raw), proofs
+	if _, err = s.readGraphOutputs(runCtx, j); err != nil {
 		return true, ErrDenied
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -207,7 +161,10 @@ func (s *Service) DispatchNext(ctx context.Context) (bool, error) {
 	if err = s.checkJob(ctx, tx, j, handle); err != nil {
 		return true, err
 	}
-	updated, err := tx.ExecContext(ctx, `UPDATE restricted_workflow_jobs SET state='completed',outputs_json=?,finished_at=? WHERE id=? AND state='running'`, string(raw), tsformat.Format(time.Now()), j.ID)
+	if _, err = s.readGraphOutputs(ctx, j); err != nil {
+		return true, ErrDenied
+	}
+	updated, err := tx.ExecContext(ctx, `UPDATE restricted_workflow_jobs SET state='completed',outputs_json=?,proofs_json=?,finished_at=? WHERE id=? AND state='running'`, string(raw), proofs, tsformat.Format(time.Now()), j.ID)
 	if err != nil {
 		return true, err
 	}
@@ -247,7 +204,8 @@ func (s *Service) Result(ctx context.Context, user, workspace, id string) (Resul
 	}
 	result = Result{ID: j.ID, State: j.State, CreatedAt: j.Created, Outputs: map[string]string{}}
 	if j.State == "completed" {
-		if json.Unmarshal([]byte(j.Outputs), &result.Outputs) != nil {
+		result.Outputs, err = s.readGraphOutputs(ctx, j)
+		if err != nil {
 			return Result{}, ErrDenied
 		}
 	}

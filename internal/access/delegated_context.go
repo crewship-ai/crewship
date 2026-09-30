@@ -13,6 +13,16 @@ import (
 // It copies only classified sources into the exact admitted child, preserving
 // their immutable identities and current authority through completion.
 func (s Store) ImportDelegatedContext(ctx context.Context, parentHandle, childHandle string, sources []string) (ContextEntry, error) {
+	return s.importDelegatedContext(ctx, parentHandle, childHandle, sources, false)
+}
+
+// ImportWorkflowContinuation preserves foreign leaf provenance when returning
+// to the original frozen agent. It accepts only a durable continuation child.
+func (s Store) ImportWorkflowContinuation(ctx context.Context, parentHandle, childHandle string, sources []string) (ContextEntry, error) {
+	return s.importDelegatedContext(ctx, parentHandle, childHandle, sources, true)
+}
+
+func (s Store) importDelegatedContext(ctx context.Context, parentHandle, childHandle string, sources []string, continuation bool) (ContextEntry, error) {
 	if s.DB == nil || len(sources) == 0 || len(sources) > 64 {
 		return ContextEntry{}, ErrDenied
 	}
@@ -29,7 +39,8 @@ func (s Store) ImportDelegatedContext(ctx context.Context, parentHandle, childHa
 	if err != nil {
 		return ContextEntry{}, err
 	}
-	if child.Parent != parent.ID || child.Scope != parent.Scope || child.ContextAudience != "" || parent.ContextAudience != "" || child.AdmissionOperation != "run" || parent.AdmissionOperation != "run" || !subset(child.Rights, parent.Rights) || !slices.Contains(parent.Rights, Right{"agent", child.Agent, "delegate"}) {
+	returnAllowed := continuation && child.WorkflowContinuation && workflowContinuationSlot(ctx, tx, parent, child.Agent) == nil
+	if (continuation && !returnAllowed) || child.Parent != parent.ID || child.Scope != parent.Scope || child.ContextAudience != "" || parent.ContextAudience != "" || child.AdmissionOperation != "run" || parent.AdmissionOperation != "run" || !subset(child.Rights, parent.Rights) || (!slices.Contains(parent.Rights, Right{"agent", child.Agent, "delegate"}) && !returnAllowed) {
 		return ContextEntry{}, ErrDenied
 	}
 	entries := make([]ContextEntry, 0, len(sources))
@@ -102,7 +113,8 @@ func readDelegatedContextSource(ctx context.Context, q queryer, reader Attempt, 
 	if err != nil {
 		return ContextEntry{}, err
 	}
-	if child.Parent != parent.ID || child.Scope != reader.Scope || child.Agent != reader.Agent || child.ContextAudience != "" || origin.Scope != reader.Scope || origin.Generation >= child.Generation || (origin.Agent != parent.Agent && origin.Parent != parent.ID) || !subset(origin.Rights, reader.Rights) || !subset(child.Rights, reader.Rights) || !slices.Contains(parent.Rights, Right{"agent", child.Agent, "delegate"}) {
+	returnAllowed := child.WorkflowContinuation && workflowContinuationSlot(ctx, q, parent, child.Agent) == nil
+	if child.Parent != parent.ID || child.Scope != reader.Scope || child.Agent != reader.Agent || child.ContextAudience != "" || origin.Scope != reader.Scope || origin.Generation >= child.Generation || (origin.Agent != parent.Agent && origin.Parent != parent.ID) || !subset(origin.Rights, reader.Rights) || !subset(child.Rights, reader.Rights) || (!slices.Contains(parent.Rights, Right{"agent", child.Agent, "delegate"}) && !returnAllowed) {
 		return ContextEntry{}, ErrDenied
 	}
 	sourceReader := reader

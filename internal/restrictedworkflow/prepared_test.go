@@ -15,6 +15,9 @@ func TestPreparedSourceRightsAtomicEnqueueAndEveryStep(t *testing.T) {
 	if _, err := s.db.ExecContext(t.Context(), `INSERT INTO projects(id,workspace_id,name,slug) VALUES('project','w','Project','project')`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.db.ExecContext(t.Context(), `INSERT INTO missions(id,workspace_id,crew_id,delegate_agent_id,lead_agent_id,trace_id,title,description,mission_type,status,project_id) VALUES('source-issue','w','crew','agent','agent','source-trace','Issue','Source','issue','TODO','project')`); err != nil {
+		t.Fatal(err)
+	}
 	store := runner.Authority.Store
 	m, err := store.Membership(t.Context(), "h1", "w")
 	if err != nil {
@@ -58,6 +61,12 @@ func TestPreparedSourceRightsAtomicEnqueueAndEveryStep(t *testing.T) {
 	}
 	tx, err = s.db.BeginTx(t.Context(), nil)
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Source binding and job must commit together; production preflight owns this row.
+	if _, err = tx.ExecContext(t.Context(), `INSERT INTO restricted_preflight_reservations(origin_attempt_id,workflow_id,workspace_id,principal_id,member_id,member_revision,agent_id,issue_id,project_id,source_hash,authority_hash,recipe_hash,work_revision,brief_revision)
+ SELECT ?,?,'w','h1',?,?, 'agent','source-issue','project',?,?,?,iw.revision,iw.brief_revision FROM issue_work iw WHERE iw.mission_id='source-issue'`, meta.OriginAttemptID, meta.WorkflowID, meta.MemberID, meta.MemberRevision, hash("synthetic-source"), hash("synthetic-authority"), meta.RecipeHash); err != nil {
+		_ = tx.Rollback()
 		t.Fatal(err)
 	}
 	receipt, err := s.EnqueuePrepared(t.Context(), tx, p)

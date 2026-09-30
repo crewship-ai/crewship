@@ -22,19 +22,25 @@ type NativeRunner struct {
 }
 
 func (r *NativeRunner) Execute(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error) error {
-	return r.execute(ctx, user, workspace, chat, input, emit, false, nil)
+	return r.execute(ctx, user, workspace, chat, input, emit, false, nil, nil)
 }
 
 // ExecuteRun is selected only by the dedicated authenticated CLI/run route.
 func (r *NativeRunner) ExecuteRun(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error) error {
-	return r.execute(ctx, user, workspace, chat, input, emit, true, nil)
+	return r.execute(ctx, user, workspace, chat, input, emit, true, nil, nil)
 }
 
 // ExecuteRunWithRights is trusted host orchestration, never a client-supplied rights list.
 func (r *NativeRunner) ExecuteRunWithRights(ctx context.Context, user, workspace, chat, input string, rights []access.Right, emit func(string, string) error) error {
-	return r.execute(ctx, user, workspace, chat, input, emit, true, rights)
+	return r.execute(ctx, user, workspace, chat, input, emit, true, rights, nil)
 }
-func (r *NativeRunner) execute(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error, runOperation bool, rights []access.Right) error {
+func (r *NativeRunner) ExecuteWithProjectFiles(ctx context.Context, user, workspace, chat, input string, ids []string, emit func(string, string) error) error {
+	return r.execute(ctx, user, workspace, chat, input, emit, false, nil, ids)
+}
+func (r *NativeRunner) ExecuteRunWithProjectFiles(ctx context.Context, user, workspace, chat, input string, ids []string, emit func(string, string) error) error {
+	return r.execute(ctx, user, workspace, chat, input, emit, true, nil, ids)
+}
+func (r *NativeRunner) execute(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error, runOperation bool, rights []access.Right, ids []string) error {
 	if r == nil || (r.Manager == nil && r.StartSession == nil) || emit == nil || len(input) == 0 || len(input) > 32768 {
 		return access.ErrDenied
 	}
@@ -56,11 +62,7 @@ func (r *NativeRunner) execute(ctx context.Context, user, workspace, chat, input
 	if profile != "native_api_key" {
 		return access.ErrDenied
 	}
-	prepare := r.Authority.PrepareChatNative
-	if runOperation {
-		prepare = r.Authority.PrepareNative
-	}
-	handle, _, err := prepare(ctx, user, workspace, agent, chat, "", rights, r.MaxOutputTokens, func(ctx context.Context, attempt access.Attempt) (NativePrompt, error) {
+	handle, attempt, err := r.Authority.prepareNativeProjectFiles(ctx, user, workspace, agent, chat, "", rights, r.MaxOutputTokens, ids, func(ctx context.Context, attempt access.Attempt) (NativePrompt, error) {
 		binding, err := loadProvider(ctx, store.DB, attempt.ID)
 		if err != nil || binding.Profile != "native_api_key" {
 			return NativePrompt{}, access.ErrDenied
@@ -70,10 +72,22 @@ func (r *NativeRunner) execute(ctx context.Context, user, workspace, chat, input
 			return NativePrompt{}, err
 		}
 		return NativePrompt{Instructions: prompt.System, Input: prompt.Input}, nil
-	})
+	}, !runOperation)
 	if err != nil {
 		return err
 	}
+	_, err = r.executeNativePrepared(ctx, user, workspace, chat, input, handle, attempt, emit, runOperation)
+	return err
+}
+
+// executeNativePrepared owns one already-admitted and host-frozen native run.
+// Delegated callers must bind inputs/import provenance before freezing the prompt.
+func (r *NativeRunner) executeNativePrepared(ctx context.Context, user, workspace, chat, input, handle string, attempt access.Attempt, emit func(string, string) error, runOperation bool) (RunProof, error) {
+	if r == nil || (r.Manager == nil && r.StartSession == nil) || emit == nil || len(input) == 0 || len(input) > 32768 {
+		return RunProof{}, access.ErrDenied
+	}
+	store := r.Authority.Store
+	var err error
 	complete := false
 	defer func() {
 		state := "failed"
@@ -96,8 +110,12 @@ func (r *NativeRunner) execute(ctx context.Context, user, workspace, chat, input
 		defer cancel()
 		_ = store.RevokeAttempt(clean, handle)
 	}()
+	current, err := store.Resolve(ctx, handle)
+	if err != nil || current.ID != attempt.ID || current.Scope != attempt.Scope || current.Generation != attempt.Generation || current.Principal != user || current.Workspace != workspace || current.Chat != chat || current.Agent != attempt.Agent {
+		return RunProof{}, access.ErrDenied
+	}
 	if _, err = store.AppendContext(ctx, handle, "user", input); err != nil {
-		return err
+		return RunProof{}, err
 	}
 	start := r.StartSession
 	if start == nil {
@@ -105,7 +123,7 @@ func (r *NativeRunner) execute(ctx context.Context, user, workspace, chat, input
 	}
 	session, err := start(ctx, handle)
 	if err != nil {
-		return err
+		return RunProof{}, err
 	}
 	defer session.Stop("application_finished")
 	ticker := time.NewTicker(50 * time.Millisecond)
@@ -184,36 +202,36 @@ func (r *NativeRunner) execute(ctx context.Context, user, workspace, chat, input
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return RunProof{}, ctx.Err()
 		case <-ticker.C:
 			if err = consume(); err != nil {
-				return err
+				return RunProof{}, err
 			}
 		case <-session.Done():
 			if err = consume(); err != nil {
-				return err
+				return RunProof{}, err
 			}
 			if !finished {
-				return errors.New("restricted response incomplete")
+				return RunProof{}, errors.New("restricted response incomplete")
 			}
-			_, err = store.AppendContext(ctx, handle, "assistant", text.String())
+			assistant, err := store.AppendContext(ctx, handle, "assistant", text.String())
 			if err != nil {
-				return err
+				return RunProof{}, err
 			}
 			if _, err = store.Resolve(ctx, handle); err != nil {
-				return err
+				return RunProof{}, err
 			}
 			if err = store.CompleteAttempt(ctx, handle); err != nil {
-				return err
+				return RunProof{}, err
 			}
 			if err = store.CheckContextAttempt(ctx, handle); err != nil {
-				return err
+				return RunProof{}, err
 			}
 			if err = emit("done", ""); err != nil {
-				return err
+				return RunProof{}, err
 			}
 			complete = true
-			return nil
+			return NewRunProof(handle, []string{assistant.ID}), nil
 		}
 	}
 }

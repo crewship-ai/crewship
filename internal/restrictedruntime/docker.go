@@ -63,7 +63,19 @@ func (d Docker) checkVolume(ctx context.Context, p Plan, m Mount, name string) e
 		Options map[string]string
 		Labels  map[string]string
 	}
-	if json.Unmarshal(b, &v) != nil || len(v) != 1 || v[0].Driver != "local" || len(v[0].Options) != 0 {
+	if json.Unmarshal(b, &v) != nil || len(v) != 1 || v[0].Driver != "local" {
+		return ErrDenied
+	}
+	if p.NativeInputs != nil {
+		if !validNativeInputPlan(p) || m != p.Mounts[0] || !strings.HasPrefix(name, "crewship-rtest-input-") || len(v[0].Options) != len(nativeInputVolumeOptions) {
+			return ErrDenied
+		}
+		for key, expected := range nativeInputVolumeOptions {
+			if v[0].Options[key] != expected {
+				return ErrDenied
+			}
+		}
+	} else if len(v[0].Options) != 0 {
 		return ErrDenied
 	}
 	for k, want := range resourceLabels(p, m.Resource) {

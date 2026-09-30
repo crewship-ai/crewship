@@ -17,6 +17,7 @@ import (
 // returned only on admission; only its digest is persisted. Retries must Admit
 // again. Scope separates two clients of the same agent and changes on revocation.
 type Attempt struct {
+	WorkflowContinuation                         bool
 	ChatGeneration                               string
 	AdmissionOperation                           string
 	ContextAudience                              string
@@ -68,6 +69,20 @@ func (s Store) AdmitChat(ctx context.Context, user, workspace, agent, chat, pare
 }
 
 func (s Store) admit(ctx context.Context, user, workspace, agent, chat, parent string, rights []Right, operation string) (string, Attempt, error) {
+	return s.admitContinuation(ctx, user, workspace, agent, chat, parent, rights, operation, false)
+}
+
+// AdmitWorkflowContinuation is a host-only return to a workflow's original
+// agent. Its provider slot and active orchestration parent must already be
+// frozen by the workflow service. It does not grant a new delegated target.
+func (s Store) AdmitWorkflowContinuation(ctx context.Context, user, workspace, agent, chat, parent string, rights []Right) (string, Attempt, error) {
+	if parent == "" {
+		return "", Attempt{}, ErrDenied
+	}
+	return s.admitContinuation(ctx, user, workspace, agent, chat, parent, rights, "run", true)
+}
+
+func (s Store) admitContinuation(ctx context.Context, user, workspace, agent, chat, parent string, rights []Right, operation string, continuation bool) (string, Attempt, error) {
 	var a Attempt
 	if s.DB == nil {
 		return "", a, ErrDenied
@@ -106,7 +121,10 @@ func (s Store) admit(ctx context.Context, user, workspace, agent, chat, parent s
 		if e != nil {
 			return "", a, e
 		}
-		if p.Principal != user || p.Workspace != workspace || p.Chat != chat || !subset(unique, p.Rights) || !slices.Contains(p.Rights, Right{"agent", agent, "delegate"}) {
+		if p.Principal != user || p.Workspace != workspace || p.Chat != chat || !subset(unique, p.Rights) || (!slices.Contains(p.Rights, Right{"agent", agent, "delegate"}) && !continuation) {
+			return "", a, ErrDenied
+		}
+		if continuation && (operation != "run" || workflowContinuationSlot(ctx, tx, p, agent) != nil) {
 			return "", a, ErrDenied
 		}
 		parentID = p.ID
@@ -124,7 +142,7 @@ func (s Store) admit(ctx context.Context, user, workspace, agent, chat, parent s
 		return "", a, err
 	}
 	handle := randomID()
-	a = Attempt{AdmissionOperation: operation, ID: randomID(), Workspace: workspace, Principal: user, Agent: agent, Chat: chat, Member: m.ID, Revision: m.Revision, Generation: generation, Parent: parentID, Rights: unique}
+	a = Attempt{WorkflowContinuation: continuation, AdmissionOperation: operation, ID: randomID(), Workspace: workspace, Principal: user, Agent: agent, Chat: chat, Member: m.ID, Revision: m.Revision, Generation: generation, Parent: parentID, Rights: unique}
 	if err = tx.QueryRowContext(ctx, `SELECT authority_generation,authority_revision FROM chats WHERE id=?`, chat).Scan(&a.ChatGeneration, &a.ChatRevision); err != nil {
 		return "", Attempt{}, err
 	}
@@ -143,8 +161,8 @@ func (s Store) admit(ctx context.Context, user, workspace, agent, chat, parent s
 	if parentID != "" {
 		parentValue = parentID
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO access_attempts(id,handle_hash,member_id,member_revision,workspace_id,principal_id,agent_id,chat_id,parent_id,generation,rights,created_at,chat_generation,chat_revision,admission_operation,context_audience) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		a.ID, digest(handle), m.ID, m.Revision, workspace, user, agent, chat, parentValue, generation, string(data), tsformat.Format(time.Now()), a.ChatGeneration, a.ChatRevision, operation, a.ContextAudience)
+	_, err = tx.ExecContext(ctx, `INSERT INTO access_attempts(id,handle_hash,member_id,member_revision,workspace_id,principal_id,agent_id,chat_id,parent_id,generation,rights,created_at,chat_generation,chat_revision,admission_operation,context_audience,workflow_continuation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		a.ID, digest(handle), m.ID, m.Revision, workspace, user, agent, chat, parentValue, generation, string(data), tsformat.Format(time.Now()), a.ChatGeneration, a.ChatRevision, operation, a.ContextAudience, continuation)
 	if err != nil {
 		return "", Attempt{}, err
 	}
@@ -184,10 +202,10 @@ func resolveState(ctx context.Context, q queryer, key string, byHandle bool, see
 	if history {
 		completion = ""
 	}
-	err := q.QueryRowContext(ctx, `SELECT a.id,a.member_id,a.member_revision,a.workspace_id,a.principal_id,a.agent_id,a.chat_id,COALESCE(a.parent_id,''),a.generation,a.rights,a.chat_generation,a.chat_revision,a.admission_operation,a.context_audience
+	err := q.QueryRowContext(ctx, `SELECT a.id,a.member_id,a.member_revision,a.workspace_id,a.principal_id,a.agent_id,a.chat_id,COALESCE(a.parent_id,''),a.generation,a.rights,a.chat_generation,a.chat_revision,a.admission_operation,a.context_audience,a.workflow_continuation
  FROM access_attempts a JOIN chats c ON c.id=a.chat_id AND c.authority_generation=a.chat_generation AND c.authority_revision=a.chat_revision
  WHERE a.`+column+`=? AND a.revoked_at IS NULL`+completion, key).
-		Scan(&a.ID, &a.Member, &a.Revision, &a.Workspace, &a.Principal, &a.Agent, &a.Chat, &a.Parent, &a.Generation, &raw, &a.ChatGeneration, &a.ChatRevision, &a.AdmissionOperation, &a.ContextAudience)
+		Scan(&a.ID, &a.Member, &a.Revision, &a.Workspace, &a.Principal, &a.Agent, &a.Chat, &a.Parent, &a.Generation, &raw, &a.ChatGeneration, &a.ChatRevision, &a.AdmissionOperation, &a.ContextAudience, &a.WorkflowContinuation)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrDenied
 	}
@@ -220,9 +238,14 @@ func resolveState(ctx context.Context, q queryer, key string, byHandle bool, see
 		if e != nil {
 			return Attempt{}, e
 		}
-		if p.Principal != a.Principal || p.Workspace != a.Workspace || p.Chat != a.Chat || !subset(a.Rights, p.Rights) || !slices.Contains(p.Rights, Right{"agent", a.Agent, "delegate"}) {
+		if p.Principal != a.Principal || p.Workspace != a.Workspace || p.Chat != a.Chat || !subset(a.Rights, p.Rights) || (!slices.Contains(p.Rights, Right{"agent", a.Agent, "delegate"}) && !a.WorkflowContinuation) {
 			return Attempt{}, ErrDenied
 		}
+		if a.WorkflowContinuation && (a.AdmissionOperation != "run" || workflowContinuationSlot(ctx, q, p, a.Agent) != nil) {
+			return Attempt{}, ErrDenied
+		}
+	} else if a.WorkflowContinuation {
+		return Attempt{}, ErrDenied
 	}
 
 	audience, err := contextAudience(ctx, q, a)
@@ -230,6 +253,9 @@ func resolveState(ctx context.Context, q queryer, key string, byHandle bool, see
 		return Attempt{}, ErrDenied
 	}
 	a.Scope = scope(a)
+	if err = checkProjectInputs(ctx, q, a); err != nil {
+		return Attempt{}, err
+	}
 	return a, nil
 }
 

@@ -33,3 +33,8 @@ public contract here. Superseded a spec? Move it to
 - [`response-shape-contract.md`](response-shape-contract.md) — how generated
   OpenAPI response schemas are graded so that a renamed field cannot pass;
   consumed by `cmd/gen-openapi` and `scripts/api-contract`.
+
+- [`project-files.md`](project-files.md) — immutable, explicitly selected project
+  files and their read-only restricted native mounts.
+- [`trusted-llm-hard-budgets.md`](trusted-llm-hard-budgets.md) — reservations before
+  trusted provider calls and admission rules for legacy sidecar traffic.

@@ -49,6 +49,7 @@ var workspaceTablesNotBundled = map[string]string{
 	"access_files":                      "classified output authority depends on attempts excluded from restore",
 	"access_attempts":                   "execution capabilities and generations must be issued anew on a restored instance",
 	"restricted_preflight_reservations": "live private issue source authority must not replay on a copied instance",
+	"attempt_project_inputs":            "attempt-specific native input capabilities must not replay after restore",
 	// --- Migration artefacts / archives (derived, never read by the app) ---
 	"agent_runs_archive":       "one-off snapshot taken by v61 drop_agent_runs; the live data was folded into journal_entries, which rides the bundle",
 	"journal_entries_archived": "compaction archive; BLOB/vector shape would corrupt under the TEXT-only round-trip path (see dbdump.go)",

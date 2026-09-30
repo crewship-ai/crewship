@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/paymaster"
 )
 
 // retryableStatusCodes are HTTP status codes that should trigger a retry.
@@ -45,7 +47,14 @@ func checkStatus(resp *http.Response, providerName string) error {
 // wrap prefix ("anthropic http: ..."), displayName the API-facing casing
 // ("Anthropic API returned ...").
 func doWithRetry(ctx context.Context, client *http.Client, newReq func(context.Context) (*http.Request, error), lowerName, displayName string) (*http.Response, error) {
-	const maxRetries = 3
+	maxRetries := 3
+	if paymaster.ReservationActive(ctx) {
+		maxRetries = 1
+		// HTTP redirects can replay a POST outside the pinned pricing contract.
+		boundedClient := *client
+		boundedClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		client = &boundedClient
+	}
 	baseDelay := time.Second
 	var retryAfter time.Duration
 

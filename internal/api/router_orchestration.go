@@ -61,6 +61,10 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/chats/{chatId}/execution-profile", authed(wsCtx(http.HandlerFunc(r.executionProfile))))
 
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight", roleSelf, r.restrictedIssuePreflight)
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files", authed(wsCtx(http.HandlerFunc(r.projectFiles))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{versionId}/download", authed(wsCtx(http.HandlerFunc(r.projectFiles))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/projects/{projectId}/files", roleCreate, r.projectFiles)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{fileId}", roleCreate, r.projectFiles)
 
 	// Human conversations share workspace authentication and enforce their own
 	// participant ACL in every store operation, independently of agent sessions.

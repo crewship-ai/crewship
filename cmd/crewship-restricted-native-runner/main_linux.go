@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"regexp"
 	"syscall"
 	"time"
@@ -36,6 +37,19 @@ func run() error {
 	}
 	ctx := context.Background()
 	switch os.Args[1] {
+	case "verify-project-inputs":
+		if os.Getuid() != 1001 || len(os.Args) != 2 {
+			return errors.New("identity")
+		}
+		return verifyProjectInputs(os.Stdin)
+	case "project-input-hold":
+		if os.Getuid() != 1001 || len(os.Args) != 2 {
+			return errors.New("identity")
+		}
+		stopped, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
+		defer stop()
+		<-stopped.Done()
+		return nil
 	case "hold":
 		if os.Getuid() != 1002 || len(os.Args) != 2 {
 			return errors.New("identity")

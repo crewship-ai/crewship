@@ -67,7 +67,13 @@ func startRestrictedTextRuntime(ctx context.Context, db *sql.DB, databasePath st
 		logger.Info("restricted text runtime enabled", "image", image)
 	}
 	if nativeImage != "" {
-		manager, err := restrictedruntime.NewNative(filepath.Join(filepath.Dir(absoluteDB), "restricted-native-runtime"), restrictedruntime.Docker{Image: nativeImage}, authority, authority, restrictedruntime.NativeLimits())
+		docker := restrictedruntime.Docker{Image: nativeImage}
+		catalog, err := restrictedruntime.NewFrozenNativeCatalog(filepath.Join(filepath.Dir(absoluteDB), "restricted-native-inputs"), docker, restricteddispatch.ProjectInputSource(authority.Store))
+		if err != nil {
+			closeAll()
+			return nil, fmt.Errorf("initialize restricted project inputs: %w", err)
+		}
+		manager, err := restrictedruntime.NewNative(filepath.Join(filepath.Dir(absoluteDB), "restricted-native-runtime"), docker, authority, catalog, restrictedruntime.NativeLimits())
 		if err != nil {
 			closeAll()
 			return nil, err
@@ -150,4 +156,63 @@ func (r *restrictedExecutor) ExecuteRunWithRights(ctx context.Context, user, wor
 		return access.ErrDenied
 	}
 	return runner.ExecuteRun(ctx, user, workspace, chat, input, emit)
+}
+
+// Workflow targets come from the host's frozen declaration. A delegated target
+// can differ from the conversation agent; its runner rechecks the parent slot.
+func (r *restrictedExecutor) ExecuteWorkflowRun(ctx context.Context, request restricteddispatch.DelegatedRunRequest, emit func(string, string) error) (restricteddispatch.RunProof, error) {
+	if r == nil || r.db == nil || request.Agent == "" {
+		return restricteddispatch.RunProof{}, access.ErrDenied
+	}
+	var profile string
+	if r.db.QueryRowContext(ctx, `SELECT a.restricted_execution_profile FROM agents a JOIN chats c ON c.workspace_id=a.workspace_id
+ WHERE a.id=? AND a.workspace_id=? AND c.id=? AND a.deleted_at IS NULL AND (?<>'' OR c.agent_id=a.id)`, request.Agent, request.Workspace, request.Chat, request.ParentHandle).Scan(&profile) != nil {
+		return restricteddispatch.RunProof{}, access.ErrDenied
+	}
+	var runner api.RestrictedTextExecutor
+	switch profile {
+	case "responses_text":
+		runner = r.text
+	case "native_api_key":
+		runner = r.native
+	}
+	workflow, ok := runner.(interface {
+		ExecuteWorkflowRun(context.Context, restricteddispatch.DelegatedRunRequest, func(string, string) error) (restricteddispatch.RunProof, error)
+	})
+	if !ok {
+		return restricteddispatch.RunProof{}, access.ErrDenied
+	}
+	return workflow.ExecuteWorkflowRun(ctx, request, emit)
+}
+
+func (r *restrictedExecutor) projectFileRunner(ctx context.Context, workspace, chat string) (api.RestrictedProjectFileExecutor, error) {
+	if r == nil || r.db == nil {
+		return nil, access.ErrDenied
+	}
+	var one int
+	if r.db.QueryRowContext(ctx, `SELECT 1 FROM chats c JOIN agents a ON a.id=c.agent_id AND a.workspace_id=c.workspace_id
+ WHERE c.id=? AND c.workspace_id=? AND a.deleted_at IS NULL AND a.restricted_execution_profile='native_api_key'`, chat, workspace).Scan(&one) != nil {
+		return nil, access.ErrDenied
+	}
+	native, ok := r.native.(api.RestrictedProjectFileExecutor)
+	if !ok {
+		return nil, access.ErrDenied
+	}
+	return native, nil
+}
+
+func (r *restrictedExecutor) ExecuteWithProjectFiles(ctx context.Context, user, workspace, chat, input string, versions []string, emit func(string, string) error) error {
+	runner, err := r.projectFileRunner(ctx, workspace, chat)
+	if err != nil {
+		return err
+	}
+	return runner.ExecuteWithProjectFiles(ctx, user, workspace, chat, input, versions, emit)
+}
+
+func (r *restrictedExecutor) ExecuteRunWithProjectFiles(ctx context.Context, user, workspace, chat, input string, versions []string, emit func(string, string) error) error {
+	runner, err := r.projectFileRunner(ctx, workspace, chat)
+	if err != nil {
+		return err
+	}
+	return runner.ExecuteRunWithProjectFiles(ctx, user, workspace, chat, input, versions, emit)
 }
