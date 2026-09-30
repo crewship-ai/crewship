@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -93,5 +94,53 @@ func TestRestrictedFileRoutesCurrentAuthorityAndMetadata(t *testing.T) {
 	}
 	if rec = request("file-h1", "file-h1-chat", "/"+v.ID+"/download"); rec.Code != 404 {
 		t.Fatalf("revoked download: %d", rec.Code)
+	}
+	for _, user := range []string{"file-h1", "file-h2"} {
+		member, err := store.Membership(t.Context(), user, w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = store.Replace(t.Context(), owner, user, w, "restricted", member, []access.Right{{Kind: "agent", ID: "file-agent", Operation: "chat"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	contextRequest := func(user, chat, method, suffix, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/api/v1/chats/"+chat+suffix+"?workspace_id="+w, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+tokens[user])
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		return recorder
+	}
+	rec = contextRequest("file-h1", "file-h1-chat", "POST", "/restricted-memory", `{"content":"H1_NOTE_CANARY"}`)
+	if rec.Code != 201 {
+		t.Fatalf("memory admission %d %s", rec.Code, rec.Body.String())
+	}
+	var note access.ContextEntry
+	if err = json.Unmarshal(rec.Body.Bytes(), &note); err != nil {
+		t.Fatal(err)
+	}
+	rec = contextRequest("file-h1", "file-h1-chat", "GET", "/restricted-context", " ")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "H1_NOTE_CANARY") {
+		t.Fatalf("own context %d %s", rec.Code, rec.Body.String())
+	}
+	rec = contextRequest("file-h2", "file-h2-chat", "GET", "/restricted-context", "")
+	if rec.Code != 200 || strings.Contains(rec.Body.String(), "CANARY") || strings.Contains(rec.Body.String(), note.ID) {
+		t.Fatalf("foreign note metadata %d %s", rec.Code, rec.Body.String())
+	}
+	rec = contextRequest("file-h2", "file-h2-chat", "DELETE", "/restricted-memory/"+note.ID, "")
+	if rec.Code != 404 {
+		t.Fatalf("foreign note deletion %d", rec.Code)
+	}
+	rec = contextRequest("file-h1", "file-h1-chat", "POST", "/restricted-memory", `{"content":"forged","principal":"file-h2"}`)
+	if rec.Code != 400 {
+		t.Fatalf("caller supplied authority %d", rec.Code)
+	}
+	rec = contextRequest("file-h1", "file-h1-chat", "DELETE", "/restricted-memory/"+note.ID, "")
+	if rec.Code != 204 {
+		t.Fatalf("own note deletion %d %s", rec.Code, rec.Body.String())
+	}
+	rec = contextRequest("file-h1", "file-h1-chat", "GET", "/restricted-context", "")
+	if rec.Code != 200 || strings.Contains(rec.Body.String(), "H1_NOTE_CANARY") {
+		t.Fatalf("withdrawn note visible %d %s", rec.Code, rec.Body.String())
 	}
 }

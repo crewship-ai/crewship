@@ -30,6 +30,7 @@ const (
 )
 
 type ContextEntry struct {
+	CreatedBy string      `json:"created_by,omitempty"`
 	CreatedAt string      `json:"created_at"`
 	ID        string      `json:"id"`
 	Kind      ContextKind `json:"kind"`
@@ -111,6 +112,7 @@ func readContext(ctx context.Context, q queryer, a Attempt, id string, seen map[
 	if origin.Scope != a.Scope || origin.Agent != a.Agent || !subset(origin.Rights, a.Rights) {
 		return ContextEntry{}, ErrDenied
 	}
+	e.CreatedBy = origin.Principal
 	if json.Unmarshal([]byte(raw), &e.Sources) != nil {
 		return ContextEntry{}, ErrDenied
 	}

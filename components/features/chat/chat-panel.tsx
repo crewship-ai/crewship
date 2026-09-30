@@ -47,6 +47,7 @@ import { checkChatMessageSize } from "./hooks/use-message-submit"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
 import { ArtifactPane } from "./artifact/artifact-pane"
 import { RestrictedFiles } from "./files/restricted-files"
+import { RestrictedMemory } from "./restricted-memory"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { isClientArtifactPath } from "./artifact/artifact-scope"
 import { relativeToAgent } from "./files/file-scope"
@@ -975,6 +976,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           {conversationEl}
         </div>
         {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
+        {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {turns.length === 0 && !historyLoading && sessionKind === "direct" && (
           <div className="px-4 pb-2 shrink-0">
             <AskRail
@@ -1076,6 +1078,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           {conversationEl}
         </div>
         {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
+        {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {/* Starter chips are for a conversation; a routine step or an issue
             chat is a transcript, and "Help me get started" under one is
             noise. */}
