@@ -14,6 +14,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Improved
 
+- Ordinary restricted CLI runs create their own private run context under the exact run permission, independently of chat permission.
+
 - Restricted group chat now shares only context classified for the exact live participants; audience and permission changes stop old attempts and start a fresh context.
 - Restricted conversational execution checks the chat grant separately from direct CLI run authority. Administrators explicitly opt agents into isolated text Responses in agent Settings; profile changes revoke prepared provider attempts and native login/tool execution stays unavailable on the text path. (#2711)
 - Restricted chat and CLI runs can use an opt-in isolated text Responses worker with scoped history, durable cost reservations, live output authorization and no shared execution fallback. Agent discovery exposes only explicit grants; native tools and provider-login agents remain unsupported on this path. (#2711)

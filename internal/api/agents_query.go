@@ -267,7 +267,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM chats c WHERE c.agent_id = a.id AND (`+chataudience.VisibleSQL+`)),
-			a.ephemeral, a.expires_at, a.expired_at, a.parent_lead_id, a.hire_reason
+			a.ephemeral, a.expires_at, a.expired_at, a.parent_lead_id, a.hire_reason, a.restricted_execution_profile
 		FROM agents a
 		LEFT JOIN crews c ON c.id = a.crew_id
 		WHERE a.id = ? AND a.workspace_id = ? AND a.deleted_at IS NULL
@@ -286,7 +286,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&createdByUserID,
 		&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats,
-		&ephemeral, &a.ExpiresAt, &a.ExpiredAt, &a.ParentLeadID, &a.HireReason)
+		&ephemeral, &a.ExpiresAt, &a.ExpiredAt, &a.ParentLeadID, &a.HireReason, &a.RestrictedExecutionProfile)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "Agent not found")
