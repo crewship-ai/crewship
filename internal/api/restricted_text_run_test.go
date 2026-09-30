@@ -31,7 +31,7 @@ func TestRestrictedTextRouterIsolatesTwoHumansAndHistory(t *testing.T) {
 	workspace := seedTestWorkspace(t, db, owner)
 	execOrFatal(t, db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('text-crew',?,'Crew','text-crew')`, workspace)
 	seedAgentRow(t, db, "text-agent", workspace, "text-crew", "Text", "text-agent", "AGENT")
-	execOrFatal(t, db, `UPDATE agents SET llm_provider='OPENAI',llm_model='fixture-model',system_prompt_legacy='SHARED_PROMPT_CANARY' WHERE id='text-agent'`)
+	execOrFatal(t, db, `UPDATE agents SET restricted_execution_profile='responses_text',llm_provider='OPENAI',llm_model='fixture-model',system_prompt_legacy='SHARED_PROMPT_CANARY' WHERE id='text-agent'`)
 	cipher, err := encryption.Encrypt("synthetic-text-key")
 	if err != nil {
 		t.Fatal(err)
@@ -165,4 +165,91 @@ func TestRestrictedTextRouterIsolatesTwoHumansAndHistory(t *testing.T) {
 	if rec.Code != 200 || starts != 4 {
 		t.Fatalf("other human impacted %d starts %d", rec.Code, starts)
 	}
+	// Chat-only is a complete conversational permission; direct CLI remains run.
+	replace := func(operations ...string) {
+		t.Helper()
+		member, err := store.Membership(t.Context(), "text-h1", workspace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rights []access.Right
+		for _, op := range operations {
+			rights = append(rights, access.Right{Kind: "agent", ID: "text-agent", Operation: op})
+		}
+		if _, err = store.Replace(t.Context(), owner, "text-h1", workspace, "restricted", member, rights); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cliRun := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/chats/text-h1-chat/restricted-cli-run?workspace_id="+workspace, strings.NewReader(`{"content":"direct run"}`))
+		req.Header.Set("Authorization", "Bearer "+tokens["text-h1"])
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	replace("chat")
+	if rec := request("text-h1", "text-h1-chat", "chat-only"); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"type":"done"`) {
+		t.Fatalf("chat-only failed %d %s", rec.Code, rec.Body.String())
+	}
+	count := starts
+	if rec := cliRun(); rec.Code != 403 || starts != count {
+		t.Fatalf("chat-only acquired run %d starts %d", rec.Code, starts)
+	}
+	replace("run")
+	if rec := cliRun(); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"type":"done"`) {
+		t.Fatalf("run-only failed %d %s", rec.Code, rec.Body.String())
+	}
+	count = starts
+	if rec := request("text-h1", "text-h1-chat", "chat denied"); rec.Code != 403 || starts != count {
+		t.Fatalf("run-only acquired chat %d starts %d", rec.Code, starts)
+	}
+	// No implicit conversion of the native CLI adapter to text execution.
+	execOrFatal(t, db, `UPDATE agents SET restricted_execution_profile='disabled',cli_adapter='CODEX_CLI' WHERE id='text-agent'`)
+	if rec := cliRun(); rec.Code != 403 || starts != count {
+		t.Fatalf("native adapter silently converted %d starts %d", rec.Code, starts)
+	}
+
+	// Only the normal agent editor may deliberately select the text profile.
+	profilePut := func(token, profile string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/agents/text-agent/restricted-execution?workspace_id="+workspace, strings.NewReader(`{"profile":"`+profile+`"}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := profilePut(tokens["text-h1"], "responses_text"); rec.Code != 404 {
+		t.Fatalf("restricted human edited execution profile %d", rec.Code)
+	}
+	ownerSession, err := sessions.NewDBStore(db).Create(t.Context(), owner, "test", "127.0.0.1", auth.RefreshTokenTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerToken, err := validator.IssueAccessToken(owner, ownerSession.ID, "Owner", "owner@text.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := profilePut(ownerToken, "native_api_key"); rec.Code != 400 {
+		t.Fatalf("unimplemented native profile enabled %d", rec.Code)
+	}
+	if rec := profilePut(ownerToken, "responses_text"); rec.Code != 200 {
+		t.Fatalf("admin could not configure text profile %d %s", rec.Code, rec.Body.String())
+	}
+	authority := restricteddispatch.Authority{Store: store}
+	bound, _, err := authority.PrepareResponses(t.Context(), "text-h1", workspace, "text-agent", "text-h1-chat", "", nil, 128, func(context.Context, access.Attempt) ([]string, error) { return []string{"/bin/true"}, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := profilePut(ownerToken, "disabled"); rec.Code != 200 {
+		t.Fatalf("admin could not disable profile %d", rec.Code)
+	}
+	if _, err = authority.Resolve(t.Context(), bound); err == nil {
+		t.Fatal("profile change retained old provider authority")
+	}
+	if rec := profilePut(ownerToken, "responses_text"); rec.Code != 200 {
+		t.Fatalf("admin could not restore profile %d", rec.Code)
+	}
+	if _, err = authority.Resolve(t.Context(), bound); err == nil {
+		t.Fatal("profile re-enable revived old attempt")
+	}
+
 }

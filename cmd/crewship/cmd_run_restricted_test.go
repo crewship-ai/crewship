@@ -23,7 +23,7 @@ func TestRunCmdRestrictedAutomaticProfileAndSave(t *testing.T) {
 			if complete {
 				stream += "data: {\"type\":\"done\",\"text\":\"\"}\n\n"
 			}
-			stub.OnPost("/api/v1/chats/private-chat/restricted-run", clitest.TextResponse(200, stream))
+			stub.OnPost("/api/v1/chats/private-chat/restricted-cli-run", clitest.TextResponse(200, stream))
 			target := filepath.Join(t.TempDir(), "answer.txt")
 			if err := os.WriteFile(target, []byte("previous"), 0600); err != nil {
 				t.Fatal(err)

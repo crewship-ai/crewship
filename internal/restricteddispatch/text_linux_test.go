@@ -20,6 +20,9 @@ func TestTextRunnerRechecksAfterQueueAndBeforeEachDelivery(t *testing.T) {
 	for _, stage := range []string{"before-builder", "queued", "delivery"} {
 		t.Run(stage, func(t *testing.T) {
 			a := providerFixture(t)
+			if _, err := a.Store.DB.ExecContext(t.Context(), `UPDATE agents SET restricted_execution_profile='responses_text' WHERE id='a'`); err != nil {
+				t.Fatal(err)
+			}
 			setRights(t, a, "h1", []access.Right{{Kind: "agent", ID: "a", Operation: "run"}, {Kind: "agent", ID: "a", Operation: "chat"}})
 			launched := 0
 			delivered := []string{}
@@ -55,6 +58,12 @@ func TestTextRunnerRechecksAfterQueueAndBeforeEachDelivery(t *testing.T) {
 				}
 			} else if launched != 0 || len(delivered) != 0 {
 				t.Fatalf("ran after revocation launched=%d delivered=%v", launched, delivered)
+			}
+			if stage != "before-builder" {
+				var state string
+				if err := a.Store.DB.QueryRowContext(t.Context(), `SELECT state FROM access_attempt_outcomes`).Scan(&state); err != nil || state != "failed" {
+					t.Fatalf("failed outcome state=%q err=%v", state, err)
+				}
 			}
 			if stage == "before-builder" {
 				var count int

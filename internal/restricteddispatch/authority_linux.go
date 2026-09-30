@@ -31,10 +31,21 @@ type BuildCommand func(context.Context, access.Attempt) ([]string, error)
 // JSON must not populate it, parent, or build. A failed preparation revokes its
 // attempt, so it cannot later be resumed with a different payload.
 func (a Authority) Prepare(ctx context.Context, user, workspace, agent, chat, parent string, rights []access.Right, build BuildCommand) (string, access.Attempt, error) {
+	return a.prepare(ctx, user, workspace, agent, chat, parent, rights, build, false)
+}
+
+func (a Authority) PrepareChat(ctx context.Context, user, workspace, agent, chat, parent string, rights []access.Right, build BuildCommand) (string, access.Attempt, error) {
+	return a.prepare(ctx, user, workspace, agent, chat, parent, rights, build, true)
+}
+func (a Authority) prepare(ctx context.Context, user, workspace, agent, chat, parent string, rights []access.Right, build BuildCommand, chatOperation bool) (string, access.Attempt, error) {
 	if build == nil {
 		return "", access.Attempt{}, access.ErrDenied
 	}
-	handle, attempt, err := a.Store.Admit(ctx, user, workspace, agent, chat, parent, rights)
+	admit := a.Store.Admit
+	if chatOperation {
+		admit = a.Store.AdmitChat
+	}
+	handle, attempt, err := admit(ctx, user, workspace, agent, chat, parent, rights)
 	if err != nil {
 		return "", access.Attempt{}, fmt.Errorf("admit isolated attempt: %w", err)
 	}

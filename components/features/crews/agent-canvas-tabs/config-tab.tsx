@@ -20,6 +20,7 @@ import {
 } from "../canvas/config-field"
 import { ConfigModel } from "../canvas/config-model"
 import { AskFormsBuilder } from "../ask-forms-builder"
+import { RestrictedExecutionProfile } from "./restricted-execution-profile"
 import { PaysWithRow } from "./pays-with-row"
 import type { AgentRecord } from "./types"
 
@@ -391,6 +392,7 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew, supplementalOnly 
             value={agent.llm_model ?? ""}
             onSave={(v) => patch({ llm_model: v })}
           />
+          <RestrictedExecutionProfile agentId={agent.id} workspaceId={agent.workspace_id} initialProfile={agent.restricted_execution_profile ?? "disabled"} />
           <ConfigSelect
             label="CLI adapter" hint="What launches the agent inside the container."
             value={agent.cli_adapter}

@@ -37,7 +37,7 @@ func (m *AuthMiddleware) restrictedRequest(w http.ResponseWriter, r *http.Reques
 		if err == nil {
 			err = store.Check(r.Context(), userID, workspace, access.Right{Kind: "agent", ID: r.PathValue("agentId"), Operation: "chat"})
 		}
-	case "GET /api/v1/chats/{chatId}/execution-profile", "POST /api/v1/chats/{chatId}/restricted-run", "GET /api/v1/chats/{chatId}/restricted-attempts":
+	case "GET /api/v1/chats/{chatId}/execution-profile", "POST /api/v1/chats/{chatId}/restricted-run", "POST /api/v1/chats/{chatId}/restricted-cli-run", "GET /api/v1/chats/{chatId}/restricted-attempts":
 		// Exact audience and server admission are enforced by these handlers.
 		return true
 	case "POST /api/v1/agents/{agentId}/chats":
@@ -45,6 +45,9 @@ func (m *AuthMiddleware) restrictedRequest(w http.ResponseWriter, r *http.Reques
 		err = m.db.QueryRowContext(r.Context(), `SELECT workspace_id FROM agents WHERE id=? AND deleted_at IS NULL`, r.PathValue("agentId")).Scan(&workspace)
 		if err == nil {
 			err = store.Check(r.Context(), userID, workspace, access.Right{Kind: "agent", ID: r.PathValue("agentId"), Operation: "chat"})
+			if errors.Is(err, access.ErrDenied) {
+				err = store.Check(r.Context(), userID, workspace, access.Right{Kind: "agent", ID: r.PathValue("agentId"), Operation: "run"})
+			}
 		}
 	case "GET /api/v1/chats/{chatId}/messages":
 		// ChatMessages applies the common current audience before proxying.
