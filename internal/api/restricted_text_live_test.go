@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 	"github.com/crewship-ai/crewship/internal/restrictedruntime"
+	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 )
 
 func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
@@ -164,6 +165,12 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	workflow, err := restrictedworkflow.New(db, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workflow.Close()
+	router.SetRestrictedWorkflow(workflow)
 	server := httptest.NewServer(router)
 	defer server.Close()
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -312,6 +319,78 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 	runResp.Body.Close()
 	if runResp.StatusCode != 200 || !done {
 		t.Fatalf("run-only production CLI status=%d done=%v", runResp.StatusCode, done)
+	}
+
+	// Ordinary manual routine admission, durable private queue and result HTTP
+	// projection reach the actual production worker with no shared journal.
+	recipe := `{"dsl_version":"1.0","name":"live-private","inputs":[{"name":"task","type":"string","required":true}],"steps":[{"id":"first","type":"agent_run","agent_slug":"text-agent","prompt":"{{ inputs.task }}"},{"id":"second","type":"agent_run","agent_slug":"text-agent","prompt":"Continue {{ steps.first.output }}"}]}`
+	execOrFatal(t, db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status) VALUES('live-private',?,'live-private','Private',?,'live-fixture','text-crew','active')`, workspace, recipe)
+	for _, user := range []string{"text-h1", "text-h2"} {
+		execOrFatal(t, db, `UPDATE workspace_members SET capabilities='["routine.run"]' WHERE user_id=? AND workspace_id=?`, user, workspace)
+		m, err := store.Membership(t.Context(), user, workspace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = store.Replace(t.Context(), owner, user, workspace, "restricted", m, []access.Right{{Kind: "agent", ID: "text-agent", Operation: "run"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	workflowRequest := func(user, method, path, body string) *http.Response {
+		req, err := http.NewRequestWithContext(t.Context(), method, server.URL+path+"?workspace_id="+workspace, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+tokens[user])
+		response, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	receipts := map[string]string{}
+	for _, user := range []string{"text-h1", "text-h2"} {
+		response := workflowRequest(user, http.MethodPost, "/api/v1/workspaces/"+workspace+"/pipelines/live-private/run", fmt.Sprintf(`{"inputs":{"task":"CANARY_%s"}}`, user))
+		var receipt struct {
+			ID string `json:"run_id"`
+		}
+		if response.StatusCode != 202 || json.NewDecoder(response.Body).Decode(&receipt) != nil || receipt.ID == "" {
+			t.Fatalf("ordinary workflow admission %s %d", user, response.StatusCode)
+		}
+		response.Body.Close()
+		receipts[user] = receipt.ID
+		if worked, err := workflow.DispatchNext(t.Context()); !worked || err != nil {
+			t.Fatalf("production workflow %s %v %v", user, worked, err)
+		}
+		response = workflowRequest(user, http.MethodGet, "/api/v1/workspaces/"+workspace+"/restricted-routine-runs/"+receipt.ID, "")
+		var result struct {
+			State   string            `json:"status"`
+			Outputs map[string]string `json:"step_outputs"`
+		}
+		if response.StatusCode != 200 || json.NewDecoder(response.Body).Decode(&result) != nil || result.State != "completed" || len(result.Outputs) != 2 {
+			t.Fatalf("private production result %s %d %+v", user, response.StatusCode, result)
+		}
+		response.Body.Close()
+	}
+	foreign := workflowRequest("text-h2", http.MethodGet, "/api/v1/workspaces/"+workspace+"/restricted-routine-runs/"+receipts["text-h1"], "")
+	if foreign.StatusCode != 404 {
+		t.Fatal("foreign production workflow result exposed")
+	}
+	foreign.Body.Close()
+	queued := workflowRequest("text-h2", http.MethodPost, "/api/v1/workspaces/"+workspace+"/pipelines/live-private/run", `{"inputs":{"task":"DO_NOT_BUILD_REVOKED_QUEUE"}}`)
+	if queued.StatusCode != 202 {
+		t.Fatalf("queue preparation %d", queued.StatusCode)
+	}
+	queued.Body.Close()
+	beforeQueued := calls.Load()
+	execOrFatal(t, db, `UPDATE pipelines SET definition_json=? WHERE id='live-private'`, strings.Replace(recipe, "Continue", "Changed", 1))
+	if worked, err := workflow.DispatchNext(t.Context()); !worked || err == nil || calls.Load() != beforeQueued {
+		t.Fatalf("revoked queue reached production worker %v %v calls%d->%d", worked, err, beforeQueued, calls.Load())
+	}
+	for _, table := range []string{"pipeline_runs", "pending_runs"} {
+		var count int
+		if err := db.QueryRowContext(t.Context(), `SELECT count(*) FROM `+table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("private production work leaked %s %d %v", table, count, err)
+		}
 	}
 
 }
