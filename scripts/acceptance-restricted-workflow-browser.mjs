@@ -46,7 +46,9 @@ try {
         const clickPromise = page.waitForResponse(response => response.url().includes('/panels/panel/actions/work') && response.request().method() === 'POST')
         await page.getByRole('button', { name: 'Run action', exact: true }).click()
         const click = await clickPromise
-        if (click.status() !== 202 || !click.request().postDataJSON().expected_intent_hash) throw new Error('Page intent was not bound')
+        if (click.status() !== 202) throw new Error(`Page admission HTTP status=${click.status()} class=admission_rejected`)
+        if (!click.request().postDataJSON().expected_intent_hash) throw new Error('Page admission class=missing_intent_hash')
+        if (new URL(click.request().url()).searchParams.get('workspace_id') !== fixture.workspace) throw new Error('Page admission class=missing_workspace_scope')
         await expect(page.getByText(`PAGE_RESULT_${actor}`, { exact: true })).toBeVisible({ timeout: 90000 })
       } else {
         await expect(page.getByText('No Page actions are available with your current access.', { exact: true })).toBeVisible()

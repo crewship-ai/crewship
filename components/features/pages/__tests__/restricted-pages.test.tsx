@@ -31,7 +31,7 @@ it("submits a publication-bound declared action after host confirmation and poll
   await screen.findByText("OWN_PAGE_RESULT")
   expect(confirm).toHaveBeenCalledWith("Confirm work\n\nRun this declared action?")
   const submit = api.mock.calls.find(([, init]) => init?.method === "POST")!
-  expect(submit[0]).toBe("/api/v1/pages/allowed/application/actions/panel/work")
+  expect(submit[0]).toBe("/api/v1/pages/allowed/application/actions/panel/work?workspace_id=workspace")
   expect(JSON.parse(submit[1].body)).toEqual({ inputs: { task: "private input" }, publication: 7, expected_intent_hash:"frozen-intent" })
   expect(submit[1].headers["Idempotency-Key"]).toBeTruthy()
   expect(api.mock.calls.some(([url]) => url.includes("/journal") || url.includes("/assets") || url.endsWith("/pages") || url.includes("/panels/panel/data"))).toBe(false)
