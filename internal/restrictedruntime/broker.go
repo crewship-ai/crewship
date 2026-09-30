@@ -26,6 +26,7 @@ type HTTPGrant struct {
 	CredentialID            string
 	ResponseMode            string           `json:",omitempty"` // empty: bounded buffered response; "sse": explicit v2 streaming grant
 	Responses               *ResponsesPolicy `json:",omitempty"` // explicit stateless text-only OpenAI operation
+	Native                  *NativePolicy    `json:",omitempty"` // separate stateful scratch-only Codex protocol
 	MaxRequest, MaxResponse int64
 	TimeoutMillis           int64
 }
@@ -48,6 +49,9 @@ type BrokerAuthority interface {
 }
 
 func (p Plan) validateNetwork() error {
+	if p.NativeSandbox != "" && p.Profile != "brokered-http-v2" {
+		return ErrDenied
+	}
 	if p.Profile == "" {
 		if p.Network != nil {
 			return ErrDenied
@@ -55,6 +59,9 @@ func (p Plan) validateNetwork() error {
 		return nil
 	}
 	n := p.Network
+	if p.NativeSandbox != "" && (p.NativeSandbox != NativeSandboxFingerprint() || len(p.Mounts) != 0 || len(p.Credentials) != 0) {
+		return ErrDenied
+	}
 	versionOK := n != nil && ((p.Profile == "brokered-http-v1" && n.Version == 1) || (p.Profile == "brokered-http-v2" && n.Version == 2))
 	if !versionOK || !identifier.MatchString(n.Audience) || len(n.Grants) == 0 || len(n.Grants) > 16 || len(n.Credentials) > 16 {
 		return ErrDenied
@@ -79,6 +86,12 @@ func (p Plan) validateNetwork() error {
 	ids := map[string]bool{}
 	responses := false
 	for _, g := range n.Grants {
+		if g.Native != nil {
+			if responses || p.Profile != "brokered-http-v2" || p.NativeSandbox == "" || g.Responses != nil || !g.validNative(n.Credentials) || len(n.Grants) != 1 || len(n.Credentials) != 1 {
+				return ErrDenied
+			}
+			responses = true
+		}
 		if g.Responses != nil {
 			if responses || p.Profile != "brokered-http-v2" || !g.validResponses(n.Credentials) {
 				return ErrDenied
@@ -106,11 +119,14 @@ func (p Plan) validateNetwork() error {
 		}
 		ids[g.ID] = true
 	}
+	if p.NativeSandbox != "" && !responses {
+		return ErrDenied
+	}
 	return nil
 }
 
 func narrowNetwork(parent, child Plan) error {
-	if parent.Profile != child.Profile {
+	if parent.Profile != child.Profile || parent.NativeSandbox != child.NativeSandbox {
 		return ErrDenied
 	}
 	if child.Network == nil {
@@ -136,7 +152,7 @@ func narrowNetwork(parent, child Plan) error {
 	for _, c := range child.Network.Grants {
 		found := false
 		for _, p := range parent.Network.Grants {
-			if c.ID == p.ID && c.Revision == p.Revision && c.URL == p.URL && c.Method == p.Method && c.CredentialID == p.CredentialID && c.ResponseMode == p.ResponseMode && c.MaxRequest <= p.MaxRequest && c.MaxResponse <= p.MaxResponse && c.TimeoutMillis <= p.TimeoutMillis && narrowResponses(p.Responses, c.Responses) {
+			if c.ID == p.ID && c.Revision == p.Revision && c.URL == p.URL && c.Method == p.Method && c.CredentialID == p.CredentialID && c.ResponseMode == p.ResponseMode && c.MaxRequest <= p.MaxRequest && c.MaxResponse <= p.MaxResponse && c.TimeoutMillis <= p.TimeoutMillis && narrowResponses(p.Responses, c.Responses) && narrowNative(p.Native, c.Native) {
 				found = true
 			}
 		}

@@ -112,6 +112,12 @@ func (d Docker) create(ctx context.Context, p Plan, c Catalog, l Limits, owner s
 		return "", e
 	}
 	args := []string{"create", "--pull=never", "--name", "crewship-rtest-" + owner + "-" + p.Attempt, "--label", labelPrefix + "owner=" + owner, "--label", labelPrefix + "attempt=" + p.Attempt, "--label", labelPrefix + "plan=" + p.fingerprint(), "--user", "1002:1002", "--read-only", "--network", "none", "--ipc", "private", "--cgroupns", "private", "--runtime", "runc", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--init", "--restart", "no", "--memory", fmt.Sprint(l.MemoryBytes), "--memory-swap", fmt.Sprint(l.MemoryBytes), "--cpus", fmt.Sprintf("%.9f", float64(l.NanoCPUs)/1e9), "--pids-limit", fmt.Sprint(l.PIDs), "--shm-size", "1048576", "--log-driver", "none", "--ulimit", "nofile=256:256", "--ulimit", "core=0:0"}
+	nativeOpts, cleanup, e := nativeSecurityOptions(ctx, p)
+	if e != nil {
+		return "", e
+	}
+	defer cleanup()
+	args = append(args, nativeOpts...)
 	for _, target := range []string{"/home/agent", "/secrets", "/broker", "/tmp"} {
 		args = append(args, "--tmpfs", target+":"+privateTmpfs()[target])
 	}

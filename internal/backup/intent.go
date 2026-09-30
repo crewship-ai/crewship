@@ -44,6 +44,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"access_attempts":              IntentExcludeRuntime, // restoring a bundle must not revive execution capabilities
 	"restricted_launches":          IntentExcludeRuntime, // frozen execution payloads require fresh admission after restore
 	"restricted_provider_bindings": IntentExcludeRuntime, // provider authority must be admitted anew after restore
+	"restricted_native_sessions":   IntentExcludeRuntime, // frozen context, issued reasoning and in-flight leases require fresh admission
 	// Durable human collaboration: restore preserves history/ACL but suspends work.
 	"workspace_conversations":              IntentInclude,
 	"workspace_conversation_direct_pairs":  IntentInclude,

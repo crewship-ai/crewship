@@ -116,6 +116,9 @@ func (a Authority) Resolve(ctx context.Context, handle string) (restrictedruntim
 	if err := a.attachProvider(ctx, attempt, &plan); err != nil {
 		return restrictedruntime.Plan{}, err
 	}
+	if err := a.attachNative(ctx, attempt, &plan); err != nil {
+		return restrictedruntime.Plan{}, err
+	}
 	// Binding removal and provider/grant updates revoke in the same mutation
 	// transaction. Fence changes that happened during command/binding reads.
 	if _, err := a.Store.Resolve(ctx, handle); err != nil {
