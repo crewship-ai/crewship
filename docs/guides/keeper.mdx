@@ -482,7 +482,7 @@ than the model.
 
   - **Same request.** The same agent, the same credential, the same request
     type, and for `/execute` the *identical* command. Anything else is a
-    `403` and the request is judged afresh.
+    `403`; to be judged afresh, the agent resubmits without the approval.
   - **Single use.** The first retry that presents the approval consumes it
     (`409` for every later one). The row the retry creates is itself never
     spendable, so approvals cannot chain.
