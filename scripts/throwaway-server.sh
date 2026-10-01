@@ -32,6 +32,11 @@ set -euo pipefail
 STATE_ROOT="${CREWSHIP_THROWAWAY_STATE:-$HOME/.local/state/crewship-throwaway}"
 PORT_RANGE_START=8110
 PORT_RANGE_END=8199
+# A cold start migrates an empty database; under load that has taken >180 s.
+START_TIMEOUT="${CREWSHIP_THROWAWAY_START_TIMEOUT:-600}"
+# Crew containers write into the data directory as the agent uid, so those
+# files cannot be unlinked by us; a throwaway container removes them.
+HELPER_IMAGE="${CREWSHIP_THROWAWAY_HELPER_IMAGE:-alpine:3}"
 
 die() { echo "throwaway-server: $*" >&2; exit 1; }
 log() { echo "throwaway-server: $*" >&2; }
@@ -130,17 +135,22 @@ EOF
   manifest_set "$dir" pid "$pid"
 
   local i
-  for ((i = 0; i < 180; i++)); do
+  for ((i = 0; i < START_TIMEOUT; i++)); do
     if ! kill -0 "$pid" 2>/dev/null; then
       manifest_set "$dir" state "failed_to_start"
-      die "server exited during start; see $dir/server.log"
+      die "server exited during start; see $dir/server.log — 'stop $name' cleans up"
     fi
     if curl -fs -o /dev/null "http://127.0.0.1:$port/"; then
       break
     fi
     sleep 1
   done
-  ((i < 180)) || die "server did not answer on :$port within 180 s; see $dir/server.log"
+  if ((i >= START_TIMEOUT)); then
+    # Never leave a server running that the caller believes failed.
+    kill -TERM "$pid" 2>/dev/null || true
+    manifest_set "$dir" state "failed_to_start"
+    die "server did not answer on :$port within $START_TIMEOUT s; see $dir/server.log — 'stop $name' cleans up"
+  fi
   local iid; iid="$(instance_id "$dir/data" || true)"
   manifest_set "$dir" instance_id "$iid"
   manifest_set "$dir" state "running"
@@ -223,8 +233,25 @@ cmd_stop() {
     manifest_set "$dir" state "teardown_failed"
     die "teardown incomplete; data and manifest kept in $dir — run 'stop $name' again"
   fi
-  rm -rf "$dir"
+  if ! remove_state "$dir"; then
+    manifest_set "$dir" state "teardown_failed"
+    die "resources removed but $dir could not be deleted — run 'stop $name' again"
+  fi
   log "$name removed ($(grep -c . <<<"$list" || true) resources)"
+}
+
+# remove_state deletes the data directory first and the manifest last, so a
+# failure part-way leaves the manifest naming what is still there.
+remove_state() {
+  local dir="$1" data
+  data="$(manifest_get "$dir" data_dir)" || return 1
+  [[ "$data" == "$dir/data" ]] || return 1
+  if [[ -e "$data" ]] && ! rm -rf "$data" 2>/dev/null; then
+    docker run --rm --network none -v "$data:/d" "$HELPER_IMAGE" \
+      sh -c 'find /d -mindepth 1 -delete' >/dev/null 2>&1 || return 1
+    rm -rf "$data" || return 1
+  fi
+  rm -rf "$dir"
 }
 
 cmd_run() {

@@ -6,7 +6,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+trap 'chmod -R u+w "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
 fail=0
 check() { if [[ "$2" == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: got [$2] want [$3]"; fail=1; fi; }
 
@@ -36,6 +36,9 @@ case "$1 $2" in
       *anon-own*) echo "$FAKE_DATA/crews/x" ;;
       *anon-foreign*) echo "/elsewhere/crews/x" ;;
     esac ;;
+  "run --rm")
+    # The helper container: delete everything under the mounted directory.
+    for a in "$@"; do [[ "$a" == *:/d ]] && { chmod -R u+w "${a%:/d}"; find "${a%:/d}" -mindepth 1 -delete; }; done; true ;;
   "volume ls") printf 'crewship-tw-t-abcd-home-x\ncrewship-tw-t-abcdef-home-x\nunrelated\n' ;;
 esac
 FAKE
@@ -68,5 +71,26 @@ if (FAKE_DOWN=1 cmd_stop down) 2>/dev/null; then r=removed; else r=refused; fi
 check "docker down: teardown refused" "$r" refused
 check "docker down: data kept" "$([[ -d "$tmp/state/down/data" ]] && echo kept)" kept
 check "docker down: manifest marked" "$(manifest_get "$tmp/state/down" state)" teardown_failed
+
+# --- data the crew container wrote as another uid ---
+mkdir -p "$tmp/state/ro/data/output/crews/x/shared"
+echo hi >"$tmp/state/ro/data/output/crews/x/shared/f"
+chmod 555 "$tmp/state/ro/data/output/crews/x/shared" # unlink refused, like a foreign uid
+echo "{\"name\":\"ro\",\"prefix\":\"crewship-tw-ro-1234\",\"instance_id\":\"\",\"data_dir\":\"$tmp/state/ro/data\",\"pid\":\"\"}" >"$tmp/state/ro/manifest.json"
+: >"$FAKE_LOG"
+if (cmd_stop ro) 2>"$tmp/ro.err"; then r=removed; else r=refused; cat "$tmp/ro.err" >&2; fi
+check "foreign-owned data: teardown completes" "$r" removed
+check "foreign-owned data: state directory gone" "$([[ -e "$tmp/state/ro" ]] && echo left || echo gone)" gone
+if ((EUID != 0)); then
+  check "foreign-owned data: removed through the helper container" "$(grep -c '^run --rm' "$FAKE_LOG" || true)" 1
+fi
+
+# --- a data_dir outside the state directory is never deleted ---
+mkdir -p "$tmp/state/out/data" "$tmp/outside"
+echo "{\"name\":\"out\",\"prefix\":\"crewship-tw-out-1234\",\"instance_id\":\"\",\"data_dir\":\"$tmp/outside\",\"pid\":\"\"}" >"$tmp/state/out/manifest.json"
+if (cmd_stop out) 2>/dev/null; then r=removed; else r=refused; fi
+check "foreign data_dir: refused" "$r" refused
+check "foreign data_dir: untouched" "$([[ -d "$tmp/outside" ]] && echo kept)" kept
+check "foreign data_dir: manifest marked" "$(manifest_get "$tmp/state/out" state)" teardown_failed
 
 exit "$fail"
