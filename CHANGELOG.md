@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Fixed
+- Mission timeout cleanup waits out backup quiet windows before changing task/mission rows or writing progress events. (#2753)
 - Complete backups preserve persistent quota-service disks in encrypted format v4. Offline instance recovery stages verified images under fresh generations and keeps services in maintenance until an audited import on the destination host. (#2744)
 - Restricted members can invoke an admitted routine from a minimal private catalog and poll their own routine or declared Page action receipts without a shared journal fallback. Catalog fingerprints also pin nested declarations across submission retries. (#2711)
 - Project files have explicit immutable versions, exact read/write grants, current checks during downloads, stale-write protection and aggregate storage limits. Retired bytes are removed while version provenance remains; native input capabilities require fresh admission. (#2711)
