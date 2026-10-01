@@ -63,3 +63,25 @@ func TestCrewServiceQuotaSnapshotCannotReplacePrivateSettings(t *testing.T) {
 		t.Fatal("private configuration changed")
 	}
 }
+
+// The snapshot check must not reveal redacted settings: for a private
+// configuration a correct and a wrong expected_services_json get the same
+// answer, decided before the snapshot is ever compared.
+func TestCrewServiceQuotaSnapshotIsNotAPrivateSettingsOracle(t *testing.T) {
+	h, db, user, ws := covCruNewCrew(t)
+	seedCrewRow(t, db, "quota-oracle", ws, "Private", "private-oracle")
+	private := `[{"name":"redis","image":"redis:7","env":{"CACHE_PASSWORD":"PRIVATE_CANARY"}}]`
+	if _, err := db.Exec(`UPDATE crews SET services_json=? WHERE id=?`, private, "quota-oracle"); err != nil {
+		t.Fatal(err)
+	}
+	answer := func(expected string) (int, string) {
+		raw, _ := json.Marshal(map[string]any{"services_json": `[{"name":"redis","image":"redis:7","quota_enforced":true}]`, "expected_services_json": expected})
+		rr := covCruDoUpdate(h, "quota-oracle", user, ws, "OWNER", string(raw))
+		return rr.Code, rr.Body.String()
+	}
+	rightCode, rightBody := answer(private)
+	wrongCode, wrongBody := answer(`[{"name":"redis","image":"redis:7","env":{"CACHE_PASSWORD":"WRONG_GUESS"}}]`)
+	if rightCode != http.StatusConflict || rightCode != wrongCode || rightBody != wrongBody {
+		t.Fatalf("redacted settings distinguishable by guess: right %d %s / wrong %d %s", rightCode, rightBody, wrongCode, wrongBody)
+	}
+}

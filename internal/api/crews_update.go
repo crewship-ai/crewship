@@ -174,12 +174,16 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			replyInternalError(w, h.logger, "open service configuration for update", openErr)
 			return
 		}
-		if req.ExpectedServicesJSON != nil && *req.ExpectedServicesJSON != previousPlain {
-			replyError(w, http.StatusConflict, "Service configuration changed; refresh before saving disk policy")
+		// Decide the redacted case before comparing the client snapshot: a
+		// snapshot comparison would answer whether a guessed private
+		// configuration is right. A snapshot editor never saw these
+		// settings, so any request carrying one is refused outright.
+		if serviceconfig.Public(previousServices.String) == serviceconfig.Redacted && (req.ExpectedServicesJSON != nil || *req.ServicesJSON != previousPlain) {
+			replyError(w, http.StatusConflict, "Private service settings cannot be replaced through crew updates; existing credentials and services were left unchanged")
 			return
 		}
-		if serviceconfig.Public(previousServices.String) == serviceconfig.Redacted && *req.ServicesJSON != previousPlain {
-			replyError(w, http.StatusConflict, "Private service settings cannot be replaced through crew updates; existing credentials and services were left unchanged")
+		if req.ExpectedServicesJSON != nil && *req.ExpectedServicesJSON != previousPlain {
+			replyError(w, http.StatusConflict, "Service configuration changed; refresh before saving disk policy")
 			return
 		}
 		trimmedServices := strings.TrimSpace(*req.ServicesJSON)
