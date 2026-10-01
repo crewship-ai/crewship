@@ -50,13 +50,15 @@ Response:
 | OPENAI    | `GET /v1/models`       | Yes              |
 | GOOGLE    | (none yet)             | Yes              |
 | OLLAMA    | `GET /api/tags`        | **No**           |
-| OPENCODE  | (gateway catalog)      | Yes — partial, non-rejecting |
-| OPENCODE_GO | (gateway catalog)    | Yes — partial, non-rejecting |
-| ZAI_CODING_PLAN | (gateway catalog) | Yes — partial, non-rejecting |
+| OPENCODE  | (none — curated only)  | Yes — partial, non-rejecting |
+| OPENCODE_GO | (none — curated only) | Yes — partial, non-rejecting |
+| ZAI_CODING_PLAN | (none — curated only) | Yes — partial, non-rejecting |
 
-The three gateway providers are deliberately partial: OpenCode's live catalog
-decides availability, so their curated suggestions never reject a custom model
-id on the agent update path.
+The three gateway providers have **no live lister** — the endpoint always
+answers them from a curated list (`source: "curated"`). That list is
+deliberately partial: OpenCode's own catalog decides at run time which ids
+actually work, so the curated suggestions never reject a custom model id on
+the agent update path.
 
 <Note>
 **OLLAMA has no curated fallback.** Its model set is whatever the local Ollama
