@@ -67,6 +67,12 @@ func (p *Provider) quotaServiceVolumes(ctx context.Context, crewID, crewSlug str
 				return nil, quota.ErrDenied
 			}
 			for k, value := range volumeLabels(labels) {
+				// The slug is a display label that a crew rename changes;
+				// crew id, service, volume, capacity and generation are
+				// the filesystem's identity.
+				if k == crewCrewLabel {
+					continue
+				}
 				if volume.Labels[k] != value {
 					return nil, quota.ErrDenied
 				}

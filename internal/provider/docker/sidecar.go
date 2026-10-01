@@ -376,6 +376,20 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 			}
 		}
 		if !matched {
+			// A crew rename changes the container name but not the quota
+			// volume, which is keyed by crew id. The old-name container
+			// still mounts it: replace it rather than start a second
+			// writer on the same filesystem.
+			if svc.QuotaEnforced && sidecarMatchesCrew(c.Labels, crewID, sidecarKind) && c.Labels[sidecarSvcLabel] == svc.Name {
+				p.logger.Info("quota service renamed; replacing old container", "service", svc.Name, "container", c.ID)
+				timeout := 10
+				if _, err := p.client.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
+					p.logger.Debug("renamed quota service stop returned error", "service", svc.Name, "error", err)
+				}
+				if _, err := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); err != nil {
+					return "", fmt.Errorf("remove renamed quota service %q: %w", svc.Name, err)
+				}
+			}
 			continue
 		}
 
