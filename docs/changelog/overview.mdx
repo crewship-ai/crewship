@@ -104,8 +104,9 @@ type (and the identical command for `/execute`), is single-use, expires after
 15 minutes and is spent before execution — approvals cannot chain. The
 sampled behaviour watchdog also stopped discarding soft verdicts: WARN and
 ESCALATE samples now fan out to the inbox and operator review exactly like
-the synchronous review path, and an L4 DENY clears the default DENY-notify
-threshold so a critical refusal always reaches someone. See
+the synchronous review path. Separately, the L4 credential tier's risk floor
+now sits at the default DENY-notify threshold, so an L4 credential-request
+DENY always reaches someone. See
 [Keeper](/guides/keeper) and
 [Keeper reviews panel](/guides/keeper-reviews-panel).
 
@@ -147,7 +148,7 @@ presenting it as complete. See [Backup](/guides/backup).
   executions`, `routine artifacts` (with `--download`), `routine run
   --fire-at/--pinned-version/--async` (understands the `202 IN_PROGRESS`
   receipt; `--wait` follows it) and `routine save --trigger-inputs` — plus
-  `routine webhooks --ingress-profile crewship|github` and `webhooks fire`,
+  `routine webhooks --ingress-profile crewship|github` and `routine webhooks fire`,
   a signed test delivery with the receipt printed back.
 - **CLI:** `memory inventory --agent|--crew` lists the knowledge documents
   the server actually reads; `run insights --agent/--crew` scope the fleet
