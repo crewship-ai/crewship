@@ -102,6 +102,8 @@ type IPCConfig struct {
 // ContainerConfig holds container runtime settings including provider type,
 // runtime image, resource limits, and sidecar configuration.
 type ContainerConfig struct {
+	InstanceID string `yaml:"-"` // loaded from DATA_DIR, never from workspace backups.
+
 	Provider        string  `yaml:"provider"` // "docker" | "apple" | "auto"
 	RuntimeImage    string  `yaml:"runtime_image"`
 	DefaultRuntime  string  `yaml:"default_runtime"` // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"

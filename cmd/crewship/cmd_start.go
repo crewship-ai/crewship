@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -46,6 +47,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
 	"github.com/crewship-ai/crewship/internal/quartermaster"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/secrets"
 	"github.com/crewship-ai/crewship/internal/server"
@@ -133,7 +135,6 @@ var startCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
-
 		debugBuffer := logging.NewRingBuffer(500)
 		innerLogger := logging.New(cfg.Logging.Level, "json", os.Stdout)
 		ringHandler := logging.NewRingHandler(innerLogger.Handler(), debugBuffer)
@@ -215,6 +216,30 @@ var startCmd = &cobra.Command{
 		}
 		if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
 			return fmt.Errorf("failed to run migrations: %w", err)
+		}
+		// Installation identity needs the migrated database: it is keyed by a
+		// per-database nonce and the database location, so servers sharing a
+		// data directory and copied databases stay distinct. A database without
+		// a stable location, or a second live server on the same one, keeps
+		// cleanup disabled instead of failing boot; an empty label is never a
+		// cleanup candidate.
+		var identity *resourcelifecycle.Identity
+		dbLocation, err := resourcelifecycle.DatabaseLocation(databaseURL)
+		if err == nil {
+			identity, err = resourcelifecycle.LoadIdentity(context.Background(), dataDir.Root, db.DB, dbLocation)
+		} else {
+			logger.Warn("container cleanup disabled: database has no stable location", "error", err)
+			err = nil
+		}
+		switch {
+		case identity == nil && err == nil:
+		case errors.Is(err, resourcelifecycle.ErrIdentityInUse):
+			logger.Warn("container cleanup disabled: another running server holds this database's installation identity")
+		case err != nil:
+			return fmt.Errorf("load installation identity: %w", err)
+		default:
+			defer identity.Close()
+			cfg.Container.InstanceID = identity.ID
 		}
 		// Guaranteed memory mutations may have committed an intent just before
 		// the previous process stopped. Settle those intents before constructing
@@ -1515,6 +1540,7 @@ func dockerProviderConfig(cfg *config.Config, gate provider.AdmissionGate) docke
 		RuntimeImage:      cfg.Container.RuntimeImage,
 		DefaultRuntime:    cfg.Container.DefaultRuntime,
 		Network:           cfg.Container.Network,
+		InstanceID:        cfg.Container.InstanceID,
 		OutputBasePath:    cfg.Storage.BasePath,
 		ContainerPrefix:   cfg.Container.ContainerPrefix,
 		SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
@@ -1643,6 +1669,12 @@ func initProviders(ctx context.Context, cfg *config.Config, gate provider.Admiss
 	default:
 		if cfg.Container.Provider != "" && cfg.Container.Provider != "k8s" {
 			logger.Warn("unknown container provider", "provider", cfg.Container.Provider)
+		}
+	}
+
+	if !skipDocker && cfg.Container.InstanceID != "" && cfg.Container.Provider != "apple" {
+		if _, appleSelected := deps.Container.(*apple.Provider); !appleSelected {
+			deps.ContainerCleanup = &resourcelifecycle.Controller{InstanceID: cfg.Container.InstanceID, Connect: func(ctx context.Context) (resourcelifecycle.Runtime, error) { return docker.NewCleanupRuntime(ctx) }}
 		}
 	}
 
