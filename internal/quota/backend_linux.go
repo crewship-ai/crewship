@@ -109,6 +109,14 @@ func (b *Backend) Close() error {
 	b.lock = nil
 	return err
 }
+
+// absent reports that no image or mount directory is left for k.
+func (b *Backend) absent(k Key) bool {
+	_, image, mount := b.paths(k)
+	_, ierr := os.Lstat(image)
+	_, merr := os.Lstat(mount)
+	return os.IsNotExist(ierr) && os.IsNotExist(merr)
+}
 func (b *Backend) paths(k Key) (string, string, string) {
 	id := k.id()
 	return filepath.Join(b.root, "images", id+".json"), filepath.Join(b.root, "images", id+".ext4"), filepath.Join(b.root, "mounts", id)
@@ -390,11 +398,8 @@ func (b *Backend) Remove(ctx context.Context, k Key) error {
 	}
 	d, err := b.read(k)
 	if os.IsNotExist(err) {
-		_, image, mount := b.paths(k)
-		if _, ierr := os.Lstat(image); os.IsNotExist(ierr) {
-			if _, merr := os.Lstat(mount); os.IsNotExist(merr) {
-				return nil
-			}
+		if b.absent(k) {
+			return nil
 		}
 		return ErrDenied
 	}
@@ -610,6 +615,9 @@ func (b *Backend) Release(_ context.Context, k Key, reference string) error {
 		return ErrDenied
 	}
 	if _, err := b.read(k); err != nil {
+		if os.IsNotExist(err) && b.absent(k) {
+			return nil // already removed: a retried teardown must not wedge
+		}
 		return err
 	}
 	refs, err := b.references(k)

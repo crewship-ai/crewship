@@ -21,6 +21,14 @@ type fakeQuotaCatalog struct {
 	calls       []string
 	removeErr   error
 	releaseErr  error
+	trace       *[]string
+}
+
+func (f *fakeQuotaCatalog) record(op string) {
+	f.calls = append(f.calls, op)
+	if f.trace != nil {
+		*f.trace = append(*f.trace, "catalog-"+op)
+	}
 }
 
 func (f *fakeQuotaCatalog) descriptor(k quota.Key, n int64) (quota.Descriptor, error) {
@@ -39,7 +47,7 @@ func (f *fakeQuotaCatalog) Verify(_ context.Context, k quota.Key, n int64) (quot
 	return f.descriptor(k, n)
 }
 func (f *fakeQuotaCatalog) Remove(context.Context, quota.Key) error {
-	f.calls = append(f.calls, "remove")
+	f.record("remove")
 	return f.removeErr
 }
 func (*fakeQuotaCatalog) Recover(context.Context) error { return nil }
@@ -125,7 +133,7 @@ func (f *fakeQuotaCatalog) Protect(context.Context, quota.Key, string) error {
 	return nil
 }
 func (f *fakeQuotaCatalog) Release(context.Context, quota.Key, string) error {
-	f.calls = append(f.calls, "release")
+	f.record("release")
 	return f.releaseErr
 }
 

@@ -800,16 +800,21 @@ func (p *Provider) RemoveCrewServiceVolumes(ctx context.Context, crewID, crewSlu
 				continue
 			}
 			key := quota.Key{Crew: crewID, Service: vol.Labels[sidecarSvcLabel], Volume: vol.Labels[sidecarVolNameLabel], Generation: generation}
-			if _, err = p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); err != nil {
-				failures = append(failures, err)
-				continue
-			}
+			// Helper first, Docker volume last. The labelled Docker volume
+			// is the durable record that this crew owns a quota image; it
+			// must outlive every helper step so a failure anywhere leaves
+			// something the next teardown finds and retries. Release and
+			// Remove are idempotent for an already-removed image.
 			if err = catalog.Release(ctx, key, vol.Name); err != nil {
-				failures = append(failures, err)
+				failures = append(failures, fmt.Errorf("release quota volume %s: %w", vol.Name, err))
 				continue
 			}
 			if err = catalog.Remove(ctx, key); err != nil {
-				failures = append(failures, err)
+				failures = append(failures, fmt.Errorf("remove quota image for %s: %w", vol.Name, err))
+				continue
+			}
+			if _, err = p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); err != nil {
+				failures = append(failures, fmt.Errorf("remove %s: %w", vol.Name, err))
 			}
 			continue
 		}

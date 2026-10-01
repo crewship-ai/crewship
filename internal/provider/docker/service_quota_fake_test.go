@@ -35,6 +35,7 @@ type fakeQuotaDaemon struct {
 	updated          []string
 	volumeRemoveErr  error
 	order            []string
+	trace            *[]string
 }
 
 func newFakeQuotaDaemon(t *testing.T) *fakeQuotaDaemon {
@@ -84,6 +85,9 @@ func (d *fakeQuotaDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"Volumes": list})
 	case strings.Contains(path, "/volumes/") && r.Method == http.MethodDelete:
 		d.order = append(d.order, "volume-remove")
+		if d.trace != nil {
+			*d.trace = append(*d.trace, "docker-volume-remove")
+		}
 		if d.volumeRemoveErr != nil {
 			http.Error(w, `{"message":"`+d.volumeRemoveErr.Error()+`"}`, http.StatusInternalServerError)
 			return
