@@ -98,7 +98,7 @@ type liveStoppedGraph struct {
 }
 
 func (e liveStoppedGraph) ConfirmWorkflowStopped(ctx context.Context, id string) error {
-	rows, err := e.db.QueryContext(ctx, `SELECT attempt_id FROM restricted_workflow_attempt_roots WHERE workflow_id=?`, id)
+	rows, err := e.db.QueryContext(ctx, `SELECT access_attempt_id FROM restricted_workflow_attempt_roots WHERE workflow_id=?`, id)
 	if err != nil {
 		return err
 	}
