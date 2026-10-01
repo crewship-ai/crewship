@@ -248,6 +248,10 @@ var TableCategory = map[string]string{
 	// the containers' sections).
 	"workspace_files": CategoryFiles,
 
+	// Project source files share the full-bundle policy of their project
+	// metadata; a custom crew-files bundle must not restore orphaned rows.
+	"project_files": categoryWorkOnly, "project_file_versions": categoryWorkOnly, "project_file_blobs": categoryWorkOnly,
+
 	// Work items: full bundles only.
 	"missions": categoryWorkOnly, "issue_work": categoryWorkOnly, "issue_executions": categoryWorkOnly,
 	"issue_counters": categoryWorkOnly, "issue_agent_sessions": categoryWorkOnly, "assignments": categoryWorkOnly,

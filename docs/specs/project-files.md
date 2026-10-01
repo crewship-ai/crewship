@@ -209,3 +209,5 @@ bytes, uploader identity or attempt admission are included.
 Statuses: `200` success, `400` missing workspace or oversized search, `401` unauthenticated,
 `403` workspace/token ceiling, `404` unavailable chat/native profile/authority,
 `503` projection/database unavailable, `500` middleware failure.
+
+Project source metadata, immutable versions and binary blobs are included in full workspace and whole-instance backups, alongside their project metadata. Custom contents plans omit these project work tables together; the “Crew working files” category covers container working files and does not select project source uploads.
