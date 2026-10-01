@@ -161,6 +161,13 @@ func TestCovQCreateNilOrchEmitsJournal(t *testing.T) {
 	if got := rec.count(); got < 4 {
 		t.Errorf("expected >=4 journal entries (running+started+answer+terminal), got %d", got)
 	}
+	rec.mu.Lock()
+	for _, e := range rec.entries {
+		if e.Type == journal.EntryRunStarted && e.CrewID != "crewX" {
+			t.Errorf("peer-query run.started crew_id = %q, want crewX", e.CrewID)
+		}
+	}
+	rec.mu.Unlock()
 }
 
 // TestCovQCreateNilFromSlug covers Create's branch where from_slug is empty,

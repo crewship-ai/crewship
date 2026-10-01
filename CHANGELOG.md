@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Crew overviews showed "No runs in the last 7 days" for crews that were running.** `run.started` journal entries from chat, sidecar, assignment and peer-query runs never recorded the crew, and crew-scoped run insights read recorded ownership, so they counted nothing. New runs now record the agent's crew at run time; earlier runs stay unattributed because the journal is append-only.
 ### Fixed
 - Restricted members can invoke an admitted routine from a minimal private catalog and poll their own routine or declared Page action receipts without a shared journal fallback. Catalog fingerprints also pin nested declarations across submission retries. (#2711)
 - Project files have explicit immutable versions, exact read/write grants, current checks during downloads, stale-write protection and aggregate storage limits. Retired bytes are removed while version provenance remains; native input capabilities require fresh admission. (#2711)
