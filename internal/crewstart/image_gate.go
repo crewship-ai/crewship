@@ -34,13 +34,14 @@ func SetImageGate(gate ImageGate) {
 	imageGate.Store(&gate)
 }
 
-func waitForImage(ctx context.Context, crewID string) error {
+// waitForImage reports whether a gate ran, and its failure.
+func waitForImage(ctx context.Context, crewID string) (bool, error) {
 	gate := imageGate.Load()
 	if gate == nil || crewID == "" {
-		return nil
+		return false, nil
 	}
 	if err := (*gate)(ctx, crewID); err != nil {
-		return fmt.Errorf("%w: %w", ErrImageNotReady, err)
+		return true, fmt.Errorf("%w: %w", ErrImageNotReady, err)
 	}
-	return nil
+	return true, nil
 }

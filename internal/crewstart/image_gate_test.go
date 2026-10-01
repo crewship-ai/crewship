@@ -87,3 +87,34 @@ func TestStartWithoutAGateOrCrewIDStartsAsBefore(t *testing.T) {
 		t.Error("gate consulted for a config without a crew id")
 	}
 }
+
+func TestStartTakesTheRebuiltImageOverTheCallersStaleOne(t *testing.T) {
+	// The pipeline resolves its config before Start; a rebuild for a new
+	// adapter writes a new tag, and the caller's copy must not win.
+	f := &fakeRuntime{}
+	setGate(t, func(context.Context, string) error { return nil })
+	completer := CompleterFunc(func(_ context.Context, c provider.CrewConfig) (provider.CrewConfig, error) {
+		c.CachedImage = "crewship-cache:new"
+		return c, nil
+	})
+	cfg := provider.CrewConfig{ID: "c", Slug: "s", CachedImage: "crewship-cache:old"}
+	if _, err := New(f, completer, nil).Start(context.Background(), cfg); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if f.runtimeCfg.CachedImage != "crewship-cache:new" {
+		t.Errorf("runtime started from %q, want the rebuilt crewship-cache:new", f.runtimeCfg.CachedImage)
+	}
+}
+
+func TestStartWithoutACompleterKeepsTheCallersImage(t *testing.T) {
+	// Chat resolves its own config and has no completer to re-read from.
+	f := &fakeRuntime{}
+	setGate(t, func(context.Context, string) error { return nil })
+	cfg := provider.CrewConfig{ID: "c", Slug: "s", CachedImage: "crewship-cache:chat"}
+	if _, err := New(f, nil, nil).Start(context.Background(), cfg); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if f.runtimeCfg.CachedImage != "crewship-cache:chat" {
+		t.Errorf("runtime started from %q, want the caller's image", f.runtimeCfg.CachedImage)
+	}
+}

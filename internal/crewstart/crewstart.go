@@ -182,16 +182,26 @@ func (s *Starter) StartResolved(ctx context.Context, cfg provider.CrewConfig, no
 	}
 
 	// Before complete: a rebuild rewrites crews.cached_image, which complete
-	// then reads.
-	if err := waitForImage(ctx, cfg.ID); err != nil {
+	// then reads. A caller that resolved its config before Start (the
+	// pipeline) holds the tag from before the rebuild, so once the gate has
+	// run the completer's tag wins; the caller's stays as the fallback when
+	// the completer cannot answer.
+	gated, err := waitForImage(ctx, cfg.ID)
+	if err != nil {
 		return "", cfg, err
+	}
+	callerImage := cfg.CachedImage
+	if gated && s.completer != nil {
+		cfg.CachedImage = ""
 	}
 
 	cfg = s.complete(ctx, cfg, notify)
+	if cfg.CachedImage == "" {
+		cfg.CachedImage = callerImage
+	}
 	if policy, ok := s.completer.(interface {
 		FilterServices(context.Context, provider.CrewConfig) (provider.CrewConfig, error)
 	}); ok {
-		var err error
 		cfg, err = policy.FilterServices(ctx, cfg)
 		if err != nil {
 			return "", cfg, fmt.Errorf("service lifecycle policy unavailable: %w", err)
