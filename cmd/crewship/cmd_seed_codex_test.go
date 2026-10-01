@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/spf13/cobra"
 	"os"
 	"path/filepath"
 	"strings"
@@ -171,5 +172,32 @@ func TestSeedCodexLoginGrantsOnlyConvertedAgents(t *testing.T) {
 	}
 	if len(stub.CallsFor("POST", "/api/v1/agents/alex-id/credentials")) != 1 || len(stub.CallsFor("POST", "/api/v1/agents/ollie-id/credentials")) != 0 {
 		t.Fatal("Codex login was not limited to the converted agents")
+	}
+}
+
+// The env var alone must be named as the source; only a passed flag is
+// blamed as --codex-auth-file (CodeRabbit on #2702).
+func TestSeedCodexAuthFlagSourceOnlyWhenPassed(t *testing.T) {
+	t.Cleanup(func() { seedCodexAuthFileOverride = "" })
+	newCmd := func() *cobra.Command {
+		c := &cobra.Command{Use: "seed"}
+		c.Flags().String("codex-auth-file", "", "")
+		return c
+	}
+	t.Setenv(seedCodexAuthFileEnv, "relative/auth.json")
+
+	cmd := newCmd()
+	applySeedCodexAuthFlag(cmd)
+	if _, err := resolveSeedCodexLogin(); err == nil || !strings.Contains(err.Error(), seedCodexAuthFileEnv) || strings.Contains(err.Error(), "--codex-auth-file") {
+		t.Fatalf("env-only path: err = %v, want it to name %s", err, seedCodexAuthFileEnv)
+	}
+
+	cmd = newCmd()
+	if err := cmd.Flags().Set("codex-auth-file", "also/relative.json"); err != nil {
+		t.Fatal(err)
+	}
+	applySeedCodexAuthFlag(cmd)
+	if _, err := resolveSeedCodexLogin(); err == nil || !strings.Contains(err.Error(), "--codex-auth-file") {
+		t.Fatalf("flag path: err = %v, want it to name --codex-auth-file", err)
 	}
 }
