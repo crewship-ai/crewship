@@ -3,6 +3,8 @@
 # unless --activate is explicit. Run only as a reviewed host administrator.
 set -euo pipefail
 INSTANCE=""; SERVER_UNIT=""; SERVER_UID=1000; CAPACITY_BYTES=17179869184; HEADROOM_BYTES=1073741824; BINARY=""; ACTIVATE=0
+# Plain or template units (crewship-ws@3.service); instance part may not be empty.
+SERVER_UNIT_RE='^[a-zA-Z0-9][a-zA-Z0-9_.-]*(@[a-zA-Z0-9_.-]+)?\.service$'
 while (($#)); do
  case "$1" in
  --instance) INSTANCE="${2:?}"; shift 2;;
@@ -12,14 +14,14 @@ while (($#)); do
  --headroom-bytes) HEADROOM_BYTES="${2:?}"; shift 2;;
  --binary) BINARY="${2:?}"; shift 2;;
  --activate) ACTIVATE=1; shift;;
- *) echo "usage: sudo $0 --instance immutable-database-id --server-unit crewship-1.service --binary /path/to/crewship-quota-helper [--server-uid 1000] [--capacity-bytes N] [--headroom-bytes N] [--activate]" >&2;exit 2;;
+ *) echo "usage: sudo $0 --instance immutable-database-id --server-unit crewship-1.service|crewship-ws@1.service --binary /path/to/crewship-quota-helper [--server-uid 1000] [--capacity-bytes N] [--headroom-bytes N] [--activate]" >&2;exit 2;;
  esac
 done
-[[ $EUID == 0 && $INSTANCE =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$ && $SERVER_UNIT =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*\.service$ ]] || { echo 'root and safe instance/server-unit required' >&2;exit 2; }
+[[ $EUID == 0 && $INSTANCE =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$ && $SERVER_UNIT =~ $SERVER_UNIT_RE ]] || { echo 'root and safe instance/server-unit required' >&2;exit 2; }
 [[ $SERVER_UID =~ ^[0-9]{1,10}$ && $SERVER_UID != 1001 && $SERVER_UID != 1002 && $SERVER_UID -gt 0 && $SERVER_UID -le 4294967295 ]] || { echo 'invalid trusted server UID' >&2;exit 2; }
 [[ $CAPACITY_BYTES =~ ^[0-9]{1,13}$ && $HEADROOM_BYTES =~ ^[0-9]{1,13}$ && $CAPACITY_BYTES -ge 33554432 && $CAPACITY_BYTES -le 1099511627776 && $HEADROOM_BYTES -le 1099511627776 ]] || { echo 'invalid aggregate reservation/floor' >&2;exit 2; }
 [[ $BINARY == /* && -f $BINARY && ! -L $BINARY && -x $BINARY ]] || { echo 'absolute regular executable binary required' >&2;exit 2; }
-for tool in systemctl mount umount mkfs.ext4 losetup; do command -v "$tool" >/dev/null || { echo "missing $tool" >&2;exit 2; };done
+for tool in systemctl mount umount mkfs.ext4 losetup python3; do command -v "$tool" >/dev/null || { echo "missing $tool" >&2;exit 2; };done
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 # Refuse symlink aliases in every destination ancestor before installation.
 python3 - "$INSTANCE" "$SERVER_UNIT" <<'PY'
@@ -48,10 +50,9 @@ printf 'SERVER_UID=%s\nCAPACITY_BYTES=%s\nHEADROOM_BYTES=%s\n' "$SERVER_UID" "$C
 chmod 0600 "/etc/crewship-quota/$INSTANCE.env"
 cat > "/etc/systemd/system/$SERVER_UNIT.d/quota-helper.conf" <<UNIT
 [Unit]
-Requires=crewship-quota-helper@$INSTANCE.service
+Wants=crewship-quota-helper@$INSTANCE.service
 After=crewship-quota-helper@$INSTANCE.service
 [Service]
-Environment=CREWSHIP_CONTAINER_PREFIX=$INSTANCE
 Environment=CREWSHIP_QUOTA_HELPER_NAMESPACE=$INSTANCE
 Environment=CREWSHIP_QUOTA_HELPER_SOCKET=/run/crewship-quota/$INSTANCE/helper.sock
 UNIT
