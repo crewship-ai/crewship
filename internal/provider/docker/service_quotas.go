@@ -27,11 +27,13 @@ func applyServiceQuotas(h *container.HostConfig) {
 	h.LogConfig = container.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3", "mode": "non-blocking", "max-buffer-size": "1m"}}
 	// The image root is read-only; writable scratch space is bounded tmpfs
 	// (charged to the memory limit). /tmp stays executable for image
-	// compatibility.
+	// compatibility. The /run tmpfs hides directories the image pre-created
+	// there (/var/run/postgresql), so it is sticky and world-writable like
+	// /tmp: an entrypoint running as a non-root USER can recreate them.
 	h.ReadonlyRootfs = true
 	h.Tmpfs = map[string]string{
 		"/tmp": "rw,nosuid,nodev,size=67108864,mode=1777",
-		"/run": "rw,nosuid,nodev,noexec,size=16777216,mode=0755",
+		"/run": "rw,nosuid,nodev,noexec,size=16777216,mode=1777",
 	}
 }
 

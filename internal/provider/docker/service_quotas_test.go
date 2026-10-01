@@ -3,6 +3,7 @@ package docker
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -137,5 +138,27 @@ func TestManagedStopUpdatesExitedPreUpgradeContainer(t *testing.T) {
 	}
 	if !updated || stopped {
 		t.Fatalf("exited service stop must disable reboot restart updated%t stopped%t", updated, stopped)
+	}
+}
+
+// The read-only root leaves /run as the only place a service can create its
+// runtime directory, and the tmpfs hides directories the image pre-created
+// there (postgres:16-alpine ships /var/run/postgresql owned by postgres).
+// A service running as a non-root numeric USER must still be able to
+// recreate them: a root-owned 0755 /run fails its entrypoint with EACCES.
+func TestServiceQuotaRunTmpfsAcceptsNonRootRuntimeDirs(t *testing.T) {
+	hc := &container.HostConfig{}
+	applyServiceQuotas(hc)
+	for _, path := range []string{"/tmp", "/run"} {
+		spec, ok := hc.Tmpfs[path]
+		if !ok {
+			t.Fatalf("%s tmpfs missing", path)
+		}
+		if !slices.Contains(strings.Split(spec, ","), "mode=1777") {
+			t.Errorf("%s tmpfs %q: a non-root image user cannot create its runtime directory; want mode=1777", path, spec)
+		}
+	}
+	if !strings.Contains(hc.Tmpfs["/run"], "noexec") {
+		t.Errorf("/run tmpfs %q lost noexec", hc.Tmpfs["/run"])
 	}
 }

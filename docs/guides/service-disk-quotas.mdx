@@ -45,7 +45,10 @@ The same fields are editable in **Crew Settings → Service disk quotas**.
 A quota-enforced service:
 
 - runs with a **read-only image root**; `/tmp` (64 MiB) and `/run` (16 MiB)
-  are tmpfs mounts charged to the memory limit;
+  are tmpfs mounts charged to the memory limit. Both start empty and are
+  writable by any user (sticky, like `/tmp`): directories the image created
+  under `/run` (for example `/var/run/postgresql`) are not carried over, and
+  the image's entrypoint must create them, as the official database images do;
 - gets 2 GiB of memory with no extra swap, 1 CPU and 512 processes;
 - keeps at most 30 MB of rotated `json-file` logs (this overrides the daemon's
   default log driver for this service only);
