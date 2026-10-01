@@ -2,10 +2,12 @@ package docker
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/quota"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
 func quotaTestService() provider.CrewService {
@@ -63,19 +65,52 @@ func TestQuotaVolumeSurvivesCrewRename(t *testing.T) {
 }
 
 // After a rename the old container still holds the volume under its old
-// name. It must be replaced, never run alongside a second writer.
+// name. It must be replaced, never run alongside a second writer, but only
+// when it provably belongs to this installation: a restored or cloned
+// database on the same daemon carries the same crew ids.
 func TestQuotaServiceRenameReplacesOldSlugContainer(t *testing.T) {
-	daemon := newFakeQuotaDaemon(t)
-	daemon.volumes["crewship-quota-syntheticquota"] = existingQuotaVolume("old-slug", nil)
-	daemon.imageConfig = map[string]any{"Volumes": map[string]any{"/data": map[string]any{}}}
-	svc := quotaTestService()
-	p := newCovProvider(t, Config{QuotaCatalog: &fakeQuotaCatalog{}}, daemon.ServeHTTP)
-	daemon.containers = []map[string]any{{"Id": "old", "Names": []string{"/" + p.sidecarContainerName(covCrewID, "old-slug", "database")}, "Image": svc.Image, "State": "running",
-		"Labels": sidecarContainerLabels(covCrewID, "old-slug", "database", computeSidecarSpecHash(&svc))}}
-	if _, err := p.ensureSidecar(t.Context(), covCrewID, "new-slug", &svc); err != nil {
-		t.Fatal(err)
+	const self = "instance-self"
+	tests := []struct {
+		name        string
+		instanceID  string
+		prefix      string
+		label       string
+		wantRemoved bool
+		wantErr     bool
+	}{
+		{name: "own old-slug container is replaced", instanceID: self, label: self, wantRemoved: true},
+		{name: "another installation's container is never touched", instanceID: self, label: "instance-other"},
+		{name: "unlabelled container is never touched", instanceID: self, label: ""},
+		{name: "container under another prefix is never touched", instanceID: self, prefix: "otherprefix", label: self},
+		{name: "empty local identity refuses replacement", instanceID: "", label: "", wantErr: true},
 	}
-	if len(daemon.removed) != 1 || daemon.removed[0] != "old" || len(daemon.containerCreates) != 1 {
-		t.Fatalf("old-slug writer kept alongside replacement: removed %v creates %d", daemon.removed, len(daemon.containerCreates))
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			daemon := newFakeQuotaDaemon(t)
+			daemon.volumes["crewship-quota-syntheticquota"] = existingQuotaVolume("old-slug", nil)
+			daemon.imageConfig = map[string]any{"Volumes": map[string]any{"/data": map[string]any{}}}
+			svc := quotaTestService()
+			p := newCovProvider(t, Config{QuotaCatalog: &fakeQuotaCatalog{}, InstanceID: tc.instanceID}, daemon.ServeHTTP)
+			name := p.sidecarContainerName(covCrewID, "old-slug", "database")
+			if tc.prefix != "" {
+				name = tc.prefix + strings.TrimPrefix(name, p.namePrefix())
+			}
+			labels := sidecarContainerLabels(covCrewID, "old-slug", "database", computeSidecarSpecHash(&svc))
+			if tc.label != "" {
+				labels = resourcelifecycle.WithInstanceLabel(labels, tc.label)
+			}
+			daemon.containers = []map[string]any{{"Id": "old", "Names": []string{"/" + name}, "Image": svc.Image, "State": "running", "Labels": labels}}
+			_, err := p.ensureSidecar(t.Context(), covCrewID, "new-slug", &svc)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ensureSidecar error = %v, wantErr %v", err, tc.wantErr)
+			}
+			removed := len(daemon.removed) == 1 && daemon.removed[0] == "old"
+			if removed != tc.wantRemoved || (!tc.wantRemoved && (len(daemon.removed) != 0 || len(daemon.stopped) != 0)) {
+				t.Fatalf("removed %v stopped %v, want old removed=%v", daemon.removed, daemon.stopped, tc.wantRemoved)
+			}
+			if tc.wantRemoved && len(daemon.containerCreates) != 1 {
+				t.Fatalf("replacement not created: creates %d", len(daemon.containerCreates))
+			}
+		})
 	}
 }

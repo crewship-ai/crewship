@@ -57,6 +57,7 @@ import (
 	"io"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -195,6 +196,17 @@ func readToDiscard(r io.Reader) (int64, error) {
 // label-based filter change touches one site.
 func volumeListOptions() client.VolumeListOptions {
 	return client.VolumeListOptions{}
+}
+
+// hasNamePrefix reports whether any of Docker's slash-prefixed container
+// names was minted under prefix.
+func hasNamePrefix(names []string, prefix string) bool {
+	for _, n := range names {
+		if strings.HasPrefix(strings.TrimPrefix(n, "/"), prefix+"-") {
+			return true
+		}
+	}
+	return false
 }
 
 // sidecarContainerName returns the docker container name for one sidecar:
@@ -395,7 +407,16 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 			// volume, which is keyed by crew id. The old-name container
 			// still mounts it: replace it rather than start a second
 			// writer on the same filesystem.
-			if svc.QuotaEnforced && sidecarMatchesCrew(c.Labels, crewID, sidecarKind) && c.Labels[sidecarSvcLabel] == svc.Name {
+			if svc.QuotaEnforced && sidecarMatchesCrew(c.Labels, crewID, sidecarKind) && c.Labels[sidecarSvcLabel] == svc.Name && hasNamePrefix(c.Names, p.namePrefix()) {
+				// A restored or cloned database on the same daemon carries
+				// the same crew ids: replace only a container this
+				// installation provably labelled.
+				if p.cfg.InstanceID == "" {
+					return "", fmt.Errorf("quota service %q was renamed but this installation has no identity to prove it owns the old container %s; remove it by hand (volumes are kept)", svc.Name, c.ID)
+				}
+				if c.Labels[resourcelifecycle.InstanceLabel] != p.cfg.InstanceID {
+					continue
+				}
 				p.logger.Info("quota service renamed; replacing old container", "service", svc.Name, "container", c.ID)
 				timeout := 10
 				if _, err := p.client.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
