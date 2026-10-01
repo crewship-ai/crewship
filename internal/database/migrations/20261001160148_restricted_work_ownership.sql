@@ -27,6 +27,8 @@ CREATE TABLE restricted_workflow_attempt_roots (
  run_id TEXT NOT NULL REFERENCES work_attempts(run_id) ON DELETE CASCADE,
  generation INTEGER NOT NULL
 );
+CREATE INDEX restricted_workflow_roots_run ON restricted_workflow_attempt_roots(run_id);
+CREATE INDEX restricted_workflow_roots_workflow ON restricted_workflow_attempt_roots(workflow_id);
 CREATE TRIGGER restricted_workflow_roots_immutable BEFORE UPDATE ON restricted_workflow_attempt_roots
 BEGIN SELECT RAISE(ABORT,'workflow dispatch root is immutable'); END;
 

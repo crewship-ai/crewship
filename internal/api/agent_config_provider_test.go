@@ -265,6 +265,7 @@ func TestEveryCredentialLoader_SplitsTheEndpointObject(t *testing.T) {
 		// never be selected. Verified in anthropicLLMCredentialFilter.
 		"internal/pipeline/runner_llm.go":               "selects on provider = 'ANTHROPIC' explicitly; no endpoint-backed row can match",
 		"internal/restricteddispatch/provider_linux.go": "pins native provider='OPENAI' and type='API_KEY' in SQL; endpoint-backed providers and structured decrypted values are rejected, covered by provider binding regressions",
+		"internal/restrictedworkflow/work_dispatch.go":  "decrypts only the sealed workflow origin handle for common dispatch admission; never loads a provider credential or delivers an upstream auth value",
 	}
 
 	decryptMarkers := []string{"decryptCredential(", "encryption.Decrypt("}

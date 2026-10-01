@@ -46,6 +46,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"attempt_project_inputs":                IntentExcludeRuntime, // native input authority must be admitted anew after restore
 	"access_context_delegations":            IntentExcludeRuntime, // classified cross-agent links require fresh attempt authority
 	"restricted_workflow_jobs":              IntentExcludeRuntime, // copying private queue capsules must not replay paid work
+	"restricted_workflow_attempt_roots":     IntentExcludeRuntime, // dispatch fences and stop identities belong to excluded work attempts; never transplant runtime authority
 	"access_files":                          IntentExcludeRuntime, // classified outputs depend on excluded attempt authority
 	"access_grants":                         IntentInclude,        // exact member/resource rights survive restore
 	"access_context_dependencies":           IntentExcludeRuntime, // dependency authority requires fresh admission
