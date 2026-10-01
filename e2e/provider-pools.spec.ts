@@ -1,4 +1,11 @@
-import { test, expect } from "@playwright/test"
+import { test, expect, type Page } from "@playwright/test"
+
+// The rail's mode menu: pin the panel open (the old cycling "Sidebar: hover"
+// button landed on pinned from the default hover mode).
+async function pinSidebar(page: Page) {
+  await page.getByRole("button", { name: /^Sidebar: / }).click()
+  await page.getByRole("menuitemradio", { name: /^Expanded/ }).click()
+}
 
 for (const width of [1280, 390]) {
   test(`account group editing at ${width}px`, async ({ page }) => {
@@ -26,7 +33,7 @@ for (const width of [1280, 390]) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
     })
     await page.goto("/credentials")
-    if (width > 640) await page.getByRole("button", { name: "Sidebar: hover", exact: true }).click()
+    if (width > 640) await pinSidebar(page)
     const titleBox = await page.getByRole("heading", { name: "Credentials", exact: true }).boundingBox()
     const actionBox = await page.getByRole("button", { name: "Account groups", exact: true }).boundingBox()
     expect(titleBox!.x + titleBox!.width).toBeLessThanOrEqual(actionBox!.x)
