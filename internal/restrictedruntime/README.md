@@ -66,6 +66,9 @@ model inference. Tests create
 uniquely named owned containers/volumes and remove them. The sidecar fixture
 uses UID 1002, its own private `/broker` state and an in-namespace synthetic
 upstream. It has no usable host-API credential or external network access.
+Its local synthetic budget authority accepts only the pinned fixture agent,
+credential and provider; the live gate checks that refusal prevents upstream
+access. Other IPC operations are unavailable.
 This verifies direct secrets and actual proxy/run-token behavior without
 changing sidecar production code. Sidecar startup is harness-owned, not yet a
 production runtime adapter; it must be provisioned before untrusted agent code

@@ -386,9 +386,17 @@ func TestLiveNetworkAndSidecar(t *testing.T) {
 		s              *Session
 		token, account string
 	}{{s, own, "A"}, {other, foreign, "B"}} {
-		result := f.shell(pair.s, "wget -q -O - --header='Authorization: Bearer "+pair.token+"' http://127.0.0.1:9119/llm/openai-compat/v1/models")
-		if !strings.Contains(result, `"ok":true`) || !strings.Contains(result, `"account":"`+pair.account+`"`) {
-			t.Fatal("authorized sidecar wrong account")
+		response := f.shell(pair.s, "wget -S -O - --header='Authorization: Bearer "+pair.token+"' http://127.0.0.1:9119/llm/openai-compat/v1/models 2>&1 || true")
+		// Only report protocol status, never the response body or tokens.
+		status := "no HTTP status"
+		for _, line := range strings.Split(response, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 && strings.HasPrefix(fields[0], "HTTP/") {
+				status = fields[1]
+			}
+		}
+		if status != "200" || !strings.Contains(response, `"ok":true`) || !strings.Contains(response, `"account":"`+pair.account+`"`) {
+			t.Fatalf("authorized sidecar wrong account: status=%s runtime=%s", status, pair.s.Record().Status)
 		}
 	}
 	before := f.shell(s, `wget -q -O - http://127.0.0.1:9120/count`)
@@ -399,6 +407,13 @@ func TestLiveNetworkAndSidecar(t *testing.T) {
 	if after := f.shell(s, `wget -q -O - http://127.0.0.1:9120/count`); after != before {
 		t.Fatal("denied request reached credential upstream")
 	}
+	// Budget refusal must prevent an otherwise valid, currently authorized call.
+	f.must(nil, "exec", "--user", "1002:1002", s.ID(), "touch", "/broker/admission-denied")
+	f.shell(s, "if wget -q -O /dev/null --header='Authorization: Bearer "+own+"' http://127.0.0.1:9119/llm/openai-compat/v1/models; then exit 96; fi")
+	if after := f.shell(s, `wget -q -O - http://127.0.0.1:9120/count`); after != before {
+		t.Fatal("budget refusal reached credential upstream")
+	}
+	f.must(nil, "exec", "--user", "1002:1002", s.ID(), "rm", "/broker/admission-denied")
 	// B cannot see A's broker or private synthetic key through the same port,
 	// filesystem or PID paths. Its successful account=B control is above.
 	f.shell(other, `set -eu; needle=$(printf 'synthetic-sidecar-%s' A); if grep -R -a -q "$needle" /secrets /home/agent /tmp 2>/dev/null; then exit 93; fi; for p in /proc/[0-9]*; do if cat "$p/environ" "$p/cmdline" 2>/dev/null | grep -q "$needle"; then exit 94; fi; done`)
@@ -422,9 +437,10 @@ func (f *liveFixture) sidecar(s *Session, p Plan, account string) string {
 	started := time.Now()
 	secret := "synthetic-sidecar-" + account
 	f.must([]byte(secret), "exec", "-i", "--user", "1002:1002", s.ID(), "sh", "-c", "umask 077; cat > /broker/private")
-	f.background(s, "/opt/crewship-runner", []string{"mock"}, map[string]string{"Token": secret, "Account": account}, "1002:1002")
+	admissionToken := "synthetic-budget-" + f.prefix + "-" + p.Attempt
+	f.background(s, "/opt/crewship-runner", []string{"mock"}, map[string]string{"Token": secret, "Account": account, "AdmissionToken": admissionToken, "Agent": p.Agent}, "1002:1002")
 	routeKey := "synthetic-route-key-" + f.prefix + "-" + account + "-" + p.Attempt
-	cfg := map[string]any{"credentials": []map[string]any{{"id": "mock", "provider": "OPENAI_COMPAT", "token": secret, "base_url": "http://127.0.0.1:9120", "agent_ids": []string{p.Agent}}}, "ipc": map[string]string{"base_url": "http://127.0.0.1:1", "token": "synthetic-unusable-host-token", "agent_id": p.Agent, "agent_slug": p.Agent, "workspace_id": p.Workspace, "crew_id": "isolated", "agent_token": "synthetic-ipc-" + account, "run_id": p.Attempt, "run_chat_id": p.OriginID, "container_id": s.ID()}, "route_auth": map[string]string{"key": routeKey}, "config_fingerprint": "prototype-config", "network_policy": map[string]any{"mode": "restricted", "allow_private_endpoints": true, "allowed_domains": []string{"127.0.0.1"}}}
+	cfg := map[string]any{"credentials": []map[string]any{{"id": "mock", "provider": "OPENAI_COMPAT", "token": secret, "base_url": "http://127.0.0.1:9120", "agent_ids": []string{p.Agent}}}, "ipc": map[string]string{"base_url": "http://127.0.0.1:9120", "token": admissionToken, "agent_id": p.Agent, "agent_slug": p.Agent, "workspace_id": p.Workspace, "crew_id": "isolated", "agent_token": "synthetic-ipc-" + account, "run_id": p.Attempt, "run_chat_id": p.OriginID, "container_id": s.ID()}, "route_auth": map[string]string{"key": routeKey}, "config_fingerprint": "prototype-config", "network_policy": map[string]any{"mode": "restricted", "allow_private_endpoints": true, "allowed_domains": []string{"127.0.0.1"}}}
 	f.background(s, "/opt/crewship-sidecar", nil, cfg, "1002:1002")
 	ready := false
 	for i := 0; i < 40; i++ {
