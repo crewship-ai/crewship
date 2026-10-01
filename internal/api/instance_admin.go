@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Instance administration: the people who run the server itself, as opposed
@@ -345,7 +346,7 @@ func auditInstance(ctx context.Context, r *http.Request, tx instanceAuditExecer,
 		INSERT INTO instance_audit_logs (id, user_id, action, entity_type, entity_id, target_workspace_id, metadata, ip_address, user_agent, created_at)
 		VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nullable(userID), action, entityType, nullable(entityID), nullable(targetWorkspaceID), meta,
-		nullable(ip), nullable(ua), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		nullable(ip), nullable(ua), tsformat.Format(time.Now())); err != nil {
 		return fmt.Errorf("instance audit %s: %w", action, err)
 	}
 	return nil
