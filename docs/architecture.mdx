@@ -187,7 +187,7 @@ Default allowed domains (from `internal/egressallow/allowlist.go`, re-exported b
 
 Unknown network modes default to **restricted** (fail closed). Keep this list in sync with `components/features/crews/crew-network-policy.tsx` on the frontend.
 
-### Sidecar Endpoints (45 path patterns, 62 method+path arms)
+### Sidecar Endpoints (49 path patterns, 64 method+path arms)
 
 The sidecar exposes a local API on port 9119 (`internal/sidecar/server.go`). The
 two numbers differ because several patterns are prefixes carrying more than one
@@ -196,9 +196,10 @@ attachments. Both are derived from the `buildHandler` switch; the authoritative
 list is that switch, and `TestSidecarRoutes_IdentityCoverage` fails the build
 when a route registered there is not classified by whose identity guards it.
 
-<Accordion title="Full endpoint catalog (45 path patterns)">
+<Accordion title="Full endpoint catalog (49 path patterns)">
 | Category | Endpoints |
 |----------|-----------|
+| **Run lifecycle** | `/agent/run/end` (POST — handled inside the sidecar, never forwarded) |
 | **Memory** | `/memory/read`, `/memory/write`, `/memory/search`, `/memory/status`, `/memory/reindex` |
 | **In-container MCP servers** | `/mcp/memory`, `/mcp/memory/{slug}`, `/mcp/routines`, `/mcp/notify` |
 | **MCP gateway** | `/mcp/tools`, `/mcp/call`, `/mcp/status` |
@@ -206,12 +207,12 @@ when a route registered there is not classified by whose identity guards it.
 | **Missions** | `/mission/create`, `/mission/templates`, `/mission/{id}` (GET status, POST `/start`) |
 | **Issues** | `/issue/create`, `/issues` (GET), `/issue/{identifier}` (GET/PATCH, plus POST `/comment`, GET `/comments`, `/link`, `/work`, `/attachments`, `/attachments/{id}`) |
 | **Pipelines** | `/pipelines` (GET), `/pipelines/save`, `/pipelines/{slug}` (GET, POST `/run`, POST `/dry_run`) |
-| **Pages** | `/pages/{page}/{panel}` (PUT — the producer door, see [Pages](/guides/pages)) |
+| **Pages** | `/pages/{page}/{panel}` (PUT — the producer door, see [Pages](/guides/pages)), `/page-webhooks/{token}` (POST — forwarded to crewshipd's page webhook; also served by a crew-only sidecar) |
 | **Connections** | `/connections`, `/connections/{id}` (`/message`, `/messages`, `/files`), `/crew-connections` |
 | **Keeper** | `/keeper/request`, `/keeper/request/{id}` (GET — the agent-facing poll), `/keeper/execute` |
 | **Credentials** | `/credentials` (GET), `/credentials/create`, `/credentials/{name}/rotate` |
 | **Authoring** | `/skills/generate`, `/skills/author`, `/routines/schedules/create` |
-| **Management** | `/crews`, `/crew/create`, `/agent/create`, `/spawn` |
+| **Management** | `/crews`, `/crews/telemetry` (GET — also served by a crew-only sidecar), `/crew/create`, `/agent/create`, `/spawn` |
 | **Other** | `/manifest` (GET/PATCH), `/expose-port` |
 </Accordion>
 
