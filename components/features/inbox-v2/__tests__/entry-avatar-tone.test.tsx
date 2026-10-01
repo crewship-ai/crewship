@@ -8,7 +8,7 @@ import type { InboxLookup } from "../inbox-v2-types"
 
 afterEach(cleanup)
 
-const lookup: InboxLookup = { crewById: new Map(), agentBySlug: new Map(), agentById: new Map() } as InboxLookup
+const lookup: InboxLookup = { crewById: new Map(), agentBySlug: new Map(), agentById: new Map(), ready: true }
 const item = (kind: string) => ({ id: "i", workspace_id: "w", kind, source_id: "s", title: "t", state: "unread", priority: "high", blocking: false, sender_type: "system", sender_name: "", created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z", payload: {} }) as unknown as InboxItem
 
 // One colour per row: the kind pill carries the severity, so the schedule
