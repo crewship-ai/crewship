@@ -598,7 +598,11 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 		},
 	}
 
-	if svc.ControllerManaged || svc.QuotaEnforced {
+	// Exactly one restart owner: the durable controller for services with an
+	// intent row, Docker's on-failure policy for everything else — quota
+	// services included, since the controller never reconciles a service
+	// without an intent row.
+	if svc.ControllerManaged {
 		hostCfg.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyDisabled}
 	}
 	if svc.QuotaEnforced {
