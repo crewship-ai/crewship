@@ -253,5 +253,5 @@ func openGatedLocalDB(cmd *cobra.Command, what, alternative string) (*database.D
 		"database not found at %s — set DATABASE_URL or run `crewship init` first", target.Path)); err != nil {
 		return nil, err
 	}
-	return database.Open(target.DSN)
+	return database.Open(target.DSN, database.WithExclusiveWriter())
 }

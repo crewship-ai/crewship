@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,11 +10,14 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/crewship-ai/crewship/internal/writerlease"
 )
 
 // DB wraps sql.DB with the resolved database file path. It uses the "sqlite"
 // driver from modernc.org/sqlite with WAL mode and foreign keys enabled.
 type DB struct {
+	writerLease *writerlease.Lease
 	*sql.DB
 	path string
 	// managedWAL records that this handle was opened with WithManagedWAL,
@@ -32,9 +36,10 @@ type DB struct {
 type Option func(*openOptions)
 
 type openOptions struct {
-	managedWAL  bool
-	synchronous string
-	busyTimeout time.Duration
+	managedWAL      bool
+	exclusiveWriter bool
+	synchronous     string
+	busyTimeout     time.Duration
 }
 
 // Synchronous levels. FULL fsyncs the WAL at every commit; NORMAL does not,
@@ -55,11 +60,18 @@ const (
 // daemon only — see the measurements in checkpoint.go for why it is worth
 // the coupling (p99 write latency at 100 concurrent agents: 26.1ms → 8.9ms).
 //
+// This daemon-only option also holds an exclusive local-file writer lease
+// until Close. A second server fails before opening SQLite or migrating it.
+// Network filesystems and in-memory server databases are not supported.
+//
 // The pragma has to be set here rather than by the checkpointer itself
 // because `wal_autocheckpoint` is per-connection state and the pool holds
 // several connections; only the DSN reaches all of them.
 func WithManagedWAL() Option {
-	return func(o *openOptions) { o.managedWAL = true }
+	return func(o *openOptions) {
+		o.managedWAL = true
+		o.exclusiveWriter = true
+	}
 }
 
 // WithSynchronous sets the `synchronous` pragma. The default is FULL, because
@@ -86,6 +98,21 @@ func WithManagedWAL() Option {
 // which in the call. It is not a performance knob for the main database.
 func WithSynchronous(mode string) Option {
 	return func(o *openOptions) { o.synchronous = mode }
+}
+
+// WithExclusiveWriter is for offline mutating operations. Managed-WAL server
+// handles take the same lifetime ownership automatically.
+func WithExclusiveWriter() Option { return func(o *openOptions) { o.exclusiveWriter = true } }
+
+// VerifyWriterLease is the backup's source-ownership guard.
+func (d *DB) VerifyWriterLease() error { return d.writerLease.Verify() }
+
+// Close releases ownership only after SQLite connections have closed.
+func (d *DB) Close() error {
+	if err := d.DB.Close(); err != nil {
+		return err
+	}
+	return d.writerLease.Close()
 }
 
 // Synchronous reports the level this handle was opened with.
@@ -151,6 +178,27 @@ func Open(databaseURL string, opts ...Option) (*DB, error) {
 		if err := os.Chmod(dir, 0700); err != nil {
 			return nil, fmt.Errorf("chmod database directory: %w", err)
 		}
+	}
+
+	var owner *writerlease.Lease
+	keepOwner := false
+	if o.exclusiveWriter {
+		filePath := path
+		if i := strings.IndexByte(filePath, '?'); i >= 0 {
+			filePath = filePath[:i]
+		}
+		if filePath == ":memory:" || strings.Contains(path, "mode=memory") {
+			return nil, fmt.Errorf("server writer requires a persistent local database")
+		}
+		owner, err = writerlease.Acquire(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("acquire database writer ownership: %w", err)
+		}
+		defer func() {
+			if !keepOwner {
+				_ = owner.Close()
+			}
+		}()
 	}
 
 	sep := "?"
@@ -288,7 +336,13 @@ func Open(databaseURL string, opts ...Option) (*DB, error) {
 		_ = os.Chmod(filePath+"-shm", 0600)
 	}
 
-	return &DB{DB: db, path: path, managedWAL: o.managedWAL, synchronous: o.synchronous}, nil
+	if owner != nil {
+		if err = owner.Verify(); err != nil {
+			return nil, errors.Join(err, db.Close())
+		}
+	}
+	keepOwner = true
+	return &DB{DB: db, path: path, managedWAL: o.managedWAL, synchronous: o.synchronous, writerLease: owner}, nil
 }
 
 // Path returns the resolved filesystem path of the SQLite database file.
