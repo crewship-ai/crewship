@@ -140,7 +140,8 @@ EOF
       manifest_set "$dir" state "failed_to_start"
       die "server exited during start; see $dir/server.log — 'stop $name' cleans up"
     fi
-    if curl -fs -o /dev/null "http://127.0.0.1:$port/"; then
+    # Any HTTP answer means it is up: / is 404 on a build without the web UI.
+    if [[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/healthz" || true)" != 000 ]]; then
       break
     fi
     sleep 1
