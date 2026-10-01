@@ -39,7 +39,7 @@ ScheduledRuntime executes the agent run
     +--> Update run record (COMPLETED or FAILED)
 ```
 
-A boot-time sweep (repeated every 30 s) accepts occurrences whose due instant already passed — downtime or a leadership change cannot silently skip a daily occurrence until tomorrow's tick.
+A boot-time sweep (repeated every 30 s) accepts occurrences whose due instant already passed — downtime or a leadership change cannot silently skip a daily occurrence until tomorrow's tick. Only the **single persisted** overdue instant (`schedule_next_run`) is accepted: the cursor then jumps to the next occurrence after *now*, so several missed intervals collapse into one run, not one run per missed interval.
 
 ## Enabling a Schedule
 
@@ -181,13 +181,13 @@ After the dispatcher claims the accepted work item (and re-checks its authority)
     - Duration in milliseconds
     - Cost and usage metadata (if available from the LLM provider)
 
-    The assistant response is persisted to the conversation store and the message count is incremented. `schedule_last_run` is stamped at execution start.
+    The assistant response is persisted to the conversation store and the message count is incremented. `schedule_last_run` is written when the run settles, carrying the run's **start** time, and only if the agent exec was actually requested; a failed write is logged, not retried or surfaced.
   </Step>
 </Steps>
 
 ### At-most-once firing
 
-Each scheduled *occurrence* becomes **at most one** work item. The cursor
+**Agent schedules.** Each scheduled *occurrence* becomes **at most one** work item. The cursor
 advance and the occurrence reservation commit together: a duplicate tick
 within the same minute — a second replica, or a tick racing the overdue sweep
 — resolves to the **existing** work item and reports it as a duplicate; it is
@@ -201,6 +201,17 @@ executes it. If acceptance itself fails (database unavailable, disk guard),
 the occurrence **remains due** and is retried on the next tick or sweep; the
 fire fails closed, never double-runs. Duplicate protection and delivery are
 both durable.
+
+**Routine schedules, wake-check probes, deferred runs and recurring issues**
+do not go through the durable work queue. They keep the older
+reserve-then-run discipline: before any side effect, the firing path reserves
+a deterministic per-occurrence key (`ScheduledFireIdempotencyKey`) in the
+shared `pipeline_run_idempotency` table, and a duplicate tick resolves to the
+existing reservation and is skipped. This is **at-most-once, not
+exactly-once**: the key is reserved *before* the run, so a crash between the
+reservation and the run **drops** that occurrence rather than running it
+twice, and an unreachable idempotency store fails closed (the occurrence is
+skipped).
 
 <Note>
   This is **single-leader** protection per occurrence. Running multiple
@@ -237,7 +248,7 @@ The scheduler maintains two fields on each agent:
 | Field | Updated | Description |
 |-------|---------|-------------|
 | `schedule_next_run` | At acceptance (same transaction as the occurrence), on schedule create/update, and on cursor (re-)initialisation | ISO 8601 timestamp of the next scheduled occurrence |
-| `schedule_last_run` | At execution start | ISO 8601 timestamp of the most recent run the dispatcher actually started |
+| `schedule_last_run` | When the run settles, and only if the agent exec was requested (a failed write is only logged) | ISO 8601 **start** time of the most recent run that reached the agent |
 
 Because the cursor advances at acceptance, `schedule_next_run` never moves as
 a side effect of execution latency — a slow or retried run cannot make the
@@ -282,14 +293,22 @@ Failures split by where they happen:
   the item is refused with the reason — an accepted occurrence is not a
   licence to run against a world that changed. An agent staged for review is
   re-checked after 30 s rather than refused outright.
-- **During execution** (chat creation, resolution, container startup, agent
-  failure): the work item holds its heartbeat and lease; the dispatcher's
-  stop/reconciliation discipline applies, exactly as for webhook-owned runs.
-  The cursor has already advanced at acceptance, so a failed execution does
-  not re-fire the same occurrence — the next cron tick is the next run.
+- **Before the agent starts** (chat creation or resolution, crew container
+  start, a run-record write that provably did not land, a refused exec):
+  nothing left the machine, so the
+  **same work item** is retried with exponential backoff and full jitter —
+  up to 5 attempts in total, 2 s base, 300 s cap (`internal/work/work.go`).
+  After the fifth attempt the item fails.
+- **Once the agent may have acted** (an agent-side failure, or the 45-minute
+  deadline firing): the outcome is unclear — the agent could already have
+  pushed, posted or called something — so the item goes to reconciliation
+  and is **not** retried.
+- **Unreadable input** (a work item whose immutable input snapshot does not
+  decode or no longer matches its agent): final failure, no retry — a retry
+  would read the same bytes.
 
-There is no exponential backoff -- the cron schedule determines retry timing
-across occurrences.
+In every case the cursor advanced at acceptance, so a failure never re-fires
+the accepted occurrence — the next cron tick is the next run.
 
 ## Running multiple replicas (leader election)
 
