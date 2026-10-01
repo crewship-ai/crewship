@@ -1,3 +1,5 @@
+//go:build !clionly
+
 package main
 
 import (
@@ -64,7 +66,7 @@ No workspace selection or decryption identity is required.`,
 		defer response.Body.Close()
 		if response.StatusCode != http.StatusCreated {
 			var failure struct {
-				Error string `json:"error"`
+				Error string `json:"error" yaml:"error"`
 			}
 			_ = json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&failure)
 			return fmt.Errorf("backup upload: HTTP %d: %s", response.StatusCode, failure.Error)
