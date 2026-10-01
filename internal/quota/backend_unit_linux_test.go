@@ -4,8 +4,10 @@ package quota
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -66,4 +68,67 @@ func TestReleaseAndRemoveAreIdempotentForRemovedImage(t *testing.T) {
 	if err := u.Remove(t.Context(), k); err != nil {
 		t.Fatalf("remove of a removed image: %v", err)
 	}
+}
+
+// writeEntry plants a catalog entry as a previous helper process left it.
+func (u *unitBackend) writeEntry(t *testing.T, k Key, size int64, withImage, withMeta bool) {
+	t.Helper()
+	meta, image, mount := u.paths(k)
+	if withImage {
+		f, err := os.OpenFile(image, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = f.Truncate(size); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+	if withMeta {
+		raw, _ := json.Marshal(Descriptor{ID: k.id(), Key: k, Bytes: size, Mount: mount})
+		if err := os.WriteFile(meta, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func (u *unitBackend) exists(name string) bool {
+	_, err := os.Lstat(filepath.Join(u.root, name))
+	return err == nil
+}
+
+func (u *unitBackend) ran(tool string) [][]string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	var out [][]string
+	for _, c := range u.commands {
+		if strings.HasSuffix(c[0], tool) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// writeAllocating plants the record an interrupted allocation leaves.
+func (u *unitBackend) writeAllocating(t *testing.T, k Key, size int64) {
+	t.Helper()
+	raw, _ := json.Marshal(Descriptor{ID: k.id(), Key: k, Bytes: size})
+	if err := os.WriteFile(filepath.Join(u.root, "images", k.id()+".allocating"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// quarantined reports whether a file named prefix* sits in quarantine/.
+func (u *unitBackend) quarantined(t *testing.T, prefix string) bool {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(u.root, "quarantine"))
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), prefix) {
+			return true
+		}
+	}
+	return false
 }

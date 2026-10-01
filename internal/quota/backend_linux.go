@@ -186,6 +186,11 @@ func (b *Backend) Ensure(ctx context.Context, k Key, size int64, owner Owner) (D
 	if !os.IsNotExist(err) {
 		return Descriptor{}, err
 	}
+	// No metadata: whatever an earlier process left for this key was never
+	// handed out. Clean an interrupted allocation, set aside anything else.
+	if err = b.adoptUnpublished(k); err != nil {
+		return Descriptor{}, err
+	}
 	// Separate per-database helpers share one host allocation lock. Physical
 	// preallocation survives a crash; the next process observes reduced free space.
 	reservation, err := hostReservationLock(b.reservePath, b.owner)
@@ -193,24 +198,9 @@ func (b *Backend) Ensure(ctx context.Context, k Key, size int64, owner Owner) (D
 		return Descriptor{}, err
 	}
 	defer reservation.Close()
-	// A complete preallocation is the reservation. Count even orphan images left
-	// by a crash, so cleanup cannot accidentally overcommit aggregate capacity.
-	entries, err := os.ReadDir(filepath.Join(b.root, "images"))
+	used, err := b.reservedBytes()
 	if err != nil {
 		return Descriptor{}, err
-	}
-	used := int64(0)
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".ext4") {
-			i, err := e.Info()
-			if err != nil || !i.Mode().IsRegular() {
-				return Descriptor{}, ErrDenied
-			}
-			used += i.Size()
-			if used > b.capacity {
-				return Descriptor{}, ErrDenied
-			}
-		}
 	}
 	var space unix.Statfs_t
 	if err = unix.Statfs(b.root, &space); err != nil {
@@ -221,8 +211,18 @@ func (b *Backend) Ensure(ctx context.Context, k Key, size int64, owner Owner) (D
 		return Descriptor{}, ErrDenied
 	}
 	meta, image, mount := b.paths(k)
+	// The allocating record exists before the image does and is removed
+	// only after the metadata is durable, so a crash at any point leaves
+	// proof that the image was never handed out (Recover/Ensure/Remove
+	// then delete it instead of wedging the key).
+	record := b.allocatingPath(k)
+	pending, _ := json.Marshal(Descriptor{ID: k.id(), Key: k, Bytes: size})
+	if err = atomicFile(record, pending); err != nil {
+		return Descriptor{}, err
+	}
 	f, err := os.OpenFile(image, os.O_CREATE|os.O_EXCL|os.O_RDWR|unix.O_NOFOLLOW, 0600)
 	if err != nil {
+		_ = os.Remove(record)
 		return Descriptor{}, err
 	}
 	allocated := false
@@ -230,6 +230,7 @@ func (b *Backend) Ensure(ctx context.Context, k Key, size int64, owner Owner) (D
 		f.Close()
 		if !allocated {
 			os.Remove(image)
+			os.Remove(record)
 		}
 	}()
 	if err = unix.Fallocate(int(f.Fd()), 0, 0, size); err != nil {
@@ -238,7 +239,7 @@ func (b *Backend) Ensure(ctx context.Context, k Key, size int64, owner Owner) (D
 	if err = f.Sync(); err != nil {
 		return Descriptor{}, err
 	}
-	if err = b.command(ctx, "/usr/sbin/mkfs.ext4", "-q", "-F", "-m", "0", "-E", "nodiscard,lazy_itable_init=0,lazy_journal_init=0", image); err != nil {
+	if err = b.command(ctx, "/usr/sbin/mkfs.ext4", mkfsArgs(image, owner)...); err != nil {
 		return Descriptor{}, err
 	}
 	if err = f.Sync(); err != nil {
@@ -253,8 +254,104 @@ func (b *Backend) Ensure(ctx context.Context, k Key, size int64, owner Owner) (D
 		return Descriptor{}, err
 	}
 	allocated = true
-	return d, b.attachDescriptor(ctx, d)
+	if err = os.Remove(record); err != nil && !os.IsNotExist(err) {
+		return Descriptor{}, err
+	}
+	if err = b.attachDescriptor(ctx, d); err != nil {
+		return Descriptor{}, err
+	}
+	return d, b.prepareRoot(d)
 }
+
+func mkfsArgs(image string, owner Owner) []string {
+	return []string{"-q", "-F", "-m", "0", "-E", "nodiscard,lazy_itable_init=0,lazy_journal_init=0", image}
+}
+
+// prepareRoot runs once on a freshly formatted, mounted volume.
+func (b *Backend) prepareRoot(Descriptor) error { return nil }
+
+func (b *Backend) allocatingPath(k Key) string {
+	return filepath.Join(b.root, "images", k.id()+".allocating")
+}
+
+// reservedBytes is the aggregate preallocation: live images plus images set
+// aside in quarantine, which still occupy disk until an administrator
+// deletes them.
+func (b *Backend) reservedBytes() (int64, error) {
+	var used int64
+	for _, dir := range []string{"images", "quarantine"} {
+		entries, err := os.ReadDir(filepath.Join(b.root, dir))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		for _, e := range entries {
+			if !strings.Contains(e.Name(), ".ext4") {
+				continue
+			}
+			i, err := e.Info()
+			if err != nil || !i.Mode().IsRegular() {
+				return 0, ErrDenied
+			}
+			used += i.Size()
+		}
+	}
+	return used, nil
+}
+
+// adoptUnpublished resolves leftovers for a key that has no metadata. An
+// allocating record proves an interrupted allocation: its image is deleted.
+// An image without one was not produced by this catalog and is quarantined.
+func (b *Backend) adoptUnpublished(k Key) error {
+	_, image, mount := b.paths(k)
+	record := b.allocatingPath(k)
+	_, recErr := os.Lstat(record)
+	_, imgErr := os.Lstat(image)
+	switch {
+	case recErr == nil:
+		if err := os.Remove(image); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.Remove(record); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		b.log("quota catalog: removed interrupted allocation %s", k.id())
+	case imgErr == nil:
+		if err := b.quarantine(k.id() + ".ext4"); err != nil {
+			return err
+		}
+		b.log("quota catalog: quarantined image %s without metadata", k.id())
+	}
+	// An empty mount directory from the interrupted attempt is harmless and
+	// reused; a mounted one would have metadata.
+	if dev, err := mountedDevice(mount); err == nil && dev == "" {
+		_ = os.Remove(mount)
+	}
+	return nil
+}
+
+// quarantine moves one catalog file aside. Nothing is deleted: the
+// administrator inspects quarantine/ and removes what is truly garbage.
+func (b *Backend) quarantine(name string) error {
+	dir := filepath.Join(b.root, "quarantine")
+	if err := os.Mkdir(dir, 0700); err != nil && !os.IsExist(err) {
+		return err
+	}
+	src := filepath.Join(b.root, "images", name)
+	if _, err := os.Lstat(src); os.IsNotExist(err) {
+		return nil
+	}
+	return os.Rename(src, filepath.Join(dir, fmt.Sprintf("%s.%d", name, time.Now().UnixNano())))
+}
+
+func (b *Backend) log(format string, args ...any) {
+	if b.logf != nil {
+		b.logf(format, args...)
+	}
+}
+
 func atomicFile(path string, data []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(path), ".catalog-")
 	if err != nil {
@@ -398,6 +495,9 @@ func (b *Backend) Remove(ctx context.Context, k Key) error {
 	}
 	d, err := b.read(k)
 	if os.IsNotExist(err) {
+		if err = b.adoptUnpublished(k); err != nil {
+			return err
+		}
 		if b.absent(k) {
 			return nil
 		}
@@ -444,54 +544,163 @@ func (b *Backend) Remove(ctx context.Context, k Key) error {
 	return os.Remove(mount)
 }
 func (b *Backend) Recover(ctx context.Context) error {
+	_, err := b.RecoverReport(ctx)
+	return err
+}
+
+// RecoveryReport is what Recover did with each catalog entry (by id).
+type RecoveryReport struct {
+	Mounted      []string // valid entries attached and verified
+	Quarantined  []string // malformed entries moved to quarantine/
+	Cleaned      []string // interrupted allocations deleted
+	Failed       []string // valid entries whose attach failed; left in place
+	OverCapacity bool     // reserved bytes exceed the configured capacity
+}
+
+// Summary is a one-line status for the systemd STATUS= field and the log.
+func (r RecoveryReport) Summary() string {
+	s := fmt.Sprintf("recovered %d quota volume(s); %d quarantined, %d interrupted allocation(s) cleaned, %d failed to attach",
+		len(r.Mounted), len(r.Quarantined), len(r.Cleaned), len(r.Failed))
+	if r.OverCapacity {
+		s += "; reserved images exceed the configured capacity"
+	}
+	return s
+}
+
+// RecoverReport remounts every valid catalog entry after a helper restart.
+// One bad entry must not keep the helper (and the server that orders after
+// it) down: malformed entries are moved to quarantine/ and reported,
+// interrupted allocations are deleted, and an attach failure is reported
+// without touching the entry. Only an unusable catalog is an error.
+func (b *Backend) RecoverReport(ctx context.Context) (RecoveryReport, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	var report RecoveryReport
 	if b.lock == nil {
-		return ErrDenied
+		return report, ErrDenied
 	}
-	entries, err := os.ReadDir(filepath.Join(b.root, "images"))
+	dir := filepath.Join(b.root, "images")
+	list := func(suffix string) ([]string, error) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, err
+		}
+		var ids []string
+		for _, e := range entries {
+			if id, ok := strings.CutSuffix(e.Name(), suffix); ok && !strings.HasPrefix(id, ".") {
+				ids = append(ids, id)
+			}
+		}
+		return ids, nil
+	}
+	set := func(r *[]string, id, format string, args ...any) {
+		if !slices.Contains(*r, id) {
+			*r = append(*r, id)
+		}
+		b.log(format, args...)
+	}
+	quarantine := func(id, reason string) error {
+		for _, suffix := range []string{".json", ".ext4", ".references"} {
+			if err := b.quarantine(id + suffix); err != nil {
+				return err
+			}
+		}
+		set(&report.Quarantined, id, "quota catalog: quarantined %s: %s", id, reason)
+		return nil
+	}
+
+	// 1. Interrupted allocations: the record precedes the image and is
+	// removed only after the metadata is durable.
+	pending, err := list(".allocating")
 	if err != nil {
-		return err
+		return report, err
 	}
-	var used int64
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".ext4") {
+	for _, id := range pending {
+		if _, err := os.Lstat(filepath.Join(dir, id+".json")); err == nil {
+			_ = os.Remove(filepath.Join(dir, id+".allocating")) // finished; record outlived a crash
 			continue
 		}
-		f, err := b.safeFile(filepath.Join(b.root, "images", e.Name()))
-		if err != nil {
-			return err
+		for _, suffix := range []string{".ext4", ".allocating"} {
+			if err := os.Remove(filepath.Join(dir, id+suffix)); err != nil && !os.IsNotExist(err) {
+				return report, err
+			}
 		}
-		info, err := f.Stat()
-		f.Close()
-		if err != nil || info.Size() > b.capacity-used {
-			return ErrDenied
-		}
-		used += info.Size()
+		_ = os.Remove(filepath.Join(b.root, "mounts", id))
+		set(&report.Cleaned, id, "quota catalog: removed interrupted allocation %s", id)
 	}
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".json") {
+
+	// 2. Published entries.
+	published, err := list(".json")
+	if err != nil {
+		return report, err
+	}
+	for _, id := range published {
+		d, reason := b.inspectEntry(id)
+		if reason != "" {
+			if err := quarantine(id, reason); err != nil {
+				return report, err
+			}
 			continue
 		}
-		f, err := b.safeFile(filepath.Join(b.root, "images", e.Name()))
-		if err != nil {
-			return err
+		if err := b.attachDescriptor(ctx, d); err != nil {
+			set(&report.Failed, id, "quota catalog: attach %s failed: %v", id, err)
+			continue
 		}
-		var d Descriptor
-		err = json.NewDecoder(f).Decode(&d)
-		f.Close()
-		if err != nil || !d.Key.valid() || d.ID != d.Key.id() {
-			return ErrDenied
-		}
-		known, err := b.read(d.Key)
-		if err != nil {
-			return err
-		}
-		if err = b.attachDescriptor(ctx, known); err != nil {
-			return err
+		report.Mounted = append(report.Mounted, id)
+	}
+
+	// 3. Images nobody published.
+	images, err := list(".ext4")
+	if err != nil {
+		return report, err
+	}
+	for _, id := range images {
+		if _, err := os.Lstat(filepath.Join(dir, id+".json")); os.IsNotExist(err) {
+			if err := quarantine(id, "image without metadata"); err != nil {
+				return report, err
+			}
 		}
 	}
-	return nil
+
+	used, err := b.reservedBytes()
+	if err != nil {
+		return report, err
+	}
+	if used > b.capacity {
+		report.OverCapacity = true
+		b.log("quota catalog: reserved %d bytes exceed capacity %d; new allocations are refused", used, b.capacity)
+	}
+	return report, nil
+}
+
+// inspectEntry validates one published entry and returns why it is
+// unusable ("" when it is fine).
+func (b *Backend) inspectEntry(id string) (Descriptor, string) {
+	f, err := b.safeFile(filepath.Join(b.root, "images", id+".json"))
+	if err != nil {
+		return Descriptor{}, fmt.Sprintf("unreadable metadata: %v", err)
+	}
+	var d Descriptor
+	err = json.NewDecoder(io.LimitReader(f, 8192)).Decode(&d)
+	f.Close()
+	if err != nil || !d.Key.valid() || d.ID != d.Key.id() || d.ID != id {
+		return Descriptor{}, "malformed metadata"
+	}
+	known, err := b.read(d.Key)
+	if err != nil {
+		return Descriptor{}, fmt.Sprintf("inconsistent metadata: %v", err)
+	}
+	_, image, _ := b.paths(known.Key)
+	img, err := b.safeFile(image)
+	if err != nil {
+		return Descriptor{}, fmt.Sprintf("missing or unsafe image: %v", err)
+	}
+	info, err := img.Stat()
+	img.Close()
+	if err != nil || info.Size() != known.Bytes {
+		return Descriptor{}, "image size disagrees with metadata"
+	}
+	return known, ""
 }
 
 func trustedParent(path string) error {

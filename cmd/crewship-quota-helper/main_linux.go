@@ -51,17 +51,26 @@ func main() {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-	if err = backend.Recover(ctx); err != nil {
+	// Bad catalog entries are quarantined and reported, never fatal: one
+	// broken entry must not keep the helper, and the server ordered after
+	// it, down. Only an unusable catalog stops startup.
+	backend.SetLogger(func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) })
+	report, err := backend.RecoverReport(ctx)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "quota catalog recovery failed:", err)
 		os.Exit(1)
 	}
-	if err = quota.ServeNamespace(ctx, *socket, uint32(*uid), backend, *namespace, notifyReady); err != nil {
+	status := report.Summary()
+	fmt.Fprintln(os.Stderr, status)
+	if err = quota.ServeNamespace(ctx, *socket, uint32(*uid), backend, *namespace, func() error { return notifyReady(status) }); err != nil {
 		fmt.Fprintln(os.Stderr, "quota helper failed:", err)
 		os.Exit(1)
 	}
 }
 
-func notifyReady() error {
+// notifyReady tells systemd the socket is live; status (the recovery
+// summary, including quarantined entries) shows in `systemctl status`.
+func notifyReady(status string) error {
 	socket := os.Getenv("NOTIFY_SOCKET")
 	if socket == "" {
 		return nil
@@ -74,6 +83,6 @@ func notifyReady() error {
 		return err
 	}
 	defer c.Close()
-	_, err = c.Write([]byte("READY=1\nSTATUS=Recovered quota catalog and authenticated socket ready"))
+	_, err = c.Write([]byte("READY=1\nSTATUS=" + strings.ReplaceAll(status, "\n", " ") + "; authenticated socket ready"))
 	return err
 }
