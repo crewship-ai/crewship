@@ -32,8 +32,7 @@ deduplication. Legacy assignments and private pending/running jobs share capacit
 checks. A finite workspace hard budget is required before preparing an origin;
 the model broker separately reserves cost before every upstream request.
 
-Preparation and duplicates do not invoke a model. The existing durable private
-workflow queue owns execution; this endpoint installs no second polling ticker or
+Preparation and duplicates do not invoke a model. The common durable work ledger and dispatcher own execution; this endpoint installs no second polling ticker or
 LLM ownership loop. Source edits, reassignment, human takeover, revoked project
 permissions or changed graph/provider authority fence queued and executing work.
 Failed or canceled work remains parked even after a source edit. It requires

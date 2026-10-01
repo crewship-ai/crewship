@@ -751,3 +751,76 @@ func TestWorkResolve_RequiresEvidenceAndCurrentGeneration(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkItems_PrivateWorkflowNeverEntersGenericSurface(t *testing.T) {
+	db := setupTestDB(t)
+	h := NewWorkItemsHandler(db, quietLogger())
+	seedWorkItem(t, db, seededWork{ID: "private-work", WorkspaceID: "w1", State: "queued"})
+	if _, err := db.Exec(`UPDATE work_items SET domain_kind='restricted_workflow',domain_id='private-receipt' WHERE id='private-work'`); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	h.List(rr, workReq(t, "GET", "/work-items", "", "actor", "w1", "OWNER"))
+	if rr.Code != 200 || strings.Contains(rr.Body.String(), "private-work") || strings.Contains(rr.Body.String(), "private-receipt") {
+		t.Fatalf("private listing leaked: %d %s", rr.Code, rr.Body.String())
+	}
+	for _, action := range []string{"detail", "cancel", "replay"} {
+		t.Run(action, func(t *testing.T) {
+			req := workReq(t, "POST", "/work-items/private-work", "{}", "actor", "w1", "OWNER")
+			req.SetPathValue("workItemId", "private-work")
+			rr := httptest.NewRecorder()
+			switch action {
+			case "detail":
+				h.Get(rr, req)
+			case "cancel":
+				h.Cancel(rr, req)
+			case "replay":
+				h.Replay(rr, req)
+			}
+			if rr.Code != 404 {
+				t.Fatalf("generic %s exposed private work: %d %s", action, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestWorkItems_PrivateMetadataRequiresCurrentTrustedOperator(t *testing.T) {
+	db := setupTestDB(t)
+	h := NewWorkItemsHandler(db, quietLogger())
+	for _, q := range []string{
+		`INSERT INTO users(id,email) VALUES('operator','operator@private-work.test')`,
+		`INSERT INTO workspaces(id,name,slug) VALUES('w1','Private','private-work')`,
+		`INSERT INTO workspace_members(id,user_id,workspace_id,role) VALUES('op','operator','w1','OWNER')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedWorkItem(t, db, seededWork{ID: "private-work", WorkspaceID: "w1", State: "needs_reconciliation", Generation: 1})
+	if _, err := db.Exec(`UPDATE work_items SET domain_kind='restricted_workflow',domain_id='private-receipt' WHERE id='private-work'`); err != nil {
+		t.Fatal(err)
+	}
+	req := workReq(t, "GET", "/work-items/private-work", "", "operator", "w1", "OWNER")
+	req.SetPathValue("workItemId", "private-work")
+	rr := httptest.NewRecorder()
+	h.Get(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("operator cannot investigate: %d %s", rr.Code, rr.Body.String())
+	}
+	if _, err := db.Exec(`UPDATE workspace_members SET role='MEMBER' WHERE id='op'`); err != nil {
+		t.Fatal(err)
+	}
+	rr = httptest.NewRecorder()
+	h.Get(rr, req)
+	if rr.Code != 404 {
+		t.Fatalf("stale owner metadata survived role loss: %d %s", rr.Code, rr.Body.String())
+	}
+	if _, err := db.Exec(`UPDATE workspace_members SET role='OWNER',access_mode='restricted' WHERE id='op'`); err != nil {
+		t.Fatal(err)
+	}
+	rr = httptest.NewRecorder()
+	h.Get(rr, req)
+	if rr.Code != 404 {
+		t.Fatalf("restricted owner reached operator metadata: %d %s", rr.Code, rr.Body.String())
+	}
+}

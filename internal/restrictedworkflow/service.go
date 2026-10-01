@@ -8,14 +8,18 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 	"github.com/crewship-ai/crewship/internal/tsformat"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 type Executor interface {
@@ -32,7 +36,9 @@ type Service struct {
 	dispatch      sync.Mutex
 	cancel        context.CancelFunc
 	wg            sync.WaitGroup
-	wake          chan struct{}
+	dispatcher    *dispatch.Dispatcher
+	runtime       *workflowRuntime
+	ledger        *work.Store
 	SourceChecker func(context.Context, pipeline.PageActionQuery, string) error
 }
 type Receipt struct {
@@ -58,7 +64,10 @@ func New(db *sql.DB, executor Executor) (*Service, error) {
 	if db == nil || executor == nil {
 		return nil, ErrDenied
 	}
-	return &Service{db: db, executor: executor, providers: workflowProviderAuthority(db), wake: make(chan struct{}, 1)}, nil
+	s := &Service{db: db, executor: executor, providers: workflowProviderAuthority(db), ledger: work.NewStore(db)}
+	s.runtime = newWorkflowRuntime(s)
+	s.dispatcher = dispatch.New(s.ledger, s.runtime, s.runtime, workflowDispatchConfig(), nil)
+	return s, nil
 }
 func id() string {
 	var raw [24]byte
@@ -77,11 +86,15 @@ func (s *Service) Start(ctx context.Context) error {
 	if _, err := encryption.Encrypt("restricted-workflow-key-check"); err != nil {
 		return ErrDenied
 	}
-	// Unknown paid work is never automatically replayed on server recovery.
-	if _, err := s.db.ExecContext(ctx, `UPDATE access_attempts SET revoked_at=COALESCE(revoked_at,?) WHERE id IN(SELECT origin_attempt_id FROM restricted_workflow_jobs WHERE state='running')`, tsformat.Format(time.Now())); err != nil {
+	writer, ok := quiesce.Enter(ctx)
+	if !ok {
+		return ErrDenied
+	}
+	defer writer.Leave()
+	if _, err := s.ledger.RecoverExpiredLeases(writer.Context()); err != nil {
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE restricted_workflow_jobs SET state='failed',finished_at=? WHERE state='running'`, tsformat.Format(time.Now())); err != nil {
+	if err := s.runtime.FlushRunOutcomes(writer.Context()); err != nil {
 		return err
 	}
 	runCtx, cancel := context.WithCancel(ctx)
@@ -89,42 +102,25 @@ func (s *Service) Start(ctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		ticker := time.NewTicker(250 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-runCtx.Done():
-				return
-			case <-ticker.C:
-			case <-s.wake:
-			}
-			for {
-				worked, _ := s.DispatchNext(runCtx)
-				if !worked {
-					break
-				}
-			}
+		if err := s.dispatcher.Run(runCtx); err != nil {
+			slog.Error("restricted workflow dispatcher stopped", "error", err)
 		}
 	}()
 	return nil
 }
 func (s *Service) Close() error {
 	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
 	cancel := s.cancel
 	s.cancel = nil
-	s.lifecycle.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 	s.wg.Wait()
 	return nil
 }
-func (s *Service) notify() {
-	select {
-	case s.wake <- struct{}{}:
-	default:
-	}
-}
+func (s *Service) notify() { s.dispatcher.Hint("") }
+
 func manualPolicy(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, user, workspace string) error {

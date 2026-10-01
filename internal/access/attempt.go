@@ -212,6 +212,19 @@ func resolveState(ctx context.Context, q queryer, key string, byHandle bool, see
 	if err != nil {
 		return a, err
 	}
+	// Workflow execution roots carry the shared dispatch fence. Every child
+	// resolves this ancestor; neither credentials nor continuation can outlive it.
+	var bound, valid bool
+	if err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM restricted_workflow_attempt_roots WHERE access_attempt_id=?),
+ EXISTS(SELECT 1 FROM restricted_workflow_attempt_roots r JOIN work_attempts wa ON wa.run_id=r.run_id AND wa.generation=r.generation
+ JOIN work_items w ON w.id=wa.work_id AND w.id=r.workflow_id AND w.generation=r.generation
+ WHERE r.access_attempt_id=? AND ((w.state IN ('starting','running') AND wa.ended_at IS NULL AND wa.lease_expires_at>?)
+ OR (? AND w.state='succeeded')))`, a.ID, a.ID, tsformat.Format(time.Now()), history).Scan(&bound, &valid); err != nil {
+		return Attempt{}, err
+	}
+	if bound && !valid {
+		return Attempt{}, ErrDenied
+	}
 	m, err := member(ctx, q, a.Principal, a.Workspace)
 	if err != nil {
 		return Attempt{}, err

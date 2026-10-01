@@ -86,14 +86,15 @@ func startRestrictedTextRuntime(ctx context.Context, db *sql.DB, databasePath st
 		registry.native = &restricteddispatch.NativeRunner{Authority: authority, Manager: manager, MaxOutputTokens: 4096}
 		logger.Info("restricted native scratch runtime enabled", "image", nativeImage)
 	}
+	registry.managers = managers
 	router.SetRestrictedTextRunner(registry)
 	workflow, err = restrictedworkflow.New(db, registry)
 	if err != nil {
 		closeAll()
 		return nil, err
 	}
-	// The private queue uses this registry for every step. Unknown started
-	// work is reconciled as failed, rather than automatically replayed.
+	// Private authority stays in the domain table. Shared dispatch owns claims,
+	// leases and conservative reconciliation of interrupted graph execution.
 	workflow.SourceChecker = restrictedpreflight.CheckSource
 	if err = workflow.Start(ctx); err != nil {
 		closeAll()
@@ -105,6 +106,7 @@ func startRestrictedTextRuntime(ctx context.Context, db *sql.DB, databasePath st
 
 type restrictedExecutor struct {
 	db           *sql.DB
+	managers     []*restrictedruntime.Manager
 	text, native api.RestrictedTextExecutor
 }
 
@@ -240,4 +242,35 @@ func (r *restrictedExecutor) SupportsWorkflowProfile(profile string) bool {
 		return capable.SupportsWorkflowProfile(profile)
 	}
 	return profile == "responses_text"
+}
+
+// Graph cancellation returns only after runner cleanup; independently confirm
+// each descendant container before shared dispatch releases execution capacity.
+func (r *restrictedExecutor) ConfirmWorkflowStopped(ctx context.Context, workflowID string) error {
+	rows, err := r.db.QueryContext(ctx, `SELECT access_attempt_id FROM restricted_workflow_attempt_roots WHERE workflow_id=?`, workflowID)
+	if err != nil {
+		return err
+	}
+	var attempts []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		attempts = append(attempts, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, attempt := range attempts {
+		for _, manager := range r.managers {
+			if err = manager.ConfirmAttemptStopped(ctx, attempt); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

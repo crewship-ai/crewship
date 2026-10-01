@@ -139,6 +139,39 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	}
 }
 
+// RunOne claims and supervises one attempt, then waits for local supervision.
+// Call only on an idle dispatcher, without a concurrent Run or RunOne. It uses
+// the same authority, lease, cancellation and settlement path as Run.
+func (d *Dispatcher) RunOne(ctx context.Context) (bool, error) {
+	d.flushRunOutcomes(ctx)
+	defer d.flushRunOutcomes(ctx)
+	if len(d.cfg.Kinds) == 0 {
+		return false, errors.New("dispatch: no executable kinds declared")
+	}
+	if err := d.recover(ctx); err != nil {
+		return false, err
+	}
+	worked, err := d.claimOne(ctx)
+	if err != nil || !worked {
+		return worked, err
+	}
+	d.mu.Lock()
+	var pending []<-chan struct{}
+	for _, live := range d.running {
+		pending = append(pending, live.done)
+	}
+	d.mu.Unlock()
+	for _, done := range pending {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			d.drain()
+			return worked, ctx.Err()
+		}
+	}
+	return worked, nil
+}
+
 // recover runs one lease-recovery pass and then reconciles what it parked.
 func (d *Dispatcher) recover(ctx context.Context) error {
 	// Requeueing and parking write work rows: one writer in the quiet
