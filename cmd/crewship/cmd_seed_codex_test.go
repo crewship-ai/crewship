@@ -90,13 +90,14 @@ func TestSeedCodexAuthFileFlagOverridesEnv(t *testing.T) {
 	}
 }
 
-func TestSeedCmdCodexAuthFileFlagDefaultsFromEnv(t *testing.T) {
+func TestSeedCmdCodexAuthFileFlagDefaultsEmpty(t *testing.T) {
+	t.Setenv(seedCodexAuthFileEnv, "/tmp/seed-review-auth.json")
 	flag := seedCmd.Flags().Lookup("codex-auth-file")
 	if flag == nil {
 		t.Fatal("crewship seed has no --codex-auth-file flag")
 	}
-	if got := flag.DefValue; got != os.Getenv(seedCodexAuthFileEnv) {
-		t.Fatalf("--codex-auth-file default = %q, want the %s value %q", got, seedCodexAuthFileEnv, os.Getenv(seedCodexAuthFileEnv))
+	if got := flag.DefValue; got != "" {
+		t.Fatalf("--codex-auth-file default = %q, want empty", got)
 	}
 }
 
