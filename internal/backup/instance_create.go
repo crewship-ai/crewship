@@ -56,6 +56,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/safepath"
+	"github.com/crewship-ai/crewship/internal/servicelifecycle"
 )
 
 // File stores an instance bundle carries, by the name they have in the
@@ -197,6 +198,10 @@ var ErrInstanceBusy = errors.New("backup: instance backup skipped: work was stil
 
 // InstanceOptions configure CreateInstanceBackup.
 type InstanceOptions struct {
+	ServiceSnapshots          ServiceSnapshotRuntime
+	RecoverServiceMaintenance bool
+	serviceCapture            *instanceServiceCapture
+
 	OutputDir       string
 	CrewshipVersion string
 	Actor           Actor
@@ -325,9 +330,27 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 	if err := opts.validate(); err != nil {
 		return nil, err
 	}
-	if err := requireSupportedInstanceServiceBackups(ctx, db); err != nil {
+	if err := requireSupportedInstanceServiceBackups(ctx, db, opts.ServiceSnapshots); err != nil {
 		return nil, err
 	}
+	captureCtx, cancelCapture := context.WithCancel(ctx)
+	defer cancelCapture()
+	ctx = captureCtx
+	keeper := &serviceFenceKeeper{db: db}
+	opts.serviceCapture = &instanceServiceCapture{keeper: keeper}
+	go keeper.run(ctx, cancelCapture)
+	defer func() {
+		if retErr != nil {
+			return
+		}
+		for _, fence := range opts.serviceCapture.fences {
+			if err := servicelifecycle.EndBackupFence(context.WithoutCancel(ctx), db, fence.crew, fence.token); err != nil {
+				res = nil
+				retErr = err
+				return
+			}
+		}
+	}()
 	level := opts.Level
 	if !level.Valid() {
 		level = DefaultScopeLevel
@@ -454,7 +477,7 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 	// Everything below reads the staged copy, never the live server.
 	snap := memSnap.DB
 
-	contents := Contents{}
+	contents := Contents{ServiceSnapshots: len(opts.serviceCapture.snapshots)}
 	inst := &InstanceContents{Stores: map[string]StoreSummary{}, HoldMS: holdMS}
 	for name, s := range stores {
 		inst.Stores[name] = s.summary
@@ -566,7 +589,7 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 	// disk unencrypted (seal_stream.go).
 	sealedPath := filepath.Join(stage, "sealed")
 	sha, sealedSize, err := sealInstancePayload(ctx, sealedPath, opts, func(w io.Writer) error {
-		return writeInstancePayload(w, opts.EncoderConcurrency, dbImage, sc, stores, workspaces, kit, now)
+		return writeInstancePayload(w, opts.EncoderConcurrency, dbImage, sc, stores, workspaces, kit, now, opts.serviceCapture)
 	}, progress)
 	dbImage = nil
 	if err != nil {
@@ -609,7 +632,7 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 		_ = os.Remove(partial)
 		return nil, err
 	}
-	if err := os.Rename(partial, finalPath); err != nil {
+	if err := publishServiceSnapshotBundle(ctx, db, opts.serviceCapture.fences, func() error { return os.Rename(partial, finalPath) }); err != nil {
 		_ = os.Remove(partial)
 		return nil, fmt.Errorf("backup: rename final bundle: %w", err)
 	}
@@ -749,6 +772,11 @@ type stagedStore struct {
 // every staged file is written through sc, so nothing it stages is readable
 // on disk. On error the snapshot is freed and nil returned.
 func stageInstanceCopy(ctx context.Context, db *sql.DB, stage string, sc *stagingCipher, opts InstanceOptions, level ScopeLevel, workspaces []*instanceWorkspaceTarget, envRun *environmentRun) (_ map[string]*stagedStore, _ *database.MemorySnapshot, retErr error) {
+	if opts.serviceCapture != nil {
+		if err := opts.serviceCapture.capture(ctx, db, stage, sc, opts, workspaces); err != nil {
+			return nil, nil, err
+		}
+	}
 	ms, err := database.SnapshotToMemory(ctx, db)
 	if err != nil {
 		return nil, nil, fmt.Errorf("backup: snapshot database: %w", err)
@@ -758,8 +786,17 @@ func stageInstanceCopy(ctx context.Context, db *sql.DB, stage string, sc *stagin
 			_ = ms.Close()
 		}
 	}()
-	if err := requireSupportedInstanceServiceBackups(ctx, ms.DB); err != nil {
+	if err := requireSupportedInstanceServiceBackups(ctx, ms.DB, opts.ServiceSnapshots); err != nil {
 		return nil, nil, err
+	}
+	if opts.serviceCapture != nil {
+		dump, err := instanceServiceDump(ctx, ms.DB)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := requireSupportedDumpServiceBackups(dump, opts.serviceCapture.snapshots); err != nil {
+			return nil, nil, err
+		}
 	}
 	outAbs, _ := filepath.Abs(opts.OutputDir)
 	skip := []string{stage, outAbs}
@@ -1142,7 +1179,7 @@ func sealInstancePayload(ctx context.Context, sealedPath string, opts InstanceOp
 	return sealer.Sum(), sealer.Size(), nil
 }
 
-func writeInstancePayload(sink io.Writer, concurrency int, dbImage []byte, sc *stagingCipher, stores map[string]*stagedStore, workspaces []*instanceWorkspaceTarget, kit *RecoveryKit, now time.Time) error {
+func writeInstancePayload(sink io.Writer, concurrency int, dbImage []byte, sc *stagingCipher, stores map[string]*stagedStore, workspaces []*instanceWorkspaceTarget, kit *RecoveryKit, now time.Time, services ...*instanceServiceCapture) error {
 	tw, err := NewTarZstWriterConcurrency(sink, concurrency)
 	if err != nil {
 		return err
@@ -1153,6 +1190,11 @@ func writeInstancePayload(sink io.Writer, concurrency int, dbImage []byte, sc *s
 	}
 	if err := tw.WriteStream(instanceDBEntry, 0o600, now, int64(len(dbImage)), bytes.NewReader(dbImage)); err != nil {
 		return fail(err)
+	}
+	for _, service := range services {
+		if err := service.write(tw, sc, now); err != nil {
+			return fail(err)
+		}
 	}
 	index := InstanceIndex{Stores: map[string][]IndexEntry{}}
 	for _, name := range InstanceStores {

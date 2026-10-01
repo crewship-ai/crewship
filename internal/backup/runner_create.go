@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"filippo.io/age"
+	"github.com/crewship-ai/crewship/internal/servicelifecycle"
 )
 
 // takes these rather than a long positional list so call sites (CLI,
@@ -50,7 +51,9 @@ type CreateOptions struct {
 	// unique across tenants (audit C1). Nil is valid for tests.
 	CrewContainerName func(id, slug string) string
 	// DockerOps executes pause/unpause/CopyFrom against the daemon.
-	DockerOps DockerOps
+	DockerOps                 DockerOps
+	ServiceSnapshots          ServiceSnapshotRuntime
+	RecoverServiceMaintenance bool
 	// Storage overrides the file-system operations used for bundle
 	// output. Nil uses LocalStorageOps; tests can inject an in-memory
 	// or S3-backed implementation via package-level SetDefaultStorage
@@ -255,7 +258,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		return nil, err
 	}
 
-	if err := requireSupportedServiceBackups(ctx, db, target.CrewTargets); err != nil {
+	if err := requireSupportedServiceBackups(ctx, db, target.CrewTargets, opts.ServiceSnapshots); err != nil {
 		return nil, err
 	}
 
@@ -372,8 +375,31 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		return nil, err
 	}
 
-	// 5a. Per-crew live data, and each crew's complete environment when
-	// asked for.
+	captureCtx, cancelCapture := context.WithCancel(ctx)
+	defer cancelCapture()
+	ctx = captureCtx
+	fenceKeeper := &serviceFenceKeeper{db: db}
+	go fenceKeeper.run(ctx, cancelCapture)
+	serviceFences, capturedServiceSnapshots, err := captureServiceSnapshots(ctx, db, opts.ServiceSnapshots, payloadWriter, target.CrewTargets, now, opts.RecoverServiceMaintenance, fenceKeeper.add)
+	if err != nil {
+		_ = payloadWriter.Close()
+		_ = sealedFile.Close()
+		return nil, err
+	}
+	defer func() {
+		if retErr != nil {
+			return
+		}
+		for _, fence := range serviceFences {
+			if err := servicelifecycle.EndBackupFence(context.WithoutCancel(ctx), db, fence.crew, fence.token); err != nil {
+				result = nil
+				retErr = err
+				return
+			}
+		}
+	}()
+	serviceSnapshotCount := len(capturedServiceSnapshots)
+	// 5a. Per-crew live data.
 	level := opts.Level
 	if !level.Valid() {
 		level = DefaultScopeLevel
@@ -451,7 +477,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	// the memory and attachment sections and the page files all follow.
 	filter.filterDump(dump)
 	if dump != nil {
-		if err := requireSupportedDumpServiceBackups(dump); err != nil {
+		if err := requireSupportedDumpServiceBackups(dump, capturedServiceSnapshots); err != nil {
 			_ = payloadWriter.Close()
 			_ = sealedFile.Close()
 			return nil, err
@@ -538,6 +564,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		migrations = AppliedMigrationVersions(ctx, db)
 	}
 	contents := buildContents(target, level, captures)
+	contents.ServiceSnapshots = serviceSnapshotCount
 	if memoryBlobsResult != nil {
 		contents.MemoryBlobsIncluded = memoryBlobsResult.Included
 		contents.MemoryBlobsMissing = len(memoryBlobsResult.Missing)
@@ -573,6 +600,9 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	if filter != nil {
 		manifest.Kind = KindCustom
 		manifest.Categories = filter.sorted()
+	}
+	if serviceSnapshotCount > 0 {
+		manifest.FormatVersion = FormatVersionServiceSnapshots
 	}
 	switch {
 	case opts.NoEncrypt:
@@ -618,7 +648,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		_ = st.Remove(context.Background(), partialPath)
 		return nil, fmt.Errorf("backup: stat partial: %w", err)
 	}
-	if err := st.Rename(ctx, partialPath, finalPath); err != nil {
+	if err := publishServiceSnapshotBundle(ctx, db, serviceFences, func() error { return st.Rename(ctx, partialPath, finalPath) }); err != nil {
 		_ = st.Remove(context.Background(), partialPath)
 		return nil, fmt.Errorf("backup: rename final bundle: %w", err)
 	}

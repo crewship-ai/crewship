@@ -1873,3 +1873,17 @@ for every window's exact rule.
 - [Migrations Catalog](/guides/migrations) — what migration ran when, and which `restoreBackfill` hook (if any) will fire on a cross-version restore.
 - [Troubleshooting](/guides/troubleshooting) — recovering from a stuck migration or corrupt DB.
 - [Security → Audit log](/security/audit) — where `backup.created`, `backup.restored`, and `backup.restore.dry_run` events land.
+
+
+### Persistent quota-service disks
+
+Format v4 includes standalone quota-service disks, in addition to crew container
+files. The host quota helper must be configured; a missing transport rejects the
+backup instead of silently losing these disks. Failed capture retains service
+maintenance and requires an explicit operator retry.
+
+After whole-instance recovery, these disks are verified and staged with fresh
+generations. On the destination instance, first run
+`crewship admin instance backups services land --dry-run`, then
+`crewship admin instance backups services land`. Keep the source archive and
+staged images until the destination's services and data have been checked.

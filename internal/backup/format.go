@@ -81,7 +81,10 @@ import (
 // and no existing field changed meaning. A reader tells a bundle that
 // predates the section by attachments_included being absent, not by the
 // format version.
-const FormatVersion = 3
+const FormatVersion = 4
+
+// Quota service images require readers that restore their persistent data.
+const FormatVersionServiceSnapshots = 4
 
 // FormatVersionCrewMemory is the first format version whose
 // memory_included flag means what it says: observed, and about the real
@@ -91,9 +94,8 @@ const FormatVersionCrewMemory = 3
 // MinSupportedFormatVersion is the oldest bundle layout this binary can
 // still read directly. It implements the N-2 policy:
 // MinSupportedFormatVersion = max(1, FormatVersion-2). v1 bundles
-// (10-table dump) are still read directly today; once FormatVersion
-// moves past 3 they are recovered through the converter instead.
-const MinSupportedFormatVersion = 1
+// (10-table dump) are are recovered through the maintained converter chain.
+const MinSupportedFormatVersion = 2
 
 // OldestRecoverableFormatVersion is the oldest bundle layout the current
 // recovery tooling can bring back, directly or through converters. It

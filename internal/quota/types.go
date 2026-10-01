@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"path"
 	"regexp"
 	"strings"
@@ -100,4 +101,12 @@ type ReferenceCatalog interface {
 	Catalog
 	Protect(context.Context, Key, string) error
 	Release(context.Context, Key, string) error
+}
+
+// SnapshotCatalog transfers offline fixed-size ext4 images. Import never replaces
+// an existing generation. Callers must detach all runtime aliases before Export.
+type SnapshotCatalog interface {
+	ReferenceCatalog
+	Export(context.Context, Key, int64, io.Writer) error
+	Import(context.Context, Key, int64, io.Reader) (Descriptor, error)
 }

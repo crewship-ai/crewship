@@ -47,6 +47,7 @@ const (
 	// environment store the server lands from once it runs with Docker
 	// (POST /api/v1/admin/instance/backups/environments/land).
 	RecoveredEnvironmentsDir = "restore-staging/environments"
+	RecoveredServicesDir     = "restore-staging/services"
 )
 
 // Incomplete kinds recover adds on top of what the bundle recorded.
@@ -117,6 +118,7 @@ type RecoverReport struct {
 	AuthKeysRotated   bool                    `json:"auth_keys_rotated"`
 	RuntimeReset      []string                `json:"runtime_reset"`
 	Holds             []quiesce.Hold          `json:"holds"`
+	ServiceSnapshots  int                     `json:"service_snapshots,omitempty"`
 	CrewArchives      []string                `json:"crew_archives,omitempty"`
 	PageProjectsPath  string                  `json:"page_projects_path,omitempty"`
 	Incomplete        []IncompleteItem        `json:"incomplete"`
@@ -205,6 +207,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (*RecoverReport, 
 		rep.Stores[store] = sr
 	}
 	rep.CrewArchives = ex.crewArchives
+	rep.ServiceSnapshots = m.Contents.ServiceSnapshots
 	rep.Incomplete = append(rep.Incomplete, ex.compareIndex(m)...)
 	if m.Contents.Instance.DatabaseSHA256 != "" && ex.dbSHA != m.Contents.Instance.DatabaseSHA256 {
 		return rep, fmt.Errorf("backup: the database in the bundle does not match its manifest digest")
@@ -220,7 +223,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (*RecoverReport, 
 	}
 
 	// 4. The database: migrations forward, runtime reset, holds.
-	if err := finishRecoveredDatabase(ctx, rep, ex.kit, dataDir, logger); err != nil {
+	if err := finishRecoveredDatabase(ctx, rep, ex.kit, dataDir, logger, instanceServiceRecovery{ex.services, m.Contents.ServiceSnapshots}); err != nil {
 		return rep, err
 	}
 
@@ -320,6 +323,7 @@ type extractedInstance struct {
 	index        *InstanceIndex
 	kit          *RecoveryKit
 	crewArchives []string
+	services     *ExtractedPayload
 	envArchives  []string
 }
 
@@ -364,7 +368,13 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 		return nil, err
 	}
 	defer closeAll()
-	ex := &extractedInstance{stores: map[string]StoreRestore{}, hashes: map[string]map[string]IndexEntry{}}
+	serviceDir := filepath.Join(dataDir, RecoveredServicesDir)
+	if err := os.MkdirAll(serviceDir, 0700); err != nil {
+		return nil, err
+	}
+	services := &ExtractedPayload{storage: LocalStorageOps{}, tempDir: serviceDir, serviceImages: map[string]string{}, serviceMetadata: map[string]serviceSnapshot{}}
+	var serviceBytes int64
+	ex := &extractedInstance{services: services, stores: map[string]StoreRestore{}, hashes: map[string]map[string]IndexEntry{}}
 	for _, s := range InstanceStores {
 		if st, ok := m.Contents.Instance.Stores[s]; ok && st.Configured {
 			ex.stores[s] = StoreRestore{Path: RecoveredStoreDir(dataDir, s)}
@@ -387,6 +397,10 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 		}
 		name := hdr.Name
 		switch {
+		case strings.HasPrefix(name, serviceSnapshotsPrefix):
+			if err := services.extractServiceSnapshot(ctx, tr, hdr, name, &serviceBytes); err != nil {
+				return nil, err
+			}
 		case name == instanceDBEntry:
 			dst := filepath.Join(dataDir, "crewship.db")
 			sha, _, err := writeExtracted(dst, tr)
@@ -457,6 +471,23 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 	}
 	if ex.dbSHA == "" {
 		return nil, fmt.Errorf("%w: the payload carries no database", ErrInvalidManifest)
+	}
+	for _, path := range services.serviceImages {
+		file, err := os.OpenFile(path, os.O_RDWR, 0)
+		if err != nil {
+			return nil, err
+		}
+		err = file.Sync()
+		closeErr := file.Close()
+		if err != nil {
+			return nil, err
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+	}
+	if err := services.validateServiceSnapshotArchive(ctx, m.Contents.ServiceSnapshots); err != nil {
+		return nil, err
 	}
 	return ex, nil
 }
@@ -588,7 +619,7 @@ var runtimeResets = []struct{ table, what string }{
 	{"instance_holds", "old holds"},
 }
 
-func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *RecoveryKit, dataDir string, logger *slog.Logger) error {
+func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *RecoveryKit, dataDir string, logger *slog.Logger, serviceArgs ...instanceServiceRecovery) error {
 	env, err := kitEnv(kit)
 	if err != nil {
 		return err
@@ -613,6 +644,16 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 		}
 		rep.MigrationsApplied = len(AppliedMigrationVersions(ctx, db.DB)) - before
 
+		if len(serviceArgs) != 0 {
+			services := serviceArgs[0].payload
+			count := serviceArgs[0].count
+			if err := stageInstanceServiceRecovery(ctx, db.DB, services, count, dataDir); err != nil {
+				return err
+			}
+			if count > 0 {
+				rep.Notes = append(rep.Notes, fmt.Sprintf("%d quota-service image(s) verified and staged; services remain in maintenance until their data are landed on the new host", count))
+			}
+		}
 		for _, r := range runtimeResets {
 			res, err := db.ExecContext(ctx, `DELETE FROM `+r.table) // nosemgrep: gosql-sqli — table names are constants
 			if err != nil {

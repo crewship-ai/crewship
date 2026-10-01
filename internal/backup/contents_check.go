@@ -121,6 +121,9 @@ func checkInstanceContents(ctx context.Context, tr *TarZstReader, m *Manifest, t
 		}
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
+	services := &ExtractedPayload{storage: LocalStorageOps{}, tempDir: tmp, serviceImages: map[string]string{}, serviceMetadata: map[string]serviceSnapshot{}}
+	var serviceBytes int64
+	var kit *RecoveryKit
 	got := map[string]map[string]IndexEntry{}
 	var index *InstanceIndex
 	dbSeen, kitSeen := false, false
@@ -138,6 +141,10 @@ func checkInstanceContents(ctx context.Context, tr *TarZstReader, m *Manifest, t
 		}
 		res.Entries++
 		switch name := hdr.Name; {
+		case strings.HasPrefix(name, serviceSnapshotsPrefix):
+			if err := services.extractServiceSnapshot(ctx, tr, hdr, name, &serviceBytes); err != nil {
+				return err
+			}
 		case name == instanceDBEntry:
 			dbSeen = true
 			dbPath := filepath.Join(tmp, "db.sqlite")
@@ -155,6 +162,9 @@ func checkInstanceContents(ctx context.Context, tr *TarZstReader, m *Manifest, t
 				continue
 			}
 			counts, err := snapshotRowCounts(ctx, db)
+			if err == nil {
+				services.DBDump, err = instanceServiceDump(ctx, db)
+			}
 			_ = db.Close()
 			if err != nil {
 				return err
@@ -177,8 +187,10 @@ func checkInstanceContents(ctx context.Context, tr *TarZstReader, m *Manifest, t
 			if err != nil {
 				return err
 			}
-			if _, err := ParseRecoveryKit(data); err != nil {
+			if parsed, err := ParseRecoveryKit(data); err != nil {
 				res.Problems = append(res.Problems, "the recovery kit does not parse")
+			} else {
+				kit = parsed
 			}
 		case strings.HasPrefix(name, instanceFilesPrefix):
 			store, rel, _ := strings.Cut(strings.TrimPrefix(name, instanceFilesPrefix), "/")
@@ -200,6 +212,16 @@ func checkInstanceContents(ctx context.Context, tr *TarZstReader, m *Manifest, t
 				return err
 			}
 		}
+	}
+	env, err := kitEnv(kit)
+	if err != nil {
+		return err
+	}
+	if err = withEnv(env, func() error {
+		_, err := services.prepareServiceRestorePlan(ctx, m.Contents.ServiceSnapshots)
+		return err
+	}); err != nil {
+		res.Problems = append(res.Problems, err.Error())
 	}
 	if !dbSeen {
 		res.Problems = append(res.Problems, "the payload carries no database")
@@ -245,6 +267,13 @@ func checkInstanceContents(ctx context.Context, tr *TarZstReader, m *Manifest, t
 }
 
 func checkWorkspaceContents(ctx context.Context, tr *TarZstReader, m *Manifest, res *ContentsCheck) error {
+	tmp, err := os.MkdirTemp("", "crewship-service-check-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	services := &ExtractedPayload{storage: LocalStorageOps{}, tempDir: tmp, serviceImages: map[string]string{}, serviceMetadata: map[string]serviceSnapshot{}}
+	var serviceBytes int64
 	attachments, memoryBlobs := 0, 0
 	var dump *DBDump
 	for {
@@ -261,6 +290,10 @@ func checkWorkspaceContents(ctx context.Context, tr *TarZstReader, m *Manifest, 
 		res.Entries++
 		name := strings.TrimPrefix(hdr.Name, "./")
 		switch {
+		case strings.HasPrefix(name, serviceSnapshotsPrefix):
+			if err := services.extractServiceSnapshot(ctx, tr, hdr, name, &serviceBytes); err != nil {
+				return err
+			}
 		case name == "db/dump.json" && hdr.Typeflag == tar.TypeReg:
 			data, err := io.ReadAll(io.LimitReader(tr, maxBackupDBDumpBytes))
 			if err != nil {
@@ -290,6 +323,10 @@ func checkWorkspaceContents(ctx context.Context, tr *TarZstReader, m *Manifest, 
 				return err
 			}
 		}
+	}
+	services.DBDump = dump
+	if _, err := services.prepareServiceRestorePlan(ctx, m.Contents.ServiceSnapshots); err != nil {
+		res.Problems = append(res.Problems, err.Error())
 	}
 	if dump != nil {
 		for _, mm := range compareRowCounts(m.Contents.TableRowCounts, tableRowCounts(dump)) {

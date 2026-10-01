@@ -3,6 +3,8 @@
 package quota
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -204,13 +206,36 @@ func ServeNamespace(ctx context.Context, socket string, serverUID uint32, b *Bac
 			opCtx, cancelOp := context.WithTimeout(ctx, helperCallTimeout)
 			defer cancelOp()
 			var request Request
-			decoder := json.NewDecoder(io.LimitReader(conn, 4096))
+			reader := bufio.NewReader(conn)
+			line, readErr := reader.ReadSlice('\n')
+			decoder := json.NewDecoder(bytes.NewReader(line))
 			decoder.DisallowUnknownFields()
-			if decoder.Decode(&request) != nil || request.Namespace != namespace {
+			if readErr != nil || len(line) > 4096 || decoder.Decode(&request) != nil || request.Namespace != namespace {
 				return
 			}
+			var trailing any
+			if decoder.Decode(&trailing) != io.EOF {
+				return
+			}
+
 			response := Response{Namespace: namespace}
 			switch request.Operation {
+			case "export":
+				_ = conn.SetDeadline(time.Now().Add(30 * time.Minute))
+				d, readErr := b.read(request.Key)
+				if readErr != nil || Validate(request.Key, request.Bytes) != nil || d.Bytes != request.Bytes {
+					err = ErrDenied
+					break
+				}
+				response.Descriptor = d
+				if json.NewEncoder(conn).Encode(response) != nil {
+					return
+				}
+				err = b.Export(ctx, request.Key, request.Bytes, conn)
+				response.Descriptor = Descriptor{}
+			case "import":
+				_ = conn.SetDeadline(time.Now().Add(30 * time.Minute))
+				response.Descriptor, err = b.Import(ctx, request.Key, request.Bytes, reader)
 			case "ensure":
 				response.Descriptor, err = b.Ensure(opCtx, request.Key, request.Bytes, request.Owner)
 			case "verify":
