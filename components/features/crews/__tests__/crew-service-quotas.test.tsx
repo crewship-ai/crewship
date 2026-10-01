@@ -48,6 +48,15 @@ describe("service disk policy", () => {
     expect(screen.getByRole("spinbutton", { name: "redis/data: Capacity in MiB" })).toHaveValue(128)
     expect(save.mock.calls[0][0].expected_services_json).toBe(enforced)
   })
+  it("warns that quota storage makes crew and workspace backups refuse", () => {
+    const save = vi.fn()
+    const { rerender } = render(<CrewServiceQuotas servicesJSON={legacy} canManage save={save} />)
+    expect(screen.queryByText(/backups of this crew and its workspace are refused/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("checkbox", { name: "redis: Enforce disk quotas" }))
+    expect(screen.getByRole("checkbox", { name: /I understand/ }).closest("label")).toHaveTextContent(/backups of this crew and its workspace are refused/)
+    rerender(<CrewServiceQuotas servicesJSON={enforced} canManage={false} save={save} />)
+    expect(screen.getByRole("note")).toHaveTextContent(/backups of this crew and its workspace are refused/)
+  })
   it("offers no mutation below manager and does not reconstruct private settings", () => {
     const save = vi.fn()
     const { rerender } = render(<CrewServiceQuotas servicesJSON={enforced} canManage={false} save={save} />)

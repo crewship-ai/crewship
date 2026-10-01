@@ -8,6 +8,9 @@ import { Input } from "@/components/ui/input"
 type Volume = { name: string; mount: string; quota_bytes?: number; generation?: number }
 type Service = { name: string; image: string; ports?: string[]; env_refs?: string[]; volumes?: Volume[]; quota_enforced?: boolean }
 const MIB = 1024 * 1024
+// Quota volume contents cannot be captured yet, so the backup guard refuses
+// rather than produce a bundle that silently omits service data.
+const BACKUP_WARNING = "While a service keeps quota storage, backups of this crew and its workspace are refused until snapshot transport for quota volumes is available."
 
 // Accept only the server's complete public representation. Private or unknown
 // settings cannot be reconstructed by this quota editor.
@@ -40,6 +43,7 @@ export function CrewServiceQuotas({ servicesJSON, canManage, save }: {
   useEffect(() => { setDraft(parseServices(servicesJSON)); setAcknowledged(false); setError(null) }, [servicesJSON])
 
   const changed = JSON.stringify(draft) !== JSON.stringify(original)
+  const usesQuotaStorage = draft?.some(service => service.quota_enforced && (service.volumes?.length ?? 0) > 0) ?? false
   const storageChanged = draft?.some((service, i) => {
     const before = original?.[i]
     return service.quota_enforced !== before?.quota_enforced || service.volumes?.some((volume, j) => (volume.generation ?? 1) !== (before?.volumes?.[j].generation ?? 1))
@@ -106,7 +110,8 @@ export function CrewServiceQuotas({ servicesJSON, canManage, save }: {
         </>}
       </div>)}
     </div>)}
-    {canManage && changed && storageChanged && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={acknowledged} disabled={pending} onChange={event => setAcknowledged(event.target.checked)} />I understand that changing storage policy or generation recreates the service and switches volumes. New quota generations start empty; existing data is not copied automatically.</label>}
+    {usesQuotaStorage && !(canManage && changed && storageChanged) && <p role="note" className="text-sm text-muted-foreground">{BACKUP_WARNING}</p>}
+    {canManage && changed && storageChanged && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={acknowledged} disabled={pending} onChange={event => setAcknowledged(event.target.checked)} /><span>I understand that changing storage policy or generation recreates the service and switches volumes. New quota generations start empty; existing data is not copied automatically. {usesQuotaStorage && BACKUP_WARNING}</span></label>}
     {error && <p role="alert" className="text-sm">{error}</p>}
     {canManage && draft && draft.length > 0 && <Button className="coarse:h-12" disabled={!changed || pending} onClick={() => void submit()}>{pending ? "Saving…" : "Save disk policy"}</Button>}
   </section>
