@@ -221,7 +221,7 @@ func extractArchive(ctx context.Context, path string) (*ExtractedPayload, error)
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	return ExtractPayload(ctx, f)
+	return ExtractPayload(ctx, f, filepath.Dir(path))
 }
 
 // landTimeout bounds one land request's Docker work per environment set.

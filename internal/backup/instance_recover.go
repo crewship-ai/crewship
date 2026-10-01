@@ -647,6 +647,8 @@ var runtimeResets = []struct{ table, what string }{
 	{"provider_login_refresh", "provider login refresh leases"},
 	{"provider_device_logins", "provider device logins in progress"},
 	{"instance_holds", "old holds"},
+	{"service_backup_fences", "source service backup epochs"},
+	{"service_operation_leases", "source service operation epochs"},
 }
 
 func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *RecoveryKit, dataDir string, logger *slog.Logger, serviceArgs ...instanceServiceRecovery) error {
@@ -674,7 +676,7 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 		}
 		rep.MigrationsApplied = len(AppliedMigrationVersions(ctx, db.DB)) - before
 
-		if len(serviceArgs) != 0 {
+		if len(serviceArgs) != 0 && serviceArgs[0].count > 0 {
 			services := serviceArgs[0].payload
 			count := serviceArgs[0].count
 			if err := stageInstanceServiceRecovery(ctx, db.DB, services, count, dataDir); err != nil {
@@ -685,6 +687,9 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 			}
 		}
 		for _, r := range runtimeResets {
+			if len(serviceArgs) != 0 && serviceArgs[0].count > 0 && (r.table == "service_backup_fences" || r.table == "service_operation_leases") {
+				continue
+			}
 			res, err := db.ExecContext(ctx, `DELETE FROM `+r.table) // nosemgrep: gosql-sqli — table names are constants
 			if err != nil {
 				if strings.Contains(strings.ToLower(err.Error()), "no such table") {

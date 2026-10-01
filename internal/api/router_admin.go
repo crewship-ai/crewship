@@ -185,6 +185,7 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("GET", "/api/v1/admin/instance/backups/drills", ib.ListDrills)
 	// openapi: responses 200,400,401,403,500
 	r.authedInstance("POST", "/api/v1/admin/instance/backups/environments/land", ib.LandEnvironments)
+	// openapi: responses 200,400,401,403,500,503
 	r.authedInstance("POST", "/api/v1/admin/instance/backups/services/land", ib.LandServices)
 	// openapi: responses 200,401,403,500
 	r.authedInstance("GET", "/api/v1/admin/instance/holds", ib.ListHolds)

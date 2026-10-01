@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/pages"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -457,7 +458,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// Large per-crew sections live in temp files owned by the returned
 	// ExtractedPayload — Close must fire on every exit path to clean
 	// them up.
-	extracted, err := ExtractPayload(ctx, effectivePayload)
+	extracted, err := ExtractPayload(ctx, effectivePayload, filepath.Dir(opts.Path))
 	if err != nil {
 		return nil, err
 	}

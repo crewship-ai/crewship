@@ -5,6 +5,7 @@ package quota
 import (
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 )
@@ -29,17 +30,18 @@ func TestSnapshotImportCountsQuarantinedImages(t *testing.T) {
 type stalledSnapshotReader struct {
 	started chan struct{}
 	release chan struct{}
+	once    sync.Once
 }
 
-func (r stalledSnapshotReader) Read([]byte) (int, error) {
-	close(r.started)
+func (r *stalledSnapshotReader) Read([]byte) (int, error) {
+	r.once.Do(func() { close(r.started) })
 	<-r.release
 	return 0, io.EOF
 }
 func TestSnapshotImportDoesNotBlockOtherKeys(t *testing.T) {
 	u := newUnitBackend(t)
 	key := Key{"crew", "database", "data", 1}
-	reader := stalledSnapshotReader{make(chan struct{}), make(chan struct{})}
+	reader := &stalledSnapshotReader{started: make(chan struct{}), release: make(chan struct{})}
 	imported := make(chan error, 1)
 	go func() { _, err := u.Import(t.Context(), key, MinBytes, reader); imported <- err }()
 	defer func() { close(reader.release); <-imported }()

@@ -34,10 +34,22 @@ func Seal(raw string) (string, error) {
 // The encrypted purpose marker prevents ciphertext from another vault field
 // from being interpreted as a service document.
 func Open(raw string) (string, error) {
+	return openWithDecryptor(raw, encryption.Decrypt)
+}
+
+// OpenWithKeys reads a recovered service document using only the supplied
+// authority. It never changes or falls back to the running process's keys.
+func OpenWithKeys(raw string, keys map[string][]byte) (string, error) {
+	return openWithDecryptor(raw, func(value string) (string, error) {
+		return encryption.DecryptWithKeys(value, keys)
+	})
+}
+
+func openWithDecryptor(raw string, decrypt func(string) (string, error)) (string, error) {
 	if !strings.HasPrefix(raw, envelopePrefix) {
 		return raw, nil
 	}
-	plain, err := encryption.Decrypt(strings.TrimPrefix(raw, envelopePrefix))
+	plain, err := decrypt(strings.TrimPrefix(raw, envelopePrefix))
 	if err != nil || !strings.HasPrefix(plain, purpose) {
 		return "", errors.New("private service configuration cannot be decrypted")
 	}

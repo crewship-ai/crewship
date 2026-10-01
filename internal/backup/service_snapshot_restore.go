@@ -56,7 +56,7 @@ func (p *ExtractedPayload) prepareServiceRestorePlan(ctx context.Context, count 
 			return nil, fmt.Errorf("backup: duplicate service owner")
 		}
 		crewRows[id] = row
-		specs, err := declaredServiceSnapshots(body, id, slug)
+		specs, err := declaredServiceSnapshotsWithOpener(body, id, slug, p.openServiceConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -410,4 +410,11 @@ func (p *serviceRestorePlan) removeUncommittedImports(ctx context.Context, runti
 		item.imported = false
 	}
 	return result
+}
+
+func (p *ExtractedPayload) openServiceConfig(raw string) (string, error) {
+	if p.serviceConfigKeys != nil {
+		return serviceconfig.OpenWithKeys(raw, p.serviceConfigKeys)
+	}
+	return serviceconfig.Open(raw)
 }

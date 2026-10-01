@@ -94,9 +94,10 @@ func AdoptBackupFence(ctx context.Context, db *sql.DB, crew, operation string) (
 	token := hex.EncodeToString(random[:])
 	now := time.Now()
 	result, err := db.ExecContext(ctx, `UPDATE service_backup_fences SET token=?,operation=?,producer_until=? WHERE crew_id=? AND producer_until<=?
+ AND (operation='backup' OR ?='restore')
  AND EXISTS(SELECT 1 FROM crews WHERE id=? AND deleted_at IS NULL)
  AND NOT EXISTS(SELECT 1 FROM service_runtime_intents WHERE crew_id=? AND lease_until>?)
- AND NOT EXISTS(SELECT 1 FROM service_operation_leases WHERE crew_id=? AND lease_until>?)`, token, operation, tsformat.Format(now.Add(2*time.Minute)), crew, tsformat.Format(now), crew, crew, tsformat.Format(now), crew, tsformat.Format(now))
+ AND NOT EXISTS(SELECT 1 FROM service_operation_leases WHERE crew_id=? AND lease_until>?)`, token, operation, tsformat.Format(now.Add(2*time.Minute)), crew, tsformat.Format(now), operation, crew, crew, tsformat.Format(now), crew, tsformat.Format(now))
 	if err != nil {
 		return "", err
 	}

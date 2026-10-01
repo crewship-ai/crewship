@@ -213,14 +213,14 @@ func checkInstanceContents(ctx context.Context, tr *TarZstReader, m *Manifest, t
 			}
 		}
 	}
-	env, err := kitEnv(kit)
-	if err != nil {
-		return err
+	if kit != nil {
+		keys, err := kit.KeyMap()
+		if err != nil {
+			return err
+		}
+		services.serviceConfigKeys = keys
 	}
-	if err = withEnv(env, func() error {
-		_, err := services.prepareServiceRestorePlan(ctx, m.Contents.ServiceSnapshots)
-		return err
-	}); err != nil {
+	if _, err := services.prepareServiceRestorePlan(ctx, m.Contents.ServiceSnapshots); err != nil {
 		res.Problems = append(res.Problems, err.Error())
 	}
 	if !dbSeen {

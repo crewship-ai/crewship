@@ -59,7 +59,11 @@ type snapshotDeclaration struct {
 }
 
 func declaredServiceSnapshots(body, crew, slug string) ([]serviceSnapshot, error) {
-	plain, err := serviceconfig.Open(body)
+	return declaredServiceSnapshotsWithOpener(body, crew, slug, serviceconfig.Open)
+}
+
+func declaredServiceSnapshotsWithOpener(body, crew, slug string, open func(string) (string, error)) ([]serviceSnapshot, error) {
+	plain, err := open(body)
 	if err != nil {
 		return nil, err
 	}

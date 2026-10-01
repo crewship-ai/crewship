@@ -103,6 +103,7 @@ type ExtractedPayload struct {
 	serviceImages            map[string]string
 	serviceMetadata          map[string]serviceSnapshot
 	serviceRecoveryCommitted bool
+	serviceConfigKeys        map[string][]byte
 }
 
 // storageOrDefault returns the payload's captured StorageOps, or the
@@ -285,12 +286,16 @@ func (p *ExtractedPayload) OpenAttachmentBlobs(ctx context.Context) (io.ReadClos
 // The returned ExtractedPayload owns its temp directory; the caller
 // MUST call Close() once finished with all sections (typically via
 // defer in RestoreBackup).
-func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, error) {
+func ExtractPayload(ctx context.Context, payload io.Reader, stagingParents ...string) (*ExtractedPayload, error) {
 	// Capture the storage backend NOW so a later SetDefaultStorage
 	// swap cannot send cleanup / reopen traffic to a different
 	// implementation than the one that created the temp files.
 	st := getDefaultStorage()
-	tempDir, err := st.MkdirTemp(ctx, "", "crewship-restore-*")
+	parent := ""
+	if len(stagingParents) > 0 {
+		parent = stagingParents[0]
+	}
+	tempDir, err := st.MkdirTemp(ctx, parent, "crewship-restore-*")
 	if err != nil {
 		return nil, fmt.Errorf("backup: temp dir: %w", err)
 	}

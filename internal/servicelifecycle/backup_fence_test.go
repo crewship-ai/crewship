@@ -204,3 +204,21 @@ func TestBeginBackupFencePreservesDatabaseErrors(t *testing.T) {
 		t.Fatalf("database failure misclassified: %v", err)
 	}
 }
+
+func TestBackupRetryCannotAdoptStagedRestoreFence(t *testing.T) {
+	db, _ := fenceDB(t)
+	token, err := BeginBackupFence(t.Context(), db, "crew", "restore")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`UPDATE service_backup_fences SET producer_until='' WHERE crew_id='crew'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = AdoptBackupFence(t.Context(), db, "crew", "backup"); !errors.Is(err, ErrBackupMaintenance) {
+		t.Fatalf("backup stole restore epoch: %v", err)
+	}
+	var actual, operation string
+	if err = db.QueryRow(`SELECT token,operation FROM service_backup_fences WHERE crew_id='crew'`).Scan(&actual, &operation); err != nil || actual != token || operation != "restore" {
+		t.Fatalf("restore ownership changed: %s %s %v", actual, operation, err)
+	}
+}
