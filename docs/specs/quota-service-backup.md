@@ -84,6 +84,10 @@ the host's configured quota helper. The corresponding endpoint is
 `POST /api/v1/admin/instance/backups/services/land`. Maintenance release and the
 instance audit commit together. A failed landing keeps maintenance; a retry
 accepts an already imported image only after an exact offline checksum check.
+If the database commit succeeds but publication of the landing plan fails, the
+synced pending plan remains available. The same landing command verifies its
+images, declarations and restore epochs before publishing it and continuing;
+uncommitted, changed or ambiguous pending plans are never promoted.
 
 The instance drill verifies staged service bytes, ownership, generations and
 maintenance. It does not claim to mount those images through a physical helper;

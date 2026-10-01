@@ -58,6 +58,10 @@ func writeInstanceServicePlan(payload *ExtractedPayload, plan *serviceRestorePla
 		_ = os.Remove(path)
 		return "", err
 	}
+	if err = syncServiceLandingDirectory(filepath.Dir(path)); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
 	return path, nil
 }
 
@@ -74,70 +78,11 @@ func LandRecoveredServices(ctx context.Context, db *sql.DB, dataDir string, runt
 		opts = options[0]
 	}
 	dir := filepath.Join(dataDir, RecoveredServicesDir)
-	file, err := os.Open(filepath.Join(dir, instanceServicePlanFile))
+	plan, record, err := loadServiceLandingPlan(ctx, db, dir)
 	if err != nil {
 		return 0, err
 	}
-	defer file.Close()
-	var record instanceServiceLanding
-	decoder := json.NewDecoder(io.LimitReader(file, 8<<20))
-	decoder.DisallowUnknownFields()
-	if err = decoder.Decode(&record); err != nil {
-		return 0, err
-	}
-	var trailing any
-	if decoder.Decode(&trailing) != io.EOF {
-		return 0, fmt.Errorf("backup: trailing service landing data")
-	}
-	if len(record.Items) > 4096 {
-		return 0, fmt.Errorf("backup: excessive service landing records")
-	}
-	payload := &ExtractedPayload{storage: LocalStorageOps{}, tempDir: dir, serviceImages: map[string]string{}, serviceMetadata: map[string]serviceSnapshot{}}
-	for _, item := range record.Items {
-		if item.Target.Crew != item.Source.CrewID || item.Target.Service != item.Source.Service || item.Target.Volume != item.Source.Volume || item.Target.Generation == item.Source.Generation || quota.Validate(item.Target, item.Source.Bytes) != nil {
-			return 0, fmt.Errorf("backup: invalid service landing target")
-		}
-		if filepath.Base(item.Image) != item.Image {
-			return 0, fmt.Errorf("backup: unsafe service image path")
-		}
-		meta := item.Source
-		meta.Generation = item.Target.Generation
-		if _, exists := payload.serviceMetadata[meta.name()]; exists {
-			return 0, fmt.Errorf("backup: duplicate service landing target")
-		}
-		payload.serviceMetadata[meta.name()] = meta
-		payload.serviceImages[meta.name()] = filepath.Join(dir, item.Image)
-	}
-	dump, err := instanceServiceDump(ctx, db)
-	if err != nil {
-		return 0, err
-	}
-	payload.DBDump = dump
-	plan, err := payload.prepareServiceRestorePlan(ctx, len(record.Items))
-	if err != nil {
-		return 0, err
-	}
-	for i := range plan.items {
-		plan.items[i].target = plan.items[i].source.key()
-	}
-	crews := map[string]bool{}
-	for _, item := range plan.items {
-		crews[item.target.Crew] = true
-	}
-	tokens := map[string]string{}
-	for _, fence := range record.Fences {
-		if !crews[fence.Crew] || tokens[fence.Crew] != "" || len(fence.Token) != 32 {
-			return 0, fmt.Errorf("backup: invalid service landing maintenance")
-		}
-		tokens[fence.Crew] = fence.Token
-		var matches int
-		if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM service_backup_fences WHERE crew_id=? AND token=? AND operation='restore'`, fence.Crew, fence.Token).Scan(&matches); err != nil || matches != 1 {
-			return 0, fmt.Errorf("backup: recovered service maintenance changed")
-		}
-	}
-	if len(tokens) != len(crews) {
-		return 0, fmt.Errorf("backup: missing service landing maintenance")
-	}
+	payload := plan.payload
 	if opts.DryRun {
 		return len(plan.items), nil
 	}
@@ -218,4 +163,131 @@ func LandRecoveredServices(ctx context.Context, db *sql.DB, dataDir string, runt
 		return 0, err
 	}
 	return len(plan.items), nil
+}
+
+// Pending plans may survive a committed database transaction whose final
+// rename failed. Never promote one until all its images, declarations and
+// restore epochs have been verified against the recovered database.
+func loadServiceLandingPlan(ctx context.Context, db *sql.DB, dir string) (*serviceRestorePlan, *instanceServiceLanding, error) {
+	path := filepath.Join(dir, instanceServicePlanFile)
+	plan, record, err := readServiceLandingPlan(ctx, db, dir, path)
+	if err == nil {
+		if err = syncServiceLandingDirectory(dir); err != nil {
+			return nil, nil, err
+		}
+		return plan, record, nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, nil, err
+	}
+	missing := err
+	candidates, err := filepath.Glob(filepath.Join(dir, ".landing-*.json"))
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(candidates) > 16 {
+		return nil, nil, fmt.Errorf("backup: too many pending service plans")
+	}
+	selected := ""
+	for _, candidate := range candidates {
+		candidatePlan, candidateRecord, validateErr := readServiceLandingPlan(ctx, db, dir, candidate)
+		if validateErr != nil || len(candidatePlan.items) == 0 {
+			continue
+		}
+		if selected != "" {
+			return nil, nil, fmt.Errorf("backup: ambiguous committed service plans")
+		}
+		selected, plan, record = candidate, candidatePlan, candidateRecord
+	}
+	if selected == "" {
+		return nil, nil, missing
+	}
+	if err = os.Rename(selected, path); err != nil {
+		// A concurrent retry may have published the same committed intent already.
+		concurrentPlan, concurrentRecord, readErr := readServiceLandingPlan(ctx, db, dir, path)
+		if readErr != nil {
+			return nil, nil, err
+		}
+		plan, record = concurrentPlan, concurrentRecord
+	}
+	if err = syncServiceLandingDirectory(dir); err != nil {
+		return nil, nil, err
+	}
+	return plan, record, nil
+}
+
+func syncServiceLandingDirectory(dir string) error {
+	file, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	return errors.Join(file.Sync(), file.Close())
+}
+
+func readServiceLandingPlan(ctx context.Context, db *sql.DB, dir, path string) (*serviceRestorePlan, *instanceServiceLanding, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer file.Close()
+	var record instanceServiceLanding
+	decoder := json.NewDecoder(io.LimitReader(file, 8<<20))
+	decoder.DisallowUnknownFields()
+	if err = decoder.Decode(&record); err != nil {
+		return nil, nil, err
+	}
+	var trailing any
+	if decoder.Decode(&trailing) != io.EOF {
+		return nil, nil, fmt.Errorf("backup: trailing service landing data")
+	}
+	if len(record.Items) > 4096 {
+		return nil, nil, fmt.Errorf("backup: excessive service landing records")
+	}
+	payload := &ExtractedPayload{storage: LocalStorageOps{}, tempDir: dir, serviceImages: map[string]string{}, serviceMetadata: map[string]serviceSnapshot{}}
+	for _, item := range record.Items {
+		if item.Target.Crew != item.Source.CrewID || item.Target.Service != item.Source.Service || item.Target.Volume != item.Source.Volume || item.Target.Generation == item.Source.Generation || quota.Validate(item.Target, item.Source.Bytes) != nil {
+			return nil, nil, fmt.Errorf("backup: invalid service landing target")
+		}
+		if filepath.Base(item.Image) != item.Image {
+			return nil, nil, fmt.Errorf("backup: unsafe service image path")
+		}
+		meta := item.Source
+		meta.Generation = item.Target.Generation
+		if _, exists := payload.serviceMetadata[meta.name()]; exists {
+			return nil, nil, fmt.Errorf("backup: duplicate service landing target")
+		}
+		payload.serviceMetadata[meta.name()] = meta
+		payload.serviceImages[meta.name()] = filepath.Join(dir, item.Image)
+	}
+	dump, err := instanceServiceDump(ctx, db)
+	if err != nil {
+		return nil, nil, err
+	}
+	payload.DBDump = dump
+	plan, err := payload.prepareServiceRestorePlan(ctx, len(record.Items))
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range plan.items {
+		plan.items[i].target = plan.items[i].source.key()
+	}
+	crews := map[string]bool{}
+	for _, item := range plan.items {
+		crews[item.target.Crew] = true
+	}
+	tokens := map[string]string{}
+	for _, fence := range record.Fences {
+		if !crews[fence.Crew] || tokens[fence.Crew] != "" || len(fence.Token) != 32 {
+			return nil, nil, fmt.Errorf("backup: invalid service landing maintenance")
+		}
+		tokens[fence.Crew] = fence.Token
+		var matches int
+		if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM service_backup_fences WHERE crew_id=? AND token=? AND operation='restore'`, fence.Crew, fence.Token).Scan(&matches); err != nil || matches != 1 {
+			return nil, nil, fmt.Errorf("backup: recovered service maintenance changed")
+		}
+	}
+	if len(tokens) != len(crews) {
+		return nil, nil, fmt.Errorf("backup: missing service landing maintenance")
+	}
+	return plan, &record, nil
 }
