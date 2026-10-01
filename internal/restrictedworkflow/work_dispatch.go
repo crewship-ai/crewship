@@ -231,6 +231,12 @@ func (s *Service) receiptState(ctx context.Context, j job) (string, error) {
 	}
 	// The domain result must not escape before the dispatch outcome is durable.
 	if j.State == "completed" && state != "succeeded" {
+		switch state {
+		case "failed", "expired":
+			return "failed", nil
+		case "cancelled":
+			return "canceled", nil
+		}
 		return "running", nil
 	}
 	return j.State, nil

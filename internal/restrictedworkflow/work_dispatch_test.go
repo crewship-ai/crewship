@@ -241,6 +241,34 @@ func TestWorkflowUnconfirmedContainerStopWithholdsCapturedOutput(t *testing.T) {
 	}
 }
 
+func TestWorkflowNegativeResolutionWithholdsCapturedOutputAndStopsPolling(t *testing.T) {
+	for _, state := range []work.State{work.StateFailed, work.StateCancelled} {
+		t.Run(string(state), func(t *testing.T) {
+			s, runner := fixture(t)
+			s.executor = unconfirmedGraphStop{runner}
+			r := admitFixtureJob(t, s)
+			if worked, err := s.DispatchNext(t.Context()); !worked || err == nil {
+				t.Fatalf("unconfirmed stop reported success %v %v", worked, err)
+			}
+			it, err := s.ledger.Get(t.Context(), r.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = s.ledger.Resolve(t.Context(), r.ID, it.Generation, state, "owner", "investigated outcome rejected"); err != nil {
+				t.Fatal(err)
+			}
+			result, err := s.Result(t.Context(), "h1", "w", r.ID)
+			want := "failed"
+			if state == work.StateCancelled {
+				want = "canceled"
+			}
+			if err != nil || result.State != want || len(result.Outputs) != 0 {
+				t.Fatalf("negative resolution must be terminal and private: %+v %v", result, err)
+			}
+		})
+	}
+}
+
 func TestWorkflowExpiredLeaseFencesCredentialResolutionAndNextLeaf(t *testing.T) {
 	s, runner := fixture(t)
 	r := admitFixtureJob(t, s)
