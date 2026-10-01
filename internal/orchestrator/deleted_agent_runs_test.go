@@ -153,4 +153,22 @@ func TestAgentLivenessRefusesExecAtTheGate(t *testing.T) {
 	}
 }
 
+// A run without an agent id has no agents row to be deleted from; the
+// liveness check must not turn that into a refusal (agentMayRun fails closed
+// on a missing row).
+func TestAgentLivenessSkipsARunWithoutAnAgentID(t *testing.T) {
+	o := New(&mockContainer{}, newMemState(), slog.Default())
+	called := false
+	o.SetAgentLiveness(func(context.Context, string) error {
+		called = true
+		return errors.New("no such agent")
+	})
+	req := AgentRunRequest{AgentSlug: "s", RunID: NewRunID(), ContainerID: "c"}
+	ctx, finish := o.trackAgentRun(context.Background(), &req)
+	defer finish()
+	if err := req.ExecGate(ctx); err != nil || called {
+		t.Fatalf("gate err=%v, liveness called=%v", err, called)
+	}
+}
+
 var _ provider.ContainerProvider = stopProcessContainer{}

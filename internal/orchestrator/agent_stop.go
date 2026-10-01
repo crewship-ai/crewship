@@ -50,7 +50,7 @@ func (o *Orchestrator) trackAgentRun(ctx context.Context, req *AgentRunRequest) 
 		if stopped {
 			return context.Canceled
 		}
-		if live != nil {
+		if live != nil && agentID != "" {
 			if err := live(ctx, agentID); err != nil {
 				return err
 			}
