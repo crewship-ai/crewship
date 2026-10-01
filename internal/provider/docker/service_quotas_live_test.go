@@ -31,7 +31,7 @@ func TestLiveServiceQuotaBounds(t *testing.T) {
 	defer p.client.Close()
 	crew := fmt.Sprintf("quota%d", time.Now().UnixNano())
 	slug := "quota-probe"
-	svc := provider.CrewService{Name: "probe", Image: "alpine:3", Command: []string{"sh", "-c", "sleep 300"}}
+	svc := provider.CrewService{Name: "probe", Image: "alpine:3", QuotaEnforced: true, Command: []string{"sh", "-c", "sleep 300"}}
 	id, err := p.ensureSidecar(ctx, crew, slug, &svc)
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestLiveServiceQuotaBounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = checkServiceQuotas(inspected.Container.HostConfig); err != nil {
+	if err = checkServiceQuotaProfile(inspected.Container.HostConfig); err != nil {
 		t.Fatal(err)
 	}
 	script := `set -eu; test "$(cat /sys/fs/cgroup/memory.max)" = 2147483648; test "$(cat /sys/fs/cgroup/memory.swap.max)" = 0; test "$(cat /sys/fs/cgroup/pids.max)" = 512; test "$(cat /sys/fs/cgroup/cpu.max)" = "100000 100000"; if dd if=/dev/zero of=/tmp/overflow bs=1048576 count=70 2>/tmp/error; then exit 91; fi; test "$(wc -c </tmp/overflow)" -le 67108864; rm -f /tmp/overflow /tmp/error; echo quota-overflow-denied`

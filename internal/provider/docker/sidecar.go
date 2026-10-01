@@ -128,7 +128,22 @@ func computeSidecarSpecHash(svc *provider.CrewService) string {
 		envPairs = append(envPairs, [2]string{k, svc.Env[k]})
 	}
 
-	vols := append([]provider.CrewServiceVolume(nil), svc.Volumes...)
+	// The digest is stored on every running service. A service that does
+	// not opt in to quotas must hash exactly as it did before quota fields
+	// existed, or the upgrade recreates it (and orphans image-declared
+	// anonymous volumes). New fields are therefore omitempty and appended.
+	// ControllerManaged is not part of the spec: its restart policy is
+	// corrected in place with ContainerUpdate.
+	type hashVolume struct {
+		Name       string
+		Mount      string
+		QuotaBytes int64 `json:",omitempty"`
+		Generation int64 `json:",omitempty"`
+	}
+	vols := make([]hashVolume, 0, len(svc.Volumes))
+	for _, v := range svc.Volumes {
+		vols = append(vols, hashVolume{Name: v.Name, Mount: v.Mount, QuotaBytes: v.QuotaBytes, Generation: v.Generation})
+	}
 	sort.Slice(vols, func(i, j int) bool {
 		if vols[i].Name != vols[j].Name {
 			return vols[i].Name < vols[j].Name
@@ -137,23 +152,23 @@ func computeSidecarSpecHash(svc *provider.CrewService) string {
 	})
 
 	payload := struct {
-		QuotaPolicy       string
-		ControllerManaged bool `json:"controller_managed,omitempty"`
-		QuotaEnforced     bool `json:"quota_enforced,omitempty"`
-		Command           []string
-		Env               [][2]string
-		Ports             []string
-		Volumes           []provider.CrewServiceVolume
-		Healthcheck       *provider.CrewServiceHealthcheck
+		Command       []string
+		Env           [][2]string
+		Ports         []string
+		Volumes       []hashVolume
+		Healthcheck   *provider.CrewServiceHealthcheck
+		QuotaPolicy   string `json:",omitempty"`
+		QuotaEnforced bool   `json:",omitempty"`
 	}{
-		QuotaPolicy:       serviceQuotaPolicyVersion,
-		ControllerManaged: svc.ControllerManaged,
-		QuotaEnforced:     svc.QuotaEnforced,
-		Command:           svc.Command,
-		Env:               envPairs,
-		Ports:             svc.Ports,
-		Volumes:           vols,
-		Healthcheck:       svc.Healthcheck,
+		Command:       svc.Command,
+		Env:           envPairs,
+		Ports:         svc.Ports,
+		Volumes:       vols,
+		Healthcheck:   svc.Healthcheck,
+		QuotaEnforced: svc.QuotaEnforced,
+	}
+	if svc.QuotaEnforced {
+		payload.QuotaPolicy = serviceQuotaPolicyVersion
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -411,23 +426,35 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 		} else if c.Labels[sidecarSpecHashLabel] != desiredHash {
 			drift = "spec drift (command/env/ports/volumes/healthcheck)"
 		}
-		if drift == "" {
+		// Services that did not opt in to quota enforcement keep exactly the
+		// pre-quota reuse rule (image + spec hash). Auditing them against the
+		// quota profile would recreate every existing service on upgrade and
+		// orphan image-declared anonymous volumes (an empty database).
+		var inspectedHost *container.HostConfig
+		if drift == "" && (svc.QuotaEnforced || svc.ControllerManaged) {
 			inspected, err := p.client.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
 			if err != nil {
-				return "", fmt.Errorf("inspect service quota enforcement: %w", err)
+				return "", fmt.Errorf("inspect service runtime policy: %w", err)
 			}
-			if err = checkServiceQuotaProfile(inspected.Container.HostConfig, svc.QuotaEnforced); err != nil {
+			inspectedHost = inspected.Container.HostConfig
+			if inspectedHost == nil {
+				return "", fmt.Errorf("inspect service runtime policy: HostConfig unavailable")
+			}
+		}
+		if drift == "" && svc.QuotaEnforced {
+			if err = checkServiceQuotaProfile(inspectedHost); err != nil {
+				drift = err.Error()
+			} else if err = checkQuotaMounts(inspectedHost.Mounts, quotaMounts); err != nil {
 				drift = err.Error()
 			}
-			if drift == "" && svc.QuotaEnforced {
-				if err = checkQuotaMounts(inspected.Container.HostConfig.Mounts, quotaMounts); err != nil {
-					drift = err.Error()
-				}
-			}
-			if drift == "" {
-				if err = checkServiceRestartPolicy(inspected.Container.HostConfig, svc.ControllerManaged || svc.QuotaEnforced); err != nil {
-					drift = err.Error()
-				}
+		}
+		if drift == "" && svc.ControllerManaged && checkServiceRestartPolicy(inspectedHost, true) != nil {
+			// The durable controller owns restarts. Correct the policy in
+			// place: recreating would discard the container's anonymous
+			// volumes for a change Docker can apply live.
+			policy := container.RestartPolicy{Name: container.RestartPolicyDisabled}
+			if _, err := p.client.ContainerUpdate(ctx, c.ID, client.ContainerUpdateOptions{RestartPolicy: &policy}); err != nil {
+				return "", fmt.Errorf("hand service restarts to the controller: %w", err)
 			}
 		}
 		if drift != "" {
@@ -571,13 +598,14 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 		},
 	}
 
-	applyServiceQuotas(hostCfg)
 	if svc.ControllerManaged || svc.QuotaEnforced {
 		hostCfg.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyDisabled}
 	}
 	if svc.QuotaEnforced {
-		hostCfg.ReadonlyRootfs = true
-		hostCfg.Tmpfs["/run"] = "rw,nosuid,nodev,noexec,size=16777216,mode=0755"
+		// Opt-in only: the bounded /tmp tmpfs is charged to the memory
+		// limit and hides the image's /tmp, and the log driver override
+		// replaces the operator's daemon default.
+		applyServiceQuotas(hostCfg)
 	}
 
 	// NetworkingConfig wires the sidecar to the crew bridge with a

@@ -9,8 +9,9 @@ import (
 
 const serviceQuotaPolicyVersion = "service-quotas-v1"
 
-// These are host-enforced service bounds. Writable roots and named data volumes
-// remain trusted legacy storage until an explicitly quota-backed catalog exists.
+// applyServiceQuotas is the host-enforced profile of a service that opted in
+// with quota_enforced. Services that did not opt in keep the pre-quota
+// profile (memory/CPU/PID caps only) and their operator's log driver.
 func applyServiceQuotas(h *container.HostConfig) {
 	pids := int64(512)
 	h.Resources.Memory = sidecarMemoryBytes
@@ -20,24 +21,24 @@ func applyServiceQuotas(h *container.HostConfig) {
 	// Rotation bounds retained logs; nonblocking buffering may drop logs when
 	// the daemon cannot keep up rather than stalling the service indefinitely.
 	h.LogConfig = container.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3", "mode": "non-blocking", "max-buffer-size": "1m"}}
-	// Keep /tmp executable for legacy service image compatibility. This bounds
-	// that tmpfs, not the writable image root or persistent data volumes.
-	h.Tmpfs = map[string]string{"/tmp": "rw,nosuid,nodev,size=67108864,mode=1777"}
+	// The image root is read-only; writable scratch space is bounded tmpfs
+	// (charged to the memory limit). /tmp stays executable for image
+	// compatibility.
+	h.ReadonlyRootfs = true
+	h.Tmpfs = map[string]string{
+		"/tmp": "rw,nosuid,nodev,size=67108864,mode=1777",
+		"/run": "rw,nosuid,nodev,noexec,size=16777216,mode=0755",
+	}
 }
-func checkServiceQuotas(h *container.HostConfig) error { return checkServiceQuotaProfile(h, false) }
-func checkServiceQuotaProfile(h *container.HostConfig, hard bool) error {
+
+// checkServiceQuotaProfile audits a quota-enforced container's actual
+// HostConfig against applyServiceQuotas.
+func checkServiceQuotaProfile(h *container.HostConfig) error {
 	if h == nil {
 		return fmt.Errorf("service HostConfig unavailable")
 	}
 	want := &container.HostConfig{}
 	applyServiceQuotas(want)
-	if hard {
-		if h.RestartPolicy.Name != container.RestartPolicyDisabled {
-			return fmt.Errorf("quota service autonomous restart bypass")
-		}
-		want.ReadonlyRootfs = true
-		want.Tmpfs["/run"] = "rw,nosuid,nodev,noexec,size=16777216,mode=0755"
-	}
 	if h.ReadonlyRootfs != want.ReadonlyRootfs {
 		return fmt.Errorf("service root write policy drift")
 	}

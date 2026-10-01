@@ -1,26 +1,31 @@
 package docker
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 )
 
+// quotaHostConfig is the HostConfig a correctly created quota service has.
+func quotaHostConfig() *container.HostConfig {
+	hc := &container.HostConfig{Mounts: []mount.Mount{{Type: mount.TypeVolume, Source: "crewship-quota-syntheticquota", Target: "/data", VolumeOptions: &mount.VolumeOptions{NoCopy: true}}}}
+	hc.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyDisabled}
+	applyServiceQuotas(hc)
+	return hc
+}
+
 func TestServiceQuotaActualConfigurationDrift(t *testing.T) {
-	for _, field := range []string{"valid", "swap", "cpu", "memory", "pids", "logs", "tmpfs", "inspect_failure", "managed_restart"} {
+	for _, field := range []string{"valid", "swap", "cpu", "memory", "pids", "logs", "tmpfs", "rootfs", "mount", "inspect_failure"} {
 		t.Run(field, func(t *testing.T) {
-			svc := provider.CrewService{Name: "redis", Image: "redis:7"}
-			if field == "managed_restart" {
-				svc.ControllerManaged = true
-			}
-			hash := computeSidecarSpecHash(&svc)
-			hc := &container.HostConfig{}
-			applyServiceQuotas(hc)
+			svc := quotaTestService()
+			daemon := newFakeQuotaDaemon(t)
+			daemon.volumes["crewship-quota-syntheticquota"] = existingQuotaVolume("alpha", nil)
+			daemon.imageConfig = map[string]any{"Volumes": map[string]any{"/data": map[string]any{}}}
+			hc := quotaHostConfig()
 			switch field {
 			case "swap":
 				hc.MemorySwap = 0
@@ -34,52 +39,20 @@ func TestServiceQuotaActualConfigurationDrift(t *testing.T) {
 				hc.LogConfig.Config = nil
 			case "tmpfs":
 				hc.Tmpfs = nil
+			case "rootfs":
+				hc.ReadonlyRootfs = false
+			case "mount":
+				hc.Mounts[0].Type = mount.TypeBind
 			}
-			created, stopped, removed := false, false, false
-			p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
-				path := r.URL.Path
-				switch {
-				case strings.HasSuffix(path, "/containers/json"):
-					_ = json.NewEncoder(w).Encode([]map[string]any{{"Id": "existing", "Names": []string{"/crewship-svc-alpha-ckalpha0001-redis"}, "Image": svc.Image, "State": "running", "Labels": map[string]string{sidecarSpecHashLabel: hash}}})
-				case strings.HasSuffix(path, "/containers/existing/json"):
-					if field == "inspect_failure" {
-						http.Error(w, "unavailable", 500)
-						return
-					}
-					_ = json.NewEncoder(w).Encode(map[string]any{"Id": "existing", "HostConfig": hc})
-				case strings.HasSuffix(path, "/containers/existing/stop"):
-					stopped = true
-					w.WriteHeader(204)
-				case r.Method == http.MethodDelete && strings.HasSuffix(path, "/containers/existing"):
-					removed = true
-					w.WriteHeader(204)
-				case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json"):
-					_ = json.NewEncoder(w).Encode(map[string]string{"Id": "image"})
-				case strings.HasSuffix(path, "/images/create"):
-					_, _ = w.Write([]byte("{}"))
-				case strings.HasSuffix(path, "/containers/create"):
-					created = true
-					var req container.CreateRequest
-					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-						t.Error(err)
-					}
-					if field == "managed_restart" && req.HostConfig.RestartPolicy.Name != container.RestartPolicyDisabled {
-						t.Error("managed service replacement still restarts autonomously")
-					}
-					if err := checkServiceQuotas(req.HostConfig); err != nil {
-						t.Errorf("replacement quota: %v", err)
-					}
-					_ = json.NewEncoder(w).Encode(map[string]string{"Id": "replacement"})
-				case strings.HasSuffix(path, "/containers/replacement/start"):
-					w.WriteHeader(204)
-				default:
-					t.Errorf("unexpected request %s %s", r.Method, path)
-					w.WriteHeader(500)
-				}
-			})
-			id, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
+			p := newCovProvider(t, Config{QuotaCatalog: &fakeQuotaCatalog{}}, daemon.ServeHTTP)
+			daemon.containers = []map[string]any{{"Id": "existing", "Names": []string{"/" + p.sidecarContainerName(covCrewID, "alpha", svc.Name)}, "Image": svc.Image, "State": "running",
+				"Labels": sidecarContainerLabels(covCrewID, "alpha", svc.Name, computeSidecarSpecHash(&svc))}}
+			if field != "inspect_failure" {
+				daemon.hostConfigs["existing"] = hc
+			}
+			id, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", &svc)
 			if field == "inspect_failure" {
-				if err == nil || created || stopped || removed {
+				if err == nil || len(daemon.containerCreates) != 0 || len(daemon.stopped) != 0 || len(daemon.removed) != 0 {
 					t.Fatalf("inspect failure was reused or mutated: %v", err)
 				}
 				return
@@ -88,31 +61,47 @@ func TestServiceQuotaActualConfigurationDrift(t *testing.T) {
 				t.Fatal(err)
 			}
 			if field == "valid" {
-				if id != "existing" || created || stopped || removed {
+				if id != "existing" || len(daemon.containerCreates) != 0 || len(daemon.removed) != 0 {
 					t.Fatal("valid audited service not reused")
 				}
-			} else if id != "replacement" || !created || !stopped || !removed {
-				t.Fatalf("drift not replaced %q %t %t %t", id, created, stopped, removed)
+				return
+			}
+			if id != "replacement" || len(daemon.containerCreates) != 1 || len(daemon.removed) != 1 {
+				t.Fatalf("drift not replaced %q creates %d removed %v", id, len(daemon.containerCreates), daemon.removed)
+			}
+			if err := checkServiceQuotaProfile(daemon.containerCreates[0].HostConfig); err != nil {
+				t.Errorf("replacement quota: %v", err)
 			}
 		})
 	}
 }
+
 func TestServiceQuotaCreateBounds(t *testing.T) {
-	hc := captureSidecarHostConfig(t)
-	if err := checkServiceQuotas(hc); err != nil {
+	daemon := newFakeQuotaDaemon(t)
+	daemon.imageConfig = map[string]any{"Volumes": map[string]any{"/data": map[string]any{}}}
+	svc := quotaTestService()
+	p := newCovProvider(t, Config{QuotaCatalog: &fakeQuotaCatalog{}}, daemon.ServeHTTP)
+	if _, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", &svc); err != nil {
 		t.Fatal(err)
 	}
-	if hc.MemorySwap != hc.Memory || hc.LogConfig.Config["max-size"] != "10m" || hc.LogConfig.Config["max-file"] != "3" || !strings.Contains(hc.Tmpfs["/tmp"], "size=67108864") {
+	if len(daemon.containerCreates) != 1 {
+		t.Fatal("quota service not created")
+	}
+	hc := daemon.containerCreates[0].HostConfig
+	if err := checkServiceQuotaProfile(hc); err != nil {
+		t.Fatal(err)
+	}
+	if hc.MemorySwap != hc.Memory || hc.LogConfig.Config["max-size"] != "10m" || hc.LogConfig.Config["max-file"] != "3" || !strings.Contains(hc.Tmpfs["/tmp"], "size=67108864") || !hc.ReadonlyRootfs {
 		t.Fatal("missing host-enforced limits")
 	}
 }
 
-func TestManagedServicePolicyChangesSpecAndPreservesLegacy(t *testing.T) {
+func TestManagedServicePolicyKeepsSpecAndLegacyRestart(t *testing.T) {
 	svc := covRedisSvc()
 	legacy := computeSidecarSpecHash(&svc)
 	svc.ControllerManaged = true
-	if legacy == computeSidecarSpecHash(&svc) {
-		t.Fatal("managed restart policy missing from immutable desired spec")
+	if legacy != computeSidecarSpecHash(&svc) {
+		t.Fatal("controller ownership must be corrected in place, not by a spec-hash recreate")
 	}
 	h := captureSidecarHostConfig(t)
 	if h.RestartPolicy.Name != container.RestartPolicyOnFailure || h.RestartPolicy.MaximumRetryCount != 3 {
@@ -132,7 +121,7 @@ func TestManagedStopUpdatesExitedPreUpgradeContainer(t *testing.T) {
 			var body struct{ RestartPolicy container.RestartPolicy }
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			if body.RestartPolicy.Name != container.RestartPolicyDisabled {
-				t.Fatal("old service restart policy retained")
+				t.Error("old service restart policy retained")
 			}
 			_, _ = w.Write([]byte(`{}`))
 		case strings.HasSuffix(r.URL.Path, "/stop"):

@@ -31,7 +31,9 @@ func (p *Provider) quotaServiceVolumes(ctx context.Context, crewID, crewSlug str
 	if err := validateQuotaService(svc); err != nil {
 		return nil, err
 	}
-	if !svc.QuotaEnforced {
+	if !svc.QuotaEnforced || len(svc.Volumes) == 0 {
+		// A quota service without persistent volumes needs only the
+		// Docker-enforced profile, not the host helper.
 		return nil, nil
 	}
 	catalog, ok := p.cfg.QuotaCatalog.(quota.ReferenceCatalog)

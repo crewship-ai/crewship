@@ -88,7 +88,7 @@ func TestQuotaServiceOwnedVolumeAndReadOnlyRoot(t *testing.T) {
 			var req container.CreateRequest
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			rootReadOnly = req.HostConfig.ReadonlyRootfs
-			if err := checkServiceQuotaProfile(req.HostConfig, true); err != nil {
+			if err := checkServiceQuotaProfile(req.HostConfig); err != nil {
 				t.Error(err)
 			}
 			if len(req.HostConfig.Mounts) != 1 || req.HostConfig.Mounts[0].Source != "crewship-quota-syntheticquota" || !req.HostConfig.Mounts[0].VolumeOptions.NoCopy {
