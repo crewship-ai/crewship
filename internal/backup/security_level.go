@@ -132,7 +132,7 @@ func floatSecurityLevel(f float64) (int, bool) {
 	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) || f < math.MinInt32 || f > math.MaxInt32 {
 		return 0, false
 	}
-	return int(f), true
+	return tierFromInt64(int64(f))
 }
 
 // tierFromInt64 refuses a value outside the 32-bit range instead of letting
