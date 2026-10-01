@@ -69,4 +69,8 @@ describe("applying an accent", () => {
     new Function(ACCENT_BOOT_SCRIPT)()
     expect(document.documentElement.hasAttribute("data-accent")).toBe(false)
   })
+
+  it("boot script cannot close its own <script> tag", () => {
+    expect(ACCENT_BOOT_SCRIPT).not.toMatch(/<\/|<!--|\u2028|\u2029/)
+  })
 })

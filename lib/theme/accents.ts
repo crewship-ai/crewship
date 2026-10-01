@@ -76,9 +76,16 @@ export function readStoredAccent(): AccentId {
  * first paint — otherwise every load flashes Blue. Only a registered id is
  * ever written to the attribute.
  */
-export const ACCENT_BOOT_SCRIPT = `(function(){try{var a=localStorage.getItem(${JSON.stringify(
+export const ACCENT_BOOT_SCRIPT = `(function(){try{var a=localStorage.getItem(${scriptJSON(
   ACCENT_STORAGE_KEY,
-)});if(${JSON.stringify(IDS)}.indexOf(a)>-1)document.documentElement.setAttribute("data-accent",a)}catch(e){}})()`
+)});if(${scriptJSON(IDS)}.indexOf(a)>-1)document.documentElement.setAttribute("data-accent",a)}catch(e){}})()`
+
+/** JSON that stays inert inside an inline <script>: no "</script>", no line
+ *  separators that end a JS string. */
+function scriptJSON(value: unknown): string {
+  const escapes: Record<string, string> = { "<": "\\u003c", ">": "\\u003e", "/": "\\u002f", "\u2028": "\\u2028", "\u2029": "\\u2029" }
+  return JSON.stringify(value).replace(/[<>/\u2028\u2029]/g, (c) => escapes[c])
+}
 
 /**
  * Test helper: the brand tokens one accent defines for one mode, parsed from
