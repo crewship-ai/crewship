@@ -187,7 +187,7 @@ ON CONFLICT(key) DO UPDATE SET reason = excluded.reason, count = excluded.count,
 }
 
 func parseTime(s string) time.Time {
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"} {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"} { // tsformat:allow: read-side parser for stored values
 		if t, err := time.Parse(layout, s); err == nil {
 			return t.UTC()
 		}

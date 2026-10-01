@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Restore report kinds (restore_reports.kind).
@@ -109,7 +111,7 @@ func RecordRestoreReport(ctx context.Context, db *sql.DB, r RestoreReport) (Rest
 INSERT INTO restore_reports (id, kind, actor_user_id, bundle_path, target, result, report, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.Kind, nullableString(r.ActorUserID), r.BundlePath, r.Target, r.Result, string(r.Report),
-		r.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		tsformat.Format(r.CreatedAt)); err != nil {
 		return r, fmt.Errorf("backup: record restore report: %w", err)
 	}
 	return r, nil
@@ -136,7 +138,7 @@ FROM restore_reports ORDER BY created_at DESC, id DESC LIMIT ?`, limit)
 			return nil, fmt.Errorf("backup: scan restore report: %w", err)
 		}
 		r.Report = json.RawMessage(report)
-		t, err := time.Parse(time.RFC3339Nano, created)
+		t, err := time.Parse(time.RFC3339Nano, created) // tsformat:allow: parses tsformat.Format output and legacy rows
 		if err != nil {
 			return nil, fmt.Errorf("backup: parse restore report created_at %q: %w", created, err)
 		}

@@ -217,9 +217,9 @@ func RestoreAttachmentBlobs(ctx context.Context, root string, payload *Extracted
 	if len(order) == 0 {
 		return st, nil
 	}
-	pending := make(map[string][]string, len(byWorkspace))
+	pending := make(map[string]pendingBlob, len(byWorkspace))
 	for sha, wss := range byWorkspace {
-		pending[sha] = wss
+		pending[sha] = pendingBlob{sha: sha, workspaces: wss}
 	}
 	if root == "" && !dryRun {
 		st.RootUnset = true
@@ -227,15 +227,23 @@ func RestoreAttachmentBlobs(ctx context.Context, root string, payload *Extracted
 		return st, err
 	}
 	// Whatever no bundle entry matched is missing.
-	for _, wss := range pending {
-		st.Missing += len(wss)
+	for _, pb := range pending {
+		st.Missing += len(pb.workspaces)
 	}
 	return st, nil
 }
 
+// pendingBlob is one blob the dump references. sha is the dump's own copy
+// of the digest: the archive entry's name only finds the entry, it never
+// reaches a path.
+type pendingBlob struct {
+	sha        string
+	workspaces []string
+}
+
 // walkAttachmentBlobs streams the section, landing every entry pending names
 // and removing it from pending.
-func walkAttachmentBlobs(ctx context.Context, root string, payload *ExtractedPayload, pending map[string][]string, dryRun bool, st *AttachmentRestoreStats) error {
+func walkAttachmentBlobs(ctx context.Context, root string, payload *ExtractedPayload, pending map[string]pendingBlob, dryRun bool, st *AttachmentRestoreStats) error {
 	if payload == nil {
 		return nil
 	}
@@ -264,13 +272,12 @@ func walkAttachmentBlobs(ctx context.Context, root string, payload *ExtractedPay
 		}
 		// hdr.Name is archive-controlled and used only as a lookup key; the
 		// destination comes from the dump's rows (see attachmentRefs).
-		sha := path.Base(hdr.Name)
-		wss, known := pending[sha]
+		pb, known := pending[path.Base(hdr.Name)]
 		if !known {
 			continue
 		}
-		delete(pending, sha)
-		if err := restoreOneAttachmentBlob(root, sha, wss, tr, dryRun, st); err != nil {
+		delete(pending, pb.sha)
+		if err := restoreOneAttachmentBlob(root, pb.sha, pb.workspaces, tr, dryRun, st); err != nil {
 			return err
 		}
 	}

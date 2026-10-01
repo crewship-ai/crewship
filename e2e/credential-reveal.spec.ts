@@ -1,4 +1,11 @@
-import { test, expect } from "@playwright/test"
+import { test, expect, type Page } from "@playwright/test"
+
+// The rail's mode menu: pin the panel open (the old cycling "Sidebar: hover"
+// button landed on pinned from the default hover mode).
+async function pinSidebar(page: Page) {
+  await page.getByRole("button", { name: /^Sidebar: / }).click()
+  await page.getByRole("menuitemradio", { name: /^Expanded/ }).click()
+}
 
 test("Static export helper serves root and denies traversal", async ({ request }) => {
   expect((await request.get("/")).status()).toBe(200)
@@ -39,7 +46,7 @@ for (const scenario of [
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
     })
     await page.goto("/credentials")
-    await page.getByRole("button", { name: "Sidebar: hover", exact: true }).click()
+    await pinSidebar(page)
     await page.getByText("Demo file", { exact: true }).first().click()
     await expect(page.getByText("Back to credentials", { exact: true })).toBeVisible()
     const reveal = page.getByRole("button", { name: "Reveal the existing value…", exact: true })

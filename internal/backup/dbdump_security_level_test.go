@@ -17,6 +17,7 @@ package backup
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -231,5 +232,21 @@ func TestInspectSecurityLevels(t *testing.T) {
 
 	if got, total := InspectSecurityLevels(nil); total != 0 || got != nil {
 		t.Errorf("nil dump = (%v, %d), want (nil, 0)", got, total)
+	}
+}
+
+// A tampered bundle can carry a level far outside int's tier range. It must
+// be refused as "not a tier", never truncated into one: on a 32-bit build
+// int(int64(1<<32 + 2)) is 2, a valid tier the bundle never said.
+func TestParseSecurityLevelRefusesOutOfRange(t *testing.T) {
+	for _, v := range []any{int64(1<<32 + 2), int64(-1 << 40), "4294967298", json.Number("4294967298"), float64(1 << 40), []byte("-4294967296")} {
+		if n, ok := parseSecurityLevel(v); ok {
+			t.Errorf("parseSecurityLevel(%T %v) = %d, accepted", v, v, n)
+		}
+	}
+	for _, v := range []any{int64(3), "2", json.Number("1"), float64(3)} {
+		if _, ok := parseSecurityLevel(v); !ok {
+			t.Errorf("parseSecurityLevel(%T %v) refused a tier", v, v)
+		}
 	}
 }

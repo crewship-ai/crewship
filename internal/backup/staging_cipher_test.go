@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestStagingCipher_RoundTripTamperTruncate(t *testing.T) {
@@ -98,55 +97,53 @@ func readStaged(sc *stagingCipher, path string) ([]byte, error) {
 
 // The encrypted copy must not make the quiet window much longer: copying a
 // store through the staging cipher costs about what a plain copy does.
-func TestStagingCipher_CopyCostIsComparable(t *testing.T) {
-	if testing.Short() {
-		t.Skip("timing")
-	}
-	src := t.TempDir()
+// Wall-clock ratios are noise on shared CI runners, so this is a pair of
+// benchmarks rather than an asserting test; compare them with
+//
+//	go test ./internal/backup -run '^$' -bench 'StagingCopy' -benchtime 5x
+func stagingCopyFixture(b *testing.B) string {
+	b.Helper()
+	src := b.TempDir()
 	buf := make([]byte, 256<<10)
 	for i := 0; i < 64; i++ { // 16 MiB in 64 files
 		_, _ = rand.Read(buf)
 		if err := os.WriteFile(filepath.Join(src, "f"+string(rune('a'+i%26))+string(rune('a'+i/26))), buf, 0o600); err != nil {
-			t.Fatal(err)
+			b.Fatal(err)
 		}
 	}
-	plainCopy := func(dst string) {
+	return src
+}
+
+// BenchmarkStagingCopyPlain is the baseline: a hashed plaintext copy, as
+// the index hashes every file.
+func BenchmarkStagingCopyPlain(b *testing.B) {
+	src := stagingCopyFixture(b)
+	b.SetBytes(16 << 20)
+	for b.Loop() {
+		dst := b.TempDir()
 		entries, _ := os.ReadDir(src)
 		for _, e := range entries {
 			in, _ := os.Open(filepath.Join(src, e.Name()))
 			out, _ := os.Create(filepath.Join(dst, e.Name()))
-			h := sha256.New() // the index hashes every file, before and after
+			h := sha256.New()
 			_, _ = io.Copy(io.MultiWriter(out, h), in)
 			_ = in.Close()
 			_ = out.Close()
 		}
 	}
-	best := func(f func(dst string)) int64 {
-		var b int64 = 1 << 62
-		for i := 0; i < 3; i++ {
-			dst := t.TempDir()
-			start := nowMono()
-			f(dst)
-			if d := nowMono() - start; d < b {
-				b = d
-			}
-		}
-		return b
-	}
-	plain := best(plainCopy)
-	sc, _ := newStagingCipher()
-	enc := best(func(dst string) {
-		if _, _, _, err := copyTree(t.Context(), src, dst, nil, sc); err != nil {
-			t.Fatal(err)
-		}
-	})
-	t.Logf("16 MiB: hashed plaintext copy (before) %.1f ms, hashed encrypted copy (now) %.1f ms", float64(plain)/1e6, float64(enc)/1e6)
-	// Generous, because CI machines are noisy.
-	if enc > 3*plain+int64(200e6) {
-		t.Fatalf("encrypted staging copy %.1f ms vs plain %.1f ms", float64(enc)/1e6, float64(plain)/1e6)
-	}
 }
 
-var monoStart = time.Now()
-
-func nowMono() int64 { return int64(time.Since(monoStart)) }
+// BenchmarkStagingCopyEncrypted is the same store through the staging cipher.
+func BenchmarkStagingCopyEncrypted(b *testing.B) {
+	src := stagingCopyFixture(b)
+	sc, err := newStagingCipher()
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(16 << 20)
+	for b.Loop() {
+		if _, _, _, err := copyTree(b.Context(), src, b.TempDir(), nil, sc); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

@@ -70,6 +70,10 @@ func TestCollectCrew_ACancelledCopyStillFails(t *testing.T) {
 }
 
 func TestCopyTree_UnreadableFilesAreSkippedAndNamed(t *testing.T) {
+	// SKIP-WAIVER: permanent platform guard, not deferred work. Mode 0000
+	// cannot deny root, so the permission failure this test injects is
+	// unreachable when euid is 0 and the test would pass without exercising
+	// anything. No tracking issue: there is nothing to come back and fix.
 	if os.Geteuid() == 0 {
 		t.Skip("root reads mode-0000 files")
 	}

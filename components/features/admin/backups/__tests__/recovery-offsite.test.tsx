@@ -51,7 +51,7 @@ it("fetches an off-site copy and continues the restore with it", async () => {
   expect(JSON.parse(String((post?.[1] as RequestInit).body))).toEqual({ destination_id: "d1", key: KEY })
   // The job is followed until it is done, then the wizard moves on.
   expect(await screen.findByRole("radiogroup", { name: "Restore into" }, { timeout: 5000 })).toBeInTheDocument()
-  fireEvent.click(screen.getByRole("button", { name: "Next", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Next" }))
   fireEvent.change(screen.getByLabelText("AGE identity"), { target: { value: "AGE-SECRET-KEY-1TEST" } })
   fireEvent.click(screen.getByRole("button", { name: "Run the checks" }))
   expect(await screen.findByText(`crewship recover --bundle ${LOCAL} --identity <key-file> --data-dir /var/lib/crewship`)).toBeInTheDocument()

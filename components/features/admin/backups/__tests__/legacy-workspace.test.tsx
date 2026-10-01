@@ -85,7 +85,7 @@ describe("the recovery wizard", () => {
     h.api.mockImplementation((url: string) => url.endsWith("/restore/checks") ? Promise.resolve(new Response("404 page not found", { status: 404 })) : json({ dry_run: true }))
     render(<RestoreWizard ctx={{ scope: "workspaces", selected: new Set(["ws-b", "ws-c"]), workspaces: [], currentWorkspaceId: "ws-a", demo: false, go: vi.fn(), focusRun: null, focusPath: "/b.tar.zst", backUpNow: vi.fn(), newPlanSignal: 0 }} />)
     fireEvent.click(screen.getByRole("radio", { name: /Replace a workspace/ }))
-    fireEvent.click(screen.getByRole("button", { name: "Next", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Next" }))
     fireEvent.change(screen.getByLabelText("AGE identity"), { target: { value: "AGE-SECRET-KEY-1TEST" } })
     fireEvent.click(screen.getByRole("button", { name: "Run the checks" }))
     fireEvent.click(await screen.findByRole("button", { name: "Run the dry run" }))

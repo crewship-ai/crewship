@@ -26,6 +26,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/safepath"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Files recover writes into the data directory.
@@ -634,7 +635,7 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 		// as interrupted by a crash and retry them on first boot.
 		if res, err := db.ExecContext(ctx, `UPDATE backup_runs SET status = 'interrupted',
 			error = 'was running on the source server when this backup was taken; not retried after a restore',
-			ended_at = ? WHERE status = 'running'`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			ended_at = ? WHERE status = 'running'`, tsformat.Format(time.Now())); err != nil {
 			if !strings.Contains(strings.ToLower(err.Error()), "no such table") {
 				return fmt.Errorf("backup: close source backup runs: %w", err)
 			}

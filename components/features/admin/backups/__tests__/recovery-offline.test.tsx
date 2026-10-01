@@ -40,7 +40,7 @@ afterEach(cleanup)
 function throughChecks(target?: RegExp) {
   render(<RestoreWizard ctx={ctx} />)
   if (target) fireEvent.click(screen.getByRole("radio", { name: target }))
-  fireEvent.click(screen.getByRole("button", { name: "Next", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Next" }))
   fireEvent.change(screen.getByLabelText("AGE identity"), { target: { value: "review-only identity" } })
   fireEvent.click(screen.getByRole("button", { name: "Run the checks" }))
 }
