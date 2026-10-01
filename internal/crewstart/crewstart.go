@@ -184,20 +184,22 @@ func (s *Starter) StartResolved(ctx context.Context, cfg provider.CrewConfig, no
 	// Before complete: a rebuild rewrites crews.cached_image, which complete
 	// then reads. A caller that resolved its config before Start (the
 	// pipeline) holds the tag from before the rebuild, so once the gate has
-	// run the completer's tag wins; the caller's stays as the fallback when
-	// the completer cannot answer.
+	// run only the completer's tag is trusted: when it cannot supply one,
+	// the caller's unverified tag is refused rather than started.
 	gated, err := waitForImage(ctx, cfg.ID)
 	if err != nil {
 		return "", cfg, err
 	}
 	callerImage := cfg.CachedImage
-	if gated && s.completer != nil {
+	reresolve := gated && s.completer != nil
+	if reresolve {
 		cfg.CachedImage = ""
 	}
 
 	cfg = s.complete(ctx, cfg, notify)
-	if cfg.CachedImage == "" {
-		cfg.CachedImage = callerImage
+	if reresolve && cfg.CachedImage == "" && callerImage != "" {
+		return "", cfg, fmt.Errorf("%w: the current image of crew %s could not be read after the image check",
+			ErrImageNotReady, cfg.ID)
 	}
 	if policy, ok := s.completer.(interface {
 		FilterServices(context.Context, provider.CrewConfig) (provider.CrewConfig, error)

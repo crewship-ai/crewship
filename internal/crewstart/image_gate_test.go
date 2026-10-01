@@ -118,3 +118,21 @@ func TestStartWithoutACompleterKeepsTheCallersImage(t *testing.T) {
 		t.Errorf("runtime started from %q, want the caller's image", f.runtimeCfg.CachedImage)
 	}
 }
+
+func TestStartRefusesTheCallersStaleImageWhenTheCompleterFailsAfterTheGate(t *testing.T) {
+	// The gate may have rebuilt under a new tag; the caller's tag is
+	// unverified. Without the current one, nothing starts.
+	f := &fakeRuntime{}
+	setGate(t, func(context.Context, string) error { return nil })
+	completer := CompleterFunc(func(context.Context, provider.CrewConfig) (provider.CrewConfig, error) {
+		return provider.CrewConfig{}, errors.New("database is locked")
+	})
+	cfg := provider.CrewConfig{ID: "c", Slug: "s", CachedImage: "crewship-cache:old"}
+	_, err := New(f, completer, nil).Start(context.Background(), cfg)
+	if !errors.Is(err, ErrImageNotReady) {
+		t.Fatalf("err = %v, want ErrImageNotReady", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("runtime started from the stale image: %v", f.calls)
+	}
+}
