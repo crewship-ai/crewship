@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs a private helper per database instance. Does not start/restart services
 # unless --activate is explicit. Run only as a reviewed host administrator.
-set -euo pipefail
+set -Eeuo pipefail
 INSTANCE=""; SERVER_UNIT=""; SERVER_UID=1000; CAPACITY_BYTES=17179869184; HEADROOM_BYTES=1073741824; BINARY=""; ACTIVATE=0
 # Plain or template units (crewship-ws@3.service); instance part may not be empty.
 SERVER_UNIT_RE='^[a-zA-Z0-9][a-zA-Z0-9_.-]*(@[a-zA-Z0-9_.-]+)?\.service$'
@@ -43,9 +43,55 @@ PY
 install -d -o root -g root -m 0755 /usr/local/libexec /etc/crewship-quota /var/lib/crewship-quota /run/crewship-quota
 install -d -o root -g root -m 0700 "/var/lib/crewship-quota/$INSTANCE"
 install -d -o root -g root -m 0755 "/run/crewship-quota/$INSTANCE" "/etc/systemd/system/$SERVER_UNIT.d"
+# BEGIN shared-install
+# The helper binary and its unit are shared by every instance on the host.
+# Both are staged under temporary names first; each existing file is kept
+# as a hard-link backup before an atomic rename replaces it, and any later
+# failure puts the previous pair back, so no instance restarts into a new
+# binary under an old unit or the reverse.
+SHARED_DESTS=()
+shared_rollback() {
+ local dest
+ for dest in "${SHARED_DESTS[@]}"; do
+  if [[ -e $dest.crewship-prev ]]; then mv -f -- "$dest.crewship-prev" "$dest"; else rm -f -- "$dest"; fi
+ done
+ SHARED_DESTS=()
+}
+on_shared_error() {
+ trap - ERR
+ shared_rollback
+ systemctl daemon-reload || true
+ echo "installation failed; previous shared helper files restored" >&2
+ exit "$1"
+}
+arm_shared_rollback() { trap 'on_shared_error $?' ERR; }
+# install_shared SRC DEST MODE [SRC DEST MODE...]
+install_shared() {
+ local -a staged=() dests=()
+ local tmp i
+ while (($#)); do
+  tmp=$(mktemp "${2%/*}/.${2##*/}.XXXXXX") || { rm -f -- "${staged[@]}"; return 1; }
+  staged+=("$tmp"); dests+=("$2")
+  install -o root -g root -m "$3" "$1" "$tmp" || { rm -f -- "${staged[@]}"; return 1; }
+  shift 3
+ done
+ for i in "${!dests[@]}"; do
+  if [[ -e ${dests[i]} ]]; then ln -f -- "${dests[i]}" "${dests[i]}.crewship-prev"; else rm -f -- "${dests[i]}.crewship-prev"; fi
+  SHARED_DESTS+=("${dests[i]}")
+  mv -f -- "${staged[i]}" "${dests[i]}"
+ done
+}
+commit_shared() {
+ local dest
+ trap - ERR
+ for dest in "${SHARED_DESTS[@]}"; do rm -f -- "$dest.crewship-prev"; done
+ SHARED_DESTS=()
+}
+# END shared-install
 # Binary is shared code only; catalog/socket/config remain per instance.
-install -o root -g root -m 0755 "$BINARY" /usr/local/libexec/crewship-quota-helper
-install -o root -g root -m 0644 "$SCRIPT_DIR/../packaging/crewship-quota-helper@.service" /etc/systemd/system/crewship-quota-helper@.service
+arm_shared_rollback
+install_shared "$BINARY" /usr/local/libexec/crewship-quota-helper 0755 \
+ "$SCRIPT_DIR/../packaging/crewship-quota-helper@.service" /etc/systemd/system/crewship-quota-helper@.service 0644
 printf 'SERVER_UID=%s\nCAPACITY_BYTES=%s\nHEADROOM_BYTES=%s\n' "$SERVER_UID" "$CAPACITY_BYTES" "$HEADROOM_BYTES" > "/etc/crewship-quota/$INSTANCE.env"
 chmod 0600 "/etc/crewship-quota/$INSTANCE.env"
 cat > "/etc/systemd/system/$SERVER_UNIT.d/quota-helper.conf" <<UNIT
@@ -59,5 +105,6 @@ UNIT
 chmod 0644 "/etc/systemd/system/$SERVER_UNIT.d/quota-helper.conf"
 systemctl daemon-reload
 systemctl enable "crewship-quota-helper@$INSTANCE.service"
+commit_shared
 if ((ACTIVATE)); then systemctl start "crewship-quota-helper@$INSTANCE.service";fi
 printf 'Installed private catalog %s; server configuration applies at its next restart. No server or Docker restart performed.\n' "$INSTANCE"
