@@ -14,6 +14,7 @@ package main
 // database does not merely lack data, it reports someone else's.
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -190,9 +191,12 @@ func TestAcceptance_AdminListUsers_ServerDownIsAnError(t *testing.T) {
 	}
 }
 
-// --locked-only cannot be answered from the API, and answering it anyway with
-// a client-side filter over a field the response does not carry would print
-// "(no currently locked-out users)" for a workspace full of them.
+// --locked-only cannot be answered from a server that does not return
+// lockout state (this stub is shaped like one from before the field), and
+// answering it anyway with a client-side filter over a field the response
+// does not carry would print "(no currently locked-out users)" for a
+// workspace full of them. A current server answers it over HTTP — see
+// TestAcceptance_AdminUserVerbs.
 func TestAcceptance_AdminListUsers_LockedOnlyRefusesOverHTTP(t *testing.T) {
 	stub := newAdminUsersStub(t)
 	dataDir := localDBFixture(t)
@@ -475,5 +479,36 @@ func TestAcceptance_MemoryVersions_ReadTheServer(t *testing.T) {
 	}
 	if !strings.Contains(out, "content from the server") {
 		t.Errorf("blob body missing:\n%s", out)
+	}
+}
+
+// Recovery without the bootstrap. The one-time bootstrap never runs again, so
+// an instance whose last admin is gone stays without one until someone on the
+// host names a new admin in the database file. `add-admin --local` is that
+// way back, and it must work on exactly that state.
+func TestAcceptance_AddAdminLocal_RecoversAnInstanceWithNoAdmin(t *testing.T) {
+	dataDir := localDBFixture(t)
+	db, err := sql.Open("sqlite", filepath.Join(dataDir, "crewship.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO app_settings (key, value) VALUES ('instance.admin_bootstrapped', 'oldest workspace owners')`); err != nil {
+		t.Fatalf("mark bootstrapped: %v", err)
+	}
+	_ = db.Close()
+
+	cfg := localDBStubConfig(t, "http://127.0.0.1:1")
+	out, err := runLocalDBCLI(t, cfg, dataDir, nil, "admin", "instance", "add-admin", "stale@localfile.invalid", "--local")
+	if err != nil {
+		t.Fatalf("add-admin --local: %v\n%s", err, out)
+	}
+	db, err = sql.Open("sqlite", filepath.Join(dataDir, "crewship.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var role sql.NullString
+	if err := db.QueryRow(`SELECT instance_role FROM users WHERE id = 'u-local'`).Scan(&role); err != nil || role.String != "ADMIN" {
+		t.Fatalf("instance_role = %q (%v), want ADMIN written to the file", role.String, err)
 	}
 }

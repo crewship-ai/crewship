@@ -33,7 +33,7 @@ func (a PageActionInvocation) Authority() string {
 	return pageActionAuthorityPrefix + string(data)
 }
 
-func checkPageActionAuthority(ctx context.Context, db *sql.DB, in RunInput, role string) error {
+func checkPageActionAuthority(ctx context.Context, db PageActionQuery, in RunInput, role string) error {
 	var a PageActionInvocation
 	decoder := json.NewDecoder(strings.NewReader(strings.TrimPrefix(in.InvocationAuthority, pageActionAuthorityPrefix)))
 	decoder.DisallowUnknownFields()

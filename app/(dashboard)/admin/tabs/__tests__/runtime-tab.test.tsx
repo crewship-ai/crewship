@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 
 import { RuntimeTab } from "../runtime-tab"
 import type { RuntimeEntry } from "../runtime-tab"
@@ -7,12 +7,10 @@ import type { RuntimeEntry } from "../runtime-tab"
 // The two workspace-scoped cards the tab also hosts each fetch on mount. They
 // are not what is under test here, and their in-flight requests are aborted at
 // teardown, which floods the run with unhandled AbortErrors.
-vi.mock("@/components/features/admin/security-posture-card", () => ({
-  SecurityPostureCard: () => null,
-}))
-vi.mock("@/components/features/admin/memory-config-card", () => ({
-  MemoryConfigCard: () => null,
-}))
+// The tab's own reads (daemon, agents, log level, legacy resources) are not
+// what this file is about; they answer "not available" here, and
+// runtime-tab-ops.test.tsx covers them.
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn(async () => ({ ok: false, status: 404, json: async () => null })) }))
 
 // Before #1690 this panel could only ever show one runtime — the endpoint
 // behind it returned on the first socket that answered — and it labelled the
@@ -143,8 +141,10 @@ describe("RuntimeTab — the runtime inventory", () => {
     }
   })
 
-  it("also offers the runtimes not installed when one already is", () => {
+  it("also offers the runtimes not installed when one already is, folded into one row", () => {
     renderTab()
+    expect(screen.queryByTestId("runtime-install-colima")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /3 other runtimes supported/ }))
     // OrbStack, Podman and Apple are present; the rest are still worth naming.
     expect(screen.getByTestId("runtime-install-colima")).toBeInTheDocument()
     expect(screen.getByTestId("runtime-install-rancher")).toBeInTheDocument()

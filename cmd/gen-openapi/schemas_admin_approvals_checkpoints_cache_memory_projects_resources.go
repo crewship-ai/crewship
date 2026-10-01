@@ -50,16 +50,51 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"workspaces": integer(), "users": integer(), "crews": integer(),
 		"agents": integer(), "running": integer(),
 	})
+	// Admin › Users / Workspaces (internal/api/admin_people.go). The scope —
+	// current workspace, or every one for the instance owner — is in the
+	// X-Admin-Scope response header, not the body.
 	adminUser := object(map[string]any{
 		"id": str(), "email": str(), "full_name": nullable(str()),
 		"avatar_url": nullable(str()), "created_at": str(),
-		"workspace": object(map[string]any{"id": str(), "name": str(), "slug": str()}),
-		"role":      nullable(str()), "workspaces": array(object(map[string]any{"id": str(), "name": str(), "slug": str()})),
-	})
+		"workspace": nullable(object(map[string]any{"id": str(), "name": str(), "slug": str()})),
+		"role":      nullable(str()),
+		"memberships": array(object(map[string]any{
+			"member_id": str(), "workspace_id": str(), "name": str(), "slug": str(), "role": str(), "joined_at": str(),
+		}, "member_id", "workspace_id", "name", "slug", "role", "joined_at")),
+		"last_active_at": nullable(str()), "active_sessions": integer(), "cli_tokens": integer(),
+		"locked_until": nullable(str()), "failed_login_count": integer(), "email_verified": boolean(),
+		"instance_admin": boolean(), "instance_admin_source": nullable(str()),
+		"suspended_at": nullable(str()), "suspended_reason": nullable(str()), "setup_link_expires_at": nullable(str()),
+	}, "id", "email", "full_name", "avatar_url", "created_at", "workspace", "role", "memberships",
+		"last_active_at", "active_sessions", "cli_tokens", "locked_until", "failed_login_count", "email_verified",
+		"instance_admin", "instance_admin_source", "suspended_at", "suspended_reason", "setup_link_expires_at")
 	adminWorkspace := object(map[string]any{
 		"id": str(), "name": str(), "slug": str(), "created_at": str(), "updated_at": str(),
 		"_count_members": integer(), "_count_agents": integer(), "_count_crews": integer(),
-	})
+		"preferred_language": nullable(str()), "run_retention_days": nullable(integer()),
+		"allow_privileged_credentials": boolean(), "pending_invitations": integer(),
+		"last_activity_at": nullable(str()), "runs_7d": integer(), "runs_by_day": array(integer()),
+		"cost_30d_usd": number(), "current": boolean(),
+		"owners": array(object(map[string]any{"id": str(), "email": str(), "full_name": nullable(str())}, "id", "email", "full_name")),
+	}, "id", "name", "slug", "created_at", "updated_at", "_count_members", "_count_agents", "_count_crews",
+		"preferred_language", "run_retention_days", "allow_privileged_credentials", "pending_invitations",
+		"last_activity_at", "runs_7d", "runs_by_day", "cost_30d_usd", "current", "owners")
+	// The three per-person POSTs carry no body; EmptyRequest is the shared
+	// component the other body-less admin actions name.
+	emptyRequest := ref("EmptyRequest")
+	adminScopeHeader := map[string]any{"X-Admin-Scope": map[string]any{
+		"description": "instance when the caller is an instance administrator and the list covers every workspace; workspace when it covers the caller's workspace only.",
+		"schema":      map[string]any{"type": "string", "enum": []string{"instance", "workspace"}},
+	}}
+	instanceMembership := object(map[string]any{"workspace_id": str(), "role": str()}, "workspace_id", "role")
+	adminUserSession := object(map[string]any{
+		"id": str(), "created_at": str(), "last_used_at": str(), "expires_at": str(),
+		"user_agent": str(), "ip": str(), "current": boolean(),
+	}, "id", "created_at", "last_used_at", "expires_at", "user_agent", "ip", "current")
+	adminUserCLIToken := object(map[string]any{
+		"id": str(), "name": str(), "scopes": array(str()), "created_at": str(),
+		"last_used_at": nullable(str()), "expires_at": nullable(str()),
+	}, "id", "name", "scopes", "created_at", "last_used_at", "expires_at")
 
 	approval := object(map[string]any{
 		"id": str(), "workspace_id": str(), "crew_id": str(), "agent_id": str(), "mission_id": str(),
@@ -204,11 +239,262 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 			"revision": str(), "updated_at": str(), "history_path": str(),
 		}, "id", "name", "scope", "state", "bytes")),
 	}, "source", "peer_generation", "scopes", "documents")
+	// Admin › Security across workspaces (admin_instance_keeper.go).
+	instanceWsRef := map[string]any{"workspace_id": str(), "workspace_name": str(), "workspace_slug": str()}
+	instanceWsRequired := []string{"workspace_id", "workspace_name", "workspace_slug"}
+	// Admin › Data retention (admin_instance_retention.go). Every window is a
+	// number of days, or null for forever.
+	retentionKeys := []string{"routine_runs_days", "approvals_days", "audit_days", "credential_audit_days",
+		"memory_versions_days", "page_panel_data_days", "inbox_days", "chats_days", "keeper_decisions_days"}
+	retentionProps := map[string]any{}
+	for _, k := range retentionKeys {
+		retentionProps[k] = nullable(integer())
+	}
+	retentionWindows := object(retentionProps, retentionKeys...)
+	retentionPatch := object(retentionProps)
+	instanceGovSettings := map[string]any{
+		"enabled": boolean(), "security_contact_user_id": str(), "deny_notify_min_risk": integer(),
+		"watch_spec": str(), "watch_presets": stringArray(), "require_second_approver": boolean(),
+		"gov_model_provider": str(), "gov_model_id": str(), "gov_model_credential_id": str(),
+		"auto_lease_seconds": integer(), "behavior_sample_every": integer(),
+	}
+	instanceGovPatch := map[string]any{
+		"enabled": boolean(), "security_contact_user_id": str(), "deny_notify_min_risk": integer(),
+		"watch_spec": str(), "watch_presets": stringArray(), "require_second_approver": boolean(),
+		"gov_model_provider": str(), "gov_model_id": str(), "gov_model_credential_id": str(),
+		"auto_lease_seconds": integer(), "behavior_sample_every": integer(),
+	}
+	instanceDefaults := object(map[string]any{
+		"applied": boolean(), "configured": boolean(), "preview_id": str(),
+		"defaults": object(instanceGovSettings, "enabled", "deny_notify_min_risk"),
+		"changes":  array(object(map[string]any{"field": str(), "before": map[string]any{}, "after": map[string]any{}}, "field", "before", "after")),
+	}, "applied", "configured", "defaults", "changes", "preview_id")
+	withProps := func(maps ...map[string]any) map[string]any {
+		out := map[string]any{}
+		for _, m := range maps {
+			for k, v := range m {
+				out[k] = v
+			}
+		}
+		return out
+	}
 	return map[string]DomainSchema{
 		"GET /api/v1/admin/stats":      {Response: stats},
-		"GET /api/v1/admin/users":      {Response: array(adminUser)},
-		"GET /api/v1/admin/workspaces": {Response: array(adminWorkspace)},
-		"GET /api/v1/admin/health":     {Response: object(map[string]any{"uptime_seconds": integer(), "log_level": anyObject(), "encryption_key_source": str(), "db": anyObject(), "disk": anyObject()})},
+		"GET /api/v1/admin/users":      {Response: array(adminUser), SuccessHeaders: adminScopeHeader},
+		"GET /api/v1/admin/workspaces": {Response: array(adminWorkspace), SuccessHeaders: adminScopeHeader},
+		"GET /api/v1/admin/users/{userId}/sessions": {Response: object(map[string]any{
+			"sessions": array(adminUserSession), "cli_tokens": array(adminUserCLIToken),
+		}, "sessions", "cli_tokens")},
+		"POST /api/v1/admin/users/{userId}/sessions/{sessionId}/revoke": {SuccessStatuses: []string{"204"}, Request: emptyRequest},
+		"POST /api/v1/admin/users/{userId}/sessions/revoke-all":         {Response: object(map[string]any{"revoked": integer()}, "revoked"), Request: emptyRequest},
+		"POST /api/v1/admin/users/{userId}/unlock":                      {SuccessStatuses: []string{"204"}, Request: emptyRequest},
+		"POST /api/v1/admin/instance/people": {SuccessStatuses: []string{"201"},
+			Request: object(map[string]any{"email": str(), "full_name": str(), "memberships": array(instanceMembership)}, "email"),
+			Response: object(map[string]any{"user_id": str(), "email": str(), "memberships": array(instanceMembership), "setup_url": str(), "expires_at": str()},
+				"user_id", "email", "memberships", "setup_url", "expires_at")},
+		"POST /api/v1/admin/instance/people/{userId}/suspend": {Request: object(map[string]any{"reason": str()}),
+			Response: object(map[string]any{"user_id": str(), "suspended_at": str(), "sessions_revoked": integer(), "cli_tokens_revoked": integer()},
+				"user_id", "suspended_at", "sessions_revoked", "cli_tokens_revoked")},
+		"POST /api/v1/admin/instance/people/{userId}/reactivate": {SuccessStatuses: []string{"204"}, Request: emptyRequest},
+		"POST /api/v1/admin/instance/people/{userId}/setup-link": {Request: emptyRequest,
+			Response: object(map[string]any{"user_id": str(), "setup_url": str(), "expires_at": str()}, "user_id", "setup_url", "expires_at")},
+		"DELETE /api/v1/admin/instance/people/{userId}/setup-link": {SuccessStatuses: []string{"204"}},
+		"PUT /api/v1/admin/instance/admins/{userId}":               {SuccessStatuses: []string{"204"}, Request: emptyRequest},
+		"DELETE /api/v1/admin/instance/admins/{userId}":            {SuccessStatuses: []string{"204"}},
+		"PUT /api/v1/admin/instance/workspaces/{workspaceId}/members/{userId}": {SuccessStatuses: []string{"200", "201"},
+			Request: object(map[string]any{"role": str()}, "role"),
+			Response: object(map[string]any{"workspace_id": str(), "user_id": str(), "role": str(), "created": boolean()},
+				"workspace_id", "user_id", "role", "created")},
+		"DELETE /api/v1/admin/instance/workspaces/{workspaceId}/members/{userId}": {SuccessStatuses: []string{"204"}},
+		"POST /api/v1/admin/instance/workspaces": {SuccessStatuses: []string{"201"},
+			Request: object(map[string]any{"name": str(), "slug": str(), "owner_user_id": str(), "preferred_language": nullable(str())}, "name", "slug", "owner_user_id"),
+			Response: object(map[string]any{"id": str(), "name": str(), "slug": str(), "owner_user_id": str(), "created_at": str()},
+				"id", "name", "slug", "owner_user_id", "created_at")},
+		"POST /api/v1/admin/instance/workspaces/{workspaceId}/transfer-ownership": {
+			Request: object(map[string]any{"user_id": str()}, "user_id"),
+			Response: object(map[string]any{"workspace_id": str(), "owner_user_id": str(), "previous_owner_user_ids": array(str())},
+				"workspace_id", "owner_user_id", "previous_owner_user_ids")},
+		"DELETE /api/v1/admin/instance/workspaces/{workspaceId}": {SuccessStatuses: []string{"204"},
+			Request: object(map[string]any{"confirm_slug": str()}, "confirm_slug")},
+		"GET /api/v1/admin/instance/keeper/governance": {Response: object(map[string]any{
+			"defaults":   object(withProps(instanceGovSettings, map[string]any{"configured": boolean(), "effective_second_approver": anyObject()}), "configured", "enabled"),
+			"workspaces": array(object(withProps(instanceGovSettings, map[string]any{"configured": boolean(), "effective_second_approver": anyObject()}, instanceWsRef), append([]string{"configured", "enabled"}, instanceWsRequired...)...)),
+		}, "defaults", "workspaces")},
+		"PUT /api/v1/admin/instance/keeper/governance": {
+			Request: object(map[string]any{
+				"workspaces": stringArray(), "all": boolean(), "dry_run": boolean(), "expect_preview": str(),
+				"set": object(instanceGovPatch),
+			}, "set"),
+			Response: object(map[string]any{
+				"applied": boolean(), "changed": integer(), "preview_id": str(),
+				"workspaces": array(object(withProps(instanceWsRef, map[string]any{
+					"changes":  array(object(map[string]any{"field": str(), "before": map[string]any{}, "after": map[string]any{}}, "field", "before", "after")),
+					"warnings": stringArray(),
+				}), append([]string{"changes"}, instanceWsRequired...)...)),
+			}, "applied", "changed", "workspaces", "preview_id")},
+		"GET /api/v1/admin/instance/keeper/governance/defaults": {Response: instanceDefaults},
+		"PUT /api/v1/admin/instance/keeper/governance/defaults": {
+			Request:  object(map[string]any{"dry_run": boolean(), "expect_preview": str(), "set": object(instanceGovPatch)}, "set"),
+			Response: instanceDefaults},
+		"GET /api/v1/admin/instance/keeper/requests": {Response: object(map[string]any{
+			"items": array(object(withProps(map[string]any{
+				"id": str(), "agent_id": str(), "agent_name": str(), "crew_id": str(), "credential_id": str(), "credential_name": str(),
+				"intent": str(), "request_type": str(), "command": nullable(str()), "decision": nullable(str()), "reason": nullable(str()),
+				"risk_score": nullable(integer()), "exit_code": nullable(integer()), "ollama_prompt": nullable(str()), "ollama_raw_response": nullable(str()),
+				"created_at": str(), "decided_at": nullable(str()), "judge_profile": nullable(str()),
+			}, map[string]any{"workspace_id": str(), "workspace_name": str()}), "id", "agent_id", "request_type", "created_at", "workspace_id", "workspace_name")),
+			"total":        integer(),
+			"counts":       object(map[string]any{"allow": integer(), "deny": integer(), "escalate": integer(), "pending": integer()}, "allow", "deny", "escalate", "pending"),
+			"by_workspace": array(object(withProps(instanceWsRef, map[string]any{"count": integer()}), append([]string{"count"}, instanceWsRequired...)...)),
+			"by_type":      integerMap(),
+		}, "items", "total", "counts", "by_workspace", "by_type")},
+		"GET /api/v1/admin/instance/keeper/health": {Response: object(map[string]any{
+			"workspaces": array(object(map[string]any{
+				"workspace_id": str(), "workspace_name": str(), "workspace_slug": str(),
+				"samples": integer(), "allow": integer(), "deny": integer(), "escalate": integer(), "judge_failures": integer(),
+				"allow_rate": number(), "deny_rate": number(), "escalate_rate": number(), "progressed_rate": number(), "judge_failure_rate": number(),
+				"p95_latency_ms": integer(), "min_samples": integer(), "alarm_progressed_rate": number(), "alarm_judge_failure_rate": number(),
+				"alarm": nullable(object(map[string]any{"kind": str(), "summary": str(), "at": str()})), "oldest": str(), "newest": str(),
+			}, "workspace_id", "workspace_name", "samples", "min_samples")),
+		}, "workspaces")},
+		"GET /api/v1/admin/instance/retention": {Response: object(map[string]any{
+			"workspaces":          array(object(withProps(instanceWsRef, map[string]any{"windows": retentionWindows}), append([]string{"windows"}, instanceWsRequired...)...)),
+			"defaults":            retentionWindows,
+			"defaults_configured": stringArray(),
+			"keys": array(object(map[string]any{
+				"key": str(), "label": str(), "default_days": nullable(integer()), "forever_allowed": boolean(),
+				"min_days": integer(), "max_days": integer(), "detail": str(),
+			}, "key", "label", "default_days", "forever_allowed", "min_days", "max_days", "detail")),
+			"housekeeping": array(object(map[string]any{"key": str(), "label": str(), "value": str(), "detail": str()},
+				"key", "label", "value", "detail")),
+		}, "workspaces", "defaults", "defaults_configured", "keys", "housekeeping")},
+		"PUT /api/v1/admin/instance/retention": {
+			Request: object(map[string]any{
+				"workspace_ids": nullable(stringArray()), "windows": retentionPatch, "dry_run": boolean(), "expect_preview": str(),
+			}, "workspace_ids", "windows"),
+			Response: object(map[string]any{
+				"applied": boolean(), "dry_run": boolean(), "changed": integer(), "rows_affected_next_sweep": integer(),
+				"preview_id": str(),
+				"workspaces": array(object(withProps(instanceWsRef, map[string]any{
+					"changes": array(object(map[string]any{
+						"key": str(), "from": nullable(integer()), "to": nullable(integer()), "rows_affected_next_sweep": integer(),
+					}, "key", "from", "to", "rows_affected_next_sweep")),
+				}), append([]string{"changes"}, instanceWsRequired...)...)),
+			}, "applied", "dry_run", "changed", "rows_affected_next_sweep", "workspaces", "preview_id")},
+		"GET /api/v1/admin/instance/retention/defaults": {Response: object(map[string]any{
+			"defaults": retentionWindows, "configured": stringArray(),
+		}, "defaults", "configured")},
+		"PUT /api/v1/admin/instance/retention/defaults": {
+			Request: object(map[string]any{"windows": retentionPatch, "dry_run": boolean(), "expect_preview": str()}, "windows"),
+			Response: object(map[string]any{
+				"applied": boolean(), "dry_run": boolean(), "affects_existing": boolean(),
+				"changes":    array(object(map[string]any{"key": str(), "from": nullable(integer()), "to": nullable(integer())}, "key", "from", "to")),
+				"defaults":   retentionWindows,
+				"preview_id": str(),
+			}, "applied", "dry_run", "affects_existing", "changes", "defaults", "preview_id")},
+		// Admin › Backups across workspaces. incomplete is null when the
+		// bundle's gaps were never recorded and [] when there are none;
+		// proof_level is 1 checksum, 2 contents checked, 3 test restore.
+		"GET /api/v1/admin/instance/backups/bundles": {Response: object(map[string]any{
+			"bundles": array(object(map[string]any{
+				"id": str(), "path": str(), "file_name": str(), "scope": str(), "scope_level": str(), "kind": str(), "slug": str(),
+				"workspace_id": str(), "workspace_name": str(), "workspace_slug": str(), "created_at": str(), "created_by": str(),
+				"size_bytes": integer(), "payload_sha256": str(), "encrypted": boolean(), "format_version": integer(),
+				"plan_id": str(), "run_id": str(), "pinned": boolean(), "proof_level": integer(), "proof_checked_at": nullable(str()),
+				"drill_result": str(), "drill_at": nullable(str()), "drill_report": nullable(map[string]any{}),
+				"incomplete": nullable(array(object(map[string]any{"kind": str(), "detail": str(), "count": integer(), "workspace": str()}, "kind", "detail", "count"))),
+			}, "id", "path", "file_name", "scope", "scope_level", "kind", "workspace_id", "created_at", "size_bytes", "payload_sha256",
+				"encrypted", "format_version", "pinned", "proof_level", "proof_checked_at", "drill_result", "drill_at", "incomplete")),
+		}, "bundles")},
+		// One catalogued bundle's manifest (plaintext, never decrypted), any
+		// scope; contents differs by scope (workspace, crews, instance).
+		"GET /api/v1/admin/instance/backups/bundles/inspect": {Response: object(map[string]any{
+			"format_version": integer(), "crewship_version_at_backup": str(), "scope": str(), "scope_level": str(),
+			"created_at": str(),
+			"created_by": object(map[string]any{"user_id": str(), "email": str(), "role": str()}),
+			"encryption": object(map[string]any{"enabled": boolean(), "algorithm": str()}, "enabled"),
+			"checksums":  object(map[string]any{"payload_sha256": str()}, "payload_sha256"),
+			"contents":   map[string]any{"type": "object"},
+		}, "format_version", "scope", "created_at", "encryption", "checksums", "contents")},
+		"POST /api/v1/admin/instance/backups/bundles/pin": {
+			Request:  object(map[string]any{"path": str()}, "path"),
+			Response: object(map[string]any{"path": str(), "pinned": boolean()}, "path", "pinned")},
+		"POST /api/v1/admin/instance/backups/bundles/unpin": {
+			Request:  object(map[string]any{"path": str()}, "path"),
+			Response: object(map[string]any{"path": str(), "pinned": boolean()}, "path", "pinned")},
+		// kind restore | dry_run | drill; result ok | partial | failed; report
+		// is the full restore report the server returned at the time.
+		"GET /api/v1/admin/instance/backups/restores": {Response: object(map[string]any{
+			"restores": array(object(map[string]any{
+				"id": str(), "kind": str(), "actor_user_id": str(), "actor_email": str(), "bundle_path": str(),
+				"target": str(), "result": str(), "report": map[string]any{}, "created_at": str(),
+			}, "id", "kind", "actor_user_id", "actor_email", "bundle_path", "target", "result", "report", "created_at")),
+		}, "restores")},
+		// Whole-instance backup and recovery. Runs (POST …/run, GET
+		// …/run/{runId}) are backup_runs rows: see backupPlanSchemaCatalog.
+		// Counts only: no key material leaves the server.
+		"GET /api/v1/admin/instance/backups/vault-keys": {Response: object(map[string]any{
+			"versions": array(object(map[string]any{
+				"version": str(), "env": str(), "active": boolean(), "envelopes": integer(), "present": boolean(),
+			}, "version", "env", "active", "envelopes", "present")),
+			"recovery_kit": object(map[string]any{"available": boolean(), "enabled": boolean()}, "available", "enabled"),
+		}, "versions", "recovery_kit")},
+		"PUT /api/v1/admin/instance/backups/settings/recovery-kit": {
+			Request:  object(map[string]any{"enabled": boolean()}, "enabled"),
+			Response: object(map[string]any{"enabled": boolean()}, "enabled")},
+		// The key is used for this check only and never stored.
+		"POST /api/v1/admin/instance/backups/bundles/check": {
+			Request: object(map[string]any{"path": str(), "identity": str(), "passphrase": str()}, "path"),
+			Response: object(map[string]any{
+				"ok": boolean(), "proof_level": integer(), "detail": str(), "problems": stringArray(),
+				"absent":  array(object(map[string]any{"kind": str(), "detail": str(), "count": integer(), "workspace": str()}, "kind", "detail", "count")),
+				"entries": integer(), "tables": integer(), "files": integer(),
+			}, "ok", "proof_level", "detail", "problems", "absent")},
+		"POST /api/v1/admin/instance/backups/restore/checks": {
+			Request: object(map[string]any{"path": str(), "target": str(), "identity": str(), "passphrase": str()}, "path", "target"),
+			Response: object(map[string]any{
+				"space":   object(map[string]any{"ok": boolean(), "need_bytes": integer(), "free_bytes": integer()}, "ok", "need_bytes", "free_bytes"),
+				"format":  object(map[string]any{"ok": boolean(), "version": integer(), "converter": boolean()}, "ok", "version", "converter"),
+				"runtime": object(map[string]any{"ok": boolean(), "detail": str(), "warnings": stringArray()}, "ok", "detail", "warnings"),
+				// One runtime check per complete container environment (Track E).
+				"environments": array(object(map[string]any{
+					"crew": str(), "action": str(), "platform": str(), "host_platform": str(),
+					"missing_blobs": integer(), "need_bytes": integer(), "detail": str(),
+				}, "crew", "action", "platform", "host_platform", "missing_blobs", "need_bytes", "detail")),
+				"unsafe":    stringArray(),
+				"conflicts": object(map[string]any{"ok": boolean(), "detail": str()}, "ok", "detail"),
+			}, "space", "format", "runtime", "unsafe", "conflicts", "environments")},
+		// Loads the complete container environments `crewship recover`
+		// staged; each one restored, rebuilt or skipped with its reason.
+		"POST /api/v1/admin/instance/backups/environments/land": {
+			Request: object(map[string]any{"dry_run": boolean()}),
+			Response: object(map[string]any{
+				"dir": str(), "staged": boolean(), "dry_run": boolean(),
+				"environments": array(object(map[string]any{
+					"workspace": str(), "crew": str(), "result": str(), "reason": str(), "image": str(), "container": str(),
+					"volumes": stringArray(), "unsafe": stringArray(), "notes": stringArray(),
+				}, "workspace", "crew", "result", "unsafe")),
+			}, "dir", "staged", "dry_run", "environments")},
+		"POST /api/v1/admin/instance/backups/drills": {
+			Request: object(map[string]any{"path": str(), "sha256": str(), "result": str(), "report": map[string]any{}}, "path", "sha256", "result"),
+			Response: object(map[string]any{
+				"path": str(), "proof_level": integer(), "drill_result": str(), "drill_at": str(), "report_id": str(),
+			}, "path", "proof_level", "drill_result", "drill_at", "report_id")},
+		"GET /api/v1/admin/instance/backups/drills": {Response: array(object(map[string]any{
+			"id": str(), "kind": str(), "actor": str(), "bundle_path": str(), "source_scope": str(), "source_name": str(),
+			"source_date": str(), "target": str(), "result": str(), "warnings": integer(), "created_at": str(),
+		}, "id", "kind", "actor", "bundle_path", "source_scope", "source_name", "source_date", "target", "result", "warnings", "created_at"))},
+		"GET /api/v1/admin/instance/holds": {Response: array(object(map[string]any{
+			"key": str(), "reason": str(), "count": integer(), "detail": str(), "created_at": str(),
+		}, "key", "reason", "count", "detail", "created_at"))},
+		"POST /api/v1/admin/instance/holds/resume": {
+			Request:  object(map[string]any{"key": str()}, "key"),
+			Response: object(map[string]any{"key": str(), "resumed": boolean()}, "key", "resumed")},
+		"GET /api/v1/admin/instance/audit": {Response: array(object(map[string]any{
+			"id": str(), "user_id": nullable(str()), "user_email": nullable(str()), "action": str(), "entity_type": str(),
+			"entity_id": nullable(str()), "target_workspace_id": nullable(str()), "metadata": str(), "created_at": str(),
+		}, "id", "user_id", "user_email", "action", "entity_type", "entity_id", "target_workspace_id", "metadata", "created_at"))},
+		"GET /api/v1/admin/health": {Response: object(map[string]any{"uptime_seconds": integer(), "log_level": anyObject(), "encryption_key_source": str(), "db": anyObject(), "disk": anyObject()})},
 		"GET /api/v1/admin/security-posture": {Response: object(map[string]any{"environment": str(), "encryption_key_configured": boolean(), "plaintext_secrets_allowed": boolean(), "private_endpoints_ceiling": boolean(), "signup_open": boolean(), "oauth_configured": boolean(), "email_configured": boolean(), "rate_limit_disabled": boolean(), "rate_limit_effectively_disabled": boolean(), "warnings": array(object(map[string]any{"key": str(), "severity": str(), "message": str()}, "key", "severity", "message"))},
 			"environment", "encryption_key_configured", "plaintext_secrets_allowed", "private_endpoints_ceiling", "signup_open",
 			"oauth_configured", "email_configured", "rate_limit_disabled", "rate_limit_effectively_disabled", "warnings")},

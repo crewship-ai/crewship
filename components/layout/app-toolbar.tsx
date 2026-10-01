@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { useAuth } from "@/hooks/use-auth"
+import { useAuth, useIsInstanceAdmin } from "@/hooks/use-auth"
 import {
   BookOpen, ChevronDown, GitBranch, HelpCircle,
   LogOut, Search, User, X,
@@ -38,6 +38,7 @@ import { useAppStore } from "@/lib/store"
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
 import { SystemStatusPill } from "./status-pill"
 import { Volume2 } from "lucide-react"
+import { AccentPicker, ThemeSwitcher } from "./theme-switcher"
 
 // External destinations for the user menu. Kept here (not env-driven) because
 // they are stable public properties; the docs site is the Mintlify source of
@@ -117,6 +118,7 @@ export function AppToolbar() {
   const setMobileNavOpen = useAppStore((st) => st.setMobileNavOpen)
   const [cmdkOpen, setCmdkOpen] = useState(false)
   const { role } = useAbilities()
+  const instanceAdmin = useIsInstanceAdmin()
   const breadcrumbs = useAppStore((s) => s.breadcrumbs)
 
   // ⌘K opens the global palette, on every route, and it is the ONLY listener
@@ -215,7 +217,7 @@ export function AppToolbar() {
   }
 
   return (
-    <header className="flex h-[var(--app-header-h)] pt-[env(safe-area-inset-top)] shrink-0 items-center justify-between bg-card px-3 sm:px-4 border-b border-white/[0.1]">
+    <header className="flex h-[var(--app-header-h)] pt-[env(safe-area-inset-top)] shrink-0 items-center justify-between bg-card px-3 sm:px-4 border-b border-foreground/[0.1]">
       {/* Left: breadcrumb only */}
       <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
         {renderBreadcrumbs()}
@@ -253,7 +255,7 @@ export function AppToolbar() {
         <Button variant="outline" size="sm" className="hidden md:flex h-8 gap-2 rounded-full border-border bg-transparent text-muted-foreground hover:text-foreground px-3" aria-label="Search" onClick={() => setCmdkOpen(true)}>
           <Search className="h-3.5 w-3.5" />
           <span className="type-meta hidden sm:inline">Search...</span>
-          <kbd className="pointer-events-none hidden h-4 select-none items-center gap-0.5 rounded border border-white/[0.08] bg-white/[0.03] px-1 font-mono text-[10px] leading-none sm:flex">
+          <kbd className="pointer-events-none hidden h-4 select-none items-center gap-0.5 rounded border border-foreground/[0.08] bg-foreground/[0.03] px-1 font-mono text-[10px] leading-none sm:flex">
             &#8984;K
           </kbd>
         </Button>
@@ -313,6 +315,12 @@ export function AppToolbar() {
                 <Badge variant="outline" className="shrink-0 text-micro px-1.5 py-0.5">{workspaceRole ? workspaceRole.charAt(0) + workspaceRole.slice(1).toLowerCase() : "Loading role…"}</Badge>
                 <span className="truncate text-micro text-muted-foreground" title={workspace?.name}>{workspace?.name}</span>
               </div>
+            </div>
+            <div className="px-2 pb-2">
+              <div className="eyebrow mb-1.5 text-muted-foreground">Theme</div>
+              <ThemeSwitcher />
+              <div className="eyebrow mb-1.5 mt-3 text-muted-foreground">Accent</div>
+              <AccentPicker />
             </div>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild className="gap-3 text-xs">
@@ -376,7 +384,7 @@ export function AppToolbar() {
                 <div key={section.label}>
                   <div className="px-3 py-1 text-micro uppercase tracking-wider font-semibold text-muted-foreground">{section.label}</div>
                   {section.items
-                    .filter((item) => !isHiddenForRole(item, role))
+                    .filter((item) => !isHiddenForRole(item, role, instanceAdmin))
                     .map((item) => {
                       const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))
                       // FUTURE is announced, not built — the row reads as a

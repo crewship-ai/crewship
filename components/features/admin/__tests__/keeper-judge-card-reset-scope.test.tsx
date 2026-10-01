@@ -10,6 +10,7 @@ vi.mock("@/lib/api-fetch", () => ({
 vi.mock("@/hooks/use-abilities", () => ({
   useAbilities: () => ({ abilities: { can: () => true } }),
 }))
+vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => true }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 function field<T>(value: T, source = "instance") {

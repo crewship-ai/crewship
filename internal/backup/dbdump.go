@@ -92,6 +92,7 @@ import (
 // should update BOTH lists. The CI drift test on real schema
 // catches the asymmetry; intent_test.go pins the alignment.
 var BackupTables = []string{
+
 	// Depth 0: anchor + global identities (no workspace FK)
 	"users",
 	"workspaces",
@@ -166,6 +167,7 @@ var BackupTables = []string{
 	"labels",
 	"milestones",
 	"projects",
+	"project_files", "project_file_versions", "project_file_blobs",
 	"missions",
 	"issue_work",
 	"issue_executions",
@@ -284,6 +286,7 @@ var BackupTables = []string{
 	"routine_step_overrides",     // FK pipeline_id; has workspace_id
 	"composio_settings",          // workspace_id PK
 	"keeper_governance_settings", // workspace_id PK
+	"retention_settings",         // (workspace_id, key) PK
 	"user_models",                // has workspace_id
 	"user_model_provenance",      // has workspace_id; FK users(id) — dumped after users; no FK on message_id by design
 
@@ -594,6 +597,16 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 			}
 		}
 		if table == "users" {
+			// Included workspace membership/grants can reference humans with no
+			// crew or chat. Probe the optional table for older/minimal schemas.
+			hasMembers, err := tableExists(ctx, tx, "workspace_members")
+			if err != nil {
+				return nil, fmt.Errorf("backup: probe workspace member scope: %w", err)
+			}
+			if hasMembers {
+				where = "(" + where + `) OR id IN (SELECT user_id FROM workspace_members WHERE workspace_id = ?)`
+				args = append(args, workspaceID)
+			}
 			where, args, err = includeConversationUsers(ctx, tx, workspaceID, where, args)
 			if err != nil {
 				return nil, err

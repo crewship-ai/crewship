@@ -88,7 +88,7 @@ func TestEveryMutationRouteDeclaresRole(t *testing.T) {
 // registers dynamically (rbac_routes.go builds `method+" "+pattern`) has no
 // literal route to classify but is still a registrar, and it must be read
 // rather than assumed harmless.
-var routeRegistrationCall = regexp.MustCompile(`\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin)\(`)
+var routeRegistrationCall = regexp.MustCompile(`\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin|authedInstance|authedInstanceMut|authedAdminPeople|authedAdminWrite|authedAdminAny|authedAdminMut)\(`)
 
 // routeRegistrarFiles returns every non-test .go file in this package that
 // contains a route registration. Discovery is by content, never by filename.
@@ -139,13 +139,13 @@ var muxMutationLine = regexp.MustCompile(`r\.mux\.(?:Handle|HandleFunc)\("(POST|
 // ARGUMENT rather than part of the pattern string. Missing this shape is the
 // mistake route_read_scope_invariant_test.go documents having made with
 // authedAdmin: a whole surface in no bucket, and nothing failing.
-var wrapperMutationLine = regexp.MustCompile(`r\.authed(?:Mut|SelfMut)\("(POST|PUT|PATCH|DELETE)",\s*"([^"]*)"`)
+var wrapperMutationLine = regexp.MustCompile(`r\.authed(?:Mut|SelfMut|Instance|InstanceMut|AdminMut)\("(POST|PUT|PATCH|DELETE)",\s*"([^"]*)"`)
 
 // mutationRegistrationStart matches the beginning of ANY route registration.
 // It bounds the wrapper lookahead: whatever follows belongs to the next route,
 // so it must not be read as this one's wrapper. Same reasoning — and the same
 // measured bug — as readRouteWrapperLookahead in the read-side twin.
-var mutationRegistrationStart = regexp.MustCompile(`^\s*r\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin)\(`)
+var mutationRegistrationStart = regexp.MustCompile(`^\s*r\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin|authedInstance|authedInstanceMut|authedAdminPeople|authedAdminWrite|authedAdminAny|authedAdminMut)\(`)
 
 // mutationWrapperLookahead caps how many lines after a registration are joined
 // before looking for the wrapper. registerInternalPageRoutes puts the handler

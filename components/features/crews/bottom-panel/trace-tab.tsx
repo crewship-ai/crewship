@@ -80,7 +80,7 @@ export function TraceTab({ workspaceId, context }: { workspaceId: string; contex
       {steps.length === 0 ? (
         <EmptyState>No step output recorded yet.</EmptyState>
       ) : (
-        <div className="relative pl-5 before:absolute before:left-[5px] before:top-1 before:bottom-1 before:w-px before:bg-white/10">
+        <div className="relative pl-5 before:absolute before:left-[5px] before:top-1 before:bottom-1 before:w-px before:bg-foreground/10">
           {steps.map(([stepId, out]) => {
             const current = stepId === run.current_step_id
             const failed = stepId === run.failed_at_step

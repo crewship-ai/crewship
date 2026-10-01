@@ -1,7 +1,7 @@
-// Tests for Admin → Rate Limiters: rows render from the API, Save PUTs the
-// edited value (with the workspace_id query param), Reset DELETEs the
-// override, and an out-of-range value is blocked client-side (Save disabled,
-// no PUT fired).
+// Tests for Admin → Limits: rows render from the API, edits collect in one
+// save bar that PUTs each changed value (with the workspace_id query param),
+// Reset DELETEs an override and only exists where there is one, and an
+// out-of-range value is blocked client-side (Save disabled, no PUT fired).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
@@ -30,7 +30,7 @@ function makeLimiter(overrides: Record<string, unknown> = {}) {
     key: "http.auth_per_min",
     group: "HTTP (per-IP)",
     display_name: "Auth endpoints",
-    description: "Login / token-refresh throttle",
+    description: "Login / token-refresh throttle. Read-only session polls do not count.",
     unit: "req/min",
     default: 10,
     value: 10,
@@ -70,50 +70,64 @@ describe("rendering", () => {
   })
 })
 
-describe("save (PUT)", () => {
-  it("PUTs the edited value to the limiter key with the workspace_id param", async () => {
+describe("save bar (PUT)", () => {
+  it("collects edits in one bar and PUTs each changed limit", async () => {
     h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (init?.method === "PUT") return ok(makeLimiter({ value: 25, overridden: true }))
-      return ok({ limiters: [makeLimiter()] })
+      if (init?.method === "PUT") {
+        const value = JSON.parse(String(init.body)).value
+        return url.includes("http.api") ? ok(makeLimiter({ key: "http.api_per_min", display_name: "API endpoints", value, default: 60, overridden: true }))
+          : ok(makeLimiter({ value, overridden: true }))
+      }
+      return ok({ limiters: [makeLimiter(), makeLimiter({ key: "http.api_per_min", display_name: "API endpoints", value: 60, default: 60 })] })
     })
     render(<RateLimitsTab workspaceId="ws1" />)
 
-    const input = await screen.findByLabelText("Auth endpoints value")
-    fireEvent.change(input, { target: { value: "25" } })
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
+    fireEvent.change(await screen.findByLabelText("Auth endpoints value"), { target: { value: "25" } })
+    fireEvent.change(screen.getByLabelText("API endpoints value"), { target: { value: "90" } })
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("2 unsaved changes")
 
-    const save = screen.getByRole("button", { name: "Save" })
-    expect(save).not.toBeDisabled()
-    fireEvent.click(save)
-
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => {
       expect(h.apiFetch).toHaveBeenCalledWith(
         "/api/v1/admin/rate-limits/http.auth_per_min?workspace_id=ws1",
-        expect.objectContaining({
-          method: "PUT",
-          body: JSON.stringify({ value: 25 }),
-        }),
+        expect.objectContaining({ method: "PUT", body: JSON.stringify({ value: 25 }) }),
+      )
+      expect(h.apiFetch).toHaveBeenCalledWith(
+        "/api/v1/admin/rate-limits/http.api_per_min?workspace_id=ws1",
+        expect.objectContaining({ method: "PUT", body: JSON.stringify({ value: 90 }) }),
       )
     })
-    // The returned limiter is merged in — the row now reads Overridden.
-    expect(await screen.findByText("Overridden")).toBeInTheDocument()
+    // The returned limiters are merged in: the bar is gone, the rows say which way they moved.
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull())
+    expect(screen.getByText(/looser · default 10/)).toBeInTheDocument()
   })
 
-  it("surfaces an API error (e.g. 400 out-of-range) without a client block bypass", async () => {
+  it("Discard puts every edited field back", async () => {
+    h.apiFetch.mockImplementation(async () => ok({ limiters: [makeLimiter()] }))
+    render(<RateLimitsTab workspaceId="ws1" />)
+    const input = await screen.findByLabelText("Auth endpoints value")
+    fireEvent.change(input, { target: { value: "25" } })
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+    expect(input).toHaveValue("10")
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
+  })
+
+  it("surfaces an API error (e.g. 400 out-of-range) and keeps the edit", async () => {
     const { toast } = await import("sonner")
     h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
       if (init?.method === "PUT") return fail(400, { error: "value out of range" })
-      // max is small so 25 is a valid client-side value but the server rejects it.
       return ok({ limiters: [makeLimiter({ max: 100000 })] })
     })
     render(<RateLimitsTab workspaceId="ws1" />)
 
-    const input = await screen.findByLabelText("Auth endpoints value")
-    fireEvent.change(input, { target: { value: "25" } })
+    fireEvent.change(await screen.findByLabelText("Auth endpoints value"), { target: { value: "25" } })
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("value out of range")
+      expect(toast.error).toHaveBeenCalledWith("Auth endpoints: value out of range")
     })
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("1 unsaved change")
   })
 })
 
@@ -125,9 +139,7 @@ describe("reset (DELETE)", () => {
     })
     render(<RateLimitsTab workspaceId="ws1" />)
 
-    const reset = await screen.findByRole("button", { name: /Reset Auth endpoints to default/ })
-    expect(reset).not.toBeDisabled()
-    fireEvent.click(reset)
+    fireEvent.click(await screen.findByRole("button", { name: /Reset Auth endpoints to 10/ }))
 
     await waitFor(() => {
       expect(h.apiFetch).toHaveBeenCalledWith(
@@ -137,12 +149,11 @@ describe("reset (DELETE)", () => {
     })
   })
 
-  it("disables Reset when the limiter is not overridden", async () => {
+  it("offers no Reset where the limiter is at its default", async () => {
     h.apiFetch.mockImplementation(async () => ok({ limiters: [makeLimiter({ overridden: false })] }))
     render(<RateLimitsTab workspaceId="ws1" />)
-
-    const reset = await screen.findByRole("button", { name: /Reset Auth endpoints to default/ })
-    expect(reset).toBeDisabled()
+    await screen.findByText("Auth endpoints")
+    expect(screen.queryByRole("button", { name: /Reset Auth endpoints/ })).toBeNull()
   })
 })
 
@@ -151,14 +162,37 @@ describe("client-side validation", () => {
     h.apiFetch.mockImplementation(async () => ok({ limiters: [makeLimiter({ min: 1, max: 100 })] }))
     render(<RateLimitsTab workspaceId="ws1" />)
 
-    const input = await screen.findByLabelText("Auth endpoints value")
-    fireEvent.change(input, { target: { value: "999" } }) // above max 100
+    fireEvent.change(await screen.findByLabelText("Auth endpoints value"), { target: { value: "999" } })
 
-    const save = screen.getByRole("button", { name: "Save" })
-    expect(save).toBeDisabled()
-    expect(screen.getByText("must be between 1 and 100")).toBeInTheDocument()
-
-    // No PUT ever fires — only the initial GET(s).
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(screen.getByText("Must be between 1 and 100")).toBeInTheDocument()
     expect(h.apiFetch.mock.calls.every((c) => (c[1] as RequestInit | undefined)?.method !== "PUT")).toBe(true)
+  })
+})
+
+describe("reading a limit", () => {
+  const LIST = {
+    limiters: [
+      makeLimiter(),
+      makeLimiter({ key: "login.lockout_threshold", group: "Login", display_name: "Account lockout threshold", unit: "attempts", value: 20, default: 50, overridden: true }),
+      makeLimiter({ key: "pages.public_view_per_hour", group: "Pages", display_name: "Public page views", unit: "views/hour" }),
+    ],
+  }
+
+  it("keeps the description to its first sentence and the rest on hover", async () => {
+    h.apiFetch.mockResolvedValue(ok(LIST))
+    render(<RateLimitsTab workspaceId="ws-1" />)
+    const [d] = await screen.findAllByText("Login / token-refresh throttle.")
+    expect(d).toHaveAttribute("title", "Login / token-refresh throttle. Read-only session polls do not count.")
+  })
+
+  it("counts what differs from the defaults and shows only those on request", async () => {
+    h.apiFetch.mockResolvedValue(ok(LIST))
+    render(<RateLimitsTab workspaceId="ws-1" />)
+    expect(await screen.findByText(/tighter · default 50/)).toBeInTheDocument()
+    expect(document.querySelector("[data-slot=settings-summary]")).toHaveTextContent("1 changed from default")
+    fireEvent.click(screen.getByRole("button", { name: "Changed" }))
+    expect(screen.queryByText("Auth endpoints")).toBeNull()
+    expect(screen.getByText("Account lockout threshold")).toBeInTheDocument()
   })
 })

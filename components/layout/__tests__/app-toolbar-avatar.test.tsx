@@ -8,6 +8,7 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 let avatarUrl = ""
 
 vi.mock("@/hooks/use-auth", () => ({
+  useIsInstanceAdmin: () => true,
   useAuth: () => ({
     session: { user: { id: "u1", name: "Demo User", email: "demo@crewship.ai", avatar_url: avatarUrl } },
     signOut: vi.fn().mockResolvedValue(undefined),

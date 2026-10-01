@@ -43,7 +43,13 @@ import (
 // either add it to BackupTables (FK-safe order, plus BackupTableIntent) or
 // write its reason here. "It is not important" is not a reason; see #1437.
 var workspaceTablesNotBundled = map[string]string{
-	"access_attempts": "execution capabilities and generations must be issued anew on a restored instance",
+	"codex_login_proofs":                "host-bound credential identity proof must be explicitly enrolled on a restored instance",
+	"restricted_native_sessions":        "native context and provider call leases must be admitted anew after restore",
+	"restricted_workflow_jobs":          "private execution capsules and queued paid work must not replay on a copied instance",
+	"access_files":                      "classified output authority depends on attempts excluded from restore",
+	"access_attempts":                   "execution capabilities and generations must be issued anew on a restored instance",
+	"restricted_preflight_reservations": "live private issue source authority must not replay on a copied instance",
+	"attempt_project_inputs":            "attempt-specific native input capabilities must not replay after restore",
 	// --- Migration artefacts / archives (derived, never read by the app) ---
 	"agent_runs_archive":       "one-off snapshot taken by v61 drop_agent_runs; the live data was folded into journal_entries, which rides the bundle",
 	"journal_entries_archived": "compaction archive; BLOB/vector shape would corrupt under the TEXT-only round-trip path (see dbdump.go)",
@@ -52,6 +58,7 @@ var workspaceTablesNotBundled = map[string]string{
 	// --- This instance's own backup / audit bookkeeping ---
 	"audit_logs":              "instance audit trail; stays with the instance that produced it",
 	"backup_catalog":          "catalogue of THIS instance's bundles; a restored copy would describe files the target does not hold",
+	"backup_runs":             "THIS instance's backup run history; a restored copy would describe runs the target never ran",
 	"backup_locks":            "in-flight backup mutex rows; process-local by definition",
 	"backup_restore_origins":  "lineage evidence for DR resume authorisation (#1716); carrying it forward asserts a history the target never had",
 	"resource_cleanup_status": "this installation's container cleanup observations; a restored copy never scanned the target's daemon and must not inherit cleanup state",

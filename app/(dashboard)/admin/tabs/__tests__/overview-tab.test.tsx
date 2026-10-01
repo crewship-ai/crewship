@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 
 import { OverviewTab } from "../overview-tab"
 
@@ -57,6 +57,20 @@ describe("Admin overview — what needs attention comes first", () => {
     expect(within(panel).getByText(/private-egress/i)).toBeInTheDocument()
   })
 
+  // A long list scrolls inside the card; each finding is its first sentence,
+  // with the rest one click away.
+  it("keeps findings to a line each, in a scrolling list", () => {
+    renderTab({ posture: { environment: "", warnings: [
+      { key: "rate_limit_disabled", severity: "high", message: "The API rate limiter is OFF. Anyone can hammer the login endpoint." },
+    ] } })
+    expect(document.querySelector("[data-slot=admin-findings]")?.className).toContain("overflow-y-auto")
+    expect(screen.getByText("The API rate limiter is OFF.")).toBeInTheDocument()
+    const details = screen.getByRole("button", { name: "Details" })
+    expect(details).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(details)
+    expect(screen.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true")
+  })
+
   it("says everything is clear rather than hiding the block", () => {
     renderTab({ posture: { environment: "", warnings: [] } })
     // A missing block reads as "not checked". An explicit all-clear is a
@@ -74,20 +88,27 @@ describe("Admin overview — what needs attention comes first", () => {
 describe("Admin overview — instance identity", () => {
   it("names the build and the update waiting for it", () => {
     renderTab()
-    expect(screen.getByText(/v0\.9\.2/)).toBeInTheDocument()
-    expect(screen.getByText(/v0\.9\.4/)).toBeInTheDocument()
+    const hero = screen.getByRole("region", { name: "Instance status" })
+    expect(within(hero).getByText("v0.9.2")).toBeInTheDocument()
+    expect(within(hero).getByText(/v0\.9\.4 available/)).toBeInTheDocument()
   })
 
   it("keeps quiet about updates when this build is current", () => {
     renderTab({ version: { current: "v0.9.4", latest: "v0.9.4", newer: false } })
-    expect(screen.getByText(/v0\.9\.4/)).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Instance status" })).getByText("v0.9.4")).toBeInTheDocument()
     expect(screen.queryByText(/available/i)).toBeNull()
+  })
+
+  it("names the edition, not the licence id", () => {
+    renderTab()
+    expect(within(screen.getByRole("region", { name: "Instance status" })).getByText("Community Edition")).toBeInTheDocument()
   })
 
   it("reports disk headroom on the volume that fills", () => {
     renderTab()
-    expect(screen.getByText(/68%/)).toBeInTheDocument()
-    expect(screen.getByText(/15\.3 GB free/)).toBeInTheDocument()
+    const platform = screen.getByRole("region", { name: "Platform" })
+    expect(within(platform).getByText("68%")).toBeInTheDocument()
+    expect(within(platform).getByText(/15\.3 GB free/)).toBeInTheDocument()
   })
 
   it("does not render missing disk figures as zero", () => {
@@ -112,11 +133,65 @@ describe("Admin overview — capacity against the licence", () => {
   })
 })
 
+// The verdict line reads the same probes as the cards below it, and the one
+// slow probe says it is still running instead of claiming a result.
+describe("Admin overview — health checks", () => {
+  it("calls the instance healthy only when every check passes and nothing is flagged", () => {
+    renderTab({ posture: { environment: "", warnings: [] } })
+    expect(screen.getByText("All systems healthy")).toBeInTheDocument()
+  })
+
+  it("counts findings to review", () => {
+    renderTab()
+    expect(screen.getByText("1 finding to review")).toBeInTheDocument()
+  })
+
+  it("puts a failing check ahead of findings", () => {
+    renderTab({ health: { ...HEALTH, db: { connected: false, error: "locked" } } })
+    expect(screen.getByText("1 check failing")).toBeInTheDocument()
+    expect(document.querySelector('[data-check="db"]')?.getAttribute("data-state")).toBe("bad")
+  })
+
+  it("shows the journal walk as pending, not as unchecked", () => {
+    renderTab({ journal: null, journalPending: true })
+    expect(document.querySelector('[data-check="journal"]')?.getAttribute("data-state")).toBe("pending")
+    expect(screen.getAllByText(/Verifying…/).length).toBeGreaterThan(0)
+  })
+
+  it("reads the host daemon and the week's runs", () => {
+    renderTab({
+      daemon: { status: "ok", connections: 2, uptime: "1h2m3.5s" },
+      runs: [{ ts: "2026-09-28T00:00:00Z", value: 3 }, { ts: "2026-09-29T00:00:00Z", value: 4 }],
+    })
+    expect(within(screen.getByRole("region", { name: "Platform" })).getByText(/up 1h 2m/)).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Runs this week" })).getByText(/runs in the last 7 days/)).toBeInTheDocument()
+  })
+})
+
+describe("Admin overview — an instance admin with no workspace", () => {
+  it("says the runs and the host daemon belong to a workspace instead of loading forever", () => {
+    renderTab({ noWorkspace: true, daemon: null, runs: null, journal: null })
+    const runs = screen.getByRole("region", { name: "Runs this week" })
+    expect(runs.querySelector('[data-slot="skeleton"]')).toBeNull()
+    expect(runs).toHaveTextContent(/counted per workspace/)
+    expect(document.querySelector('[data-check="daemon"]')?.getAttribute("data-state")).toBe("na")
+    expect(within(screen.getByRole("region", { name: "Platform" })).getByText("Read in a workspace")).toBeInTheDocument()
+    expect(document.querySelectorAll(".animate-spin")).toHaveLength(0)
+  })
+})
+
 describe("Admin overview — integrity", () => {
   it("reports the journal chain's own verdict", () => {
     renderTab()
     const panel = screen.getByRole("region", { name: /integrity/i })
     expect(within(panel).getByText(/32,?007/)).toBeInTheDocument()
+  })
+
+  // The verify endpoint answers {ok, count, checkpoints}; reading only the
+  // older field names printed "0 entries verified" over a 284k-entry chain.
+  it("reads the entry count the server actually sends", () => {
+    renderTab({ journal: { ok: true, count: 284249, checkpoints: 4 } })
+    expect(within(screen.getByRole("region", { name: /integrity/i })).getByText(/284,249 entries verified/)).toBeInTheDocument()
   })
 
   it("says where the encryption key came from", () => {
@@ -138,7 +213,7 @@ describe("Admin overview — integrity", () => {
   // "Rancher". Product names are not a capitalisation of their socket label.
   it("names the runtime in use the way its vendor writes it", () => {
     renderTab({ runtimeInfo: { runtime: "orbstack", version: "29.4.0", socket: "/var/run/docker.sock" } })
-    expect(screen.getByText(/OrbStack 29\.4\.0/)).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Platform" })).getByText(/OrbStack 29\.4\.0/)).toBeInTheDocument()
   })
 
   // Runtimes installed, none driving anything: the server started without a
@@ -146,12 +221,12 @@ describe("Admin overview — integrity", () => {
   // the old label rendered it as "Unknown " (#1690).
   it("distinguishes a detected runtime from one that is actually in use", () => {
     renderTab({ runtimeAvailable: true, runtimeInfo: null })
-    expect(screen.getByText(/none in use/i)).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Platform" })).getByText(/none in use/i)).toBeInTheDocument()
     expect(screen.queryByText(/unknown/i)).toBeNull()
   })
 
   it("still says so when nothing is detected at all", () => {
     renderTab({ runtimeAvailable: false, runtimeInfo: null })
-    expect(screen.getByText(/not detected/i)).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Platform" })).getByText(/not detected/i)).toBeInTheDocument()
   })
 })

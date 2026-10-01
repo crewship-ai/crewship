@@ -12,8 +12,9 @@ workspaces may attach an override row that flips the flag for that workspace
 only.
 
 All endpoints require authentication and workspace context. Reads are open to
-any workspace role; mutations (flag definition CRUD and per-workspace override
-CRUD) require `OWNER` or `ADMIN`.
+any workspace role. Creating, updating and deleting a flag definition changes
+every workspace, so it requires an instance administrator; a per-workspace
+override requires `OWNER` or `ADMIN` of that workspace.
 
 ---
 
@@ -70,7 +71,7 @@ POST /api/v1/feature-flags
 
 Inserts a new instance-global flag definition.
 
-**Auth:** `OWNER` or `ADMIN` role
+**Auth:** instance administrator — a flag definition applies to every workspace, so a workspace `OWNER` or `ADMIN` role is not enough
 
 **Request Body:**
 
@@ -111,7 +112,7 @@ PATCH /api/v1/feature-flags/{key}
 
 Partial update -- only provided fields are changed.
 
-**Auth:** `OWNER` or `ADMIN` role
+**Auth:** instance administrator — a flag definition applies to every workspace, so a workspace `OWNER` or `ADMIN` role is not enough
 
 | Path Parameter | Description |
 |---|---|
@@ -149,7 +150,7 @@ DELETE /api/v1/feature-flags/{key}
 Removes the flag definition. The `ON DELETE CASCADE` on the override table
 means all per-workspace override rows are removed too.
 
-**Auth:** `OWNER` or `ADMIN` role
+**Auth:** instance administrator — a flag definition applies to every workspace, so a workspace `OWNER` or `ADMIN` role is not enough
 
 **Response:** `204 No Content`
 

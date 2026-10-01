@@ -53,7 +53,7 @@ describe("<StatStrip>", () => {
   it("uses the row role for values and the meta role for captions", () => {
     render(<StatStrip items={items} />)
     expect(screen.getByText("77")).toHaveClass("type-row")
-    expect(screen.getByText("RUNS")).toHaveClass("type-meta")
+    expect(screen.getByText("RUNS")).toHaveClass("eyebrow")
   })
 
   it("tints a value without touching the others", () => {

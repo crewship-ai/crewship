@@ -1,15 +1,17 @@
 "use client"
 
+import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
 function Toaster({ ...props }: ToasterProps) {
+  const { resolvedTheme } = useTheme()
   return (
     <Sonner
       className="toaster group"
       position="bottom-right"
-      // The app root is always dark. Sonner's light error palette has
-      // insufficient text contrast and looks wrong against the shell.
-      theme="dark"
+      // Sonner's light palette only under the light theme, where it sits on
+      // a light shell.
+      theme={resolvedTheme === "light" ? "light" : "dark"}
       richColors
       closeButton
       {...props}

@@ -40,11 +40,14 @@ import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { StatusDonut } from "@/components/features/dashboard/status-donut"
 import { Skeleton } from "@/components/ui/skeleton"
+import { InlineEmpty } from "@/components/ui/inline-empty"
+import { StatusPill } from "@/components/ui/status-pill"
 import { CredentialTierBadge } from "./credential-tier-badge"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
 import { formatRelativeTime } from "@/lib/time"
 import {
   attentionQueue,
+  foldAttentionReasons,
   expiringSoon,
   recentlyUsed,
   typeBreakdown,
@@ -53,7 +56,6 @@ import {
 } from "@/lib/credentials/overview"
 import { GUARDED_TIER, guardedCount, tierBuckets, tierOf } from "@/lib/credentials/tiers"
 import { EXPIRY_WARNING_DAYS } from "@/lib/credentials/facets"
-import { cn } from "@/lib/utils"
 
 const ATTENTION_LIMIT = 6
 const RECENT_LIMIT = 6
@@ -104,10 +106,14 @@ export function CredentialsOverview({
   // Everything the attention queue could hold, not just the page of it shown —
   // a card headed "6" over six rows when nine are broken is a card lying by
   // omission.
-  const attentionTotal = React.useMemo(
-    () => attentionQueue(credentials, missingToolIds, Number.MAX_SAFE_INTEGER).length,
+  const fullQueue = React.useMemo(
+    () => attentionQueue(credentials, missingToolIds, Number.MAX_SAFE_INTEGER),
     [credentials, missingToolIds],
   )
+  const attentionTotal = fullQueue.length
+  // A reason several rows share is said once under the list; each of those
+  // rows keeps only its pill.
+  const fold = React.useMemo(() => foldAttentionReasons(fullQueue), [fullQueue])
 
   const shownTypes = types.slice(0, TYPE_LIMIT)
   const hiddenTypes = types.length - shownTypes.length
@@ -129,7 +135,7 @@ export function CredentialsOverview({
           <KpiCard
             label="Active"
             value={totals.active}
-            valueColor={totals.active > 0 ? "rgb(52, 211, 153)" : undefined}
+            valueColor={totals.active > 0 ? "var(--success)" : undefined}
             subtitle={`of ${totals.total} total`}
           />
           {/* The tier tile, and it is a place to go. "How much of this vault
@@ -148,7 +154,7 @@ export function CredentialsOverview({
           <KpiCard
             label="Tools missing"
             value={missingToolCount}
-            valueColor={missingToolCount > 0 ? "rgb(248, 113, 113)" : undefined}
+            valueColor={missingToolCount > 0 ? "var(--destructive)" : undefined}
             subtitle={
               readinessLoading
                 ? "checking crews…"
@@ -161,7 +167,7 @@ export function CredentialsOverview({
           <KpiCard
             label="Expiring"
             value={totals.expiring}
-            valueColor={totals.expiring > 0 ? "rgb(251, 191, 36)" : undefined}
+            valueColor={totals.expiring > 0 ? "var(--warn)" : undefined}
             subtitle="next 30 days"
           />
         </div>
@@ -202,10 +208,11 @@ export function CredentialsOverview({
                 Nothing is expired, stale, or waiting on a decision.
               </Empty>
             ) : (
-              <div className="flex flex-col">
+              <div className="flex flex-col gap-1">
                 {attention.map((item) => {
                   const brand = getBrand(item.provider)
                   const Icon = brand.Icon
+                  const reason = fold.rowReason(item)
                   const body = (
                     <>
                       <Icon
@@ -213,22 +220,24 @@ export function CredentialsOverview({
                         style={{ color: brandColor(brand) }}
                         aria-hidden="true"
                       />
-                      <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground/90">
+                      <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground">
                         {item.name}
                       </span>
-                      <span
-                        className={cn(
-                          "shrink-0 text-[10px]",
-                          item.tone === "error" ? "text-destructive" : "text-warn",
-                        )}
-                      >
-                        {item.reason}
-                        {item.href && " →"}
-                      </span>
+                      {reason && (
+                        <span className="hidden min-w-0 truncate text-[11px] text-muted-foreground-soft sm:inline">
+                          {reason}
+                        </span>
+                      )}
+                      <StatusPill tone={item.pillTone} label={item.label} />
+                      {item.href && (
+                        <span className="text-[11px] text-primary-hover" aria-hidden>
+                          →
+                        </span>
+                      )}
                     </>
                   )
                   const rowClass =
-                    "group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
+                    "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.04]"
                   // A row whose fix is somewhere else links there. Opening the
                   // credential to be told "approve it in the inbox" is the
                   // scavenger hunt the deep link exists to remove.
@@ -247,6 +256,20 @@ export function CredentialsOverview({
                     </button>
                   )
                 })}
+                {fold.summary.length > 0 && (
+                  <p
+                    data-testid="attention-summary"
+                    className="mt-1 border-t border-border px-2 pt-2.5 text-[11px] text-muted-foreground"
+                  >
+                    {fold.summary.map((g, i) => (
+                      <span key={`${g.kind}-${g.reason}`}>
+                        {i > 0 && " · "}
+                        <span className="font-mono tabular-nums text-foreground">{g.count} ×</span>{" "}
+                        <span className="text-foreground">{g.label}</span> — {g.reason}
+                      </span>
+                    ))}
+                  </p>
+                )}
               </div>
             )}
           </DashboardCard>
@@ -274,7 +297,7 @@ export function CredentialsOverview({
                         biggest row: "half of everything is an api key" is the
                         readable fact, and a chart normalised to its own maximum
                         always shows one full bar whatever the data says. */}
-                    <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-white/[0.05]">
+                    <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-foreground/[0.05]">
                       <span
                         className="block h-full rounded-full bg-primary/70"
                         style={{ width: `${Math.max(row.share * 100, 2)}%` }}
@@ -318,7 +341,7 @@ export function CredentialsOverview({
                       key={credential.id}
                       type="button"
                       onClick={() => onSelect(credential.id)}
-                      className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
+                      className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
                     >
                       <span className="w-[52px] shrink-0 font-mono text-[11px] tabular-nums text-warn">
                         {days === 0 ? "today" : `${days}d`}
@@ -353,7 +376,7 @@ export function CredentialsOverview({
                       key={credential.id}
                       type="button"
                       onClick={() => onSelect(credential.id)}
-                      className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
+                      className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
                     >
                       <Icon
                         className="h-4 w-4 shrink-0"
@@ -382,13 +405,8 @@ export function CredentialsOverview({
   )
 }
 
-function Empty({ icon: Icon, children }: { icon: typeof AlertTriangle; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-1.5 py-7 text-center">
-      <Icon className="h-4 w-4 text-muted-foreground-soft" />
-      <p className="max-w-[280px] text-[11px] text-muted-foreground-soft">{children}</p>
-    </div>
-  )
+function Empty({ icon, children }: { icon: typeof AlertTriangle; children: React.ReactNode }) {
+  return <InlineEmpty icon={icon} text={children} />
 }
 
 /**
@@ -404,17 +422,17 @@ export function CredentialsOverviewSkeleton() {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <AppearStack>
           {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-[104px] rounded-xl" />
+            <Skeleton key={i} className="h-[104px] rounded-card" />
           ))}
         </AppearStack>
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Skeleton className="h-[228px] rounded-xl" />
-        <Skeleton className="h-[228px] rounded-xl" />
+        <Skeleton className="h-[228px] rounded-card" />
+        <Skeleton className="h-[228px] rounded-card" />
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Skeleton className="h-[228px] rounded-xl" />
-        <Skeleton className="h-[228px] rounded-xl" />
+        <Skeleton className="h-[228px] rounded-card" />
+        <Skeleton className="h-[228px] rounded-card" />
       </div>
     </div>
   )

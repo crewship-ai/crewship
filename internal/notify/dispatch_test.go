@@ -272,3 +272,29 @@ func TestDispatch_Email_DisabledMailerIsNoOp(t *testing.T) {
 		t.Fatalf("disabled mailer should be a no-op, got %v", err)
 	}
 }
+
+func TestWebhookTransportOverrideAndDispatchClientAreConcurrentSafe(t *testing.T) {
+	d := NewDispatcher(staticLister{}, nil, nil, nil)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 1000 {
+			restore := SetWebhookTransportForTesting(http.DefaultTransport)
+			restore()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 1000 {
+			if d.webhookClient("").Transport == nil {
+				t.Error("dispatch lost its transport")
+			}
+		}
+	}()
+	close(start)
+	wg.Wait()
+}

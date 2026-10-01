@@ -103,14 +103,14 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
           Assign skill
         </button>
       </div>
-      <div className="rounded-xl border border-white/8 bg-card overflow-hidden divide-y divide-white/5">
+      <div className="rounded-xl border border-foreground/8 bg-card overflow-hidden divide-y divide-foreground/5">
         {assigned === null ? (
           <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
         ) : assigned.length === 0 ? (
           <div className="px-4 py-6 text-xs text-muted-foreground italic">No skills assigned. Click <em>Assign skill</em> to attach one from the workspace library.</div>
         ) : (
           assigned.map((row) => (
-            <div key={row.id} className="px-4 py-3 flex items-center gap-3 hover:bg-white/[0.025]">
+            <div key={row.id} className="px-4 py-3 flex items-center gap-3 hover:bg-foreground/[0.025]">
               <div className="w-8 h-8 rounded-lg bg-muted grid place-items-center text-foreground/60 shrink-0">
                 <span className="text-xs">{(row.skill.display_name ?? row.skill.name).slice(0, 2).toUpperCase()}</span>
               </div>
@@ -277,14 +277,14 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
           Assign credential
         </button>
       </div>
-      <div className="rounded-xl border border-white/8 bg-card overflow-hidden divide-y divide-white/5">
+      <div className="rounded-xl border border-foreground/8 bg-card overflow-hidden divide-y divide-foreground/5">
         {assigned === null ? (
           <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
         ) : assigned.length === 0 ? (
           <div className="px-4 py-6 text-xs text-muted-foreground italic">No credentials assigned. SECRETs are surfaced through Keeper at runtime — assign them here once and the agent fetches them on demand.</div>
         ) : (
           assigned.map((row) => (
-            <div key={row.id} className="px-4 py-3 flex items-center gap-3 hover:bg-white/[0.025]">
+            <div key={row.id} className="px-4 py-3 flex items-center gap-3 hover:bg-foreground/[0.025]">
               <div className="w-8 h-8 rounded-lg bg-warn/15 text-warn grid place-items-center shrink-0">
                 <span className="text-xs">{row.credential_provider.slice(0, 2).toUpperCase()}</span>
               </div>
@@ -389,17 +389,17 @@ function PickerSheet<T>({
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className="w-[460px] max-w-[90vw] max-h-[70dvh] rounded-xl border border-white/10 bg-card shadow-2xl overflow-hidden flex flex-col outline-none"
+        className="w-[460px] max-w-[90vw] max-h-[70dvh] rounded-xl border border-foreground/10 bg-card shadow-2xl overflow-hidden flex flex-col outline-none"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label={title}
       >
-        <div className="px-4 py-3 border-b border-white/8">
+        <div className="px-4 py-3 border-b border-foreground/8">
           <h3 className="text-sm font-semibold">{title}</h3>
           <p className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</p>
         </div>
-        <div className="flex-1 overflow-y-auto divide-y divide-white/5">
+        <div className="flex-1 overflow-y-auto divide-y divide-foreground/5">
           {loading ? (
             <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
           ) : items.length === 0 ? (
@@ -413,7 +413,7 @@ function PickerSheet<T>({
                   type="button"
                   disabled={busy}
                   onClick={() => onPick(item)}
-                  className="w-full text-left px-4 py-2.5 hover:bg-white/[0.04] disabled:opacity-50"
+                  className="w-full text-left px-4 py-2.5 hover:bg-foreground/[0.04] disabled:opacity-50"
                 >
                   <div className="text-sm text-foreground">{primary}</div>
                   {secondary && <div className="text-[10px] text-muted-foreground">{secondary}</div>}
@@ -422,11 +422,11 @@ function PickerSheet<T>({
             })
           )}
         </div>
-        <div className="px-4 py-2 border-t border-white/8 flex items-center justify-end">
+        <div className="px-4 py-2 border-t border-foreground/8 flex items-center justify-end">
           <button
             type="button"
             onClick={onClose}
-            className="text-xs px-3 py-1.5 rounded border border-white/10 hover:bg-white/5 text-foreground"
+            className="text-xs px-3 py-1.5 rounded border border-foreground/10 hover:bg-foreground/5 text-foreground"
           >
             Cancel
           </button>

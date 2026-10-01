@@ -3,10 +3,11 @@
 import { useMemo, useState } from "react"
 import {
   User, Building, Users, Volume2,
-  Link2, Activity, Shield, KeyRound, Webhook,
+  Link2, Activity, Shield, KeyRound, Webhook, ChevronRight,
 } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { isManagerTier } from "@/lib/permissions/tiers"
+import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
 import type { LucideIcon } from "lucide-react"
 import {
   SidebarToolbar,
@@ -40,6 +41,12 @@ interface NavItem {
    * backend cannot keep.
    */
   enabled?: boolean
+  /**
+   * A nested page (components/layout/drill-page) instead of a pane: the row
+   * navigates there and carries a chevron, so the reader expects a bigger
+   * page with its own side panel rather than another card.
+   */
+  href?: string
 }
 
 interface NavSection {
@@ -91,7 +98,7 @@ const sections: NavSection[] = [
       // rule at the top of this file. Named "Crew links" and not
       // "Connections": Integrations owns that word for the services this
       // instance is wired into.
-      { key: "connections", label: "Crew links", icon: Link2 },
+      { key: "connections", label: "Crew links", icon: Link2, href: "/settings/crew-links" },
       // The roster is readable by every role; the invite/role controls inside
       // are gated separately.
       { key: "members", label: "Members", icon: Users },
@@ -110,9 +117,10 @@ const sections: NavSection[] = [
       // file: a shell hook running on the host is information a member is
       // entitled to, and the switch is the part they are not.
       { key: "hooks", label: "Lifecycle hooks", icon: Webhook },
-      // The audit log is not readable below MANAGER, so the pane would be
-      // empty — the one section where hiding beats read-only.
-      { key: "audit", label: "Audit Log", icon: Activity, visibleTo: isManagerTier },
+      // GET /api/v1/audit is ADMIN+ (router_admin.go authedAdmin, audit.go
+      // canRole("manage")); below that the pane could only show a 403 — the
+      // one section where hiding beats read-only.
+      { key: "audit", label: "Audit Log", icon: Activity, visibleTo: isAdminTier, href: "/settings/audit" },
     ],
   },
 ]
@@ -143,11 +151,11 @@ export function isSettingsSectionVisible(key: string, role: string | null | unde
  */
 export function visibleSettingsSections(
   role: string | null | undefined,
-): Array<{ key: string; label: string; icon: LucideIcon }> {
+): Array<{ key: string; label: string; icon: LucideIcon; href?: string }> {
   return sections
     .flatMap((s) => s.items)
     .filter((i) => isSettingsSectionVisible(i.key, role))
-    .map(({ key, label, icon }) => ({ key, label, icon }))
+    .map(({ key, label, icon, href }) => ({ key, label, icon, href }))
 }
 
 interface SettingsNavProps {
@@ -160,6 +168,7 @@ interface SettingsNavProps {
 }
 
 export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: SettingsNavProps) {
+  const router = useRouter()
   // Universal search doubles as a command-finder here — type "audit" to jump
   // straight to Audit Log. Filters the nav live; Enter opens the first match.
   const [query, setQuery] = useState("")
@@ -189,7 +198,10 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
           onValueChange={setQuery}
           placeholder="Search settings…"
           onKeyDown={(e) => {
-            if (e.key === "Enter" && firstMatch) onTabChange(firstMatch)
+            if (e.key !== "Enter" || !firstMatch) return
+            const href = filtered[0]?.items[0]?.href
+            if (href) router.push(href)
+            else onTabChange(firstMatch)
           }}
         />
       </SidebarToolbar>
@@ -213,7 +225,7 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
                 <SidebarRow
                   key={item.key}
                   selected={isActive}
-                  onSelect={() => onTabChange(item.key)}
+                  onSelect={() => (item.href ? router.push(item.href) : onTabChange(item.key))}
                   aria-label={item.label}
                 >
                   <item.icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
@@ -221,6 +233,7 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
                   {item.badge === "P2" && (
                     <span className="ml-auto shrink-0 font-mono text-[10px] text-sidebar-foreground/40">P2</span>
                   )}
+                  {item.href && <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden />}
                   {item.badge === "OWNER" && (
                     <span className="ml-auto shrink-0 font-mono text-[10px] text-sidebar-foreground/60">Owner</span>
                   )}

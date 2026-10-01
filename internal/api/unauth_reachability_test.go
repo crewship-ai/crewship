@@ -120,6 +120,8 @@ var sensitiveRoutes = []route{
 	{"DELETE", "/api/v1/admin/backups"},
 	{"POST", "/api/v1/admin/backups/restore"},
 	{"GET", "/api/v1/admin/backups/download"},
+	{"GET", "/api/v1/admin/instance/backups/bundles/inspect"},
+	{"GET", "/api/v1/admin/instance/backups/bundles/download"},
 
 	// Instance settings + feature flags (multi-tenant-global)
 	{"GET", "/api/v1/instance/settings"},

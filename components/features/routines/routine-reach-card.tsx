@@ -73,7 +73,7 @@ export function RoutineReachCard({
         <Skeleton className="h-4 w-32 rounded" />
       </div>
     ) : (
-      <ul className="divide-y divide-white/[0.04]">
+      <ul className="divide-y divide-foreground/[0.04]">
         {resolved.map(({ slug, agent }) => (
           <li key={slug} className={bare ? "py-2 first:pt-0 last:pb-0" : "px-4 py-2.5"}>
             {agent ? (
@@ -94,8 +94,8 @@ export function RoutineReachCard({
   if (bare) return body
 
   return (
-    <div className="overflow-hidden rounded-xl border border-white/8 bg-card">
-      <div className="flex items-center gap-2 border-b border-white/5 px-4 py-2.5">
+    <div className="overflow-hidden rounded-xl border border-foreground/8 bg-card">
+      <div className="flex items-center gap-2 border-b border-foreground/5 px-4 py-2.5">
         <Bot className="h-3 w-3 shrink-0 text-muted-foreground/70" />
         <h3 className="text-[10px] font-semibold uppercase tracking-wider text-foreground/50">
           Reach through its agents
@@ -136,7 +136,7 @@ function AgentRow({ workspaceId, agent }: { workspaceId: string; agent: Workspac
               title={`${t.toolkit} · ${t.mode}`}
               className={cn(
                 "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px]",
-                MODE_STYLE[t.mode] ?? "border-white/10 bg-white/[0.03] text-muted-foreground",
+                MODE_STYLE[t.mode] ?? "border-foreground/10 bg-foreground/[0.03] text-muted-foreground",
               )}
             >
               <ProviderMark
@@ -152,7 +152,7 @@ function AgentRow({ workspaceId, agent }: { workspaceId: string; agent: Workspac
             <span
               key={c.id}
               title={`May post to a ${c.provider || c.type} channel`}
-              className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.03] px-1.5 py-0.5 text-[10px] text-muted-foreground"
+              className="inline-flex items-center gap-1 rounded-full border border-foreground/10 bg-foreground/[0.03] px-1.5 py-0.5 text-[10px] text-muted-foreground"
             >
               <Bell className="h-2.5 w-2.5" />
               <span className="capitalize">{c.provider || c.type}</span>

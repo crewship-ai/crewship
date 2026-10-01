@@ -63,9 +63,13 @@ describe("SettingsNav visibility by role", () => {
     }
   })
 
-  it("gives a MANAGER Audit Log", () => {
+  // GET /api/v1/audit is ADMIN+, so a MANAGER could only ever see a 403.
+  it("gives a MANAGER Crew links but not Audit Log; an ADMIN gets both", () => {
     renderNav("MANAGER")
     expect(row("Crew links")).toBeTruthy()
+    expect(row("Audit Log")).toBeNull()
+    cleanup()
+    renderNav("ADMIN")
     expect(row("Audit Log")).toBeTruthy()
   })
 
@@ -122,7 +126,10 @@ describe("SettingsNav visibility by role", () => {
 describe("isSettingsSectionVisible", () => {
   it("agrees with the rendered nav", () => {
     expect(isSettingsSectionVisible("audit", "MEMBER")).toBe(false)
-    expect(isSettingsSectionVisible("audit", "MANAGER")).toBe(true)
+    // GET /api/v1/audit is ADMIN+ (router_admin.go, audit.go canRole("manage")):
+    // a MANAGER only ever got a 403 pane.
+    expect(isSettingsSectionVisible("audit", "MANAGER")).toBe(false)
+    expect(isSettingsSectionVisible("audit", "ADMIN")).toBe(true)
     // The link graph reads at any tier; only its controls are MANAGER+.
     expect(isSettingsSectionVisible("connections", "MEMBER")).toBe(true)
     expect(isSettingsSectionVisible("general", "MEMBER")).toBe(true)
@@ -205,6 +212,9 @@ vi.mock("@/lib/api-fetch", () => ({
 vi.mock("../sections/profile-section", () => ({
   ProfileSection: () => <div data-testid="profile-section" />,
 }))
+vi.mock("../sections/hooks-section", () => ({
+  HooksSection: () => <div data-testid="hooks-section" />,
+}))
 vi.mock("../sections/crew-audit-section", () => ({
   CrewAuditSection: () => <div data-testid="audit-section" />,
 }))
@@ -225,13 +235,16 @@ describe("SettingsLayout deep-link into a hidden section", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Settings / Profile")
   })
 
-  it("still honours ?tab=audit for a role that can read it", async () => {
+  // The Audit log is a nested page now (/settings/audit); an old ?tab=audit
+  // link from a role that can read it lands there.
+  it("forwards ?tab=audit to the Audit log page for a role that can read it", async () => {
     h.role = "OWNER"
+    h.replace.mockClear()
     window.history.replaceState(null, "", "/settings?tab=audit")
     const { SettingsLayout } = await import("../settings-layout")
     render(<SettingsLayout />)
 
-    await waitFor(() => expect(screen.getByTestId("audit-section")).toBeTruthy())
+    await waitFor(() => expect(h.replace).toHaveBeenCalledWith("/settings/audit"))
   })
 })
 
@@ -275,29 +288,29 @@ describe("SettingsLayout — a changed link on a mounted page", () => {
 
   it("follows a later ?tab= without a remount", async () => {
     h.role = "OWNER"
-    window.history.replaceState(null, "", "/settings?tab=audit")
+    window.history.replaceState(null, "", "/settings?tab=hooks")
     const { SettingsLayout } = await import("../settings-layout")
     const { rerender } = render(<SettingsLayout />)
-    await waitFor(() => expect(screen.getByTestId("audit-section")).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId("hooks-section")).toBeTruthy())
 
     // A client-side navigation: the URL changes under a mounted layout.
     window.history.replaceState(null, "", "/settings?tab=profile")
     rerender(<SettingsLayout />)
     await waitFor(() => expect(screen.getByTestId("profile-section")).toBeTruthy())
-    expect(screen.queryByTestId("audit-section")).toBeNull()
+    expect(screen.queryByTestId("hooks-section")).toBeNull()
   })
 
   it("does not re-apply the same link when something else rerenders", async () => {
     // setActiveTab writes the URL with history.replaceState precisely so it
     // does NOT navigate. Re-reading an unchanged URL must not undo a click.
     h.role = "OWNER"
-    window.history.replaceState(null, "", "/settings?tab=audit")
+    window.history.replaceState(null, "", "/settings?tab=hooks")
     const { SettingsLayout } = await import("../settings-layout")
     const { rerender } = render(<SettingsLayout />)
-    await waitFor(() => expect(screen.getByTestId("audit-section")).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId("hooks-section")).toBeTruthy())
 
     rerender(<SettingsLayout />)
     rerender(<SettingsLayout />)
-    expect(screen.getByTestId("audit-section")).toBeTruthy()
+    expect(screen.getByTestId("hooks-section")).toBeTruthy()
   })
 })

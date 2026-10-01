@@ -1,5 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+/* Brand colours per accent theme — see the header of that file. */
+@import "./styles/accents.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -84,42 +86,42 @@
 :root {
   /* ── Light surfaces (kept from prior shadcn palette — only Philosophy /
    *    legal pages render light; main app is dark-first) ── */
-  --background: oklch(0.9911 0 0);
-  --foreground: oklch(0.1994 0.0470 270.6494);
+  --background: #F4F7FB;
+  --foreground: #0F1733;
   --scrollbar-thumb: oklch(0.80 0 0);
   --scrollbar-thumb-hover: oklch(0.66 0 0);
-  --card: oklch(0.9851 0 0);
-  --card-foreground: oklch(0.1994 0.0470 270.6494);
-  --popover: oklch(1.0000 0 0);
-  --popover-foreground: oklch(0.1994 0.0470 270.6494);
+  --card: #FFFFFF;
+  --card-foreground: #0F1733;
+  --popover: #FFFFFF;
+  --popover-foreground: #0F1733;
 
   /* Brand — #0E6BE8 is the light-mode variant of the marketing site's
    *  #1E7BFE (deeper so it stays legible on white). Same hue family. */
-  --primary: #0E6BE8;
-  --primary-foreground: oklch(1.0000 0 0);
-  --primary-hover: #1E7BFE;
+  --primary: var(--brand);
+  --primary-foreground: var(--brand-foreground);
+  --primary-hover: var(--brand-ink);
 
   --secondary: oklch(0.1994 0.0470 270.6494);
   --secondary-foreground: oklch(1.0000 0 0);
-  --muted: oklch(1.0000 0 0);
-  --muted-foreground: oklch(0.1994 0.0470 270.6494);
+  --muted: #EEF2F7;
+  --muted-foreground: #566079;
   /* Dimmer-but-AA-compliant second muted level. Replaces the old
    * text-muted-foreground/40–/70 alpha pattern, which composited to
    * well under the WCAG AA 4.5:1 minimum for normal-size text.
    * Light: 5.86:1 on --background, 5.76:1 on --card. */
-  --muted-foreground-soft: oklch(0.50 0.03 270);
-  --accent: oklch(1.0000 0 0);
-  --accent-foreground: #0E6BE8;
+  --muted-foreground-soft: #646E87;
+  --accent: #EEF2F7;
+  --accent-foreground: #0F1733;
 
   /* Destructive — matches marketing-site --color-error (oklch 0.70 0.19 25,
    *  a tighter red than the previous orange-leaning oklch(0.71 0.19 39)). */
-  --destructive: oklch(0.70 0.19 25);
+  --destructive: #C0261B;
   --destructive-foreground: oklch(1.0000 0 0);
 
-  --border: oklch(0.9212 0.0033 17.2170);
-  --input: oklch(0.8452 0 0);
-  --control-border: oklch(0.56 0 0);
-  --ring: #0E6BE8;
+  --border: #D8E0EB;
+  --input: #D8E0EB;
+  --control-border: #8792AB;
+  --ring: var(--brand);
 
   /* Chart palette — light-ground tuning, deliberately distinct from the
    *  .dark block below (was byte-identical light vs dark until this fix,
@@ -149,20 +151,22 @@
   --chart-4: oklch(0.45 0.108 55);
   --chart-5: oklch(0.62 0.133 105);
 
-  --sidebar: oklch(0.9851 0 0);
-  --sidebar-foreground: oklch(0.1994 0.0470 270.6494);
-  --sidebar-primary: #0E6BE8;
-  --sidebar-primary-foreground: oklch(1.0000 0 0);
-  --sidebar-accent: oklch(1.0000 0 0);
-  --sidebar-accent-foreground: #0E6BE8;
-  --sidebar-border: oklch(1.0000 0 0);
-  --sidebar-ring: #0E6BE8;
+  --sidebar: #E6EEF7;
+  --sidebar-foreground: #0F1733;
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: var(--brand-foreground);
+  --sidebar-accent: #FFFFFF;
+  --sidebar-accent-foreground: var(--brand-ink);
+  --sidebar-border: #D8E0EB;
+  --sidebar-ring: var(--brand);
 
-  /* ── Semantic palette (1:1 with marketing-site tokens for brand parity) ── */
-  --success: oklch(0.72 0.18 152);
-  --info: #5DA1FF;
-  --notice: oklch(0.72 0.14 200);
-  --warn: oklch(0.78 0.15 75);
+  /* ── Semantic palette — Day values. The marketing-site lightness (≥ 0.72)
+   *    reads on a dark ground only; these are the same hues taken dark enough
+   *    to be text on white (pinned in theme-contrast.test, day block). ── */
+  --success: #157A45;
+  --info: #0A63D6;
+  --notice: #0B6E7F;
+  --warn: #8A5A00;
   --purple: oklch(0.66 0.22 300);
   /* Text on a purple tint. --purple is a fill/stroke token and is not
      text-safe: measured on the LEAD badge (bg-purple/20 over the card) it
@@ -172,16 +176,28 @@
      Light needs to go darker, dark needs to go lighter; chroma is unchanged
      so the badge stays the brand purple. Measured: 5.20:1. */
   --purple-hover: oklch(0.50 0.22 300);
-  --gold: oklch(0.84 0.15 85);
+  --gold: #7A5E00;
+  /* Concept hues for the rail (lib/concept-accents.ts): one per function, at
+     one lightness per theme so none outweighs the rest; contrast pinned in
+     lib/__tests__/theme-contrast.test.ts. */
+  --indigo: oklch(0.50 0.17 285);
+  --rose: oklch(0.52 0.18 350);
+  --lime: oklch(0.50 0.12 130);
+  --orange: oklch(0.54 0.15 45);
+  --azure: oklch(0.50 0.10 225);
 
-  --font-sans: "Open Sans", ui-sans-serif, sans-serif, system-ui;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Georgia", serif;
-  --font-mono: "Menlo", monospace;
-  --radius: 1.3rem;
+  --font-mono: var(--font-jetbrains, "JetBrains Mono"), ui-monospace, "SF Mono", Menlo, monospace;
+  /* Shape scale. Controls (rows, inputs, selects, buttons) are rounded-md
+     = 8px, small marks rounded-sm = 6px, cards rounded-card = 16px, chips
+     rounded-full. --radius drives sm/md/lg/xl below; cards have their own
+     token so a control never inherits a card's roundness. */
+  --radius: 0.625rem;
 
   /* ── Surface tokens (for nested sections & raised elements) ── */
-  --surface-subtle: oklch(0.975 0 0);
-  --surface-raised: oklch(1 0 0);
+  --surface-subtle: #FBFCFE;
+  --surface-raised: #FFFFFF;
 
   /* ── Shadows (functional, minimal — orchestration uses borders over shadows) ── */
   --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.05);
@@ -219,30 +235,66 @@
      Light theme uses primary-tinted overlays.
      Consumed via utility classes below (.row-selected, .row-hover, .chip-*).
      Components should NEVER hardcode bg-blue-500/X — use lib/interaction.ts. */
-  --selection-bg: oklch(0.5729 0.2337 264.3664 / 0.10);
-  --selection-bg-hover: oklch(0.5729 0.2337 264.3664 / 0.14);
-  --selection-border: oklch(0.5729 0.2337 264.3664);
-  --row-hover-bg: oklch(0 0 0 / 0.03);
-  --chip-active-bg: oklch(0.5729 0.2337 264.3664 / 0.12);
-  --chip-active-fg: oklch(0.5729 0.2337 264.3664);
+  --selection-bg: color-mix(in srgb, var(--foreground) 7%, transparent);
+  --selection-bg-hover: color-mix(in srgb, var(--foreground) 9%, transparent);
+  --selection-border: var(--brand);
+  --row-hover-bg: color-mix(in srgb, var(--foreground) 4%, transparent);
+  --chip-active-bg: color-mix(in srgb, var(--brand) 14%, transparent);
+  --chip-active-fg: var(--brand-ink);
   --chip-idle-fg: oklch(0.45 0.02 270);
+
+  /* ── Harbor — the marketing site's design language, in app tokens ──
+   *  primary-strong is the filled-button blue: white text must clear 4.5:1
+   *  on it (light 4.90, dark 5.17), which --primary cannot do in
+   *  the dark theme, where it is tuned as a text colour on the ground.
+   *  --primary-hover doubles as Harbor's "primary-ink" (links, brand text on
+   *  tints) — it already carries that job in 120+ call sites. */
+  --primary-strong: var(--brand-strong);
+  --primary-strong-hover: var(--brand-strong-hover);
+  --primary-glow: var(--brand-glow);
+  --line-strong: #B9C8DE;
+  --shadow-color: rgb(15 23 51 / 0.35);
+  --page-glow: none;
+  /* Deep "panel" ground for heroes, terminals and graph canvases. Text on it
+   * is always --panel-foreground regardless of theme. */
+  --panel-bg: radial-gradient(120% 140% at 0% 0%, #1A2752 0%, #0F1733 55%, #0B1228 100%);
+  --panel-foreground: #E8EEF8;
+  --panel-muted: #A5B3CB;
+  --panel-node: #131E3A;
+  /* Status chips — tinted fill + text pairs, every pair ≥ 4.5:1. */
+  --chip-ok-bg: #E2F3E9;     --chip-ok-fg: #136B3C;
+  --chip-warn-bg: #FCEFD9;   --chip-warn-fg: #8A5300;
+  --chip-danger-bg: #FDE7E7; --chip-danger-fg: #B42318;
+  --chip-neutral-bg: #E9EEF5; --chip-neutral-fg: #3F4A63;
+  --chip-info-bg: var(--brand-tint); --chip-info-fg: var(--brand-ink);
+  --chip-violet-bg: #EFE8FC; --chip-violet-fg: #5B35B0;
+  /* Icon tile glyph colours: the tint is the chip's own accent (--ic). */
+  --tile-inset: inset 0 1px 0 rgb(255 255 255 / 0.35);
+  --tile-text-mix: 78%;
+  /* Chart chrome (grid, axis ticks, hover cursor) — ink on light, white on dark. */
+  --chart-grid: rgb(15 23 51 / 0.08);
+  --chart-axis: rgb(15 23 51 / 0.55);
+  --chart-cursor: rgb(15 23 51 / 0.05);
+  --ease-harbor: cubic-bezier(.2, .7, .2, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
 }
 
 .dark {
+  color-scheme: dark;
   /* ── Dark surfaces — Unify-style depth from the marketing site:
    *    bg ≈ #0a0b0e (near-black, cool purple tint), card +6 lightness,
    *    border at 0.24 lightness. All in hue 285 (cool purple-blue). ── */
-  --background: oklch(0.10 0.008 285);
-  --foreground: oklch(1.0000 0 0);
+  --background: #0A0B0E;
+  --foreground: #EDEDF2;
   /* Scrollbar thumb. Well above --border (0.24) on purpose: a track hint has
      to be legible against BOTH the background (0.10) and the card (0.155),
      and a border-weight thumb disappeared on the card. */
   --scrollbar-thumb: oklch(0.38 0.010 285);
   --scrollbar-thumb-hover: oklch(0.52 0.012 285);
-  --card: oklch(0.155 0.010 285);
-  --card-foreground: oklch(0.8853 0 0);
-  --popover: oklch(0.155 0.010 285);
-  --popover-foreground: oklch(1.0000 0 0);
+  --card: #121318;
+  --card-foreground: #EDEDF2;
+  --popover: #121318;
+  --popover-foreground: #EDEDF2;
 
   /* Brand — #1E7BFE (vivid blue from Crewship logo's blue-bg variant).
    *  Hex used directly — OKLCH approximations of vivid blues can drift
@@ -250,32 +302,32 @@
    *  primary-foreground is the page-background navy, not white: white on
    *  #1E7BFE is 3.95:1 (fails WCAG AA 4.5:1 for normal text); the dark
    *  navy reads at 5.22:1 while keeping the same brand blue surface. */
-  --primary: #1E7BFE;
-  --primary-foreground: oklch(0.10 0.008 285);
-  --primary-hover: #3D8FFE;
+  --primary: var(--brand);
+  --primary-foreground: var(--brand-foreground);
+  --primary-hover: var(--brand-ink);
 
   --secondary: oklch(1.0000 0 0);
   --secondary-foreground: oklch(0.10 0.008 285);
-  --muted: oklch(0.155 0.006 285);
-  --muted-foreground: oklch(0.62 0.018 280);
+  --muted: #16171D;
+  --muted-foreground: #9295A3;
   /* Dimmer-but-AA-compliant second muted level (see :root note).
    * Dark: 4.99:1 on --background, 4.74:1 on --card — both above the
    * 4.5:1 AA floor, while plain muted-foreground (5.64/5.36) stays
    * the brighter tier. */
-  --muted-foreground-soft: oklch(0.59 0.018 280);
-  --accent: oklch(0.22 0.011 290);
-  --accent-foreground: oklch(1.0000 0 0);
+  --muted-foreground-soft: #7E818F;
+  --accent: #1C1E25;
+  --accent-foreground: #EDEDF2;
 
   /* Destructive — same red as light mode for brand consistency. */
   --destructive: oklch(0.70 0.19 25);
   --destructive-foreground: oklch(1.0000 0 0);
 
-  --border: oklch(0.24 0.010 285);
-  --input: oklch(0.30 0.010 285);
+  --border: #24262E;
+  --input: #2A2C35;
   /* Operable form boundaries need more contrast than decorative separators.
    * Keep --input as the existing fill; brightening it also lifts backgrounds. */
   --control-border: oklch(0.54 0.010 285);
-  --ring: #1E7BFE;
+  --ring: var(--brand);
 
   /* Chart palette — dark-ground tuning. Was byte-identical to the :root
    *  block above (same 5 values reused on a near-black ground as on
@@ -313,15 +365,15 @@
   --chart-4: oklch(0.63 0.145 55);
   --chart-5: oklch(0.82 0.13 105);
 
-  --sidebar: oklch(0.155 0.010 285);
-  --sidebar-foreground: oklch(1.0000 0 0);
+  --sidebar: #0D0E12;
+  --sidebar-foreground: #EDEDF2;
   /* sidebar-primary pair must have contrast — previously both white. */
-  --sidebar-primary: #1E7BFE;
-  --sidebar-primary-foreground: oklch(1.0000 0 0);
-  --sidebar-accent: oklch(0.22 0.011 290);
-  --sidebar-accent-foreground: oklch(1.0000 0 0);
-  --sidebar-border: oklch(0.24 0.010 285);
-  --sidebar-ring: #1E7BFE;
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: var(--brand-foreground);
+  --sidebar-accent: #1C1E25;
+  --sidebar-accent-foreground: var(--brand-ink);
+  --sidebar-border: #24262E;
+  --sidebar-ring: var(--brand);
 
   /* ── Semantic palette (identical to light — brand-consistent across modes) ── */
   --success: oklch(0.72 0.18 152);
@@ -333,16 +385,25 @@
      5.11:1, up from 4.48:1. Chroma unchanged at 0.22. */
   --purple-hover: oklch(0.70 0.22 300);
   --gold: oklch(0.84 0.15 85);
+  --indigo: oklch(0.74 0.13 285);
+  --rose: oklch(0.75 0.14 350);
+  --lime: oklch(0.84 0.16 125);
+  --orange: oklch(0.77 0.14 50);
+  --azure: oklch(0.79 0.11 220);
 
-  --font-sans: "Open Sans", ui-sans-serif, sans-serif, system-ui;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Georgia", serif;
-  --font-mono: "Menlo", monospace;
-  --radius: 1.3rem;
+  --font-mono: var(--font-jetbrains, "JetBrains Mono"), ui-monospace, "SF Mono", Menlo, monospace;
+  /* Shape scale. Controls (rows, inputs, selects, buttons) are rounded-md
+     = 8px, small marks rounded-sm = 6px, cards rounded-card = 16px, chips
+     rounded-full. --radius drives sm/md/lg/xl below; cards have their own
+     token so a control never inherits a card's roundness. */
+  --radius: 0.625rem;
 
   /* ── Surface tokens (dark theme: nested section + raised popover/drawer)
    *    Hue 285 now matches background family. ── */
-  --surface-subtle: oklch(0.13 0.009 285);
-  --surface-raised: oklch(0.195 0.011 285);
+  --surface-subtle: #0F1014;
+  --surface-raised: #16171D;
 
   /* ── Shadows (dark theme — same functional values, lower visibility) ── */
   --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.20);
@@ -355,14 +416,40 @@
   --shadow-2xs: 0 1px 1px 0 oklch(0 0 0 / 0.18);
 
   /* ── Interaction tokens (dark theme overrides) ── */
-  --selection-bg: oklch(0.6230 0.2140 259.8150 / 0.10);
-  --selection-bg-hover: oklch(0.6230 0.2140 259.8150 / 0.14);
-  --selection-border: oklch(0.6230 0.2140 259.8150);
-  --row-hover-bg: oklch(1 0 0 / 0.025);
-  --chip-active-bg: oklch(0.6230 0.2140 259.8150 / 0.16);
-  --chip-active-fg: oklch(0.78 0.14 259);
+  --selection-bg: color-mix(in srgb, var(--foreground) 7%, transparent);
+  --selection-bg-hover: color-mix(in srgb, var(--foreground) 9%, transparent);
+  --selection-border: var(--brand);
+  --row-hover-bg: color-mix(in srgb, var(--foreground) 4%, transparent);
+  --chip-active-bg: color-mix(in srgb, var(--brand) 14%, transparent);
+  --chip-active-fg: var(--brand-ink);
   --chip-idle-fg: oklch(0.65 0.02 276);
+
+  /* ── Harbor dark ("Ink") — see the :root Harbor block for the roles ── */
+  --primary-strong: var(--brand-strong);
+  --primary-strong-hover: var(--brand-strong-hover);
+  --primary-glow: var(--brand-glow);
+  --line-strong: #3A3D49;
+  --shadow-color: rgb(0 0 0 / 0.7);
+  --page-glow: radial-gradient(60% 40% at 80% 0%, rgb(59 130 246 / 0.07), transparent 70%);
+  --panel-bg: radial-gradient(120% 140% at 0% 0%, #1B1F2C 0%, #12141B 55%, #0C0D12 100%);
+  --panel-foreground: #E8EEF8;
+  --panel-muted: #A5B3CB;
+  --panel-node: #121318;
+  --chip-ok-bg: #0F2E22;     --chip-ok-fg: #6FE3B0;
+  --chip-warn-bg: #2E240F;   --chip-warn-fg: #F7C77E;
+  --chip-danger-bg: #3A1417; --chip-danger-fg: #FF9B9B;
+  --chip-neutral-bg: #1C1E25; --chip-neutral-fg: #B2B5C2;
+  --chip-info-bg: var(--brand-tint); --chip-info-fg: var(--brand-ink);
+  --chip-violet-bg: #211A3D; --chip-violet-fg: #C4A8FF;
+  --tile-inset: none;
+  --tile-text-mix: 55%;
+  --chart-grid: rgb(255 255 255 / 0.06);
+  --chart-axis: rgb(255 255 255 / 0.45);
+  --chart-cursor: rgb(255 255 255 / 0.05);
+  --ease-harbor: cubic-bezier(.2, .7, .2, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
 }
+
 
 @theme inline {
   --color-background: var(--background);
@@ -407,6 +494,25 @@
   /* Brand hover variant — text-primary-hover, bg-primary-hover */
   --color-primary-hover: var(--primary-hover);
 
+  /* Harbor — bg-primary-strong, border-line-strong, bg-chip-ok-bg … */
+  --color-primary-strong: var(--primary-strong);
+  --color-primary-strong-hover: var(--primary-strong-hover);
+  --color-line-strong: var(--line-strong);
+  --color-panel-foreground: var(--panel-foreground);
+  --color-panel-muted: var(--panel-muted);
+  --color-chip-ok-bg: var(--chip-ok-bg);
+  --color-chip-ok-fg: var(--chip-ok-fg);
+  --color-chip-warn-bg: var(--chip-warn-bg);
+  --color-chip-warn-fg: var(--chip-warn-fg);
+  --color-chip-danger-bg: var(--chip-danger-bg);
+  --color-chip-danger-fg: var(--chip-danger-fg);
+  --color-chip-neutral-bg: var(--chip-neutral-bg);
+  --color-chip-neutral-fg: var(--chip-neutral-fg);
+  --color-chip-info-bg: var(--chip-info-bg);
+  --color-chip-info-fg: var(--chip-info-fg);
+  --color-chip-violet-bg: var(--chip-violet-bg);
+  --color-chip-violet-fg: var(--chip-violet-fg);
+
   /* Semantic palette mapped 1:1 with marketing site — utilities:
    *   bg-success / text-success / border-success (same for warn/info/
    *   notice/error/purple/gold). Use these for status chips, timeline
@@ -418,6 +524,11 @@
   --color-purple: var(--purple);
   --color-purple-hover: var(--purple-hover);
   --color-gold: var(--gold);
+  --color-indigo: var(--indigo);
+  --color-rose: var(--rose);
+  --color-lime: var(--lime);
+  --color-orange: var(--orange);
+  --color-azure: var(--azure);
 
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
@@ -427,6 +538,8 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* rounded-card: every card, panel and dialog surface. */
+  --radius-card: 1rem;
 
   --shadow-2xs: var(--shadow-2xs);
   --shadow-xs: var(--shadow-xs);
@@ -465,6 +578,12 @@
   --text-micro--line-height: var(--typo-micro-lh);
   --text-label: var(--typo-label);
   --text-label--line-height: var(--typo-label-lh);
+  /* Every form control (Input, Textarea, SelectTrigger, native selects):
+     the size of the row label beside it, so a field never reads bigger or
+     smaller than its label. Touch devices still get 16px (the coarse-pointer
+     floor above), which is what keeps iOS from zooming. */
+  --text-control: 0.8125rem;
+  --text-control--line-height: 1.25rem;
   --text-body: var(--typo-body);
   --text-body--line-height: var(--typo-body-lh);
   --text-default: var(--typo-default);
@@ -487,6 +606,12 @@ body {
   }
   body {
     @apply bg-background text-foreground;
+    background-image: var(--page-glow);
+    background-attachment: fixed;
+  }
+  h1, h2, h3 {
+    letter-spacing: -0.02em;
+    text-wrap: balance;
   }
 
   /* ── Scrollbars ──────────────────────────────────────────────────
@@ -567,19 +692,22 @@ body {
   .type-title {
     font-size: 1.5rem;
     line-height: 2rem;
-    font-weight: 650;
-    letter-spacing: -0.02em;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
   }
   .type-row {
     font-size: 0.875rem;
     line-height: 1.3rem;
   }
+  /* Harbor eyebrow shape: mono, wide-tracked. Colour stays with the caller. */
   .type-section {
-    font-size: 0.8125rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
     line-height: 1.2rem;
-    font-weight: 600;
+    font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
   }
   .type-meta {
     font-size: 0.75rem;
@@ -730,11 +858,14 @@ body {
      Composed by lib/interaction.ts constants.
      Use these via the ListRow / FilterChip primitives, not directly. */
 
+  /* Selected row: one quiet signal — a neutral fill and full-strength
+     text. No outline, no edge bar, no accent: the accent is kept for
+     actions, so a selected row never competes with a button. */
   .row-interactive {
+    position: relative;
     display: flex;
     cursor: pointer;
-    border-left: 2px solid transparent;
-    transition: background-color 150ms ease, border-color 150ms ease;
+    transition: background-color 150ms ease;
   }
 
   .row-interactive:focus-visible {
@@ -748,7 +879,7 @@ body {
 
   .row-selected {
     background-color: var(--selection-bg);
-    border-left-color: var(--selection-border);
+    color: var(--foreground);
   }
 
   .row-selected.row-hover:hover {
@@ -777,8 +908,8 @@ body {
     cursor: pointer;
     border: 1px solid var(--border);
     background-color: var(--card);
-    border-radius: 0.5rem;
-    transition: background-color 150ms ease, border-color 150ms ease;
+    border-radius: 1rem;
+    transition: background-color 150ms ease, border-color 200ms var(--ease-harbor), transform 220ms var(--ease-harbor), box-shadow 220ms var(--ease-harbor);
   }
 
   .card-interactive:focus-visible {
@@ -786,9 +917,12 @@ body {
     box-shadow: 0 0 0 2px var(--ring);
   }
 
+  /* Harbor hover: borders carry structure, a shadow appears only while the
+     card is lifted. */
   .card-hover:hover {
-    background-color: var(--row-hover-bg);
-    border-color: color-mix(in oklch, var(--border) 60%, transparent);
+    border-color: var(--line-strong);
+    transform: translateY(-2px);
+    box-shadow: 0 24px 48px -30px var(--shadow-color);
   }
 
   .card-selected {
@@ -798,6 +932,144 @@ body {
 
   .card-selected.card-hover:hover {
     background-color: var(--selection-bg-hover);
+  }
+
+  /* ── Harbor recipes ──────────────────────────────────────────────
+     The marketing site's shapes, as utilities the components compose. */
+
+  /* Eyebrow: section labels, table heads, card kickers. */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--primary-hover);
+  }
+
+  /* Deep panel ground (heroes, terminals, graph canvases). Text on it is
+     --panel-foreground in every theme. */
+  .panel-surface {
+    background: var(--panel-bg);
+    color: var(--panel-foreground);
+    border: 1px solid rgb(255 255 255 / 0.06);
+  }
+
+  /* Card lift for anything clickable that is not a .card-interactive. */
+  .lift {
+    transition: transform 220ms var(--ease-harbor), border-color 200ms var(--ease-harbor), box-shadow 220ms var(--ease-harbor);
+  }
+  .lift:hover {
+    transform: translateY(-2px);
+    border-color: var(--line-strong);
+    box-shadow: 0 24px 48px -30px var(--shadow-color);
+  }
+
+  /* Icon tile: a glyph in a tinted square (a soft radial wash, no pattern). The tint is --ic (set by
+     ConceptIcon from the concept's accent); the glyph takes a lighter or
+     darker mix of it per theme. */
+  .icon-tile {
+    --ic: var(--primary);
+    position: relative;
+    overflow: hidden;
+    color: color-mix(in oklch, var(--ic) var(--tile-text-mix), var(--foreground));
+    background: radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--ic) 20%, transparent), color-mix(in srgb, var(--ic) 7%, transparent) 70%);
+    border: 1px solid color-mix(in srgb, var(--ic) 32%, transparent);
+    box-shadow: var(--tile-inset);
+    transition: transform 300ms var(--ease-spring), border-color 300ms var(--ease-harbor);
+  }
+  :hover > .icon-tile,
+  .group:hover .icon-tile {
+    transform: scale(1.08) rotate(-4deg);
+    border-color: color-mix(in srgb, var(--ic) 55%, transparent);
+  }
+
+  /* The app rail (components/layout/rail.tsx). One grid in both states: a
+     2rem tile column at a fixed inset — half the difference between the
+     rail and the tile — and a label that only fades. The panel widening is
+     the whole animation. */
+  .rail-inset {
+    /* !important: the collapsed sidebar's own group-data padding is a
+       utility and would otherwise move the column 5.5px on open. */
+    padding-inline: calc((var(--sidebar-width-icon) - 2rem) / 2) !important;
+  }
+  .rail-tile {
+    --ic: var(--primary);
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.6rem;
+    border: 1px solid transparent;
+    color: var(--muted-foreground);
+    transition: border-color 300ms var(--ease-harbor), background-color 300ms var(--ease-harbor), color 200ms var(--ease-harbor);
+  }
+  /* Only the glyph moves on hover; the frame and the badge stay put. */
+  .rail-tile > svg { width: 0.95rem; height: 0.95rem; transition: transform 300ms var(--ease-spring); }
+  .rail-tile[data-active="true"],
+  :hover > .rail-tile {
+    color: color-mix(in oklch, var(--ic) var(--tile-text-mix), var(--foreground));
+    background: radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--ic) 22%, transparent), color-mix(in srgb, var(--ic) 8%, transparent) 70%);
+    border-color: color-mix(in srgb, var(--ic) 34%, transparent);
+    box-shadow: var(--tile-inset);
+  }
+  :hover > .rail-tile:not(.rail-tile-static) > svg {
+    transform: scale(1.12) rotate(-8deg);
+  }
+  :hover > .rail-tile:not(.rail-tile-static) {
+    border-color: color-mix(in srgb, var(--ic) 55%, transparent);
+  }
+  .rail-badge {
+    position: absolute;
+    top: -0.2rem;
+    left: 1.2rem;
+    min-width: 1rem;
+    padding: 0 0.25rem;
+    border-radius: 999px;
+    border: 2px solid var(--sidebar);
+    background: var(--info);
+    color: var(--background);
+    font: 600 0.6rem/0.8rem var(--font-mono);
+    text-align: center;
+  }
+  .rail-label {
+    opacity: 1;
+    transition: opacity 160ms ease 90ms;
+  }
+  /* Faded AND zero-width in the rail: the rows no longer clip (the Inbox
+     count overhangs its tile), so a SOON pill or the ⌘B hint would
+     otherwise make the rail scrollable sideways under keyboard focus. */
+  [data-collapsible="icon"] .rail-label {
+    opacity: 0;
+    pointer-events: none;
+    max-width: 0;
+    margin-inline: 0;
+    padding-inline: 0;
+    overflow: hidden;
+    transition-delay: 0ms;
+  }
+  .rail-group-head {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    height: 1.5rem;
+    margin-top: 0.5rem;
+    white-space: nowrap;
+  }
+  .rail-group-rule { display: flex; justify-content: center; width: 2rem; flex-shrink: 0; }
+  .rail-group-rule > i { display: block; width: 1rem; height: 1px; background: var(--border); }
+  .rail-group-name {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted-foreground-soft);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rail-tile, .rail-tile > svg, :hover > .rail-tile > svg, .rail-label { transition: none; transform: none; }
   }
 }
 
@@ -924,6 +1196,21 @@ body {
   .agent-active-dot {
     animation: none;
   }
+}
+
+/*
+ * Nested-page panel rows (DrillNavItem) rise in one after another, so a
+ * filter that changes the list reads as a change rather than a flash. The
+ * delay is set inline per row.
+ */
+.drill-row-in {
+  animation: drill-row-in 0.24s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes drill-row-in {
+  from { opacity: 0; transform: translateY(3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drill-row-in { animation: none; }
 }
 
 /*

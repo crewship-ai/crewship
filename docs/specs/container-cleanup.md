@@ -65,6 +65,18 @@ exists. Revive/restore racing the last check can lose that container's process
 and writable layer. Strong incarnation/restore coordination and persistent data
 removal are outside this contract.
 
+## Coordination with instance backups
+
+A cleanup scan registers as a writer in the instance backup quiet window.
+A new scan defers while admission is closed, and a consistent copy waits for
+an in-flight candidate to finish its mount evidence, owner checks and
+stop/remove. Large backlogs yield between candidates; no candidate yields
+halfway through its destructive operation. The barrier also covers cleanup
+diagnostic writes. This coordination is local to one server process; it does
+not add the strong restore/revive fencing excluded above.
+
+Idle runtime retention and cache eviction register with the same barrier,
+including their database observations, and yield between eligible resources.
 ## Idle retention
 
 Opt-in, separate from deletion cleanup, and never acting on deleted owners
@@ -114,10 +126,12 @@ An incomplete scan or disconnected Docker is `unknown`; a failed candidate step
 is `error`; a removal backlog is `pending`.
 
 `GET /api/v1/admin/resource-cleanup` and `crewship admin cleanup` read persisted diagnostics. It uses the
-existing authenticated ADMIN/OWNER workspace gate and, like every other admin
-read, returns only crews of the caller's workspace; other tenants' crew IDs and
-states are never visible. Once a workspace is deleted its rows are readable
-only locally through `crewship doctor cleanup`.
+authenticated admin gate. Instance administrators can read this installation's
+observations across all workspaces without selecting or belonging to a workspace,
+including observations left by deleted workspaces. Workspace ADMIN/OWNER users
+continue to see only their own workspace; other tenants' crew IDs and states
+are never exposed to them. `crewship doctor cleanup` remains a local read-only
+alternative.
 Freshness comes from one per-installation scan record written on every
 complete scan. Per-owner records are written only when their state changes, and
 a tombstone that never had a container needs no record at all, so the steady

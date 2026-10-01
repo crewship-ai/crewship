@@ -153,7 +153,7 @@ function getEditorClasses(compact?: boolean) {
     // Inline code
     "[&_code]:bg-success/10 [&_code]:text-success [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono",
     // Code blocks
-    "[&_pre]:relative [&_pre]:bg-[#0d1117] [&_pre]:border [&_pre]:border-white/[0.08] [&_pre]:rounded-lg [&_pre]:p-4 [&_pre]:pt-8 [&_pre]:my-3 [&_pre]:overflow-x-auto",
+    "[&_pre]:relative [&_pre]:bg-[#0d1117] [&_pre]:border [&_pre]:border-foreground/[0.08] [&_pre]:rounded-lg [&_pre]:p-4 [&_pre]:pt-8 [&_pre]:my-3 [&_pre]:overflow-x-auto",
     "[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-xs [&_pre_code]:font-mono [&_pre_code]:text-[#c9d1d9]",
     // Blockquote
     "[&_blockquote]:border-l-2 [&_blockquote]:border-warn/40 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-foreground/60",
@@ -163,10 +163,10 @@ function getEditorClasses(compact?: boolean) {
     "[&_a]:text-primary [&_a]:underline",
     // Tables
     "[&_table]:w-full [&_table]:text-xs [&_table]:my-2",
-    "[&_th]:text-left [&_th]:font-semibold [&_th]:py-1.5 [&_th]:px-2 [&_th]:border [&_th]:border-white/[0.08] [&_th]:bg-white/[0.02]",
-    "[&_td]:py-1.5 [&_td]:px-2 [&_td]:border [&_td]:border-white/[0.04]",
+    "[&_th]:text-left [&_th]:font-semibold [&_th]:py-1.5 [&_th]:px-2 [&_th]:border [&_th]:border-foreground/[0.08] [&_th]:bg-foreground/[0.02]",
+    "[&_td]:py-1.5 [&_td]:px-2 [&_td]:border [&_td]:border-foreground/[0.04]",
     // Horizontal rule
-    "[&_hr]:border-white/[0.06] [&_hr]:my-3",
+    "[&_hr]:border-foreground/[0.06] [&_hr]:my-3",
     // Task lists
     "[&_ul[data-type=taskList]]:list-none [&_ul[data-type=taskList]]:pl-0",
     "[&_li[data-type=taskItem]]:flex [&_li[data-type=taskItem]]:items-start [&_li[data-type=taskItem]]:gap-2",
@@ -410,7 +410,7 @@ export function TiptapEditor({
           }}
           onMouseDown={(e) => e.preventDefault()}
         >
-          <div className="flex items-center gap-0.5 bg-[#1a1a2e] border border-white/[0.12] rounded-lg shadow-2xl p-1">
+          <div className="flex items-center gap-0.5 bg-[#1a1a2e] border border-foreground/[0.12] rounded-lg shadow-2xl p-1">
             <BubbleButton
               active={editor.isActive("bold")}
               onClick={() => editor.chain().focus().toggleBold().run()}
@@ -447,7 +447,7 @@ export function TiptapEditor({
               <Code className="h-3.5 w-3.5" />
             </BubbleButton>
 
-            <div className="w-px h-4 bg-white/[0.1] mx-0.5" />
+            <div className="w-px h-4 bg-foreground/[0.1] mx-0.5" />
 
             <BubbleButton
               active={editor.isActive("link")}
@@ -530,13 +530,13 @@ export function TiptapEditor({
           }}
           onMouseDown={(e) => e.preventDefault()}
         >
-          <div className="flex items-center gap-1 bg-[#1a1a2e]/90 border border-white/[0.1] rounded-lg shadow-xl p-1 backdrop-blur-sm">
+          <div className="flex items-center gap-1 bg-[#1a1a2e]/90 border border-foreground/[0.1] rounded-lg shadow-xl p-1 backdrop-blur-sm">
             <button
               type="button"
               onClick={() =>
                 editor.chain().focus().toggleHeading({ level: 2 }).run()
               }
-              className="p-1 rounded text-muted-foreground/40 hover:text-muted-foreground hover:bg-white/[0.08] transition-colors"
+              className="p-1 rounded text-muted-foreground/40 hover:text-muted-foreground hover:bg-foreground/[0.08] transition-colors"
               title="Heading 2"
             >
               <Heading2 className="h-3.5 w-3.5" />
@@ -546,7 +546,7 @@ export function TiptapEditor({
               onClick={() =>
                 editor.chain().focus().toggleBulletList().run()
               }
-              className="p-1 rounded text-muted-foreground/40 hover:text-muted-foreground hover:bg-white/[0.08] transition-colors"
+              className="p-1 rounded text-muted-foreground/40 hover:text-muted-foreground hover:bg-foreground/[0.08] transition-colors"
               title="Bullet list"
             >
               <List className="h-3.5 w-3.5" />
@@ -556,7 +556,7 @@ export function TiptapEditor({
               onClick={() =>
                 editor.chain().focus().toggleTaskList().run()
               }
-              className="p-1 rounded text-muted-foreground/40 hover:text-muted-foreground hover:bg-white/[0.08] transition-colors"
+              className="p-1 rounded text-muted-foreground/40 hover:text-muted-foreground hover:bg-foreground/[0.08] transition-colors"
               title="Task list"
             >
               <CheckSquare className="h-3.5 w-3.5" />
@@ -566,7 +566,7 @@ export function TiptapEditor({
               onClick={() =>
                 editor.chain().focus().toggleCodeBlock().run()
               }
-              className="p-1 rounded text-muted-foreground/40 hover:text-muted-foreground hover:bg-white/[0.08] transition-colors"
+              className="p-1 rounded text-muted-foreground/40 hover:text-muted-foreground hover:bg-foreground/[0.08] transition-colors"
               title="Code block"
             >
               <FileCode className="h-3.5 w-3.5" />
@@ -576,7 +576,7 @@ export function TiptapEditor({
               onClick={() =>
                 editor.chain().focus().toggleBlockquote().run()
               }
-              className="p-1 rounded text-muted-foreground/40 hover:text-muted-foreground hover:bg-white/[0.08] transition-colors"
+              className="p-1 rounded text-muted-foreground/40 hover:text-muted-foreground hover:bg-foreground/[0.08] transition-colors"
               title="Blockquote"
             >
               <Quote className="h-3.5 w-3.5" />
@@ -590,7 +590,7 @@ export function TiptapEditor({
                   .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
                   .run()
               }
-              className="p-1 rounded text-muted-foreground/40 hover:text-muted-foreground hover:bg-white/[0.08] transition-colors"
+              className="p-1 rounded text-muted-foreground/40 hover:text-muted-foreground hover:bg-foreground/[0.08] transition-colors"
               title="Table"
             >
               <TableIcon className="h-3.5 w-3.5" />
@@ -601,7 +601,7 @@ export function TiptapEditor({
 
       {/* Toolbar */}
       {editable && (
-        <div className="flex items-center gap-0.5 pb-2 mb-2 border-b border-white/[0.06] flex-wrap">
+        <div className="flex items-center gap-0.5 pb-2 mb-2 border-b border-foreground/[0.06] flex-wrap">
           {/* Text formatting */}
           <ToolbarButton
             active={editor.isActive("bold")}

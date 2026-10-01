@@ -6,11 +6,11 @@ package main
 //
 // The endpoint had no CLI command. It is server-backed (not the
 // local-only recovery family in cmd_admin.go): it returns the CURRENT
-// workspace — the one the CLI's auth/workspace context resolves to —
-// together with member/agent/crew counts, scoped server-side so it can
-// never leak another workspace's data. It is not a multi-tenant listing
-// despite the plural name; see internal/api/admin.go's ListWorkspaces,
-// which filters `WHERE w.id = <the caller's workspace>`.
+// workspace — the one the CLI's auth/workspace context resolves to — or,
+// for an instance administrator, every workspace on the instance, each with
+// member/agent/crew counts, runs over the last week, spend over the last
+// 30 days and the last audited change. Scope is decided server-side (see
+// internal/api/admin_people.go) and reported in the X-Admin-Scope header.
 //
 // Deliberately mirrors `crewship admin stats` (server-backed, ADMIN+,
 // same file-per-command convention) rather than the `--local` family:
@@ -39,15 +39,22 @@ type adminWorkspaceRow struct {
 	MemberCount int    `json:"_count_members" yaml:"_count_members"`
 	AgentCount  int    `json:"_count_agents" yaml:"_count_agents"`
 	CrewCount   int    `json:"_count_crews" yaml:"_count_crews"`
+	// Nil from a server older than these fields — printed as "-", not 0.
+	Runs7d         *int     `json:"runs_7d,omitempty" yaml:"runs_7d,omitempty"`
+	Cost30dUSD     *float64 `json:"cost_30d_usd,omitempty" yaml:"cost_30d_usd,omitempty"`
+	LastActivityAt *string  `json:"last_activity_at,omitempty" yaml:"last_activity_at,omitempty"`
+	Current        bool     `json:"current,omitempty" yaml:"current,omitempty"`
 }
 
 var adminWorkspacesCmd = &cobra.Command{
 	Use:   "workspaces",
-	Short: "Show the current workspace with member/agent/crew counts (admin)",
-	Long: `GET /api/v1/admin/workspaces, scoped server-side to the workspace the CLI
-is currently authenticated against. Despite the plural name this is not an
-instance-wide tenant listing — it returns at most one row, the caller's own
-workspace, with counts for members, agents and crews.
+	Short: "List the workspaces you administer, with counts, runs and spend (admin)",
+	Long: `GET /api/v1/admin/workspaces. A workspace ADMIN or OWNER gets one row, the
+workspace the CLI is authenticated against; an instance administrator
+(see 'crewship admin instance') gets every workspace on the instance.
+Each row has counts for members, agents and crews, runs in the last 7 days,
+spend in the last 30 days and the time of the last audited change; the
+current workspace is marked with *.
 
 Requires OWNER or ADMIN (canRole "manage").
 
@@ -79,10 +86,24 @@ Examples:
 
 		return resolvedFormatter(cmd).AutoHuman(rows, func() {
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tSLUG\tMEMBERS\tAGENTS\tCREWS\tCREATED")
+			fmt.Fprintln(w, "NAME\tSLUG\tMEMBERS\tAGENTS\tCREWS\tRUNS 7D\tSPEND 30D\tLAST ACTIVITY\tCREATED")
 			for _, r := range rows {
-				fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%s\n",
-					r.Name, r.Slug, r.MemberCount, r.AgentCount, r.CrewCount, r.CreatedAt)
+				name := r.Name
+				if r.Current {
+					name += " *"
+				}
+				runs, spend, last := "-", "-", "-"
+				if r.Runs7d != nil {
+					runs = fmt.Sprintf("%d", *r.Runs7d)
+				}
+				if r.Cost30dUSD != nil {
+					spend = fmt.Sprintf("$%.2f", *r.Cost30dUSD)
+				}
+				if r.LastActivityAt != nil {
+					last = shortAdminTime(*r.LastActivityAt)
+				}
+				fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n",
+					name, r.Slug, r.MemberCount, r.AgentCount, r.CrewCount, runs, spend, last, r.CreatedAt)
 			}
 			_ = w.Flush()
 			if len(rows) == 0 {

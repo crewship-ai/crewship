@@ -1,7 +1,7 @@
 ---
 title: "Instance-Scope Backup Security"
 sidebarTitle: "Backup (Instance Scope)"
-description: "Threat model, crypto chain, failure modes, and operational requirements for instance-scope backups."
+description: "Threat model, crypto chain, recovery kit, quiet window and operational requirements for whole-instance backups."
 icon: "database-backup"
 stability: stable
 tag: Stable
@@ -9,150 +9,153 @@ tag: Stable
 
 ## What "instance scope" means
 
-An instance-scope backup bundles **every workspace** on a Crewship host
-plus the cross-workspace surfaces that make the install usable:
+An instance bundle is the whole Crewship in one file:
 
-- All workspace, crew, and agent rows (same as `--scope=workspace` per
-  workspace)
-- The **credstore** — encrypted credential rows from every workspace,
-  exported **without decrypting** so the bundle carries two layers of
-  protection: the credstore's own AES-256-GCM plus the outer AGE seal.
-- The **auth signing secret** (`NEXTAUTH_SECRET`) so sessions survive
-  a restore onto the *same* host.
-- The instance identity (`instance_config.hostname`) so the target can
-  detect whether a restore is a same-host roll-back or a
-  cross-host DR operation.
+- a page-level snapshot of the **whole database** (SQLite's online backup
+  API) — every workspace, user, credential row, setting and history;
+- every **file store** next to it: attachment files and workspace files, the
+  memory trees and their version blobs, page projects, chats and skills, each
+  file listed with its SHA-256 in the payload's index;
+- every workspace's **crew containers** (workspace, memory, home and tools,
+  per the scope level);
+- optionally, the **recovery kit**: the vault keys the database's sealed values
+  need (see below).
 
-Crew-scope and workspace-scope backups are covered in the
-[Backup & Restore guide](/guides/backup); this page is specifically
-about the instance scope's additional risks.
+It is restored offline with [`crewship recover`](/cli/recover) into an empty
+data directory. Crew-scope and workspace-scope backups are covered in the
+[Backup & Restore guide](/guides/backup); this page is about what the instance
+scope adds.
 
 ## Access control
 
-- **Server-level OWNER is distinct from workspace OWNER.** Instance
-  backup is gated by `CREWSHIP_OWNER_EMAIL` (env var). Any other
-  workspace role — including OWNER or ADMIN of a single workspace —
-  is refused with HTTP 403. The env is intentionally not stored in
-  the database; rotating it is a file edit + restart, never a SQL
-  UPDATE that a compromised DB session could perform.
-- **Rate limited to 1 instance backup per user per hour.** A runaway
-  script cannot DoS the host by thrashing the endpoint. Workspace-
-  and crew-scope backups are still governed by `backup_locks` only.
-- **Encryption is recipient-only.** Instance scope refuses
-  `--passphrase-file`. The surface is too broad (every workspace's
-  secrets in one blob) to trust a brute-forceable scrypt passphrase.
-  Callers must supply an AGE `age1…` X25519 public key and hold the
-  matching private key offline.
+- **Instance administrators only.** Every instance backup route sits behind
+  the instance gate: the `CREWSHIP_OWNER_EMAIL` break-glass owner, or anyone
+  an instance admin named (`users.instance_role = 'ADMIN'`). An install that
+  named nobody named the owners of its oldest workspace once, the first time
+  anyone's status was asked, recorded it in the instance audit
+  (`instance.admin_bootstrapped`) and never does it again — removing every
+  named admin later does not hand the instance to that workspace's owners.
+  An OWNER or ADMIN of a single workspace is refused with `403`. CLI tokens
+  need the `instance:admin` scope.
+- **Per-workspace backups follow the same rule.** The `/api/v1/admin/backups*`
+  routes act on the workspace the request names and admit its OWNER or ADMIN,
+  or an instance administrator who is not a member of it. Nobody else reaches
+  another workspace's bundles.
+- **One run at a time.** A second run while one is going answers `409`.
+- **Always encrypted.** An unencrypted instance bundle is refused. Prefer age
+  recipients (`age1…` public keys whose private halves live offline). A
+  passphrase is accepted, but with the recovery kit on it is then the only
+  thing between a copied bundle and every secret in the instance: use a long,
+  generated one.
+
+## The recovery kit
+
+Sealed values (credentials, webhook secrets, integration keys) are AES-256-GCM
+envelopes stamped with the key version that sealed them (`v1:`, `v2:` …). The
+keys live in the environment (`ENCRYPTION_KEY`, `ENCRYPTION_KEY_V2` …), never
+in the database, so a database backup alone restores credentials nobody can
+read.
+
+With the recovery kit on (`crewship admin instance backups recovery-kit on`,
+off by default, audited), every key version an envelope in the database
+references rides inside the **age-encrypted payload** of each instance bundle,
+as `recovery-kit/keys.json`, byte for byte as the source had it (the journal
+hash chain key is derived from the `ENCRYPTION_KEY` string itself). Workspace
+and crew bundles never carry it. `crewship recover` writes the keys to
+`<data-dir>/recovered-keys.env` (mode `0600`).
+
+**Whoever holds a private backup key can read every secret in the instance.**
+Store the age private key on a different device from the one that keeps the
+live `ENCRYPTION_KEY`, and delete `recovered-keys.env` once its lines are in
+your secret store.
+
+`GET /api/v1/admin/instance/backups/vault-keys` shows, per version, how many
+sealed values use it and whether this server has its key — counts only, never
+key material. A referenced version the server cannot resolve is recorded in the
+bundle as `vault_key_missing` rather than silently left out.
 
 ## Crypto chain
 
 ```
-credentials.encrypted_value  (AES-256-GCM, ENCRYPTION_KEY on source)
-    └─ packaged verbatim into payload/credstore.json
-           └─ whole payload sealed with AGE recipient
-                  └─ outer tar.zst bundle
+credentials.encrypted_value   (AES-256-GCM, ENCRYPTION_KEY[_Vn] on the source)
+    └─ inside instance/db.sqlite (the database snapshot)
+recovery-kit/keys.json        (only with the kit on)
+    └─ both inside the payload, sealed with age (recipients or scrypt passphrase)
+           └─ outer tar.zst bundle (MANIFEST.json plaintext, no secrets)
 ```
 
-Losing any one layer does not immediately expose plaintext:
+- Bundle alone: the payload is age-encrypted.
+- Bundle + age key, **no kit**: the database opens, sealed values do not —
+  the attacker still needs the source's `ENCRYPTION_KEY`.
+- Bundle + age key, **kit on**: full compromise of every secret in the
+  instance. That is the price of a restore that works without the source host.
 
-- Bundle leak alone (attacker has `.tar.zst`): outer AGE recipient
-  still encrypts the payload — attacker must also have the
-  recipient's X25519 private key.
-- Bundle + AGE key: payload decrypts, but `encrypted_value` rows are
-  still AES-256-GCM under `ENCRYPTION_KEY`. Attacker needs the source
-  host's master key env too.
-- Bundle + AGE key + source ENCRYPTION_KEY: full compromise. This is
-  the same blast radius as losing a live backup bundle of the raw
-  credentials table, and is why offsite storage of the AGE private
-  key belongs on a separate device from the one that stores
-  `ENCRYPTION_KEY`.
+## The quiet window
 
-## Cross-host restore (disaster recovery)
+A consistent copy needs the database and the files to agree. The server first
+drains running work (agent runs, started work items, routine runs; up to two
+hours, then the run is `skipped`), then holds every write to protected data
+for the copy only: mutating HTTP requests answer `503` with `Retry-After`
+(backup, instance-hold and sign-in routes stay open), inbound webhooks answer
+`503`, schedulers and queue consumers do not fire, and retention and GC
+sweepers wait. A hard cap (20 minutes) releases the hold and abandons the copy.
+The hold lives in memory only: a crash mid-copy comes back with nothing held.
+Packing and encryption run after the hold is released; the run records
+`hold_ms`.
 
-Each bundle records the source hostname in the manifest. On restore
-the runner compares it to `instance_config.hostname` of the TARGET:
+## Restore: sessions, keys and holds
 
-- **Same host**: no rotation. Sessions and credentials resume seamlessly.
-- **Different host OR unknown source host**: the manifest's source
-  hostname differs from the target's `instance_config.hostname`. The
-  helper `backup.ShouldRotateAuthKeysOnRestore` (in
-  `internal/backup/authkeys.go`) detects this condition.
+`crewship recover` runs offline and:
 
-<Note>
-  Auth key rotation on cross-host restore is planned but **not
-  currently enforced**. `internal/backup/authkeys.go` defines
-  `RotateAuthKeys`, but it is not wired into the `crewship backup
-  restore` CLI flow — the restore command's flag set is
-  `--as-workspace`, `--as-crew`, `--passphrase-file`, `--use-keyring`,
-  `--dry-run`, and `--replace` (registered in
-  `cmd/crewship/cmd_backup.go`; handler in
-  `cmd/crewship/cmd_backup_lifecycle.go`).
-  Operators performing a cross-host DR restore should manually rotate
-  `NEXTAUTH_SECRET` before the next `crewshipd` start to invalidate
-  any session tokens from the source host.
-</Note>
+- drops every sign-in session and pairing, clears backup locks, the scheduler
+  lease and provider-login leases;
+- writes a new `NEXTAUTH_SECRET` and `CREWSHIP_ADMIN_TOKEN_HMAC_KEY` into
+  `<data-dir>/secrets.env`, so no token issued by the source works on the
+  restored server (the rotation is enforced, not advisory);
+- clears `instance_config.hostname`, which the new host fills in at first
+  boot;
+- **holds** routines and schedules, inbound webhooks and queued work (including
+  notification retries) in `instance_holds`, so nothing fires, answers or
+  retries until an instance admin resumes it (`crewship admin instance holds
+  resume <key>`, audited).
 
-## Credstore master-key continuity
-
-`encrypted_value` is written unmodified at backup time and
-reinserted unmodified at restore time. The target instance must
-share the source's `ENCRYPTION_KEY` (or a compatible key version
-from `ENCRYPTION_KEY_vN`) to actually decrypt on next keeper.Reload.
-When keys differ:
-
-- Reload logs a "decrypt failed" warning for each affected row.
-- The credential remains in the DB but is flagged (via the existing
-  keeper error path) and must be re-entered by the workspace owner.
-- No silent data loss — the row is retained so manual recovery is
-  possible once the correct key is located.
-
-An instance backup is therefore NOT a substitute for rotating
-`ENCRYPTION_KEY` across hosts. The operator must coordinate master
-keys out of band.
+Host-level container settings in the restored crews' configuration — Docker
+socket mounts, privileged mode, host path binds — are reported by the restore
+checks as not carried over for safety, to be switched back on by hand after
+review.
 
 ## Rotation policy
 
-- **AGE recipient**: rotate whenever a holder of the private key
-  leaves the organisation. Old bundles encrypted to the retired key
-  should be re-encrypted (unseal with old key, reseal with new) or
-  retired.
-- **`ENCRYPTION_KEY`**: rotate at least yearly, or immediately on any
-  suspected host compromise. Use `ENCRYPTION_KEY_vN` versioned keys
-  so ciphertext-at-rest remains decryptable during transition.
-- **`NEXTAUTH_SECRET`**: rotate manually on any cross-host restore
-  (automatic rotation in the CLI is planned but not yet wired — see
-  the cross-host restore note above). Also rotate if an operator
-  session token leaks (every session expires next restart).
+- **age recipient**: rotate whenever a holder of the private key leaves.
+  Bundles sealed to the retired key should be re-sealed or retired.
+- **`ENCRYPTION_KEY`**: rotate at least yearly, or immediately on suspected
+  host compromise, with versioned keys (`CREWSHIP_ENCRYPTION_KEY_VERSION`,
+  `ENCRYPTION_KEY_V2` …) and `crewship admin reencrypt`. With the recovery kit
+  on, bundles taken before the rotation still carry the old versions.
+- **`NEXTAUTH_SECRET`**: rotated by every `crewship recover`; rotate by hand if
+  an operator session token leaks.
 
 ## Incident response
 
-If a bundle is known or suspected to have leaked:
+If an instance bundle is known or suspected to have leaked:
 
-1. Rotate the AGE recipient holding the matching private key
-   immediately; revoke the pubkey from `manifest.encryption.recipients`
-   so future backups do not re-seal to it.
-2. Rotate `ENCRYPTION_KEY` on the source host; keeper.Reload will
-   re-encrypt rows using the new key on its first successful cycle.
+1. Rotate the age recipient holding the matching private key.
+2. If the bundle carried the recovery kit, treat every secret in the instance
+   as exposed: rotate `ENCRYPTION_KEY` (a new version plus `crewship admin
+   reencrypt`) **and** the upstream credentials themselves.
 3. Force-logout every session by rotating `NEXTAUTH_SECRET`.
-4. Audit-log review: every backup create/restore emits a row in
-   `audit_logs` with entity_type `backup`; instance scope carries a
-   metadata object including crypto chain, scope, and
-   `cross_instance` flag. Filter the log for the incident window.
+4. Review `crewship admin instance audit` for `instance.backup_*` entries in
+   the incident window.
 
 ## Known limitations
 
-- Instance backup does NOT protect against a live compromise prior
-  to `crewship backup create`. An attacker with root on the source
-  is inside the trust boundary and can capture keys directly.
-- Instance backup does NOT encrypt the manifest (`MANIFEST.json` is
-  stored plaintext inside the outer tar.zst so `inspect` works
-  without a key). Manifest carries no secrets — only metadata — but
-  hostnames, user emails, and workspace slugs are visible.
-- `--scope=instance --passphrase-file` is refused by design.
-  Deployments that cannot manage AGE keys should use workspace
-  scope and accept the operational cost of restoring each workspace
-  individually.
-- Instance restore into a non-empty installation is refused. Merge
-  strategies (conflict resolution across workspaces, keeper crew
-  selection) were intentionally scoped out — restore onto a clean
-  install and let the operator migrate data manually if needed.
+- A live compromise before the backup is out of scope: root on the source is
+  inside the trust boundary.
+- `MANIFEST.json` is plaintext so `inspect` works without a key. It carries no
+  secrets, but workspace names and slugs, hostnames, file counts and key
+  version numbers are visible.
+- Recovery goes into an empty data directory only (`--force` replaces an
+  existing one). Merging an instance bundle into a running server is not
+  supported.
+- Crew container files are staged under `<data-dir>/restore-staging/crews/`;
+  they are not landed in containers automatically.

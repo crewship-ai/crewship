@@ -74,6 +74,9 @@ type runRequestBody struct {
 // the workspace WebSocket channel and watch for pipeline.* journal
 // entries — the run id in the response payload joins them.
 func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
+	if h.serveRestrictedWorkflow(w, r) {
+		return
+	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	slug := r.PathValue("slug")
 	// Running a routine spawns execution (control-plane) — MANAGER+, or a

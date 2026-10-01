@@ -173,7 +173,7 @@ export function AgentWorkTab({ agentId, workspaceId }: { agentId: string; worksp
       {(["issues", "routines"] as const).map((kind) => {
         const Icon = kind === "issues" ? CircleDot : Workflow
         return <button key={kind} id={`${tabId}-${kind}`} type="button" role="tab" aria-selected={view === kind} aria-controls={`${tabId}-panel`} onClick={() => setView(kind)} className={cn("kit-tap flex min-h-8 items-center justify-center gap-1.5 rounded-md px-2 text-[11px] transition-colors", view === kind ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-card/50")}>
-          <Icon className="size-3.5" />{kind === "issues" ? "Issues" : "Routines"}<span className="rounded-full bg-white/[0.06] px-1.5 text-[10px] tabular-nums text-muted-foreground">{kind === "issues" ? issues.length : routines.length}</span>
+          <Icon className="size-3.5" />{kind === "issues" ? "Issues" : "Routines"}<span className="rounded-full bg-foreground/[0.06] px-1.5 text-[10px] tabular-nums text-muted-foreground">{kind === "issues" ? issues.length : routines.length}</span>
         </button>
       })}
     </div>

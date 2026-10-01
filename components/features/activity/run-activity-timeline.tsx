@@ -246,7 +246,7 @@ export function RunActivityRail({
         <CollapsibleTrigger asChild>
           <button
             type="button"
-            className="mb-2 -mx-2 flex w-[calc(100%+1rem)] items-start gap-2.5 rounded-md px-2 py-2 text-left hover:bg-white/[0.03]"
+            className="mb-2 -mx-2 flex w-[calc(100%+1rem)] items-start gap-2.5 rounded-md px-2 py-2 text-left hover:bg-foreground/[0.03]"
           >
             <VerdictIcon className={cn("h-4 w-4 shrink-0 mt-0.5", VERDICT_ICON_TONE[verdict.outcome])} />
             <div className="min-w-0 flex-1">
@@ -303,7 +303,7 @@ export function RunActivityRail({
   return (
     <div
       data-testid="run-activity"
-      className={cn("border-t border-white/[0.06] pt-3 px-4 pb-4", className)}
+      className={cn("border-t border-foreground/[0.06] pt-3 px-4 pb-4", className)}
     >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -331,7 +331,7 @@ function RunActivityRowView({ row, last }: { row: RunActivityRow; last: boolean 
       )}
     >
       {/* Connector rail down to the next node. */}
-      {!last && <div className="absolute left-[7px] top-[24px] w-px h-[calc(100%-8px)] bg-white/[0.06]" />}
+      {!last && <div className="absolute left-[7px] top-[24px] w-px h-[calc(100%-8px)] bg-foreground/[0.06]" />}
       <Icon
         className={cn(
           "h-3.5 w-3.5 shrink-0 mt-0.5",

@@ -25,6 +25,9 @@ vi.mock("@/hooks/use-abilities", () => ({
 
 const toastSuccess = vi.fn()
 const toastError = vi.fn()
+// The judge is an instance-wide setting: who may edit it is the instance
+// admin (review R2), so "canManage" here stands for that.
+vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => canManage }))
 vi.mock("sonner", () => ({
   toast: {
     success: (...args: unknown[]) => toastSuccess(...args),
@@ -242,7 +245,7 @@ describe("KeeperJudgeCard", () => {
     expect(screen.queryByTestId("keeper-judge-reset")).not.toBeInTheDocument()
   })
 
-  it("is read-only for a non-manager", async () => {
+  it("is read-only for someone who is not an instance admin", async () => {
     canManage = false
     mockRoutes(config({
       enabled: [true, "instance"],
@@ -427,7 +430,7 @@ describe("KeeperJudgeCard", () => {
     expect(screen.queryByTestId("keeper-judge-model")).toBeNull()
   })
 
-  it("offers no Test button to a non-manager", async () => {
+  it("offers no Test button to someone who is not an instance admin", async () => {
     canManage = false
     mockRoutes(config({ endpoint: ["http://127.0.0.1:11434", "env"], model: ["qwen2.5:7b", "env"] }))
     render(<KeeperJudgeCard workspaceId="ws1" />)

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
-import { RoutinesDashboard, outcomeKpis, runOutcomesByDay, type DashboardRun } from "../routines-dashboard"
+import { RoutinesDashboard, outcomeKpis, runOutcomesByDay, groupLatestResults, outcomeVolumeShape, honestPct, type DashboardRun } from "../routines-dashboard"
 
 vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }))
 vi.mock("@/components/ui/crew-icon", () => ({ CrewIcon: () => <span data-testid="icon" /> }))
@@ -48,6 +48,56 @@ describe("outcomeKpis", () => {
     expect(k).toMatchObject({ total: 5, completed: 1, successOk: 1, successTotal: 2, successPct: 50 })
     expect(k.spendUsd).toBeCloseTo(0.09)
     expect(k.p95Ms).toBe(120_000)
+  })
+})
+
+describe("honestPct", () => {
+  // A rate only says 100% when nothing failed, and only 0% when nothing passed.
+  it.each([
+    [199, 200, 99],
+    [200, 200, 100],
+    [1, 200, 1],
+    [0, 200, 0],
+    [1, 2, 50],
+    [2, 3, 67],
+  ])("%i of %i → %i", (ok, total, pct) => {
+    expect(honestPct(ok, total)).toBe(pct)
+  })
+  it("has no rate without finished runs", () => expect(honestPct(0, 0)).toBeNull())
+})
+
+describe("groupLatestResults", () => {
+  const r = (id: string, slug: string, h: number, extra: Partial<DashboardRun> = {}): DashboardRun =>
+    ({ id, pipeline_slug: slug, pipeline_name: slug, status: "completed", started_at: hoursAgo(h), ...extra })
+  it("folds repeated runs of one routine with one result into a row with a count", () => {
+    const groups = groupLatestResults([r("a", "ingest", 1), r("b", "ingest", 2), r("c", "digest", 3), r("d", "ingest", 4)])
+    expect(groups.map((g) => [g.latest.id, g.count])).toEqual([["a", 3], ["c", 1]])
+  })
+  it("keeps a different result of the same routine as its own row, failures first", () => {
+    const groups = groupLatestResults([
+      r("a", "ingest", 1),
+      r("b", "ingest", 2, { outcome: "FAILED" }),
+      r("c", "ingest", 3, { status: "cancelled" }),
+      r("d", "ingest", 4, { status: "failed" }),
+    ])
+    // "Result failed" and "Failed" are separate words, both danger; stopped is muted.
+    expect(groups.map((g) => [g.latest.id, g.count])).toEqual([["b", 1], ["d", 1], ["a", 1], ["c", 1]])
+  })
+  it("caps the rows", () => {
+    const many = Array.from({ length: 12 }, (_, i) => r(`x${i}`, `slug${i}`, i))
+    expect(groupLatestResults(many, 8)).toHaveLength(8)
+    expect(groupLatestResults([])).toEqual([])
+  })
+})
+
+describe("outcomeVolumeShape", () => {
+  const b = (n: number) => ({ ts: "t", completed: n, failed: 0, stopped: 0, live: 0 })
+  it.each([
+    ["empty", [b(0), b(0)]],
+    ["single-day", [b(0), b(0), b(200)]],
+    ["chart", [b(3), b(0), b(200)]],
+  ])("%s", (shape, buckets) => {
+    expect(outcomeVolumeShape(buckets, ["completed", "failed", "stopped", "live"])).toBe(shape)
   })
 })
 
@@ -93,20 +143,45 @@ describe("<RoutinesDashboard>", () => {
     expect(screen.queryByText("Elsewhere")).toBeNull()
     // Up next lists the enabled schedule only.
     expect(screen.getByText("Up next")).toBeInTheDocument()
-    // Latest results: finished runs of the window, newest first, each opening its run.
+    // Latest results: finished runs of the window, failures first then newest,
+    // each opening its run.
     const results = screen.getAllByRole("link", { name: /Open run/ })
     expect(results.map((a) => a.getAttribute("href"))).toEqual([
-      "/routines?slug=invoice&run=r1",
       "/routines?slug=invoice&run=r2",
+      "/routines?slug=invoice&run=r1",
       "/routines?slug=briefing&run=r3",
     ])
-    expect(results[1]).toHaveTextContent("Result failed")
+    expect(results[0]).toHaveTextContent("Result failed")
     expect(results[2]).toHaveTextContent("Stopped")
     // Drafts open the routine.
     fireEvent.click(screen.getByRole("button", { name: /Invoice intake.*Publish/ }))
     expect(select).toHaveBeenCalledWith("invoice")
     // Runs live in Activity.
     expect(screen.getAllByRole("link", { name: /Activity/ })[0]).toHaveAttribute("href", "/activity?lens=routines")
+  })
+
+  it("folds a routine that ran the same way many times into one row with a count", () => {
+    const repeated: DashboardRun[] = Array.from({ length: 5 }, (_, i) => ({
+      id: `i${i}`, pipeline_slug: "invoice", pipeline_name: "Invoice intake", status: "completed", started_at: hoursAgo(i + 1), duration_ms: 1000,
+    }))
+    render(<RoutinesDashboard routines={routines} runs={repeated} schedules={[]} onSelect={vi.fn()} />)
+    const rows = screen.getAllByRole("link", { name: /Open run/ })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toHaveAttribute("href", "/routines?slug=invoice&run=i0")
+    expect(rows[0]).toHaveTextContent("×5")
+  })
+
+  it("says in one line what a single day of runs did instead of drawing one bar", () => {
+    const today: DashboardRun[] = [
+      { id: "t1", pipeline_slug: "invoice", status: "completed", started_at: hoursAgo(1) },
+      { id: "t2", pipeline_slug: "invoice", status: "failed", started_at: hoursAgo(2) },
+    ]
+    render(<RoutinesDashboard routines={routines} runs={today} schedules={[]} onSelect={vi.fn()} />)
+    expect(screen.queryByTestId("run-volume")).toBeNull()
+    const summary = screen.getByTestId("run-outcomes-single-day")
+    expect(summary).toHaveTextContent("All 2 runs in the window started today")
+    expect(summary).toHaveTextContent("1 Completed")
+    expect(summary).toHaveTextContent("1 Could not finish")
   })
 
   it("says so when nothing needs anyone and nothing runs", () => {

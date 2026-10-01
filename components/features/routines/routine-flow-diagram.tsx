@@ -62,7 +62,7 @@ function FlowNodeCard({ node }: { node: FlowNode }) {
   return (
     <div
       className={cn(
-        "flex w-[112px] shrink-0 flex-col items-center rounded-[10px] border px-2.5 py-2.5 text-center",
+        "flex w-[112px] shrink-0 flex-col items-center rounded-lg border px-2.5 py-2.5 text-center",
         style.node,
       )}
       title={node.detail ? `${node.label} · ${node.detail}` : node.label}

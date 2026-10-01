@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Check, X, ChevronsUpDown } from "lucide-react"
+import { Check, X, ChevronsUpDown, AlertTriangle, BarChart3, Fingerprint } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { SaveFooter } from "@/components/ui/save-footer"
@@ -20,8 +20,9 @@ import { Button } from "@/components/ui/button"
 import { LANGUAGES } from "@/lib/languages"
 import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier, isOwner } from "@/lib/permissions/tiers"
-import { SettingsCard, SettingsRow, SettingsDangerCard } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsRow, SettingsDangerCard, settingsControl, settingsPickerButton } from "@/components/features/settings/shared"
 import { PagesAppearanceCard } from "./pages-appearance-card"
+import { cn } from "@/lib/utils"
 import { PrivilegedCredentialsCard } from "@/components/features/settings/sections/privileged-credentials-card"
 
 interface GeneralSectionProps {
@@ -127,9 +128,8 @@ export function GeneralSection({
 
   return (
     <div className="space-y-5">
-      <PagesAppearanceCard key={workspaceId} workspaceId={workspaceId} role={role} />
       {/* ── Identity ── */}
-      <SettingsCard
+      <SettingsCard icon={Fingerprint}
         title="Identity"
         description={
           canEdit
@@ -170,7 +170,7 @@ export function GeneralSection({
                 onChange={(e) => form.set("name", e.target.value)}
                 placeholder="My Company"
                 aria-label="Workspace name"
-                className="h-7 text-xs w-48"
+                className={settingsControl}
               />
             </SettingsRow>
             <SettingsRow label="Slug" description="Used in URLs and CLI commands">
@@ -179,14 +179,14 @@ export function GeneralSection({
                 onChange={(e) => form.set("slug", e.target.value)}
                 placeholder="my-company"
                 aria-label="Slug"
-                className="h-7 text-xs w-48 font-mono"
+                className={cn(settingsControl, "font-mono")}
               />
             </SettingsRow>
             <SettingsRow label="Agent language" description="Agents will respond in this language" border={false}>
               <Popover open={langOpen} onOpenChange={setLangOpen}>
                 <PopoverTrigger asChild>
                   <button
-                    className="inline-flex items-center justify-between w-48 h-7 px-2.5 rounded-md bg-background border border-border text-xs text-foreground hover:border-ring transition-colors disabled:opacity-50"
+                    className={settingsPickerButton}
                     disabled={form.status === "saving"}
                   >
                     {selectedLang ? (
@@ -194,7 +194,7 @@ export function GeneralSection({
                     ) : (
                       <span className="text-muted-foreground">Select language…</span>
                     )}
-                    <ChevronsUpDown className="h-3 w-3 text-muted-foreground ml-2 shrink-0" />
+                    <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   </button>
                 </PopoverTrigger>
                 <PopoverContent className="w-64 p-0" align="end">
@@ -240,7 +240,7 @@ export function GeneralSection({
       </SettingsCard>
 
       {/* ── Usage ── */}
-      <SettingsCard title="Usage" description="Resource counts for this workspace">
+      <SettingsCard icon={BarChart3} title="Usage" description="Resource counts for this workspace">
         <SettingsRow
           label={
             <span className="inline-flex items-center gap-2">
@@ -280,6 +280,9 @@ export function GeneralSection({
         </SettingsRow>
       </SettingsCard>
 
+      {/* Below identity and usage: it themes Page applications only. */}
+      <PagesAppearanceCard key={workspaceId} workspaceId={workspaceId} role={role} />
+
       {/* ── Security ──
           Workspace-wide, fail-closed, and nothing to do with any one crew —
           it used to sit under "Crews & Containers", where it read as per-crew
@@ -290,7 +293,7 @@ export function GeneralSection({
 
       {/* ── Danger Zone ── */}
       {isOwner(role) && (
-        <SettingsDangerCard
+        <SettingsDangerCard icon={AlertTriangle}
           title="Danger zone"
           description="Irreversible actions that affect the whole workspace"
         >

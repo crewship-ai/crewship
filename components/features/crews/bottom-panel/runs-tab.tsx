@@ -97,7 +97,7 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
         </thead>
         <tbody>
           {runs.map((run, i) => (
-            <tr key={run.id ?? i} className="border-t border-white/5 hover:bg-white/[0.02]">
+            <tr key={run.id ?? i} className="border-t border-foreground/5 hover:bg-foreground/[0.02]">
               {isMission ? (
                 <td className="py-2 pr-3 text-foreground/90">{run.agent_name || "—"}</td>
               ) : (

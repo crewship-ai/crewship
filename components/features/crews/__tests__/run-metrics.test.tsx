@@ -33,4 +33,17 @@ describe("RunMetrics", () => {
     expect(screen.getByText("Run sources are not available yet.")).toBeInTheDocument()
     expect(screen.queryByRole("meter")).not.toBeInTheDocument()
   })
+  // Three tiles reading 0 said "nothing ran" three times at 32px. A quiet
+  // week is one line.
+  it("collapses to one line when nothing ran in the window", () => {
+    resource.mockReturnValue({ key: "runs", data: { totals: { succeeded: 0, failed: 0, running: 0 }, truncated: false } })
+    render(<RunMetrics workspaceId="ws-1" agentId="a1" />)
+    expect(screen.queryByText("Completed runs")).not.toBeInTheDocument()
+    expect(document.querySelector("[data-slot=inline-empty]")).toHaveTextContent(/No runs in the last 7 days/)
+  })
+  it("keeps the tiles while the totals are still loading", () => {
+    resource.mockReturnValue({ key: "runs", data: undefined })
+    render(<RunMetrics workspaceId="ws-1" agentId="a1" />)
+    expect(screen.getByText("Completed runs")).toBeInTheDocument()
+  })
 })

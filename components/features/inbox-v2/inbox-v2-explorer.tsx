@@ -211,7 +211,7 @@ export function InboxV2Explorer({
       <div className="shrink-0 px-2 pb-2 pt-1">
         <InboxCrewPicker lookup={lookup} entries={entries} value={filters.crew} onChange={(crew) => set({ crew })} />
       </div>
-      <SidebarActiveChips className="border-b border-white/[0.06] pt-2">
+      <SidebarActiveChips className="border-b border-foreground/[0.06] pt-2">
         {attention && <SidebarActiveChip onRemove={onClearAttention ?? (() => {})}>{ATTENTION_LABELS[attention]}</SidebarActiveChip>}
         {filters.type && (
           <SidebarActiveChip onRemove={() => set({ type: null })}>{TYPE_LABEL[filters.type]}</SidebarActiveChip>
@@ -232,7 +232,9 @@ export function InboxV2Explorer({
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 overflow-y-auto pb-1">
           {sections.filter((s) => s.rows.length > 0).map((section, index) => (
-            <div key={section.label}>
+            // Each section after the first starts below a rule, so the
+            // operational alerts never read as more of the decisions above.
+            <div key={section.label} data-slot="inbox-section" className={cn(index > 0 && "mt-2 border-t border-border pt-1")}>
               <SidebarSection
                 label={section.label}
                 count={section.rows.length}
@@ -337,7 +339,7 @@ function EntryRow({ entry, selected, onOpen, lookup }: { entry: InboxV2Entry; se
         <span className="flex min-w-0 items-center gap-1 text-micro leading-4 text-muted-foreground">
           {crew && <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="h-3.5 w-3.5 rounded-sm [&_svg]:h-2.5 [&_svg]:w-2.5" />}
           <span className="truncate">{crew ? `${crew.name} · ${name}` : name}</span>
-          <span className={cn("ml-auto shrink-0 tabular-nums", expiring && "font-semibold text-destructive")}>
+          <span className={cn("ml-auto shrink-0 font-mono text-[11px] tabular-nums", expiring && "font-semibold text-destructive")}>
             {deadlineMins != null && entry.actionable ? deadlineMins > 0 ? `expires in ${remainingLabel(deadlineMins)}` : "expired" : since(entry.createdAt)}
           </span>
         </span>

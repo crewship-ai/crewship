@@ -79,7 +79,8 @@ services:
       CONTAINERS: 1
       # /exec -- ExecStart, ExecAttach, ExecInspect, ExecResize.
       EXEC: 1
-      # /images -- ImagePull, ImageInspect, ImageList, ImageRemove.
+      # /images -- ImagePull, ImageInspect, ImageList, ImageRemove, ImageTag,
+      # and ImageSave/ImageLoad for complete-environment backups.
       IMAGES: 1
       # /networks -- NetworkCreate, NetworkList (per-crew network).
       NETWORKS: 1
@@ -101,7 +102,8 @@ services:
       # off and such a crew fails at provisioning with a 403 on POST /commit;
       # every other crew is unaffected.
       #
-      # /commit -- ContainerCommit, the last step of provisioning.
+      # /commit -- ContainerCommit, the last step of provisioning. Backups that
+      # take complete container environments commit each crew too.
       # COMMIT: 1
       # /build and /session -- `docker build` with BuildKit, used when a crew
       # declares devcontainer FEATURES. Crewship shells out to the docker CLI

@@ -20,7 +20,7 @@
  */
 
 import * as React from "react"
-import { AlertTriangle, ShieldAlert } from "lucide-react"
+import { AlertTriangle, ShieldAlert, Eye, ShieldCheck, UserCheck } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
@@ -53,6 +53,9 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
   const [policyError, setPolicyError] = React.useState<string | null>(null)
   const [saving, setSaving] = React.useState(false)
   const [capsByUser, setCapsByUser] = React.useState<Record<string, string[]> | null>(null)
+  // The bulk capabilities read is ADMIN+; a MANAGER cannot see the grants.
+  const [capsHidden, setCapsHidden] = React.useState(false)
+  const [capsFailed, setCapsFailed] = React.useState(false)
 
   React.useEffect(() => {
     let cancelled = false
@@ -77,15 +80,19 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
       `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members/capabilities` +
         `?workspace_id=${encodeURIComponent(workspaceId)}`,
     )
-      .then(async (res) => (res.ok ? ((await res.json()) as BulkCapabilities) : null))
+      .then(async (res) => {
+        if (res.status === 401 || res.status === 403) return "forbidden" as const
+        return res.ok ? ((await res.json()) as BulkCapabilities) : null
+      })
       .then((body) => {
         if (cancelled) return
-        if (!body) { setCapsByUser({}); return }
+        if (body === "forbidden") { setCapsHidden(true); setCapsByUser({}); return }
+        if (!body) { setCapsFailed(true); setCapsByUser({}); return }
         const map: Record<string, string[]> = {}
         for (const m of body.members ?? []) map[m.user_id] = m.capabilities ?? []
         setCapsByUser(map)
       })
-      .catch(() => { if (!cancelled) setCapsByUser({}) })
+      .catch(() => { if (!cancelled) { setCapsFailed(true); setCapsByUser({}) } })
     return () => { cancelled = true }
   }, [workspaceId])
 
@@ -121,7 +128,7 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
 
   return (
     <div className="space-y-6">
-      <SettingsCard
+      <SettingsCard icon={Eye}
         title="Value reveal"
         description="Whether anyone in this workspace may read a stored secret back in plaintext."
       >
@@ -162,11 +169,18 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
         )}
       </SettingsCard>
 
-      <SettingsCard
+      <SettingsCard icon={UserCheck}
         title="Who may reveal"
         description="OWNER and ADMIN receive reveal by default unless their membership has an explicit capability set. Individual grants and revocations take precedence; workspace policy still applies."
       >
-        {holders === null ? (
+        {capsHidden ? (
+          <SettingsEmpty>
+            Your role cannot see who holds <span className="font-mono">credentials:reveal</span>. An
+            Admin or the Owner can check it in Members.
+          </SettingsEmpty>
+        ) : capsFailed ? (
+          <SettingsEmpty>The capability grants could not be loaded. Reload the page to try again.</SettingsEmpty>
+        ) : holders === null ? (
           <SettingsEmpty>Loading the capability grants…</SettingsEmpty>
         ) : holders.length === 0 ? (
           <SettingsEmpty>
@@ -194,22 +208,22 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
         )}
       </SettingsCard>
 
-      <SettingsCard
+      <SettingsCard icon={ShieldCheck}
         title="Classification"
         description="What each class means, and who can move a credential between them."
       >
-        <SettingsRow label="STANDARD" description="Dev tokens, read-only keys.">
+        <SettingsRow label="Standard" description="Dev tokens, read-only keys.">
           <span className="text-[11px] text-muted-foreground text-right">
             Revealable with the full ceremony
           </span>
         </SettingsRow>
-        <SettingsRow label="RESTRICTED" description="Production API keys, deploy keys.">
+        <SettingsRow label="Restricted" description="Production API keys, deploy keys.">
           <span className="text-[11px] text-muted-foreground text-right">
             Revealable today; earmarked for a second approver
           </span>
         </SettingsRow>
         <SettingsRow
-          label="SEALED"
+          label="Sealed"
           description="Production databases, root credentials, anything an agent created."
         >
           <span className="inline-flex items-center gap-1.5 text-[11px] text-destructive text-right">
@@ -219,15 +233,13 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
         </SettingsRow>
         <SettingsRow label="Changing a class" description="Raise it at any time; lowering is audited." border={false}>
           <span className="text-[11px] text-muted-foreground text-right">
-            MANAGER+ to raise · OWNER/ADMIN to lower
+            Manager and up can raise · Owner or Admin can lower
           </span>
         </SettingsRow>
       </SettingsCard>
 
       <p className="text-[11px] text-muted-foreground">
-        Per-category default classifications are not configurable yet — the API has no endpoint for
-        them, so a control here would be a setting that saves nowhere. Set the class on each
-        credential from its detail sheet until it lands.
+        Set a credential&rsquo;s class on its detail sheet in Credentials.
       </p>
     </div>
   )

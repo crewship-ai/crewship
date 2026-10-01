@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -75,7 +76,20 @@ func TestE2ESidecarIntegration(t *testing.T) {
 	// OpenRouter keys: sk-or-*
 	realORKey := "sk-or-v1-" + strings.Repeat("Q", 30)
 
+	admissionHost := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/internal/cost/admit" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("X-Internal-Token") != "synthetic-internal-token" {
+			t.Error("missing admission auth")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"allowed":true}`))
+	}))
+	defer admissionHost.Close()
 	srv := NewServer(ServerConfig{
+		IPC:  &IPCConfig{BaseURL: admissionHost.URL, Token: "synthetic-internal-token", WorkspaceID: "synthetic-workspace", AgentID: "synthetic-agent"},
 		Addr: "127.0.0.1:0",
 		Credentials: []Credential{
 			{ID: "anth-1", Provider: ProviderAnthropic, Token: realAnthKey, Priority: 1},

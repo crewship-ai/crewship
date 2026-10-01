@@ -105,6 +105,30 @@ type Manifest struct {
 	Contents          Contents   `json:"contents" yaml:"contents"`
 	Encryption        Encryption `json:"encryption" yaml:"encryption"`
 	Checksums         Checksums  `json:"checksums" yaml:"checksums"`
+	// Conversion is set on a bundle written by `crewship backup convert`
+	// and records where it came from. Nil on every bundle written by
+	// backup create. Additive field; readers that predate it ignore it.
+	Conversion *Conversion `json:"conversion,omitempty" yaml:"conversion,omitempty"`
+	// Kind is "custom" on a bundle that carries only some contents
+	// categories (Categories lists them) — such a bundle never counts as
+	// protecting a workspace. Empty on every full bundle. Additive field.
+	Kind       string   `json:"kind,omitempty" yaml:"kind,omitempty"`
+	Categories []string `json:"categories,omitempty" yaml:"categories,omitempty"`
+}
+
+// Conversion is the provenance of a converted bundle: which format it
+// was converted from, when, by which Crewship version, and the payload
+// digest of the original, so the two can be matched later. The full
+// per-step report is printed by the convert command, not stored here.
+type Conversion struct {
+	FromFormatVersion   int       `json:"from_format_version" yaml:"from_format_version"`
+	ConvertedAt         time.Time `json:"converted_at" yaml:"converted_at"`
+	ConverterVersion    string    `json:"converter_version,omitempty" yaml:"converter_version,omitempty"`
+	SourcePayloadSHA256 string    `json:"source_payload_sha256" yaml:"source_payload_sha256"`
+	// Unrecoverable repeats the report's unrecoverable lines so an
+	// operator inspecting the converted bundle later still sees what it
+	// can never contain.
+	Unrecoverable []string `json:"unrecoverable,omitempty" yaml:"unrecoverable,omitempty"`
 }
 
 // Actor describes the user who created or restored the bundle.
@@ -159,6 +183,35 @@ type Contents struct {
 	// cannot be landed from this bundle no matter what comes after.
 	MissingContainerCrews []string `json:"missing_container_crews,omitempty" yaml:"missing_container_crews,omitempty"`
 
+	// AttachmentsIncluded is the number of distinct attachment blobs
+	// (content-addressed files under <root>/attachments/<workspace>/…)
+	// this bundle carries in its attachment-blobs/ section, one per sha256
+	// referenced by the dump's `attachments` rows. Zero on every bundle
+	// written before the section existed — those carried the rows and none
+	// of the files.
+	AttachmentsIncluded int `json:"attachments_included,omitempty" yaml:"attachments_included,omitempty"`
+	// AttachmentsMissing is the number of distinct attachment sha256 values
+	// the dump references whose file was NOT on disk (or attachment storage
+	// was not configured) at create time. Not a create failure — the rows
+	// still ride — but always also recorded as an Incomplete item, so a
+	// bundle that lacks files never reads as complete.
+	AttachmentsMissing int `json:"attachments_missing,omitempty" yaml:"attachments_missing,omitempty"`
+
+	// Incomplete lists everything this bundle should have carried and does
+	// not, one item per kind (and per crew for container_missing). It is the
+	// single place a reader asks "is this backup complete?" — the counters
+	// above and MissingContainerCrews stay for older readers, and this list
+	// is derived from the same observations, so they cannot disagree. Empty
+	// or absent on a complete bundle.
+	Incomplete []IncompleteItem `json:"incomplete,omitempty" yaml:"incomplete,omitempty"`
+
+	// Environments lists the complete container environments this bundle
+	// carries (Track E), one per crew: platform, the blob digests its image
+	// needs and whether those ride inline. The configuration itself is in
+	// the encrypted payload (environments/<crew>.json). Empty on a bundle
+	// taken with env_mode=files.
+	Environments []EnvironmentSummary `json:"environments,omitempty" yaml:"environments,omitempty"`
+
 	// TableRowCounts records, per table, how many rows the DB dump
 	// (DumpWorkspace / DumpCrew) wrote into this bundle's payload at
 	// create time — len(dump.Tables[table]) for every table the dump
@@ -182,6 +235,51 @@ type Contents struct {
 	// re-derivation, e.g. reconciling against the source instance) is a
 	// stronger, separate guarantee and out of scope here — see #2009.
 	TableRowCounts map[string]int `json:"table_row_counts,omitempty" yaml:"table_row_counts,omitempty"`
+
+	// Instance is set on instance-scope bundles only: the workspaces in the
+	// snapshot, every file store with its file count and index digest, the
+	// database snapshot's size and digest, the vault key versions the
+	// database references and whether the recovery kit rides along, and how
+	// long writes were held. For those bundles TableRowCounts counts every
+	// table in the snapshot. Additive field; nil everywhere else.
+	Instance *InstanceContents `json:"instance,omitempty" yaml:"instance,omitempty"`
+}
+
+// Incomplete item kinds. Readers must tolerate kinds they do not know —
+// new ones are added without a format bump.
+const (
+	// IncompleteAttachmentMissing: attachment rows whose blob was not
+	// collected (file absent, or attachment storage not configured).
+	IncompleteAttachmentMissing = "attachment_missing"
+	// IncompleteMemoryBlobMissing: memory_versions rows whose content blob
+	// was absent from the memory version store.
+	IncompleteMemoryBlobMissing = "memory_blob_missing"
+	// IncompleteContainerMissing: a provisioned crew whose container was
+	// gone from the daemon, so none of its files are in the bundle.
+	IncompleteContainerMissing = "container_missing"
+	// IncompleteAttachmentConflict is restore-side only: the target already
+	// held a DIFFERENT file at the blob's path, which restore never
+	// overwrites.
+	IncompleteAttachmentConflict = "attachment_conflict"
+	// IncompleteCrewSectionFailed: Docker refused to start copying one of a
+	// crew's sections (e.g. a bind mount whose host directory is gone); the
+	// crew's other sections are in the bundle, that one is not.
+	IncompleteCrewSectionFailed = "crew_section_failed"
+	// IncompleteFileUnreadable: files in an instance file store the server
+	// could not read (owned by a container user with mode 0600, say); every
+	// other file of the store is in the bundle.
+	IncompleteFileUnreadable = "file_unreadable"
+)
+
+// IncompleteItem is one kind of gap in a bundle (or, on a RestoreResult, in
+// what a restore landed). Count is how many things of that kind; Detail is a
+// sentence an operator can act on; Workspace, when set, is the workspace id
+// the gap belongs to.
+type IncompleteItem struct {
+	Kind      string `json:"kind" yaml:"kind"`
+	Detail    string `json:"detail" yaml:"detail"`
+	Count     int    `json:"count" yaml:"count"`
+	Workspace string `json:"workspace,omitempty" yaml:"workspace,omitempty"`
 }
 
 // WorkspaceSummary carries workspace-level identity fields.
@@ -250,6 +348,10 @@ type CrewSummary struct {
 	// never-provisioned crew, where no files ever existed to omit
 	// (#2612). Mirrors Contents.MissingContainerCrews per crew.
 	ContainerMissing bool `json:"container_missing,omitempty" yaml:"container_missing,omitempty"`
+	// FailedSections names the sections Docker refused to start copying
+	// ("/workspace: <daemon error>"); their *_included flags stay false, so
+	// a restore does not look for them.
+	FailedSections []string `json:"failed_sections,omitempty" yaml:"failed_sections,omitempty"`
 }
 
 // HasCrewMemory answers the only question an operator actually asks of

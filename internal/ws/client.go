@@ -339,6 +339,13 @@ func (c *Client) trySend(data []byte) (sent bool) {
 // that file too.
 const AgentBusyEventType = "agent_busy"
 
+// CrewProvisioningEventType is the chat event a send receives when it was
+// parked behind an environment build. The server then sends done, and replays
+// the message on the same session channel once the build finishes; that
+// replay is the actual run. Metadata status "failed" means the build never
+// started and nothing will replay.
+const CrewProvisioningEventType = "crew_provisioning"
+
 // agentBusyNotice is the user-facing text of the sender-only busy rejection.
 const agentBusyNotice = "The agent is busy with another run right now. Please wait for it to finish."
 

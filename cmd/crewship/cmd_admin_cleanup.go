@@ -16,9 +16,6 @@ func newAdminCleanupCmd() *cobra.Command {
 		if err := requireAuth(); err != nil {
 			return err
 		}
-		if err := requireWorkspace(); err != nil {
-			return err
-		}
 		response, err := newAPIClient().Get("/api/v1/admin/resource-cleanup")
 		if err != nil {
 			return err

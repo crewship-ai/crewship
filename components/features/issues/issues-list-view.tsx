@@ -258,7 +258,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
   }
 
   return (
-    <div ref={scopeRef} className="@container/issues rounded-lg border border-border overflow-hidden">
+    <div ref={scopeRef} data-slot="issues-list" className="@container/issues overflow-hidden rounded-card border border-border bg-card">
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 border-b border-primary/20">
@@ -267,7 +267,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
             <div className="relative">
               <button
                 onClick={() => setBulkMenuOpen(bulkMenuOpen === "status" ? null : "status")}
-                className="px-2 py-1 text-[11px] rounded bg-white/[0.06] hover:bg-white/[0.1] text-foreground/80 transition-colors"
+                className="px-2 py-1 text-[11px] rounded bg-foreground/[0.06] hover:bg-foreground/[0.1] text-foreground/80 transition-colors"
               >
                 Status
               </button>
@@ -277,7 +277,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                     <button
                       key={s.value}
                       onClick={() => handleBulkUpdate({ status: s.value })}
-                      className="w-full px-3 py-1.5 text-xs text-left hover:bg-white/[0.06] flex items-center gap-2"
+                      className="w-full px-3 py-1.5 text-xs text-left hover:bg-foreground/[0.06] flex items-center gap-2"
                     >
                       <StatusIcon status={s.value} className="h-3 w-3" />
                       {s.label}
@@ -289,7 +289,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
             <div className="relative">
               <button
                 onClick={() => setBulkMenuOpen(bulkMenuOpen === "priority" ? null : "priority")}
-                className="px-2 py-1 text-[11px] rounded bg-white/[0.06] hover:bg-white/[0.1] text-foreground/80 transition-colors"
+                className="px-2 py-1 text-[11px] rounded bg-foreground/[0.06] hover:bg-foreground/[0.1] text-foreground/80 transition-colors"
               >
                 Priority
               </button>
@@ -299,7 +299,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                     <button
                       key={p.value}
                       onClick={() => handleBulkUpdate({ priority: p.value })}
-                      className="w-full px-3 py-1.5 text-xs text-left hover:bg-white/[0.06] flex items-center gap-2"
+                      className="w-full px-3 py-1.5 text-xs text-left hover:bg-foreground/[0.06] flex items-center gap-2"
                     >
                       <PriorityIcon priority={p.value} className="h-3 w-3" />
                       {p.label}
@@ -317,7 +317,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
             </span>
           )}
           <div className="flex-1" />
-          <button onClick={clearSelection} className="p-1 rounded hover:bg-white/[0.08] text-muted-foreground/60 hover:text-foreground transition-colors">
+          <button onClick={clearSelection} className="p-1 rounded hover:bg-foreground/[0.08] text-muted-foreground/60 hover:text-foreground transition-colors">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -341,7 +341,10 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
        * one grouped by status.
        */}
       <div className="hidden @md/issues:block">
-      <Table>
+      {/* Fixed layout: the title column takes what is left and every cell
+          truncates, instead of the table growing past the card and clipping
+          the Crew column off its right edge. */}
+      <Table className="min-w-[60rem] table-fixed">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TableHead className="w-[40px]">
@@ -356,7 +359,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               className="w-[90px] cursor-pointer select-none"
               onClick={() => handleSort("identifier")}
             >
-              <span className="flex items-center gap-1">
+              <span className="eyebrow flex items-center gap-1">
                 ID {renderSortIcon("identifier")}
               </span>
             </TableHead>
@@ -364,7 +367,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               className="cursor-pointer select-none"
               onClick={() => handleSort("title")}
             >
-              <span className="flex items-center gap-1">
+              <span className="eyebrow flex items-center gap-1">
                 Title {renderSortIcon("title")}
               </span>
             </TableHead>
@@ -372,7 +375,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               className="w-[110px] cursor-pointer select-none"
               onClick={() => handleSort("status")}
             >
-              <span className="flex items-center gap-1">
+              <span className="eyebrow flex items-center gap-1">
                 Status {renderSortIcon("status")}
               </span>
             </TableHead>
@@ -380,7 +383,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               className="w-[90px] cursor-pointer select-none"
               onClick={() => handleSort("priority")}
             >
-              <span className="flex items-center gap-1">
+              <span className="eyebrow flex items-center gap-1">
                 Priority {renderSortIcon("priority")}
               </span>
             </TableHead>
@@ -388,7 +391,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               className="w-[120px] cursor-pointer select-none"
               onClick={() => handleSort("assignee")}
             >
-              <span className="flex items-center gap-1">
+              <span className="eyebrow flex items-center gap-1">
                 Assignee {renderSortIcon("assignee")}
               </span>
             </TableHead>
@@ -396,16 +399,16 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               className="w-[100px] cursor-pointer select-none"
               onClick={() => handleSort("crew")}
             >
-              <span className="flex items-center gap-1">
+              <span className="eyebrow flex items-center gap-1">
                 Crew {renderSortIcon("crew")}
               </span>
             </TableHead>
-            <TableHead className="w-[120px]">Labels</TableHead>
+            <TableHead className="w-[120px]"><span className="eyebrow">Labels</span></TableHead>
             <TableHead
               className="w-[90px] cursor-pointer select-none"
               onClick={() => handleSort("updated")}
             >
-              <span className="flex items-center gap-1">
+              <span className="eyebrow flex items-center gap-1">
                 Updated {renderSortIcon("updated")}
               </span>
             </TableHead>
@@ -440,7 +443,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm font-medium line-clamp-1 min-w-0">
+                    <span className="min-w-0 truncate text-sm font-medium">
                       {issue.title}
                     </span>
                     {/* Sub-issues counter — small pill next to title. Hidden
@@ -448,7 +451,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                     {(issue.sub_issues_count ?? 0) > 0 && (
                       <span
                         title={`${issue.sub_issues_count} sub-issues`}
-                        className="shrink-0 inline-flex items-center gap-0.5 rounded bg-white/[0.05] border border-white/[0.06] px-1 py-px text-[9px] font-medium text-muted-foreground tabular-nums"
+                        className="shrink-0 inline-flex items-center gap-0.5 rounded bg-foreground/[0.05] border border-foreground/[0.06] px-1 py-px text-[9px] font-medium text-muted-foreground tabular-nums"
                       >
                         {issue.sub_issues_count}
                       </span>
@@ -491,7 +494,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                       : <span className="text-xs text-muted-foreground/50">--</span>}
                   </div>
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
+                <TableCell className="truncate font-mono text-[11px] text-muted-foreground-soft">
                   {formatRelativeTime(issue.updated_at)}
                 </TableCell>
               </TableRow>

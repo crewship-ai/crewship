@@ -14,9 +14,8 @@ import (
 
 func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -114,9 +113,8 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -154,9 +152,8 @@ func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 
 func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -213,9 +210,8 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -283,8 +279,10 @@ func (h *BackupHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
-	if !backup.IsInstanceOwner(user.Email) {
-		replyError(w, http.StatusForbidden, "instance owner required")
+	// Instance-wide counters: an instance administrator only, not a
+	// workspace ADMIN. The env owner is one by definition.
+	if !backup.IsInstanceOwner(user.Email) && !isInstanceAdmin(r, h.db) {
+		replyError(w, http.StatusForbidden, "instance administrator required")
 		return
 	}
 

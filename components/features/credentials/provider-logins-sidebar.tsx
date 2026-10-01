@@ -88,7 +88,7 @@ export function ProviderLoginsSidebar({
           rail prints its tiers: "Needs re-login · 0" is the answer to a
           question, and a row that vanishes when the answer is none cannot
           be told apart from a question the console does not ask. */}
-      <SidebarSection label="Status" count={statusRows.length} className="border-b border-white/[0.06]">
+      <SidebarSection label="Status" count={statusRows.length} className="border-b border-foreground/[0.06]">
         {statusRows.map((row) => {
           const Icon = row.icon
           const empty = row.count === 0 && row.key !== "all"
@@ -119,7 +119,7 @@ export function ProviderLoginsSidebar({
         <ProviderFilterSection providers={providers} selected={filters.provider} onSelect={(key) => set({ provider: key ? toggle(filters.provider, key) : [] })} />
 
         {modes.length > 0 && (
-          <SidebarSection label="Mode" count={modes.length} className="border-b border-white/[0.06]">
+          <SidebarSection label="Mode" count={modes.length} className="border-b border-foreground/[0.06]">
             {modes.map((opt) => {
               const Icon = opt.value === "api_key" ? KeyRound : CreditCard
               return (

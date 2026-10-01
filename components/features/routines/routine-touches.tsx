@@ -89,7 +89,7 @@ export function RoutineTouches({ manifest }: { manifest?: RoutineManifest | null
       {groups.map((g) => (
         <div
           key={g.key}
-          className="flex items-start gap-2 border-t border-white/[0.04] py-2 first:border-t-0"
+          className="flex items-start gap-2 border-t border-foreground/[0.04] py-2 first:border-t-0"
         >
           <div className="w-[88px] shrink-0 pt-[3px] text-[10.5px] text-muted-foreground-soft">
             {g.label}

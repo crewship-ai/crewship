@@ -260,6 +260,11 @@ func (h *NextAuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 		name, email, avatarURL = dbName.String, dbEmail.String, dbAvatar.String
 	}
 
+	// Whether the Admin console is theirs: instance administration, not any
+	// workspace role (instance_admin.go). A lookup failure answers false —
+	// the console hides, the API still decides every call on its own.
+	instanceAdmin, _, _ := instanceAdminStatus(r.Context(), h.db, claims.ID, email)
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"user": map[string]interface{}{
 			"id":    claims.ID,
@@ -267,7 +272,8 @@ func (h *NextAuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 			"email": email,
 			// Always present, "" when unset, so the client has one shape to
 			// parse instead of distinguishing null from absent.
-			"avatar_url": avatarURL,
+			"avatar_url":        avatarURL,
+			"is_instance_admin": instanceAdmin,
 		},
 		"expires": expires,
 	})
@@ -347,9 +353,17 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 	// can't use the response to enumerate which emails exist or
 	// which are currently locked.
 	userID, fullName, err := checkAndLockoutOnFail(r.Context(), h.db, email, password, time.Now())
+	if err == nil && accountSuspended(r.Context(), h.db, userID) {
+		// Same generic answer as a wrong password: the response must not tell
+		// a caller which accounts exist, are locked, or are suspended.
+		err = ErrAccountSuspended
+	}
 	if err != nil {
 		if errors.Is(err, ErrAccountLocked) {
 			h.logger.Warn("login blocked by lockout",
+				"email", email, "ip", clientIP(r))
+		} else if errors.Is(err, ErrAccountSuspended) {
+			h.logger.Warn("login blocked: account suspended",
 				"email", email, "ip", clientIP(r))
 		} else if !errors.Is(err, ErrInvalidCredentials) {
 			h.logger.Error("login lockout check", "error", err, "email", email)
@@ -539,9 +553,11 @@ func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	// person picks one. Scanning it into a bare string turned every token
 	// rotation for those users into "your session was revoked by an
 	// administrator", which is both false and unfixable from their side.
+	// A suspended account (Admin › People) gets no new access token: the
+	// same answer as a deleted one.
 	var fullNameNS, emailNS sql.NullString
 	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT full_name, email FROM users WHERE id = ?", claims.ID,
+		"SELECT full_name, email FROM users WHERE id = ? AND suspended_at IS NULL", claims.ID,
 	).Scan(&fullNameNS, &emailNS); err != nil {
 		h.clearAuthCookies(w, r)
 		_ = h.sessions.Revoke(r.Context(), claims.Sid, sessions.ReasonAdminForce)

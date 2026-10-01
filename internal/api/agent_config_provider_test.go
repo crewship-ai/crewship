@@ -220,8 +220,15 @@ func TestEveryCredentialLoader_SplitsTheEndpointObject(t *testing.T) {
 	// point is that adding a name here is a decision someone made, not a way to
 	// silence the test.
 	notUpstreamDelivery := map[string]string{
+		"internal/providerlogin/codex_proof.go":    "only signed PROVIDER_LOGIN identity verification; selects no API_KEY rows and grants no inference entitlement or upstream auth delivery",
+		"internal/restricteddispatch/run_proof.go": "decrypts a sealed host output capability, not a provider credential; checked only against scoped context in the host",
+		"internal/restrictedworkflow/prepared.go":  "decrypts a sealed workflow origin capability for private preflight checks; no provider credential is loaded or delivered",
+		"internal/restrictedworkflow/service.go":   "decrypts an existing workflow origin capability to validate idempotent admission; provider credentials are never delivered here",
+		"internal/restrictedworkflow/dispatch.go":  "decrypts the workflow origin capability for host authorization; provider keys remain confined to the broker",
 		"internal/serviceconfig/encryption.go":     "purpose-bound service document for the trusted runtime decoder; never loads an API_KEY row or sends an LLM auth credential",
 		"internal/api/admin_reencrypt.go":          "re-encrypts at rest; the plaintext never leaves the process",
+		"internal/backup/environment_crypto.go":    "unseals the environment store's own generation key (kept vault-sealed so the next run can keep deduplicating) to encrypt image layers at rest; a key for our own ciphertext, never an API_KEY row, never sent anywhere",
+		"internal/backupplan/destinations.go":      "decrypts an off-site destination's own S3 secret-key column (a vault envelope, not a credential row) to sign SigV4 requests to that bucket; never an API_KEY provider value",
 		"internal/api/credentials.go":              "CRUD over the row itself",
 		"internal/api/credentials_reveal.go":       "shows the value to an authorised human, which is the whole point of the endpoint",
 		"internal/api/credential_rotation.go":      "writes a new value; splits where it must",

@@ -1,0 +1,553 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
+)
+
+// Admin › Security across workspaces. The instance admin ("boss") belongs to
+// ws-old only; ws-new is carol's. Everything here must reach ws-new anyway —
+// Admin does not depend on the workspace its user happens to sit in.
+
+type govListBody struct {
+	Defaults struct {
+		Configured bool `json:"configured"`
+		Enabled    bool `json:"enabled"`
+	} `json:"defaults"`
+	Workspaces []struct {
+		WorkspaceID   string `json:"workspace_id"`
+		WorkspaceName string `json:"workspace_name"`
+		Configured    bool   `json:"configured"`
+		Enabled       bool   `json:"enabled"`
+		DenyMinRisk   int    `json:"deny_notify_min_risk"`
+	} `json:"workspaces"`
+}
+
+type govPutResp struct {
+	Applied         bool `json:"applied"`
+	Changed         int  `json:"changed"`
+	DefaultsUpdated bool `json:"defaults_updated"`
+	Workspaces      []struct {
+		WorkspaceID string `json:"workspace_id"`
+		Changes     []struct {
+			Field  string `json:"field"`
+			Before any    `json:"before"`
+			After  any    `json:"after"`
+		} `json:"changes"`
+	} `json:"workspaces"`
+}
+
+func (f *instanceFixture) gov(ws string) (governance.Settings, bool) {
+	f.t.Helper()
+	s, found, err := governance.Get(context.Background(), f.db, ws)
+	if err != nil {
+		f.t.Fatalf("governance.Get: %v", err)
+	}
+	return s, found
+}
+
+func decodeAs[T any](t *testing.T, body []byte) T {
+	t.Helper()
+	var v T
+	if err := json.Unmarshal(body, &v); err != nil {
+		t.Fatalf("decode: %v: %s", err, body)
+	}
+	return v
+}
+
+func TestInstanceKeeperGovernanceIsForInstanceAdminsOnly(t *testing.T) {
+	f := newInstanceFixture(t)
+	wantCode(t, f.do(f.wsAdmin, "GET", "/api/v1/admin/instance/keeper/governance", ""), http.StatusForbidden, "workspace ADMIN reads")
+	wantCode(t, f.do(f.wsAdmin, "PUT", "/api/v1/admin/instance/keeper/governance", `{"all":true,"set":{"enabled":true}}`), http.StatusForbidden, "workspace ADMIN writes")
+	if _, found := f.gov("ws-old"); found {
+		t.Fatal("a refused write left a row")
+	}
+}
+
+func TestInstanceKeeperGovernanceListsEveryWorkspace(t *testing.T) {
+	f := newInstanceFixture(t)
+	if err := governance.Upsert(context.Background(), f.db, "ws-new", governance.Settings{Enabled: true, DenyNotifyMinRisk: 4}, ""); err != nil {
+		t.Fatal(err)
+	}
+	rr := f.do(f.boss, "GET", "/api/v1/admin/instance/keeper/governance", "")
+	wantCode(t, rr, http.StatusOK, "list")
+	got := decodeAs[govListBody](t, rr.Body.Bytes())
+	seen := map[string]bool{}
+	for _, w := range got.Workspaces {
+		seen[w.WorkspaceID] = true
+		if w.WorkspaceID == "ws-new" && (!w.Configured || !w.Enabled || w.DenyMinRisk != 4 || w.WorkspaceName == "") {
+			t.Fatalf("ws-new row = %+v, want its own settings and name", w)
+		}
+		if w.WorkspaceID == "ws-old" && (w.Configured || w.Enabled) {
+			t.Fatalf("ws-old row = %+v, want unconfigured and off", w)
+		}
+	}
+	if !seen["ws-old"] || !seen["ws-new"] {
+		t.Fatalf("workspaces = %v, want both, including one the admin is not a member of", seen)
+	}
+	if got.Defaults.Configured {
+		t.Fatal("defaults configured on a fresh instance")
+	}
+}
+
+func TestInstanceKeeperGovernanceEditsOneWorkspaceTheAdminIsNotIn(t *testing.T) {
+	f := newInstanceFixture(t)
+	rr := f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"workspaces":["ws-new"],"set":{"enabled":true,"behavior_sample_every":10}}`)
+	wantCode(t, rr, http.StatusOK, "single write")
+	resp := decodeAs[govPutResp](t, rr.Body.Bytes())
+	if !resp.Applied || resp.Changed != 1 || resp.DefaultsUpdated {
+		t.Fatalf("resp = %+v, want applied to one workspace and defaults untouched", resp)
+	}
+	s, found := f.gov("ws-new")
+	if !found || !s.Enabled || s.BehaviorSampleEvery != 10 {
+		t.Fatalf("ws-new = %+v (found %v)", s, found)
+	}
+	if _, found := f.gov("ws-old"); found {
+		t.Fatal("a one-workspace save wrote another workspace")
+	}
+	if !f.audited("instance.keeper_governance_updated") {
+		t.Fatal("no instance audit entry")
+	}
+}
+
+func TestInstanceKeeperGovernanceDryRunWritesNothing(t *testing.T) {
+	f := newInstanceFixture(t)
+	rr := f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"all":true,"dry_run":true,"set":{"enabled":true}}`)
+	wantCode(t, rr, http.StatusOK, "dry run")
+	resp := decodeAs[govPutResp](t, rr.Body.Bytes())
+	if resp.Applied || resp.Changed < 2 {
+		t.Fatalf("resp = %+v, want a preview naming every workspace that would change", resp)
+	}
+	for _, w := range resp.Workspaces {
+		if len(w.Changes) != 1 || w.Changes[0].Field != "enabled" || w.Changes[0].Before != false || w.Changes[0].After != true {
+			t.Fatalf("%s changes = %+v, want enabled false → true", w.WorkspaceID, w.Changes)
+		}
+	}
+	if _, found := f.gov("ws-old"); found {
+		t.Fatal("a dry run wrote a row")
+	}
+	if _, found, _ := governance.Defaults(context.Background(), f.db); found {
+		t.Fatal("a dry run wrote the defaults")
+	}
+	if f.audited("instance.keeper_governance_updated") {
+		t.Fatal("a dry run was audited as a change")
+	}
+}
+
+// "all" is the scope of the selection — every existing workspace — and never
+// a change of the defaults for new ones, which is an operation of its own.
+func TestInstanceKeeperGovernanceAllChangesExistingWorkspacesOnly(t *testing.T) {
+	f := newInstanceFixture(t)
+	if err := governance.Upsert(context.Background(), f.db, "ws-new", governance.Settings{Enabled: false, DenyNotifyMinRisk: 9}, ""); err != nil {
+		t.Fatal(err)
+	}
+	rr := f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"all":true,"set":{"enabled":true,"deny_notify_min_risk":5}}`)
+	wantCode(t, rr, http.StatusOK, "all")
+	if strings.Contains(rr.Body.String(), "defaults_updated") {
+		t.Fatalf("response still speaks of defaults: %s", rr.Body.String())
+	}
+	for _, ws := range []string{"ws-old", "ws-new"} {
+		if s, found := f.gov(ws); !found || !s.Enabled || s.DenyNotifyMinRisk != 5 {
+			t.Fatalf("%s = %+v (found %v), want overwritten", ws, s, found)
+		}
+	}
+	if _, found, _ := governance.Defaults(context.Background(), f.db); found {
+		t.Fatal("a save for all workspaces changed the defaults for new ones")
+	}
+}
+
+type defaultsResp struct {
+	Applied   bool   `json:"applied"`
+	PreviewID string `json:"preview_id"`
+	Changes   []struct {
+		Field  string `json:"field"`
+		Before any    `json:"before"`
+		After  any    `json:"after"`
+	} `json:"changes"`
+	Defaults struct {
+		Enabled     bool `json:"enabled"`
+		DenyMinRisk int  `json:"deny_notify_min_risk"`
+	} `json:"defaults"`
+}
+
+// "Defaults for new workspaces" is its own operation: previewed, confirmed
+// against the preview, audited — and it changes no existing workspace.
+func TestInstanceKeeperDefaultsForNewWorkspaces(t *testing.T) {
+	const path = "/api/v1/admin/instance/keeper/governance/defaults"
+	f := newInstanceFixture(t)
+
+	wantCode(t, f.do(f.wsAdmin, "PUT", path, `{"set":{"enabled":true}}`), http.StatusForbidden, "workspace ADMIN")
+	for _, bad := range []string{`{"set":{}}`, `{"set":{"security_contact_user_id":"boss"}}`, `{"set":{"gov_model_credential_id":"c1"}}`, `{"set":{"deny_notify_min_risk":0}}`} {
+		wantCode(t, f.do(f.boss, "PUT", path, bad), http.StatusBadRequest, bad)
+	}
+
+	rr := f.do(f.boss, "PUT", path, `{"dry_run":true,"set":{"enabled":true,"deny_notify_min_risk":5}}`)
+	wantCode(t, rr, http.StatusOK, "preview")
+	p := decodeAs[defaultsResp](t, rr.Body.Bytes())
+	if p.Applied || p.PreviewID == "" || len(p.Changes) != 2 {
+		t.Fatalf("preview = %+v, want two changes and an id, nothing applied", p)
+	}
+	if _, found, _ := governance.Defaults(context.Background(), f.db); found {
+		t.Fatal("a preview wrote the defaults")
+	}
+
+	wantCode(t, f.do(f.boss, "PUT", path, `{"expect_preview":"not-it","set":{"enabled":true,"deny_notify_min_risk":5}}`), http.StatusConflict, "stale preview")
+
+	rr = f.do(f.boss, "PUT", path, `{"expect_preview":"`+p.PreviewID+`","set":{"enabled":true,"deny_notify_min_risk":5}}`)
+	wantCode(t, rr, http.StatusOK, "confirm")
+	got := decodeAs[defaultsResp](t, rr.Body.Bytes())
+	if !got.Applied || !got.Defaults.Enabled || got.Defaults.DenyMinRisk != 5 {
+		t.Fatalf("saved = %+v", got)
+	}
+	if !f.audited("instance.keeper_defaults_updated") {
+		t.Fatal("no instance audit entry")
+	}
+	if _, found := f.gov("ws-old"); found {
+		t.Fatal("saving the defaults touched an existing workspace")
+	}
+
+	rr = f.do(f.boss, "GET", path, "")
+	wantCode(t, rr, http.StatusOK, "read")
+	if d := decodeAs[defaultsResp](t, rr.Body.Bytes()); !d.Defaults.Enabled || d.Defaults.DenyMinRisk != 5 {
+		t.Fatalf("GET defaults = %+v", d.Defaults)
+	}
+}
+
+func TestInstanceKeeperGovernanceIsAllOrNothing(t *testing.T) {
+	f := newInstanceFixture(t)
+	ctx := context.Background()
+	// ws-new runs a hosted judge; clearing the model id is fine for ws-old
+	// (no provider) and incoherent for ws-new. Nothing may be written.
+	if err := governance.Upsert(ctx, f.db, "ws-new", governance.Settings{DenyNotifyMinRisk: 7, GovModelProvider: "anthropic", GovModelID: "claude-haiku-4-5"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	rr := f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"all":true,"set":{"enabled":true,"gov_model_id":""}}`)
+	wantCode(t, rr, http.StatusBadRequest, "incoherent in one workspace")
+	if b := rr.Body.String(); !strings.Contains(b, "ws-new") || !strings.Contains(b, "gov_model_id") {
+		t.Fatalf("body = %s, want the workspace and the field named", rr.Body.String())
+	}
+	if _, found := f.gov("ws-old"); found {
+		t.Fatal("ws-old was written although the save failed in ws-new")
+	}
+	if s, _ := f.gov("ws-new"); s.Enabled {
+		t.Fatal("ws-new changed although the save was refused")
+	}
+}
+
+func TestInstanceKeeperGovernanceRejects(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"nothing selected", `{"set":{"enabled":true}}`},
+		{"both all and a list", `{"all":true,"workspaces":["ws-old"],"set":{"enabled":true}}`},
+		{"nothing to change", `{"all":true,"set":{}}`},
+		{"a person across workspaces", `{"workspaces":["ws-old","ws-new"],"set":{"security_contact_user_id":"boss"}}`},
+		{"a vault credential across workspaces", `{"all":true,"set":{"gov_model_credential_id":"c1"}}`},
+		{"a value out of bounds", `{"all":true,"set":{"deny_notify_min_risk":11}}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newInstanceFixture(t)
+			wantCode(t, f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", c.body), http.StatusBadRequest, c.name)
+			if _, found := f.gov("ws-old"); found {
+				t.Fatal("a refused save wrote a row")
+			}
+		})
+	}
+	f := newInstanceFixture(t)
+	wantCode(t, f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"workspaces":["nope"],"set":{"enabled":true}}`), http.StatusNotFound, "unknown workspace")
+}
+
+func TestInstanceKeeperGovernanceAcceptsSlugsAndSkipsUnchanged(t *testing.T) {
+	f := newInstanceFixture(t)
+	if err := governance.Upsert(context.Background(), f.db, "ws-new", governance.Settings{Enabled: true, DenyNotifyMinRisk: 7}, ""); err != nil {
+		t.Fatal(err)
+	}
+	// seedInstanceWorkspace uses the id as the slug; resolve by slug all the same.
+	rr := f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"workspaces":["ws-old","ws-new"],"set":{"enabled":true}}`)
+	wantCode(t, rr, http.StatusOK, "two by slug")
+	resp := decodeAs[govPutResp](t, rr.Body.Bytes())
+	if resp.Changed != 1 {
+		t.Fatalf("changed = %d, want 1 — ws-new already had it on", resp.Changed)
+	}
+}
+
+func TestInstanceKeeperRequestsSpanWorkspaces(t *testing.T) {
+	f := newInstanceFixture(t)
+	mustExec(t, f.db, `INSERT INTO agents (id, workspace_id, name, slug) VALUES ('ag-o', 'ws-old', 'Old agent', 'oa'), ('ag-n', 'ws-new', 'New agent', 'na')`)
+	mustExec(t, f.db, `INSERT INTO keeper_requests (id, requesting_agent_id, intent, decision, request_type) VALUES
+		('k1','ag-o','x','ALLOW','access'), ('k2','ag-n','x','DENY','access'), ('k3','ag-n','x','ALLOW','behavior')`)
+
+	type reqList struct {
+		Items []struct {
+			ID            string `json:"id"`
+			WorkspaceID   string `json:"workspace_id"`
+			WorkspaceName string `json:"workspace_name"`
+		} `json:"items"`
+		Total  int `json:"total"`
+		Counts struct {
+			Allow int `json:"allow"`
+			Deny  int `json:"deny"`
+		} `json:"counts"`
+		ByWorkspace []struct {
+			WorkspaceID string `json:"workspace_id"`
+			Count       int    `json:"count"`
+		} `json:"by_workspace"`
+	}
+
+	rr := f.do(f.boss, "GET", "/api/v1/admin/instance/keeper/requests", "")
+	wantCode(t, rr, http.StatusOK, "all")
+	all := decodeAs[reqList](t, rr.Body.Bytes())
+	if all.Total != 3 || len(all.Items) != 3 || all.Counts.Allow != 2 || all.Counts.Deny != 1 {
+		t.Fatalf("all = %+v", all)
+	}
+	for _, it := range all.Items {
+		if it.WorkspaceID == "" || it.WorkspaceName == "" {
+			t.Fatalf("row %s carries no workspace", it.ID)
+		}
+	}
+	by := map[string]int{}
+	for _, b := range all.ByWorkspace {
+		by[b.WorkspaceID] = b.Count
+	}
+	if by["ws-old"] != 1 || by["ws-new"] != 2 {
+		t.Fatalf("by_workspace = %v", by)
+	}
+
+	rr = f.do(f.boss, "GET", "/api/v1/admin/instance/keeper/requests?workspace=ws-new&request_type=access", "")
+	wantCode(t, rr, http.StatusOK, "filtered")
+	one := decodeAs[reqList](t, rr.Body.Bytes())
+	if one.Total != 1 || one.Items[0].ID != "k2" {
+		t.Fatalf("filtered = %+v, want only k2", one)
+	}
+	// The panel's counts stay instance-wide, so a filtered view still shows
+	// how much every workspace holds.
+	if len(one.ByWorkspace) < 2 {
+		t.Fatalf("by_workspace narrowed with the filter: %+v", one.ByWorkspace)
+	}
+
+	wantCode(t, f.do(f.boss, "GET", "/api/v1/admin/instance/keeper/requests?workspace=nope", ""), http.StatusNotFound, "unknown workspace")
+	wantCode(t, f.do(f.wsAdmin, "GET", "/api/v1/admin/instance/keeper/requests", ""), http.StatusForbidden, "workspace ADMIN")
+}
+
+func TestInstanceKeeperHealthCoversEveryWorkspace(t *testing.T) {
+	f := newInstanceFixture(t)
+	rr := f.do(f.boss, "GET", "/api/v1/admin/instance/keeper/health", "")
+	wantCode(t, rr, http.StatusOK, "health")
+	got := decodeAs[struct {
+		Workspaces []struct {
+			WorkspaceID   string `json:"workspace_id"`
+			WorkspaceName string `json:"workspace_name"`
+			MinSamples    int    `json:"min_samples"`
+		} `json:"workspaces"`
+	}](t, rr.Body.Bytes())
+	seen := map[string]bool{}
+	for _, w := range got.Workspaces {
+		seen[w.WorkspaceID] = w.WorkspaceName != "" && w.MinSamples > 0
+	}
+	if !seen["ws-old"] || !seen["ws-new"] {
+		t.Fatalf("health = %+v, want a named window per workspace", got.Workspaces)
+	}
+}
+
+// An instance admin runs Admin › Security whatever their role where they
+// stand. These reads used to re-check the workspace role inside the handler
+// and refused a named instance admin who is only a MEMBER of their current
+// workspace — the page then said "requires an admin role" to the one person
+// it exists for.
+func TestInstanceAdminWhoIsAMemberReadsTheInstanceCards(t *testing.T) {
+	f := newInstanceFixture(t)
+	seedInstanceUser(t, f.db, "ann", "ann@ex.com", "ws-new", "MEMBER")
+	mustExec(t, f.db, `UPDATE users SET instance_role = 'ADMIN' WHERE id = 'ann'`)
+	ann := mintTokenFor(t, f.db, "ann", "instfixann00000000000000000")
+	wantCode(t, f.do(ann, "GET", "/api/v1/admin/security-posture?workspace_id=ws-new", ""), http.StatusOK, "posture")
+	// The test router has no keeper settings store, so these answer 503 once
+	// past the gate; what matters here is that the gate lets her through.
+	for _, path := range []string{"/api/v1/admin/keeper/config", "/api/v1/admin/keeper/aux"} {
+		if rr := f.do(ann, "GET", path+"?workspace_id=ws-new", ""); rr.Code == http.StatusForbidden {
+			t.Fatalf("%s = 403 for an instance admin: %s", path, rr.Body.String())
+		}
+	}
+	// A MEMBER who is not an instance admin still gets nowhere.
+	seedInstanceUser(t, f.db, "joe", "joe@ex.com", "ws-new", "MEMBER")
+	joe := mintTokenFor(t, f.db, "joe", "instfixjoe00000000000000000")
+	wantCode(t, f.do(joe, "GET", "/api/v1/admin/security-posture?workspace_id=ws-new", ""), http.StatusForbidden, "plain member")
+}
+
+// Review R7: an instance admin need not belong to any workspace, and the
+// People lists, like every instance surface, must answer them without one.
+func TestInstanceAdminWithoutAWorkspaceReadsPeopleAndWorkspaces(t *testing.T) {
+	f := newInstanceFixture(t)
+	mustExec(t, f.db, `UPDATE users SET instance_role = 'ADMIN' WHERE id = 'boss'`)
+	mustExec(t, f.db, `DELETE FROM workspace_members WHERE user_id = 'boss'`)
+	for _, path := range []string{"/api/v1/admin/users", "/api/v1/admin/workspaces", "/api/v1/admin/users/carol/sessions"} {
+		rr := f.do(f.boss, "GET", path, "")
+		wantCode(t, rr, http.StatusOK, path)
+	}
+	rr := f.do(f.boss, "GET", "/api/v1/admin/workspaces", "")
+	if b := rr.Body.String(); !strings.Contains(b, "ws-old") || !strings.Contains(b, "ws-new") {
+		t.Fatalf("workspaces = %s, want every workspace", b)
+	}
+	// Nobody else gets the instance view by leaving the workspace out.
+	seedInstanceUser(t, f.db, "joe", "joe@ex.com", "ws-new", "ADMIN")
+	joe := mintTokenFor(t, f.db, "joe", "instfixjoe00000000000000000")
+	wantCode(t, f.do(joe, "GET", "/api/v1/admin/users", ""), http.StatusBadRequest, "workspace admin without a workspace")
+}
+
+// Review R7: the instance:admin scope follows the instance role, so an
+// instance admin who is only a MEMBER somewhere (or nowhere) can still mint a
+// token narrowed to exactly that power.
+func TestInstanceAdminMintsAnInstanceScopedToken(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		setup string
+		want  int
+	}{
+		{"member somewhere", `UPDATE workspace_members SET role = 'MEMBER' WHERE user_id = 'boss'`, http.StatusOK},
+		{"member nowhere", `DELETE FROM workspace_members WHERE user_id = 'boss'`, http.StatusOK},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newInstanceFixture(t)
+			mustExec(t, f.db, `UPDATE users SET instance_role = 'ADMIN' WHERE id = 'boss'`)
+			mustExec(t, f.db, c.setup)
+			rr := f.do(f.boss, "POST", "/api/v1/auth/cli-token", `{"name":"ops","scopes":["instance:admin"]}`)
+			wantCode(t, rr, c.want, "mint instance:admin")
+		})
+	}
+	f := newInstanceFixture(t)
+	seedInstanceUser(t, f.db, "ann", "ann@ex.com", "ws-new", "MEMBER")
+	mustExec(t, f.db, `UPDATE users SET instance_role = 'ADMIN' WHERE id = 'boss'`)
+	ann := mintTokenFor(t, f.db, "ann", "instfixann00000000000000000")
+	wantCode(t, f.do(ann, "POST", "/api/v1/auth/cli-token", `{"name":"ops","scopes":["instance:admin"]}`), http.StatusForbidden, "a plain member")
+}
+
+// Review R3: a save confirmed from a preview carries the preview's id, and
+// the server refuses it if what it would do is no longer what was shown — a
+// workspace created meanwhile, or a value someone else changed.
+func TestInstanceKeeperGovernanceRefusesASaveThatNoLongerMatchesItsPreview(t *testing.T) {
+	type preview struct {
+		PreviewID string `json:"preview_id"`
+	}
+	dry := func(f *instanceFixture) string {
+		rr := f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"all":true,"dry_run":true,"set":{"enabled":true}}`)
+		wantCode(t, rr, http.StatusOK, "dry run")
+		p := decodeAs[preview](t, rr.Body.Bytes())
+		if p.PreviewID == "" {
+			t.Fatal("a dry run returned no preview_id")
+		}
+		return p.PreviewID
+	}
+	apply := func(f *instanceFixture, id string) *httptest.ResponseRecorder {
+		return f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"all":true,"expect_preview":"`+id+`","set":{"enabled":true}}`)
+	}
+
+	t.Run("unchanged", func(t *testing.T) {
+		f := newInstanceFixture(t)
+		wantCode(t, apply(f, dry(f)), http.StatusOK, "apply the preview")
+		if s, _ := f.gov("ws-old"); !s.Enabled {
+			t.Fatal("not applied")
+		}
+	})
+	t.Run("a workspace created after the preview", func(t *testing.T) {
+		f := newInstanceFixture(t)
+		id := dry(f)
+		seedInstanceWorkspace(t, f.db, "ws-later", "2026-09-01 00:00:00")
+		wantCode(t, apply(f, id), http.StatusConflict, "new workspace since the preview")
+		if _, found := f.gov("ws-old"); found {
+			t.Fatal("written although the preview no longer held")
+		}
+	})
+	t.Run("a value changed after the preview", func(t *testing.T) {
+		f := newInstanceFixture(t)
+		id := dry(f)
+		if err := governance.Upsert(context.Background(), f.db, "ws-new", governance.Settings{Enabled: true, DenyNotifyMinRisk: 7}, ""); err != nil {
+			t.Fatal(err)
+		}
+		wantCode(t, apply(f, id), http.StatusConflict, "value changed since the preview")
+	})
+}
+
+// Review R6: the Activity page filters on the server and pages through the
+// whole history, so it needs several kinds at once (a credential request is
+// access or execute), counts per kind for the panel, and decision counts that
+// stay put while one decision is picked.
+func TestInstanceKeeperRequestsFilterAndCountOnTheServer(t *testing.T) {
+	f := newInstanceFixture(t)
+	mustExec(t, f.db, `INSERT INTO agents (id, workspace_id, name, slug) VALUES ('ag-o', 'ws-old', 'Old agent', 'oa')`)
+	mustExec(t, f.db, `INSERT INTO keeper_requests (id, requesting_agent_id, intent, decision, request_type, created_at) VALUES
+		('k1','ag-o','x','ALLOW','access','2026-09-01T00:00:01Z'), ('k2','ag-o','x','DENY','execute','2026-09-01T00:00:02Z'),
+		('k3','ag-o','x','ALLOW','behavior','2026-09-01T00:00:03Z'), ('k4','ag-o','x','DENY','access','2026-09-01T00:00:04Z')`)
+	type list struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+		Total  int `json:"total"`
+		Counts struct {
+			Allow int `json:"allow"`
+			Deny  int `json:"deny"`
+		} `json:"counts"`
+		ByType map[string]int `json:"by_type"`
+	}
+	rr := f.do(f.boss, "GET", "/api/v1/admin/instance/keeper/requests?request_type=access,execute&decision=DENY&limit=1", "")
+	wantCode(t, rr, http.StatusOK, "filtered")
+	got := decodeAs[list](t, rr.Body.Bytes())
+	if got.Total != 2 || len(got.Items) != 1 || got.Items[0].ID != "k4" {
+		t.Fatalf("page = %+v, want k4 of 2 denied credential requests", got)
+	}
+	if got.Counts.Allow != 1 || got.Counts.Deny != 2 {
+		t.Fatalf("counts = %+v, want the decisions of every credential request, whatever decision is picked", got.Counts)
+	}
+	if got.ByType["access"] != 2 || got.ByType["execute"] != 1 || got.ByType["behavior"] != 1 {
+		t.Fatalf("by_type = %v, want every kind, whatever kind is picked", got.ByType)
+	}
+	rr = f.do(f.boss, "GET", "/api/v1/admin/instance/keeper/requests?request_type=access,execute&decision=DENY&limit=1&offset=1", "")
+	if p := decodeAs[list](t, rr.Body.Bytes()); len(p.Items) != 1 || p.Items[0].ID != "k2" {
+		t.Fatalf("second page = %+v, want k2", p.Items)
+	}
+}
+
+// The watch spec is reported by length in the changes (the audit trail need
+// not carry the text), but the preview's fingerprint must see the text: a
+// rule rewritten to another of the same length since the preview is a
+// different plan (review follow-up, 2026-09-30).
+func TestInstanceKeeperPreviewSeesAWatchSpecRewrittenToTheSameLength(t *testing.T) {
+	f := newInstanceFixture(t)
+	ctx := context.Background()
+	if err := governance.Upsert(ctx, f.db, "ws-old", governance.Settings{DenyNotifyMinRisk: 7, WatchSpec: "AAAA"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	rr := f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"workspaces":["ws-old"],"dry_run":true,"set":{"watch_spec":"BBBB"}}`)
+	wantCode(t, rr, http.StatusOK, "preview")
+	id := decodeAs[struct {
+		PreviewID string `json:"preview_id"`
+	}](t, rr.Body.Bytes()).PreviewID
+	mustExec(t, f.db, `UPDATE keeper_governance_settings SET watch_spec = 'CCCC' WHERE workspace_id = 'ws-old'`)
+	rr = f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"workspaces":["ws-old"],"expect_preview":"`+id+`","set":{"watch_spec":"BBBB"}}`)
+	wantCode(t, rr, http.StatusConflict, "watch spec rewritten since the preview")
+	if s, _ := f.gov("ws-old"); s.WatchSpec != "CCCC" {
+		t.Fatalf("watch spec = %q, want the rewrite left alone", s.WatchSpec)
+	}
+}
+
+// The template reports four-eyes as enforced, like every workspace row: the
+// tier table requires a second approver at the top level for a new workspace
+// too, whatever the toggle says.
+func TestInstanceKeeperDefaultsCarryTheEnforcedFourEyes(t *testing.T) {
+	f := newInstanceFixture(t)
+	rr := f.do(f.boss, "GET", "/api/v1/admin/instance/keeper/governance", "")
+	wantCode(t, rr, http.StatusOK, "list")
+	got := decodeAs[struct {
+		Defaults struct {
+			Effective *struct {
+				Source string `json:"source"`
+			} `json:"effective_second_approver"`
+		} `json:"defaults"`
+	}](t, rr.Body.Bytes())
+	if got.Defaults.Effective == nil || got.Defaults.Effective.Source == "" {
+		t.Fatalf("defaults carry no effective_second_approver: %s", rr.Body.String())
+	}
+}

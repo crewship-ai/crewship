@@ -13,6 +13,9 @@ vi.mock("@/hooks/use-workspace", () => ({
 // Recent is keyed by the signed-in user and the workspace; without a user
 // there is no history to read or write.
 vi.mock("@/hooks/use-auth", () => ({
+  // Admin shows for an instance administrator; here the fixture's OWNER is one
+  // (the oldest workspace's owner, with nobody named) and a MEMBER is not.
+  useIsInstanceAdmin: () => h.role === "OWNER",
   useSessionSafe: () => ({ data: { user: { id: "u-test" } }, status: "authenticated" }),
 }))
 

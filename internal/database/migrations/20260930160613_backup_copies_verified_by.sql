@@ -1,0 +1,11 @@
+-- backup_copies.verified_by: what proved an off-site copy's stored bytes.
+--
+--   provider_checksum  the store's own SHA-256 checksum of the object
+--                      (x-amz-checksum-sha256) matched the local file's
+--   download_rehash    the object was downloaded and its bytes re-hashed
+--
+-- Copies recorded before this column existed were counted on the object's
+-- size and the uploader's own sha256 metadata, which proves nothing about
+-- the stored bytes; they read as '' ("not proven") until the next upload of
+-- the bundle replaces the row.
+ALTER TABLE backup_copies ADD COLUMN verified_by TEXT NOT NULL DEFAULT '';

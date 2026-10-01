@@ -115,7 +115,7 @@ export function RoutineWebhookEditorDialog({
               id="wh-inputs-template"
               value={inputsTemplateJson}
               onChange={(e) => setInputsTemplateJson(e.target.value)}
-              className="mt-1.5 h-24 w-full resize-none rounded-md border border-white/[0.1] bg-background p-2.5 font-mono text-[12px] leading-relaxed"
+              className="mt-1.5 h-24 w-full resize-none rounded-md border border-foreground/[0.1] bg-background p-2.5 font-mono text-[12px] leading-relaxed"
             />
             {jsonError && <p className="mt-1 text-[11px] text-destructive">{jsonError}</p>}
             <p className="mt-1.5 text-[11px] text-muted-foreground">
@@ -126,7 +126,7 @@ export function RoutineWebhookEditorDialog({
             <Switch id="wh-enabled" checked={enabled} onCheckedChange={setEnabled} />
             <Label htmlFor="wh-enabled" className="text-xs font-normal text-muted-foreground">Enabled</Label>
           </div>
-          <div className="rounded-md border border-white/[0.08] p-3">
+          <div className="rounded-md border border-foreground/[0.08] p-3">
             <div className="flex items-center gap-2">
               <Switch id="wh-rotate" checked={rotateSecret} onCheckedChange={setRotateSecret} />
               <Label htmlFor="wh-rotate" className="text-xs font-normal">Rotate signing secret</Label>

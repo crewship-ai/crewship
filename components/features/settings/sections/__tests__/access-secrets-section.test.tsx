@@ -155,15 +155,18 @@ describe("who holds credentials:reveal", () => {
     expect(await screen.findByText(/3 people can read secrets in plaintext/i)).toBeInTheDocument()
   })
 
-  it("degrades to an empty list when the capability endpoint refuses", async () => {
+  // A failed read is not an empty answer: "Nobody holds …" is a claim about
+  // the workspace, and it is only made from a list that actually loaded.
+  it("says the grants could not be loaded when the read fails", async () => {
     h.apiFetch.mockImplementation(async (url: string) => {
       if (String(url).includes("/members/capabilities")) {
-        return { ok: false, status: 403, json: async () => ({}) } as unknown as Response
+        return { ok: false, status: 500, json: async () => ({}) } as unknown as Response
       }
       return ok({ enabled: false })
     })
-    renderSection("MANAGER")
-    expect(await screen.findByText(/nobody holds/i)).toBeInTheDocument()
+    renderSection("OWNER")
+    expect(await screen.findByText(/could not be loaded/i)).toBeInTheDocument()
+    expect(screen.queryByText(/nobody holds/i)).toBeNull()
   })
 })
 
@@ -175,12 +178,29 @@ describe("classification reference", () => {
 
   it("names the two different tiers for raising and lowering", async () => {
     renderSection("OWNER")
-    expect(await screen.findByText(/manager\+ to raise · owner\/admin to lower/i)).toBeInTheDocument()
+    expect(await screen.findByText(/manager and up can raise · owner or admin can lower/i)).toBeInTheDocument()
   })
 
-  // Honesty about the gap rather than a control that saves nowhere.
-  it("says per-category defaults are not configurable yet", async () => {
+  // No control that saves nowhere: the card points to where a class is set.
+  it("points to where a credential's class is set", async () => {
     renderSection("OWNER")
-    expect(await screen.findByText(/per-category default classifications are not configurable yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/class on its detail sheet in credentials/i)).toBeInTheDocument()
+  })
+})
+
+// The bulk capabilities read is ADMIN+. A MANAGER got a 403, which the card
+// read as "no grants" and printed "Nobody holds credentials:reveal" — a false
+// statement about the workspace, on the page meant to answer exactly that.
+describe("who may reveal, when the grants cannot be read", () => {
+  it("says the role cannot see the grants instead of claiming nobody has them", async () => {
+    h.apiFetch.mockImplementation(async (url: string) => {
+      const u = String(url)
+      if (u.includes("reveal-policy")) return ok({ workspace_id: "ws1", enabled: true })
+      if (u.includes("/members/capabilities")) return { ok: false, status: 403, json: async () => ({}) } as unknown as Response
+      return ok([])
+    })
+    renderSection("MANAGER")
+    expect(await screen.findByText(/your role cannot see who holds/i)).toBeInTheDocument()
+    expect(screen.queryByText(/nobody holds/i)).toBeNull()
   })
 })

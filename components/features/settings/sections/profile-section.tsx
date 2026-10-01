@@ -15,12 +15,13 @@ import {
   EyeOff,
   AlertTriangle,
   Shield,
-  ChevronRight,
-} from "lucide-react"
+  ChevronRight, Building2, MonitorSmartphone, User } from "lucide-react"
 import { apiFetch } from "@/lib/api-fetch"
 import { useAuth } from "@/hooks/use-auth"
 import { Spinner } from "@/components/ui/spinner"
 import { Badge } from "@/components/ui/badge"
+import { StatusPill } from "@/components/ui/status-pill"
+import { formatStatus } from "@/lib/format-status"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -39,13 +40,8 @@ import { DeviceSessions } from "./device-sessions"
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-const roleCls: Record<string, string> = {
-  OWNER: "bg-muted text-foreground border-border",
-  ADMIN: "bg-muted text-foreground border-border",
-  MANAGER: "bg-muted text-foreground border-border",
-  MEMBER: "bg-muted text-muted-foreground border-border",
-  VIEWER: "bg-muted text-muted-foreground border-border",
-}
+// Owner and admin carry the workspace; everyone else is a plain member.
+const ROLE_TONE: Record<string, "blue" | "muted"> = { OWNER: "blue", ADMIN: "blue", MANAGER: "blue" }
 
 function useTimeUntil(dateStr: string | null | undefined) {
   const [text, setText] = useState("")
@@ -468,7 +464,7 @@ export function ProfileSection({
   return (
     <div className="space-y-5">
       {/* ── Account ── */}
-      <SettingsCard title="Account" description="Your identity on this instance">
+      <SettingsCard icon={User} title="Account" description="Your identity on this instance">
         <SettingsRow label="Profile picture">
           <div className="flex flex-col items-end gap-1.5">
             <div className="flex items-center gap-2.5">
@@ -627,12 +623,10 @@ export function ProfileSection({
       </AlertDialog>
 
       {/* ── Workspace ── */}
-      <SettingsCard title="Workspace" description="Your current organization and role">
+      <SettingsCard icon={Building2} title="Workspace" description="Your current organization and role">
         <SettingsRow label="Role">
           {role ? (
-            <Badge variant="outline" className={cn("text-[10px] font-medium", roleCls[role] ?? "")}>
-              {role}
-            </Badge>
+            <StatusPill tone={ROLE_TONE[role] ?? "muted"} label={formatStatus(role).label} />
           ) : (
             <span className="text-xs text-muted-foreground">Not assigned</span>
           )}
@@ -711,7 +705,7 @@ export function ProfileSection({
           and scopes, saw the secret once) — so they render as two labelled
           groups rather than one flat list. Splitting them across two cards
           made someone hunting a compromise have to know to look twice. */}
-      <SettingsCard
+      <SettingsCard icon={MonitorSmartphone}
         title="Sessions &amp; access"
         description="Everything that can sign in as you right now. Don't recognise something? End it."
       >

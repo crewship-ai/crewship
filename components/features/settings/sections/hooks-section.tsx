@@ -37,7 +37,7 @@
  */
 
 import * as React from "react"
-import { AlertTriangle, Ban, CircleSlash, Globe, Terminal, Bot } from "lucide-react"
+import { AlertTriangle, Ban, CircleSlash, Globe, Terminal, Bot, Webhook } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
@@ -295,7 +295,7 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
 
   return (
     <div className="space-y-5">
-      <SettingsCard
+      <SettingsCard icon={Webhook}
         title="Lifecycle hooks"
         description="Code this workspace runs on platform events. Shell handlers run on the crewshipd host."
       >

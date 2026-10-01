@@ -119,9 +119,8 @@ type memoryConfigResponse struct {
 // Get serves GET /api/v1/admin/memory/config.
 func (h *MemoryConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -156,10 +155,9 @@ func (h *MemoryConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 // wait under contention.
 func (h *MemoryConfigHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	user := UserFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}

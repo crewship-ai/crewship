@@ -1,0 +1,189 @@
+package docker
+
+import (
+	"context"
+	"fmt"
+	"path"
+	"reflect"
+	"strconv"
+	"strings"
+
+	cerrdefs "github.com/containerd/errdefs"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/client"
+
+	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/quota"
+)
+
+const quotaBytesLabel = "crewship.svc.quota-bytes"
+const quotaGenerationLabel = "crewship.svc.quota-generation"
+
+func validateQuotaService(svc *provider.CrewService) error {
+	for _, v := range svc.Volumes {
+		if err := quota.ValidateVolume(svc.QuotaEnforced, svc.Name, v.Name, v.Mount, v.Generation, v.QuotaBytes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *Provider) quotaServiceVolumes(ctx context.Context, crewID, crewSlug string, svc *provider.CrewService) ([]mount.Mount, error) {
+	if err := validateQuotaService(svc); err != nil {
+		return nil, err
+	}
+	if !svc.QuotaEnforced {
+		return nil, nil
+	}
+	// A quota service without persistent volumes needs only the
+	// Docker-enforced profile, not the host helper.
+	catalog, ok := p.cfg.QuotaCatalog.(quota.ReferenceCatalog)
+	if len(svc.Volumes) > 0 && (!ok || catalog == nil) {
+		return nil, quota.ErrUnavailable
+	}
+	if err := p.checkQuotaHostSupport(ctx); err != nil {
+		return nil, err
+	}
+	owner, err := p.quotaImageOwner(ctx, svc)
+	if err != nil {
+		return nil, err
+	}
+	if len(svc.Volumes) == 0 {
+		return nil, nil
+	}
+	mounts := make([]mount.Mount, 0, len(svc.Volumes))
+	for _, v := range svc.Volumes {
+		gen := v.Generation
+		if gen == 0 {
+			gen = 1
+		}
+		key := quota.Key{Crew: crewID, Service: svc.Name, Volume: v.Name, Generation: gen}
+		d, err := catalog.Ensure(ctx, key, v.QuotaBytes, owner)
+		if err != nil {
+			return nil, err
+		}
+		if d.Key != key || d.Bytes != v.QuotaBytes || d.ID == "" || !path.IsAbs(d.Mount) || path.Clean(d.Mount) != d.Mount {
+			return nil, quota.ErrDenied
+		}
+		name := p.namePrefix() + "-quota-" + d.ID
+		labels := sidecarVolumeLabels(crewID, crewSlug, svc.Name, v.Name)
+		labels[quotaBytesLabel] = strconv.FormatInt(d.Bytes, 10)
+		labels[quotaGenerationLabel] = strconv.FormatInt(gen, 10)
+		options := map[string]string{"type": "none", "o": "bind", "device": d.Mount}
+		existing, err := p.client.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
+		if err == nil {
+			volume := existing.Volume
+			if volume.Driver != "local" || !reflect.DeepEqual(volume.Options, options) {
+				return nil, quota.ErrDenied
+			}
+			for k, value := range volumeLabels(labels) {
+				// The slug is a display label that a crew rename changes;
+				// crew id, service, volume, capacity and generation are
+				// the filesystem's identity.
+				if k == crewCrewLabel {
+					continue
+				}
+				if volume.Labels[k] != value {
+					return nil, quota.ErrDenied
+				}
+			}
+		} else {
+			if !cerrdefs.IsNotFound(err) {
+				return nil, err
+			}
+			if _, err = p.client.VolumeCreate(ctx, client.VolumeCreateOptions{Name: name, Driver: "local", DriverOpts: options, Labels: volumeLabels(labels)}); err != nil {
+				return nil, err
+			}
+		}
+		if err = catalog.Protect(ctx, key, name); err != nil {
+			return nil, err
+		}
+		if _, err = catalog.Verify(ctx, key, v.QuotaBytes); err != nil {
+			return nil, err
+		}
+		mounts = append(mounts, mount.Mount{Type: mount.TypeVolume, Source: name, Target: v.Mount, VolumeOptions: &mount.VolumeOptions{NoCopy: true}})
+	}
+	return mounts, nil
+}
+
+// quotaImageOwner inspects (pulling only when absent) the service image
+// before any disk is allocated. It refuses image-declared volumes the
+// service did not classify, and returns the numeric owner a fresh volume
+// root is formatted for.
+func (p *Provider) quotaImageOwner(ctx context.Context, svc *provider.CrewService) (quota.Owner, error) {
+	image, err := p.client.ImageInspect(ctx, svc.Image)
+	if err != nil {
+		if pullErr := p.pullSidecarImage(ctx, svc.Image); pullErr != nil {
+			return quota.Owner{}, pullErr
+		}
+		if image, err = p.client.ImageInspect(ctx, svc.Image); err != nil {
+			return quota.Owner{}, err
+		}
+	}
+	if image.Config == nil {
+		return quota.Owner{}, quota.ErrDenied
+	}
+	for target := range image.Config.Volumes {
+		found := false
+		for _, v := range svc.Volumes {
+			if target == v.Mount {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return quota.Owner{}, fmt.Errorf("unclassified image volume %s: %w", target, quota.ErrDenied)
+		}
+	}
+	owner, ok := imageUserOwner(image.Config.User)
+	if !ok {
+		p.logger.Warn("quota volume root stays root-owned: image user is not numeric", "service", svc.Name, "user", image.Config.User)
+	}
+	return owner, nil
+}
+
+// imageUserOwner maps an image USER to a volume root owner. Only numeric
+// users resolve without the image's /etc/passwd; a missing or non-numeric
+// group falls back to gid 0, which is what Docker itself uses for a uid
+// with no passwd entry. Root needs no hand-over. ok is false for a named
+// user that cannot be resolved.
+func imageUserOwner(user string) (quota.Owner, bool) {
+	if user == "" || user == "root" {
+		return quota.Owner{}, true
+	}
+	name, group, _ := strings.Cut(user, ":")
+	uid, err := strconv.ParseUint(name, 10, 32)
+	if err != nil {
+		return quota.Owner{}, false
+	}
+	gid, err := strconv.ParseUint(group, 10, 32)
+	if err != nil {
+		gid = 0
+	}
+	if uid == 0 && gid == 0 {
+		return quota.Owner{}, true
+	}
+	return quota.Owner{UID: uint32(uid), GID: uint32(gid), Set: true}, true
+}
+
+func checkQuotaMounts(actual, desired []mount.Mount) error {
+	if len(actual) != len(desired) {
+		return fmt.Errorf("quota service mount count drift")
+	}
+	for _, want := range desired {
+		found := false
+		for _, got := range actual {
+			if got.Target != want.Target {
+				continue
+			}
+			if got.Type != mount.TypeVolume || got.Source != want.Source || got.ReadOnly || got.VolumeOptions == nil || !got.VolumeOptions.NoCopy || got.BindOptions != nil {
+				return fmt.Errorf("quota service mount drift at %s", want.Target)
+			}
+			found = true
+		}
+		if !found {
+			return fmt.Errorf("quota service missing mount at %s", want.Target)
+		}
+	}
+	return nil
+}

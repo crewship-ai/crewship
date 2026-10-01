@@ -658,7 +658,7 @@ export function OrchestrationLayout({
             {leftCollapsed && (
               <button
                 aria-label="Open explorer"
-                className="absolute top-2 left-2 z-20 h-8 w-8 min-h-[44px] min-w-[44px] rounded-md bg-card border border-white/[0.1] flex items-center justify-center text-muted-foreground hover:text-foreground"
+                className="absolute top-1 left-2 z-20 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground"
                 onClick={() => setLeftCollapsed(false)}
               >
                 <PanelLeftOpen className="h-3.5 w-3.5" />
@@ -677,13 +677,13 @@ export function OrchestrationLayout({
                     onClick={() => setLeftCollapsed(true)}
                   />
                   <motion.div
-                    className="fixed left-0 top-0 bottom-0 w-[280px] z-40 bg-card border-r border-white/[0.1] flex flex-col"
+                    className="fixed left-0 top-0 bottom-0 w-[280px] z-40 bg-card border-r border-foreground/[0.1] flex flex-col"
                     initial={{ x: -280 }}
                     animate={{ x: 0 }}
                     exit={{ x: -280 }}
                     transition={panel.sideLeft.transition}
                   >
-                    <div className="flex items-center justify-end px-3 py-2 border-b border-white/[0.1]">
+                    <div className="flex items-center justify-end px-3 py-2 border-b border-foreground/[0.1]">
                       <button
                         aria-label="Close explorer"
                         onClick={() => setLeftCollapsed(true)}
@@ -728,7 +728,7 @@ export function OrchestrationLayout({
         ) : (
           /* Desktop: grid column left panel */
           <div className={cn(
-            "row-span-1 border-r border-white/[0.1] bg-card flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
+            "row-span-1 border-r border-foreground/[0.1] bg-card flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
           )}>
             {leftCollapsed ? (
               /* Collapsed rail — a single expand button, no empty strip. */
@@ -877,7 +877,7 @@ export function OrchestrationLayout({
             </div>
           )}
           {activeTab === "issues" && !issueDetailFullWidth && !projectDetailFullWidth && (
-            <div className={cn("h-full overflow-auto", isMobile && leftCollapsed && "pt-[52px]")}>
+            <div className={cn("h-full overflow-auto", isMobile && leftCollapsed && "pt-[48px]")}>
               <IssuesToolbarStrip
                 loaded={issues.length}
                 total={issuesTotal}
@@ -1120,7 +1120,7 @@ export function OrchestrationLayout({
                   exit={{ x: "100%" }}
                   transition={panel.sideLeft.transition}
                 >
-                  <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.1] shrink-0">
+                  <div className="flex items-center gap-2 px-3 py-2 border-b border-foreground/[0.1] shrink-0">
                     <button
                       onClick={closeMobileDetail}
                       aria-label="Back"
@@ -1161,7 +1161,7 @@ export function OrchestrationLayout({
 
         {/* ---- Bottom drawer ---- */}
         <motion.div
-          className={cn("border-t border-white/[0.1] bg-card flex flex-col overflow-hidden", isMobile ? "col-span-1" : "col-span-3")}
+          className={cn("border-t border-border bg-card flex flex-col overflow-hidden", isMobile ? "col-span-1" : "col-span-3")}
           animate={{ height: drawerOpen ? 240 : 32 }}
           transition={{ duration: 0.2, ease: "easeInOut" }}
         >
@@ -1176,10 +1176,11 @@ export function OrchestrationLayout({
               <button
                 key={id}
                 className={cn(
-                  "flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium rounded-t transition-colors",
+                  "flex h-8 items-center gap-1.5 px-3 text-[11px] font-medium transition-colors",
+                  // Harbor tab: the open one carries a brand underline, not a fill.
                   drawerOpen && drawerTab === id
-                    ? "text-foreground bg-accent/50"
-                    : "text-muted-foreground hover:text-foreground/70",
+                    ? "text-foreground shadow-[inset_0_-2px_0_var(--primary)]"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
                 onClick={(e) => {
                   e.stopPropagation()

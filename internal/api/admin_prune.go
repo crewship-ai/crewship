@@ -68,14 +68,11 @@ func (h *LegacyResourceHandler) allCrewRefs(ctx context.Context) ([]provider.Cre
 // Admin-only, read-only. 503 when the provider can't detect (non-docker).
 func (h *LegacyResourceHandler) Detect(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	if !canRole(RoleFromContext(ctx), "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
-	if WorkspaceIDFromContext(ctx) == "" {
-		replyError(w, http.StatusUnauthorized, "not authenticated")
-		return
-	}
+	// Instance-wide: the walk covers every crew, so no workspace is needed.
 	if h.detector == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "legacy detection unavailable: docker not configured",
@@ -103,14 +100,11 @@ func (h *LegacyResourceHandler) Detect(w http.ResponseWriter, r *http.Request) {
 // server logs) can reconcile a partially-mutated docker state.
 func (h *LegacyResourceHandler) Prune(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	if !canRole(RoleFromContext(ctx), "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
-	if WorkspaceIDFromContext(ctx) == "" {
-		replyError(w, http.StatusUnauthorized, "not authenticated")
-		return
-	}
+	// Instance-wide: the walk covers every crew, so no workspace is needed.
 	if h.pruner == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "legacy prune unavailable: docker not configured",

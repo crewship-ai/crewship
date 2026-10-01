@@ -274,10 +274,11 @@ type MiseConfig struct {
 // Service models one sidecar container on the crew's bridge network.
 // The wire shape MUST match api.serviceWire — see internal/api/crew_services.go.
 type Service struct {
-	Name    string            `yaml:"name"                     json:"name"`
-	Image   string            `yaml:"image"                    json:"image"`
-	Command []string          `yaml:"command,omitempty"        json:"command,omitempty"`
-	Env     map[string]string `yaml:"env,omitempty"            json:"env,omitempty"`
+	QuotaEnforced bool              `yaml:"quota_enforced,omitempty" json:"quota_enforced,omitempty"`
+	Name          string            `yaml:"name"                     json:"name"`
+	Image         string            `yaml:"image"                    json:"image"`
+	Command       []string          `yaml:"command,omitempty"        json:"command,omitempty"`
+	Env           map[string]string `yaml:"env,omitempty"            json:"env,omitempty"`
 	// EnvRefs is the list of credential env-var names the Keeper
 	// should resolve and inject at container start. The credentials
 	// themselves live on the workspace (kind: Credential or
@@ -293,8 +294,10 @@ type Service struct {
 // mounts (host paths) are intentionally not supported — the docker
 // provider rejects them at runtime, so the manifest fails fast.
 type Volume struct {
-	Name  string `yaml:"name"  json:"name"`
-	Mount string `yaml:"mount" json:"mount"`
+	QuotaBytes int64  `yaml:"quota_bytes,omitempty" json:"quota_bytes,omitempty"`
+	Generation int64  `yaml:"generation,omitempty" json:"generation,omitempty"`
+	Name       string `yaml:"name"  json:"name"`
+	Mount      string `yaml:"mount" json:"mount"`
 }
 
 // Healthcheck mirrors docker's healthcheck shape. Duration fields

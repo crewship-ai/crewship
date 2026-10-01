@@ -297,7 +297,7 @@ export function RoutinesOverview({
                         onClick={() =>
                           s.target_pipeline_slug && onSelect(s.target_pipeline_slug)
                         }
-                        className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
+                        className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
                       >
                         <span className="w-[62px] shrink-0 font-mono text-[11px] tabular-nums text-primary">
                           {relTime(s.next_run_at)}
@@ -357,7 +357,7 @@ export function RoutinesOverview({
                       <Link
                         key={run.id}
                         href={`/routines?${new URLSearchParams({ slug: run.pipeline_slug, run: run.id })}`}
-                        className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md px-1.5 py-2 transition-colors hover:bg-white/[0.03] md:grid-cols-[auto_1fr_auto_auto]"
+                        className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md px-1.5 py-2 transition-colors hover:bg-foreground/[0.03] md:grid-cols-[auto_1fr_auto_auto]"
                       >
                         <span className="relative shrink-0">
                           {r ? (
@@ -509,7 +509,7 @@ export function RoutinesOverview({
                     <Link
                       key={f.runId}
                       href={`/routines?run=${encodeURIComponent(f.runId)}`}
-                      className="group flex items-start gap-2.5 rounded-md px-1.5 py-2 transition-colors hover:bg-white/[0.03]"
+                      className="group flex items-start gap-2.5 rounded-md px-1.5 py-2 transition-colors hover:bg-foreground/[0.03]"
                     >
                       <span
                         aria-hidden

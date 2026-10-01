@@ -18,6 +18,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }))
 
+vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => true }))
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-1", role: "OWNER", loading: false }),
 }))

@@ -91,7 +91,8 @@ func coreResourceSchemas() map[string]any {
 		"description": nullableString(), "role_title": nullableString(), "agent_role": stringSchema(), "lead_mode": nullableString(), "status": stringSchema(),
 		"cli_adapter": stringSchema(), "llm_provider": nullableString(), "llm_model": nullableString(), "system_prompt": nullableString(),
 		"avatar_seed": nullableString(), "avatar_style": nullableString(), "avatar_url": nullableString(), "timeout_seconds": intSchema(),
-		"tool_profile": stringSchema(), "memory_enabled": boolSchema(), "cli_tools": nullableString(), "schedule_cron": nullableString(),
+		"restricted_execution_profile": map[string]any{"type": "string", "enum": []string{"disabled", "responses_text", "native_api_key"}},
+		"tool_profile":                 stringSchema(), "memory_enabled": boolSchema(), "cli_tools": nullableString(), "schedule_cron": nullableString(),
 		"schedule_prompt": nullableString(), "schedule_enabled": boolSchema(), "schedule_last_run": nullableString(), "schedule_next_run": nullableString(),
 		"webhook_require_timestamp": boolSchema(), "webhook_secret_set": nullableBool(), "mcp_config_json": nullableString(),
 		"created_at": stringSchema(), "updated_at": stringSchema(), "crew": ref("AgentCrew"), "_count": ref("AgentCounts"),
@@ -106,7 +107,7 @@ func coreResourceSchemas() map[string]any {
 		"pays_with": map[string]any{"type": "object", "nullable": true, "properties": map[string]any{
 			"credential_id": stringSchema(), "name": stringSchema(), "login": ref("ProviderLogin"),
 		}, "required": []string{"credential_id", "name", "login"}},
-	}, "id", "workspace_id", "name", "slug", "agent_role", "status", "cli_adapter", "timeout_seconds", "tool_profile", "pays_with",
+	}, "id", "workspace_id", "name", "slug", "agent_role", "status", "cli_adapter", "timeout_seconds", "tool_profile", "pays_with", "restricted_execution_profile",
 		"memory_enabled", "schedule_enabled", "webhook_require_timestamp", "created_at", "updated_at", "crew", "_count", "ephemeral",
 		"crew_id", "description", "role_title", "lead_mode", "llm_provider", "llm_model", "system_prompt",
 		"avatar_seed", "avatar_style", "avatar_url", "cli_tools", "schedule_cron", "schedule_prompt",

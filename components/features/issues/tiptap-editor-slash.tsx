@@ -193,7 +193,7 @@ const SlashCommandList = forwardRef<
 
   if (items.length === 0) {
     return (
-      <div className="bg-[#1a1a2e] border border-white/[0.12] rounded-lg shadow-2xl p-3 text-xs text-muted-foreground/50">
+      <div className="bg-[#1a1a2e] border border-foreground/[0.12] rounded-lg shadow-2xl p-3 text-xs text-muted-foreground/50">
         No matching commands
       </div>
     )
@@ -202,7 +202,7 @@ const SlashCommandList = forwardRef<
   return (
     <div
       ref={scrollRef}
-      className="bg-[#1a1a2e] border border-white/[0.12] rounded-lg shadow-2xl py-1 max-h-[280px] overflow-y-auto w-[220px] scrollbar-thin scrollbar-thumb-white/10"
+      className="bg-[#1a1a2e] border border-foreground/[0.12] rounded-lg shadow-2xl py-1 max-h-[280px] overflow-y-auto w-[220px] scrollbar-thin scrollbar-thumb-white/10"
     >
       {items.map((item, index) => {
         const Icon = item.icon
@@ -214,8 +214,8 @@ const SlashCommandList = forwardRef<
             className={cn(
               "flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-xs transition-colors",
               index === selectedIndex
-                ? "bg-white/[0.1] text-foreground"
-                : "text-muted-foreground hover:bg-white/[0.06]",
+                ? "bg-foreground/[0.1] text-foreground"
+                : "text-muted-foreground hover:bg-foreground/[0.06]",
             )}
           >
             <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" />

@@ -17,7 +17,7 @@ interface CrewOption {
 }
 
 function AllCrewsIcon() {
-  return <span className="flex size-5 shrink-0 items-center justify-center rounded bg-white/[0.06] text-muted-foreground"><Users className="size-3" aria-hidden /></span>
+  return <span className="flex size-5 shrink-0 items-center justify-center rounded bg-foreground/[0.06] text-muted-foreground"><Users className="size-3" aria-hidden /></span>
 }
 
 /** A sidebar-sized crew selector using the same crew identity as the rest of the app. */
@@ -42,7 +42,7 @@ export function ChatCrewPicker({ workspaceId, agents, value, onChange }: {
     <PopoverTrigger asChild>
       <button type="button" role="combobox" aria-label="Filter agents by crew" aria-expanded={open} className={cn(
         "kit-tap mx-2 mb-1 flex h-8 w-[calc(100%-16px)] items-center gap-2 rounded-md border px-2 text-left text-xs transition-colors",
-        value ? "border-primary/30 bg-primary/10 text-foreground" : "border-white/[0.08] bg-white/[0.03] text-muted-foreground hover:bg-white/[0.06]",
+        value ? "border-primary/30 bg-primary/10 text-foreground" : "border-foreground/[0.08] bg-foreground/[0.03] text-muted-foreground hover:bg-foreground/[0.06]",
       )}>
         {selected ? <CrewIcon icon={selected.icon || "users"} color={selected.color} size="sm" className="!size-5 !rounded" /> : <AllCrewsIcon />}
         <span className="min-w-0 flex-1 truncate">{selected?.name ?? (value ? "Selected crew" : "All crews")}</span>

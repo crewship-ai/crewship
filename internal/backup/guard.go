@@ -158,6 +158,19 @@ func (g *WorkspaceGuard) BeginBackup(workspaceID string) (release func(), err er
 
 // stateFor returns the per-workspace entry, creating it on demand.
 // Caller holds g.mu.
+// ActiveMissions is the number of mission-side holders across every
+// workspace — agent runs in flight in this process. The instance backup's
+// drain waits for it to reach zero.
+func (g *WorkspaceGuard) ActiveMissions() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	n := 0
+	for _, st := range g.state {
+		n += st.missionCount
+	}
+	return n
+}
+
 func (g *WorkspaceGuard) stateFor(workspaceID string) *guardState {
 	st, ok := g.state[workspaceID]
 	if !ok {

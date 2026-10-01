@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -51,6 +52,10 @@ func SweepRoutineWebhookReceipts(ctx context.Context, db *sql.DB, now time.Time)
 	cutoff := tsformat.Format(now.UTC())
 	var total int64
 	for {
+		// Between batches: step out of a closing quiet window.
+		if err := quiesce.Yield(ctx); err != nil {
+			return total, err
+		}
 		res, err := db.ExecContext(ctx, `
 			DELETE FROM routine_webhook_receipts
 			WHERE id IN (
@@ -91,7 +96,15 @@ func StartRoutineReceiptRetentionSweeper(ctx context.Context, db *sql.DB, logger
 		logger = slog.Default()
 	}
 	sweep := func() {
-		n, err := SweepRoutineWebhookReceipts(ctx, db, time.Now())
+		// Never delete under an instance backup's consistent copy: the whole
+		// sweep is a writer in the quiet window's barrier, yielding between
+		// batches.
+		wr, werr := quiesce.EnterWait(ctx)
+		if werr != nil {
+			return
+		}
+		defer wr.Leave()
+		n, err := SweepRoutineWebhookReceipts(wr.Context(), db, time.Now())
 		switch {
 		case err != nil && ctx.Err() == nil:
 			logger.Warn("routine receipt retention sweeper: sweep failed", "error", err, "deleted", n)

@@ -27,6 +27,29 @@ func requireSupportedServiceBackups(ctx context.Context, db *sql.DB, crews []Cre
 	return nil
 }
 
+// Instance bundles include the database of every live workspace, but do not
+// have snapshot transport for standalone quota-service volumes either. Check
+// admission and the immutable database image rather than promising those data.
+func requireSupportedInstanceServiceBackups(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, `SELECT COALESCE(c.services_json, '') FROM crews c
+		JOIN workspaces w ON w.id=c.workspace_id
+		WHERE (c.deleted_at IS NULL OR c.deleted_at='') AND (w.deleted_at IS NULL OR w.deleted_at='')`)
+	if err != nil {
+		return fmt.Errorf("backup: cannot read service configuration: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return fmt.Errorf("backup: cannot read service configuration: %w", err)
+		}
+		if err := requireSupportedServiceConfig(raw); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
 func requireSupportedDumpServiceBackups(dump *DBDump) error {
 	for _, row := range dump.Tables["crews"] {
 		var raw string

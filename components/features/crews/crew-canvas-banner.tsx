@@ -175,13 +175,13 @@ function Collapsible({ title, summary, children }: {
   children: React.ReactNode
 }) {
   return (
-    <details className="rounded-xl border border-white/8 bg-card overflow-hidden group">
-      <summary className="px-4 py-3 flex items-center gap-2 text-sm cursor-pointer hover:bg-white/[0.02] list-none">
+    <details className="rounded-xl border border-foreground/8 bg-card overflow-hidden group">
+      <summary className="px-4 py-3 flex items-center gap-2 text-sm cursor-pointer hover:bg-foreground/[0.02] list-none">
         <ChevronDown className="h-3 w-3 text-muted-foreground transition-transform group-open:rotate-0 -rotate-90" />
         <span className="text-foreground font-medium">{title}</span>
         <span className="text-xs text-muted-foreground truncate">{summary}</span>
       </summary>
-      <div className="px-4 py-3 border-t border-white/5">
+      <div className="px-4 py-3 border-t border-foreground/5">
         {children}
       </div>
     </details>

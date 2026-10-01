@@ -143,7 +143,7 @@ function NetworkSection({ state, setState }: Props) {
               <button
                 type="button"
                 onClick={() => setState({ allowedDomains: mergeDomains(state.allowedDomains, PACKAGE_REGISTRY_DOMAINS) })}
-                className="inline-flex items-center gap-1 rounded border border-hairline bg-card/60 px-1.5 py-0.5 text-[10px] text-foreground/80 hover:border-white/30 hover:text-foreground"
+                className="inline-flex items-center gap-1 rounded border border-hairline bg-card/60 px-1.5 py-0.5 text-[10px] text-foreground/80 hover:border-foreground/30 hover:text-foreground"
               >
                 <Package className="h-3 w-3" aria-hidden="true" />
                 Allow package registries

@@ -5,7 +5,9 @@ package api
 // confirmation, and a refusal to delete the caller's only workspace.
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -106,61 +108,9 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cascade order: children first, join rows, then the workspace itself.
-	if _, err := tx.ExecContext(r.Context(),
-		"UPDATE agents SET deleted_at = ? WHERE workspace_id = ? AND deleted_at IS NULL", now, workspaceID); err != nil {
-		h.logger.Error("cascade soft-delete agents", "error", err)
-		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if _, err := tx.ExecContext(r.Context(),
-		"DELETE FROM crew_members WHERE crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)", workspaceID); err != nil {
-		h.logger.Error("cascade delete crew_members", "error", err)
-		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	// Snapshot the crew ids we're about to soft-delete so we can emit a
-	// crew.deleted per crew after commit (parity with single-crew delete).
-	// Fully drained + closed before the next Exec on this tx connection.
-	var crewIDs []string
-	crewRows, err := tx.QueryContext(r.Context(),
-		"SELECT id FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", workspaceID)
+	crewIDs, err := softDeleteWorkspaceTx(r.Context(), tx, workspaceID, now)
 	if err != nil {
-		h.logger.Error("snapshot crews for delete broadcast", "error", err)
-		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	for crewRows.Next() {
-		var id string
-		if err := crewRows.Scan(&id); err != nil {
-			crewRows.Close()
-			h.logger.Error("scan crew id for delete broadcast", "error", err)
-			writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
-			return
-		}
-		crewIDs = append(crewIDs, id)
-	}
-	crewRows.Close()
-	if err := crewRows.Err(); err != nil {
-		h.logger.Error("iterate crews for delete broadcast", "error", err)
-		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if _, err := tx.ExecContext(r.Context(),
-		"UPDATE crews SET deleted_at = ? WHERE workspace_id = ? AND deleted_at IS NULL", now, workspaceID); err != nil {
-		h.logger.Error("cascade soft-delete crews", "error", err)
-		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if _, err := tx.ExecContext(r.Context(),
-		"DELETE FROM workspace_members WHERE workspace_id = ?", workspaceID); err != nil {
-		h.logger.Error("cascade delete workspace_members", "error", err)
-		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if _, err := tx.ExecContext(r.Context(),
-		"UPDATE workspaces SET deleted_at = ? WHERE id = ?", now, workspaceID); err != nil {
-		h.logger.Error("soft-delete workspace", "error", err)
+		h.logger.Error("delete workspace", "error", err)
 		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
@@ -184,4 +134,54 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// softDeleteWorkspaceTx is the delete cascade, inside the caller's
+// transaction: agents and crews soft-deleted, crew and workspace memberships
+// removed, the workspace marked deleted. It returns the crews it deleted so
+// the caller can broadcast crew.deleted for each after commit.
+//
+// Cascade order: children first, join rows, then the workspace itself.
+func softDeleteWorkspaceTx(ctx context.Context, tx *sql.Tx, workspaceID, now string) ([]string, error) {
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE agents SET deleted_at = ? WHERE workspace_id = ? AND deleted_at IS NULL", now, workspaceID); err != nil {
+		return nil, fmt.Errorf("cascade soft-delete agents: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		"DELETE FROM crew_members WHERE crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)", workspaceID); err != nil {
+		return nil, fmt.Errorf("cascade delete crew_members: %w", err)
+	}
+	// Snapshot the crew ids about to be soft-deleted, fully drained and
+	// closed before the next Exec on this tx connection.
+	var crewIDs []string
+	crewRows, err := tx.QueryContext(ctx,
+		"SELECT id FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot crews for delete broadcast: %w", err)
+	}
+	for crewRows.Next() {
+		var id string
+		if err := crewRows.Scan(&id); err != nil {
+			crewRows.Close()
+			return nil, fmt.Errorf("scan crew id for delete broadcast: %w", err)
+		}
+		crewIDs = append(crewIDs, id)
+	}
+	crewRows.Close()
+	if err := crewRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate crews for delete broadcast: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE crews SET deleted_at = ? WHERE workspace_id = ? AND deleted_at IS NULL", now, workspaceID); err != nil {
+		return nil, fmt.Errorf("cascade soft-delete crews: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		"DELETE FROM workspace_members WHERE workspace_id = ?", workspaceID); err != nil {
+		return nil, fmt.Errorf("cascade delete workspace_members: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE workspaces SET deleted_at = ? WHERE id = ?", now, workspaceID); err != nil {
+		return nil, fmt.Errorf("soft-delete workspace: %w", err)
+	}
+	return crewIDs, nil
 }

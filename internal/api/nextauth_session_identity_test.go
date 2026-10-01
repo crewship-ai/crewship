@@ -122,3 +122,24 @@ func TestSession_NullFullNameDoesNotBreakTheSession(t *testing.T) {
 		t.Errorf("session lost its user on a NULL full_name: %+v", user)
 	}
 }
+
+// The Admin console is for instance administrators, and the UI learns who
+// that is from the same "who am I" answer. A workspace role is not it: an
+// ADMIN of one workspace must not see the console that retunes the server.
+func TestSession_SaysWhetherTheCallerAdministersTheInstance(t *testing.T) {
+	h, v, store, userID := newIdentityHandler(t)
+	t.Setenv("CREWSHIP_OWNER_EMAIL", "")
+
+	user := sessionForUser(t, h, v, store, userID, "Test User", "test@example.com")
+	if got := user["is_instance_admin"]; got != false {
+		t.Errorf("is_instance_admin = %v for a user who owns no workspace, want false", got)
+	}
+
+	if _, err := h.db.Exec(`UPDATE users SET instance_role = 'ADMIN' WHERE id = ?`, userID); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	user = sessionForUser(t, h, v, store, userID, "Test User", "test@example.com")
+	if got := user["is_instance_admin"]; got != true {
+		t.Errorf("is_instance_admin = %v for a named instance admin, want true", got)
+	}
+}

@@ -36,6 +36,8 @@ All Crewship configuration can be set via environment variables. These override 
 | `CREWSHIP_RUNTIME` | (unset — uses `container.default_runtime`, else `runc`) | Overrides the OCI runtime handed to Docker for crew containers (`runc`, `runsc`, `kata-runtime`, `sysbox-runc`). Wins over the YAML `container.default_runtime`. Read by `internal/provider/docker/docker_container.go`. |
 | `CREWSHIP_CONTAINER_NETWORK` | `crewship-agents` | Docker bridge network name |
 | `CREWSHIP_CONTAINER_PREFIX` | (empty) | Container name prefix for multi-instance isolation |
+| `CREWSHIP_QUOTA_HELPER_SOCKET` | (unset — quota services with volumes cannot start) | Absolute path of the root quota helper's socket, normally `/run/crewship-quota/INSTANCE/helper.sock`. Set together with `CREWSHIP_QUOTA_HELPER_NAMESPACE`; the helper installer writes both. YAML: `container.quota_helper_socket`. See [Service disk quotas](/guides/service-disk-quotas). |
+| `CREWSHIP_QUOTA_HELPER_NAMESPACE` | (unset) | Immutable identity of this Crewship database in the quota helper (letters, digits, `_`, `-`; up to 128 characters, starting with a letter or digit). Never reuse it for another database or clone. YAML: `container.quota_helper_namespace`. |
 | `CREWSHIP_RUNTIME_IMAGE` | `debian:bookworm-slim` | Default agent runtime image for crews without an explicit `runtime_image`. Any glibc-based Linux image works — Crewship bind-mounts the sidecar and entrypoint at runtime. |
 | `CREWSHIP_SIDECAR_ENABLED` | `false` | Enable sidecar proxy (`true` or `1`) |
 | `CREWSHIP_SIDECAR_PATH` | autodetected | Absolute host path to the `crewship-sidecar` Go binary. See [Devcontainers reference](/configuration/devcontainers#environment-variables) for autodetect order. |
@@ -429,10 +431,18 @@ These variables are used by the `./dev.sh seed` command:
 
 | Variable | Description |
 |----------|-------------|
+| `SEED_CODEX_AUTH_FILE` | Absolute path to a private Codex `auth.json` (ChatGPT subscription login; mode `0600`, kept outside the repo). When set — or when `crewship seed --codex-auth-file` is passed, which overrides it — the seed converts the demo agents to `CODEX_CLI` and seeds an OpenAI `PROVIDER_LOGIN` instead of the Anthropic key. Only the path belongs in the environment, never the JSON (see [the seed CLI docs](/cli/seed)) |
 | `SEED_ANTHROPIC_API_KEY` | Anthropic API key or OAuth token for demo agents |
 | `SEED_GITHUB_TOKEN` | GitHub token (read-only: `actions:read` + repository read) seeded as a workspace `GH_TOKEN` for every agent, mounted so the in-container `gh` CLI reads it directly. The legacy CI-watch/docs-drift packs (no longer installed by the default seed; `seed verify --pack` selects them) use it as their environment gate — without it `crewship seed verify --pack` reports them as skipped |
 | `SEED_GOOGLE_EMAIL` | Google email for seed Google credential |
 | `SEED_GOOGLE_PASSWORD` | Google password for seed Google credential |
+| `SEED_LINEAR_OAUTH_ACCESS_TOKEN` | Optional Linear OAuth integration: an access token, or the client ID + secret pair below, seeds an OAuth credential for the `linear` MCP integration |
+| `SEED_LINEAR_OAUTH_CLIENT_ID` | Linear OAuth client ID (used with `SEED_LINEAR_OAUTH_CLIENT_SECRET` when no access token is set) |
+| `SEED_LINEAR_OAUTH_CLIENT_SECRET` | Linear OAuth client secret paired with `SEED_LINEAR_OAUTH_CLIENT_ID` |
+| `SEED_GOOGLE_OAUTH_ACCESS_TOKEN` | Optional Google OAuth integration: an access token, or the client ID + secret pair below, seeds an OAuth credential for the `google-workspace` MCP integration (Mail, Calendar, Drive scopes) |
+| `SEED_GOOGLE_OAUTH_CLIENT_ID` | Google OAuth client ID (used with `SEED_GOOGLE_OAUTH_CLIENT_SECRET` when no access token is set) |
+| `SEED_GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client secret paired with `SEED_GOOGLE_OAUTH_CLIENT_ID` |
+| `SEED_OLLAMA_ENDPOINT` | Ollama API URL for the opt-in local-ai crew (`CREWSHIP_SEED_OLLAMA=1`); defaults to `http://host.docker.internal:11434/v1`. A private address, so the server must run with `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS=1` for the seeded endpoint to be usable |
 | `CREWSHIP_SEED_VERIFY_GITHUB_API` | Base URL `crewship seed verify` reads GitHub from for its independent check of the CI probe (default `https://api.github.com`); the acceptance tests point it at a stub |
 
 ## Container Runtime

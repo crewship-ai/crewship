@@ -25,7 +25,7 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
           </h2>
         </div>
         {agentsForCrew.length === 0 ? (
-          <div className="rounded-xl border border-white/8 bg-card p-6 text-center text-xs text-muted-foreground">
+          <div className="rounded-xl border border-foreground/8 bg-card p-6 text-center text-xs text-muted-foreground">
             No agents in this crew. Use <strong className="text-foreground/80">+ Agent</strong> in the toolbar to add one.
           </div>
         ) : (
@@ -35,7 +35,7 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
                 key={a.id}
                 type="button"
                 onClick={() => onSelectAgent(a.slug)}
-                className="rounded-xl border border-white/8 bg-card p-3.5 text-left hover:border-white/15 transition-colors"
+                className="rounded-xl border border-foreground/8 bg-card p-3.5 text-left hover:border-foreground/15 transition-colors"
               >
                 <div className="flex items-center gap-3">
                   <AgentAvatar
@@ -64,7 +64,7 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
                 </div>
                 <div className="flex items-center gap-3 mt-3 text-[11px] text-muted-foreground">
                   {a.llm_model && (
-                    <span className="px-1.5 py-0.5 rounded bg-muted border border-white/10 truncate">
+                    <span className="px-1.5 py-0.5 rounded bg-muted border border-foreground/10 truncate">
                       {a.llm_model}
                     </span>
                   )}
@@ -85,13 +85,13 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
           </h2>
           <Link
             href="/settings?tab=members"
-            className="text-xs px-2.5 py-1 rounded border border-white/10 hover:bg-white/5 text-foreground/80 flex items-center gap-1.5"
+            className="text-xs px-2.5 py-1 rounded border border-foreground/10 hover:bg-foreground/5 text-foreground/80 flex items-center gap-1.5"
           >
             <Plus className="h-3 w-3" />
             Manage in settings
           </Link>
         </div>
-        <div className="rounded-xl border border-white/8 bg-card overflow-hidden divide-y divide-white/5">
+        <div className="rounded-xl border border-foreground/8 bg-card overflow-hidden divide-y divide-foreground/5">
           {members === null ? (
             <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
           ) : members.length === 0 ? (

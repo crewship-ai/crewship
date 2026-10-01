@@ -158,7 +158,7 @@ export function RoutineApprovalBanner({ waitpoint, deciding, onDecide, className
                 placeholder="Decision comment (optional, sent to the parked run as the waitpoint payload)…"
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
-                className="h-20 w-full resize-none rounded-md border border-white/[0.1] bg-background p-2.5 text-[13px] leading-relaxed placeholder:text-muted-foreground-soft"
+                className="h-20 w-full resize-none rounded-md border border-foreground/[0.1] bg-background p-2.5 text-[13px] leading-relaxed placeholder:text-muted-foreground-soft"
               />
               <DialogFooter>
                 <Button

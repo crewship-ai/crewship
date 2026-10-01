@@ -136,7 +136,7 @@ func (h *AdminKeeperAuxHandler) payload() keeperAuxResponse {
 // store is 503 rather than a silent success — a write that goes nowhere is worse
 // than a refusal.
 func (h *AdminKeeperAuxHandler) guard(w http.ResponseWriter, r *http.Request) bool {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return false
 	}

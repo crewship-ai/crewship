@@ -60,27 +60,19 @@ export const MessageContent = ({
   <div
     className={cn(
       "flex w-fit min-w-0 max-w-full flex-col gap-2 overflow-hidden text-sm",
-      // Style C ("GitHub Copilot Chat" feel) — both bubbles are real
-      // cards with a clear value lift over bg-background. User bubble
-      // is the lighter of the two (zinc-700/40) so it reads as "your
-      // outgoing", assistant bubble (zinc-800/60) sits a half-step
-      // below to keep the eye flowing through the conversation.
-      // Border + soft shadow gives definition without shouting.
+      // Harbor bubbles: 18px radius with the corner toward the speaker's
+      // face (drawn top-aligned in the gutter) cut to 6px. No resting
+      // shadow — the border carries the shape in both themes.
       //
-      // User bubble — anchored right with bottom-right tail. Subtle
-      // blue tint pulled from the brand palette (matches the +Assign
-      // skill button + connection-status pill) so "your" outgoing
-      // messages read as a hint of brand colour without going full
-      // iMessage saturation.
-      "group-[.is-user]:ml-auto group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-sm",
-      "group-[.is-user]:bg-primary/10 group-[.is-user]:border group-[.is-user]:border-primary/20",
+      // User bubble — the brand tint with a brand hairline, so "yours" reads
+      // at a glance without a saturated fill.
+      "group-[.is-user]:ml-auto group-[.is-user]:rounded-2xl group-[.is-user]:rounded-tr-[6px]",
+      "group-[.is-user]:bg-primary/10 group-[.is-user]:border group-[.is-user]:border-primary/30",
       "group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
-      "group-[.is-user]:shadow-sm",
-      // Assistant bubble — anchored left with bottom-left tail.
-      "group-[.is-assistant]:rounded-2xl group-[.is-assistant]:rounded-bl-sm",
-      "group-[.is-assistant]:bg-muted/60 group-[.is-assistant]:border group-[.is-assistant]:border-white/10",
+      // Agent bubble — the card surface on the page ground.
+      "group-[.is-assistant]:rounded-2xl group-[.is-assistant]:rounded-tl-[6px]",
+      "group-[.is-assistant]:bg-card group-[.is-assistant]:border group-[.is-assistant]:border-border",
       "group-[.is-assistant]:px-4 group-[.is-assistant]:py-3 group-[.is-assistant]:text-foreground",
-      "group-[.is-assistant]:shadow-sm",
       className
     )}
     {...props}

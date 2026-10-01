@@ -92,7 +92,7 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
         {comments.map((c) => {
           const name = c.author_name || c.author_type || "?"
           return (
-            <div key={c.id} className="flex gap-2.5 py-2 border-b border-white/5 last:border-0">
+            <div key={c.id} className="flex gap-2.5 py-2 border-b border-foreground/5 last:border-0">
               <span
                 className="h-6 w-6 rounded-md shrink-0 grid place-items-center text-[10px] font-semibold text-white"
                 style={{ background: seedColor(name) }}
@@ -120,14 +120,14 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
           Failed to send: {error}
         </div>
       )}
-      <div className="shrink-0 flex gap-2 p-2 border-t border-white/8">
+      <div className="shrink-0 flex gap-2 p-2 border-t border-foreground/8">
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send() } }}
           placeholder="Write a comment…"
           aria-label="Write a comment"
-          className="flex-1 bg-background border border-white/10 rounded-md px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
+          className="flex-1 bg-background border border-foreground/10 rounded-md px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
         />
         <button
           type="button"

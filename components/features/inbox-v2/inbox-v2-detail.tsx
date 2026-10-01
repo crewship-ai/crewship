@@ -226,7 +226,7 @@ function ApprovalDetail({
             </p>
           </div>
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">What you are approving</div>
+            <div className="eyebrow">What you are approving</div>
             <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{row.reason || "No reason supplied."}</p>
           </div>
           {Object.keys(row.payload ?? {}).length > 0 && <div className="border-t border-border/60 pt-4"><h3 className="mb-2 text-body font-medium">Impact and context</h3><HumanContext payload={row.payload ?? {}} /></div>}
@@ -240,7 +240,7 @@ function ApprovalDetail({
                 rows={3}
               />
               <div className="flex flex-wrap gap-2">
-                <Button disabled={!allowed || busy !== null} onClick={() => void decide("approved")} className="gap-2 bg-success/20 text-success hover:bg-success/30">
+                <Button disabled={!allowed || busy !== null} onClick={() => void decide("approved")} className="gap-2">
                   <Check className="h-4 w-4" /> {busy === "approved" ? "Approving…" : "Approve"}
                 </Button>
                 <Button disabled={!allowed || busy !== null} variant="outline" onClick={() => void decide("denied")} className="gap-2">
@@ -265,7 +265,7 @@ function ApprovalDetail({
       {(agent || row.mission_id) && (
         <section className={messageDivider}>
           <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground-soft">Where this came from</span>
+            <span className="eyebrow">Where this came from</span>
             {agent && <Button asChild size="xs" variant="outline"><Link href={entityHref({ kind: "chat", agentSlug: agent.slug })}>Chat with {agent.name} <ArrowUpRight className="ml-1 h-3 w-3" /></Link></Button>}
             {row.mission_id && <Button asChild size="xs" variant="outline"><Link href={`/missions/${encodeURIComponent(row.mission_id)}/timeline`}>Open mission <ArrowUpRight className="ml-1 h-3 w-3" /></Link></Button>}
           </div>

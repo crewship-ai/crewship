@@ -1664,7 +1664,13 @@ jobs:
     # before the job cap, and the log still says which package hung. What
     # changes is only that a slow runner no longer kills a passing suite
     # and reports it as a failure nobody can diagnose from the log.
-    timeout-minutes: 55
+    # 55 -> 75 (2026-10-01, combined Harbor integration). Run 36855862178
+    # finished 160 of 174 race packages with no failures before the job cap
+    # killed still-progressing server/work/usermodel tests and the final
+    # script packages. The larger schema makes DB-backed fixtures slower.
+    # Keep the per-package 35m hang deadline below unchanged; this increases
+    # only the whole-suite allowance, not what any individual test may do.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

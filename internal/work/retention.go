@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -169,6 +170,10 @@ func (s *Store) sweepRawBodies(ctx context.Context, p RetentionPolicy, now time.
 	cutoff := now.Add(-p.RawBodyAfterTerminal)
 	after := ""
 	for {
+		// Between batches: step out of a closing quiet window, resume after.
+		if err := quiesce.Yield(ctx); err != nil {
+			return err
+		}
 		batch, err := s.walkRawBodyCandidates(ctx, p.Batch, after)
 		if err != nil {
 			return err
@@ -315,6 +320,9 @@ func (s *Store) sweepDedup(ctx context.Context, p RetentionPolicy, now time.Time
 
 	after := ""
 	for {
+		if err := quiesce.Yield(ctx); err != nil {
+			return err
+		}
 		ids, err := s.walkDedupCandidates(ctx, p.Batch, after, accepted, nowText)
 		if err != nil {
 			return err

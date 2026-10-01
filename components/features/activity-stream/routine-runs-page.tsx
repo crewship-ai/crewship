@@ -273,7 +273,7 @@ export function RoutineRunsPage({
                     >
                       {b.summary}
                     </span>
-                    <span aria-hidden className="h-px flex-1 bg-white/[0.06]" />
+                    <span aria-hidden className="h-px flex-1 bg-foreground/[0.06]" />
                   </div>
 
                   {b.runs.map((run) => {
@@ -283,7 +283,7 @@ export function RoutineRunsPage({
                         key={run.id}
                         type="button"
                         onClick={() => onOpenRun(run.id)}
-                        className="group grid grid-cols-[8px_64px_1fr_56px_16px] items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-white/[0.03] md:grid-cols-[8px_64px_1fr_56px_72px_16px]"
+                        className="group grid grid-cols-[8px_64px_1fr_56px_16px] items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-foreground/[0.03] md:grid-cols-[8px_64px_1fr_56px_72px_16px]"
                       >
                         <span
                           aria-hidden

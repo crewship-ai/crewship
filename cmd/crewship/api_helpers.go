@@ -163,6 +163,15 @@ func queryString(pairs ...string) string {
 //
 // Many commands repeat this exact 4-line pattern; centralising it keeps
 // new commands one line shorter and the error messages consistent.
+// requireAuthInstance is for `admin instance …`: an instance administrator
+// need not have a workspace selected, or belong to any.
+func requireAuthInstance() (*cli.Client, error) {
+	if err := requireAuth(); err != nil {
+		return nil, err
+	}
+	return newAPIClient(), nil
+}
+
 func requireAuthAndWorkspace() (*cli.Client, error) {
 	if err := requireAuth(); err != nil {
 		return nil, err

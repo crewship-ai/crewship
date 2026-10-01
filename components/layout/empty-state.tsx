@@ -28,10 +28,10 @@ export function EmptyState({
         size === "card" ? "py-10 sm:py-16" : "py-8",
       )}
     >
-      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-muted">
-        <Icon className="h-6 w-6 text-muted-foreground" />
+      <div className="icon-tile mb-4 flex h-14 w-14 items-center justify-center rounded-2xl">
+        <Icon className="h-6 w-6" />
       </div>
-      <h3 className="text-body font-semibold">{title}</h3>
+      <h3 className="text-default font-semibold tracking-[-0.02em]">{title}</h3>
       <p className="mt-1 max-w-sm text-body text-muted-foreground">{description}</p>
       {children}
     </div>

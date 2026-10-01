@@ -2,11 +2,12 @@
 
 import {
   Blocks, Code, Search, Hammer, Server, MessageCircle, Settings,
-  Palette, ShieldCheck, BadgeCheck, Lock, Dot, Download, Clock,
-  AlertTriangle, FileText, Sparkles, Plug, Users,
+  Palette, ShieldCheck, Download, Clock,
+  FileText, Plug, Users,
 } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { StatusPill } from "@/components/ui/status-pill"
+import type { StatusTone } from "@/lib/format-status"
 import { selection } from "@/lib/interaction"
 import { cn } from "@/lib/utils"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -58,31 +59,13 @@ export interface SkillCardData {
 
 // Source badge — Composio's auth-method badge proved that a single
 // trust glyph reads faster than a publisher avatar. Map the 5 source
-// enum values onto 4 visual treatments (MARKETPLACE / VERIFIED share).
-const SOURCE_BADGE: Record<string, { label: string; icon: React.ElementType; className: string }> = {
-  BUNDLED:   { label: "Official",  icon: ShieldCheck, className: "bg-blue-500/10 text-blue-300 border-blue-500/30" },
-  GENERATED: { label: "Generated", icon: Sparkles,    className: "bg-purple/10 text-purple border-purple/30" },
-  MARKETPLACE: { label: "Verified", icon: BadgeCheck, className: "bg-success/10 text-success border-success/30" },
-  CUSTOM:    { label: "Community", icon: Dot,         className: "bg-white/[0.05] text-white/55 border-white/10" },
-  MANAGED:   { label: "Managed",   icon: Lock,        className: "bg-white/[0.05] text-white/55 border-white/10" },
-}
-
-// Domain colour — single accent chip per card per the mockup
-// (.claude/mockups/skills-page.html). 12% bg keeps dense grid readable.
-const DOMAIN_COLORS: Record<string, string> = {
-  CODING:     "bg-blue-500/12 text-blue-300",
-  AUTOMATION: "bg-cyan-500/12 text-cyan-300",
-  DATA:       "bg-violet-500/12 text-violet-300",
-  DEVOPS:     "bg-orange-500/12 text-orange-300",
-  WRITING:    "bg-teal-500/12 text-teal-300",
-  RESEARCH:   "bg-amber-500/12 text-amber-300",
-  PM:         "bg-pink-500/12 text-pink-300",
-  DESIGN:     "bg-fuchsia-500/12 text-fuchsia-300",
-  SECURITY:   "bg-red-500/12 text-red-300",
-  SUPPORT:    "bg-cyan-500/12 text-cyan-300",
-  FINANCE:    "bg-emerald-500/12 text-emerald-300",
-  OPS:        "bg-indigo-500/12 text-indigo-300",
-  CUSTOM:     "bg-white/[0.06] text-white/65",
+// enum values onto StatusPill tones (MARKETPLACE / VERIFIED share).
+export const SOURCE_BADGE: Record<string, { label: string; tone: StatusTone }> = {
+  BUNDLED:     { label: "Official",  tone: "blue" },
+  GENERATED:   { label: "Generated", tone: "purple" },
+  MARKETPLACE: { label: "Verified",  tone: "success" },
+  CUSTOM:      { label: "Community", tone: "muted" },
+  MANAGED:     { label: "Managed",   tone: "muted" },
 }
 
 const DOMAIN_ICONS: Record<string, React.ElementType> = {
@@ -104,10 +87,10 @@ const DOMAIN_ICONS: Record<string, React.ElementType> = {
 // Maturity badge — rendered only when NOT OFFICIAL (which already
 // shows a source shield). Stable=COMMUNITY without a maturity badge
 // would be the silent default once we promote skills via review.
-const MATURITY_BADGE: Record<string, { label: string; className: string }> = {
-  EXPERIMENTAL: { label: "Experimental", className: "bg-purple/15 text-purple border-purple/30" },
-  COMMUNITY:    { label: "Beta",         className: "bg-warn/15 text-warn border-warn/30" },
-  CURATED:      { label: "Curated",      className: "bg-notice/15 text-notice border-notice/30" },
+const MATURITY_BADGE: Record<string, { label: string; tone: StatusTone }> = {
+  EXPERIMENTAL: { label: "Experimental", tone: "purple" },
+  COMMUNITY:    { label: "Beta",         tone: "warn" },
+  CURATED:      { label: "Curated",      tone: "blue" },
 }
 
 function formatRelative(iso?: string): string {
@@ -142,9 +125,7 @@ interface SkillCardProps {
 // Plus a flag chip when scan_status=FLAGGED.
 export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
   const sourceCfg = SOURCE_BADGE[skill.source] ?? SOURCE_BADGE.CUSTOM
-  const SourceIcon = sourceCfg.icon
   const DomainIcon = DOMAIN_ICONS[skill.category] ?? Blocks
-  const domainCls = DOMAIN_COLORS[skill.category] ?? DOMAIN_COLORS.CUSTOM
   const matCfg = skill.maturity && skill.maturity !== "OFFICIAL" ? MATURITY_BADGE[skill.maturity] : undefined
   const flagged = skill.scan_status === "FLAGGED"
   const vendor = skill.vendor || "community"
@@ -162,7 +143,7 @@ export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
       // card in the same row matches its tallest sibling — fixes the
       // "card heights jump around in a row" feedback the user pointed at.
       className={cn(
-        "group w-full h-full text-left flex",
+        "group w-full h-full text-left flex rounded-card",
         selected ? selection.card.selected : selection.card.default,
       )}
     >
@@ -171,38 +152,27 @@ export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-1 truncate">
-                <span className="text-xs text-white/45 truncate">{vendor}/</span>
-                <span className="text-sm font-semibold text-white/95 truncate">{displayName}</span>
+                <span className="font-mono text-[11px] text-muted-foreground-soft truncate">{vendor}/</span>
+                <span className="text-sm font-semibold text-foreground truncate">{displayName}</span>
               </div>
             </div>
-            <Badge
-              variant="outline"
-              className={`shrink-0 gap-1 px-1.5 py-0 h-5 text-[10px] font-medium ${sourceCfg.className}`}
-            >
-              <SourceIcon className="h-3 w-3" />
-              {sourceCfg.label}
-            </Badge>
+            <StatusPill tone={sourceCfg.tone} label={sourceCfg.label} />
           </div>
 
-          <p className="mt-2 line-clamp-2 min-h-[2.4em] text-xs text-white/60 leading-relaxed">
-            {skill.description ?? <span className="italic text-white/35">No description</span>}
+          <p className="mt-2 line-clamp-2 min-h-[2.4em] text-xs text-muted-foreground leading-relaxed">
+            {skill.description ?? <span className="italic text-muted-foreground-soft">No description</span>}
           </p>
 
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
-            <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${domainCls}`}>
+            <span className="inline-flex items-center gap-1 rounded-full bg-foreground/[0.05] px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
               <DomainIcon className="h-3 w-3" />
               {skill.category.charAt(0) + skill.category.slice(1).toLowerCase()}
             </span>
             {matCfg && (
-              <span className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${matCfg.className}`}>
-                {matCfg.label}
-              </span>
+              <StatusPill tone={matCfg.tone} label={matCfg.label} />
             )}
             {flagged && (
-              <span className="inline-flex items-center gap-1 rounded-md border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive">
-                <AlertTriangle className="h-3 w-3" />
-                Flagged
-              </span>
+              <StatusPill tone="danger" label="Flagged" />
             )}
           </div>
 
@@ -211,7 +181,7 @@ export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
               even when descriptions are different lengths. */}
           <div className="flex-1" />
 
-          <div className="mt-3 flex items-center gap-3 text-[11px] text-white/45 tabular-nums">
+          <div className="mt-3 flex items-center gap-3 font-mono text-[11px] text-muted-foreground-soft tabular-nums">
             <span className="flex items-center gap-1">
               <Download className="h-3 w-3" />
               {formatCount(skill.downloads)}
@@ -250,8 +220,8 @@ function InstalledAgents({ agents }: { agents: SkillInstalledAgent[] }) {
     }
   }
   return (
-    <div className="mt-3 pt-2 border-t border-white/[0.05] flex items-center gap-2">
-      <span className="inline-flex items-center gap-1 text-[10px] text-white/45 shrink-0">
+    <div className="mt-3 pt-2 border-t border-border flex items-center gap-2">
+      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground-soft shrink-0">
         <Users className="h-3 w-3" />
         Installed on
       </span>
@@ -267,11 +237,11 @@ function InstalledAgents({ agents }: { agents: SkillInstalledAgent[] }) {
             title={`${a.agent_name}${a.crew_name ? ` · ${a.crew_name}` : ""}`}
             width={20}
             height={20}
-            className="h-5 w-5 rounded-full ring-1 ring-black/40 bg-white/[0.04]"
+            className="h-5 w-5 rounded-full ring-2 ring-card bg-foreground/[0.04]"
           />
         ))}
         {overflow > 0 && (
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-black/40 px-1 text-[9px] font-medium text-white/65 tabular-nums">
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground/[0.06] ring-2 ring-card px-1 text-[9px] font-medium text-foreground/65 tabular-nums">
             +{overflow}
           </span>
         )}
@@ -282,7 +252,7 @@ function InstalledAgents({ agents }: { agents: SkillInstalledAgent[] }) {
             <CrewChip key={c.slug} name={c.name} color={c.color} />
           ))}
           {crews.size > 2 && (
-            <span className="text-[9px] text-white/45">+{crews.size - 2}</span>
+            <span className="text-[9px] text-foreground/45">+{crews.size - 2}</span>
           )}
         </div>
       )}
@@ -303,9 +273,9 @@ function CrewChip({ name, color }: { name: string; color: string | null }) {
     return (
       <span
         title={name}
-        className="inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[9px] font-medium text-white/65"
+        className="inline-flex items-center gap-1 rounded-full border border-foreground/[0.08] bg-foreground/[0.03] px-1.5 py-0.5 text-[9px] font-medium text-foreground/65"
       >
-        <span className="h-1.5 w-1.5 rounded-full bg-white/40" />
+        <span className="h-1.5 w-1.5 rounded-full bg-foreground/40" />
         <span className="truncate max-w-[80px]">{name}</span>
       </span>
     )
@@ -314,7 +284,7 @@ function CrewChip({ name, color }: { name: string; color: string | null }) {
     <span
       title={name}
       style={{ "--crew-color": color } as React.CSSProperties}
-      className="inline-flex items-center gap-1 rounded-full border border-[var(--crew-color)]/25 bg-white/[0.03] px-1.5 py-0.5 text-[9px] font-medium text-[var(--crew-color)]"
+      className="inline-flex items-center gap-1 rounded-full border border-[var(--crew-color)]/25 bg-foreground/[0.03] px-1.5 py-0.5 text-[9px] font-medium text-[var(--crew-color)]"
     >
       <span className="h-1.5 w-1.5 rounded-full bg-[var(--crew-color)]" />
       <span className="truncate max-w-[80px]">{name}</span>

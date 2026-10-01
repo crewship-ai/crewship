@@ -58,7 +58,7 @@ function CrewGroupNodeInner({ data, id }: NodeProps) {
           d.onToggleCollapse?.(d.crewId)
         }}
       >
-        <button className="shrink-0 text-white/40 hover:text-white/70 transition-colors">
+        <button className="shrink-0 text-foreground/40 hover:text-foreground/70 transition-colors">
           {collapsed ? (
             <ChevronRight className="h-3.5 w-3.5" />
           ) : (
@@ -75,11 +75,11 @@ function CrewGroupNodeInner({ data, id }: NodeProps) {
           />
         )}
 
-        <span className="text-xs font-semibold text-white/80 truncate flex-1">
+        <span className="text-xs font-semibold text-foreground/80 truncate flex-1">
           {d.label}
         </span>
 
-        <div className="flex items-center gap-1 text-[10px] text-white/30">
+        <div className="flex items-center gap-1 text-[10px] text-foreground/30">
           <Users className="h-3 w-3" />
           <span>{d.agentCount}</span>
         </div>
@@ -96,7 +96,7 @@ function CrewGroupNodeInner({ data, id }: NodeProps) {
               <span className="text-destructive">{d.failedCount} failed</span>
             )}
             {d.activeCount === 0 && d.completedCount === 0 && d.failedCount === 0 && (
-              <span className="text-white/30">{d.taskCount} tasks</span>
+              <span className="text-foreground/30">{d.taskCount} tasks</span>
             )}
           </div>
         )}
@@ -112,14 +112,14 @@ function CrewGroupNodeInner({ data, id }: NodeProps) {
         type="target"
         position={Position.Left}
         id={`${id}-perm-target`}
-        className="!w-2 !h-2 !bg-white/20 !border-white/10"
+        className="!w-2 !h-2 !bg-foreground/20 !border-foreground/10"
         style={{ top: 20 }}
       />
       <Handle
         type="source"
         position={Position.Right}
         id={`${id}-perm-source`}
-        className="!w-2 !h-2 !bg-white/20 !border-white/10"
+        className="!w-2 !h-2 !bg-foreground/20 !border-foreground/10"
         style={{ top: 20 }}
       />
     </div>

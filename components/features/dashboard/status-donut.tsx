@@ -89,7 +89,7 @@ export function StatusDonut({ data, centerLabel = "missions", onSelect }: Status
               key={d.key}
               type="button"
               onClick={() => onSelect(d.key)}
-              className="flex items-center justify-between gap-2 rounded px-1 -mx-1 py-0.5 text-left transition-colors hover:bg-white/[0.04]"
+              className="flex items-center justify-between gap-2 rounded px-1 -mx-1 py-0.5 text-left transition-colors hover:bg-foreground/[0.04]"
             >
               {row}
             </button>

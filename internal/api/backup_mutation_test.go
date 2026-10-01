@@ -52,7 +52,7 @@ func TestBackup_Create_MemberRole_Returns403(t *testing.T) {
 	h, userID, wsID := backupMutationRig(t)
 	body := jsonBody(map[string]any{
 		"scope":      "workspace",
-		"no_encrypt": true,
+		"passphrase": "mutation-test-passphrase",
 	})
 	req := withWorkspaceUser(
 		httptest.NewRequest("POST", "/api/v1/admin/backups", body),
@@ -91,7 +91,7 @@ func TestBackup_Create_InstanceScope_Returns400(t *testing.T) {
 	h, userID, wsID := backupMutationRig(t)
 	body := jsonBody(map[string]any{
 		"scope":      "instance",
-		"no_encrypt": true,
+		"passphrase": "mutation-test-passphrase",
 	})
 	req := withWorkspaceUser(
 		httptest.NewRequest("POST", "/api/v1/admin/backups", body),
@@ -109,7 +109,7 @@ func TestBackup_Create_UnknownScope_Returns400(t *testing.T) {
 	h, userID, wsID := backupMutationRig(t)
 	body := jsonBody(map[string]any{
 		"scope":      "everything",
-		"no_encrypt": true,
+		"passphrase": "mutation-test-passphrase",
 	})
 	req := withWorkspaceUser(
 		httptest.NewRequest("POST", "/api/v1/admin/backups", body),
@@ -131,7 +131,7 @@ func TestBackup_Create_CrewScopeMissingCrewID_Returns400(t *testing.T) {
 		body := jsonBody(map[string]any{
 			"scope":      "crew",
 			"crew_id":    crewID,
-			"no_encrypt": true,
+			"passphrase": "mutation-test-passphrase",
 		})
 		req := withWorkspaceUser(
 			httptest.NewRequest("POST", "/api/v1/admin/backups", body),
@@ -152,7 +152,7 @@ func TestBackup_Create_NoEncryptionSelector_Returns400(t *testing.T) {
 	h, userID, wsID := backupMutationRig(t)
 	body := jsonBody(map[string]any{
 		"scope": "workspace",
-		// no passphrase, no recipient, no_encrypt absent → 0 selectors
+		// no passphrase, no recipient → 0 selectors
 	})
 	req := withWorkspaceUser(
 		httptest.NewRequest("POST", "/api/v1/admin/backups", body),
@@ -165,14 +165,14 @@ func TestBackup_Create_NoEncryptionSelector_Returns400(t *testing.T) {
 	}
 }
 
-// And the converse: passphrase + no_encrypt is contradictory and must
+// And the converse: passphrase + recipient is contradictory and must
 // hit the >1 selector gate, not be silently resolved by precedence.
 func TestBackup_Create_MultipleEncryptionSelectors_Returns400(t *testing.T) {
 	h, userID, wsID := backupMutationRig(t)
 	body := jsonBody(map[string]any{
 		"scope":      "workspace",
 		"passphrase": "hunter2",
-		"no_encrypt": true,
+		"recipient":  "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p",
 	})
 	req := withWorkspaceUser(
 		httptest.NewRequest("POST", "/api/v1/admin/backups", body),
@@ -214,7 +214,7 @@ func TestBackup_Create_OutputDirOutsideDefault_Returns400(t *testing.T) {
 	t.Setenv("HOME", t.TempDir()) // also sandbox HOME so the check is hermetic
 	body := jsonBody(map[string]any{
 		"scope":      "workspace",
-		"no_encrypt": true,
+		"passphrase": "mutation-test-passphrase",
 		"output_dir": "/tmp/elsewhere",
 	})
 	req := withWorkspaceUser(
@@ -236,7 +236,7 @@ func TestBackup_Create_InvalidScopeLevel_Returns400(t *testing.T) {
 	body := jsonBody(map[string]any{
 		"scope":       "workspace",
 		"scope_level": "maximum",
-		"no_encrypt":  true,
+		"passphrase":  "mutation-test-passphrase",
 	})
 	req := withWorkspaceUser(
 		httptest.NewRequest("POST", "/api/v1/admin/backups", body),
@@ -258,7 +258,7 @@ func TestBackup_Create_InvalidScopeLevel_Returns400(t *testing.T) {
 // real defence here is regression: if a future refactor breaks the
 // pure-DB code path (e.g. by demanding non-nil dockerOps) the handler
 // would silently 500 and CI would catch it here.
-func TestBackup_Create_WorkspaceScopeNoEncrypt_Returns201(t *testing.T) {
+func TestBackup_Create_WorkspaceScopePassphrase_Returns201(t *testing.T) {
 	// Sandbox HOME so DefaultBackupsDir resolves under a tempdir.
 	// LocalStorageOps.Home() reads os.UserHomeDir() which honours HOME
 	// on darwin/linux.
@@ -268,7 +268,7 @@ func TestBackup_Create_WorkspaceScopeNoEncrypt_Returns201(t *testing.T) {
 	h, userID, wsID := backupMutationRig(t)
 	body := jsonBody(map[string]any{
 		"scope":      "workspace",
-		"no_encrypt": true,
+		"passphrase": "mutation-test-passphrase",
 	})
 	req := withWorkspaceUser(
 		httptest.NewRequest("POST", "/api/v1/admin/backups", body),
@@ -294,8 +294,8 @@ func TestBackup_Create_WorkspaceScopeNoEncrypt_Returns201(t *testing.T) {
 	if resp.Scope != "workspace" {
 		t.Errorf("scope echo = %q, want workspace", resp.Scope)
 	}
-	if resp.Encrypted {
-		t.Errorf("encrypted = true on no_encrypt request — encryption-mode leak")
+	if !resp.Encrypted {
+		t.Errorf("encrypted = false on a passphrase request")
 	}
 	if resp.FormatVersion == 0 {
 		t.Errorf("format_version = 0, want manifest's stamped version")
@@ -308,6 +308,31 @@ func TestBackup_Create_WorkspaceScopeNoEncrypt_Returns201(t *testing.T) {
 	}
 	if !strings.HasPrefix(resp.Path, defaultDir) {
 		t.Errorf("bundle path %q not under sandboxed default %q", resp.Path, defaultDir)
+	}
+}
+
+// New bundles are always encrypted: agent home folders inside a bundle can
+// hold credentials the vault never sealed. no_encrypt is refused with a
+// message that says so, and no bundle is written.
+func TestBackup_Create_NoEncrypt_Refused(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	h, userID, wsID := backupMutationRig(t)
+	req := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/admin/backups", jsonBody(map[string]any{"scope": "workspace", "no_encrypt": true})),
+		userID, wsID, "OWNER",
+	)
+	rr := httptest.NewRecorder()
+	h.Create(rr, req)
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "every new backup is encrypted") {
+		t.Fatalf("status = %d body=%s, want 400 naming the always-encrypted rule", rr.Code, rr.Body.String())
+	}
+	dir, err := backup.DefaultBackupsDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("a refused create wrote %d file(s)", len(entries))
 	}
 }
 

@@ -6,9 +6,11 @@ import "errors"
 // errors.As to match; error strings are informational and may change.
 var (
 	// ErrFormatTooOld is returned when a bundle's FormatVersion is below
-	// MinSupportedFormatVersion. The caller should advise the user to
-	// upgrade the bundle via `crewship backup migrate` (V1.5).
-	ErrFormatTooOld = errors.New("backup: bundle format version too old for this reader")
+	// MinSupportedFormatVersion — older than this reader reads directly.
+	// It is not a dead end: `crewship backup convert` writes a readable
+	// copy. Restore, verify and inspect wrap it in a ConvertRequiredError
+	// that names the exact command for the bundle at hand.
+	ErrFormatTooOld = errors.New("backup: bundle format is older than this reader reads directly; convert it with `crewship backup convert --bundle <file> --out <new-file>`")
 
 	// ErrFormatTooNew is returned when a bundle's FormatVersion is above
 	// FormatVersion. The caller should advise the user to upgrade Crewship.

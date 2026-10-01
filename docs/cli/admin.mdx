@@ -36,8 +36,8 @@ and exited **0**.
 
 The rule now:
 
-- **`list-users` uses `GET /api/v1/admin/users`** on the targeted server,
-  scoped to the current workspace. It needs a login — **always**, not only when
+- **`list-users` uses `GET /api/v1/admin/users`** on the targeted server:
+  the current workspace's members, or every account for the instance owner. It needs a login — **always**, not only when
   something names a server. It is the one verb here that is not gated: it
   branches on `--local` alone, so on a host with no CLI config and no
   `CREWSHIP_SERVER` it still goes to the server and still fails with "not
@@ -83,7 +83,9 @@ crewship admin list-users --local
 | Command | Purpose |
 |---|---|
 | `reset-password` | Reset a user's password (interactive prompt or `--password` / `--password-stdin`). Local-only; needs `--local` when a server is named. |
-| `list-users` | List the users of the current workspace on the server the CLI targets. `--local` lists every user in the instance from the database file, with the lockout columns. |
+| `list-users` | List people on the server the CLI targets — the current workspace's members, or every account for an instance administrator — with last activity, signed-in devices and lockout. `--local` lists every user in the instance from the database file. |
+| `user sessions/revoke-session/sign-out/unlock` | Per-person actions by email: list signed-in devices and CLI tokens, sign out one device or all of them, lift a sign-in lockout. **HTTP-backed — needs a running server + login.** |
+| `instance …` | Instance administration across every workspace: add people, give or take access, create, hand over and delete workspaces, suspend accounts, reissue setup links, name instance admins, read the instance audit. **HTTP-backed — needs a running server + login as an instance administrator.** `add-admin --local` is the break-glass path. |
 | `promote` | Promote a user to a workspace role (`OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`). Local-only; needs `--local` when a server is named. The server-side equivalent is `crewship workspace member role`. |
 | `invalidate-sessions` | Force-logout every active session for a user (no password change). Local-only; needs `--local` when a server is named. |
 | `sessions list` | Forensic read of `user_sessions` for one user — all rows, including revoked + expired. Local-only; needs `--local` when a server is named. |
@@ -91,7 +93,7 @@ crewship admin list-users --local
 | `reap-orphan-containers` | Detect (and with `--apply` reap) crew containers holding a stale internal token after a master rotation. **HTTP-backed — needs a running server + login.** |
 | `health` | Instance vitals: uptime, database liveness, disk headroom on the data volume, live log level, and where the encryption key came from. **HTTP-backed — needs a running server + login.** |
 | `stats` | Workspace counts read against the licensed ceilings (crews, agents, members, runs in flight). **HTTP-backed — needs a running server + login.** |
-| `workspaces` | The current workspace with member/agent/crew counts. **HTTP-backed — needs a running server + login.** |
+| `workspaces` | The workspaces you administer (the current one, or all of them for the instance owner) with counts, runs in 7 days, spend in 30 days and last activity. **HTTP-backed — needs a running server + login.** |
 | `gdpr export/delete` | Answer a data-subject request: export everything held about one person, or erase it. **HTTP-backed — needs a running server + login.** |
 | `security-posture` | Read-only view of the instance's env-driven security flags (encryption, egress ceiling, signup, rate limiting). **HTTP-backed — needs a running server + login.** |
 | `memory-config get/set` | Read or adjust the workspace's memory retention window. **HTTP-backed — needs a running server + login.** |
@@ -161,35 +163,35 @@ crewship admin reset-password --email admin@example.com --password 's3cret!' --l
 Two different answers, deliberately:
 
 **Default — the server.** `GET /api/v1/admin/users` on the server the CLI
-targets, scoped to the current workspace (ADMIN+). Columns: EMAIL, NAME,
-CREATED, ROLE (`role@workspace-slug`). Requires a login.
+targets (ADMIN+): the members of the current workspace, or — for an instance
+administrator — every account on the instance. Columns: EMAIL, NAME, CREATED, ROLE
+(`role@workspace-slug`, comma-joined), LAST ACTIVE, SESSIONS (signed-in
+devices), LOCKED (`until …` while a lockout is in force). Requires a login.
 
 **`--local` — the database file on this host.** Every row in `users` ordered
 by `created_at ASC`, across every workspace. Columns: EMAIL, NAME, CREATED,
 LOCKED (derived from `locked_until`), FAILS (`failed_login_count`), ROLES
-(`role@workspace-slug`, comma-joined across workspaces).
+(`role@workspace-slug`, comma-joined across workspaces). Needs no server —
+the path for when the server or the login is what is broken.
 
 ```bash
-crewship admin list-users                        # the server's workspace
+crewship admin list-users                        # the server
+crewship admin list-users --locked-only          # who is stuck?
 crewship admin list-users --local                # this host's database file
-crewship admin list-users --locked-only --local  # who is stuck?
 ```
 
 | Flag | Default | Description |
 |---|---|---|
-| `--locked-only` | `false` | Filter to currently locked-out accounts only. Useful when triaging "who's stuck?" after a brute-force probe. **Requires `--local`** — the API does not return lockout state, and filtering on a field we do not have would print "no locked-out users" for a workspace full of them. Without `--local` the command exits 2 and says so. |
+| `--locked-only` | `false` | Keep only accounts under a sign-in lockout. Works over HTTP and with `--local`. Against a server too old to return lockout state the command exits 2 and says so, rather than printing "no locked-out users" for a workspace full of them. |
 | `--local` | `false` | Read the database file on this host instead of the server. |
 
-Lockout state lives only in the database file: `locked_until` and
-`failed_login_count` are not fields on `GET /api/v1/admin/users`. So the
-canonical "unlock this user" pair is run on the database host —
-`list-users --locked-only --local` followed by `reset-password --local`. The
-server-backed listing prints a note saying as much, so a clean table is
-never mistaken for "nobody is locked out".
+To lift a lock from the terminal: `crewship admin user unlock <email>` (over
+HTTP), or `reset-password --local` on the database host.
 
-That note goes to **stderr**, along with the "which database" note on the
-`--local` path. Stdout carries the table and nothing else, so
-`crewship admin list-users | awk 'NR>1 {print $1}'` yields addresses.
+Notes go to **stderr**: which people the list covers on the server path, and
+the "which database" note on the `--local` path. Stdout carries the table and
+nothing else, so `crewship admin list-users | awk 'NR>1 {print $1}'` yields
+addresses.
 
 That holds for an empty workspace too: stdout is the header row alone and
 `(no users in this workspace)` is printed on stderr, so the same pipe yields
@@ -505,18 +507,924 @@ crewship admin workspaces --format json | jq '.[0]._count_agents'
 ```
 
 ```
-NAME  SLUG  MEMBERS  AGENTS  CREWS  CREATED
-Acme  acme  3        8       2      2026-01-01T00:00:00Z
+NAME    SLUG  MEMBERS  AGENTS  CREWS  RUNS 7D  SPEND 30D  LAST ACTIVITY         CREATED
+Acme *  acme  3        8       2      41       $18.42     2026-09-29 08:12 UTC  2026-01-01T00:00:00Z
 ```
 
-`GET /api/v1/admin/workspaces`, scoped server-side to the workspace the CLI is
-currently authenticated against. Despite the plural name and the JSON array
-shape, this is **not** an instance-wide tenant listing — the handler filters
-`WHERE w.id = <caller's workspace>`, so it returns at most one row: the
-caller's own workspace, with member/agent/crew counts. An empty array means
-the workspace context could not be resolved, not "no workspaces exist".
+`GET /api/v1/admin/workspaces`. A workspace ADMIN or OWNER gets one row, the
+workspace the CLI is authenticated against. An instance administrator (see
+`crewship admin instance`) gets every workspace on the instance; `*` marks the current one. RUNS 7D counts runs started in the
+last seven UTC days, SPEND 30D is the estimated spend over the last 30 days,
+LAST ACTIVITY is the newest audit-log entry. A server older than those fields
+prints `-` for them.
 
 Requires `OWNER` or `ADMIN` (`canRole "manage"`).
+
+---
+
+## `crewship admin user`
+
+Per-person actions on the server the CLI targets. People are named by email;
+the id is resolved through `GET /api/v1/admin/users`, so you can act on the
+members of your current workspace, or on any account if you are an instance
+administrator. An ADMIN cannot act on an OWNER.
+
+```bash
+crewship admin user sessions jana@example.com
+crewship admin user revoke-session jana@example.com <session-id>
+crewship admin user sign-out jana@example.com
+crewship admin user unlock jana@example.com
+```
+
+| Command | Endpoint | What it does |
+|---|---|---|
+| `user sessions <email>` | `GET /api/v1/admin/users/{userId}/sessions` | Lists signed-in devices (device, IP, last use; `*` marks your own) and live CLI tokens (name, scopes, last use — never the secret). `--format json` returns the endpoint's body. |
+| `user revoke-session <email> <session-id>` | `POST /api/v1/admin/users/{userId}/sessions/{sessionId}/revoke` | Signs the person out of one device. |
+| `user sign-out <email>` | `POST /api/v1/admin/users/{userId}/sessions/revoke-all` | Signs the person out of every device. The password and CLI tokens are untouched. |
+| `user unlock <email>` | `POST /api/v1/admin/users/{userId}/unlock` | Lifts a sign-in lockout and resets the failed-attempt counter. |
+
+The host-side `invalidate-sessions` and `sessions list` stay for when the
+server or the login is what is broken; these are the same actions over HTTP,
+for an admin who is signed in. Every action writes an audit-log entry.
+
+---
+
+## `crewship admin instance`
+
+What an instance administrator does across the whole server. People are named
+by email and workspaces by slug. Only an **instance administrator** may run
+these: `CREWSHIP_OWNER_EMAIL` on the server, or anyone named with `add-admin`.
+An install that names nobody names the owners of its oldest workspace once,
+the first time it is asked, and never again. Being ADMIN or OWNER of a
+workspace is not enough. Every action is recorded in the instance audit. The
+last active instance administrator cannot be removed or suspended. These
+commands need no workspace selected (`crewship workspace use`): an instance
+administrator may belong to none.
+
+```bash
+crewship admin instance add-person lucie@acme.example --name "Lucie H" --access acme-ops=MEMBER
+crewship admin instance grant jana@acme.example --workspace research-lab --role ADMIN
+crewship admin instance transfer research-lab --to eva@lab.example
+crewship admin instance suspend tomas@acme.example --reason "left the company"
+crewship admin instance add-admin jana@acme.example
+```
+
+### add-person \<email\>
+
+`POST /api/v1/admin/instance/people`. Creates the account, puts it in the
+workspaces you name and prints a setup link valid for 7 days. No email is
+sent; pass the link on yourself. The person chooses their own password.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--name` | no | Full name. |
+| `--access` | no | Workspace access as `<slug>=<ROLE>`; repeat for several workspaces. |
+
+### grant \<email\>
+
+`PUT /api/v1/admin/instance/workspaces/{workspaceId}/members/{userId}`. Gives
+access to a workspace or changes the role there. OWNER is allowed; the last
+owner of a workspace cannot be moved down, use `transfer` instead.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--workspace` | yes | Workspace slug. |
+| `--role` | no | `OWNER`, `ADMIN`, `MANAGER`, `MEMBER` (default) or `VIEWER`. |
+
+### revoke \<email\>
+
+`DELETE /api/v1/admin/instance/workspaces/{workspaceId}/members/{userId}`.
+Takes the person out of the workspace. Their pages move first, as when a
+workspace admin removes them. The last owner stays.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--workspace` | yes | Workspace slug. |
+
+### create-workspace \<name\>
+
+`POST /api/v1/admin/instance/workspaces`. Creates an empty workspace owned by
+`--owner`. You are not added to it.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--slug` | yes | Workspace slug, 2–50 characters. |
+| `--owner` | yes | Email of the owner. |
+| `--language` | no | Agent language, for example `cs` or `en`. |
+
+### transfer \<workspace-slug\>
+
+`POST /api/v1/admin/instance/workspaces/{workspaceId}/transfer-ownership`.
+Makes a member the owner; every previous owner stays on as ADMIN.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--to` | yes | Email of the new owner. They must already be a member. |
+
+### delete-workspace \<slug\>
+
+`DELETE /api/v1/admin/instance/workspaces/{workspaceId}`. Deletes the
+workspace with its crews and agents. The instance audit keeps the record.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--confirm` | yes | Repeat the slug. |
+
+### suspend \<email\>
+
+`POST /api/v1/admin/instance/people/{userId}/suspend`. The account can no
+longer sign in; every session and CLI token ends now. Workspace access is
+kept for `reactivate`. You cannot suspend yourself or the instance owner.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--reason` | no | Why, for the audit. |
+
+### reactivate \<email\>
+
+`POST /api/v1/admin/instance/people/{userId}/reactivate`. Lifts a suspension.
+Ended sessions stay ended; the person signs in again.
+
+### setup-link \<email\>
+
+`POST /api/v1/admin/instance/people/{userId}/setup-link` prints a new setup
+link and voids the previous one. Only an account nobody has signed in to gets
+one; anyone else resets their own password.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--revoke` | no | Void the pending link instead (`DELETE` on the same path). |
+
+### add-admin \<email\>
+
+`PUT /api/v1/admin/instance/admins/{userId}`. Names an instance administrator.
+The named admins and `CREWSHIP_OWNER_EMAIL` are the whole list. When nobody
+who could run this can sign in, `--local` writes the database file on the
+host — the one way back once the last admin is gone.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--local` | no | Write the database file on this host instead. The way in when nobody who could do it can sign in. |
+
+### remove-admin \<email\>
+
+`DELETE /api/v1/admin/instance/admins/{userId}`. Removes a named instance
+administrator. Nobody removes themselves; `CREWSHIP_OWNER_EMAIL` is changed in
+the server's environment.
+
+### audit
+
+`GET /api/v1/admin/instance/audit`. Instance-level actions, newest first.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--limit` | no | Rows to return, 100 by default, 500 at most. |
+| `--for` | no | One person (email) or workspace (slug). |
+
+### keeper governance
+
+`GET /api/v1/admin/instance/keeper/governance`. What each workspace has
+switched on: the watchdog, its sampling, the DENY alert threshold, four-eyes
+approval, the credential lease and the judge. Every workspace is listed,
+including ones you are not a member of. `default` in the SOURCE column means
+the workspace was never set and follows the instance defaults — the last save
+for all workspaces.
+
+### keeper set
+
+`PUT /api/v1/admin/instance/keeper/governance`. Sets the Keeper watchdog for
+one, several or all existing workspaces. Only the settings you pass change. For one
+workspace it saves straight away. For several, or `--all`, it first lists
+every workspace whose settings would be overwritten and asks, then saves
+exactly that: if a workspace was created or a setting changed in between, the
+server refuses and nothing is written. The save is all or nothing: if one workspace refuses the values, none changes. `--all` means
+every existing workspace; what a new workspace starts with is `keeper
+defaults`.
+
+```bash
+crewship admin instance keeper set --workspace lab --watchdog on --sample-every 10
+crewship admin instance keeper set --workspace lab,ops --second-approver on
+crewship admin instance keeper set --all --watchdog on --deny-alert-risk 5 --dry-run
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--workspace` | one of the two | Workspace slugs, comma-separated. |
+| `--all` | one of the two | Every existing workspace. New ones start from `keeper defaults`. |
+| `--all` | one of the two | Every existing workspace. New workspaces are unaffected. |
+| `--dry-run` | no | Show what would change, write nothing. |
+| `--yes` | no | Skip the confirmation for several workspaces. |
+| `--watchdog` | no | `on` or `off`. |
+| `--sample-every` | no | Review every Nth tool call, 1–100. |
+| `--deny-alert-risk` | no | Risk, 1–10, from which a DENY also reaches the inbox. |
+| `--second-approver` | no | `on` or `off`: a credential escalation needs someone other than the agent's owner to approve it. |
+| `--lease` | no | Approved access lasts this long, e.g. `15m`. `0` keeps it standing; at least `1m`, at most `720h`. |
+| `--presets` | no | Watch presets, comma-separated. |
+| `--gov-provider` | no | Judge provider: `ollama`, `anthropic` or `openai_compat`. Empty uses the instance judge. |
+| `--gov-model` | no | Judge model id. Required with a provider. |
+| `--gov-credential` | no | Vault credential id for the judge. One workspace only. |
+| `--contact` | no | Security contact user id. One workspace only. |
+
+### keeper defaults
+
+`GET | PUT /api/v1/admin/instance/keeper/governance/defaults`. The template a
+new workspace's Keeper starts with: a workspace copies it when it is created
+and keeps its copy, so changing the template changes no existing workspace
+(`keeper set --all` does that). Without settings it shows the template; with
+them it shows the change, asks, and saves exactly what it showed.
+
+```bash
+crewship admin instance keeper defaults
+crewship admin instance keeper defaults --watchdog on --sample-every 10 --yes
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--dry-run` | no | Show what would change, write nothing. |
+| `--yes` | no | Skip the confirmation. |
+| `--watchdog` | no | `on` or `off`. |
+| `--sample-every` | no | Review every Nth tool call, 1–100. |
+| `--deny-alert-risk` | no | Risk, 1–10, from which a DENY also reaches the inbox. |
+| `--second-approver` | no | `on` or `off`. |
+| `--lease` | no | Approved access lasts this long, e.g. `15m`; `0` keeps it standing. |
+| `--presets` | no | Watch presets, comma-separated. |
+| `--gov-provider` | no | Judge provider; empty uses the instance judge. |
+| `--gov-model` | no | Judge model id. |
+| `--gov-credential` | no | Refused: a judge credential belongs to one workspace. |
+| `--contact` | no | Refused: a security contact belongs to one workspace. |
+
+### keeper requests
+
+`GET /api/v1/admin/instance/keeper/requests`. Keeper decisions across every
+workspace, newest first: credential requests and the background reviews, each
+row with its workspace. The last line totals what the filter matches.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--workspace` | no | Workspace slugs, comma-separated. All by default. |
+| `--type` | no | `access`, `execute`, `behavior`, `skill_review`, `memory_health` or `negative_learning`; several comma-separated. |
+| `--decision` | no | `ALLOW`, `DENY`, `ESCALATE` or `PENDING`. |
+| `--limit` | no | Rows to return, 50 by default, 1000 at most. |
+| `--offset` | no | Rows to skip. |
+
+### keeper health
+
+`GET /api/v1/admin/instance/keeper/health`. Every workspace's recent decision
+window: how many decisions it holds, how many let work go on, how often the
+judge failed, the p95 latency and any standing alarm. Below the sample minimum
+there is too little to judge, which is not the same as healthy.
+
+### retention get
+
+`GET /api/v1/admin/instance/retention`. How long every workspace keeps each
+kind of data: routine runs, approvals, audit log, credential audit, memory
+versions, page panel data, inbox items, chats and Keeper decisions. A window
+is a number of days or `forever`. The last row is what a workspace created now
+starts with (see `retention defaults`), followed by the fixed limits the server applies on its own. Use
+`-f json` for the full document, including what each window deletes.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--ws` | no | Workspace slugs or ids, comma-separated. All by default. |
+
+### retention set
+
+`PUT /api/v1/admin/instance/retention`. Sets retention windows for one,
+several or every existing workspace. Only the windows you pass change. Each takes a
+number of days, 1–3650, or `forever`; routine runs, memory versions and page
+panel data always age out and cannot be `forever`.
+
+It always shows first what would change and how many rows the next daily
+sweep would then delete, and asks. It saves exactly what it showed: if a
+workspace was created or a window changed in between, the server refuses and
+nothing is written. The save is all or nothing, and saving a window deletes
+nothing by itself: the sweep does, at its next run. Backups taken before still
+hold the rows it removes. `--all` selects every workspace that exists now; it
+does not change what a workspace created later starts with, which is
+`retention defaults set`.
+
+```bash
+crewship admin instance retention set --ws lab --inbox-days 90 --chats-days forever
+crewship admin instance retention set --ws lab,ops --keeper-decisions-days 365 --yes
+crewship admin instance retention set --all --audit-days 730 --dry-run
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--ws` | one of the two | Workspace slugs or ids, comma-separated. |
+| `--all` | one of the two | Every existing workspace. What new workspaces start with is `retention defaults set`. |
+| `--dry-run` | no | Show what would change and what the next sweep would delete; write nothing. |
+| `--yes` | no | Skip the confirmation. |
+| `--routine-runs-days` | no | Finished routine runs, in days. The last 10 runs of every routine are always kept. |
+| `--approvals-days` | no | Decided approvals: days or `forever`. |
+| `--audit-days` | no | Workspace audit log: days or `forever`. |
+| `--credential-audit-days` | no | Credential reads: days or `forever`. |
+| `--memory-versions-days` | no | Memory version history, in days. |
+| `--page-panel-data-days` | no | Page panel values, in days. |
+| `--inbox-days` | no | Resolved inbox items, and read ones that block nothing: days or `forever`. |
+| `--chats-days` | no | Idle chats that hold no open work: days or `forever`. |
+| `--keeper-decisions-days` | no | Decided Keeper requests: days or `forever`. |
+
+### retention defaults get
+
+`GET /api/v1/admin/instance/retention/defaults`. The retention windows a
+workspace created now starts with, one row per window. SOURCE says whether an
+administrator set it or it is the product default.
+
+### retention defaults set
+
+`PUT /api/v1/admin/instance/retention/defaults`. Changes the retention windows
+a workspace created later starts with. Only the windows you pass change; each
+takes a number of days, 1–3650, or `forever`. No existing workspace changes
+and nothing is deleted. It shows the change first and asks, and the
+confirmation saves exactly what it showed: if another admin changed a default
+in between, the server refuses (`409`) and nothing is written.
+
+```bash
+crewship admin instance retention defaults set --inbox-days 90 --chats-days 365
+crewship admin instance retention defaults set --keeper-decisions-days 730 --dry-run
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--dry-run` | no | Show what would change; write nothing. |
+| `--yes` | no | Skip the confirmation. |
+| `--routine-runs-days` | no | Finished routine runs, in days. The last 10 runs of every routine are always kept. |
+| `--approvals-days` | no | Decided approvals: days or `forever`. |
+| `--audit-days` | no | Workspace audit log: days or `forever`. |
+| `--credential-audit-days` | no | Credential reads: days or `forever`. |
+| `--memory-versions-days` | no | Memory version history, in days. |
+| `--page-panel-data-days` | no | Page panel values, in days. |
+| `--inbox-days` | no | Resolved inbox items, and read ones that block nothing: days or `forever`. |
+| `--chats-days` | no | Idle chats that hold no open work: days or `forever`. |
+| `--keeper-decisions-days` | no | Decided Keeper requests: days or `forever`. |
+
+### backups bundles
+
+`GET /api/v1/admin/instance/backups/bundles`. Every catalogued backup bundle on
+the server, across every workspace — including ones you are not a member of.
+Each row carries its proof level (`checksum`: written and its checksum
+recorded; `contents checked`; `test restore`), whether it is pinned, and its
+gaps: what the bundle should hold and does not — attachment files that were
+not on disk, memory versions without content, provisioned crews whose
+container was gone. `complete` means the bundle recorded no gap; `not
+recorded` means it was catalogued before gaps were recorded, which is not the
+same as complete.
+
+```bash
+crewship admin instance backups bundles
+crewship admin instance backups bundles --workspace lab --scope workspace --format json
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--workspace` | no | Workspace slugs or ids, comma-separated. All by default. |
+| `--scope` | no | `workspace` or `crew`. |
+
+### backups pin \<path\>
+
+`POST /api/v1/admin/instance/backups/bundles/pin`. Pins a bundle so no
+retention rule deletes it — not the age rule, not the count floor, not a
+rotation. The path is the bundle's path as `backups bundles` prints it. Written
+to the instance audit log.
+
+### backups unpin \<path\>
+
+`POST /api/v1/admin/instance/backups/bundles/unpin`. Removes the pin; retention
+rules apply to the bundle again. Written to the instance audit log.
+
+### backups restores
+
+`GET /api/v1/admin/instance/backups/restores`. Every restore, dry run and drill
+the server has run, newest first: who ran it, which bundle, into what, and the
+result — `ok`, `partial` (it landed, but the report names something skipped,
+missing or lowered: crew files not landed, credential tiers clamped, columns
+dropped, attachment files missing) or `failed`. `--format json` carries each
+full report.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--limit` | no | Rows to return, 100 by default, 500 at most. |
+
+### backups plans list
+
+`GET /api/v1/admin/instance/backups/plans`. Every backup plan: its preset,
+scope, when it runs and in which timezone, whether it is switched on, and its
+next run time. Plans run on the server's backup scheduler, never through an
+agent.
+
+### backups plans get \<id\>
+
+`GET /api/v1/admin/instance/backups/plans/{id}`. One plan in full: scope,
+contents, schedule, keep rules and busy window.
+
+### backups plans create
+
+`POST /api/v1/admin/instance/backups/plans`. `--preset` picks the defaults:
+`complete` backs up the whole instance with data daily at 03:00 and complete
+environments weekly; `workspace` backs up every category of the chosen
+workspaces daily; `custom` backs up only the categories in `--contents` (the
+server adds what they need to be restorable) and never counts as protecting a
+workspace. `--recipient` is required: every backup is encrypted. Flags you do
+not pass take the preset's default. Written to the instance audit log.
+
+```bash
+crewship admin instance backups plans create --preset workspace --workspace lab --recipient age1…
+crewship admin instance backups plans create --preset custom --name "Memory every 6 h" \
+  --contents memory --cron "0 */6 * * *" --timezone Europe/Prague --recipient age1…
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--preset` | no | `complete`, `workspace` or `custom`. |
+| `--name` | no | The plan's name. |
+| `--scope` | no | `instance` or `workspaces`. Complete recovery always covers the instance. |
+| `--workspace` | no | Workspace slugs or ids, comma-separated. Every workspace by default. |
+| `--contents` | no | Custom plans: `agents`, `memory`, `chats`, `att`, `routines`, `journal`, `creds`, `pages`, `files`. |
+| `--env-mode` | no | `files`, or `complete` to take complete container environments too. |
+| `--cadence` | no | `daily`, `weekly`, `monthly` or `custom`. |
+| `--time` | no | Time of day, `HH:MM`, in the plan's timezone. |
+| `--weekday` | no | Weekly plans: 0 is Sunday, 6 is Saturday. |
+| `--monthday` | no | Monthly plans: day 1–31; 0 means the first Sunday. |
+| `--cron` | no | A five-field cron expression; sets the cadence to `custom`. |
+| `--timezone` | no | An IANA timezone such as `Europe/Prague`. UTC by default. |
+| `--env-cadence` | no | Which runs also take environments: `every`, `weekly` (Sundays) or `monthly` (first Sunday). |
+| `--keep-min` | no | The newest copies no rule ages out, at least 1. |
+| `--keep-daily` | no | Daily copies kept. |
+| `--keep-weekly` | no | Weekly copies kept. |
+| `--keep-monthly` | no | Monthly copies kept. |
+| `--recipient` | yes | age public keys (`age1…`) or recipient ids that can open the bundles. |
+| `--destination` | no | Where copies go. `local` by default. |
+| `--busy-wait` | no | Minutes a run waits for busy workspaces before it is recorded as skipped. 120 by default. |
+| `--busy-retry` | no | Minutes between looks while it waits. 15 by default. |
+| `--hold-cap` | no | The longest quiet window, in minutes. 20 by default. |
+| `--stale-alert` | no | Hours without a backup before it needs attention. 36 by default. |
+| `--disabled` | no | Create the plan switched off. |
+
+### backups plans update \<id\>
+
+`PUT /api/v1/admin/instance/backups/plans/{id}`. Only the flags you pass
+change, and the next run time is recomputed. Takes the same flags as
+`backups plans create`; `--disabled=false` switches a plan back on. Written to
+the instance audit log.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--preset` | no | `complete`, `workspace` or `custom`. |
+| `--name` | no | The plan's name. |
+| `--scope` | no | `instance` or `workspaces`. |
+| `--workspace` | no | Workspace slugs or ids, comma-separated. |
+| `--contents` | no | Custom plans: the categories. |
+| `--env-mode` | no | `files` or `complete`. |
+| `--cadence` | no | `daily`, `weekly`, `monthly` or `custom`. |
+| `--time` | no | Time of day, `HH:MM`. |
+| `--weekday` | no | Weekly plans: 0 is Sunday. |
+| `--monthday` | no | Monthly plans: day 1–31; 0 means the first Sunday. |
+| `--cron` | no | A five-field cron expression. |
+| `--timezone` | no | An IANA timezone. |
+| `--env-cadence` | no | `every`, `weekly` or `monthly`. |
+| `--keep-min` | no | The newest copies no rule ages out, at least 1. |
+| `--keep-daily` | no | Daily copies kept. |
+| `--keep-weekly` | no | Weekly copies kept. |
+| `--keep-monthly` | no | Monthly copies kept. |
+| `--recipient` | no | age public keys or recipient ids. |
+| `--destination` | no | Where copies go. |
+| `--busy-wait` | no | Minutes a run waits for busy workspaces. |
+| `--busy-retry` | no | Minutes between looks while it waits. |
+| `--hold-cap` | no | The longest quiet window, in minutes. |
+| `--stale-alert` | no | Hours without a backup before it needs attention. |
+| `--disabled` | no | Switch the plan off (`--disabled=false` switches it on). |
+
+### backups plans delete \<id\>
+
+`DELETE /api/v1/admin/instance/backups/plans/{id}`. Deletes the plan. Its
+bundles and its run history stay. Written to the instance audit log.
+
+### backups plans next \<id\>
+
+`GET /api/v1/admin/instance/backups/plans/{id}/next`. The plan's next run
+times, and which of them also take complete environments.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--n` | no | How many run times, 1–50. 5 by default. |
+
+### backups plans calendar \<id\>
+
+`GET /api/v1/admin/instance/backups/plans/{id}/calendar`. Day by day: runs
+that were done, skipped, caught up or failed, and runs still planned.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--from` | no | First date, `YYYY-MM-DD` in the plan's timezone. 7 days ago by default. |
+| `--to` | no | Last date. 28 days ahead by default. |
+
+### backups plans preview
+
+`POST /api/v1/admin/instance/backups/plans/preview-contents`. What a plan's
+backups would carry: the categories included, the ones kept because others
+need them (memory needs crews and agents, attachment files need chats), and
+the ones left out.
+
+```bash
+crewship admin instance backups plans preview --contents memory
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--preset` | no | `complete`, `workspace` or `custom` (the default). |
+| `--contents` | no | The categories a custom plan chooses. |
+| `--env-mode` | no | `files` (the default) or `complete`. |
+
+### backups runs
+
+`GET /api/v1/admin/instance/backups/runs`. Every backup run, newest first: the
+plan, the trigger (`schedule`, `manual`, `catchup`), the workspace, the status
+(`running`, `done`, `incomplete`, `failed`, `interrupted`, `skipped`), each
+phase it went through and the bundle's proof level.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--plan` | no | Only this plan's runs. |
+| `--scope` | no | `instance` or `workspaces`. |
+| `--ws` | no | Workspace slugs or ids, comma-separated. |
+| `--limit` | no | Rows to return, 100 by default, 500 at most. |
+
+### backups run
+
+`POST /api/v1/admin/instance/backups/run`. Starts a backup now in the
+server's backup service (never through an agent). The server answers with the
+run id at once and finishes the backup on its own, so the CLI's timeout
+cannot cancel it; `--wait` follows every run it started to the end and prints
+what each wrote (with `--format json`, a list of runs in the shape of
+`backups runs`).
+
+With `--plan` it runs that plan. Otherwise `--scope instance` writes one
+instance bundle — the whole database, every file store and every crew
+container, copied in one quiet window: running work is drained first, writes
+are held for the copy only and released before packing — and
+`--scope workspaces` writes one bundle per workspace, narrowed by
+`--workspace`, with `--preset` and `--contents` choosing what goes in.
+
+Every backup is encrypted: `--recipient` (repeatable) or `--passphrase-file`,
+not both. Without either, the recipients come from the plan that covers the
+same scope. The passphrase is held in the server's memory until the run
+starts and is never stored.
+
+```bash
+crewship admin instance backups run --plan bp_… --note "before upgrade"
+crewship admin instance backups run --scope instance --recipient age1q7x…m3k --wait
+crewship admin instance backups run --scope workspaces --workspace lab --preset custom --contents memory
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--plan` | no | Run this plan now. |
+| `--scope` | no | `instance` or `workspaces`. |
+| `--workspace` | no | With `--scope workspaces`: workspace slugs or ids. Every workspace by default. |
+| `--preset` | no | `complete`, `workspace` or `custom`. |
+| `--contents` | no | A custom run's categories. |
+| `--env-mode` | no | `files` or `complete`. |
+| `--recipient` | no | Encrypt to these age public keys (`age1…`) or recipient ids; repeatable. The covering plan's by default. |
+| `--passphrase-file` | no | Encrypt with the passphrase in this file instead of recipients. |
+| `--note` | no | A note shown with the run, such as "before upgrade". |
+| `--wait` | no | Wait for the runs to finish and print what they wrote. Exits non-zero when one failed, was interrupted or was skipped. |
+| `--timeout` | no | With `--wait`: how long to wait, 3h by default. |
+
+### backups run-status \<id\>
+
+`GET /api/v1/admin/instance/backups/run/{runId}`. One run, with the same
+fields as a row of `backups runs`: its status (`running`, `done`,
+`incomplete`, `failed`, `interrupted` or `skipped`), each phase, the bundle it
+wrote, how long writes were held, and every gap. Exits non-zero when the run
+failed, was interrupted or was skipped.
+
+### backups overview
+
+`GET /api/v1/admin/instance/backups/overview`. Whether a restore would work.
+The verdict is the weakest proof among the latest full backups of what you
+selected — `verified`, `partial`, `failed`, `contents_checked`,
+`checksum_only` or `none`; custom backups never count. Then what is
+protected, how often, where, for how long, the last test restore, what needs
+attention, the last 14 nights and the space backups use and need.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--scope` | no | `instance` (the default) or `workspaces`. |
+| `--ws` | no | Workspace slugs or ids, comma-separated. All by default. |
+
+---
+
+### backups vault-keys
+
+`GET /api/v1/admin/instance/backups/vault-keys`. Every vault key version the
+database's sealed values reference or this server has configured, the
+environment variable it is read from, how many sealed values use it, whether it
+mints new ones, whether this server holds a key for it, and whether the
+recovery kit is on. Counts only: no key material is shown.
+
+### backups recovery-kit on|off
+
+`PUT /api/v1/admin/instance/backups/settings/recovery-kit`. With the kit on,
+every key version the database references rides inside new **instance**
+bundles (never workspace or crew bundles), so `crewship recover` can give the
+restored server what it needs to read credentials. Whoever holds a private
+backup key can then read every secret in the instance. Written to the instance
+audit log.
+
+### backups check \<path\>
+
+`POST /api/v1/admin/instance/backups/bundles/check`. Proof level 2 — contents
+checked: the server decrypts the bundle, reads every section to the end and
+compares table row counts and file digests with the manifest. Nothing is
+restored. The key is sent for this request only and never stored. Exits
+non-zero when the check fails.
+
+```bash
+crewship admin instance backups check /var/lib/crewship/backups/crewship-instance-all-20260930T030000Z.tar.zst --identity ops.key
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--identity` | one of | age identity file (`AGE-SECRET-KEY-1…`) that opens the bundle. |
+| `--passphrase-file` | one of | Read the passphrase that opens the bundle from a file. |
+| `--timeout` | no | How long to wait for the server, 30m by default. |
+
+### backups restore-checks \<path\>
+
+`POST /api/v1/admin/instance/backups/restore/checks`. What a restore checks
+before anything changes: room on the data directory, whether the bundle's
+format is read directly or through a converter, whether Docker answers (a crew
+built on another architecture is rebuilt from its image), host settings that
+are not carried over for safety (Docker socket mounts, privileged mode, host
+path binds — read only with a key), and conflicts with the target. For a
+bundle with complete container environments it prints one line per
+environment: `restore`, `rebuild` (another architecture, or layers not
+available here: the data comes back, the environment is rebuilt from the crew
+image) or `skip` (no Docker), and the layers count toward the space check.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--target` | no | `empty_server` (default), `isolated`, `replace`, `new_workspace` or `crew`. |
+| `--identity` | no | age identity file; also reads the crews' configuration for unsafe settings. |
+| `--passphrase-file` | no | The bundle's passphrase, for the same. |
+| `--timeout` | no | How long to wait for the server, 30m by default. |
+
+### backups drills
+
+`GET /api/v1/admin/instance/backups/drills`. Every test restore recorded with
+`crewship backup drill --post`, newest first, with its result and how many
+checks did not pass.
+
+---
+
+### backups environments land
+
+`POST /api/v1/admin/instance/backups/environments/land`. Loads the complete
+container environments `crewship recover` staged under
+`<data-dir>/restore-staging/environments/`, once the recovered server runs
+with Docker. Each image is loaded back — a Crewship crew's under its crew
+image tag, so the crew is recreated from the captured environment — and a
+container Crewship does not manage is recreated with its sanitized settings.
+Every environment is reported `restored`, `rebuilt` or `skipped` with the
+reason, and the settings not carried over for safety (Docker socket,
+privileged mode, host paths, added capabilities, devices) stay off. Processes
+start fresh. Written to the instance audit log. See
+[Complete container environments](/guides/backup#complete-container-environments).
+
+```bash
+crewship admin instance backups environments land --dry-run
+crewship admin instance backups environments land
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--dry-run` | no | Check each staged environment without loading anything. |
+| `--timeout` | no | How long to wait for the server, 35m by default (loading images takes a while; the server's own limit is 30m). |
+
+### backups settings get
+
+`GET /api/v1/admin/instance/backups/settings`. The limits (runs at once, CPU
+cores for compression, disk and upload MB/s), the heartbeat URL and its last
+ping, which incidents reach the instance admins and after how many hours a
+plan counts as stale, the drill reminder, the recovery kit, and where copies
+are kept. "Also tell" lists the notification channels on the alert route with
+the outcome of the newest backup alert each was sent; "Could tell" lists the
+channels that could be added, with their ids.
+
+### backups test-alert
+
+`POST /api/v1/admin/instance/backups/settings/test-alert`. Sends a test alert
+to one notification channel now, through the same delivery a real backup
+alert uses, and says whether it arrived. Exits non-zero when it did not. The
+channel need not be on the alert route yet.
+
+```bash
+crewship admin instance backups test-alert --channel nch_1a2b3c4d5e6f7a8b
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--channel` | yes | The notification channel id, from `backups settings get`. |
+
+### backups settings set
+
+`PUT /api/v1/admin/instance/backups/settings`. Only the flags you pass change.
+A run that would leave less than 10 % of the disk free does not start and
+says why; the limits below decide how hard a running backup may push the
+server. Written to the instance audit log.
+
+```bash
+crewship admin instance backups settings set --concurrency 1 --cpu-cores 2 --disk-mbps 80 --upload-mbps 20
+crewship admin instance backups settings set --heartbeat-url https://hc.example.com/ping/5c3e…
+crewship admin instance backups settings set --alerts failed,stale,offsite --stale-hours 48
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--concurrency` | no | Backup runs at once, 1–16. The rest queue. |
+| `--cpu-cores` | no | CPU cores for packing and compression. |
+| `--disk-mbps` | no | MB/s cap on writing staging and bundle files, shared by every run. 0 is no limit. |
+| `--upload-mbps` | no | MB/s cap on off-site uploads, shared by every upload. 0 is no limit. |
+| `--heartbeat-url` | no | A public https URL pinged after every good run, so an outside service alerts when the pings stop. `""` clears it. |
+| `--alerts` | no | Incident kinds that reach instance admins: `failed`, `incomplete`, `stale`, `offsite`, `drill` (`none` for no alerts). The others are still recorded. |
+| `--stale-hours` | no | A plan whose newest good backup is older than this raises a stale incident. 36 by default. |
+| `--drill-reminder` | no | `weekly`, `monthly` or `off`. Raises an instance-wide `drill` incident when the newest test restore is older than 7 or 31 days; resolved by the next recorded drill. |
+| `--channel` | no | A notification channel id (from `settings get`) that hears every delivered incident beside the instance admins' inboxes. Repeatable, replaces the list; `""` empties it. Only a workspace-wide, switched-on channel whose allowlist admits System health, on a provider switched on in Admin › Notifications, can be added. |
+
+### backups recipients list
+
+`GET /api/v1/admin/instance/backups/recipients`. The backup keys: the age
+public keys backups are encrypted to, who holds each private half, its
+fingerprint, and the plans that use it. The private halves never reach the
+server. `backups keys` is the same command.
+
+### backups recipients add
+
+`POST /api/v1/admin/instance/backups/recipients`. Adds a public key (`age1…`).
+Name its id in a plan's `--recipient` to encrypt to it. A private key
+(`AGE-SECRET-KEY-1…`) is refused. Keep at least two keys held by different
+people, so one lost key is not a lost backup. Written to the instance audit
+log.
+
+```bash
+crewship admin instance backups recipients add --name ops-2026 --public-key age1q7x… --holder "platform lead"
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--name` | yes | A name for the key. |
+| `--public-key` | yes | The age public key, `age1…`. |
+| `--holder` | no | Who holds the private half. |
+
+### backups recipients remove \<id\>
+
+`DELETE /api/v1/admin/instance/backups/recipients/{id}`. Refused while a plan
+still encrypts to the key; change the plan first. Backups already made stay
+readable with the key's private half. Written to the instance audit log.
+
+### backups destinations list
+
+`GET /api/v1/admin/instance/backups/destinations`. Off-site destinations,
+how many bundles have a verified copy in each, the last connection test and
+the plans that copy there. The secret access key is never shown.
+
+### backups destinations add
+
+`POST /api/v1/admin/instance/backups/destinations`. Adds an S3-compatible
+store (Cloudflare R2, Backblaze B2, Wasabi, MinIO, AWS). The server tests the
+connection first — it puts, reads back and deletes one small object — and
+stores nothing when that fails. The secret access key is read from a file,
+sealed with the server's vault key and never shown again. A private or
+loopback endpoint (a MinIO on the LAN) and plain http need
+`--allow-private-network`, and the answer then carries a warning; cloud
+metadata and link-local addresses stay blocked either way. Name the
+destination's id in a plan's `--destination` to copy that plan's backups
+there: each bundle is uploaded after it is written and counts as an off-site
+copy only once the upload is verified at the destination. Written to the
+instance audit log.
+
+```bash
+crewship admin instance backups destinations add --name r2 \
+  --endpoint https://<account>.r2.cloudflarestorage.com --region auto \
+  --bucket crewship-backups --prefix prod --access-key-id <id> --secret-file r2.secret
+crewship admin instance backups plans update bp_… --destination local --destination bdst_…
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--name` | no | A name. The bucket and prefix by default. |
+| `--endpoint` | yes | The service URL. |
+| `--region` | no | The signing region; `us-east-1` when empty, `auto` for R2. |
+| `--bucket` | yes | The bucket. |
+| `--prefix` | no | A key prefix inside the bucket. |
+| `--access-key-id` | yes | The access key id. |
+| `--secret-file` | yes | A file holding the secret access key; `-` reads stdin. |
+| `--path-style` | no | Address the bucket as `endpoint/bucket` (MinIO and most self-hosted stores). |
+| `--allow-private-network` | no | Allow a LAN or loopback endpoint and plain http. |
+| `--skip-test` | no | Store without testing the connection first. |
+
+### backups destinations test \<id\>
+
+`POST /api/v1/admin/instance/backups/destinations/{id}/test`. Tests the
+connection and permissions again and stores the outcome. Exits non-zero when
+the test fails.
+
+### backups destinations remove \<id\>
+
+`DELETE /api/v1/admin/instance/backups/destinations/{id}`. Refused while a
+plan still copies there. Copies already uploaded stay in the bucket; only the
+server's record of them goes. Written to the instance audit log.
+
+### backups incidents
+
+`GET /api/v1/admin/instance/backups/incidents`. One incident per plan and kind
+— `failed` (a run failed, was skipped or was interrupted twice), `incomplete`,
+`stale`, `offsite`, `drill` — counted on each repeat and resolved by the next
+good run or when the condition clears. The drill reminder is one more
+`drill` incident with no plan (`plan_id` null): no test restore within the
+`drill_reminder` period, resolved by the next recorded drill. Open incidents
+first. Each also sits in every instance admin's inbox.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--state` | no | `open` or `resolved`. Both by default. |
+| `--limit` | no | Rows to return, 100 by default, 500 at most. |
+
+### backups recovery-sheet
+
+`GET /api/v1/admin/instance/backups/recovery-sheet`. A Markdown page to keep
+off this server: where the bundles are (this server and every off-site
+destination), the backup keys' names and fingerprints, whether the vault keys
+ride in the recovery kit, the exact `crewship recover` and
+`crewship backup drill` commands, and who the instance admins are. It holds no
+secret.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--out` | no | Write the sheet to this file instead of stdout. |
+
+### backups copies list
+
+`GET /api/v1/admin/instance/backups/copies`. Every bundle an off-site
+destination holds (not its environment layers), with scope, size and date, and
+where this server already has it. Destination ids come from
+`backups destinations list`.
+
+```bash
+crewship admin instance backups copies list --destination bdst_…
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--destination` | yes | The destination id. |
+
+### backups copies fetch
+
+`POST /api/v1/admin/instance/backups/copies/fetch`. Restore from an off-site
+copy: downloads the bundle and the environment layers it needs into this
+server's backups directory, each verified, so it can be restored or drilled
+like a local bundle. The server runs it as a job and answers at once — a large
+download is never cut by the CLI's request timeout. `--wait` follows the job
+and prints where the bundle landed and the `crewship recover` command for it.
+A bundle already on this server is refused with its path.
+
+```bash
+crewship admin instance backups copies fetch --destination bdst_… \
+  --key instance/crewship-instance-20260929T010000Z.tar.zst --wait
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--destination` | yes | The destination id. |
+| `--key` | yes | The bundle's key at the destination, as `copies list` shows it. |
+| `--wait` | no | Follow the fetch until it ends. Exits non-zero when it failed. |
+| `--timeout` | no | With `--wait`: how long to wait, 6h by default. |
+
+### backups copies status \<fetch-id\>
+
+`GET /api/v1/admin/instance/backups/copies/fetch/{id}`. A fetch started
+without `--wait`: running, done (and where the bundle is) or failed. A server
+restart forgets its fetches.
+
+## `crewship admin instance holds`
+
+After `crewship recover` the server boots with routines and schedules, inbound
+webhooks and queued work **held**. Check the restored server, then resume each.
+
+### holds list
+
+`GET /api/v1/admin/instance/holds`. What is held, since when, and how much.
+
+### holds resume \<key\>
+
+`POST /api/v1/admin/instance/holds/resume`. Resumes `routines`, `webhooks`,
+`queue` or `all`. Written to the instance audit log.
+
+```bash
+crewship admin instance holds list
+crewship admin instance holds resume routines
+```
 
 ---
 
@@ -876,7 +1784,9 @@ Seed while the server is running, too: a restart sweeps gates whose pipeline run
 ## crewship admin cleanup
 
 Read container cleanup observations from the server selected by the CLI. This
-HTTP read requires login, a selected active workspace, and ADMIN/OWNER role.
+HTTP read requires login. Instance admins can omit the workspace and read the
+whole installation; workspace ADMIN/OWNER users must select a workspace and
+see only its observations.
 Unlike local recovery commands, it does not open a database file. It is backed
 by `GET /api/v1/admin/resource-cleanup` and never triggers cleanup itself.
 
@@ -885,7 +1795,8 @@ crewship admin cleanup --format json
 ```
 
 The response includes `scope=containers`, controller state and per-crew `items`
-for crews of the selected workspace only, with observation time, completeness, remaining eligible containers, legacy
+for this installation (instance admins) or the selected workspace (workspace
+admins), with observation time, completeness, remaining eligible containers, legacy
 unattributed count and fixed error codes. `observed_clear` describes the last
 complete eligible-container scan, not volumes, host data or future creates.
 Stale observations read as `unknown`.

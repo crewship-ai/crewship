@@ -8,13 +8,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, waitFor, cleanup } from "@testing-library/react"
 
-import { SecurityPostureCard } from "../security-posture-card"
+import { useSecurity } from "../security/use-security"
 import { MemoryConfigCard } from "../memory-config-card"
 
 const h = vi.hoisted(() => ({ apiFetch: vi.fn() }))
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => h.apiFetch(...args) }))
+vi.mock("@/app/(dashboard)/admin/hooks/use-admin-websocket", () => ({
+  useAdminWebSocket: () => ({ keeperLiveEvents: [], keeperWsStatus: "disconnected" }),
+}))
+
+/** Admin › Security's reads (posture, keeper status, activity), as a component. */
+// loading: the workspace is still being resolved (useWorkspace().loading).
+// A resolved null is an instance admin with no workspace, and reads without one.
+function SecurityReads({ workspaceId, loading = false }: { workspaceId: string | null; loading?: boolean }) {
+  useSecurity(workspaceId, loading)
+  return null
+}
 vi.mock("@/hooks/use-abilities", () => ({
   useAbilities: () => ({ abilities: { can: () => true }, role: "OWNER", hasCapability: () => false, loading: false }),
 }))
@@ -37,10 +48,16 @@ beforeEach(() => {
 })
 
 describe("admin cards are workspace-scoped", () => {
-  it("security posture asks within a workspace", async () => {
-    render(<SecurityPostureCard workspaceId="ws-1" />)
-    await waitFor(() => expect(h.apiFetch).toHaveBeenCalled())
-    expect(String(h.apiFetch.mock.calls[0][0])).toContain("workspace_id=ws-1")
+  // The decision log left this hook for the instance routes, which cover
+  // every workspace (use-instance-keeper.ts); what stays is server-wide state
+  // read through the admin's own workspace.
+  it("the Security page asks within a workspace, every time", async () => {
+    render(<SecurityReads workspaceId="ws-1" />)
+    await waitFor(() => expect(h.apiFetch).toHaveBeenCalledTimes(2))
+    for (const [url] of h.apiFetch.mock.calls) expect(String(url)).toContain("workspace_id=ws-1")
+    expect(h.apiFetch.mock.calls.map(([u]) => String(u).split("?")[0]).sort()).toEqual([
+      "/api/v1/admin/security-posture", "/api/v1/system/keeper",
+    ])
   })
 
   it("memory configuration asks within a workspace", async () => {
@@ -52,7 +69,7 @@ describe("admin cards are workspace-scoped", () => {
   // Before the id resolves there is nothing to scope to, and firing the
   // request anyway is how you get a 400 rendered as "could not load".
   it("neither asks before the workspace is known", () => {
-    render(<SecurityPostureCard workspaceId={null} />)
+    render(<SecurityReads workspaceId={null} loading />)
     render(<MemoryConfigCard workspaceId={null} />)
     expect(h.apiFetch).not.toHaveBeenCalled()
   })

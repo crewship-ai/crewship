@@ -42,7 +42,7 @@ export interface ConceptIconProps {
 }
 
 const CHIP_SIZE = {
-  sm: "h-6 w-6 rounded-md",
+  sm: "h-6 w-6 rounded-[7px]",
   md: "h-8 w-8 rounded-lg",
   lg: "h-10 w-10 rounded-xl",
 } as const
@@ -72,15 +72,15 @@ export function ConceptIcon({
   }
 
   return (
+    // The chip is a Harbor icon tile (globals.css `.icon-tile`): gradient
+    // fill, hairline in the concept's tint, glyph in a
+    // theme-tuned mix of it. The tint travels as `--ic`.
     <span
-      className={cn(
-        "inline-flex shrink-0 items-center justify-center border",
-        CHIP_SIZE[size],
-        tone.chip,
-        className,
-      )}
+      data-slot="concept-tile"
+      className={cn("icon-tile inline-flex shrink-0 items-center justify-center", CHIP_SIZE[size], className)}
+      style={{ "--ic": tone.tint } as React.CSSProperties}
     >
-      <Glyph className={cn(GLYPH_SIZE[size], tone.fg)} />
+      <Glyph className={GLYPH_SIZE[size]} />
     </span>
   )
 }

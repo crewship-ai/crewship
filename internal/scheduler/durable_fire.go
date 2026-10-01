@@ -28,6 +28,15 @@ func (s *Scheduler) acceptScheduled(ag scheduledAgent) {
 		return
 	}
 	defer release()
+	// Through quiesce.SchedulerGate the acceptance itself is one writer in
+	// the backup's quiet window barrier (entered after the slot wait, so a
+	// queued fire never holds a drain up); refused while a window is closing
+	// or held, and the occurrence stays due for the overdue sweep.
+	leave, ok := s.enter()
+	if !ok {
+		return
+	}
+	defer leave()
 	ctx, cancel := context.WithTimeout(s.ctx, work.DefaultAcceptanceBudget+time.Second)
 	defer cancel()
 	receipt, err := AcceptDue(ctx, s.acceptor, s.diskGuard, ag.Workspace, ag.ID, s.nowFn(), work.DefaultIngressLimits())
@@ -68,6 +77,7 @@ func (s *Scheduler) runOverdueSweep() {
 // wall-clock cron tick. Claiming remains atomic in AcceptDue, so this sweep
 // and a simultaneous cron tick or replica cannot create two work items.
 func (s *Scheduler) acceptOverdue() {
+	// Only reads: each acceptance below registers as its own writer.
 	if !s.isLeader() || s.acceptor == nil {
 		return
 	}

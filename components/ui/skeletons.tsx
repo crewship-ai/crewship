@@ -16,7 +16,7 @@ export function ListRowSkeleton({ rows = 4, className }: SkeletonRowsProps) {
       {Array.from({ length: rows }).map((_, i) => (
         <li
           key={i}
-          className="rounded-md border border-white/[0.06] bg-card/40 px-3 py-2.5"
+          className="rounded-md border border-foreground/[0.06] bg-card/40 px-3 py-2.5"
         >
           <div className="flex items-center gap-3">
             <SkeletonDot />
@@ -54,7 +54,7 @@ export function TableRowSkeleton({ rows = 6, columns = 4 }: { rows?: number; col
       {Array.from({ length: rows }).map((_, i) => (
         <div
           key={i}
-          className="flex items-center gap-4 rounded-md border border-white/[0.06] bg-card/40 px-3 py-2.5"
+          className="flex items-center gap-4 rounded-md border border-foreground/[0.06] bg-card/40 px-3 py-2.5"
         >
           {Array.from({ length: columns }).map((_, j) => (
             <SkeletonBar
@@ -83,7 +83,7 @@ export function CardGridSkeleton({
       {Array.from({ length: cards }).map((_, i) => (
         <div
           key={i}
-          className="space-y-2 rounded-md border border-white/[0.06] bg-card/40 p-3"
+          className="space-y-2 rounded-md border border-foreground/[0.06] bg-card/40 p-3"
         >
           <SkeletonBar widthClass="w-2/3" />
           <SkeletonBar widthClass="w-full" muted />

@@ -24,11 +24,25 @@ import { apiFetch } from "@/lib/api-fetch"
  *    left alone, so a caller that genuinely needs a different scope can still
  *    pass one explicitly.
  */
+/**
+ * "No workspace, on purpose": an instance-wide admin card used by an instance
+ * administrator who may belong to no workspace. The request goes without a
+ * workspace_id, which the instance-wide admin routes answer for the instance.
+ * null/undefined still mean "not known yet" and send nothing.
+ */
+export const INSTANCE_SCOPE = "__instance__"
+
+/** The real workspace behind a card's workspaceId: null for INSTANCE_SCOPE. */
+export function realWorkspace(workspaceId: string | null | undefined): string | null {
+  return workspaceId && workspaceId !== INSTANCE_SCOPE ? workspaceId : null
+}
+
 export function adminFetch(
   path: string,
   workspaceId: string | null | undefined,
   init?: RequestInit,
 ): Promise<Response> {
+  if (workspaceId === INSTANCE_SCOPE) return apiFetch(path, init)
   if (!workspaceId) {
     return Promise.reject(
       new Error(

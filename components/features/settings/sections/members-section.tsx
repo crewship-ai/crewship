@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { ChevronRight, HelpCircle, Trash2 } from "lucide-react"
+import { ChevronRight, HelpCircle, Trash2, Users } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
 import { SettingsCard, SettingsRow } from "../shared"
+import { MemberResourceAccess } from "../member-resource-access"
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -488,6 +489,7 @@ function MemberRow({
                 granted={granted}
                 isLoading={capsLoading}
               />
+              <MemberResourceAccess workspaceId={workspaceId} memberId={member.id} label={label} role={member.role} />
             </>
           )}
         </div>
@@ -552,7 +554,7 @@ export function MembersSection({
           "Per-member capabilities" table listing the same people again;
           answering "what can this person do?" meant reading both and
           reconciling them (#1517). The grid folded into the row. */}
-      <SettingsCard
+      <SettingsCard icon={Users}
         title="Members"
         description={
           isAdmin

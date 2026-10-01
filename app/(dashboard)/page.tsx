@@ -24,6 +24,8 @@ import { Appear } from "@/components/ui/detail"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useIsInstanceAdmin } from "@/hooks/use-auth"
+import { dashboardLanding } from "@/lib/dashboard-landing"
 import { useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
@@ -83,18 +85,25 @@ export default function DashboardPage() {
   const [firstAgentId, setFirstAgentId] = useState<string | null>(null)
   const [reportWindow, setReportWindow] = useState<DashboardWindow>("24h")
 
+  const instanceAdmin = useIsInstanceAdmin()
+  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null)
   useEffect(() => {
     serverFetch("/api/v1/onboarding/status")
       .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (data && !data.completed) {
-          window.location.assign("/onboarding")
-          return
-        }
-        setOnboardingChecked(true)
-      })
-      .catch(() => setOnboardingChecked(true))
+      .then((data) => setOnboardingCompleted(data ? !!data.completed : true))
+      .catch(() => setOnboardingCompleted(true))
   }, [])
+  // An instance admin with no workspace lands in Admin, not the first-run
+  // wizard (lib/dashboard-landing.ts).
+  useEffect(() => {
+    const to = dashboardLanding({ workspaceId, workspaceLoading, instanceAdmin, onboardingCompleted })
+    if (to === "wait") return
+    if (to) {
+      window.location.assign(to)
+      return
+    }
+    setOnboardingChecked(true)
+  }, [workspaceId, workspaceLoading, instanceAdmin, onboardingCompleted])
 
   useEffect(() => {
     try {
@@ -269,8 +278,8 @@ export default function DashboardPage() {
 
         <div className="flex flex-wrap items-center gap-2">
           <Radio className="h-3.5 w-3.5 text-primary-hover" aria-hidden />
-          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-foreground/70">Agent run summary</h2>
-          <span className="font-mono text-[10px] text-muted-foreground">{reportWindow} · routine runs appear in Activity</span>
+          <h2 className="eyebrow">Agent run summary</h2>
+          <span className="font-mono text-[11px] text-muted-foreground">{reportWindow} · routine runs appear in Activity</span>
         </div>
 
         <Appear order={2}>

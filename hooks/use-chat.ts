@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useWebSocket, type WSStatus, type WSMessage } from "@/hooks/use-websocket"
 import { checkChatMessageSize } from "@/components/features/chat/hooks/use-message-submit"
+import { apiFetch } from "@/lib/api-fetch"
+import { projectInputVersionIds } from "@/components/features/chat/files/project-input-metadata"
 import { randomUUIDv4 } from "@/lib/random-id"
 
 /** Upper bound on out-of-order events held during reassembly. Past this, a gap
@@ -179,6 +181,9 @@ const RENDERABLE_PART_TYPES: ReadonlySet<string> = new Set<TurnPartType>([
 ])
 
 interface UseChatOptions {
+  executionProfile?: "trusted" | "restricted" | "pending"
+  getExecutionProfile?: () => "trusted" | "restricted" | "pending"
+  workspaceId?: string | null
   wsUrl: string
   /** Async callback that fetches the current WS ticket. Replaces the
    *  previous `token: string | null` pre-fetched once at mount; the
@@ -314,13 +319,15 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
  * Handles streaming text/thinking/tool events, turn grouping, history loading,
  * message editing, regeneration, and stop/cancel.
  */
-export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamReset, onReplyCompleted, onOwnMessageSaved }: UseChatOptions) {
+export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamReset, onReplyCompleted, onOwnMessageSaved, executionProfile, getExecutionProfile, workspaceId }: UseChatOptions) {
   const completedReplyRef = useRef(onReplyCompleted)
   completedReplyRef.current = onReplyCompleted
   const ownMessageSavedRef = useRef(onOwnMessageSaved)
   ownMessageSavedRef.current = onOwnMessageSaved
   const replySoundSinceRef = useRef(Date.now())
   const replyHasTextRef = useRef(false)
+  const restrictedAbortRef = useRef<AbortController | null>(null)
+  useEffect(() => () => {restrictedAbortRef.current?.abort()}, [sessionId])
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   // Mirror of isStreaming for the (deps: []) event handlers — lets
@@ -413,6 +420,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
   // runs against a torn-down component.
   useEffect(() => {
     return () => {
+      restrictedAbortRef.current?.abort()
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current)
         rafIdRef.current = null
@@ -1313,6 +1321,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
   }, [subscribeAndResume])
 
   const { status, send } = useWebSocket({
+    enabled: executionProfile !== "restricted" && executionProfile !== "pending",
     url: wsUrl,
     getToken,
     onMessage: handleMessage,
@@ -1375,7 +1384,53 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
    *  thing from the persisted message (messagesToTurns above). */
   const sendMessage = useCallback(
     (content: string, metadata?: Record<string, unknown>) => {
-      if (!content.trim() || isStreaming) return false
+      const profile = getExecutionProfile?.() ?? executionProfile
+      if (!content.trim() || isStreaming || profile === "pending") return false
+      if (profile === "restricted") {
+        const projectFileVersions = projectInputVersionIds(metadata)
+        if (!workspaceId || projectFileVersions === null) {toast.error("Restricted chat supports text and explicitly selected project files only"); return false}
+        const controller = new AbortController()
+        restrictedAbortRef.current = controller
+        setTurns(prev => [...prev, {id:uuid(),role:"user",parts:[{id:uuid(),type:"text",content:content.trim(),timestamp:new Date()}],isStreaming:false,timestamp:new Date()}])
+        setIsStreaming(true)
+        isStreamingRef.current = true
+        textBufferRef.current = ""
+        cancelledRef.current = false
+        replyHasTextRef.current = false
+        void (async () => {
+          let done = false
+          try {
+            const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(sessionId)}/restricted-run?workspace_id=${encodeURIComponent(workspaceId)}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:content.trim(), ...(projectFileVersions.length ? {project_file_versions:projectFileVersions} : {})}),signal:controller.signal})
+            if (!response.ok || !response.body) throw new Error("Restricted text run denied or unavailable")
+            const reader = response.body.getReader()
+            const decoder = new TextDecoder()
+            let pending = ""
+            while (true) {
+              const next = await reader.read()
+              if (next.done) break
+              pending += decoder.decode(next.value,{stream:true})
+              if (pending.length > 256*1024) throw new Error("Restricted output exceeds limit")
+              let boundary: number
+              while ((boundary = pending.indexOf("\n\n")) >= 0) {
+                if (controller.signal.aborted || cancelledRef.current) throw new Error("Restricted response cancelled")
+                const frame = pending.slice(0,boundary); pending = pending.slice(boundary+2)
+                if (!frame.startsWith("data: ")) throw new Error("Invalid restricted output")
+                const event = JSON.parse(frame.slice(6)) as {type:string;text:string}
+                if (event.type === "text" && !done && typeof event.text === "string") applyChatEvent("text",event.text)
+                else if (event.type === "done" && !done) {done = true;applyChatEvent("done","")}
+                else throw new Error("Invalid restricted output")
+              }
+            }
+            if (!done) throw new Error("Restricted response incomplete or revoked")
+          } catch (error) {
+            if (!controller.signal.aborted) applyChatEvent("error",error instanceof Error ? error.message : "Restricted text run failed")
+          } finally {
+            controller.abort()
+            if (restrictedAbortRef.current === controller) restrictedAbortRef.current = null
+          }
+        })()
+        return true
+      }
 
       const sent = send({
         type: "send_message",
@@ -1408,10 +1463,12 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
 
       return true
     },
-    [sessionId, send, isStreaming],
+    [sessionId, send, isStreaming, executionProfile, getExecutionProfile, workspaceId, applyChatEvent],
   )
 
   const stopGeneration = useCallback(() => {
+    restrictedAbortRef.current?.abort()
+    restrictedAbortRef.current = null
     send({
       type: "cancel_message",
       payload: JSON.stringify({ session_id: sessionId }),
@@ -1457,6 +1514,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     if (lastUserIdx === -1) return
     const lastUserContent = turns[lastUserIdx].parts.find((p) => p.type === "text")?.content
     if (!lastUserContent) return
+    if ((getExecutionProfile?.() ?? executionProfile) === "restricted") {sendMessage(lastUserContent); return}
 
     // An ask submission id belongs to the original send. A Page slug can be
     // retried: the server checks access again and captures a fresh snapshot.
@@ -1515,7 +1573,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     cancelledRef.current = false
     replyHasTextRef.current = false
 
-  }, [turns, sessionId, send, isStreaming])
+  }, [turns, sessionId, send, isStreaming, executionProfile, getExecutionProfile, sendMessage])
 
   // Edit a user message and resend — removes all subsequent turns.
   const editAndResend = useCallback(
@@ -1525,6 +1583,10 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       if (turnIdx === -1 || turns[turnIdx].role !== "user") return
 
       const trimmed = newContent.trim()
+      if ((getExecutionProfile?.() ?? executionProfile) === "restricted") {
+        toast.error("Restricted history is immutable; send your revision as a new message")
+        return
+      }
 
       // Same pre-send guard the composer runs (checkChatMessageSize) — checked
       // BEFORE any turn mutation or isStreaming flip. Without this, an oversize
@@ -1567,7 +1629,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
         }),
       })
     },
-    [turns, sessionId, send, isStreaming],
+    [turns, sessionId, send, isStreaming, executionProfile, getExecutionProfile],
   )
 
   const loadHistory = useCallback((history: ChatMessage[]) => {
@@ -1615,6 +1677,6 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     markHistoryUnavailable,
     resubscribeSession,
     isStreaming,
-    connectionStatus: status as WSStatus,
+    connectionStatus: (executionProfile === "restricted" ? "connected" : status) as WSStatus,
   }
 }

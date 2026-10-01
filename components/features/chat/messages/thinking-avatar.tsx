@@ -57,7 +57,7 @@ export function ThinkingAvatar({
           // h-full so the wrapper's size governs: the gutter mounts this at
           // 32px, the empty state at 48px, and neither should have to know
           // about the other.
-          "relative h-full w-full rounded-[10px]",
+          "relative h-full w-full rounded-lg",
           active && "thinking-face",
         )}
       />

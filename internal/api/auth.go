@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/mailer"
+	"github.com/crewship-ai/crewship/internal/retention"
 )
 
 // AuthHandler provides user authentication endpoints including signup, login, and WebSocket token exchange.
@@ -425,6 +427,15 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "insert workspace", err)
 		return
 	}
+	// The new workspace's own copy of the Keeper defaults (a template).
+	if err := governance.SeedWorkspace(r.Context(), tx, workspaceID); err != nil {
+		replyInternalError(w, h.logger, "keeper template", err)
+		return
+	}
+	if err := retention.ApplyDefaults(r.Context(), tx, workspaceID); err != nil {
+		replyInternalError(w, h.logger, "retention defaults", err)
+		return
+	}
 
 	_, err = tx.ExecContext(r.Context(),
 		"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -761,6 +772,10 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		workspaceID, req.FullName+"'s Workspace", slug, now, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "bootstrap: insert workspace", err)
+		return
+	}
+	if err := governance.SeedWorkspace(r.Context(), tx, workspaceID); err != nil {
+		replyInternalError(w, h.logger, "bootstrap: keeper template", err)
 		return
 	}
 

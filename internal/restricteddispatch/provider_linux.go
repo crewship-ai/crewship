@@ -15,13 +15,13 @@ import (
 )
 
 type providerBinding struct {
-	Credential, Grant, Revision, Model string
-	MaxOutputTokens                    int64
+	Credential, Grant, Revision, Model, Profile string
+	MaxOutputTokens                             int64
 }
 
 type providerSnapshot struct {
-	Credential, Grant, Ciphertext, Model string
-	GrantExpiry, KeyExpiry               sql.NullString
+	Credential, Grant, Ciphertext, Model, Profile string
+	GrantExpiry, KeyExpiry                        sql.NullString
 }
 
 type providerQuery interface {
@@ -38,10 +38,21 @@ var providerBearer = regexp.MustCompile(`^[a-zA-Z0-9._~+/-]+=*$`)
 // credential pool to try until one works. maxOutputTokens is trusted server
 // configuration; this API must not be populated from client task metadata.
 func (a Authority) PrepareResponses(ctx context.Context, user, workspace, agent, chat, parent string, rights []access.Right, maxOutputTokens int64, build BuildCommand) (string, access.Attempt, error) {
+	return a.prepareResponses(ctx, user, workspace, agent, chat, parent, rights, maxOutputTokens, build, false)
+}
+
+func (a Authority) PrepareChatResponses(ctx context.Context, user, workspace, agent, chat, parent string, rights []access.Right, maxOutputTokens int64, build BuildCommand) (string, access.Attempt, error) {
+	return a.prepareResponses(ctx, user, workspace, agent, chat, parent, rights, maxOutputTokens, build, true)
+}
+func (a Authority) prepareResponses(ctx context.Context, user, workspace, agent, chat, parent string, rights []access.Right, maxOutputTokens int64, build BuildCommand, chatOperation bool) (string, access.Attempt, error) {
 	if build == nil || maxOutputTokens < 1 || maxOutputTokens > 32768 {
 		return "", access.Attempt{}, access.ErrDenied
 	}
-	return a.Prepare(ctx, user, workspace, agent, chat, parent, rights, func(ctx context.Context, attempt access.Attempt) ([]string, error) {
+	prepare := a.Prepare
+	if chatOperation {
+		prepare = a.PrepareChat
+	}
+	return prepare(ctx, user, workspace, agent, chat, parent, rights, func(ctx context.Context, attempt access.Attempt) ([]string, error) {
 		if err := a.pinProvider(ctx, attempt, maxOutputTokens); err != nil {
 			return nil, err
 		}
@@ -59,14 +70,14 @@ func (a Authority) pinProvider(ctx context.Context, attempt access.Attempt, limi
 	if err != nil {
 		return err
 	}
-	binding := providerBinding{snapshot.Credential, snapshot.Grant, snapshot.revision(), snapshot.Model, limit}
+	binding := providerBinding{Credential: snapshot.Credential, Grant: snapshot.Grant, Revision: snapshot.revision(), Model: snapshot.Model, Profile: snapshot.Profile, MaxOutputTokens: limit}
 	if attempt.Parent != "" {
 		p, err := loadProvider(ctx, tx, attempt.Parent)
-		if err != nil || p.Credential != binding.Credential || p.Revision != binding.Revision || p.Model != binding.Model || p.MaxOutputTokens < limit {
+		if err != nil || p.Credential != binding.Credential || p.Revision != binding.Revision || p.Model != binding.Model || p.Profile != binding.Profile || p.MaxOutputTokens < limit {
 			return access.ErrDenied
 		}
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO restricted_provider_bindings(attempt_id,credential_id,grant_id,credential_revision,model,max_output_tokens) VALUES(?,?,?,?,?,?)`, attempt.ID, binding.Credential, binding.Grant, binding.Revision, binding.Model, binding.MaxOutputTokens)
+	_, err = tx.ExecContext(ctx, `INSERT INTO restricted_provider_bindings(attempt_id,credential_id,grant_id,credential_revision,model,max_output_tokens,execution_profile) VALUES(?,?,?,?,?,?,?)`, attempt.ID, binding.Credential, binding.Grant, binding.Revision, binding.Model, binding.MaxOutputTokens, binding.Profile)
 	if err != nil {
 		return err
 	}
@@ -75,12 +86,12 @@ func (a Authority) pinProvider(ctx context.Context, attempt access.Attempt, limi
 
 func loadProvider(ctx context.Context, q providerQuery, attemptID string) (providerBinding, error) {
 	var b providerBinding
-	err := q.QueryRowContext(ctx, `SELECT credential_id,grant_id,credential_revision,model,max_output_tokens FROM restricted_provider_bindings WHERE attempt_id=?`, attemptID).Scan(&b.Credential, &b.Grant, &b.Revision, &b.Model, &b.MaxOutputTokens)
+	err := q.QueryRowContext(ctx, `SELECT credential_id,grant_id,credential_revision,model,max_output_tokens,execution_profile FROM restricted_provider_bindings WHERE attempt_id=?`, attemptID).Scan(&b.Credential, &b.Grant, &b.Revision, &b.Model, &b.MaxOutputTokens, &b.Profile)
 	return b, err
 }
 
 func providerCurrent(ctx context.Context, q providerQuery, attempt access.Attempt, grantID string) (providerSnapshot, error) {
-	rows, err := q.QueryContext(ctx, `SELECT c.id,ac.id,c.encrypted_value,a.llm_model,ac.expires_at,c.token_expires_at
+	rows, err := q.QueryContext(ctx, `SELECT c.id,ac.id,c.encrypted_value,a.llm_model,a.restricted_execution_profile,ac.expires_at,c.token_expires_at
         FROM agents a JOIN agent_credentials ac ON ac.agent_id=a.id
         JOIN credentials c ON c.id=ac.credential_id AND c.workspace_id=a.workspace_id
         WHERE a.id=? AND a.workspace_id=? AND a.deleted_at IS NULL AND a.llm_provider='OPENAI'
@@ -95,7 +106,7 @@ func providerCurrent(ctx context.Context, q providerQuery, attempt access.Attemp
 	count := 0
 	for rows.Next() {
 		count++
-		if err := rows.Scan(&snapshot.Credential, &snapshot.Grant, &snapshot.Ciphertext, &snapshot.Model, &snapshot.GrantExpiry, &snapshot.KeyExpiry); err != nil {
+		if err := rows.Scan(&snapshot.Credential, &snapshot.Grant, &snapshot.Ciphertext, &snapshot.Model, &snapshot.Profile, &snapshot.GrantExpiry, &snapshot.KeyExpiry); err != nil {
 			return providerSnapshot{}, err
 		}
 	}
@@ -112,7 +123,7 @@ func providerCurrent(ctx context.Context, q providerQuery, attempt access.Attemp
 }
 
 func (s providerSnapshot) revision() string {
-	sum := sha256.Sum256([]byte(s.Credential + "\x00" + s.Ciphertext))
+	sum := sha256.Sum256([]byte(s.Credential + "\x00" + s.Ciphertext + "\x00" + s.Profile))
 	return hex.EncodeToString(sum[:])
 }
 

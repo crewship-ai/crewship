@@ -49,6 +49,12 @@ var roleAllows = map[string]map[string]bool{
 var roleBehaviorExcluded = map[string]string{
 	roleSelf:   "handler authorizes access to the current user's resource",
 	roleInline: "handler authorizes by resource or capability",
+	// The instance gate asks who administers the server, not what role the
+	// caller holds in the workspace this matrix seeds, so the OWNER/ADMIN/
+	// MEMBER grid has nothing to say about it. TestInstanceGate and
+	// TestInstanceRoutes_RefuseAWorkspaceAdmin pin it (instance_admin_test.go,
+	// admin_instance_test.go).
+	roleInstance: "instance gate: who administers the server, pinned by the instance admin tests",
 }
 
 // TestIngressAuthorizationMatrix exercises the ingress chokepoint, not the

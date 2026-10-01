@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -158,11 +159,12 @@ runner, a quarterly compliance script).`,
 
 		var result struct {
 			Data []struct {
-				ID         string  `json:"id" yaml:"id"`
-				Name       string  `json:"name" yaml:"name"`
-				CreatedAt  string  `json:"created_at" yaml:"created_at"`
-				LastUsedAt *string `json:"last_used_at" yaml:"last_used_at"`
-				RevokedAt  *string `json:"revoked_at" yaml:"revoked_at"`
+				ID         string   `json:"id" yaml:"id"`
+				Name       string   `json:"name" yaml:"name"`
+				CreatedAt  string   `json:"created_at" yaml:"created_at"`
+				LastUsedAt *string  `json:"last_used_at" yaml:"last_used_at"`
+				RevokedAt  *string  `json:"revoked_at" yaml:"revoked_at"`
+				Scopes     []string `json:"scopes,omitempty" yaml:"scopes,omitempty"`
 			} `json:"data" yaml:"data"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
@@ -172,7 +174,7 @@ runner, a quarterly compliance script).`,
 		now := time.Now().UTC()
 		var staleIDs []string
 		f := newFormatter()
-		headers := []string{"ID", "NAME", "CREATED", "LAST USED", "STATUS"}
+		headers := []string{"ID", "NAME", "SCOPES", "CREATED", "LAST USED", "STATUS"}
 		var rows [][]string
 		for _, tok := range result.Data {
 			created := tok.CreatedAt
@@ -197,7 +199,12 @@ runner, a quarterly compliance script).`,
 			if len(displayID) > 12 {
 				displayID = displayID[:12]
 			}
-			rows = append(rows, []string{f.ShortID(tok.ID, displayID), tok.Name, created, lastUsed, status})
+			// "all" = unrestricted: the token carries the user's full role.
+			scopes := "all"
+			if len(tok.Scopes) > 0 {
+				scopes = strings.Join(tok.Scopes, ",")
+			}
+			rows = append(rows, []string{f.ShortID(tok.ID, displayID), tok.Name, scopes, created, lastUsed, status})
 		}
 		if err := f.Auto(result.Data, headers, rows); err != nil {
 			return err

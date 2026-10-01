@@ -1,10 +1,12 @@
 "use client"
 
+import { StatusPill } from "@/components/ui/status-pill"
 import { useCallback, useEffect, useState } from "react"
 import { Laptop, LogOut, Smartphone, Terminal, HelpCircle } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch } from "@/lib/api-fetch"
+import { cn } from "@/lib/utils"
 import { describeUserAgent, type DeviceKind } from "@/lib/user-agent"
 import { formatShortDate, timeAgo } from "@/lib/time"
 import { Button } from "@/components/ui/button"
@@ -46,6 +48,16 @@ function DeviceIcon({ kind }: { kind: DeviceKind }) {
   )
 }
 
+/** Rows shown before "Show all": the ones anyone looks at. */
+export const VISIBLE_SESSIONS = 5
+
+/** This device first — the reader's anchor — then most recently used. */
+export function orderSessions(sessions: SessionDTO[]): SessionDTO[] {
+  return [...sessions].sort(
+    (a, b) => Number(b.is_current) - Number(a.is_current) || Date.parse(b.last_used_at) - Date.parse(a.last_used_at),
+  )
+}
+
 export function DeviceSessions({
   onSignOut,
   currentExpiresIn,
@@ -62,6 +74,7 @@ export function DeviceSessions({
   const [busyId, setBusyId] = useState<string | null>(null)
   const [confirmBulk, setConfirmBulk] = useState(false)
   const [bulkRunning, setBulkRunning] = useState(false)
+  const [showAll, setShowAll] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -167,13 +180,14 @@ export function DeviceSessions({
     )
   }
 
-  // Current device first: it is the reader's anchor for judging the rest.
-  const ordered = [...sessions].sort((a, b) => Number(b.is_current) - Number(a.is_current))
+  const ordered = orderSessions(sessions)
+  const visible = showAll ? ordered : ordered.slice(0, VISIBLE_SESSIONS)
+  const hidden = ordered.length - VISIBLE_SESSIONS
 
   return (
     <>
       <div className="flex items-center justify-between px-4 pt-2.5 pb-1.5">
-        <span className="text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground-soft font-semibold">
+        <span className="eyebrow">
           Browsers &amp; devices
         </span>
         {others.length > 0 && (
@@ -188,7 +202,10 @@ export function DeviceSessions({
         )}
       </div>
 
-      {ordered.map((s) => {
+      {/* Past five, the list scrolls inside the card instead of growing the
+          page: ~70 sessions from a script used to fill the whole screen. */}
+      <div className={cn(showAll && hidden > 0 && "max-h-[26rem] overflow-y-auto overscroll-contain")} data-slot="session-list">
+      {visible.map((s) => {
         const { label, kind } = describeUserAgent(s.user_agent)
         return (
           <SettingsRow
@@ -200,9 +217,7 @@ export function DeviceSessions({
                   <span className="flex items-center gap-2">
                     <span className="truncate">{label}</span>
                     {s.is_current && (
-                      <span className="text-[10px] px-1.5 py-px rounded-full bg-success/15 text-success border border-success/30">
-                        this device
-                      </span>
+                      <StatusPill tone="success" label="This device" />
                     )}
                   </span>
                   <span className="block text-[11px] text-muted-foreground-soft mt-0.5">
@@ -238,6 +253,15 @@ export function DeviceSessions({
           </SettingsRow>
         )
       })}
+      </div>
+
+      {hidden > 0 && (
+        <div className="border-t border-border/60 px-4 py-2">
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-primary-hover" onClick={() => setShowAll((v) => !v)}>
+            {showAll ? "Show fewer" : `Show all ${ordered.length} sessions`}
+          </Button>
+        </div>
+      )}
 
       {others.length === 0 && (
         <div className="px-4 pb-3 text-[11px] text-muted-foreground">

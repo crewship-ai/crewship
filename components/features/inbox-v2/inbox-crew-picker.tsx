@@ -52,7 +52,7 @@ export function InboxCrewPicker({ lookup, entries, value, onChange }: {
         type="button"
         aria-label="Filter by crew"
         aria-expanded={open}
-        className="kit-tap flex h-8 w-full min-w-0 items-center gap-2 rounded-md border border-white/[0.08] bg-white/[0.04] px-2.5 text-left text-xs text-foreground transition-colors hover:border-primary/30 focus-visible:outline-2 focus-visible:outline-primary coarse:h-12"
+        className="kit-tap flex h-8 w-full min-w-0 items-center gap-2 rounded-md border border-foreground/[0.08] bg-foreground/[0.04] px-2.5 text-left text-xs text-foreground transition-colors hover:border-primary/30 focus-visible:outline-2 focus-visible:outline-primary coarse:h-12"
       >
         {selected
           ? <CrewIcon icon={selected.icon || "users"} color={selected.color} size="sm" className="!h-5 !w-5 !shrink-0 !rounded" />

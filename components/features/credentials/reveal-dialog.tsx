@@ -229,7 +229,7 @@ function RevealDialogSession({
               Hidden automatically after 30 seconds, when you leave this tab, or when you close this dialog. A second look needs a second reveal,
               with its own reason and its own audit entry.
             </div>
-            <div className="rounded-md border border-white/10 bg-background px-3 py-2">
+            <div className="rounded-md border border-foreground/10 bg-background px-3 py-2">
               <code className="block break-all font-mono text-xs" data-testid="revealed-value">
                 {value}
               </code>

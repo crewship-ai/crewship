@@ -135,7 +135,7 @@ export function BarMenu({ icon: Icon, ariaLabel, badge, open, onOpenChange, test
               initial={{ opacity: 0, scale: 0.96, y: -4 }}
               animate={{ opacity: 1, scale: 1, y: 0, transition: { duration: 0.12 } }}
               exit={{ opacity: 0, scale: 0.96, y: -4, transition: { duration: 0.1 } }}
-              className="absolute right-0 top-9 z-50 w-[380px] overflow-hidden rounded-lg border border-white/[0.1] bg-card shadow-xl"
+              className="absolute right-0 top-9 z-50 w-[380px] overflow-hidden rounded-lg border border-foreground/[0.1] bg-card shadow-xl"
               data-testid={`${testId}-popover`}
             >
               {children}
@@ -158,7 +158,7 @@ export interface BarMenuHeaderProps {
 
 export function BarMenuHeader({ title, pill, meta }: BarMenuHeaderProps) {
   return (
-    <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2">
+    <div className="flex items-center gap-2 border-b border-foreground/[0.06] px-3 py-2">
       <span className="type-row font-medium">{title}</span>
       {pill}
       {meta && <span className="type-meta ml-auto text-muted-foreground">{meta}</span>}
@@ -188,7 +188,7 @@ export interface BarMenuSectionProps {
 export function BarMenuSection({ label, count, tone, overflow, children }: BarMenuSectionProps) {
   return (
     <div data-testid={`bar-menu-section-${label.toLowerCase().replace(/\s+/g, "-")}`}>
-      <div className="flex items-center gap-2 border-b border-white/[0.04] bg-surface-subtle/60 px-3 py-1">
+      <div className="flex items-center gap-2 border-b border-foreground/[0.04] bg-surface-subtle/60 px-3 py-1">
         <span className={cn("type-meta uppercase tracking-wider", tone === "warn" ? "text-warn" : "text-foreground/40")}>
           {label}
         </span>
@@ -260,7 +260,7 @@ export function BarMenuRow({ leading, title, meta, trailing, actions, onClick, t
               onClick()
             }
           }}
-          className={cn(ROW_BASE, "cursor-pointer hover:bg-white/[0.04]")}
+          className={cn(ROW_BASE, "cursor-pointer hover:bg-foreground/[0.04]")}
         >
           {body}
         </div>
@@ -269,7 +269,7 @@ export function BarMenuRow({ leading, title, meta, trailing, actions, onClick, t
           type="button"
           data-testid={testId}
           onClick={onClick}
-          className={cn(ROW_BASE, "hover:bg-white/[0.04]")}
+          className={cn(ROW_BASE, "hover:bg-foreground/[0.04]")}
         >
           {body}
         </button>
@@ -303,7 +303,7 @@ export function BarMenuRowAction({
     "type-meta inline-flex items-center gap-1 rounded-md border px-2 py-0.5 transition-colors",
     danger
       ? "border-transparent text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-      : "border-white/[0.08] bg-white/[0.03] text-foreground/85 hover:bg-white/[0.06]",
+      : "border-foreground/[0.08] bg-foreground/[0.03] text-foreground/85 hover:bg-foreground/[0.06]",
     disabled && "opacity-50",
   )
   const Comp = asChild ? Slot.Root : "button"
@@ -338,7 +338,7 @@ export function BarMenuEmpty({
 /** The action strip: secondary on the left, the way out on the right. */
 export function BarMenuFooter({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2 border-t border-white/[0.06] px-2 py-1.5" data-testid="bar-menu-footer">
+    <div className="flex items-center gap-2 border-t border-foreground/[0.06] px-2 py-1.5" data-testid="bar-menu-footer">
       {children}
     </div>
   )

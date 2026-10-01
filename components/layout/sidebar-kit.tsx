@@ -63,7 +63,7 @@ export function SidebarSearch({
     <div
       className={cn(
         "kit-tap flex items-center gap-1.5 h-8 px-2.5 flex-1 min-w-0 rounded-md",
-        "bg-white/[0.04] border border-white/[0.08]",
+        "bg-foreground/[0.04] border border-foreground/[0.08]",
         "focus-within:border-primary/40 transition-colors",
         className,
       )}
@@ -118,7 +118,7 @@ export function SidebarFilterButton({
         "kit-tap inline-flex items-center gap-1.5 h-8 px-2.5 shrink-0 rounded-md border text-[11px] whitespace-nowrap transition-colors",
         on
           ? "bg-primary/10 border-primary/30 text-primary-hover"
-          : "bg-white/[0.04] border-white/[0.08] text-muted-foreground hover:text-foreground",
+          : "bg-foreground/[0.04] border-foreground/[0.08] text-muted-foreground hover:text-foreground",
         className,
       )}
       {...props}
@@ -242,12 +242,12 @@ export function SidebarFilterPopover({
               aria-label={label}
               className={cn(
                 "absolute right-0 top-9 z-50 min-w-[200px] max-h-[360px] overflow-y-auto",
-                "rounded-lg border border-white/[0.1] bg-card py-1 shadow-xl",
+                "rounded-lg border border-foreground/[0.1] bg-card py-1 shadow-xl",
                 panelClassName,
               )}
             >
-              <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-1.5">
-                <span className="text-[9px] font-semibold uppercase tracking-wider text-foreground/40">
+              <div className="flex items-center gap-2 border-b border-foreground/[0.06] px-3 py-1.5">
+                <span className="font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">
                   Filters
                 </span>
                 {activeCount > 0 && onClear && (
@@ -295,8 +295,8 @@ export function SidebarFacet({
 }) {
   return (
     <>
-      {!first && <div className="mt-1 border-t border-white/[0.06]" />}
-      <div className="px-3 py-1 text-[9px] font-semibold uppercase tracking-wider text-foreground/40">
+      {!first && <div className="mt-1 border-t border-foreground/[0.06]" />}
+      <div className="px-3 py-1 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">
         {label}
       </div>
       <button
@@ -304,7 +304,7 @@ export function SidebarFacet({
         onClick={onReset}
         aria-pressed={resetActive}
         className={cn(
-          "kit-tap w-full px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
+          "kit-tap w-full px-3 py-1.5 text-left text-xs hover:bg-foreground/[0.06]",
           resetActive ? "text-primary" : "text-muted-foreground/80",
         )}
       >
@@ -333,7 +333,7 @@ export function SidebarFacetOption({
       onClick={onToggle}
       aria-pressed={active}
       className={cn(
-        "kit-tap flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
+        "kit-tap flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-foreground/[0.06]",
         active ? "text-primary" : "text-muted-foreground/80",
         className,
       )}
@@ -360,7 +360,7 @@ export function SidebarViewButton({
       aria-label={ariaLabel}
       className={cn(
         "kit-tap inline-flex items-center justify-center h-8 w-8 shrink-0 rounded-md border text-muted-foreground/70",
-        "bg-white/[0.04] border-white/[0.08] hover:text-foreground transition-colors",
+        "bg-foreground/[0.04] border-foreground/[0.08] hover:text-foreground transition-colors",
         className,
       )}
       {...props}
@@ -389,7 +389,7 @@ export function SidebarCollapseButton({
       title={collapsed ? "Expand" : "Collapse"}
       className={cn(
         "kit-tap inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground/70",
-        "hover:text-foreground hover:bg-white/[0.04] transition-colors",
+        "hover:text-foreground hover:bg-foreground/[0.04] transition-colors",
         className,
       )}
       {...props}
@@ -478,7 +478,7 @@ export function SidebarSection({
           )}
         />
       )}
-      <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wider text-foreground/50">
+      <span className="min-w-0 truncate font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
         {label}
       </span>
       {count != null && (
@@ -497,7 +497,7 @@ export function SidebarSection({
             onClick={onToggle}
             aria-expanded={!collapsed}
             className={cn(
-              "kit-tap flex flex-1 items-center gap-1.5 px-3 py-1.5 hover:bg-white/[0.02] transition-colors",
+              "kit-tap flex flex-1 items-center gap-1.5 px-3 py-1.5 hover:bg-foreground/[0.02] transition-colors",
               headerClassName,
             )}
           >

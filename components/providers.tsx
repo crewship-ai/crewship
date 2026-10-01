@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { MotionConfig } from "motion/react"
+import { ThemeProvider } from "next-themes"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { AuthProvider } from "@/hooks/use-auth"
@@ -18,6 +19,8 @@ import { Toaster } from "@/components/ui/sonner"
  * fetch+useState hooks migrate incrementally; a wholesale rewrite is
  * out of scope.
  */
+export const HARBOR_THEMES = ["light", "dark"]
+
 export function Providers({ children }: { children: React.ReactNode }) {
   // useState keeps the client stable across re-renders. Creating a
   // fresh QueryClient on every render would dump the cache on every
@@ -34,6 +37,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
       }),
   )
   return (
+    // Harbor themes: "dark" is the default (unchanged for everyone who never
+    // opens the switcher) and "light" the Harbor day palette. The class lands
+    // on <html>, where globals.css keys the palettes.
+    <ThemeProvider attribute="class" defaultTheme="dark" themes={HARBOR_THEMES} enableSystem disableTransitionOnChange>
     <QueryClientProvider client={queryClient}>
       <MotionConfig reducedMotion="user">
         <AuthProvider>
@@ -42,5 +49,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
         </AuthProvider>
       </MotionConfig>
     </QueryClientProvider>
+    </ThemeProvider>
   )
 }

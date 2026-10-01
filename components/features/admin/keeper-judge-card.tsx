@@ -35,7 +35,7 @@ import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SaveFooter } from "@/components/ui/save-footer"
 import { useDirtyForm } from "@/hooks/use-dirty-form"
-import { useAbilities } from "@/hooks/use-abilities"
+import { useIsInstanceAdmin } from "@/hooks/use-auth"
 import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
 import { cn } from "@/lib/utils"
 
@@ -170,11 +170,11 @@ function StageRow({ stage }: { stage: JudgeStage }) {
 }
 
 export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | undefined }) {
-  // The PUT is roleManage (OWNER/ADMIN) server-side, which is exactly who gets
-  // "manage" on Workspace from CASL. The server stays authoritative; a
-  // read-only render is a UX hint, not the gate.
-  const { abilities } = useAbilities()
-  const canEdit = abilities.can("manage", "Workspace")
+  // An instance-wide setting: the PUT is authedInstanceMut, which admits an
+  // instance admin whatever their role in this workspace and refuses a
+  // workspace ADMIN who is not one. The card follows the same rule (review
+  // R2); the server stays the gate.
+  const canEdit = useIsInstanceAdmin() === true
 
   const [cfg, setCfg] = useState<KeeperConfigResponse | null>(null)
   const [err, setErr] = useState<string | null>(null)

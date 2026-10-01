@@ -488,11 +488,11 @@ func TestCreateBackup_StorageFaultLadder(t *testing.T) {
 		st   *faultStorage
 		sub  string
 	}{
-		{"payload temp", &faultStorage{failCreateTempAt: 1}, "create payload temp"},
-		{"sealed temp", &faultStorage{failCreateTempAt: 2}, "create sealed temp"},
-		{"reopen payload", &faultStorage{failOpenAt: 1}, "reopen payload"},
+		// One staging file now: the payload is sealed as it is packed, so
+		// there is no plaintext payload temp to create or reopen.
+		{"sealed temp", &faultStorage{failCreateTempAt: 1}, "create sealed temp"},
 		{"partial create", &faultStorage{failCreate: true}, "open partial"},
-		{"reopen sealed", &faultStorage{failOpenAt: 2}, "reopen sealed"},
+		{"reopen sealed", &faultStorage{failOpenAt: 1}, "reopen sealed"},
 		{"stat partial", &faultStorage{failStat: true}, "stat partial"},
 		{"rename final", &faultStorage{failRename: true}, "rename final bundle"},
 	}

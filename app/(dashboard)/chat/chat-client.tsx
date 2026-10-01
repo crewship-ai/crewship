@@ -872,7 +872,7 @@ export function ChatClient() {
         {!humanConversationId && <div
           role="tablist"
           aria-label="Chat panel"
-          className="flex h-9 shrink-0 items-stretch border-b border-white/[0.08]"
+          className="flex h-9 shrink-0 items-stretch border-b border-foreground/[0.08]"
         >
           {MOBILE_PANELS.map(({ id, label, icon: Icon }) => (
             <button
@@ -949,7 +949,7 @@ export function ChatClient() {
           the width and the rule, the explorer inside owns the content. */}
       <aside
         className={cn(
-          "shrink-0 overflow-hidden border-r border-white/[0.06] transition-all",
+          "shrink-0 overflow-hidden border-r border-foreground/[0.06] transition-all",
           leftCollapsed ? "w-9" : "w-[280px]",
         )}
       >

@@ -39,20 +39,20 @@ var backupCreateCmd = &cobra.Command{
 			return fmt.Errorf("--crew <slug-or-id> is required when --scope=crew")
 		}
 
-		// Mutually-exclusive encryption selectors. --recipient overrides
-		// --passphrase-file; --no-encrypt wins over both and skips the
-		// prompt entirely.
-		if recipient != "" && noEncrypt {
-			return fmt.Errorf("--recipient and --no-encrypt are mutually exclusive")
+		// Every new bundle is encrypted: agent home folders inside it can
+		// hold credentials the vault never sealed (~/.aws, ~/.ssh, tool
+		// logins). The flag stays so an old script gets this answer instead
+		// of an unknown-flag error.
+		if noEncrypt {
+			return fmt.Errorf("--no-encrypt is no longer accepted: every new backup is encrypted, because agent home folders in a bundle can hold credentials (~/.aws, ~/.ssh, tool logins). Use a passphrase (prompt or --passphrase-file) or --recipient")
 		}
+		// Mutually-exclusive encryption selectors.
 		if recipient != "" && passphraseFile != "" {
 			return fmt.Errorf("--recipient and --passphrase-file are mutually exclusive")
 		}
 
 		var passphrase string
 		switch {
-		case noEncrypt:
-			cli.PrintWarning("--no-encrypt: bundle will contain plaintext data. Protect it accordingly.")
 		case recipient != "":
 			if !strings.HasPrefix(recipient, "age1") {
 				return fmt.Errorf("--recipient must be an age1… public key")
@@ -130,16 +130,15 @@ var backupCreateCmd = &cobra.Command{
 			"crew_id":    crewID,
 			"passphrase": passphrase,
 			"recipient":  recipient,
-			"no_encrypt": noEncrypt,
 			"output_dir": outputDir,
 		}
 		// Transport-security pre-flight before the encryption passphrase
 		// rides the wire — mirrors cmd_login.go / cmd_setup.go. Blocks on
 		// a structurally broken --server, warns on plaintext HTTP to a
 		// non-loopback host. Skipped when nothing secret is being sent
-		// (--no-encrypt / --recipient leave passphrase empty), so an
-		// unencrypted backup over a plain-HTTP dev box doesn't get a
-		// spurious credentials-in-the-clear warning. EffectiveServer (not
+		// (--recipient leaves passphrase empty), so a recipient-sealed
+		// backup over a plain-HTTP dev box doesn't get a spurious
+		// credentials-in-the-clear warning. EffectiveServer (not
 		// ResolveServer) so this matches what the client.Post below (via
 		// newAPIClient) actually dials — flag > profile > env > config >
 		// default (#1146/#1163).
@@ -148,7 +147,7 @@ var backupCreateCmd = &cobra.Command{
 				return err
 			}
 		}
-		resp, err := client.Post("/api/v1/admin/backups", body)
+		resp, err := client.Post(backupRoute("/api/v1/admin/backups"), body)
 		if err != nil {
 			return err
 		}
@@ -291,7 +290,7 @@ var backupRestoreCmd = &cobra.Command{
 			"files_only":   filesOnly,
 		}
 		client := newAPIClient()
-		resp, err := client.Post("/api/v1/admin/backups/restore", body)
+		resp, err := client.Post(backupRoute("/api/v1/admin/backups/restore"), body)
 		if err != nil {
 			return err
 		}
@@ -581,7 +580,7 @@ var backupDeleteCmd = &cobra.Command{
 			}
 		}
 		client := newAPIClient()
-		resp, err := client.Delete("/api/v1/admin/backups?path=" + encodeQuery(args[0]))
+		resp, err := client.Delete(backupRoute("/api/v1/admin/backups?path=" + encodeQuery(args[0])))
 		if err != nil {
 			return err
 		}

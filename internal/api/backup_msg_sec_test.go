@@ -41,7 +41,7 @@ func TestSecBackupMsg_CreateOutputDir_NoPathLeak(t *testing.T) {
 	}
 	body := jsonBody(map[string]any{
 		"scope":      "workspace",
-		"no_encrypt": true,
+		"passphrase": "msg-sec-passphrase-123",
 		"output_dir": "/tmp/elsewhere",
 	})
 	req := withWorkspaceUser(

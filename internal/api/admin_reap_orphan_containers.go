@@ -127,7 +127,7 @@ func (h *OrphanContainerHandler) workspaceCrews(ctx context.Context, workspaceID
 // (a stop/remove that failed leaves Reaped=false on that entry and is logged).
 func (h *OrphanContainerHandler) Reap(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	if !canRole(RoleFromContext(ctx), "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}

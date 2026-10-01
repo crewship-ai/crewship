@@ -61,3 +61,33 @@ describe("client dashboard results", () => {
     expect(screen.queryByRole("region", { name: "In progress" })).toBeNull()
   })
 })
+
+// A routine on a five-minute schedule filled every row of "Finished recently"
+// with the same name (dev3, coolify-ingest ×8). One row per routine, with how
+// many runs it stands for and a link to the newest.
+describe("finished routine results are grouped per routine", () => {
+  const at = (minAgo: number) => new Date(Date.now() - minAgo * 60_000).toISOString()
+  const run = (id: string, slug: string, minAgo: number, status = "completed") =>
+    ({ id, status, pipeline_slug: slug, pipeline_name: slug, ended_at: at(minAgo) }) as PipelineRun
+
+  it("folds runs of one routine into a single group led by the newest run", async () => {
+    const { groupRoutineResults } = await import("../dashboard-results")
+    const groups = groupRoutineResults([run("a", "ingest", 4), run("b", "ingest", 9), run("c", "digest", 12), run("d", "ingest", 14)])
+    expect(groups.map((g) => [g.latest.id, g.count])).toEqual([["a", 3], ["c", 1]])
+  })
+
+  it("ignores runs that did not complete and caps the list at eight routines", async () => {
+    const { groupRoutineResults } = await import("../dashboard-results")
+    const many = Array.from({ length: 10 }, (_, i) => run(`r${i}`, `routine-${i}`, i))
+    expect(groupRoutineResults([run("x", "ingest", 1, "failed"), ...many])).toHaveLength(8)
+    expect(groupRoutineResults([run("x", "ingest", 1, "failed")])).toEqual([])
+  })
+
+  it("renders one row per routine with its run count", () => {
+    render(<DashboardResults {...base} recentRoutineRuns={[run("a", "coolify-ingest", 4), run("b", "coolify-ingest", 9), run("c", "coolify-ingest", 14)]} />)
+    const rows = screen.getAllByRole("link", { name: /coolify-ingest/ })
+    expect(rows).toHaveLength(1)
+    expect(rows[0].getAttribute("href")).toBe("/activity?run=a&pipeline=coolify-ingest")
+    expect(rows[0].textContent).toContain("×3")
+  })
+})

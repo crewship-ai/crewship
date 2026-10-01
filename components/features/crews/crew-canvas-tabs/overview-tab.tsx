@@ -2,7 +2,8 @@
 
 import Link from "next/link"
 import { Users, Activity } from "lucide-react"
-import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { HarborAgentCard } from "../agent-ring-avatar"
+import { InlineEmpty } from "@/components/ui/inline-empty"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { AssignedConnected } from "../assigned-connected"
 import { RunMetrics } from "../workspace-overview"
@@ -16,6 +17,8 @@ export interface OverviewTabProps {
   crewId: string
   crewSlug?: string
   crewName?: string
+  /** Palette id or hex; rings the agent portraits. */
+  crewColor?: string | null
   avatarStyle?: string | null
   agentsForCrew: AgentSummary[]
   onSelectAgent?: (slug: string) => void
@@ -41,6 +44,7 @@ export function OverviewTab({
   crewId,
   crewSlug = "",
   crewName = "Crew",
+  crewColor,
   avatarStyle,
   agentsForCrew,
   onOpenTeam,
@@ -52,25 +56,25 @@ export function OverviewTab({
 }: OverviewTabProps) {
   return (
     <div className="space-y-7">
-      <DashboardCard title="Team" icon={Users} action={<button onClick={onOpenTeam} className="text-primary">View team →</button>}>
-        {teamError ? <p role="alert" className="mt-3 text-sm text-muted-foreground">Team could not be loaded. Open Team to retry.</p> : teamLoading && !agentsForCrew.length ? <p role="status" className="mt-3 text-sm text-muted-foreground">Loading team…</p> : !agentsForCrew.length ? <p className="mt-3 text-sm text-muted-foreground">Add an agent to start working together.</p> : <ul className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{agentsForCrew.slice(0, 6).map((agent) => <li key={agent.id}><Link href={`/crews?agent=${encodeURIComponent(agent.slug)}`} onClick={event => { if (onSelectAgent && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) { event.preventDefault(); onSelectAgent(agent.slug) } }} className="flex items-center gap-3 rounded-xl border border-border/60 p-3 hover:bg-muted transition-colors"><AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style || avatarStyle} avatarUrl={agent.avatar_url} className="h-10 w-10" /><div className="min-w-0"><p className="text-sm font-medium">{agent.name}</p><p className="text-xs text-muted-foreground mt-1">{agent.role_title || (agent.agent_role === "LEAD" ? "Lead" : "Agent")} · {agent.status.toLowerCase()}</p></div></Link></li>)}</ul>}
+      <DashboardCard title="Team" icon={Users} action={<button onClick={onOpenTeam} className="text-primary-hover hover:underline">View team →</button>}>
+        {teamError ? <p role="alert" className="mt-3 text-sm text-muted-foreground">Team could not be loaded. Open Team to retry.</p> : teamLoading && !agentsForCrew.length ? <p role="status" className="mt-3 text-sm text-muted-foreground">Loading team…</p> : !agentsForCrew.length ? <InlineEmpty icon={Users} className="mt-3" text="No agents yet. Add one with + Agent to start working together." /> : <ul className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{agentsForCrew.slice(0, 6).map((agent) => <li key={agent.id}><HarborAgentCard agent={agent} crewName={crewName} crewColor={crewColor} avatarStyle={avatarStyle} href={`/crews?agent=${encodeURIComponent(agent.slug)}`} onSelect={onSelectAgent ? () => onSelectAgent(agent.slug) : undefined} /></li>)}</ul>}
       </DashboardCard>
       <RunMetrics workspaceId={workspaceId} crewId={crewId} />
 
       {/* Activity with per-agent filter chips */}
       <section className="space-y-3">
         <div className="flex items-baseline justify-between flex-wrap gap-2">
-          <h2 className="text-lg font-semibold flex items-center gap-2"><Activity className="h-4 w-4 text-muted-foreground" />Recent activity</h2>
+          <h2 className="eyebrow flex items-center gap-2"><Activity className="h-3.5 w-3.5" />Recent activity</h2>
           <div className="flex items-center gap-1.5 text-xs flex-wrap">
             <button
               type="button"
               onClick={() => setActivityFilter("all")}
               aria-pressed={activityFilter === "all"}
               className={cn(
-                "px-2 py-0.5 rounded border transition-colors",
+                "px-2 py-0.5 rounded-full border transition-colors",
                 activityFilter === "all"
-                  ? "border-primary/45 bg-primary/15 text-primary"
-                  : "border-white/10 text-muted-foreground hover:text-foreground/80",
+                  ? "border-primary/45 bg-primary/15 text-primary-hover"
+                  : "border-border text-muted-foreground hover:text-foreground",
               )}
             >
               All
@@ -82,10 +86,10 @@ export function OverviewTab({
                 onClick={() => setActivityFilter(a.id)}
                 aria-pressed={activityFilter === a.id}
                 className={cn(
-                  "px-2 py-0.5 rounded border transition-colors",
+                  "px-2 py-0.5 rounded-full border transition-colors",
                   activityFilter === a.id
-                    ? "border-primary/45 bg-primary/15 text-primary"
-                    : "border-white/10 text-muted-foreground hover:text-foreground/80",
+                    ? "border-primary/45 bg-primary/15 text-primary-hover"
+                    : "border-border text-muted-foreground hover:text-foreground",
                 )}
               >
                 {a.name}
@@ -93,7 +97,7 @@ export function OverviewTab({
             ))}
           </div>
         </div>
-        <div className="rounded-xl border border-white/8 bg-card max-h-[420px] overflow-hidden">
+        <div className="rounded-card border border-border bg-card max-h-[420px] overflow-hidden">
           <CrewActivityFeed
             limit={5}
             workspaceId={workspaceId}
@@ -101,7 +105,7 @@ export function OverviewTab({
             agentId={activityFilter === "all" ? undefined : activityFilter}
           />
         </div>
-        <Link className="text-sm text-primary" href={`/journal?crew_id=${encodeURIComponent(crewId)}`}>View all activity ↗</Link>
+        <Link className="text-sm text-primary-hover hover:underline" href={`/journal?crew_id=${encodeURIComponent(crewId)}`}>View all activity ↗</Link>
       </section>
       <AssignedConnected workspaceId={workspaceId} crewId={crewId} slug={crewSlug} name={crewName} />
     </div>

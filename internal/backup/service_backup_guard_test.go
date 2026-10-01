@@ -4,13 +4,53 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+
+	"filippo.io/age"
 )
 
 const guardedQuotaServices = `[{"name":"db","quota_enforced":true,"volumes":[{"name":"data","generation":"g1","quota_bytes":33554432}]}]`
+
+func TestCreateInstanceBackupRejectsStandaloneServiceData(t *testing.T) {
+	for _, changedAfterAdmission := range []bool{false, true} {
+		t.Run(fmt.Sprint(changedAfterAdmission), func(t *testing.T) {
+			db := openMigratedDBCov(t)
+			_, crew := seedCovWorkspace(t, db, "instanceserviceguard")
+			identity, err := age.GenerateX25519Identity()
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts := InstanceOptions{OutputDir: t.TempDir(), Actor: covAdminActor(), Recipients: []age.Recipient{identity.Recipient()}}
+			change := func() {
+				if _, err := db.Exec("UPDATE crews SET services_json=? WHERE id=?", guardedQuotaServices, crew); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if changedAfterAdmission {
+				var once sync.Once
+				opts.Busy = func(context.Context) (int, string, error) { once.Do(change); return 0, "", nil }
+			} else {
+				change()
+			}
+			res, err := CreateInstanceBackup(t.Context(), db, opts)
+			if res != nil || err == nil || !strings.Contains(err.Error(), "snapshot transport") {
+				t.Fatalf("instance backup accepted unsupported service data: result present=%v err=%v", res != nil, err)
+			}
+			entries, err := os.ReadDir(opts.OutputDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("rejected instance backup published files: %v", entries)
+			}
+		})
+	}
+}
 
 func TestCreateBackupRejectsStandaloneServiceData(t *testing.T) {
 	db := openMigratedDBCov(t)

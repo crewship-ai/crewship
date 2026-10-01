@@ -62,6 +62,14 @@ paths = [
   # repeated digits), no production credentials.
   '''internal/encryption/encryption_extra_test\.go$''',
 
+  # Backup compat fixtures: a TEST-ONLY age identity and vault key,
+  # committed so CI can decrypt and restore the historical fixture
+  # bundles next to them. They seal nothing but those fixtures (whose
+  # only secret is the literal "compat-fixture-secret-not-a-real-
+  # credential"). Only the two files whose names say TEST-ONLY.
+  '''internal/backup/testdata/compat/TEST-ONLY-age-identity\.txt$''',
+  '''internal/backup/testdata/compat/TEST-ONLY-vault-key\.hex$''',
+
   # Onboarding test fixture: ENCRYPTION_KEY string passed to mock
   # bootstrap calls — generic-api-key rule fires on the high-entropy
   # value. Verified in the launch audit; not a real credential.

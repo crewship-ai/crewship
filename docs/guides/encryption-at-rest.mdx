@@ -186,10 +186,11 @@ cat /var/lib/crewship/crews/*/agents/*/.memory/PERSONA.md
 
 Backups taken via `crewship backup create` read the volume while
 it's unlocked. The backup tool encrypts the bundle natively
-(passphrase or age `--recipient`); use `--no-encrypt` only if you
-intend to layer your own protection. If you need to wrap a
-plaintext bundle yourself, run it through GPG / age before storing
-it off-host:
+(passphrase or age `--recipient`), always — `--no-encrypt` is refused
+for new bundles, because agent home folders inside one can hold
+credentials the vault never sealed. If you need a second layer, or
+hold a legacy plaintext bundle, run it through GPG / age before
+storing it off-host:
 
 ```bash
 # Writes an encrypted bundle into a directory you choose; the

@@ -18,6 +18,9 @@
 //	r.authedMut("METHOD", "/path", role, ...)
 //	r.authedSelfMut("METHOD", "/path", ...)
 //	r.authedAdmin("METHOD", "/path", ...)
+//	r.authedAdminMut("METHOD", "/path", ...)
+//	r.authedInstance("METHOD", "/path", ...)
+//	r.authedInstanceMut("METHOD", "/path", ...)
 //
 // It deliberately does NOT infer schemas from handler readJSON/writeJSON
 // calls. The response schemas below cover the highest-value read-only
@@ -59,8 +62,10 @@ var outputPath = "internal/api/openapi.gen.json"
 // combinedPattern matches r.mux.Handle("METHOD /path", ...) / HandleFunc.
 var combinedPattern = regexp.MustCompile(`r\.mux\.Handle(?:Func)?\(\s*"([A-Z]+) (/[^"]*)"`)
 
-// splitPattern matches r.authedMut/authedSelfMut/authedAdmin("METHOD", "/path", ...).
-var splitPattern = regexp.MustCompile(`r\.authed(?:Mut|SelfMut|Admin)\(\s*"([A-Z]+)"\s*,\s*"(/[^"]*)"`)
+// splitPattern matches r.authedMut/authedSelfMut/authedAdmin/authedAdminMut/
+// authedInstance/authedInstanceMut("METHOD", "/path", ...). Longer names come
+// first in the alternation: "authedAdmin" must not stop short of "authedAdminMut(".
+var splitPattern = regexp.MustCompile(`r\.authed(?:Mut|SelfMut|AdminPeople|AdminWrite|AdminAny|AdminMut|Admin|InstanceMut|Instance)\(\s*"([A-Z]+)"\s*,\s*"(/[^"]*)"`)
 
 type route struct {
 	method string
@@ -304,11 +309,13 @@ func buildDocument(routes []route) map[string]any {
 	_, workspaceConversationComponents := workspaceConversationSchemaCatalog()
 	_, routinesWorkspaceComponents := routinesWorkspaceSchemaCatalog()
 	_, workLedgerComponents := workLedgerSchemaCatalog()
+	_, restrictedContextComponents := restrictedContextSchemaCatalog()
+	_, restrictedWorkflowComponents := restrictedWorkflowSchemaCatalog()
 	_, chatShareComponents := chatShareSchemaCatalog()
 	for _, catalog := range []map[string]any{
 		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
 		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
-		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents,
+		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, restrictedContextComponents, restrictedWorkflowComponents,
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -495,6 +502,12 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	for key, schema := range backupPlanSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range backupSettingsSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	for key, schema := range remainingExecutionDomainSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
@@ -636,6 +649,17 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	chatShareRoutes, _ := chatShareSchemaCatalog()
 	for key, schema := range chatShareRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	restrictedContextRoutes, _ := restrictedContextSchemaCatalog()
+	for key, schema := range restrictedContextRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range restrictedProjectFileSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	restrictedWorkflowRoutes, _ := restrictedWorkflowSchemaCatalog()
+	for key, schema := range restrictedWorkflowRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	return result
@@ -1548,7 +1572,7 @@ func resolveHandlerRefs(call, src string) (inline []inlineHandler, targets []han
 // were built on that glob; the other one (internal/api's
 // route_authz_invariant_test.go) is the security-relevant half, and
 // internal/api/pages_internal.go was the file both of them could not see.
-var routeRegistrationCall = regexp.MustCompile(`\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin)\(`)
+var routeRegistrationCall = regexp.MustCompile(`\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin|authedAdminMut|authedAdminPeople|authedAdminWrite|authedAdminAny|authedInstance|authedInstanceMut)\(`)
 
 // routeSourceFiles lists the non-test Go files in routerDir that register at
 // least one route. A file that registers none is skipped only because it has
@@ -1693,7 +1717,7 @@ func inferHandlerInfo(rt route) handlerInfo {
 	if strings.Contains(rt.call, "authed") {
 		info.statuses["401"] = true
 	}
-	if strings.Contains(rt.call, "authedAdmin") || strings.Contains(rt.call, "authedMut") || strings.Contains(rt.call, "authedSelfMut") || strings.Contains(rt.call, "wsCtx") {
+	if strings.Contains(rt.call, "authedAdmin") || strings.Contains(rt.call, "authedMut") || strings.Contains(rt.call, "authedSelfMut") || strings.Contains(rt.call, "authedInstance") || strings.Contains(rt.call, "wsCtx") {
 		info.statuses["403"] = true
 	}
 	if strings.Contains(rt.call, "wsCtx") {
@@ -1770,7 +1794,7 @@ func responseContent(path string, schema map[string]any) map[string]any {
 		types = []string{"text/event-stream"}
 	case path == "/api/v1/memory/export":
 		types = []string{"application/json", "application/zip"}
-	case path == "/api/v1/admin/backups/download":
+	case path == "/api/v1/admin/backups/download", path == "/api/v1/admin/instance/backups/bundles/download":
 		types = []string{"application/zstd"}
 	case strings.HasSuffix(path, "/memory/versions/{id}/content"):
 		types = []string{"text/markdown", "application/octet-stream"}

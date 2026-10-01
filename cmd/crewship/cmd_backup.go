@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -26,8 +27,8 @@ var backupCmd = &cobra.Command{
 ADMIN role on the workspace; MEMBER and VIEWER roles are refused.
 
 Bundles live under the server's data dir (CREWSHIP_DATA_DIR/backups, or
-~/.crewship/backups when that env var is unset) by default and are
-AGE-encrypted with a passphrase unless --no-encrypt is supplied.
+~/.crewship/backups when that env var is unset) by default and are always
+AGE-encrypted, with a passphrase or an age recipient key.
 
 Examples:
   crewship backup create --scope=workspace
@@ -49,7 +50,7 @@ var backupListCmd = &cobra.Command{
 			return err
 		}
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/admin/backups")
+		resp, err := client.Get(backupRoute("/api/v1/admin/backups"))
 		if err != nil {
 			return err
 		}
@@ -109,7 +110,12 @@ var backupInspectCmd = &cobra.Command{
 			return err
 		}
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/admin/backups/inspect?path=" + encodeQuery(args[0]))
+		// Instance bundles answer on the instance route (the workspace
+		// route is a 404 for them).
+		resp, err := client.Get(backupRoute("/api/v1/admin/backups/inspect?path=" + encodeQuery(args[0])))
+		if tryInstanceBundleRoute(resp, err) {
+			resp, err = client.Get("/api/v1/admin/instance/backups/bundles/inspect?path=" + encodeQuery(args[0]))
+		}
 		if err != nil {
 			return err
 		}
@@ -222,7 +228,7 @@ you need to know who acquired the lock (or wait for its TTL).`,
 			return err
 		}
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/admin/backups/status")
+		resp, err := client.Get(backupRoute("/api/v1/admin/backups/status"))
 		if err != nil {
 			return err
 		}
@@ -260,7 +266,7 @@ you need to know who acquired the lock (or wait for its TTL).`,
 func init() {
 	backupCreateCmd.Flags().String("scope", "workspace", "Backup scope: workspace | crew")
 	backupCreateCmd.Flags().String("crew", "", "Crew slug or ID (required for --scope=crew)")
-	backupCreateCmd.Flags().Bool("no-encrypt", false, "Write a plaintext payload instead of AGE-encrypting it")
+	backupCreateCmd.Flags().Bool("no-encrypt", false, "Refused: every new backup is encrypted (kept so old scripts get a clear error)")
 	backupCreateCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
 	backupCreateCmd.Flags().Bool("use-keyring", false, "Store and reuse the passphrase via the local backup keyring (~/.crewship/backup-keyring.enc)")
 	backupCreateCmd.Flags().String("recipient", "", "AGE X25519 public key (age1…) for asymmetric encryption")
@@ -386,4 +392,40 @@ func truncateLong(s string, max int) string {
 // urlencoded expects.
 func encodeQuery(s string) string {
 	return url.QueryEscape(s)
+}
+
+// backupRoute names the workspace on a /api/v1/admin/backups* call
+// explicitly, as the --workspace flag or the config gives it (id or slug;
+// the server resolves either). An instance admin may act on a workspace
+// they are not a member of, which the client's own slug lookup — it lists
+// only the caller's workspaces — would refuse before the call is sent.
+func backupRoute(path string) string {
+	ws := cli.ResolveWorkspace(flagWorkspace, cliCfg)
+	if ws == "" {
+		return path
+	}
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return path + sep + "workspace_id=" + url.QueryEscape(ws)
+}
+
+// tryInstanceBundleRoute reports whether a bundle GET the workspace route
+// could not serve should be sent again to the instance route, which
+// resolves any catalogued bundle: 404 (no workspace bundle there) or 400 (a
+// path outside the workspace backups directory, where an instance run with
+// its own output directory writes). An instance bundle belongs to no
+// workspace, so the workspace route never finds it; the instance route
+// needs an instance admin, which is who holds instance bundles anyway.
+//
+// The caller sends both requests itself, so each route stays a literal at a
+// request call; this only decides, and closes the first response when the
+// second is to be sent.
+func tryInstanceBundleRoute(resp *http.Response, err error) bool {
+	if err != nil || resp == nil || (resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusBadRequest) {
+		return false
+	}
+	_ = resp.Body.Close()
+	return true
 }

@@ -176,7 +176,7 @@ export function MCPDetailSheet({
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent side="right" className="sm:max-w-[560px] p-0 flex flex-col">
-          <SheetHeader className="px-5 pt-4 pb-3 border-b border-white/10">
+          <SheetHeader className="px-5 pt-4 pb-3 border-b border-foreground/10">
             <div className="flex items-start gap-3">
               <MCPLogo name={server.icon || server.name} transport={server.transport} className="h-8 w-8 shrink-0 mt-0.5 opacity-90" />
               <div className="flex-1 min-w-0">
@@ -193,7 +193,7 @@ export function MCPDetailSheet({
           </SheetHeader>
 
           <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="flex-1 flex flex-col">
-            <TabsList className="px-3 mt-2 justify-start bg-transparent border-b border-white/10 rounded-none h-9">
+            <TabsList className="px-3 mt-2 justify-start bg-transparent border-b border-foreground/10 rounded-none h-9">
               <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
               <TabsTrigger value="tools" className="text-xs gap-1.5">
                 <Wrench className="h-3 w-3" />
@@ -262,7 +262,7 @@ export function MCPDetailSheet({
                 {toolsLoading ? (
                   <div className="text-center py-8"><Spinner className="inline h-4 w-4 text-muted-foreground" /></div>
                 ) : totalCount === 0 ? (
-                  <div className="rounded-md border border-white/10 bg-background p-4 text-xs text-muted-foreground">
+                  <div className="rounded-md border border-foreground/10 bg-background p-4 text-xs text-muted-foreground">
                     No tools recorded here yet, and this screen cannot discover them &mdash; nothing in
                     Crewship probes an MCP server&rsquo;s catalogue for you. You can record one you
                     already have with <code>crewship integration tools refresh</code>. The server
@@ -277,7 +277,7 @@ export function MCPDetailSheet({
                         initial={{ opacity: 0, y: 4 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.1, delay: Math.min(idx, 30) * 0.01 }}
-                        className="flex items-start gap-3 rounded-md border border-white/10 bg-background p-3"
+                        className="flex items-start gap-3 rounded-md border border-foreground/10 bg-background p-3"
                       >
                         <Switch
                           checked={t.enabled}
@@ -299,7 +299,7 @@ export function MCPDetailSheet({
               </TabsContent>
 
               <TabsContent value="logs" className="m-0">
-                <div className="rounded-md border border-white/10 bg-background p-4 text-xs text-muted-foreground">
+                <div className="rounded-md border border-foreground/10 bg-background p-4 text-xs text-muted-foreground">
                   Tool-call logs land in a follow-up ticket. The data layer (mcp_tool_calls table from v32)
                   is already populated; the UI binding ships next.
                 </div>
@@ -311,7 +311,7 @@ export function MCPDetailSheet({
                   Reload tool list
                 </Button>
 
-                <div className="pt-3 border-t border-white/10">
+                <div className="pt-3 border-t border-foreground/10">
                   <Button
                     size="sm"
                     variant="outline"

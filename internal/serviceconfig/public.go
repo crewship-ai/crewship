@@ -21,13 +21,16 @@ func Public(raw string) string {
 		return raw
 	}
 	var services []struct {
-		Name    string   `json:"name"`
-		Image   string   `json:"image"`
-		Ports   []string `json:"ports"`
-		EnvRefs []string `json:"env_refs"`
-		Volumes []struct {
-			Name  string `json:"name"`
-			Mount string `json:"mount"`
+		QuotaEnforced bool     `json:"quota_enforced,omitempty"`
+		Name          string   `json:"name"`
+		Image         string   `json:"image"`
+		Ports         []string `json:"ports"`
+		EnvRefs       []string `json:"env_refs"`
+		Volumes       []struct {
+			QuotaBytes int64  `json:"quota_bytes,omitempty"`
+			Generation int64  `json:"generation,omitempty"`
+			Name       string `json:"name"`
+			Mount      string `json:"mount"`
 		} `json:"volumes"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(raw))

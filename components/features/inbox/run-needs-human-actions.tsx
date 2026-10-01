@@ -212,7 +212,7 @@ export function RunNeedsHumanActions({
                 }
                 void perform(a)
               }}
-              className={primary ? "gap-1.5 bg-success/20 text-success hover:bg-success/30" : "gap-1.5"}
+              className="gap-1.5"
             >
               <Icon className="h-3.5 w-3.5" />
               {busy === a.id ? `${a.label}…` : a.label}

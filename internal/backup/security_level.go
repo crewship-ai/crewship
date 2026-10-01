@@ -95,11 +95,11 @@ func parseSecurityLevel(v any) (int, bool) {
 	case nil:
 		return 0, false
 	case int:
-		return n, true
+		return tierFromInt64(int64(n))
 	case int32:
 		return int(n), true
 	case int64:
-		return int(n), true
+		return tierFromInt64(n)
 	case float32:
 		return floatSecurityLevel(float64(n))
 	case float64:
@@ -109,19 +109,19 @@ func parseSecurityLevel(v any) (int, bool) {
 		if err != nil {
 			return 0, false
 		}
-		return int(i), true
+		return tierFromInt64(i)
 	case string:
-		i, err := strconv.Atoi(strings.TrimSpace(n))
+		i, err := strconv.ParseInt(strings.TrimSpace(n), 10, 32)
 		if err != nil {
 			return 0, false
 		}
-		return i, true
+		return int(i), true
 	case []byte:
-		i, err := strconv.Atoi(strings.TrimSpace(string(n)))
+		i, err := strconv.ParseInt(strings.TrimSpace(string(n)), 10, 32)
 		if err != nil {
 			return 0, false
 		}
-		return i, true
+		return int(i), true
 	}
 	return 0, false
 }
@@ -129,10 +129,20 @@ func parseSecurityLevel(v any) (int, bool) {
 // floatSecurityLevel rejects fractional and non-finite values. 2.5 is not a
 // tier, and letting SQLite's INTEGER affinity round it would invent one.
 func floatSecurityLevel(f float64) (int, bool) {
-	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) || f < math.MinInt32 || f > math.MaxInt32 {
 		return 0, false
 	}
-	return int(f), true
+	return tierFromInt64(int64(f))
+}
+
+// tierFromInt64 refuses a value outside the 32-bit range instead of letting
+// int() truncate it into a tier on a 32-bit build: a tampered bundle's
+// 1<<32+2 must not become tier 2.
+func tierFromInt64(n int64) (int, bool) {
+	if n < math.MinInt32 || n > math.MaxInt32 {
+		return 0, false
+	}
+	return int(n), true
 }
 
 // clampRestoredSecurityLevel returns the value to insert for one bundle

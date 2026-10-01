@@ -56,6 +56,7 @@ func init() {
 	seedCmd.Flags().String("state-dir", "", "Private team-chat credential directory outside Git (isolated per server/workspace)")
 	seedCmd.AddCommand(newSeedTeamChatCmd())
 	seedCmd.Flags().Bool("with-users", false, "Add four extra users (ADMIN, MANAGER, MEMBER, VIEWER) to the workspace for RBAC matrix testing; requires CREWSHIP_ALLOW_SIGNUP=true on the server")
+	seedCmd.Flags().String("codex-auth-file", "", "Absolute path to a private Codex auth.json (0600, outside the repo) that switches the demo agents to Codex CLI; overrides "+seedCodexAuthFileEnv)
 }
 
 // loadDotEnvLocal seeds os.Getenv with values from .env.local in the
@@ -145,6 +146,7 @@ func bridgeServerFromPort() {
 
 func runSeed(cmd *cobra.Command, args []string) error {
 	loadDotEnvLocal()
+	applySeedCodexAuthFlag(cmd)
 	if _, err := resolveSeedCodexLogin(); err != nil {
 		return err // validate before bootstrap or any workspace mutation
 	}
@@ -778,4 +780,17 @@ func postBootstrap(ctx context.Context, server, setupToken string, body map[stri
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	return client.Do(req)
+}
+
+// applySeedCodexAuthFlag makes an explicit --codex-auth-file win over
+// SEED_CODEX_AUTH_FILE. Only a flag the operator actually passed becomes the
+// override: copying a default would make errors blame --codex-auth-file for a
+// path that came from the environment.
+func applySeedCodexAuthFlag(cmd *cobra.Command) {
+	seedCodexAuthFileOverride = ""
+	if cmd.Flags().Changed("codex-auth-file") {
+		if path, err := cmd.Flags().GetString("codex-auth-file"); err == nil {
+			seedCodexAuthFileOverride = strings.TrimSpace(path)
+		}
+	}
 }

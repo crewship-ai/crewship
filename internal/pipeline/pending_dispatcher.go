@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // defaultDispatchConcurrency bounds how many claimed rows dispatch at
@@ -60,6 +62,9 @@ type PendingRunDispatcher struct {
 
 	startOnce sync.Once
 	stopOnce  sync.Once
+
+	// paused, when set, holds every sweep (internal/quiesce.QueuePaused).
+	paused func() bool
 }
 
 // NewPendingRunDispatcher builds the dispatcher. A 5s tick keeps short
@@ -78,6 +83,10 @@ func NewPendingRunDispatcher(store *PendingRunStore, executor runExecutor, logge
 		stopped:        make(chan struct{}),
 	}
 }
+
+// SetPaused makes every sweep a no-op while fn reports true (see sweep).
+// Call before Start.
+func (d *PendingRunDispatcher) SetPaused(fn func() bool) { d.paused = fn }
 
 // Start spawns the dispatch loop. Idempotent.
 func (d *PendingRunDispatcher) Start(ctx context.Context) {
@@ -127,6 +136,19 @@ func (d *PendingRunDispatcher) run(ctx context.Context) {
 // The pool acquire is interruptible so a Stop() mid-sweep abandons the
 // not-yet-dispatched tail promptly rather than blocking on a full pool.
 func (d *PendingRunDispatcher) sweep(ctx context.Context) {
+	// Held (an instance restore's queue hold, a backup's quiet window):
+	// neither fire nor expire. A row that would have expired meanwhile is
+	// decided on the first sweep after the hold, not lost during it.
+	if d.paused != nil && d.paused() {
+		return
+	}
+	// The expire pass and the listing are one writer in the backup's quiet
+	// window barrier; each claim below is its own (fireOne).
+	wr, ok := quiesce.Enter(ctx)
+	if !ok {
+		return
+	}
+	defer wr.Leave()
 	now := time.Now().UTC()
 	if n, err := d.store.ExpireDue(ctx, now); err != nil {
 		d.logger.Warn("pending dispatcher: expire", "error", err)
@@ -161,8 +183,24 @@ func (d *PendingRunDispatcher) sweep(ctx context.Context) {
 // fireOne claims a due pending row (winner-takes-once) and dispatches it
 // through the executor, then backfills the resulting run id.
 func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
+	// The run is admitted by the backup's quiet window BEFORE the claim, so
+	// it counts as busy from the claim on — not only once its row reaches
+	// running. A window that is closing or held refuses: the row is not
+	// claimed and stays due for the first sweep after release.
+	adm, ok := quiesce.StartRun(ctx)
+	if !ok {
+		return
+	}
+	defer adm.Done()
 	// Claim the row first so a second tick (or replica) can't double-fire.
+	// The claim is a writer in the barrier too; a window that closed since
+	// the admission refuses it, and the row stays due.
+	wr, ok := quiesce.Enter(ctx)
+	if !ok {
+		return
+	}
 	claimed, err := d.store.ClaimDue(ctx, pr.ID, time.Now().UTC())
+	wr.Leave()
 	if err != nil {
 		d.logger.Warn("pending dispatcher: claim", "error", err, "pending_id", pr.ID)
 		return
@@ -199,7 +237,7 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 	}
 
 	triggeredVia, triggeredByID := effectivePendingTrigger(pr)
-	res, runErr := d.executor.Run(ctx, RunInput{
+	res, runErr := d.executor.Run(adm.Context(), RunInput{
 		PinnedVersion: pr.PinnedVersion,
 		PipelineID:    pr.PipelineID,
 		WorkspaceID:   pr.WorkspaceID,
@@ -235,8 +273,13 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		return
 	}
 	// Backfill the fired run id now that we have it (claim used "").
+	// The run has finished, so the busy probe no longer counts it: the
+	// backfill is its own writer, and waits out a window rather than landing
+	// inside one.
 	if res != nil {
-		if uerr := d.store.SetFiredRunID(ctx, pr.ID, res.RunID); uerr != nil {
+		if uerr := quiesce.Do(ctx, func(ctx context.Context) error {
+			return d.store.SetFiredRunID(ctx, pr.ID, res.RunID)
+		}); uerr != nil {
 			d.logger.Warn("pending dispatcher: backfill run id", "error", uerr, "pending_id", pr.ID)
 		}
 	}

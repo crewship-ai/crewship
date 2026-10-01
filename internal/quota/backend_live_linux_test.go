@@ -1,0 +1,196 @@
+//go:build linux && quota_live
+
+package quota
+
+import (
+	"context"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+// Explicit root-owned guest opt-in; never part of the default host test suite.
+type zeroes struct{}
+
+func (zeroes) Read(p []byte) (int, error) { clear(p); return len(p), nil }
+func TestLiveBoundedFilesystemRecoveryAndAttachment(t *testing.T) {
+	if os.Getenv("CREWSHIP_LIVE_QUOTA_BACKEND") != "1" || os.Geteuid() != 0 {
+		t.Fatal("requires explicit root-owned isolated loopback test; no shared daemon restart")
+	}
+	root := t.TempDir()
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	b, err := NewBackend(root, 128<<20, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := Key{"synthetic-crew", "probe", "data", 1}
+	d, err := b.Ensure(t.Context(), key, 64<<20, Owner{})
+	if err != nil {
+		b.Close()
+		t.Fatalf("loop/mount support unavailable or quota create failed: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := b.Remove(context.Background(), key); err != nil {
+			if !errors.Is(err, ErrDenied) {
+				t.Error(err)
+			} else {
+				t.Logf("safe removal refused external namespace alias on this host: %v", err)
+			}
+			dev, _ := mountedDevice(d.Mount)
+			if dev != "" {
+				_ = b.command(context.Background(), "/usr/bin/umount", d.Mount)
+				_ = b.command(context.Background(), "/usr/sbin/losetup", "-d", dev)
+			}
+		}
+		b.Close()
+	})
+	if _, err = b.Ensure(t.Context(), key, 128<<20, Owner{}); !errors.Is(err, ErrDenied) {
+		t.Fatalf("existing quota silently expanded: %v", err)
+	}
+	if err = os.WriteFile(filepath.Join(d.Mount, "canary"), []byte("DURABLE_QUOTA_CANARY"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(d.Mount, "overflow"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := io.CopyN(f, zeroes{}, 96<<20)
+	f.Close()
+	if err == nil || written >= 64<<20 {
+		t.Fatalf("physical overflow did not stop: wrote%d err%v", written, err)
+	}
+	if err = os.Remove(filepath.Join(d.Mount, "overflow")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = b.Ensure(t.Context(), Key{"synthetic-crew", "probe", "other", 1}, 96<<20, Owner{}); !errors.Is(err, ErrDenied) {
+		t.Fatalf("aggregate capacity not reserved: %v", err)
+	}
+	binding := filepath.Join(root, "test-bind")
+	if err = os.Mkdir(binding, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = b.command(context.Background(), "/usr/bin/mount", "--bind", d.Mount, binding); err != nil {
+		t.Fatal(err)
+	}
+	if err = b.Remove(t.Context(), key); !errors.Is(err, ErrDenied) {
+		_ = b.command(context.Background(), "/usr/bin/umount", binding)
+		t.Fatalf("attached quota removed: %v", err)
+	}
+	if err = b.command(context.Background(), "/usr/bin/umount", binding); err != nil {
+		t.Fatal(err)
+	}
+	if err = b.Protect(t.Context(), key, "owned-docker-volume"); err != nil {
+		t.Fatal(err)
+	}
+	if err = b.Remove(t.Context(), key); !errors.Is(err, ErrDenied) {
+		t.Fatalf("protected quota removed before Docker attachment: %v", err)
+	}
+	b.Close()
+	b, err = NewBackend(root, 128<<20, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = b.Recover(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = b.Verify(t.Context(), key, 64<<20); err != nil {
+		t.Fatal(err)
+	}
+	if err = b.Remove(t.Context(), key); !errors.Is(err, ErrDenied) {
+		t.Fatalf("helper recovery lost durable protection: %v", err)
+	}
+	if err = b.Release(t.Context(), key, "owned-docker-volume"); err != nil {
+		t.Fatal(err)
+	}
+	canary, err := os.ReadFile(filepath.Join(d.Mount, "canary"))
+	if err != nil || string(canary) != "DURABLE_QUOTA_CANARY" {
+		t.Fatalf("restart lost data: %s %v", canary, err)
+	}
+	t.Logf("own64MiB fully preallocated ext4 overflow denied after%dbytes; helper recovery preserved data; active bind removal denied", written)
+}
+
+func TestLiveCatalogNamespaceIsolation(t *testing.T) {
+	if os.Getenv("CREWSHIP_LIVE_QUOTA_BACKEND") != "1" || os.Geteuid() != 0 {
+		t.Fatal("isolated privileged namespace fixture")
+	}
+	var backends []*Backend
+	var descriptors []Descriptor
+	key := Key{"identical-restored-crew", "probe", "data", 1}
+	for _, namespace := range []string{"database-a", "database-b"} {
+		root := t.TempDir()
+		if err := os.Chmod(root, 0700); err != nil {
+			t.Fatal(err)
+		}
+		b, err := NewBackend(root, 64<<20, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		backends = append(backends, b)
+		if err = b.BindNamespace(namespace); err != nil {
+			t.Fatal(err)
+		}
+		if err = b.BindNamespace("wrong-database"); !errors.Is(err, ErrDenied) {
+			t.Fatalf("catalog identity changed: %v", err)
+		}
+		d, err := b.Ensure(t.Context(), key, 64<<20, Owner{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		descriptors = append(descriptors, d)
+	}
+	defer func() {
+		for _, b := range backends {
+			if err := b.Remove(t.Context(), key); err != nil {
+				t.Error(err)
+			}
+			b.Close()
+		}
+	}()
+	if descriptors[0].Mount == descriptors[1].Mount {
+		t.Fatal("restored identical IDs share physical catalog")
+	}
+	if err := os.WriteFile(filepath.Join(descriptors[0].Mount, "private-canary"), []byte("DATABASE_A_ONLY"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(filepath.Join(descriptors[1].Mount, "private-canary")); !os.IsNotExist(err) {
+		t.Fatalf("cross-instance data visible: %v", err)
+	}
+}
+
+func TestLiveHostReservationSerialization(t *testing.T) {
+	if os.Getenv("CREWSHIP_LIVE_QUOTA_BACKEND") != "1" || os.Geteuid() != 0 {
+		t.Fatal("isolated root host-reservation lock")
+	}
+	first, err := hostReservationLock(defaultReservePath, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	acquired := make(chan error, 1)
+	go func() {
+		second, e := hostReservationLock(defaultReservePath, 0)
+		if e == nil {
+			second.Close()
+		}
+		acquired <- e
+	}()
+	select {
+	case e := <-acquired:
+		t.Fatalf("overlapping host disk admission: %v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+	first.Close()
+	select {
+	case e := <-acquired:
+		if e != nil {
+			t.Fatal(e)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("released host reservation lock remained unavailable")
+	}
+}

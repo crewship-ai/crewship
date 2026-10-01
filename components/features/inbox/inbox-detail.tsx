@@ -590,7 +590,7 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
 
   return (
     <InboxMessageSurface>
-      <header className={cn(messageSection, "flex items-start gap-3 border-b border-border/60 !py-3")}>
+      <header className={cn(messageSection, "flex items-start gap-3 border-b border-border !py-3")}>
         <span className="mt-0.5"><EntryAvatar entry={inboxEntry(item)} lookup={lookup ?? EMPTY_INBOX_LOOKUP} compact /></span>
         <div className="min-w-0 flex-1 text-body">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -598,7 +598,7 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
             {agent && !!item.payload?.mission_id && <span className="text-micro text-muted-foreground">Assignee</span>}
             {crewName && crewHref && <Link href={crewHref} className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"><CrewIcon icon={crew?.icon || "users"} color={crew?.color ?? agent?.crew?.color} size="sm" className="h-4 w-4 rounded [&_svg]:h-2.5 [&_svg]:w-2.5" />{crewName}</Link>}
           </div>
-          <time dateTime={item.created_at} title={absolute(item.created_at)} className="text-micro text-muted-foreground">{absolute(item.created_at)} · {since(item.created_at)}</time>
+          <time dateTime={item.created_at} title={absolute(item.created_at)} className="font-mono text-[11px] text-muted-foreground-soft">{absolute(item.created_at)} · {since(item.created_at)}</time>
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Message options" className="h-9 w-9 shrink-0"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
@@ -626,7 +626,7 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
             {(item.kind === "failed_run" || item.kind === "run_needs_human") && <h2 className="mb-2 text-body font-medium">{contentLabel}</h2>}
             {item.body_md ? <MessageBody key={item.id} body={item.body_md} /> : <p className="text-body text-muted-foreground">No message content was included.</p>}
           </section>
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border/60 pt-4">
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
             {messageLinks.map((l, index) => <Button asChild key={l.href} size="sm" variant={index === 0 ? "default" : "outline"}><Link href={l.href}><l.icon className="mr-1.5 h-3.5 w-3.5 shrink-0" />{l.label}</Link></Button>)}
             {actReceipt && <ActReceipt receipt={actReceipt} />}
             {!isResolved && <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={false} onAct={onAct} hideMessageLinks />}
@@ -640,11 +640,11 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
 
 
       {item.kind === "waitpoint" && runID !== "" && <details className={messageDivider}>
-        <summary className="cursor-pointer px-4 py-3 text-body text-muted-foreground sm:px-6"><Clock className="mr-1.5 inline h-3.5 w-3.5" />How the run got here</summary>
+        <summary className="eyebrow cursor-pointer px-4 py-3 sm:px-6"><Clock className="mr-1.5 inline h-3.5 w-3.5" />How the run got here</summary>
         <div className={messageSection}><WaitpointRunDetail workspaceId={item.workspace_id} pipelineRunId={runID} inboxResolved={isResolved} /></div>
       </details>}
       {item.payload && visibleContextEntries(item.payload).length > 0 && <details className={messageDivider}>
-        <summary className="cursor-pointer px-4 py-3 text-body text-muted-foreground sm:px-6">Additional context</summary>
+        <summary className="eyebrow cursor-pointer px-4 py-3 sm:px-6">Additional context</summary>
         <div className={messageSection}><ContextDetails payload={item.payload} /></div>
       </details>}
       {isResolved && <footer className={cn(messageSection, messageDivider, "!py-3 text-label text-muted-foreground")}>

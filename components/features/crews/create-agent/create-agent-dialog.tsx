@@ -88,7 +88,7 @@ export interface CreateAgentDialogProps {
  *  sets `--spacing: 0.23rem` — see the header comment on create-surface.tsx.
  *  `h-11` would land at 40.5px and look fine while missing the target. */
 const INPUT_CLASS =
-  "w-full bg-background border border-white/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15 coarse:min-h-12 coarse:text-sm"
+  "w-full bg-background border border-foreground/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15 coarse:min-h-12 coarse:text-sm"
 
 const TOOL_PROFILES = ["MINIMAL", "CODING", "FULL"] as const
 /** Shared create/edit form with persistent drafts and focused settings sections. */
@@ -425,11 +425,11 @@ export function CreateAgentDialog({
                   <button
                     type="button"
                     aria-label="Choose a template"
-                    className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md border border-white/[0.15] bg-background px-2 py-1.5 text-left text-[13px] transition-colors hover:border-white/[0.28] focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 coarse:min-h-12"
+                    className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md border border-foreground/[0.15] bg-background px-2 py-1.5 text-left text-[13px] transition-colors hover:border-foreground/[0.28] focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 coarse:min-h-12"
                   >
                     {draft.selectedPersona ? (
                       <>
-                        <span className="h-6 w-6 shrink-0 overflow-hidden rounded-full border border-white/10 bg-muted">
+                        <span className="h-6 w-6 shrink-0 overflow-hidden rounded-full border border-foreground/10 bg-muted">
                           <img
                             src={getAgentAvatarUrl(
                               draft.selectedPersona.suggestedSlug,
@@ -458,9 +458,9 @@ export function CreateAgentDialog({
                 <PopoverContent
                   align="start"
                   sideOffset={6}
-                  className="w-[640px] max-w-[calc(100vw-2rem)] p-0 bg-card border-white/[0.08]"
+                  className="w-[640px] max-w-[calc(100vw-2rem)] p-0 bg-card border-foreground/[0.08]"
                 >
-                  <div className="p-3 border-b border-white/[0.08]">
+                  <div className="p-3 border-b border-foreground/[0.08]">
                     <div className="text-[13px] font-semibold mb-0.5">All templates</div>
                     <div className="text-[11.5px] text-muted-foreground">
                       Pick one — we&apos;ll close this and pre-fill everything below.
@@ -515,7 +515,7 @@ export function CreateAgentDialog({
                 aria-label="Customize avatar"
                 aria-haspopup="dialog"
                 aria-expanded={pickerOpen}
-                className="mt-5 h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-muted outline-none transition-colors hover:border-primary/50 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20"
+                className="mt-5 h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-foreground/10 bg-muted outline-none transition-colors hover:border-primary/50 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20"
               >
                 <img src={avatarUrl} alt="" aria-hidden="true" className="h-full w-full object-cover" />
               </button>
@@ -655,7 +655,7 @@ PERSONALITY: …
 RESPONSIBILITIES: …
 WORK STYLE: …`}
               spellCheck={false}
-              className="w-full min-h-[140px] max-h-[260px] resize-y bg-background border border-white/[0.15] rounded-md px-3 py-2 text-[12px] font-mono leading-relaxed outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+              className="w-full min-h-[140px] max-h-[260px] resize-y bg-background border border-foreground/[0.15] rounded-md px-3 py-2 text-[12px] font-mono leading-relaxed outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
             />
             <div className="flex items-start gap-2">
               <p className="min-w-0 flex-1 text-[10.5px] text-muted-foreground flex items-center gap-1.5">

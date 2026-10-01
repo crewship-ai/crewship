@@ -42,3 +42,37 @@ func TestCrewDelete_CleanupPendingScope(t *testing.T) {
 		t.Fatalf("durable status %s %v", state, err)
 	}
 }
+
+func TestResourceCleanupInstanceAdminWithoutMembershipSeesAllWorkspaces(t *testing.T) {
+	f := lonelyAdmin(t)
+	f.r.containerCleanup = &resourcelifecycle.Controller{DB: f.db, InstanceID: "cleanup-instance"}
+	for _, ws := range []string{"ws-old", "ws-new"} {
+		mustExec(t, f.db, `INSERT INTO resource_cleanup_status(instance_id,crew_id,workspace_id,state,complete) VALUES('cleanup-instance',?,?,'pending',1)`, "deleted-"+ws, ws)
+	}
+	read := func(token, path string, wantCount int) {
+		t.Helper()
+		rr := f.do(token, "GET", path, "")
+		wantCode(t, rr, http.StatusOK, "cleanup observations")
+		var body struct {
+			Items []resourcelifecycle.Status `json:"items"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Items) != wantCount {
+			t.Fatalf("cleanup observations = %s, want %d rows", rr.Body.String(), wantCount)
+		}
+		if token == f.wsAdmin && wantCount == 1 && body.Items[0].CrewID != "deleted-ws-old" {
+			t.Fatal("workspace admin received another workspace's cleanup observation")
+		}
+	}
+	read(f.boss, "/api/v1/admin/resource-cleanup", 2)
+	read(f.wsAdmin, "/api/v1/admin/resource-cleanup?workspace_id=ws-old", 1)
+	rr := f.do(f.wsAdmin, "GET", "/api/v1/admin/resource-cleanup", "")
+	if rr.Code == http.StatusOK {
+		t.Fatal("workspace admin read instance observations without a workspace")
+	}
+	mustExec(t, f.db, `UPDATE cli_tokens SET scopes='["crews:read"]' WHERE user_id='boss'`)
+	wantCode(t, f.do(f.boss, "GET", "/api/v1/admin/resource-cleanup", ""), http.StatusForbidden, "instance cleanup requires instance:admin token scope")
+	wantCode(t, f.do(f.boss, "GET", "/api/v1/admin/resource-cleanup?workspace_id=ws-new", ""), http.StatusForbidden, "workspace selection must not bypass instance token scope")
+}

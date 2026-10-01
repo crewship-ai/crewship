@@ -19,7 +19,7 @@ import { usePendingApproval } from "@/hooks/use-pending-approval"
 import { TraceCanvas } from "@/components/features/activity/trace-canvas"
 import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
 import { RunEvidencePanel } from "@/components/features/activity/run-evidence-panel"
-import { declaredCredentialTypes, routineRunOrigin } from "@/lib/routine-run-provenance"
+import { declaredCredentialTypes, readableOriginSource, routineRunOrigin } from "@/lib/routine-run-provenance"
 import { RoutineRunArtifacts } from "./routine-run-artifacts"
 import { RoutineExecutionHistory } from "./routine-execution-history"
 import { RoutineExecutionInsights } from "./routine-execution-insights"
@@ -611,7 +611,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
       </div>
       <DetailCard title="Run provenance" icon={History}>
         <dl className="grid gap-2 text-xs sm:grid-cols-2">
-          <div><dt className="text-muted-foreground">Started by</dt><dd>{triggerLabel}{origin.source ? ` · ${origin.source}` : ""}</dd></div>
+          <div><dt className="text-muted-foreground">Started by</dt><dd title={origin.source}>{triggerLabel}{readableOriginSource(origin.source) ? ` · ${readableOriginSource(origin.source)}` : ""}</dd></div>
           <div><dt className="text-muted-foreground">Executed recipe</dt><dd>{run.pipeline_version != null ? `v${run.pipeline_version}` : "Version unavailable"}{run.definition_hash ? <span className="ml-1 font-mono" title={run.definition_hash}>· {run.definition_hash.slice(0, 12)}</span> : null}</dd></div>
           <div><dt className="text-muted-foreground">Human initiator</dt><dd>Not independently verified in this run record</dd></div>
           <div><dt className="text-muted-foreground">Credentials declared in executed recipe</dt><dd>{dsl ? credentialTypes.length ? credentialTypes.join(", ") : "None declared" : "Historical recipe unavailable"}</dd></div>

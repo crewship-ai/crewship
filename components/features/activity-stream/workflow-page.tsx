@@ -182,7 +182,7 @@ export function WorkflowPage({ workspaceId, chain, routineName, onBack, onOpenNo
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <span
-              className="rounded border border-white/[0.08] px-1.5 py-px font-mono text-[10px] uppercase tracking-wider"
+              className="rounded border border-foreground/[0.08] px-1.5 py-px font-mono text-[10px] uppercase tracking-wider"
               style={{ color: `var(${chain.failed ? "--destructive" : "--primary"})` }}
             >
               {chain.failed ? "failed" : "workflow"}
@@ -281,7 +281,7 @@ export function WorkflowPage({ workspaceId, chain, routineName, onBack, onOpenNo
                   key={run.id}
                   type="button"
                   onClick={() => onOpenNode("run", run.id)}
-                  className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03] md:grid-cols-[auto_1fr_auto_auto_auto]"
+                  className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-foreground/[0.03] md:grid-cols-[auto_1fr_auto_auto_auto]"
                 >
                   <span
                     aria-hidden
@@ -383,7 +383,7 @@ export function WorkflowPage({ workspaceId, chain, routineName, onBack, onOpenNo
                   topology card's gaps: a reader who cannot tell an ordering
                   from a guess will read the guess as fact. */}
               {timeline.untimedCount > 0 && (
-                <p className="mt-2.5 flex items-start gap-1.5 border-t border-white/[0.06] pt-2.5 text-[10.5px] text-muted-foreground-soft">
+                <p className="mt-2.5 flex items-start gap-1.5 border-t border-foreground/[0.06] pt-2.5 text-[10.5px] text-muted-foreground-soft">
                   <AlertTriangle className="mt-px h-2.5 w-2.5 shrink-0 text-warn" />
                   <span>
                     {timeline.untimedCount === timeline.rows.length
@@ -430,7 +430,7 @@ export function WorkflowPage({ workspaceId, chain, routineName, onBack, onOpenNo
                       // hands over, so a caller gets one kind of reference
                       // from both halves of the page.
                       onClick={() => onOpenNode("issue", i.id)}
-                      className="inline-flex max-w-full items-center gap-1.5 rounded bg-white/[0.05] px-1.5 py-1 text-left text-[11px] transition-colors hover:bg-white/[0.1]"
+                      className="inline-flex max-w-full items-center gap-1.5 rounded bg-foreground/[0.05] px-1.5 py-1 text-left text-[11px] transition-colors hover:bg-foreground/[0.1]"
                     >
                       <CircleDot
                         className="h-3 w-3 shrink-0"
@@ -460,7 +460,7 @@ export function WorkflowPage({ workspaceId, chain, routineName, onBack, onOpenNo
                       key={a.id}
                       type="button"
                       onClick={() => onOpenNode("agent", a.id)}
-                      className="inline-flex max-w-full items-center gap-1.5 rounded bg-white/[0.05] px-1.5 py-1 text-left text-[11px] transition-colors hover:bg-white/[0.1]"
+                      className="inline-flex max-w-full items-center gap-1.5 rounded bg-foreground/[0.05] px-1.5 py-1 text-left text-[11px] transition-colors hover:bg-foreground/[0.1]"
                     >
                       <Bot className="h-3 w-3 shrink-0 text-muted-foreground" />
                       <span className="truncate">{a.name || a.slug || a.id}</span>
@@ -540,7 +540,7 @@ function TimelineRowView({
     // target and an interactive element nested in an interactive element is
     // neither valid nor keyboard-navigable.
     <div
-      className="group flex items-center gap-2 border-l-2 pl-2 transition-colors hover:bg-white/[0.03]"
+      className="group flex items-center gap-2 border-l-2 pl-2 transition-colors hover:bg-foreground/[0.03]"
       // The indent goes on the CONTENT, not on the row: indenting the row
       // drags the time column right with it, and a timeline whose clock
       // staircases down the page cannot be read as a clock at all. Time on the
@@ -605,7 +605,7 @@ function TimelineRowView({
         <button
           type="button"
           onClick={() => onOpenNode("agent", executedBy.ref)}
-          className="hidden shrink-0 items-center gap-1 rounded bg-white/[0.05] px-1.5 py-0.5 text-[10.5px] text-muted-foreground transition-colors hover:bg-white/[0.1] sm:inline-flex"
+          className="hidden shrink-0 items-center gap-1 rounded bg-foreground/[0.05] px-1.5 py-0.5 text-[10.5px] text-muted-foreground transition-colors hover:bg-foreground/[0.1] sm:inline-flex"
         >
           <Bot className="h-2.5 w-2.5" />
           {executedBy.label}

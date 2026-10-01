@@ -36,7 +36,7 @@ export function ThroughputChart({ buckets, series, height = 180 }: ThroughputCha
   return (
     <ChartContainer config={chartConfig} className="w-full aspect-auto" style={{ height }}>
       <BarChart accessibilityLayer data={buckets} margin={{ top: 8, right: 8, left: -24, bottom: 0 }}>
-        <CartesianGrid vertical={false} strokeDasharray="2 3" stroke="rgba(255,255,255,0.04)" />
+        <CartesianGrid vertical={false} strokeDasharray="2 3" stroke="var(--chart-grid)" />
         <XAxis
           dataKey="ts"
           tickLine={false}
@@ -56,7 +56,7 @@ export function ThroughputChart({ buckets, series, height = 180 }: ThroughputCha
           tick={{ fontSize: 9, fill: "rgba(230,231,235,0.35)", fontFamily: "ui-monospace" }}
           allowDecimals={false}
         />
-        <ChartTooltip cursor={{ fill: "rgba(255,255,255,0.04)" }} content={<ChartTooltipContent indicator="dot" />} />
+        <ChartTooltip cursor={{ fill: "var(--chart-cursor)" }} content={<ChartTooltipContent indicator="dot" />} />
         {series.map((s, i) => (
           <Bar
             key={s.key}

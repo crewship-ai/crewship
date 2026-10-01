@@ -132,7 +132,7 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
         const lines = data.diff.split("\n")
         const shown = lines.slice(0, MAX_LINES)
         return (
-          <pre className="font-mono text-[11px] leading-relaxed border border-white/8 rounded-md overflow-x-auto">
+          <pre className="font-mono text-[11px] leading-relaxed border border-foreground/8 rounded-md overflow-x-auto">
             {shown.map((line, i) => (
               <div key={i} className={cn("px-3", lineClass(line))}>{line || " "}</div>
             ))}

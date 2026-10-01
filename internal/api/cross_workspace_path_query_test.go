@@ -100,6 +100,11 @@ var pathWorkspaceAllowlist = map[string]string{
 	// path can only deny a mismatch, never choose or widen the tenant. Covered
 	// for both methods by TestMemberAccessPolicyAuthenticatedRoutes.
 	"workspaces_member_access.go": "rejects path/context disagreement; only validated context scopes queries",
+	// Instance administration: these routes register through authedInstance,
+	// with no RequireWorkspace and no ?workspace_id= to prefer. The workspace
+	// in the path IS the target, chosen by an instance admin who may act on
+	// any workspace; there is no membership check it could slip past.
+	"admin_instance.go": "authedInstance routes: the path workspace is the instance admin's target, and no workspace membership is resolved",
 }
 
 // TestNoHandlerReadsWorkspaceFromPath is the class-level guard. It parses the

@@ -57,7 +57,7 @@ export function ToolAccountDetail({
       </div>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 md:p-6">
-        <div className="flex flex-wrap items-start gap-3 rounded-xl border border-white/[0.08] bg-card px-4 py-3.5">
+        <div className="flex flex-wrap items-start gap-3 rounded-xl border border-foreground/[0.08] bg-card px-4 py-3.5">
           <ProviderMark
             provider={slug}
             label={slug}
@@ -92,8 +92,8 @@ export function ToolAccountDetail({
           </div>
         )}
 
-        <section className="overflow-hidden rounded-xl border border-white/[0.08] bg-card">
-          <div className="flex items-baseline gap-2 border-b border-white/[0.06] px-4 py-2.5">
+        <section className="overflow-hidden rounded-xl border border-foreground/[0.08] bg-card">
+          <div className="flex items-baseline gap-2 border-b border-foreground/[0.06] px-4 py-2.5">
             <h3 className="text-[10px] font-semibold uppercase tracking-wider text-foreground/50">
               Agents that can act through it
             </h3>
@@ -108,7 +108,7 @@ export function ToolAccountDetail({
               <span className="font-medium text-foreground/70">Agent access</span>.
             </p>
           ) : (
-            <ul className="divide-y divide-white/[0.04]">
+            <ul className="divide-y divide-foreground/[0.04]">
               {boundAgents.map((a) => {
                 const grant = (bindings[a.id] ?? []).find((b) => b.toolkit === slug)
                 return (
@@ -117,7 +117,7 @@ export function ToolAccountDetail({
                     <span className="min-w-0 flex-1 truncate text-foreground/85">{a.name}</span>
                     {grant?.mode && (
                       <span
-                        className="shrink-0 rounded-md border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                        className="shrink-0 rounded-md border border-foreground/[0.08] bg-foreground/[0.03] px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
                         title={
                           grant.mode === "full"
                             ? "Every tool on this toolkit"

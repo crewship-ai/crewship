@@ -682,7 +682,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         )}
         <aside
           className={cn(
-            "shrink-0 border-r border-white/[0.06] bg-card transition-all",
+            "shrink-0 border-r border-foreground/[0.06] bg-card transition-all",
             isMobile && !collapsed && "fixed inset-y-0 left-0 z-50 pt-[env(safe-area-inset-top)] shadow-2xl",
             // `overflow-hidden` only while collapsing, where it is what keeps
             // the content from spilling out of a 36px rail. Leaving it on when
@@ -752,7 +752,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                   <button
                     type="button"
                     onClick={() => setApiKeyOpen(true)}
-                    className="mx-1.5 mt-2 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-white/[0.03] hover:text-foreground"
+                    className="mx-1.5 mt-2 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-foreground/[0.03] hover:text-foreground"
                   >
                     <KeyRound className="h-3 w-3 shrink-0" />
                     <span className="min-w-0 flex-1 truncate">

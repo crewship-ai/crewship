@@ -202,6 +202,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// (Anthropic/OpenAI/Google) for token usage + rate-limit headers, then
 	// POSTs here so paymaster.Record can write the row + emit llm.call /
 	// cost.incurred / budget.* journal entries on the trusted plane.
+	r.mux.Handle("POST /api/v1/internal/cost/admit", internalAuth(http.HandlerFunc(r.handleSidecarCostAdmit)))
 	r.mux.Handle("POST /api/v1/internal/cost/record", internalAuth(http.HandlerFunc(r.handleSidecarCostRecord)))
 
 	// Cross-crew messaging and file sharing (called by sidecar)

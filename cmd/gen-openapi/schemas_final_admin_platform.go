@@ -59,11 +59,32 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	// manifest is backup.Manifest; only the fields a client acts on are
 	// spelled out. contents.table_row_counts is the per-table count the
 	// completeness check compares against (#2009).
+	// One gap in a bundle or a restore (backup.IncompleteItem). kind is
+	// open-ended: attachment_missing, memory_blob_missing, container_missing,
+	// attachment_conflict today; readers must tolerate new kinds.
+	incompleteItem := object(map[string]any{"kind": str(), "detail": str(), "count": integer(), "workspace": str()}, "kind", "detail", "count")
 	manifest := nullable(object(map[string]any{
 		"format_version": integer(), "crewship_version_at_backup": str(), "schema_migration_versions": array(integer()),
 		"scope": str(), "scope_level": str(), "compatible_targets": array(str()), "created_at": str(),
-		"contents": object(map[string]any{"table_row_counts": map[string]any{"type": "object", "additionalProperties": integer()}}),
+		"contents": object(map[string]any{
+			"table_row_counts":     map[string]any{"type": "object", "additionalProperties": integer()},
+			"attachments_included": integer(), "attachments_missing": integer(),
+			"memory_blobs_included": integer(), "memory_blobs_missing": integer(),
+			"missing_container_crews": array(str()),
+			"incomplete":              array(incompleteItem),
+			// Complete container environments (Track E): per crew, the
+			// platform and the layer digests it needs.
+			"environments": array(object(map[string]any{
+				"crew": str(), "id": str(), "platform": str(), "blobs": array(str()), "bytes": integer(), "inline": boolean(),
+			}, "crew", "id", "platform", "blobs", "bytes")),
+		}),
 	}))
+	// One crew's complete environment on restore (backup.EnvironmentOutcome):
+	// result restored | rebuilt | skipped, and what was not carried over.
+	envOutcome := object(map[string]any{
+		"crew": str(), "result": str(), "reason": str(), "image": str(), "container": str(),
+		"volumes": array(str()), "unsafe": array(str()), "notes": array(str()),
+	}, "crew", "result", "unsafe")
 	// backupVerifyResponse (internal/api/backup_query.go). completeness_checked
 	// false means "not evaluated" — see completeness_skip_reason — never
 	// "confirmed complete".
@@ -74,8 +95,12 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	backupCreate := object(map[string]any{"path": str(), "size_bytes": integer(), "payload_sha256": str(), "format_version": integer(), "scope": str(), "scope_level": str(), "created_at": str(), "encrypted": boolean(),
 		// #2612: provisioned crews whose container was absent at create
 		// time — the bundle carries DB rows only for them.
-		"missing_container_crews": nullable(array(str()))},
-		"path", "size_bytes", "payload_sha256", "format_version", "scope", "scope_level", "created_at", "encrypted", "missing_container_crews")
+		"missing_container_crews": nullable(array(str())),
+		// Attachment files carried / not carried, and every recorded gap.
+		"attachments_included": integer(), "attachments_missing": integer(),
+		"incomplete": nullable(array(incompleteItem))},
+		"path", "size_bytes", "payload_sha256", "format_version", "scope", "scope_level", "created_at", "encrypted", "missing_container_crews",
+		"attachments_included", "attachments_missing", "incomplete")
 	backupRotate := object(map[string]any{"deleted": array(str()), "dry_run": boolean()})
 	// backupRestoreResponse (internal/api/backup.go). restored_ws is the
 	// restored workspace's SLUG — it is what the CLI prints as `workspace=`,
@@ -107,10 +132,19 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		// counts of what arrived with a fresh secret. nullable: a plain
 		// restore re-keys nothing and reports nil, not an empty map.
 		"capability_tokens_reminted": nullable(map[string]any{"type": "object", "additionalProperties": integer()}),
+		// Attachment files written / already there / absent from the bundle /
+		// left alone because different bytes sat at the path.
+		"attachments_restored": integer(), "attachments_already_present": integer(),
+		"attachments_missing": integer(), "attachments_conflicts": integer(),
+		"incomplete": nullable(array(incompleteItem)),
+		// Each crew's complete environment: restored, rebuilt or skipped.
+		"environments": nullable(array(envOutcome)),
+		// ok | partial | failed, and the restore_reports row it was recorded as.
+		"result": str(), "report_id": str(),
 	}, "manifest", "restored_ws", "restored_workspace_id", "crews_count", "crews_restored", "rows_inserted", "docker_phase_skipped",
 		"dropped_crew_filesystems", "security_level_clamped", "security_level_clamps", "columns_dropped", "dropped_columns",
 		"issue_counters_migrated", "payload_row_count_mismatches", "rows_inserted_shortfalls", "journal_entries_resigned", "journal_checkpoints_resigned",
-		"capability_tokens_reminted")
+		"capability_tokens_reminted", "attachments_restored", "attachments_already_present", "attachments_missing", "attachments_conflicts", "incomplete", "environments", "result", "report_id")
 	backupSelfTest := object(map[string]any{"ok": boolean(), "crew_id": str(), "crew_slug": str(), "canary_path": str(), "canary_bytes": integer(), "bundle_bytes": integer(), "elapsed_ms": integer(), "error": str()})
 	backupMetrics := object(map[string]any{"created_total": integer(), "created_by_scope": map[string]any{"type": "object", "additionalProperties": integer()}, "failed_total": integer(), "failed_by_reason": map[string]any{"type": "object", "additionalProperties": integer()}, "restored_total": integer(), "size_bytes_total": integer(), "duration_seconds_p50": numberSchema(), "duration_seconds_p95": numberSchema(), "duration_seconds_mean": numberSchema(), "lock_held_seconds_by_workspace": map[string]any{"type": "object", "additionalProperties": integer()}})
 	setup := object(map[string]any{
@@ -155,27 +189,28 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	}
 
 	routes := map[string]DomainSchema{
-		"GET /api/v1/admin/backups":              {Response: object(map[string]any{"data": array(ref("FinalAdminPlatformBackupEntry"))})},
-		"POST /api/v1/admin/backups":             {Response: ref("FinalAdminPlatformBackupCreate")},
-		"GET /api/v1/admin/backups/status":       {Response: ref("FinalAdminPlatformBackupStatus")},
-		"GET /api/v1/admin/backups/verify":       {Response: ref("FinalAdminPlatformBackupVerify")},
-		"GET /api/v1/admin/backups/metrics":      {Response: ref("FinalAdminPlatformBackupMetrics")},
-		"POST /api/v1/admin/backups/rotate":      {Response: ref("FinalAdminPlatformBackupRotate")},
-		"POST /api/v1/admin/backups/restore":     {Response: ref("FinalAdminPlatformBackupRestore")},
-		"POST /api/v1/admin/backups/self-test":   {Response: ref("FinalAdminPlatformBackupSelfTest")},
-		"GET /api/v1/admin/keeper/governance":    {Response: ref("FinalAdminPlatformGovernance")},
-		"PUT /api/v1/admin/keeper/governance":    {Response: ref("FinalAdminPlatformGovernance")},
-		"GET /api/v1/admin/rate-limits":          {Response: object(map[string]any{"limiters": array(ref("FinalAdminPlatformRateLimitState"))})},
-		"PUT /api/v1/admin/rate-limits/{key}":    {Response: ref("FinalAdminPlatformRateLimitState")},
-		"DELETE /api/v1/admin/rate-limits/{key}": {Response: ref("FinalAdminPlatformRateLimitState")},
-		"POST /api/v1/auth/forgot":               {Response: ref("FinalAdminPlatformMessage")},
-		"POST /api/v1/auth/reset":                {Response: object(map[string]any{"ok": boolean()})},
-		"POST /api/v1/auth/signup":               {Response: ref("FinalAdminPlatformMessage")},
-		"GET /api/v1/auth/google/status":         {Response: object(map[string]any{"enabled": boolean()})},
-		"POST /api/v1/bootstrap":                 {Response: ref("FinalAdminPlatformBootstrap")},
-		"GET /api/v1/ws-token":                   {Response: ref("FinalAdminPlatformWsToken")},
-		"GET /api/v1/onboarding/status":          {Response: object(map[string]any{"completed": boolean()})},
-		"POST /api/v1/onboarding/complete":       {Response: object(map[string]any{"status": str()})},
+		"GET /api/v1/admin/backups":                         {Response: object(map[string]any{"data": array(ref("FinalAdminPlatformBackupEntry"))})},
+		"POST /api/v1/admin/backups":                        {Response: ref("FinalAdminPlatformBackupCreate")},
+		"GET /api/v1/admin/backups/status":                  {Response: ref("FinalAdminPlatformBackupStatus")},
+		"GET /api/v1/admin/backups/verify":                  {Response: ref("FinalAdminPlatformBackupVerify")},
+		"GET /api/v1/admin/instance/backups/bundles/verify": {Response: ref("FinalAdminPlatformBackupVerify")},
+		"GET /api/v1/admin/backups/metrics":                 {Response: ref("FinalAdminPlatformBackupMetrics")},
+		"POST /api/v1/admin/backups/rotate":                 {Response: ref("FinalAdminPlatformBackupRotate")},
+		"POST /api/v1/admin/backups/restore":                {Response: ref("FinalAdminPlatformBackupRestore")},
+		"POST /api/v1/admin/backups/self-test":              {Response: ref("FinalAdminPlatformBackupSelfTest")},
+		"GET /api/v1/admin/keeper/governance":               {Response: ref("FinalAdminPlatformGovernance")},
+		"PUT /api/v1/admin/keeper/governance":               {Response: ref("FinalAdminPlatformGovernance")},
+		"GET /api/v1/admin/rate-limits":                     {Response: object(map[string]any{"limiters": array(ref("FinalAdminPlatformRateLimitState"))})},
+		"PUT /api/v1/admin/rate-limits/{key}":               {Response: ref("FinalAdminPlatformRateLimitState")},
+		"DELETE /api/v1/admin/rate-limits/{key}":            {Response: ref("FinalAdminPlatformRateLimitState")},
+		"POST /api/v1/auth/forgot":                          {Response: ref("FinalAdminPlatformMessage")},
+		"POST /api/v1/auth/reset":                           {Response: object(map[string]any{"ok": boolean()})},
+		"POST /api/v1/auth/signup":                          {Response: ref("FinalAdminPlatformMessage")},
+		"GET /api/v1/auth/google/status":                    {Response: object(map[string]any{"enabled": boolean()})},
+		"POST /api/v1/bootstrap":                            {Response: ref("FinalAdminPlatformBootstrap")},
+		"GET /api/v1/ws-token":                              {Response: ref("FinalAdminPlatformWsToken")},
+		"GET /api/v1/onboarding/status":                     {Response: object(map[string]any{"completed": boolean()})},
+		"POST /api/v1/onboarding/complete":                  {Response: object(map[string]any{"status": str()})},
 		"POST /api/v1/onboarding/setup": {Request: object(map[string]any{
 			"workspace_name": str(), "crew_name": str(), "agent_name": str(), "cli_adapter": str(), "llm_provider": str(),
 			"llm_model": str(), "credential_name": str(), "credential_value": str(), "crew_template_slug": str(),

@@ -40,6 +40,7 @@ import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { useAutomations } from "@/hooks/use-automations"
 import { automationsForRoutine, crewshipActionsInDefinition } from "@/lib/automations"
 import { runProvenance } from "@/lib/run-provenance"
+import { readableOriginSource } from "@/lib/routine-run-provenance"
 import { AutomationList } from "@/components/features/automations/automation-list"
 import { integrationLabel } from "@/lib/integration-labels"
 import { credentialTypeLabel } from "@/lib/credential-labels"
@@ -1058,7 +1059,7 @@ function RunsList({ slug, workspaceId }: { slug: string; workspaceId: string }) 
                 <Link
                   href={activityHref(slug, r.id)}
                   data-testid={`run-row-${r.id}`}
-                  className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-white/[0.025]"
+                  className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-foreground/[0.025]"
                 >
                   <Icon
                     className={cn(
@@ -1075,9 +1076,9 @@ function RunsList({ slug, workspaceId }: { slug: string; workspaceId: string }) 
                     <div className="flex flex-wrap items-baseline gap-x-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
                       <span>{prov.label}</span>
                       {r.pipeline_version != null && <span>· v{r.pipeline_version}</span>}
-                      {prov.source && (
+                      {readableOriginSource(prov.source) && (
                         <span className="truncate normal-case text-muted-foreground-soft">
-                          {prov.source}
+                          {readableOriginSource(prov.source)}
                         </span>
                       )}
                     </div>

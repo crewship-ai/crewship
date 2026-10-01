@@ -131,7 +131,7 @@ export function IssueDrillDown({ workspaceId, issueId, label, chains, onOpenWork
           {identifier && (
             <a
               href={`/issues/${encodeURIComponent(identifier)}`}
-              className="ml-auto rounded-md border border-white/[0.08] px-2 py-1 text-[11px] text-primary transition-colors hover:bg-white/[0.04]"
+              className="ml-auto rounded-md border border-foreground/[0.08] px-2 py-1 text-[11px] text-primary transition-colors hover:bg-foreground/[0.04]"
             >
               Open issue ↗
             </a>
@@ -166,7 +166,7 @@ export function IssueDrillDown({ workspaceId, issueId, label, chains, onOpenWork
                     key={c.origin}
                     type="button"
                     onClick={() => onOpenWorkflow(c.origin)}
-                    className="grid grid-cols-[8px_1fr_auto_auto] items-center gap-3 rounded-md px-1.5 py-2 text-left text-[11.5px] transition-colors hover:bg-white/[0.03]"
+                    className="grid grid-cols-[8px_1fr_auto_auto] items-center gap-3 rounded-md px-1.5 py-2 text-left text-[11.5px] transition-colors hover:bg-foreground/[0.03]"
                   >
                     <span
                       aria-hidden
@@ -322,7 +322,7 @@ export function AgentDrillDown({ workspaceId, agentID, agentSlug, name, chains, 
                     key={c.origin}
                     type="button"
                     onClick={() => onOpenWorkflow(c.origin)}
-                    className="grid grid-cols-[8px_1fr_auto_auto] items-center gap-3 rounded-md px-1.5 py-2 text-left text-[11.5px] transition-colors hover:bg-white/[0.03]"
+                    className="grid grid-cols-[8px_1fr_auto_auto] items-center gap-3 rounded-md px-1.5 py-2 text-left text-[11.5px] transition-colors hover:bg-foreground/[0.03]"
                   >
                     <span
                       aria-hidden

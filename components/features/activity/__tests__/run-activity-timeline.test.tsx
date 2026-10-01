@@ -122,7 +122,7 @@ describe("RunActivityTimeline — card variant", () => {
     mockEntries = twoSteps()
     render(<RunActivityTimeline workspaceId="ws_1" params={{ trace_id: "trace_1" }} card />)
     const root = screen.getByTestId("run-activity")
-    expect(root).toHaveClass("rounded-xl", "border", "bg-card")
+    expect(root.getAttribute("data-slot")).toBe("detail-card")
     expect(screen.getByText("Run activity")).toBeInTheDocument()
     expect(screen.getByText("2 steps")).toBeInTheDocument()
     // The card draws the header; the rail must not draw a second one.
@@ -147,7 +147,7 @@ describe("RunActivityTimeline — card variant", () => {
     mockEntries = twoSteps()
     render(<RunActivityTimeline workspaceId="ws_1" params={{ trace_id: "trace_1" }} />)
     const root = screen.getByTestId("run-activity")
-    expect(root).not.toHaveClass("rounded-xl")
+    expect(root.getAttribute("data-slot")).not.toBe("detail-card")
     expect(screen.getByText("2 steps")).toBeInTheDocument()
   })
 })

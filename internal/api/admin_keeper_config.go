@@ -159,7 +159,7 @@ func redactEndpointUserinfo(raw string) string {
 // Get returns the effective judge configuration with per-field provenance.
 // GET /api/v1/admin/keeper/config
 func (h *AdminKeeperConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
@@ -202,7 +202,7 @@ type keeperConfigRequest struct {
 
 // Put applies a partial update. PUT /api/v1/admin/keeper/config
 func (h *AdminKeeperConfigHandler) Put(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
@@ -279,7 +279,7 @@ func (h *AdminKeeperConfigHandler) Put(w http.ResponseWriter, r *http.Request) {
 // Reset drops every instance override so the judge returns to the KEEPER_*
 // values the server booted with. DELETE /api/v1/admin/keeper/config
 func (h *AdminKeeperConfigHandler) Reset(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}

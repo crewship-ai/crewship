@@ -77,14 +77,14 @@ const DOMAINS: Array<{ value: string; icon: typeof Code2 }> = [
   { value: "SALES", icon: HandCoins },
   { value: "CUSTOM", icon: Box },
 ]
-// Source colours map to trust tier — emerald=official, sky=verified,
-// neutral=community, violet=generated, amber=private. Tailwind text-*
+// Source colours match the card's StatusPill tones — blue=official,
+// green=verified, neutral=community, violet=generated, amber=private. Tailwind text-*
 // classes are applied directly on the icon so the count column keeps
 // the standard muted colour.
 const SOURCES = [
-  { value: "BUNDLED", label: "Official", icon: ShieldCheck, colour: "text-success" },
-  { value: "MARKETPLACE", label: "Verified", icon: BadgeCheck, colour: "text-sky-400" },
-  { value: "CUSTOM", label: "Community", icon: Users, colour: "text-white/55" },
+  { value: "BUNDLED", label: "Official", icon: ShieldCheck, colour: "text-primary" },
+  { value: "MARKETPLACE", label: "Verified", icon: BadgeCheck, colour: "text-success" },
+  { value: "CUSTOM", label: "Community", icon: Users, colour: "text-foreground/55" },
   { value: "GENERATED", label: "Generated", icon: Sparkles, colour: "text-purple" },
   { value: "MANAGED", label: "Private", icon: Lock, colour: "text-warn" },
 ]
@@ -111,8 +111,8 @@ const RAIL_COLLAPSED_PX = 44
 // rows read as equal-weight text.
 const MATURITIES = [
   { value: "OFFICIAL", label: "Official", dot: "bg-success" },
-  { value: "CURATED", label: "Curated", dot: "bg-sky-400" },
-  { value: "COMMUNITY", label: "Community", dot: "bg-white/40" },
+  { value: "CURATED", label: "Curated", dot: "bg-primary" },
+  { value: "COMMUNITY", label: "Community", dot: "bg-foreground/40" },
   { value: "EXPERIMENTAL", label: "Experimental", dot: "bg-warn" },
 ]
 
@@ -508,7 +508,7 @@ export function SkillsBrowser() {
         }}
       >
         <aside data-panel-id="skills-rail" className={cn(
-          "row-span-1 border-r border-white/[0.1] bg-card flex flex-col min-h-0 overflow-hidden",
+          "row-span-1 border-r border-foreground/[0.1] bg-card flex flex-col min-h-0 overflow-hidden",
           isMobile && railCollapsed && "hidden",
         )}>
           {railCollapsed ? (
@@ -549,7 +549,7 @@ export function SkillsBrowser() {
                           <span className="inline-flex items-center gap-1.5">
                             <Icon className={cn(
                               "h-3 w-3",
-                              isDisabled ? "text-white/25" : "text-white/65",
+                              isDisabled ? "text-foreground/25" : "text-foreground/65",
                             )} />
                             {capitalise(d.value)}
                           </span>
@@ -580,7 +580,7 @@ export function SkillsBrowser() {
                           <span className="inline-flex items-center gap-1.5">
                             <Icon className={cn(
                               "h-3 w-3",
-                              isDisabled ? "text-white/25" : s.colour,
+                              isDisabled ? "text-foreground/25" : s.colour,
                             )} />
                             {s.label}
                           </span>
@@ -631,7 +631,7 @@ export function SkillsBrowser() {
                           <span className="inline-flex items-center gap-2">
                             <span className={cn(
                               "h-1.5 w-1.5 rounded-full",
-                              isDisabled ? "bg-white/15" : m.dot,
+                              isDisabled ? "bg-foreground/15" : m.dot,
                             )} />
                             {m.label}
                           </span>
@@ -651,31 +651,31 @@ export function SkillsBrowser() {
 
         {/* CENTER — toolbar + chips + grid */}
         <main data-panel-id="skills-grid" className="flex flex-col h-full bg-card/40 min-h-0 overflow-hidden">
-          <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-white/[0.05] shrink-0">
-            <div className="text-[12px] text-white/55">
-              <span className="text-white/35">Skills</span> ›{" "}
-              <span className="text-white/95 font-semibold">Browse</span>
+          <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-foreground/[0.05] shrink-0">
+            <div className="text-[12px] text-foreground/55">
+              <span className="text-foreground/35">Skills</span> ›{" "}
+              <span className="text-foreground/95 font-semibold">Browse</span>
             </div>
-            <div className="text-[11px] text-white/45 tabular-nums">
+            <div className="text-[11px] text-foreground/45 tabular-nums">
               {loading ? "Loading…" : `Showing ${filtered.length} of ${skills.length}`}
             </div>
           </div>
 
           {activeChips.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 border-b border-white/[0.05] shrink-0">
+            <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 border-b border-foreground/[0.05] shrink-0">
               {activeChips.map((c) => (
                 <button
                   key={c.key}
                   onClick={c.onRemove}
-                  className="group inline-flex items-center gap-1 rounded-md bg-white/[0.06] border border-white/[0.08] px-2 py-0.5 text-[11px] text-white/70 hover:bg-white/[0.1] transition-colors duration-150"
+                  className="group inline-flex items-center gap-1 rounded-md bg-foreground/[0.06] border border-foreground/[0.08] px-2 py-0.5 text-[11px] text-foreground/70 hover:bg-foreground/[0.1] transition-colors duration-150"
                 >
                   {c.label}
-                  <X className="h-3 w-3 text-white/45 group-hover:text-white/85" />
+                  <X className="h-3 w-3 text-foreground/45 group-hover:text-foreground/85" />
                 </button>
               ))}
               <button
                 onClick={clearAll}
-                className="text-[11px] text-white/45 hover:text-white/85 underline-offset-2 hover:underline transition-colors duration-150"
+                className="text-[11px] text-foreground/45 hover:text-foreground/85 underline-offset-2 hover:underline transition-colors duration-150"
               >
                 Clear all
               </button>
@@ -684,7 +684,7 @@ export function SkillsBrowser() {
 
           <div className="flex-1 min-h-0 overflow-hidden">
             {loading ? (
-              <div className="flex h-full items-center justify-center text-white/45 text-sm">
+              <div className="flex h-full items-center justify-center text-foreground/45 text-sm">
                 <Spinner className="h-4 w-4 mr-2" />
                 Loading skills…
               </div>
@@ -694,7 +694,7 @@ export function SkillsBrowser() {
                 {error}
               </div>
             ) : filtered.length === 0 ? (
-              <div className="flex h-full flex-col items-center justify-center gap-2 text-white/45 text-sm">
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-foreground/45 text-sm">
                 <Package className="h-6 w-6" />
                 <div>No skills match the current filters.</div>
                 {activeChips.length > 0 && (
@@ -739,7 +739,7 @@ export function SkillsBrowser() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 24 }}
               transition={spring.smooth}
-              className="relative flex flex-col h-full bg-card border-l border-white/[0.1] overflow-hidden"
+              className="relative flex flex-col h-full bg-card border-l border-foreground/[0.1] overflow-hidden"
             >
               <div
                 role="separator"
@@ -791,30 +791,30 @@ function FacetRow({
             checked
               ? "border-primary bg-primary"
               : disabled
-                ? "border-white/10"
-                : "border-white/20",
+                ? "border-foreground/10"
+                : "border-foreground/20",
           )}
         />
         {label}
       </span>
-      <span className="tabular-nums text-white/45 shrink-0">{count}</span>
+      <span className="tabular-nums text-foreground/45 shrink-0">{count}</span>
     </SidebarRow>
   )
 }
 
 function BottomStrip({ bundledCount }: { bundledCount: number }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-[11px] text-white/55">
+    <div className="flex items-center gap-3 rounded-lg border border-foreground/[0.08] bg-foreground/[0.02] px-3 py-2 text-[11px] text-foreground/55">
       <span className="inline-flex items-center gap-1.5">
         <Package className="h-3 w-3" />
         Bundled ({bundledCount}) — included offline
       </span>
-      <span className="text-white/25">|</span>
+      <span className="text-foreground/25">|</span>
       <span className="inline-flex items-center gap-1.5">
         <RefreshCw className="h-3 w-3" />
-        skills.sh sync — manual via <code className="text-white/65 bg-white/[0.04] px-1 rounded">crewship skill import</code>
+        skills.sh sync — manual via <code className="text-foreground/65 bg-foreground/[0.04] px-1 rounded">crewship skill import</code>
       </span>
-      <span className="ml-auto text-white/35 tabular-nums">v0.1.0-beta</span>
+      <span className="ml-auto text-foreground/35 tabular-nums">v0.1.0-beta</span>
     </div>
   )
 }

@@ -22,11 +22,12 @@ describe("ConceptIcon", () => {
     expect(container.querySelector("span")).toBeNull()
   })
 
-  it("draws the tinted chip when asked", () => {
+  it("draws the chip as a Harbor icon tile in the concept's tint", () => {
     const { container } = render(<ConceptIcon concept="issues" variant="chip" />)
     const chip = container.querySelector("span")
     expect(chip).not.toBeNull()
-    expect(chip!.getAttribute("class")).toContain(ACCENT[CONCEPT_ACCENT.issues].chip)
+    expect(chip!.getAttribute("class")).toContain("icon-tile")
+    expect(chip!.style.getPropertyValue("--ic")).toBe(ACCENT[CONCEPT_ACCENT.issues].tint)
   })
 
   it("lets an explicit accent win over the concept's own", () => {

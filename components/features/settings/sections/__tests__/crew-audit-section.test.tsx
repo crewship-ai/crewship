@@ -44,7 +44,8 @@ describe("CrewAuditSection", () => {
     // detail panel, where the machine-readable form belongs.
     expect(screen.getByText("created")).toBeTruthy()
 
-    const [url] = apiFetch.mock.calls[0] as [string]
+    // The person filter also reads the member list; find the audit request.
+    const url = apiFetch.mock.calls.map(([u]) => String(u)).find((u) => u.startsWith("/api/v1/audit"))
     expect(url).toContain("workspace_id=ws-1")
   })
 
@@ -64,13 +65,19 @@ describe("CrewAuditSection", () => {
   })
 
   it("surfaces a refresh failure after a prior successful load", async () => {
-    apiFetch.mockResolvedValueOnce(
-      jsonResponse({ data: LOGS, pagination: { page: 1, limit: 50, total: 1, total_pages: 1 } }),
+    // Route by URL: the member list for the person filter loads alongside.
+    let auditFails = false
+    apiFetch.mockImplementation(async (u: string) =>
+      u.includes("/members")
+        ? jsonResponse([])
+        : auditFails
+          ? jsonResponse({ error: "boom" }, 500)
+          : jsonResponse({ data: LOGS, pagination: { page: 1, limit: 50, total: 1, total_pages: 1 } }),
     )
     render(<CrewAuditSection workspaceId="ws-1" />)
     await screen.findByText("Pavel Srba")
 
-    apiFetch.mockResolvedValueOnce(jsonResponse({ error: "boom" }, 500))
+    auditFails = true
     const refreshBtn = screen.getByRole("button", { name: /refresh audit log/i })
     fireEvent.click(refreshBtn)
 

@@ -58,14 +58,14 @@ export function SourcePill({ run, linked = true }: { run: PipelineRun; linked?: 
   }
   if (run.triggered_via === "call_pipeline") {
     return (
-      <span className="rounded bg-white/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+      <span className="rounded bg-foreground/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
         <ScrollText className="mr-1 inline h-2.5 w-2.5" />
         sub-run
       </span>
     )
   }
   return (
-    <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+    <span className="rounded bg-foreground/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
       manual
     </span>
   )

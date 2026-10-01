@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/work"
 )
 
@@ -140,6 +141,14 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 
 // recover runs one lease-recovery pass and then reconciles what it parked.
 func (d *Dispatcher) recover(ctx context.Context) error {
+	// Requeueing and parking write work rows: one writer in the quiet
+	// window's barrier. Refused while a window is closing or held; the next
+	// pass after release picks the abandoned leases up.
+	wr, ok := quiesce.Enter(ctx)
+	if !ok {
+		return nil
+	}
+	defer wr.Leave()
 	out, err := d.store.RecoverExpiredLeases(ctx)
 	if err != nil {
 		return fmt.Errorf("recover expired leases: %w", err)
@@ -154,6 +163,21 @@ func (d *Dispatcher) recover(ctx context.Context) error {
 // claimOne takes at most one piece of work and starts it. It reports whether it
 // claimed anything, so the caller can drain.
 func (d *Dispatcher) claimOne(ctx context.Context) (bool, error) {
+	// Held: nothing is claimed, so nothing is burned — the work stays queued
+	// with its attempt budget intact and the next poll after the hold lifts
+	// picks it up.
+	if d.cfg.Paused != nil && d.cfg.Paused() {
+		return false, nil
+	}
+	// The claim and the start intent are one writer in the backup's quiet
+	// window barrier: a window waits for a claim in progress, and no claim
+	// begins while one is closing or held. The started attempt is then
+	// running work, which the backup's busy probe counts.
+	wr, ok := quiesce.Enter(ctx)
+	if !ok {
+		return false, nil
+	}
+	defer wr.Leave()
 	c, err := d.store.Claim(ctx, work.ClaimOptions{
 		LeaseOwner: d.cfg.Owner,
 		Limits:     d.cfg.Limits,

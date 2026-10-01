@@ -97,6 +97,16 @@ func covFanoutServer(t *testing.T) *httptest.Server {
 				send(wsproto.AgentBusyEventType,
 					"The agent is busy with another run right now. Please wait for it to finish.")
 				continue
+			case "agent-rebuild":
+				// A send parked behind an environment build: the bridge's
+				// crew_provisioning + done, then the server's replay of the
+				// message on the same channel once the image is ready.
+				send(wsproto.CrewProvisioningEventType, "agent-rebuild's environment is being built")
+				send("done", "")
+				send("status", "Starting container...")
+				send("text", "answer-after-rebuild")
+				send("done", "")
+				continue
 			case "agent-drop":
 				send("text", "text-before-drop")
 				return // close without done → read error path
@@ -410,5 +420,20 @@ func TestFanoutOne_AgentBusy(t *testing.T) {
 		t.Fatal("fanoutOne blocked on an agent_busy frame: the server sends no " +
 			"terminal done after a busy bounce, so waiting for one hangs until " +
 			"the caller gives up (observed live on dev3: 200 s, empty output, exit 124)")
+	}
+}
+
+// A cache image evicted under the agent (or a first build) parks the send
+// behind a rebuild. The deferral's own done must not end the exchange: the
+// answer is the replayed run that follows on the same channel.
+func TestFanoutOne_WaitsThroughEnvironmentRebuild(t *testing.T) {
+	srv := covFanoutServer(t)
+	covSetupCli8(t, srv.URL)
+	text, err := fanoutOne(t.Context(), newAPIClient(), srv.URL, "ws-tok", "agent-rebuild", "ping", 0)
+	if err != nil {
+		t.Fatalf("fanoutOne: %v", err)
+	}
+	if text != "answer-after-rebuild" {
+		t.Fatalf("text = %q, want the replayed run's answer", text)
 	}
 }

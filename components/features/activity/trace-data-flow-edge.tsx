@@ -126,7 +126,7 @@ function TraceDataFlowEdgeBase(props: EdgeProps) {
             </div>
           )}
           {hovered && d?.preview && (
-            <div className="absolute left-1/2 top-full z-50 mt-1 -translate-x-1/2 whitespace-pre rounded border border-white/[0.08] bg-card px-2 py-1 font-mono text-[10px] text-foreground/80 shadow-xl">
+            <div className="absolute left-1/2 top-full z-50 mt-1 -translate-x-1/2 whitespace-pre rounded border border-foreground/[0.08] bg-card px-2 py-1 font-mono text-[10px] text-foreground/80 shadow-xl">
               {d.preview}
             </div>
           )}

@@ -21,7 +21,8 @@ routes also write a Keeper decision entry to the workspace journal where noted.
 | Role | Routes |
 | --- | --- |
 | `ADMIN` or `OWNER` | `GET /config`, `GET /health`, `GET /aux`, `GET /governance` |
-| `ADMIN` or `OWNER` | All `PUT`, `POST`, and `DELETE` routes on this page |
+| Instance administrator | Judge configuration, judge probes and evaluator models: `PUT`/`DELETE /config`, `POST /judge/test`, `POST /judge/test-hosted`, `PUT`/`DELETE /aux…`, `POST /aux/use-judge`, `POST /aux/{slot}/probe`. They change Keeper for every workspace. |
+| `ADMIN` or `OWNER` | The remaining `PUT`, `POST`, and `DELETE` routes on this page (governance, findings test, reviews, requests) |
 
 Malformed JSON, invalid enum values, unknown slots, missing workspace context, or
 invalid workspace-owned references return `400`. Insufficient role returns `403`;
@@ -77,7 +78,7 @@ missing.
 
 ### `PUT /api/v1/admin/keeper/config`
 
-**Auth:** ADMIN or OWNER. **Request:** partial configuration JSON. **Response:**
+**Auth:** instance administrator (a workspace ADMIN or OWNER is not enough). **Request:** partial configuration JSON. **Response:**
 effective config. **Status:** `200` updated; `400` invalid values; `403` insufficient
 role; `503` unavailable.
 
@@ -136,7 +137,7 @@ healthy. The response includes `workspace_id`, `samples`, `allow`, `deny`,
 
 ### `DELETE /api/v1/admin/keeper/config`
 
-**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** effective config.
+**Auth:** instance administrator (a workspace ADMIN or OWNER is not enough). **Request:** no body. **Response:** effective config.
 **Status:** `200` cleared; `403` insufficient role; `503` unavailable.
 
 Clears all instance overrides and returns the effective configuration. The server
@@ -171,7 +172,7 @@ errors. This route dials the supplied address and is rate limited instance-wide.
 
 ### `POST /api/v1/admin/keeper/judge/test`
 
-**Auth:** ADMIN or OWNER. **Request:** optional JSON override body. **Response:**
+**Auth:** instance administrator (a workspace ADMIN or OWNER is not enough). **Request:** optional JSON override body. **Response:**
 stage/decision object. **Status:** `200` with stage failures; `400` invalid JSON;
 `403` insufficient role; `429` probe limit.
 
@@ -199,7 +200,7 @@ as a 5xx. Invalid JSON is `400`; probe exhaustion is `429`.
 
 ### `POST /api/v1/admin/keeper/judge/test-hosted`
 
-**Auth:** ADMIN or OWNER. **Request:** provider/model and optional credential.
+**Auth:** instance administrator (a workspace ADMIN or OWNER is not enough). **Request:** provider/model and optional credential.
 **Response:** stage/decision object. **Status:** `200` with stage failures;
 `400` invalid input; `403` insufficient role; `429` probe limit; `503` unavailable.
 
@@ -253,7 +254,7 @@ edit to the handler. See
 
 ### `PUT /api/v1/admin/keeper/aux/{slot}`
 
-**Auth:** ADMIN or OWNER. **Request:** partial slot override JSON. **Response:**
+**Auth:** instance administrator (a workspace ADMIN or OWNER is not enough). **Request:** partial slot override JSON. **Response:**
 complete `aux` object. **Status:** `200` success; `400` invalid slot/data;
 `403` insufficient role; `503` verification unavailable.
 
@@ -267,7 +268,7 @@ credential is selected.
 
 ### `DELETE /api/v1/admin/keeper/aux` and `DELETE /api/v1/admin/keeper/aux/{slot}`
 
-**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** complete `aux`
+**Auth:** instance administrator (a workspace ADMIN or OWNER is not enough). **Request:** no body. **Response:** complete `aux`
 object. **Status:** `200` cleared; `400` unknown slot; `403` insufficient role.
 
 Clears every evaluator override, or only the named slot, respectively. Both
@@ -275,7 +276,7 @@ return the complete `aux` object. An unknown slot is `400`.
 
 ### `POST /api/v1/admin/keeper/aux/use-judge`
 
-**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** complete `aux`
+**Auth:** instance administrator (a workspace ADMIN or OWNER is not enough). **Request:** no body. **Response:** complete `aux`
 object. **Status:** `200` updated; `400` incomplete judge; `403` insufficient
 role; `503` evaluator store unavailable.
 
@@ -285,7 +286,7 @@ not); an unavailable evaluator store is `503`.
 
 ### `POST /api/v1/admin/keeper/aux/{slot}/probe`
 
-**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** stage/decision
+**Auth:** instance administrator (a workspace ADMIN or OWNER is not enough). **Request:** no body. **Response:** stage/decision
 object. **Status:** `200` probe result; `400` invalid slot; `403` insufficient
 role; `429` spend limit; `503` unavailable.
 

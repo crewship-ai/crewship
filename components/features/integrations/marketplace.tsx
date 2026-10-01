@@ -213,7 +213,7 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
             </div>
           ) : filtered.length === 0 ? (
             recipeEmptyState ?? (
-              <div className="rounded-md border border-white/10 bg-background p-12 text-center text-sm text-muted-foreground">
+              <div className="rounded-md border border-foreground/10 bg-background p-12 text-center text-sm text-muted-foreground">
                 {debouncedQuery ? "No servers match your search." : "Registry empty — wait for first sync."}
               </div>
             )
@@ -247,7 +247,7 @@ function FeaturedCard({ entry, onAdd, installing }: { entry: RegistryEntry; onAd
       type="button"
       onClick={() => onAdd(entry)}
       disabled={installing}
-      className="group flex items-start gap-3 rounded-xl border border-white/10 bg-card p-4 text-left transition-all hover:border-primary/40 hover:bg-white/[0.02]"
+      className="group flex items-start gap-3 rounded-xl border border-foreground/10 bg-card p-4 text-left transition-all hover:border-primary/40 hover:bg-foreground/[0.02]"
     >
       <MCPLogo name={entry.icon || entry.name} transport={entry.transport} className="h-10 w-10 shrink-0 opacity-90" />
       <div className="flex-1 min-w-0 space-y-1">
@@ -268,7 +268,7 @@ function FeaturedCard({ entry, onAdd, installing }: { entry: RegistryEntry; onAd
 
 function Card({ entry, onAdd, installing }: { entry: RegistryEntry; onAdd: () => void; installing: boolean }) {
   return (
-    <div className="rounded-md border border-white/10 bg-background p-3 hover:border-white/20 transition-colors">
+    <div className="rounded-md border border-foreground/10 bg-background p-3 hover:border-foreground/20 transition-colors">
       <div className="flex items-start gap-2.5">
         <MCPLogo name={entry.icon || entry.name} transport={entry.transport} className="h-6 w-6 shrink-0 mt-0.5 opacity-85" />
         <div className="flex-1 min-w-0 space-y-1">

@@ -1,18 +1,26 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Shield, ChevronRight, ChevronLeft, Search, RefreshCw, Download } from "lucide-react"
+import { Shield, ChevronRight, ChevronLeft, RefreshCw, Download, ScrollText, Cpu } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select"
+import { StatusPill } from "@/components/ui/status-pill"
+import type { StatusTone } from "@/lib/format-status"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
-import { personLabel } from "@/components/ui/user-avatar"
+import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
 import { SettingsCard, SettingsEmpty } from "../shared"
+import {
+  AUDIT_SOURCES,
+  DEFAULT_AUDIT_FILTERS,
+  activeFilterChips,
+  auditQueryParams,
+  type AuditFilters,
+} from "../audit-log/audit-filters"
+import { useAuditFilters } from "../audit-log/use-audit-filters"
+import { AuditToolbar } from "../audit-log/audit-toolbar"
+import { useWorkspacePeople } from "../audit-log/use-workspace-people"
 
 interface AuditLog {
   id: string
@@ -30,38 +38,6 @@ interface AuditLog {
 }
 
 interface AuditPagination { page: number; limit: number; total: number; total_pages: number }
-
-// The entity types the server actually writes. Four of the six entries here
-// used to match nothing at all — the handlers for crews, credentials, members
-// and workspace settings recorded no audit rows, so those filters could only
-// ever return an empty list. They are real now; keep this list and the write
-// sites in step, or the filter starts lying again.
-const categories = [
-  { label: "All", value: "all" },
-  { label: "Agents", value: "AGENT" },
-  { label: "Crews", value: "CREW" },
-  { label: "Crew links", value: "CREW_LINK" },
-  { label: "Credentials", value: "CREDENTIAL" },
-  { label: "People", value: "WorkspaceMember" },
-  { label: "Workspace", value: "WORKSPACE" },
-]
-
-const dateRanges = [
-  { label: "Last 24h", value: "24h" },
-  { label: "Last 7d", value: "7d" },
-  { label: "Last 30d", value: "30d" },
-  { label: "All time", value: "all" },
-]
-
-function getDateFrom(range: string): string | undefined {
-  const now = new Date()
-  switch (range) {
-    case "24h": return new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
-    case "7d": return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
-    case "30d": return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
-    default: return undefined
-  }
-}
 
 const PAGE_SIZE = 50
 
@@ -98,21 +74,6 @@ function normalizeLog(raw: Record<string, unknown>): AuditLog {
 
 
 // ── Reading a row ────────────────────────────────────────────────────────
-
-/**
- * The four trails a workspace keeps. They are separate tables on purpose —
- * the keeper ledger is append-only, and merging it into a general log would
- * cost exactly the guarantee it exists for — so this switch changes what the
- * page READS, not where anything is stored.
- */
-const SOURCES = [
-  { value: "workspace", label: "Workspace", hint: "Settings, people, crews, credentials" },
-  { value: "crews", label: "Crews", hint: "Cross-crew dispatch, messages, shared files" },
-  { value: "credentials", label: "Credentials", hint: "Which secret was used, revealed or rotated" },
-  { value: "keeper", label: "Keeper", hint: "Every gatekeeper decision, append-only" },
-] as const
-
-type AuditSource = (typeof SOURCES)[number]["value"]
 
 /**
  * Actions that change who can reach what.
@@ -217,21 +178,37 @@ function dayHeading(day: string): string {
 
 interface CrewAuditSectionProps {
   workspaceId: string
+  /** Controlled filters, when a parent owns them (the Audit log page's side
+   *  panel picks the trail and time range). Omitted → the URL-backed hook. */
+  filters?: AuditFilters
+  onFiltersChange?: (next: Partial<AuditFilters>) => void
+  /** The trail tabs; hidden when the page's side panel shows them. */
+  showSources?: boolean
+  /** Card heading; the Audit log page names the card by what it lists. */
+  title?: string
+  description?: string
+  /** The search / person / type / range bar; hidden when the page's side
+   *  panel holds those filters. */
+  showToolbar?: boolean
+  /** Fold adjacent repeats of the same event into one line. */
+  groupRepeats?: boolean
+  /** Mark rows that change who can reach what. */
+  highlightAccess?: boolean
 }
 
-export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
+export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersChange, showSources = true, title = "Audit log", description = "Every state-changing action on this workspace, immutably recorded", showToolbar = true, groupRepeats = true, highlightAccess = true }: CrewAuditSectionProps) {
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [source, setSource] = useState<AuditSource>("workspace")
-  const [category, setCategory] = useState("all")
-  const [dateRange, setDateRange] = useState("7d")
-  const [searchQuery, setSearchQuery] = useState("")
+  const [ownFilters, setOwnFilters] = useAuditFilters()
+  const filters = controlled ?? ownFilters
+  const setFilters = onFiltersChange ?? setOwnFilters
   const [page, setPage] = useState(1)
   const [pagination, setPagination] = useState<AuditPagination | null>(null)
   const [exporting, setExporting] = useState(false)
+  const people = useWorkspacePeople(workspaceId)
   const abortRef = useRef<AbortController | null>(null)
 
   // Cap on rows an export may walk across pages. The audit table can
@@ -240,6 +217,13 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
   // while it walks pagination. 10k is enough for >6 months of typical
   // CRUD activity and small enough to stay snappy.
   const EXPORT_MAX_ROWS = 10_000
+
+  // Every filter change starts again from page one.
+  const changeFilters = useCallback((next: Partial<AuditFilters>) => {
+    setFilters(next)
+    setPage(1)
+    setExpandedId(null)
+  }, [setFilters])
 
   const fetchLogs = useCallback(async (opts?: { silent?: boolean }) => {
     // Abort any in-flight request
@@ -252,14 +236,10 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
     else setLoading(true)
     setError(null)
     try {
-      const params = new URLSearchParams({ workspace_id: workspaceId, page: String(page), limit: String(PAGE_SIZE), source })
-      // entity_type is the workspace trail's vocabulary; the others index by
-      // their own shape, and passing a filter the server would ignore is a
-      // filter that lies about what you are looking at.
-      if (source === "workspace" && category !== "all") params.set("entity_type", category)
-      const dateFrom = getDateFrom(dateRange)
-      if (dateFrom) params.set("date_from", dateFrom)
-
+      // auditQueryParams is the one place the query is built: it drops the
+      // filters a trail does not honour, so a filter never claims to narrow a
+      // list the server returned unfiltered.
+      const params = auditQueryParams(workspaceId, filters, page, PAGE_SIZE, new Date())
       const res = await apiFetch(`/api/v1/audit?${params}`, { signal: controller.signal })
       if (!res.ok) {
         setError(`Failed to load audit logs (${res.status})`)
@@ -276,7 +256,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [workspaceId, source, category, dateRange, page])
+  }, [workspaceId, filters, page])
 
   // Cancellable export — for 10k-row exports the page-walk can run
   // for many seconds; users need a way to bail without abandoning
@@ -300,20 +280,12 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
       const all: AuditLog[] = []
       const totalToFetch = Math.min(total, EXPORT_MAX_ROWS)
       const pageCount = Math.ceil(totalToFetch / PAGE_SIZE)
+      // One "now" for the whole walk, so a relative range does not slide
+      // between the first page and the last.
+      const now = new Date()
       for (let p = 1; p <= pageCount; p++) {
-        // Same params as fetchLogs, for the same reason: an export that
-        // drops `source` hands back the workspace trail under a filename
-        // that says Keeper, and entity_type is the workspace trail's
-        // vocabulary alone.
-        const params = new URLSearchParams({
-          workspace_id: workspaceId,
-          page: String(p),
-          limit: String(PAGE_SIZE),
-          source,
-        })
-        if (source === "workspace" && category !== "all") params.set("entity_type", category)
-        const dateFrom = getDateFrom(dateRange)
-        if (dateFrom) params.set("date_from", dateFrom)
+        // Same query as the table: the export is exactly what is on screen.
+        const params = auditQueryParams(workspaceId, filters, p, PAGE_SIZE, now)
         const res = await apiFetch(`/api/v1/audit?${params}`, { signal: controller.signal })
         if (!res.ok) {
           setError("Export failed — partial results discarded")
@@ -330,6 +302,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
         action: log.action,
         entity_type: log.entity_type,
         entity_id: log.entity_id,
+        entity_name: log.entity_name ?? "",
         user: personLabel(log.user?.full_name, log.user?.email ?? ""),
         ip_address: log.ip_address ?? "",
       }))
@@ -352,12 +325,12 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
       a.href = url
       // Name the trail: four sources land in the same downloads folder,
       // and "audit-log-<date>" for all of them is not a filename.
-      a.download = `audit-log-${source}-${new Date().toISOString().slice(0, 10)}.csv`
+      a.download = `audit-log-${filters.source}-${new Date().toISOString().slice(0, 10)}.csv`
       a.click()
       URL.revokeObjectURL(url)
       if (total > EXPORT_MAX_ROWS) {
         setError(
-          `Export capped at ${EXPORT_MAX_ROWS.toLocaleString()} rows (total matches: ${total.toLocaleString()}). Narrow the date range or category for a complete export.`,
+          `Export capped at ${EXPORT_MAX_ROWS.toLocaleString()} rows (total matches: ${total.toLocaleString()}). Narrow the time range or filters for a complete export.`,
         )
       }
     } catch (err) {
@@ -369,38 +342,20 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
       exportAbortRef.current = null
       setExporting(false)
     }
-  }, [workspaceId, pagination, source, category, dateRange])
+  }, [workspaceId, pagination, filters])
 
   useEffect(() => { fetchLogs() }, [fetchLogs])
-
-  // Reset page when filters change
-  function handleCategoryChange(value: string) {
-    setCategory(value)
-    setPage(1)
-  }
-  function handleDateRangeChange(value: string) {
-    setDateRange(value)
-    setPage(1)
-  }
-
-  const filteredLogs = searchQuery
-    ? logs.filter(
-        (log) =>
-          log.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          log.entity_type.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          personLabel(log.user?.full_name, log.user?.email ?? "").toLowerCase().includes(searchQuery.toLowerCase()),
-      )
-    : logs
 
   const total = pagination?.total ?? 0
   const totalPages = pagination?.total_pages ?? 1
   const rangeStart = (page - 1) * PAGE_SIZE + 1
   const rangeEnd = Math.min(page * PAGE_SIZE, total)
+  const filtered = activeFilterChips(filters, {}).length > 0
 
   return (
-    <SettingsCard
-      title="Audit log"
-      description="Every state-changing action on this workspace, immutably recorded"
+    <SettingsCard icon={ScrollText}
+      title={title}
+      description={description}
       actions={
         <>
           <Button
@@ -443,84 +398,44 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
           Four separate tables, one place to read them. The tables stay split
           — the keeper ledger is append-only on purpose — so this changes what
           is read, never where anything is stored. */}
-      <div className="flex flex-wrap items-center gap-1 border-b border-border/40 px-4 py-2">
-        {SOURCES.map((s) => (
-          <button
-            key={s.value}
-            type="button"
-            onClick={() => { setSource(s.value); setCategory("all"); setPage(1); setExpandedId(null) }}
-            aria-pressed={source === s.value}
-            title={s.hint}
-            className={cn(
-              "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
-              source === s.value
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
-
-      {/* ── Filter bar ── */}
-      <div className="flex items-center gap-2 flex-wrap px-4 py-3 border-b border-border/40">
-        {/* entity_type is the workspace trail's vocabulary, and fetchLogs only
-            sends it for that source. Rendering the buttons on the other trails
-            left them pressable and pressed while filtering nothing — the
-            selector said "Credentials" over an unfiltered Keeper log. */}
-        {source === "workspace" && (
-        <div
-          className="inline-flex items-center gap-0.5 p-0.5 rounded-md bg-muted/40 border border-border/60"
-          role="group"
-          aria-label="Filter by category"
-        >
-          {categories.map((cat) => (
-            <Button
-              key={cat.value}
+      {showSources && <div className="flex flex-wrap items-center gap-1 border-b border-border/60 px-4 pt-2" role="tablist" aria-label="Audit trail">
+        {AUDIT_SOURCES.map((s) => {
+          const on = filters.source === s.value
+          return (
+            <button
+              key={s.value}
               type="button"
-              variant="ghost"
-              size="sm"
-              aria-pressed={category === cat.value}
-              onClick={() => handleCategoryChange(cat.value)}
+              onClick={() => changeFilters({ ...DEFAULT_AUDIT_FILTERS, source: s.value, range: filters.range, from: filters.from, to: filters.to })}
+              aria-pressed={on}
+              title={s.hint}
               className={cn(
-                "h-6 px-2.5 rounded text-[11px] font-medium",
-                category === cat.value
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
+                "-mb-px border-b-2 px-3 pb-2 pt-1 text-xs font-medium transition-colors",
+                on ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
               )}
             >
-              {cat.label}
-            </Button>
-          ))}
-        </div>
-        )}
-        <Select value={dateRange} onValueChange={handleDateRangeChange}>
-          <SelectTrigger aria-label="Date range" className="w-[120px] h-7 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {dateRanges.map((dr) => (
-              <SelectItem key={dr.value} value={dr.value} className="text-xs">{dr.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="relative flex-1 min-w-[160px] max-w-[260px]">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-          <Input
-            aria-label="Filter events on this page"
-            placeholder="Filter this page…"
-            className="pl-7 h-7 text-xs"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-      </div>
+              {s.label}
+            </button>
+          )
+        })}
+      </div>}
+
+      {showToolbar && <AuditToolbar filters={filters} onChange={changeFilters} people={people} />}
 
       {/* Error with stale data */}
       {error && logs.length > 0 && (
         <div role="alert" className="text-[11px] text-destructive px-4 py-2 border-b border-border/40 bg-destructive/5">
           {error}
+        </div>
+      )}
+
+      {/* Column heads — the rows below are a table, read left to right. */}
+      {!loading && logs.length > 0 && (
+        <div className="hidden grid-cols-[14px_72px_minmax(0,12rem)_minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 bg-surface-subtle px-4 py-1.5 sm:grid">
+          <span />
+          <span className="eyebrow text-muted-foreground">Time</span>
+          <span className="eyebrow text-muted-foreground">Person</span>
+          <span className="eyebrow text-muted-foreground">Event</span>
+          <span />
         </div>
       )}
 
@@ -543,42 +458,43 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
             Retry
           </Button>
         </div>
-      ) : filteredLogs.length === 0 ? (
+      ) : logs.length === 0 ? (
         <SettingsEmpty>
           <div className="flex flex-col items-center gap-3 py-6">
-            <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center">
-              <Shield className="h-4 w-4 text-muted-foreground" />
+            <div className="icon-tile flex h-10 w-10 items-center justify-center rounded-lg">
+              <Shield className="h-4 w-4" />
             </div>
             <div>
               <div className="text-sm font-medium text-foreground/80">
-                {searchQuery ? "No matching events" : "No activity yet"}
+                {filtered ? "No events match these filters" : "No activity yet"}
               </div>
               <div className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">
-                {searchQuery ? "Try a different search term" : "All state-changing actions will be logged here."}
+                {filtered ? "Widen the time range or clear a filter." : "All state-changing actions will be logged here."}
               </div>
             </div>
           </div>
         </SettingsEmpty>
       ) : (
         <>
-          {byDay(filteredLogs).map((bucket) => (
+          {byDay(logs).map((bucket) => (
             <div key={bucket.day}>
               {/* A day is the unit people actually search in ("what happened
                   on the 27th"), and it is free to compute — the server
                   already returns newest-first. */}
-              <h3 className="sticky top-0 z-10 border-b border-border/40 bg-card/95 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground backdrop-blur">
+              <h3 className="sticky top-0 z-10 border-b border-border/40 bg-card/95 px-4 py-1.5 font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground backdrop-blur">
                 {dayHeading(bucket.day)}
-                <span className="ml-2 font-mono text-[10px] font-normal normal-case tracking-normal text-muted-foreground-soft">
+                <span className="ml-2 font-mono text-[11px] font-normal normal-case tracking-normal text-muted-foreground-soft">
                   {bucket.logs.length}
                 </span>
               </h3>
-              {foldRuns(bucket.logs).map((group) =>
+              {(groupRepeats ? foldRuns(bucket.logs) : bucket.logs.map((log) => ({ key: log.id, logs: [log] }))).map((group) =>
                 group.logs.length > 1 ? (
-                  <FoldedRun key={group.logs[0].id} group={group} />
+                  <FoldedRun key={group.logs[0].id} group={group} highlightAccess={highlightAccess} />
                 ) : (
                   <AuditRow
                     key={group.logs[0].id}
                     log={group.logs[0]}
+                    highlightAccess={highlightAccess}
                     expanded={expandedId === group.logs[0].id}
                     onToggle={() =>
                       setExpandedId(expandedId === group.logs[0].id ? null : group.logs[0].id)
@@ -593,7 +509,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
           {total > 0 && (
             <div className="flex items-center justify-between gap-2 flex-wrap px-4 py-2.5 border-t border-border/40">
               <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
-                Showing {rangeStart}–{rangeEnd} of {total}
+                {rangeStart}–{rangeEnd} of {total.toLocaleString()} events
               </span>
               <div className="flex items-center gap-1.5">
                 <Button
@@ -625,6 +541,39 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
   )
 }
 
+/** The verb's tone: what was made, changed, removed or broke. */
+function verbTone(action: string): StatusTone {
+  const tail = (action.includes(".") ? action.slice(action.lastIndexOf(".") + 1) : action).toLowerCase()
+  if (/^(create|created|hired|rehired|add|added|invite|invited)$/.test(tail)) return "success"
+  if (/^(delete|deleted|remove|removed|revoke|revoked|failed|deny)$/.test(tail)) return "danger"
+  if (/^(revealed|download|reencrypt|escalate|rotate)$/.test(tail)) return "warn"
+  if (/^(update|updated|role_change|patch|rename)$/.test(tail)) return "blue"
+  return "muted"
+}
+
+/** An id-shaped name (run_…, msg_…, cuids) is shortened; the full value is on hover and in the details. */
+function shortIdLabel(label: string): string {
+  if (label.length > 28 && /^[a-z]+_[0-9a-z_]+$/i.test(label)) return `${label.slice(0, 14)}…${label.slice(-6)}`
+  return label
+}
+
+function Actor({ user }: { user: AuditLog["user"] }) {
+  const label = personLabel(user?.full_name, user?.email ?? "")
+  if (!label) {
+    return (
+      <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+        <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-accent"><Cpu className="h-3 w-3" aria-hidden /></span>
+        System
+      </span>
+    )
+  }
+  return (
+    <span className="flex min-w-0 items-center gap-2 text-xs">
+      <UserAvatar name={user?.full_name} email={user?.email ?? ""} className="h-5 w-5 shrink-0" textClassName="text-[8px]" />
+      <span className="truncate text-foreground">{label}</span>
+    </span>
+  )
+}
 
 /**
  * One event, as a sentence: who, then what they did to which thing.
@@ -634,48 +583,43 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
  * without going and looking the id up somewhere else.
  */
 function AuditRow({
-  log, expanded, onToggle,
-}: { log: AuditLog; expanded: boolean; onToggle: () => void }) {
+  log, expanded, onToggle, highlightAccess = true,
+}: { log: AuditLog; expanded: boolean; onToggle: () => void; highlightAccess?: boolean }) {
   const label = entityLabel(log)
-  const security = isSecurityRelevant(log)
+  const security = highlightAccess && isSecurityRelevant(log)
   return (
     <div data-audit-weight={security ? "security" : "routine"}>
-      <Button
+      <button
         type="button"
-        variant="ghost"
         aria-expanded={expanded}
         aria-controls={`audit-detail-${log.id}`}
         className={cn(
-          "flex h-auto w-full items-center justify-between gap-3 rounded-none border-b border-border/40 px-4 py-2 text-left font-normal",
-          expanded && "bg-accent/50",
+          "grid w-full items-center gap-x-3 gap-y-1 border-b border-border/40 px-4 py-2 text-left transition-colors hover:bg-[var(--row-hover-bg)]",
+          "grid-cols-[14px_minmax(0,1fr)_auto] sm:grid-cols-[14px_72px_minmax(0,12rem)_minmax(0,1fr)_auto]",
+          expanded && "bg-[var(--selection-bg)]",
         )}
         onClick={onToggle}
       >
-        <span className="flex min-w-0 items-center gap-2.5">
-          <ChevronRight
-            className={cn(
-              "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150",
-              expanded && "rotate-90 text-foreground",
-            )}
-          />
-          <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-            {formatTimeOfDay(log.created_at)}
-          </span>
-          <span className="min-w-0 truncate text-xs">
-            <span className="text-foreground/80">
-              {personLabel(log.user?.full_name, log.user?.email ?? "") || "System"}
-            </span>{" "}
-            <span className="text-muted-foreground">{actionVerb(log.action)}</span>{" "}
-            <span className="text-muted-foreground">{entityNoun(log.entity_type)}</span>{" "}
-            <span className="font-medium text-foreground">{label}</span>
-          </span>
+        <ChevronRight
+          className={cn(
+            "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150",
+            expanded && "rotate-90 text-foreground",
+          )}
+        />
+        <span className="hidden font-mono text-[11px] tabular-nums text-muted-foreground sm:block">
+          {formatTimeOfDay(log.created_at)}
         </span>
-        {security && (
-          <span className="shrink-0 rounded-full border border-warn/40 bg-warn/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-warn">
-            access
-          </span>
-        )}
-      </Button>
+        <span className="hidden min-w-0 sm:block"><Actor user={log.user} /></span>
+        <span className="flex min-w-0 items-center gap-2 text-xs">
+          <StatusPill tone={verbTone(log.action)} label={actionVerb(log.action)} />
+          <span className="shrink-0 text-muted-foreground">{entityNoun(log.entity_type)}</span>
+          <span className="truncate font-medium text-foreground" title={label}>{shortIdLabel(label)}</span>
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="font-mono text-[11px] tabular-nums text-muted-foreground sm:hidden">{formatTimeOfDay(log.created_at)}</span>
+          {security && <StatusPill tone="warn" label="Access" />}
+        </span>
+      </button>
 
       <AnimatePresence initial={false}>
         {expanded && (
@@ -686,18 +630,18 @@ function AuditRow({
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.15, ease: "easeInOut" }}
-            className="overflow-hidden border-b border-border/40 bg-muted/20"
+            className="overflow-hidden border-b border-border/40 bg-surface-subtle"
           >
-            <div className="px-4 py-3 pl-11">
+            <div className="px-4 py-3 sm:pl-[calc(1rem+14px+0.75rem)]">
               <div className="grid max-w-3xl gap-3 sm:grid-cols-2">
                 <div>
-                  <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <div className="eyebrow mb-1 text-muted-foreground">
                     Action
                   </div>
                   <div className="font-mono text-[11px] text-foreground/80">{log.action}</div>
                 </div>
                 <div>
-                  <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <div className="eyebrow mb-1 text-muted-foreground">
                     Entity
                   </div>
                   <div className="truncate font-mono text-[11px] text-foreground/80" title={log.entity_id ?? ""}>
@@ -705,13 +649,13 @@ function AuditRow({
                   </div>
                 </div>
                 <div>
-                  <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <div className="eyebrow mb-1 text-muted-foreground">
                     IP address
                   </div>
                   <div className="font-mono text-[11px] text-foreground/80">{log.ip_address ?? "—"}</div>
                 </div>
                 <div>
-                  <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <div className="eyebrow mb-1 text-muted-foreground">
                     User agent
                   </div>
                   <div className="truncate font-mono text-[11px] text-foreground/80" title={log.user_agent ?? ""}>
@@ -720,7 +664,7 @@ function AuditRow({
                 </div>
                 {log.metadata && Object.keys(log.metadata).length > 0 && (
                   <div className="sm:col-span-2">
-                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <div className="eyebrow mb-1 text-muted-foreground">
                       Details
                     </div>
                     <pre className="max-h-32 overflow-auto rounded border border-border/60 bg-muted/40 p-2 font-mono text-[10px] text-muted-foreground">
@@ -749,47 +693,45 @@ function AuditRow({
  * the day reads as "one thing happened fifty-six times" — which is what it
  * was — and the individual rows are one click away.
  */
-function FoldedRun({ group }: { group: AuditGroup }) {
+function FoldedRun({ group, highlightAccess = true }: { group: AuditGroup; highlightAccess?: boolean }) {
   const [open, setOpen] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const first = group.logs[0]
-  const security = isSecurityRelevant(first)
+  const security = highlightAccess && isSecurityRelevant(first)
   return (
     <div data-audit-weight={security ? "security" : "routine"}>
-      <Button
+      <button
         type="button"
-        variant="ghost"
         aria-expanded={open}
         className={cn(
-          "flex h-auto w-full items-center justify-between gap-3 rounded-none border-b border-border/40 px-4 py-2 text-left font-normal",
-          open && "bg-accent/50",
+          "grid w-full items-center gap-x-3 gap-y-1 border-b border-border/40 px-4 py-2 text-left transition-colors hover:bg-[var(--row-hover-bg)]",
+          "grid-cols-[14px_minmax(0,1fr)_auto] sm:grid-cols-[14px_72px_minmax(0,12rem)_minmax(0,1fr)_auto]",
+          open && "bg-[var(--selection-bg)]",
         )}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="flex min-w-0 items-center gap-2.5">
-          <ChevronRight
-            className={cn(
-              "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150",
-              open && "rotate-90 text-foreground",
-            )}
-          />
-          <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-            {formatTimeOfDay(first.created_at)}
-          </span>
-          <span className="min-w-0 truncate text-xs">
-            <span className="text-foreground/80">
-              {personLabel(first.user?.full_name, first.user?.email ?? "") || "System"}
-            </span>{" "}
-            <span className="font-medium text-foreground">
-              {group.logs.length} × {actionVerb(first.action)}
-            </span>{" "}
-            <span className="text-muted-foreground">
-              {entityNoun(first.entity_type)}
-              {group.logs.length === 1 ? "" : "s"}
-            </span>
+        <ChevronRight
+          className={cn(
+            "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150",
+            open && "rotate-90 text-foreground",
+          )}
+        />
+        <span className="hidden font-mono text-[11px] tabular-nums text-muted-foreground sm:block">
+          {formatTimeOfDay(first.created_at)}
+        </span>
+        <span className="hidden min-w-0 sm:block"><Actor user={first.user} /></span>
+        <span className="flex min-w-0 items-center gap-2 text-xs">
+          <StatusPill tone={verbTone(first.action)} label={`${group.logs.length} × ${actionVerb(first.action)}`} />
+          <span className="text-muted-foreground">
+            {entityNoun(first.entity_type)}
+            {group.logs.length === 1 ? "" : "s"}
           </span>
         </span>
-      </Button>
+        <span className="flex items-center gap-2">
+          <span className="font-mono text-[11px] tabular-nums text-muted-foreground sm:hidden">{formatTimeOfDay(first.created_at)}</span>
+          {security && <StatusPill tone="warn" label="Access" />}
+        </span>
+      </button>
 
       {open && (
         <div className="border-b border-border/40 bg-muted/10 pl-6">
@@ -797,6 +739,7 @@ function FoldedRun({ group }: { group: AuditGroup }) {
             <AuditRow
               key={log.id}
               log={log}
+              highlightAccess={highlightAccess}
               expanded={expandedId === log.id}
               onToggle={() => setExpandedId(expandedId === log.id ? null : log.id)}
             />

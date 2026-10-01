@@ -142,6 +142,16 @@ describe("the rows", () => {
     expect(cursor.getByText("nobody yet")).toBeInTheDocument()
   })
 
+  // Five rows each saying "quota not readable for this provider" is one fact
+  // told five times. When no row has a quota, the column goes and the fact is
+  // said once under the list.
+  it("says an unreadable quota once when no seat has one", () => {
+    const noQuota = all.map((c) => ({ ...c, login: { ...c.login!, quota: null } }))
+    renderPanel({ logins: noQuota, visible: noQuota })
+    expect(screen.getAllByText(/quota/i)).toHaveLength(1)
+    expect(screen.getByTestId("quota-unreadable")).toHaveTextContent(/no provider here reports its quota/i)
+  })
+
   it("an unassigned seat carries Assign; the others do not", () => {
     const { onAssign, onSelect } = renderPanel()
     const rows = screen.getAllByRole("listitem")

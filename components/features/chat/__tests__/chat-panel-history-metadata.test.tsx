@@ -95,6 +95,7 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
+      if (url.includes("/execution-profile")) {return {ok:true,status:200,json:async()=>({mode:"trusted"})} as unknown as Response}
       if (url.includes("/messages")) {
         return new Response(JSON.stringify(historyResponse()), {
           status: 200,

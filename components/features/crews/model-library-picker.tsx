@@ -173,7 +173,7 @@ export function ModelLibraryPicker({
         type="button"
         onClick={() => setOpen(true)}
         className={cn(
-          "w-full flex items-center gap-3 rounded-lg border bg-card hover:bg-white/[0.03]",
+          "w-full flex items-center gap-3 rounded-lg border bg-card hover:bg-foreground/[0.03]",
           "px-3 py-2.5 text-left transition-colors",
         )}
         aria-haspopup="dialog"

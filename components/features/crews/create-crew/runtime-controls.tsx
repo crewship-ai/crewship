@@ -29,7 +29,7 @@ export function Chip({ active, onClick, children }: { active: boolean; onClick: 
         "coarse:h-12 coarse:px-3 coarse:text-sm",
         active
           ? "border-primary bg-primary/20 text-primary"
-          : "border-hairline bg-card text-foreground/70 hover:border-white/20",
+          : "border-hairline bg-card text-foreground/70 hover:border-foreground/20",
       )}
     >
       {children}
@@ -118,7 +118,7 @@ export function CustomNumberChip({ active, value, onChange, min, max, step = 1, 
     <button
       type="button"
       onClick={() => { setDraft(String(value)); setEditing(true) }}
-      className="rounded border border-hairline bg-card px-2 py-0.5 text-[11px] text-foreground/70 hover:border-white/20 coarse:h-12 coarse:px-3 coarse:text-sm"
+      className="rounded border border-hairline bg-card px-2 py-0.5 text-[11px] text-foreground/70 hover:border-foreground/20 coarse:h-12 coarse:px-3 coarse:text-sm"
     >
       Custom…
     </button>

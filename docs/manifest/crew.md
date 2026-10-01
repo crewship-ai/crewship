@@ -203,13 +203,14 @@ wire shape mirrors the server's `serviceWire`.
 | `env` | map[string]string | no | Literal env vars. |
 | `env_refs` | []string | no | Credential env-var names the Keeper resolves at start. |
 | `ports` | []string | no | Numeric ports (`"5432"` or `"5432/tcp"`). Host:container mappings are rejected — the crew network is private. |
-| `volumes` | []object | no | Named volumes `{ name, mount }`. Bind mounts (path-like names) are rejected; mounts must be unique. |
+| `volumes` | []object | no | Named volumes `{ name, mount }`. Bind mounts (path-like names) are rejected; mounts must be unique. On a quota-enforced service each volume also takes `quota_bytes` (required) and `generation` (default 1). |
+| `quota_enforced` | bool | no | Opt in to [disk quota enforcement](/guides/service-disk-quotas): read-only root, bounded scratch space and fixed-size volumes. |
 | `healthcheck` | object | no | Docker healthcheck `{ test, interval, timeout, retries, start_period }`. Duration strings must parse via Go's `time.ParseDuration` ("5s", "1m"); `retries` non-negative. |
 
 #### Private service settings
 
 A service that declares anything beyond `name`, `image`, `ports`,
-`env_refs` and `volumes` — that is, `env`, `command` or `healthcheck`
+`env_refs`, `volumes` and `quota_enforced` — that is, `env`, `command` or `healthcheck`
 (and, in a Workspace bundle, `auto_credentials` or a catalog image's
 sugar defaults) — is **private** once applied. The server never
 returns such a configuration on a read, whatever the caller's role:

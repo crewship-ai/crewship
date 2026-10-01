@@ -288,7 +288,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               <div
                 role="group"
                 aria-label="Show"
-                className="mr-1 flex h-7 items-center rounded-md border border-white/[0.08] p-0.5"
+                className="mr-1 flex h-7 items-center rounded-md border border-foreground/[0.08] p-0.5"
               >
                 <button
                   type="button"
@@ -297,7 +297,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   className={cn(
                     "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-11",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    !showPanels ? "bg-white/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+                    !showPanels ? "bg-foreground/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
                   <AppWindow className="h-3 w-3" aria-hidden />
@@ -311,7 +311,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   className={cn(
                     "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-11",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    showPanels ? "bg-white/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+                    showPanels ? "bg-foreground/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
                   <LayoutGrid className="h-3 w-3" aria-hidden />
@@ -383,7 +383,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             here goes through the same unsaved-work question as Back does. */}
         <aside
           className={cn(
-            "shrink-0 overflow-hidden border-r border-white/[0.06] bg-card transition-all print:hidden",
+            "shrink-0 overflow-hidden border-r border-foreground/[0.06] bg-card transition-all print:hidden",
             collapsed ? "w-9" : SIDEBAR_WIDTH,
             isMobile && !collapsed && "fixed inset-y-0 left-0 z-50 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl",
           )}

@@ -168,6 +168,11 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   const [pinned, setPinned] = React.useState<SpineLink | null>(null)
   const [selected, setSelected] = React.useState<JournalEntry | null>(null)
   const [railCollapsed, setRailCollapsed] = React.useState(false)
+  // On a phone the rail is a drawer over the content; open by default it hid
+  // the overview on arrival. Start it closed, as the Routines explorer does.
+  React.useEffect(() => {
+    if (isMobile) setRailCollapsed(true)
+  }, [isMobile])
   // Which catalogue the rail lists. Owned HERE rather than inside the rail so
   // it survives a drill-down: walking into an agent out of a chain graph and
   // pressing back must land the reader on the list they left, not reset them to
@@ -830,7 +835,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
 
         <aside
           className={cn(
-            "shrink-0 overflow-hidden border-r border-white/[0.06] bg-card transition-all",
+            "shrink-0 overflow-hidden border-r border-foreground/[0.06] bg-card transition-all",
             railCollapsed ? "w-9" : "w-[280px]",
             isMobile && !railCollapsed && "absolute inset-y-0 left-0 z-30 shadow-2xl",
           )}
@@ -905,7 +910,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
             {path.stops.length > 0 && (
               <nav
                 aria-label="Activity trail"
-                className="flex shrink-0 items-center gap-1 border-b border-white/[0.06] px-3 py-1.5 text-xs"
+                className="flex shrink-0 items-center gap-1 border-b border-foreground/[0.06] px-3 py-1.5 text-xs"
               >
                 <Button
                   size="sm"
@@ -916,7 +921,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                   <ArrowLeft className="h-3.5 w-3.5" />
                   Back
                 </Button>
-                <span aria-hidden className="mx-1 h-3.5 w-px bg-white/10" />
+                <span aria-hidden className="mx-1 h-3.5 w-px bg-foreground/10" />
                 {trail.crumbs.map((c, i) => (
                   <React.Fragment key={c.depth}>
                     {i > 0 && <ChevronRight aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground/50" />}
@@ -934,7 +939,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                       onClick={() => setPath((p) => jumpTo(p, c.depth))}
                       aria-current={c.current ? "page" : undefined}
                       className={cn(
-                        "max-w-[22ch] truncate rounded px-1.5 py-0.5 hover:bg-white/[0.06]",
+                        "max-w-[22ch] truncate rounded px-1.5 py-0.5 hover:bg-foreground/[0.06]",
                         c.current ? "font-medium text-foreground" : "text-muted-foreground",
                       )}
                     >
@@ -948,7 +953,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
             {/* Filters, not position — the trail owns position. Hidden in a
                 workflow, where none of them describes what is on screen. */}
             {filterChips.length > 0 && surface.main !== "workflow" && (
-              <SidebarActiveChips className="shrink-0 border-b border-white/[0.06] px-4 py-1.5">
+              <SidebarActiveChips className="shrink-0 border-b border-foreground/[0.06] px-4 py-1.5">
                 {filterChips.map((c) => (
                   <SidebarActiveChip key={c.label} onRemove={c.onClear}>
                     {c.label}

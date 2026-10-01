@@ -169,6 +169,15 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A suspended account signs in nowhere: the password path refuses it,
+	// and so does this one. The answer does not say why — the same
+	// "could not sign you in" as any other refusal.
+	if accountSuspended(r.Context(), h.db, userID) {
+		h.logger.Warn("google sign-in blocked: account suspended", "user_id", userID, "ip", clientIP(r))
+		http.Redirect(w, r, "/login?error=signin", http.StatusSeeOther)
+		return
+	}
+
 	// Mint a fresh user_sessions row + access/refresh cookies, mirroring
 	// the credentials path. OAuth callers get the same revocable lifecycle
 	// as password sign-in.

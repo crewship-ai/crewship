@@ -62,14 +62,14 @@ export function IssuesToolbarStrip({
 }: IssuesToolbarStripProps) {
   const showing = issuesShowingLabel(loaded, total)
   return (
-    <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.06] shrink-0">
-      <div className="flex gap-1 bg-white/[0.04] rounded-md p-0.5" role="group" aria-label="View mode">
+    <div className="flex items-center gap-2 px-4 py-2 border-b border-foreground/[0.06] shrink-0">
+      <div className="flex gap-1 bg-foreground/[0.04] rounded-md p-0.5" role="group" aria-label="View mode">
         <button
           type="button"
           aria-label="Board view"
           aria-pressed={issueViewMode === "board"}
           onClick={() => onViewModeChange("board")}
-          className={cn("p-1.5 rounded", issueViewMode === "board" ? "bg-white/[0.1] text-foreground" : "text-muted-foreground")}
+          className={cn("p-1.5 rounded", issueViewMode === "board" ? "bg-foreground/[0.1] text-foreground" : "text-muted-foreground")}
         >
           <LayoutGrid className="h-3.5 w-3.5" />
         </button>
@@ -78,7 +78,7 @@ export function IssuesToolbarStrip({
           aria-label="List view"
           aria-pressed={issueViewMode === "list"}
           onClick={() => onViewModeChange("list")}
-          className={cn("p-1.5 rounded", issueViewMode === "list" ? "bg-white/[0.1] text-foreground" : "text-muted-foreground")}
+          className={cn("p-1.5 rounded", issueViewMode === "list" ? "bg-foreground/[0.1] text-foreground" : "text-muted-foreground")}
         >
           <List className="h-3.5 w-3.5" />
         </button>
@@ -88,7 +88,7 @@ export function IssuesToolbarStrip({
       {savedViews.length > 0 && (
         <DropdownMenu open={savedViewsOpen} onOpenChange={onSavedViewsOpenChange}>
           <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs hover:bg-white/[0.06] text-muted-foreground transition-colors">
+            <button className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs hover:bg-foreground/[0.06] text-muted-foreground transition-colors">
               <Bookmark className="h-3 w-3" />
               <span>{activeViewId ? savedViews.find((v) => v.id === activeViewId)?.name || "Saved Views" : "Saved Views"}</span>
             </button>
@@ -96,7 +96,7 @@ export function IssuesToolbarStrip({
           <DropdownMenuContent align="start" className="w-52">
             <DropdownMenuItem
               onClick={() => { onActiveViewChange(null); onSavedViewsOpenChange(false) }}
-              className={cn("text-xs", !activeViewId && "bg-white/[0.04]")}
+              className={cn("text-xs", !activeViewId && "bg-foreground/[0.04]")}
             >
               All Issues
             </DropdownMenuItem>
@@ -112,7 +112,7 @@ export function IssuesToolbarStrip({
                   }
                   onSavedViewsOpenChange(false)
                 }}
-                className={cn("text-xs", activeViewId === view.id && "bg-white/[0.04]")}
+                className={cn("text-xs", activeViewId === view.id && "bg-foreground/[0.04]")}
               >
                 <Save className="h-3 w-3 mr-1.5 text-muted-foreground/50" />
                 {view.name}

@@ -1,4 +1,11 @@
-import { test, expect } from "@playwright/test"
+import { test, expect, type Page } from "@playwright/test"
+
+// The rail's mode menu: pin the panel open (the old cycling "Sidebar: hover"
+// button landed on pinned from the default hover mode).
+async function pinSidebar(page: Page) {
+  await page.getByRole("button", { name: /^Sidebar: / }).click()
+  await page.getByRole("menuitemradio", { name: /^Expanded/ }).click()
+}
 
 // GET /api/v1/credentials/{id}/access/me as the OWNER role sees it — the
 // same states and reasons internal/api/access_me.go answers for an owner on
@@ -62,7 +69,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
     })
     await page.goto("/credentials?tab=providers")
-    if (viewport.width > 640) await page.getByRole("button", { name: "Sidebar: hover", exact: true }).click()
+    if (viewport.width > 640) await pinSidebar(page)
     await page.getByText("Example ChatGPT", { exact: true }).first().click()
     await expect(page.getByText("Connection health", { exact: true })).toBeVisible()
     await expect(page.getByRole("button", { name: /Rotate/ })).toHaveCount(0)
@@ -98,7 +105,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
     })
     await page.goto(viewport.width > 640 ? "/credentials" : "/credentials?tab=providers")
-    if (viewport.width > 640) await page.getByRole("button", { name: "Sidebar: hover", exact: true }).click()
+    if (viewport.width > 640) await pinSidebar(page)
     await expect(page.getByRole("button", { name: "Connect via OAuth", exact: true })).toHaveCount(0)
     await page.getByRole("button", { name: "Add secret", exact: true }).first().click()
     await expect(page.getByTestId("shape-grid").getByRole("button")).toHaveCount(6)
@@ -189,7 +196,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
     })
     await page.goto("/credentials")
-    if (viewport.width > 640) await page.getByRole("button", { name: "Sidebar: hover", exact: true }).click()
+    if (viewport.width > 640) await pinSidebar(page)
     // Open from Recently used is unavailable for an unused secret; the rail is
     // the canonical list. At mobile width, open it through the explorer toggle.
     if (viewport.width < 640) await page.getByRole("button", { name: "Expand sidebar", exact: true }).click()

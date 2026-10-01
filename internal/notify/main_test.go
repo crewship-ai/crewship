@@ -12,9 +12,8 @@ import (
 // webhookTransport; the crew-egress block-proof tests assert the allowlist
 // layer, which sits ABOVE the transport and is unaffected by this swap.
 func TestMain(m *testing.M) {
-	prev := webhookTransport
-	webhookTransport = http.DefaultTransport
+	restore := SetWebhookTransportForTesting(http.DefaultTransport)
 	code := m.Run()
-	webhookTransport = prev
+	restore()
 	os.Exit(code)
 }

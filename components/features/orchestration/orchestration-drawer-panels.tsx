@@ -70,7 +70,7 @@ export function LiveMessagesPanel() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-3 py-1 border-b border-white/[0.06] shrink-0">
+      <div className="flex items-center justify-between px-3 py-1 border-b border-foreground/[0.06] shrink-0">
         <span className="text-[10px] text-muted-foreground">{messages.length} messages</span>
         <button onClick={() => setAutoScroll(!autoScroll)} className={cn("text-[10px] px-1.5 py-0.5 rounded", autoScroll ? "text-primary bg-primary/10" : "text-muted-foreground")}>
           Auto-scroll {autoScroll ? "ON" : "OFF"}
@@ -78,9 +78,9 @@ export function LiveMessagesPanel() {
       </div>
       <div className="flex-1 overflow-y-auto font-mono text-[11px] px-3 py-1">
         {messages.map((msg, i) => (
-          <div key={i} className="flex items-start gap-2 py-0.5 hover:bg-white/[0.02]">
+          <div key={i} className="flex items-start gap-2 py-0.5 hover:bg-foreground/[0.02]">
             <span className="text-foreground/40 tabular-nums shrink-0 w-[52px]">{msg.ts.slice(11, 19)}</span>
-            <span className={cn("shrink-0 text-[10px] px-1 rounded", MSG_TYPE_COLORS[msg.type] || "text-muted-foreground", "bg-white/[0.03]")}>
+            <span className={cn("shrink-0 text-[10px] px-1 rounded", MSG_TYPE_COLORS[msg.type] || "text-muted-foreground", "bg-foreground/[0.03]")}>
               {MSG_TYPE_LABELS[msg.type] || msg.type}
             </span>
             {msg.agent && <AgentAvatar seed={msg.agent} className="w-3.5 h-3.5 rounded-full shrink-0 mt-0.5" />}
@@ -134,7 +134,7 @@ export function ExecLogPanel() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-3 py-1 border-b border-white/[0.06] shrink-0">
+      <div className="flex items-center justify-between px-3 py-1 border-b border-foreground/[0.06] shrink-0">
         <span className="text-[10px] text-muted-foreground">{logs.length} entries</span>
         <button onClick={() => setAutoScroll(!autoScroll)} className={cn("text-[10px] px-1.5 py-0.5 rounded", autoScroll ? "text-primary bg-primary/10" : "text-muted-foreground")}>
           Auto-scroll {autoScroll ? "ON" : "OFF"}
@@ -142,7 +142,7 @@ export function ExecLogPanel() {
       </div>
       <div className="flex-1 overflow-y-auto font-mono text-[11px] px-3 py-1">
         {logs.map((log, i) => (
-          <div key={i} className="flex items-start gap-2 py-0.5 hover:bg-white/[0.02]">
+          <div key={i} className="flex items-start gap-2 py-0.5 hover:bg-foreground/[0.02]">
             <span className="text-foreground/40 tabular-nums shrink-0 w-[52px]">{log.ts.slice(11, 19)}</span>
             <AgentAvatar seed={log.agent} className="w-3.5 h-3.5 rounded-full shrink-0 mt-0.5" />
             <span className="text-muted-foreground shrink-0 w-[60px] truncate">@{log.agent}</span>

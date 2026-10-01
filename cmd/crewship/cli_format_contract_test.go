@@ -168,8 +168,9 @@ var formatContractExempt = map[string]string{
 	// the artifact is a manifest you check into git and feed back to
 	// `crewship apply`, not a rendering of a query result — so `-f json`
 	// having no effect is correct rather than a defect.
-	"crewship export crew": "emits a YAML manifest by design (cmd_export.go: yaml.Marshal, unconditional); the document IS the output, and `crewship apply` reads it back",
-	"crewship export page": "emits a YAML manifest by design (cmd_export.go: yaml.Marshal, unconditional); the document IS the output, and `crewship apply` reads it back",
+	"crewship export crew":                           "emits a YAML manifest by design (cmd_export.go: yaml.Marshal, unconditional); the document IS the output, and `crewship apply` reads it back",
+	"crewship export page":                           "emits a YAML manifest by design (cmd_export.go: yaml.Marshal, unconditional); the document IS the output, and `crewship apply` reads it back",
+	"crewship admin instance backups recovery-sheet": "prints the recovery sheet, a Markdown document the server renders (or writes it to --out); the document IS the output, not a receipt, so `-f json` has nothing to change",
 
 	// `crewship export workspace` writes the same kind of manifest, to a file
 	// or to stdout, for the whole workspace.

@@ -219,3 +219,75 @@ export function liveSignal(entries: JournalEntry[]): LiveSignal {
 
   return { running, agents: agents.size, spendUSD, slowestMs }
 }
+
+/* ------------------------------------------------------------------ *
+ *  Run bursts
+ * ------------------------------------------------------------------ */
+
+export interface FoldedRow {
+  /** The newest event of the burst — the row shows and opens this one. */
+  entry: JournalEntry
+  /** How many older events of the same burst were folded under it. */
+  more: number
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === "string" && v !== "" ? v : undefined
+}
+
+/** The routine an event belongs to: a run's own events name it, and a page
+ * push names it as its producer ("routine/<slug>") without a run id. */
+function routineOf(entry: JournalEntry): string | undefined {
+  const p = entry.payload ?? {}
+  const r = entry.refs ?? {}
+  const direct = str(p.pipeline_slug) ?? str(p.routine_slug) ?? str(r.pipeline_slug) ?? str(r.routine_slug)
+  if (direct) return direct
+  const producer = str(p.producer)
+  return producer?.startsWith("routine/") ? producer.slice("routine/".length) : undefined
+}
+
+function runOf(entry: JournalEntry): string | undefined {
+  return str(entry.payload?.run_id) ?? str(entry.refs?.run_id)
+}
+
+/**
+ * Consecutive events of one routine (or one run), folded into one row.
+ *
+ * A routine run writes a started/completed pair per step plus a line per
+ * artefact, so the newest eight events were routinely one run eight times,
+ * each repeating the same crew › routine › run breadcrumb. The row keeps the
+ * newest event and says how many more the run wrote; the journal still lists
+ * every one. A routine's back-to-back runs fold too — "coolify-ingest ran
+ * again" is not news. Events without a routine or run fold by kind and
+ * source instead (a webhook pushing twelve pages is one burst). Only
+ * neighbours fold — two routines interleaving stay separate rows — and an error always starts its own row so
+ * a failure is never hidden under a quieter line from the same burst.
+ */
+export function foldRunBursts(entries: JournalEntry[], limit: number): FoldedRow[] {
+  // A run's own step events name its routine; an exec line inside it names
+  // only the run. Learn the pairing from the window so both land in one burst.
+  const routineByRun = new Map<string, string>()
+  for (const entry of entries) {
+    const run = runOf(entry)
+    const routine = routineOf(entry)
+    if (run && routine && !routineByRun.has(run)) routineByRun.set(run, routine)
+  }
+  const rows: (FoldedRow & { key: string })[] = []
+  for (const entry of entries) {
+    const run = runOf(entry)
+    const routine = routineOf(entry) ?? (run ? routineByRun.get(run) : undefined)
+    const key = routine
+      ? `routine:${routine}`
+      : run
+        ? `run:${run}`
+        : `kind:${entry.entry_type}|${entry.actor_type ?? ""}|${entry.agent_id ?? ""}|${entry.crew_id ?? ""}`
+    const last = rows[rows.length - 1]
+    if (last && last.key === key && entry.severity !== "error") {
+      last.more += 1
+      continue
+    }
+    if (rows.length === limit) break
+    rows.push({ entry, more: 0, key })
+  }
+  return rows.map(({ entry, more }) => ({ entry, more }))
+}

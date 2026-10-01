@@ -21,7 +21,9 @@ func assignedIssueFixture(t *testing.T) *sql.DB {
  CREATE TABLE issue_work(mission_id TEXT PRIMARY KEY,mode TEXT);
  CREATE TABLE mission_relations(source_id TEXT,target_id TEXT,relation_type TEXT);
  CREATE TABLE assignments(mission_id TEXT,status TEXT);
- CREATE TABLE issue_executions(mission_id TEXT,routine_run_id TEXT);`)
+ CREATE TABLE issue_executions(mission_id TEXT,routine_run_id TEXT);
+ CREATE TABLE restricted_preflight_reservations(issue_id TEXT,workflow_id TEXT);
+ CREATE TABLE restricted_workflow_jobs(id TEXT,state TEXT);`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,6 +36,7 @@ func TestAssignedIssues_PreflightScopeAndBlockers(t *testing.T) {
 		want       bool
 	}{
 		{"empty", "", false},
+		{"private claim", `INSERT INTO missions VALUES('own','ws_test','crew_a','agent_lead','issue','TODO');INSERT INTO restricted_preflight_reservations VALUES('own','job');INSERT INTO restricted_workflow_jobs VALUES('job','pending')`, false},
 		{"ready", `INSERT INTO missions VALUES('own','ws_test','crew_a','agent_lead','issue','TODO')`, true},
 		{"other agent", `INSERT INTO missions VALUES('other','ws_test','crew_b','agent_b_lead','issue','TODO')`, false},
 		{"foreign workspace", `INSERT INTO missions VALUES('foreign','ws_other','crew_a','agent_lead','issue','TODO')`, false},

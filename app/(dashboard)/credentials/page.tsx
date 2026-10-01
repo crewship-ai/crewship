@@ -595,7 +595,7 @@ export default function CredentialsPage() {
         {showSidebar && (
           <aside
             className={cn(
-              "shrink-0 border-r border-white/[0.06] bg-card transition-all",
+              "shrink-0 border-r border-foreground/[0.06] bg-card transition-all",
               sidebarCollapsed ? "w-9 overflow-hidden" : "w-[280px]",
               // The collapsed rail stays in flow at both sizes, so the expand
               // button never moves.

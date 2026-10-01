@@ -27,7 +27,11 @@ package api
 //
 // and the OpenAPI document with `go generate ./internal/api/`.
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
+)
 
 func (r *Router) registerPageActionRoutes() {
 	// Its own handler, following registerPageTransferRoutes: the group is
@@ -36,6 +40,7 @@ func (r *Router) registerPageActionRoutes() {
 	// A handler passed in as a parameter is invisible to that resolution, and
 	// the published contract then claims a bare 200.
 	p := NewPageHandler(r.db, r.hub, r.logger).SetJournal(r.Journal())
+	p.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
 
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace

@@ -11,6 +11,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/notify"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // Recovery tuning. A delivery is retried at most recoveryMaxAttempts times
@@ -47,10 +48,18 @@ func (r *Router) RecoverStuckDeliveries(ctx context.Context) (attempted, sent in
 		return 0, 0
 	}
 	for _, d := range stuck {
+		// Each re-delivery (and the status it records) is one writer in the
+		// backup's quiet window barrier. Once a window starts closing the
+		// rest of the sweep waits for the next pass.
+		wr, ok := quiesce.Enter(ctx)
+		if !ok {
+			break
+		}
 		attempted++
 		if r.recoverOne(ctx, d) {
 			sent++
 		}
+		wr.Leave()
 	}
 	if attempted > 0 {
 		r.logger.Info("notifyroute: recovery sweep", "attempted", attempted, "sent", sent)
@@ -61,6 +70,9 @@ func (r *Router) RecoverStuckDeliveries(ctx context.Context) (attempted, sent in
 // recoverOne re-attempts a single stuck delivery. Returns true iff it was
 // delivered this pass.
 func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
+	if derive, ok := sourceDeriverFor(d.SourceKind); ok {
+		return r.recoverDerived(ctx, d, derive)
+	}
 	body, priority, payload, err := r.deriveMessage(ctx, d.WorkspaceID, d.SourceKind, d.SourceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -99,6 +111,48 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 		SourceID:    d.SourceID,
 		Links:       links,
 		Vars:        vars,
+	}
+	if err := r.dispatcher.DeliverCategoryMessage(ctx, ch, msg); err != nil {
+		if merr := r.deliveries.MarkFailed(ctx, d.ID, err.Error()); merr != nil {
+			r.logger.Warn("notifyroute: recovery: mark failed", "error", merr, "delivery_id", d.ID)
+		}
+		return false
+	}
+	if err := r.deliveries.MarkSent(ctx, d.ID); err != nil {
+		r.logger.Warn("notifyroute: recovery: mark sent", "error", err, "delivery_id", d.ID)
+	}
+	return true
+}
+
+// recoverDerived is recoverOne for a producer that registered its own
+// SourceDeriver: the message comes from the producer's durable record, the
+// channel and the delivery log are handled exactly as for every other row.
+func (r *Router) recoverDerived(ctx context.Context, d Delivery, derive SourceDeriver) bool {
+	msg, err := derive(ctx, r.db, d)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			_ = r.deliveries.MarkFailed(ctx, d.ID, "recovery: "+err.Error())
+		} else {
+			r.logger.Warn("notifyroute: recovery: derive message", "error", err, "delivery_id", d.ID, "source_kind", d.SourceKind)
+		}
+		return false
+	}
+	ch, err := r.channels.GetForDispatch(ctx, d.WorkspaceID, d.ChannelID)
+	if err != nil {
+		_ = r.deliveries.MarkFailed(ctx, d.ID, "recovery: channel unavailable: "+err.Error())
+		return false
+	}
+	if msg.Title == "" {
+		msg.Title = d.Title
+	}
+	if msg.WorkspaceID == "" {
+		msg.WorkspaceID = d.WorkspaceID
+	}
+	if msg.Category == "" {
+		msg.Category = d.Category
+	}
+	if msg.SourceKind == "" {
+		msg.SourceKind, msg.SourceID = d.SourceKind, d.SourceID
 	}
 	if err := r.dispatcher.DeliverCategoryMessage(ctx, ch, msg); err != nil {
 		if merr := r.deliveries.MarkFailed(ctx, d.ID, err.Error()); merr != nil {

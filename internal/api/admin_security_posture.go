@@ -403,7 +403,7 @@ func readPostureState(ctx context.Context, db *sql.DB, logger *slog.Logger) post
 // the gate is about who should be reasoning about instance posture, not about
 // protecting a payload.
 func (h *SecurityPostureHandler) Get(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 )
@@ -724,6 +725,18 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if in.Mode == "" {
 		in.Mode = ModeRun
 	}
+	// Admission from the backup's quiet window before anything is written
+	// (the idempotency reservation, the run row, the steps). A caller that
+	// already admitted this run (scheduler, pending dispatcher), a writer
+	// inside the gate (a request) or a parent run is admitted at once;
+	// anything else waits out an open window. From here to return the run
+	// counts as busy, so a window cannot hold over it.
+	adm, err := quiesce.StartRunWait(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer adm.Done()
+	ctx = adm.Context()
 	if err := e.checkInvokingUser(ctx, in); err != nil {
 		return nil, err
 	}
@@ -968,6 +981,13 @@ func (e *Executor) RunDefinition(ctx context.Context, dsl *DSL, in RunInput) (*R
 	if in.WorkspaceID == "" {
 		return nil, errors.New("executor: workspace_id required for RunDefinition")
 	}
+	// Quiet-window admission, as in Run: a draft run writes journal rows.
+	adm, err := quiesce.StartRunWait(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer adm.Done()
+	ctx = adm.Context()
 	// A real (agent-invoking) draft run needs a crew to resolve agents/runtime
 	// against. A ModeDryRun is static validation (parse + template render, no
 	// agent invocation), so it works without a crew — letting the public

@@ -34,7 +34,7 @@ export function ConfigRow({ label, hint, htmlFor, children, full = false }: Conf
   return (
     <div
       className={cn(
-        "grid min-h-[38px] items-center gap-3.5 border-b border-border px-3 py-1.5 transition-colors last:border-b-0 hover:bg-white/[.025]",
+        "grid min-h-[38px] items-center gap-3.5 border-b border-border px-3 py-1.5 transition-colors last:border-b-0 hover:bg-foreground/[.025]",
         full ? "grid-cols-1 gap-1.5" : "grid-cols-1 md:grid-cols-[minmax(0,1fr)_248px]",
       )}
     >
@@ -303,7 +303,7 @@ export function ConfigCards<T extends string>({ value, options, onSave }: Config
           aria-checked={local === o.value}
           onClick={() => void commit(o.value)}
           className={cn(
-            "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 rounded-[9px] border px-3 py-2.5 text-left transition-colors",
+            "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 rounded-md border px-3 py-2.5 text-left transition-colors",
             local === o.value
               ? "border-primary bg-primary/10"
               : "border-border bg-background hover:border-foreground/25",

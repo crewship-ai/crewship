@@ -126,6 +126,9 @@ func ListBackups(ctx context.Context, dir string) ([]ListEntry, error) {
 			if m.Contents.Workspace != nil {
 				le.WorkspaceID = m.Contents.Workspace.ID
 			}
+			if m.Scope == ScopeCrew && len(m.Contents.Crews) > 0 {
+				le.CrewID = m.Contents.Crews[0].ID
+			}
 		}
 		out = append(out, le)
 	}
@@ -154,6 +157,9 @@ type ListEntry struct {
 	CreatedAt     time.Time
 	FormatVersion int
 	WorkspaceID   string
+	// CrewID is set for crew-scope bundles so retention can keep one
+	// crew's bundles from crowding out another's.
+	CrewID string
 }
 
 // Inspect opens a bundle and returns its manifest without decrypting
@@ -175,7 +181,7 @@ func inspectWithStorage(ctx context.Context, st StorageOps, path string) (*Manif
 	defer func() { _ = f.Close() }()
 	m, _, err := ReadBundle(f)
 	if err != nil {
-		return m, err
+		return m, WithConvertHint(path, m, err)
 	}
 	return m, nil
 }
@@ -250,7 +256,7 @@ func Verify(ctx context.Context, path string) (*VerifyResult, error) {
 
 	manifest, sealed, closeBundle, err := ReadBundleStream(f)
 	if err != nil {
-		return &VerifyResult{Manifest: manifest, Valid: false, Size: info.Size(), Err: err}, nil
+		return &VerifyResult{Manifest: manifest, Valid: false, Size: info.Size(), Err: WithConvertHint(path, manifest, err)}, nil
 	}
 	defer func() {
 		if closeBundle != nil {
@@ -341,63 +347,19 @@ func ForceReleaseLock(ctx context.Context, db *sql.DB, workspaceID string) error
 // Rotate enumerates bundles in dir (via ListBackups), filters them
 // by workspace (bundle.Manifest.Contents.Workspace.ID == workspaceID
 // — so an admin of workspace A does not accidentally rotate workspace
-// B's backups), sorts by CreatedAt descending, and deletes anything
-// beyond keepLast or older than cutoff. dryRun returns the list of
-// paths that WOULD be deleted without touching disk.
-//
-// keepLast ≤ 0 disables the count-based rule; keepDays ≤ 0 disables
-// the age-based rule. When both are set, both are applied (a bundle
-// survives only if it is within keepLast AND newer than cutoff).
+// B's backups), and deletes what the legacy policy drops: the newest
+// keepLast bundles are always kept (at least one, however old), and
+// beyond them a bundle is kept only while it is newer than keepDays
+// (keepDays ≤ 0: everything beyond the floor goes). dryRun returns the
+// list of paths that WOULD be deleted without touching disk.
 func Rotate(ctx context.Context, dir, workspaceID string, keepLast int, keepDays int, dryRun bool) ([]string, error) {
-	entries, err := ListBackups(ctx, dir)
-	if err != nil {
-		return nil, err
-	}
-	// Filter to the caller's workspace. ListBackups already parsed
-	// each bundle's manifest to populate WorkspaceID + CreatedAt, so
-	// we avoid a second Inspect per bundle here — meaningful on a
-	// directory with hundreds of backups.
-	var scoped []ListEntry
-	for _, e := range entries {
-		if e.WorkspaceID == "" || e.WorkspaceID != workspaceID {
-			continue
-		}
-		scoped = append(scoped, e)
-	}
-	// Newest first so keepLast drops the tail.
-	for i := 1; i < len(scoped); i++ {
-		for j := i; j > 0 && scoped[j-1].CreatedAt.Before(scoped[j].CreatedAt); j-- {
-			scoped[j], scoped[j-1] = scoped[j-1], scoped[j]
-		}
-	}
-	now := time.Now().UTC()
-	var cutoff time.Time
-	if keepDays > 0 {
-		cutoff = now.AddDate(0, 0, -keepDays)
-	}
-
-	var toDelete []string
-	for i, e := range scoped {
-		drop := false
-		if keepLast > 0 && i >= keepLast {
-			drop = true
-		}
-		if keepDays > 0 && e.CreatedAt.Before(cutoff) {
-			drop = true
-		}
-		if drop {
-			toDelete = append(toDelete, e.Path)
-		}
-	}
-	if dryRun {
-		return toDelete, nil
-	}
-	for _, p := range toDelete {
-		if err := Delete(ctx, p); err != nil {
-			return toDelete, err
-		}
-	}
-	return toDelete, nil
+	// keepLast is the floor age never touches (and never below 1); keepDays
+	// applies only beyond it. The original rule dropped a bundle beyond
+	// keepLast OR older than keepDays, which deleted every copy of a
+	// workspace whose backups had stopped for longer than keepDays. See
+	// retention.go. No catalog here, so nothing counts as pinned — the API
+	// calls RotateWithPolicy with the DB so pins hold.
+	return RotateWithPolicy(ctx, nil, dir, workspaceID, LegacyRetentionPolicy(keepLast, keepDays), dryRun)
 }
 
 // Delete removes a bundle. Before touching disk it verifies the file
@@ -561,6 +523,14 @@ func cleanupStalePartials(ctx context.Context, st StorageOps, dir, ownerSlug str
 			_ = st.Remove(ctx, filepath.Join(dir, e.Name()))
 		}
 	}
+}
+
+// SweepStalePartials removes the .partial bundle files in dir that belong to
+// ownerSlug (every one when it is empty) and are older than maxAge. The
+// backup scheduler calls it for a run the process died in, with maxAge 0:
+// nothing can still be writing that run's file.
+func SweepStalePartials(ctx context.Context, dir, ownerSlug string, maxAge time.Duration) {
+	cleanupStalePartials(ctx, nil, dir, ownerSlug, maxAge)
 }
 
 // slugFromPartialName extracts the slug segment from a bundle filename

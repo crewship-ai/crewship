@@ -144,7 +144,7 @@ export function TopologyCard({ workspaceId, anchor, anchorLabel, onOpenNode }: T
       {graph && chain && chain.nodes.length > 1 && (
         <div className="flex flex-col gap-2">
           <div
-            className="w-full overflow-hidden rounded-md border border-white/[0.06]"
+            className="w-full overflow-hidden rounded-md border border-foreground/[0.06]"
             style={{ height: canvasHeightFor(graph.bounds.height) }}
           >
             <ChainCanvas nodes={graph.nodes} edges={graph.edges} onOpenNode={onOpenNode} />

@@ -123,7 +123,7 @@ export function DetailCell({
           aria-label={`Search ${title.toLowerCase()}`}
           className={cn(
             "grid h-6 w-6 place-items-center rounded-md text-muted-foreground-soft transition-colors",
-            "hover:bg-white/[.06] hover:text-foreground",
+            "hover:bg-foreground/[.06] hover:text-foreground",
             searchOpen && "bg-primary/15 text-primary",
           )}
         >
@@ -226,7 +226,7 @@ function CellRow({ item, index }: { item: DetailCellItem; index: number }) {
 
   const shared = cn(
     "flex w-full items-start gap-2.5 px-4 py-2 text-left transition-colors",
-    interactive && "cursor-pointer hover:bg-white/[.03]",
+    interactive && "cursor-pointer hover:bg-foreground/[.03]",
     item.dimmed && "opacity-45",
   )
 

@@ -74,7 +74,7 @@ export function statusTint(status: string): StatusTint {
       }
     default:
       return {
-        bg: "bg-white/[0.06]",
+        bg: "bg-foreground/[0.06]",
         icon: "text-muted-foreground",
         text: "text-muted-foreground",
       }

@@ -53,9 +53,9 @@ export function TemplateBrowser({ selected, onSelect }: TemplateBrowserProps) {
   }
 
   return (
-    <div className="border border-white/[0.08] rounded-xl overflow-hidden bg-card-2 flex flex-col min-h-[320px] max-h-[420px]">
+    <div className="border border-foreground/[0.08] rounded-xl overflow-hidden bg-card-2 flex flex-col min-h-[320px] max-h-[420px]">
       {/* Search bar */}
-      <div className="px-3 py-2.5 border-b border-white/[0.08]">
+      <div className="px-3 py-2.5 border-b border-foreground/[0.08]">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input
@@ -64,13 +64,13 @@ export function TemplateBrowser({ selected, onSelect }: TemplateBrowserProps) {
             onChange={(e) => setSearch(e.target.value)}
             placeholder='Search personas… (e.g. "data analyst", "test", "research")'
             aria-label="Search personas by name, role, or category"
-            className="w-full pl-8 pr-3 py-1.5 bg-background border border-white/[0.15] rounded-md text-[12.5px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+            className="w-full pl-8 pr-3 py-1.5 bg-background border border-foreground/[0.15] rounded-md text-[12.5px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
           />
         </div>
       </div>
 
       {/* Source tabs */}
-      <div className="flex px-3 border-b border-white/[0.08]">
+      <div className="flex px-3 border-b border-foreground/[0.08]">
         {(["builtin", "mine", "workspace", "marketplace"] as PersonaSource[]).map((src) => {
           const isActive = source === src
           const isDisabled = src !== "builtin"
@@ -92,7 +92,7 @@ export function TemplateBrowser({ selected, onSelect }: TemplateBrowserProps) {
               <span
                 className={cn(
                   "text-[10px] px-1.5 rounded-full font-semibold min-w-[18px] text-center",
-                  isActive ? "bg-primary/15 text-primary" : "bg-white/[0.05] text-muted-foreground",
+                  isActive ? "bg-primary/15 text-primary" : "bg-foreground/[0.05] text-muted-foreground",
                 )}
               >
                 {sourceCounts[src]}
@@ -103,7 +103,7 @@ export function TemplateBrowser({ selected, onSelect }: TemplateBrowserProps) {
       </div>
 
       {/* Category chips */}
-      <div className="flex gap-1.5 px-3 py-2 border-b border-white/[0.08] overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+      <div className="flex gap-1.5 px-3 py-2 border-b border-foreground/[0.08] overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         <CategoryChip
           active={category === "all"}
           onClick={() => setCategory("all")}
@@ -172,7 +172,7 @@ function CategoryChip({
         "px-2.5 py-1 rounded-full text-[11.5px] border whitespace-nowrap flex items-center gap-1.5 transition-colors",
         active
           ? "bg-primary/15 border-primary/45 text-primary"
-          : "bg-white/[0.03] border-white/[0.08] text-foreground/80 hover:border-white/[0.15]",
+          : "bg-foreground/[0.03] border-foreground/[0.08] text-foreground/80 hover:border-foreground/[0.15]",
       )}
     >
       {label}
@@ -198,10 +198,10 @@ function PersonaRow({
         "p-2.5 rounded-lg border text-left transition-all flex gap-2.5 items-start",
         active
           ? "border-primary/45 bg-primary/10"
-          : "border-white/[0.08] bg-card hover:border-white/[0.15] hover:bg-white/[0.03]",
+          : "border-foreground/[0.08] bg-card hover:border-foreground/[0.15] hover:bg-foreground/[0.03]",
       )}
     >
-      <span className="w-9 h-9 rounded-lg overflow-hidden border border-white/[0.08] bg-muted shrink-0">
+      <span className="w-9 h-9 rounded-lg overflow-hidden border border-foreground/[0.08] bg-muted shrink-0">
         <img
           src={getAgentAvatarUrl(persona.suggestedSlug, persona.avatarStyle)}
           alt=""
@@ -227,7 +227,7 @@ function PersonaRow({
 
 function Pill({ children }: { children: React.ReactNode }) {
   return (
-    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/[0.04] text-muted-foreground">
+    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-foreground/[0.04] text-muted-foreground">
       {children}
     </span>
   )

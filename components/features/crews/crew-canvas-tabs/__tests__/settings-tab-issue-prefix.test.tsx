@@ -20,8 +20,12 @@ import type { CrewRecord } from "@/components/features/crews/crew-canvas-tabs/ty
 
 vi.mock("@/components/features/crews/crew-service-lifecycle", () => ({ CrewServiceLifecycle: () => null }))
 
+const permission = vi.hoisted(() => ({ role: "ADMIN" }))
 vi.mock("@/hooks/use-abilities", () => ({
-  useAbilities: () => ({ role: "ADMIN" }),
+  useAbilities: () => ({ role: permission.role }),
+}))
+vi.mock("@/components/features/crews/crew-service-quotas", () => ({
+  CrewServiceQuotas: ({ canManage }: { canManage: boolean }) => <button disabled={!canManage}>Edit service disk policy</button>,
 }))
 
 vi.mock("@/components/features/crews/crew-policy-controls", () => ({
@@ -119,3 +123,13 @@ describe("Issue prefix field (#2118)", () => {
     expect(screen.queryByText(/max 5/i)).toBeNull()
   })
 })
+
+ it("only lets OWNER and ADMIN edit disk policy", () => {
+   for (const role of ["OWNER", "ADMIN", "MANAGER", "MEMBER", "VIEWER"]) {
+     permission.role = role
+     const view = render(<SettingsTab workspaceId="w1" crew={baseCrew} agentsForCrew={[]} integrations={[]} patch={vi.fn()} applyAvatarStyle={vi.fn()} onDelete={vi.fn()} />)
+     expect((screen.getByRole("button", { name: "Edit service disk policy" }) as HTMLButtonElement).disabled).toBe(role !== "OWNER" && role !== "ADMIN")
+     view.unmount()
+   }
+   permission.role = "ADMIN"
+ })

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // PR #10 F6 — UserModelSync daily routine + background worker.
@@ -362,6 +363,15 @@ func runUserModelSweepAll(
 	logger *slog.Logger,
 	cfg UserModelWorkerConfig,
 ) {
+	// Never write memory under an instance backup's consistent copy: the whole
+	// sweep is a writer in the quiet window's barrier, yielding between
+	// workspaces so a backup's drain never waits on it.
+	wr, err := quiesce.EnterWait(ctx)
+	if err != nil {
+		return
+	}
+	defer wr.Leave()
+	ctx = wr.Context()
 	workspaces, err := loadActiveWorkspaceIDs(ctx, db)
 	if err != nil {
 		logger.Error("user model sync: load workspaces failed", "err", err)
@@ -375,6 +385,9 @@ func runUserModelSweepAll(
 	var totals UserModelSyncSummary
 	for _, wsID := range workspaces {
 		if ctx.Err() != nil {
+			return
+		}
+		if wr.Yield(ctx) != nil {
 			return
 		}
 		sum, err := RunUserModelSync(ctx, db, logger, wsID, UserModelSyncOptions{

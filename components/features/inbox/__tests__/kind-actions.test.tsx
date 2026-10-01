@@ -522,3 +522,43 @@ it("answers a rich waitpoint through the shared decision route", async () => {
   expect(onResolve).not.toHaveBeenCalled()
   await waitFor(() => expect(onRefresh).toHaveBeenCalledWith("approved"))
 })
+
+describe("backup incidents reach instance admins as message cards", () => {
+  const incident = item({
+    kind: "message",
+    source_id: "backup_incident:bin_1:boss",
+    title: "Backup needs attention",
+    payload: {
+      subkind: "backup_incident", incident_id: "bin_1", plan_id: "bp_1", run_id: "br_1",
+      view_url: "/admin?run=br_1&section=history&tab=backups",
+    },
+  })
+
+  it("links View failure to the run in Backup history", () => {
+    mount(incident)
+    expect(screen.getByRole("link", { name: /View failure/ })).toHaveAttribute("href", "/admin?run=br_1&section=history&tab=backups")
+  })
+
+  it("retries the plan through the run endpoint and leaves the card for the server to clear", async () => {
+    mount(incident)
+    fireEvent.click(screen.getByRole("button", { name: /Retry/ }))
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith("/api/v1/admin/instance/backups/run", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ plan_id: "bp_1" }),
+    })))
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    expect(onResolve).not.toHaveBeenCalled()
+  })
+
+  it("says why a retry was refused", async () => {
+    apiFetch.mockResolvedValue({ ok: false, status: 403, json: async () => ({ error: "Only an instance administrator can do this" }) })
+    mount(incident)
+    fireEvent.click(screen.getByRole("button", { name: /Retry/ }))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Only an instance administrator can do this"))
+  })
+
+  it("follows no link that is not an in-app admin page", () => {
+    mount(item({ ...incident, payload: { ...incident.payload, view_url: "https://evil.example/admin?x" } }))
+    expect(screen.queryByRole("link", { name: /View failure/ })).toBeNull()
+    expect(screen.getByRole("button", { name: /Retry/ })).toBeInTheDocument()
+  })
+})

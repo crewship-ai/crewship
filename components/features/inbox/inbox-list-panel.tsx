@@ -270,10 +270,10 @@ export function InboxListPanel(props: InboxListPanelProps) {
   return (
     <div
       data-testid="inbox-list"
-      className="flex w-[460px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-card"
+      className="flex w-[460px] shrink-0 flex-col overflow-hidden border-r border-foreground/[0.06] bg-card"
     >
       {/* ── Search + Select ── */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-2">
+      <div className="flex shrink-0 items-center gap-2 border-b border-foreground/[0.06] px-3 py-2">
         <SidebarSearch
           value={search}
           onValueChange={onSearchChange}
@@ -292,7 +292,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
       </div>
 
       {/* ── Views + Filter + Display ── */}
-      <div className="flex shrink-0 items-center gap-1 border-b border-white/[0.06] pr-2">
+      <div className="flex shrink-0 items-center gap-1 border-b border-foreground/[0.06] pr-2">
         <TabBar
           value={view}
           onValueChange={(v) => onViewChange(v as InboxView)}
@@ -321,7 +321,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
                 <div className="fixed inset-0 z-40" onClick={() => setFilterOpen(false)} />
                 <motion.div
                   {...dropdownAnim}
-                  className="absolute right-0 top-9 z-50 max-h-[380px] min-w-[230px] overflow-y-auto rounded-lg border border-white/[0.1] bg-card py-1 shadow-xl"
+                  className="absolute right-0 top-9 z-50 max-h-[380px] min-w-[230px] overflow-y-auto rounded-lg border border-foreground/[0.1] bg-card py-1 shadow-xl"
                 >
                   {archive ? (
                     <>
@@ -413,7 +413,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
               "ml-1 inline-flex h-6 items-center gap-1 whitespace-nowrap rounded-md border px-1.5 text-[10px] transition-colors",
               displayOpen
                 ? "border-primary/30 bg-primary/10 text-primary-hover"
-                : "border-white/[0.08] bg-white/[0.04] text-muted-foreground/70 hover:text-foreground",
+                : "border-foreground/[0.08] bg-foreground/[0.04] text-muted-foreground/70 hover:text-foreground",
             )}
           >
             <SlidersHorizontal className="h-2.5 w-2.5" />
@@ -426,7 +426,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
                 <div className="fixed inset-0 z-40" onClick={() => setDisplayOpen(false)} />
                 <motion.div
                   {...dropdownAnim}
-                  className="absolute right-0 top-9 z-50 min-w-[190px] rounded-lg border border-white/[0.1] bg-card py-1 shadow-xl"
+                  className="absolute right-0 top-9 z-50 min-w-[190px] rounded-lg border border-foreground/[0.1] bg-card py-1 shadow-xl"
                 >
                   <MenuHeading>Group by</MenuHeading>
                   {GROUP_BYS.map((g) => (
@@ -448,7 +448,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
         </div>
       </div>
 
-      <SidebarActiveChips className="border-b border-white/[0.06] pt-2">
+      <SidebarActiveChips className="border-b border-foreground/[0.06] pt-2">
         {bucketLabel && <SidebarActiveChip onRemove={() => onBucketChange(null)}>{bucketLabel}</SidebarActiveChip>}
         {subjectLabel && <SidebarActiveChip onRemove={() => onSubjectChange(null)}>{subjectLabel}</SidebarActiveChip>}
         {archive && outcomeLabel && <SidebarActiveChip onRemove={() => onOutcomeChange(null)}>{outcomeLabel}</SidebarActiveChip>}
@@ -477,7 +477,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
           return (
             <div key={group.key}>
               {groupBy !== "none" && (
-                <div className="sticky top-0 z-[1] flex items-center gap-2 border-b border-white/[0.04] bg-card/95 px-3 py-1.5 backdrop-blur">
+                <div className="sticky top-0 z-[1] flex items-center gap-2 border-b border-foreground/[0.04] bg-card/95 px-3 py-1.5 backdrop-blur">
                   {selectMode && (
                     <Checkbox
                       checked={groupState}
@@ -534,7 +534,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
 
       {/* ── Bulk bar ── */}
       {checked.size > 0 && (
-        <div className="flex shrink-0 flex-col gap-1.5 border-t border-white/[0.06] bg-surface-subtle/60 px-3 py-2">
+        <div className="flex shrink-0 flex-col gap-1.5 border-t border-foreground/[0.06] bg-surface-subtle/60 px-3 py-2">
           <div className="flex items-center gap-2">
             <span className="type-row font-medium">{checked.size} selected</span>
             <div className="ml-auto flex items-center gap-1.5">
@@ -569,7 +569,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
         </div>
       )}
 
-      <div className="type-meta flex shrink-0 items-center gap-2 border-t border-white/[0.06] px-3 py-1.5 text-muted-foreground-soft">
+      <div className="type-meta flex shrink-0 items-center gap-2 border-t border-foreground/[0.06] px-3 py-1.5 text-muted-foreground-soft">
         <span>{rows.length === total ? `${total} items` : `${rows.length} of ${total}`}</span>
         {selectMode && <span className="ml-auto">shift-click takes a range</span>}
       </div>
@@ -584,7 +584,7 @@ function MenuHeading({ children }: { children: React.ReactNode }) {
 }
 
 function MenuDivider() {
-  return <div className="mt-1 border-t border-white/[0.06]" />
+  return <div className="mt-1 border-t border-foreground/[0.06]" />
 }
 
 function MenuOption({
@@ -602,7 +602,7 @@ function MenuOption({
       data-testid={testId}
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-white/[0.06]",
+        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-foreground/[0.06]",
         active ? "text-primary" : "text-muted-foreground/80",
       )}
     >

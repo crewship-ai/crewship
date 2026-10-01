@@ -40,10 +40,9 @@ import {
   type CalendarOutcome,
   type RoutineGroup,
 } from "@/lib/routine-calendar-groups"
-import { CrewIcon } from "@/components/ui/crew-icon"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
-import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
+import { RoutineGlyph } from "./routine-glyph"
 import { routineRunPresentation } from "@/lib/routine-run-presentation"
 import { cn } from "@/lib/utils"
 import { RoutineCalendarSchedule } from "./routine-calendar-schedule"
@@ -195,17 +194,11 @@ export function RoutineCalendar({
     }
     setScheduleDate(proposed)
   }
-  const icon = (slug: string, className?: string) => {
-    const routine = bySlug.get(slug) ?? { slug }
-    return (
-      <CrewIcon
-        icon={resolveRoutineIcon(routine)}
-        color={resolveRoutineColor(routine)}
-        size="sm"
-        className={className}
-      />
-    )
-  }
+  // One tint for every routine: the dot beside it already carries the
+  // outcome colour, and a hue per routine on top of it made the grid a quilt.
+  const icon = (slug: string, className?: string) => (
+    <RoutineGlyph routine={bySlug.get(slug) ?? { slug }} size="sm" className={className} />
+  )
   const nameOf = (slug: string, fallback?: string) => bySlug.get(slug)?.name || fallback || slug
   const eventTitle = (event: CalendarEntry) => {
     const label =
@@ -317,7 +310,7 @@ export function RoutineCalendar({
               >
                 {calendarClock(event.at)}
               </span>
-              {icon(event.slug, "!h-4 !w-4 [&>svg]:h-3 [&>svg]:w-3")}
+              {icon(event.slug, "!h-4 !w-4 !rounded-[5px] [&>svg]:!h-3 [&>svg]:!w-3")}
               <span className="hidden min-w-0 truncate @2xl/month:inline">
                 {nameOf(event.slug, event.name)}
               </span>
@@ -549,7 +542,7 @@ export function RoutineCalendar({
     return (
       <section
         aria-label="Day agenda"
-        className="overflow-hidden rounded-xl border border-border/60 bg-card"
+        className="overflow-hidden rounded-card border border-border bg-card"
       >
         <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-4 py-2.5">
           <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -560,7 +553,7 @@ export function RoutineCalendar({
             ‹ {view === "year" ? "Year" : view === "month" ? "Month" : CALENDAR_LABELS[view]}
           </Button>
           {canSchedule && (
-            <Button size="sm" onClick={() => plan(day)}>
+            <Button size="sm" variant="outline" onClick={() => plan(day)}>
               <Plus className="mr-1 h-3.5 w-3.5" />
               Schedule a start
             </Button>
@@ -613,7 +606,7 @@ export function RoutineCalendar({
     (_, i) => addDays(from, i),
   )
   return (
-    <section className="space-y-3 rounded-3xl border border-white/[0.06] bg-card p-4">
+    <section className="space-y-3 rounded-3xl border border-foreground/[0.06] bg-card p-4">
       {/* One toolbar, as the prototype draws it: views · ‹ Today › · title · filters. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <nav
@@ -694,7 +687,7 @@ export function RoutineCalendar({
                 "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors",
                 filter === f
                   ? "border-primary/40 bg-primary/[0.12] text-primary"
-                  : "border-white/[0.08] bg-white/[0.02] text-muted-foreground hover:text-foreground/80",
+                  : "border-foreground/[0.08] bg-foreground/[0.02] text-muted-foreground hover:text-foreground/80",
               )}
             >
               <span aria-hidden className={cn("h-2 w-2 rounded-full", FILTER_DOT[f])} />
@@ -704,7 +697,7 @@ export function RoutineCalendar({
           ))}
         </div>
         {canSchedule && (
-          <Button size="sm" onClick={() => plan(anchor)}>
+          <Button size="sm" variant="outline" onClick={() => plan(anchor)}>
             <Plus className="mr-1 h-3.5 w-3.5" />
             Schedule a start
           </Button>

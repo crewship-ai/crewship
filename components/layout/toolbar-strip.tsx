@@ -67,8 +67,7 @@ interface ToolbarStripProps<T extends string = string> extends React.ComponentPr
  * flex spacer, trailing actions slot. Active tab gets `bg-accent text-foreground`;
  * inactive tabs get `text-muted-foreground`.
  *
- * Keyboard: the WAI-ARIA tabs pattern, as in
- * `components/features/admin/keeper-queue-panel.tsx` — ArrowLeft/ArrowRight
+ * Keyboard: the WAI-ARIA tabs pattern — ArrowLeft/ArrowRight
  * cycle, Home/End jump to the ends, and a roving `tabIndex` keeps the whole
  * group to one stop in the document's tab order.
  */
@@ -100,8 +99,7 @@ export function ToolbarStrip<T extends string = string>({
   /**
    * ArrowLeft/Right cycle, Home/End jump — the WAI-ARIA tabs pattern.
    *
-   * Activation follows focus, the pattern's default and what
-   * `keeper-queue-panel.tsx` already does here: it is the right choice when
+   * Activation follows focus, the pattern's default: it is the right choice when
    * switching is cheap, and the one caller with panels keeps all of them
    * mounted. A strip that has to fetch on select would want the manual variant
    * (move focus, activate on Enter/Space) instead.

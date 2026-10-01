@@ -18,8 +18,13 @@ crewship backup <subcommand> [flags]
 ```
 
 <Note>
-  Every subcommand requires the **OWNER** or **ADMIN** role on the target
-  workspace — other roles are refused at both the CLI and the server.
+  Every subcommand that talks to the server requires the **OWNER** or
+  **ADMIN** role on the target workspace, or an instance administrator —
+  other roles are refused. The commands name the workspace explicitly
+  (`--workspace`, or the configured one), so an instance administrator works
+  on any workspace without being a member of it:
+  `crewship backup list --workspace lab`. `convert` works offline on a bundle
+  file.
 </Note>
 
 ## Subcommands
@@ -37,7 +42,9 @@ crewship backup <subcommand> [flags]
 | `status` | Show the active advisory lock for this workspace. |
 | `unlock` | Force-release a stale advisory lock (emergency only). |
 | `self-test` | Run the backup canary round-trip on a crew (admin diagnostic). |
-| `metrics` | Show process-lifetime backup counters (instance owner only). |
+| `metrics` | Show process-lifetime backup counters (instance administrators only). |
+| `convert` | Convert an older bundle to the current format (offline, no server or role needed; the original is never modified). |
+| `drill` | Test-restore an instance bundle in a throwaway directory and check it (offline); `--post` records the result. |
 
 ---
 
@@ -56,15 +63,15 @@ crewship backup create --scope=workspace --use-keyring
 |------|------|---------|-------------|
 | `--scope` | `string` | `workspace` | Backup scope: `workspace` or `crew`. |
 | `--crew` | `string` | | Crew slug or ID (required when `--scope=crew`). |
-| `--no-encrypt` | `bool` | `false` | Write a plaintext payload instead of AGE-encrypting. Test / CI only. |
+| `--no-encrypt` | `bool` | `false` | Refused: every new backup is encrypted. Kept so an old script gets a clear error. |
 | `--passphrase-file` | `string` | | Read the passphrase from a file instead of prompting. |
 | `--use-keyring` | `bool` | `false` | Cache and reuse the passphrase via `~/.crewship/backup-keyring.enc`. |
 | `--recipient` | `string` | | AGE X25519 public key (`age1…`) for asymmetric encryption. |
 | `--output` | `string` | `<data dir>/backups` | Override the output directory on the server. |
 
-`--recipient` is mutually exclusive with both `--passphrase-file` and
-`--no-encrypt` (each combination is rejected). `--no-encrypt` also wins
-over a passphrase — it skips the prompt entirely and writes plaintext.
+`--recipient` is mutually exclusive with `--passphrase-file`. `--no-encrypt`
+is refused before anything reaches the server: vault secrets stay sealed, but
+agent home folders inside a bundle can hold credentials the vault never sealed (`~/.aws`, `~/.ssh`, tool logins), so a plaintext bundle would be a plaintext copy of them.
 
 A workspace bundle also carries the sources, artifacts and Git checkpoints
 behind any [custom Page applications](/guides/pages#custom-applications) as a
@@ -112,6 +119,14 @@ crewship backup download /var/crewship/backups/bundle.tar.zst --out ~/restores/b
 The endpoint sends `no-store`/`no-cache` headers and a half-written
 file is removed on copy failure — partial bundles never land on disk.
 
+An **instance bundle** (from `crewship admin instance backups run --scope
+instance`, or a Complete recovery plan) belongs to no workspace, so the
+per-workspace route answers 404 for it. `download`, `inspect` and `verify`
+then ask the instance route (`GET /api/v1/admin/instance/backups/bundles/download`,
+`…/inspect`, `…/verify`), which serves any bundle in the catalog to an
+instance administrator — use the path `crewship admin instance backups
+bundles` or `runs` shows.
+
 ---
 
 ## `crewship backup inspect`
@@ -122,7 +137,11 @@ touches the encrypted payload, so no passphrase is needed.
 
 ```bash
 crewship backup inspect ~/.crewship/backups/crewship-workspace-acme-...tar.zst
+crewship backup inspect /var/lib/crewship/backups/crewship-instance-20260930T020000Z.tar.zst   # an instance bundle
 ```
+
+An instance bundle is read through the instance route (see
+[`download`](#crewship-backup-download)); the manifest is plaintext there too.
 
 ---
 
@@ -160,6 +179,83 @@ fields: `valid`, `size_bytes`, `error`, `completeness_checked`,
 `completeness_skip_reason`, `table_row_count_mismatches`
 (see the [API reference](/api-reference/backup#inspect-verify-and-self-test)).
 Exit status is non-zero on `INVALID`.
+
+---
+
+## `crewship backup convert`
+
+Convert a bundle written by an older Crewship to the current format
+version so the current `restore` can read it. Runs locally on the bundle
+file: no server, login or workspace role is involved. `restore`, `verify`
+and `inspect` print this exact command when they meet a bundle older than
+they read directly.
+
+```bash
+crewship backup convert --bundle old.tar.zst --identity ~/.crewship/backup.key
+crewship backup convert --bundle old.tar.zst --out new.tar.zst --passphrase-file pass.txt
+```
+
+The original is only read. A **new** bundle is written to `--out` and
+sealed to the same age recipients the original records, or to the
+passphrase that opened it, unless `--recipient` names new ones. The report
+lists each version step, what it changed, and what the older format never
+carried and so cannot be recovered; the converted manifest keeps that list
+under `conversion`. A bundle already at the current version is reported
+and nothing is written. Use the global `-f json` for the report as JSON.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--bundle` | `string` | | Bundle to convert (required). Only read, never modified. |
+| `--out` | `string` | next to `--bundle` with a `.v3` infix | Where to write the converted bundle. Refuses to overwrite an existing file. |
+| `--identity` | `string` | | age identity file (`AGE-SECRET-KEY-1…`) that opens the bundle. |
+| `--passphrase-file` | `string` | | Read the passphrase that opens the bundle from a file. |
+| `--recipient` | `stringArray` | | Seal the converted bundle to this age public key (`age1…`) instead of the original's recipients. Repeatable. |
+
+See [Compatibility](/guides/backup#compatibility) for what each version
+step converts and what it reports.
+
+---
+
+## `crewship backup drill`
+
+Test-restore an **instance** bundle in isolation and check it. Runs locally:
+the same restore [`crewship recover`](/cli/recover) performs, into a throwaway
+directory that is deleted afterwards. No server, scheduler, container or
+network client is started, so no message is sent, no webhook called and no
+model run paid for.
+
+```bash
+crewship backup drill --bundle crewship-instance-all-20260930T030000Z.tar.zst --identity ops.key
+crewship backup drill --bundle b.tar.zst --identity ops.key --post
+crewship backup drill --bundle b.tar.zst --passphrase-file pass.txt --env-keys
+```
+
+It then checks what a real recovery is judged on:
+
+| Check | Passes when |
+|-------|-------------|
+| `attachments_open` | every attachment row's file exists with the right content |
+| `memory_loads` | every memory version's content is readable |
+| `credentials_unlock` | every sealed value decrypts with the recovery kit's keys (or, with `--env-keys`, this machine's `ENCRYPTION_KEY` / `ENCRYPTION_KEY_V2`…) |
+| `journal_verifies` | every workspace's journal hash chain verifies |
+| `routines_held` | routines, webhooks and queued work are held after the restore |
+
+The result is `ok`, `partial` (every check that did not pass is listed; a
+bundle without a recovery kit is partial unless `--env-keys` unlocks it) or
+`failed` (the restore itself did not complete; exit code non-zero).
+`--post` records the result on the server this CLI is logged in to: the bundle
+becomes proof level 3 (test restore) and the drill lands in the restore
+history. The bundle must be catalogued there under the same path. `--post` never
+sends the stored token to a server other than the one it belongs to.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--bundle` | `string` | | The instance bundle (required). |
+| `--identity` | `string` | | age identity file (`AGE-SECRET-KEY-1…`) that opens the bundle. |
+| `--passphrase-file` | `string` | | Read the passphrase that opens the bundle from a file. |
+| `--env-keys` | `bool` | `false` | Without a recovery kit in the bundle, unlock credentials with this machine's vault keys. |
+| `--post` | `string` | | Record the result on the server this CLI is logged in to; `--post=<url>` also checks that it is that server. |
+| `--server-path` | `string` | absolute `--bundle` | With `--post`: the bundle's path as the server catalogued it. |
 
 ---
 
@@ -273,8 +369,10 @@ written. See [Backup & restore](/guides/backup#columns-your-schema-does-not-have
 
 ## `crewship backup rotate`
 
-Retention sweep. Either flag on its own is valid; both together apply
-the stricter cutoff.
+Retention sweep. Either flag on its own is valid. `--keep-last` is a floor:
+the N newest bundles are always kept, however old. `--keep-days` applies only
+beyond that floor; on its own the floor is one bundle, so a rotation never
+deletes the last copy. Pinned bundles are never deleted.
 
 ```bash
 crewship backup rotate --keep-last 10
@@ -284,12 +382,12 @@ crewship backup rotate --keep-last 10 --keep-days 30 --dry-run
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--keep-last` | `int` | `0` | Keep only the N newest bundles (0 disables). |
-| `--keep-days` | `int` | `0` | Drop bundles older than N days (0 disables). |
+| `--keep-last` | `int` | `0` | Always keep the N newest bundles; with no `--keep-days`, drop the rest (0 disables). |
+| `--keep-days` | `int` | `0` | Beyond the kept newest, keep bundles younger than N days (0 disables). |
 | `--dry-run` | `bool` | `false` | List bundles that would be deleted without touching disk. |
 
 Rotation applies per workspace — it never touches another workspace's
-bundles.
+bundles, and counts crew bundles separately from workspace bundles.
 
 ---
 
@@ -384,7 +482,7 @@ crewship backup metrics
 Output is pretty-printed JSON.
 
 <Note>
-  Gated to instance OWNER server-side.
+  Instance administrators only, server-side.
 </Note>
 
 ## See also

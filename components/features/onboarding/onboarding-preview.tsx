@@ -186,7 +186,7 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
         initial={reduce ? { opacity: 0 } : { opacity: 0, y: 14, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.55, ease, delay: 0.05 }}
-        className="bg-card border border-border rounded-[20px] p-4 flex items-center gap-3 shadow-lg"
+        className="bg-card border border-border rounded-card p-4 flex items-center gap-3 shadow-lg"
       >
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#1B75FE] to-[#2B90FF] flex items-center justify-center text-white shadow-md shadow-primary/30">
           <Building2 className="h-5 w-5" />
@@ -210,7 +210,7 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={reduce ? { opacity: 0 } : { opacity: 0, y: -8, scale: 0.98 }}
             transition={{ duration: 0.4, ease }}
-            className="bg-card border border-border rounded-[20px] p-4 shadow-lg"
+            className="bg-card border border-border rounded-card p-4 shadow-lg"
           >
             <div className="flex items-center gap-3 mb-3 pb-3 border-b border-border">
               {/* Inline styles are dynamic brand colors from the crew
@@ -288,7 +288,7 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
             // below the form and off-screen while you type, so reserving a
             // card's worth of height there is pure dead scroll for a landing
             // nobody watches.
-            className="flex min-h-[120px] items-center justify-center rounded-[20px] border border-dashed border-border bg-card/40 p-6 text-center text-sm text-muted-foreground sm:min-h-[248px]"
+            className="flex min-h-[120px] items-center justify-center rounded-card border border-dashed border-border bg-card/40 p-6 text-center text-sm text-muted-foreground sm:min-h-[248px]"
           >
             {/* Not "on the left" — stacked on a phone there is no left, and
                 the picker is above this, not beside it. */}
@@ -315,7 +315,7 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.96 }}
               transition={{ duration: 0.4, ease }}
-              className="bg-card border border-border rounded-[20px] p-4 shadow-lg"
+              className="bg-card border border-border rounded-card p-4 shadow-lg"
             >
               <div className="flex items-center gap-3">
                 {AdapterIcon && brand && (

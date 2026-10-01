@@ -37,6 +37,7 @@ type updateCrewRequest struct {
 	DevcontainerConfig    *string   `json:"devcontainer_config"`
 	MiseConfig            *string   `json:"mise_config"`
 	ServicesJSON          *string   `json:"services_json"`
+	ExpectedServicesJSON  *string   `json:"expected_services_json"` // optional client snapshot CAS; omitted preserves legacy callers
 	// MaxEphemeralAgents is the hire-flow quota (see v103 migration
 	// + agents_hire.go). PR-G surfaces this on the policy panel so
 	// operators can raise/lower the cap without dropping to the CLI.
@@ -155,6 +156,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// TrimSpace handles a payload of "   " or "\n", which the
 	// previous != "" check would have stored verbatim, diverging
 	// from the documented clear-on-empty semantics.
+	if req.ExpectedServicesJSON != nil && (req.ServicesJSON == nil || len(*req.ExpectedServicesJSON) > 64*1024) {
+		replyError(w, http.StatusBadRequest, "expected_services_json requires services_json and must not exceed 64KB")
+		return
+	}
 	var previousServices sql.NullString
 	if req.ServicesJSON != nil {
 		if err := h.db.QueryRowContext(r.Context(), "SELECT services_json FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL", crewID, workspaceID).Scan(&previousServices); err != nil {
@@ -169,8 +174,16 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			replyInternalError(w, h.logger, "open service configuration for update", openErr)
 			return
 		}
-		if serviceconfig.Public(previousServices.String) == serviceconfig.Redacted && *req.ServicesJSON != previousPlain {
+		// Decide the redacted case before comparing the client snapshot: a
+		// snapshot comparison would answer whether a guessed private
+		// configuration is right. A snapshot editor never saw these
+		// settings, so any request carrying one is refused outright.
+		if serviceconfig.Public(previousServices.String) == serviceconfig.Redacted && (req.ExpectedServicesJSON != nil || *req.ServicesJSON != previousPlain) {
 			replyError(w, http.StatusConflict, "Private service settings cannot be replaced through crew updates; existing credentials and services were left unchanged")
+			return
+		}
+		if req.ExpectedServicesJSON != nil && *req.ExpectedServicesJSON != previousPlain {
+			replyError(w, http.StatusConflict, "Service configuration changed; refresh before saving disk policy")
 			return
 		}
 		trimmedServices := strings.TrimSpace(*req.ServicesJSON)
@@ -181,6 +194,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if err := validateServicesJSON(trimmedServices); err != nil {
+				replyError(w, http.StatusBadRequest, "invalid services_json: "+err.Error())
+				return
+			}
+			if err := serviceconfig.QuotaTransition(previousPlain, trimmedServices); err != nil {
 				replyError(w, http.StatusBadRequest, "invalid services_json: "+err.Error())
 				return
 			}

@@ -36,3 +36,24 @@ it("does not offer write controls to a member", () => {
  expect(screen.queryByRole("button", { name: /default colors/i })).toBeNull()
  expect(screen.getByText("#123abc")).toBeInTheDocument()
 })
+
+// "Preview" opens a half-screen panel with a sample Page application painted
+// from the unsaved draft, so an admin sees a palette before saving it; it
+// follows edits live and closes without saving anything.
+it("previews the unsaved palette on a sample page, live, and closes without saving", async () => {
+ render(<PagesAppearanceCard workspaceId="ws1" role="ADMIN" />)
+ fireEvent.click(screen.getByRole("button", { name: /^preview$/i }))
+ const page = await screen.findByTestId("pages-theme-preview")
+ expect(page.style.getPropertyValue("--crewship-page-accent")).toBe("#123abc")
+ fireEvent.change(screen.getByLabelText("Background"), { target: { value: "#f4f7fb" } })
+ await waitFor(() => expect(screen.getByTestId("pages-theme-preview").style.getPropertyValue("--crewship-page-background")).toBe("#f4f7fb"))
+ fireEvent.click(screen.getByRole("button", { name: /close preview/i }))
+ await waitFor(() => expect(screen.queryByTestId("pages-theme-preview")).toBeNull())
+ expect(api).not.toHaveBeenCalled()
+})
+
+it("offers the preview to a member too, read-only", async () => {
+ render(<PagesAppearanceCard workspaceId="ws1" role="MEMBER" />)
+ fireEvent.click(screen.getByRole("button", { name: /^preview$/i }))
+ expect(await screen.findByTestId("pages-theme-preview")).toBeInTheDocument()
+})

@@ -43,3 +43,15 @@ export function routineRunOrigin(run: { triggered_via?: string; triggered_by_id?
     automation_name: typeof automationName === "string" && automationName.trim() ? automationName : undefined,
   })
 }
+
+/** The origin's source as copy, or nothing when it is a database id. A
+ * schedule or trigger id (`psched_…`, a cuid, a uuid) says nothing to a reader
+ * and leaks an internal key into the sentence; a name reads fine. */
+export function readableOriginSource(source: string | undefined): string | undefined {
+  if (!source) return undefined
+  const s = source.trim()
+  if (/^[a-z]{1,12}_[a-z0-9]{16,}$/i.test(s)) return undefined
+  if (/^c[a-z0-9]{20,}$/.test(s)) return undefined
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return undefined
+  return s
+}

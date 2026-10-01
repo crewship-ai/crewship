@@ -84,7 +84,7 @@ export function AgentHeatmap({ agents, buckets }: AgentHeatmapProps) {
                     aria-label={`@${a.slug} at ${new Date(b.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}: ${v} task${v === 1 ? "" : "s"}`}
                     className={cn(
                       "h-[14px] rounded-[2px] transition-colors",
-                      intensity === 0 && "bg-white/[0.03]",
+                      intensity === 0 && "bg-foreground/[0.03]",
                       intensity === 1 && "bg-blue-500/20",
                       intensity === 2 && "bg-blue-500/40",
                       intensity === 3 && "bg-blue-500/65",
@@ -101,7 +101,7 @@ export function AgentHeatmap({ agents, buckets }: AgentHeatmapProps) {
       <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground-soft pt-2 pl-[72px]">
         <span>less</span>
         <div className="flex gap-0.5">
-          <div className="h-2.5 w-2.5 rounded-[2px] bg-white/[0.03]" />
+          <div className="h-2.5 w-2.5 rounded-[2px] bg-foreground/[0.03]" />
           <div className="h-2.5 w-2.5 rounded-[2px] bg-blue-500/20" />
           <div className="h-2.5 w-2.5 rounded-[2px] bg-blue-500/40" />
           <div className="h-2.5 w-2.5 rounded-[2px] bg-blue-500/65" />

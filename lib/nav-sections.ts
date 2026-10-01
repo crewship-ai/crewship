@@ -79,9 +79,13 @@ export const navSections: NavSection[] = [
   },
 ]
 
-/** True when a role may not see this row at all. Shared by both surfaces. */
-export function isHiddenForRole(item: NavItem, role: string | null | undefined): boolean {
-  return item.badge === "ADMIN" && role !== "OWNER" && role !== "ADMIN"
+/**
+ * True when this person may not see the row at all. Shared by both surfaces.
+ * Admin is the instance console: it shows for an instance administrator, and a
+ * workspace role (OWNER or ADMIN of the current workspace) does not decide it.
+ */
+export function isHiddenForRole(item: NavItem, _role: string | null | undefined, instanceAdmin?: boolean | null): boolean {
+  return item.badge === "ADMIN" && instanceAdmin !== true
 }
 
 /**

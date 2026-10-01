@@ -479,6 +479,7 @@ Lists all CLI tokens belonging to the calling user, newest first. The plaintext 
 | `expires_at` | string? | RFC3339 expiry. Present only when the token has one (any ADMIN token, or a STANDARD token created with `expires_in_seconds`). |
 | `last_used_at` | string? | RFC3339 of the last successful auth. Updated asynchronously by `ValidateCLIToken`. Omitted on tokens never used. |
 | `revoked_at` | string? | RFC3339 when `/auth/cli-tokens/{tokenId}` was called. Omitted on still-active tokens. |
+| `scopes` | string[]? | The scopes the token was narrowed to, sorted. Omitted on an unrestricted token, which carries the user's full role. |
 
 ### `DELETE /api/v1/auth/cli-tokens/{tokenId}`
 

@@ -18,13 +18,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { AgentRingAvatar } from "./agent-ring-avatar"
+import { getModelLabel } from "@/lib/cli-adapters"
+import { getCrewDotColor } from "@/lib/crew-icons"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Pill } from "@/components/ui/detail"
 import { StatusPill } from "@/components/ui/status-pill"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
-import { cn } from "@/lib/utils"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
 import { apiFetch } from "@/lib/api-fetch"
 import { entityHref } from "@/lib/entity-links"
@@ -335,15 +336,15 @@ export function AgentCanvas({
           className="group mt-0.5 shrink-0"
           title="Change avatar"
         >
-          <AgentAvatar
+          <AgentRingAvatar
             seed={agent.avatar_seed || agent.name}
             style={agent.avatar_style || agent.crew?.avatar_style}
             agentId={agent.id}
             avatarUrl={agent.avatar_url}
-            className={cn(
-              "h-16 w-16 rounded-xl ring-4 ring-purple/10 transition-transform group-hover:scale-[1.06]",
-              isRunning && "ring-2 ring-success/40",
-            )}
+            crewColor={agent.crew?.color}
+            engine={agent.llm_provider}
+            size="lg"
+            className="transition-transform group-hover:scale-[1.04]"
           />
         </button>
 
@@ -429,7 +430,6 @@ export function AgentCanvas({
           </div>
         </div>
 
-        {agent.description && <p className="mt-2 max-w-prose text-sm text-muted-foreground">{agent.description}</p>}
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           <StatusPill status={statusKey} live={isRunning} size="md" />
           {agent.agent_role === "LEAD" && <Pill tone="purple">Lead</Pill>}
@@ -443,7 +443,7 @@ export function AgentCanvas({
               takes the row role rather than the caption one. type-meta is for
               a timestamp in the corner of a card, not for the line that says
               what this agent IS. */}
-          <span className="type-row flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-muted-foreground">
+          <span className="type-row flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
             {agent.role_title && <span>{agent.role_title}</span>}
             {agent.crew && (
               <>
@@ -451,7 +451,8 @@ export function AgentCanvas({
                 <button
                   type="button"
                   onClick={() => onSelectCrew(agent.crew!.slug)}
-                  className="text-primary hover:underline"
+                  className="font-mono text-[11px] hover:underline"
+                  style={{ color: agent.crew.color ? getCrewDotColor(agent.crew.color) : "var(--primary-hover)" }}
                 >
                   {agent.crew.name}
                 </button>
@@ -460,9 +461,9 @@ export function AgentCanvas({
             {agent.llm_model && (
               <>
                 <span className="opacity-40">·</span>
-                <span className="inline-flex items-center gap-1.5">
+                <span className="inline-flex items-center gap-1.5" title={agent.llm_model}>
                   {providerMark(agent.llm_provider)}
-                  {agent.llm_model}
+                  {getModelLabel(agent.llm_model)}
                 </span>
               </>
             )}

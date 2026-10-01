@@ -26,6 +26,7 @@ package api
 // 5-tier role model or the v109 capability layer.
 
 import (
+	"context"
 	"net/http"
 	"strings"
 )
@@ -199,7 +200,7 @@ func scopeForRoute(pattern string) string {
 // The enumeration test uses it so a typo'd or empty role fails the build.
 func isDeclaredRole(role string) bool {
 	switch role {
-	case roleCreate, roleManage, roleSelf, roleInline:
+	case roleCreate, roleManage, roleSelf, roleInline, roleInstance:
 		return true
 	default:
 		return false
@@ -277,17 +278,77 @@ type adminRoute struct {
 }
 
 // authedAdmin registers an admin-console READ route behind the ADMIN+ floor
-// (#865). The admin surface exposes cross-user / cross-workspace operational
-// data (stats, user/workspace listings, keeper audit, backups, memory
-// versions); before this it registered as authed(wsCtx(...)) with no role, so
-// any workspace MEMBER could read it while the destructive mutations behind
-// the same console were already ADMIN+. authedAdmin gates the reads at
-// roleManage (OWNER/ADMIN) from the registration — reusing the mutation
-// chokepoint (requireRoleScopeMW) with scopeSelf, since reads are not
-// scope-gated — and records the route so the floor invariant can enumerate it
-// and a forgotten gate is a build failure, not a review catch.
+// (#865): OWNER/ADMIN of the workspace, or an instance administrator — who may
+// leave the workspace out or name one they are not a member of
+// (RequireWorkspaceOrInstanceAdmin). Recorded so the floor invariant can
+// enumerate it and a forgotten gate is a build failure, not a review catch.
 func (r *Router) authedAdmin(method, pattern string, h http.HandlerFunc) {
 	r.adminRoutes = append(r.adminRoutes, adminRoute{Method: method, Pattern: pattern})
 	r.mux.Handle(method+" "+pattern,
-		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.requireRoleScopeMW(roleManage, scopeSelf, h))))
+		r.authMw.RequireAuth(r.adminWorkspace(false, r.requireAdminFloorMW(scopeSelf, h))))
+}
+
+// authedAdminAny is authedAdmin for an instance-wide read (health, log level,
+// rate limits, posture, the Keeper judge, stats): an instance admin may also
+// name no workspace at all and gets the instance's answer.
+func (r *Router) authedAdminAny(method, pattern string, h http.HandlerFunc) {
+	r.adminRoutes = append(r.adminRoutes, adminRoute{Method: method, Pattern: pattern})
+	r.mux.Handle(method+" "+pattern,
+		r.authMw.RequireAuth(r.adminWorkspace(true, r.requireAdminFloorMW(scopeSelf, h))))
+}
+
+// authedAdminWrite is authedAdmin for a change to one workspace's settings
+// (Keeper governance, memory retention, a review run, a runtime prune): the
+// same floor, recorded as roleManage like the authedMut it replaces, so an
+// instance admin reaches a workspace they are not a member of.
+func (r *Router) authedAdminWrite(method, pattern string, h http.HandlerFunc) {
+	scope := scopeForRoute(pattern)
+	r.recordMut(method, pattern, roleManage, scope)
+	r.mux.Handle(method+" "+pattern,
+		r.authMw.RequireAuth(r.adminWorkspace(false, r.requireAdminFloorMW(scope, h))))
+}
+
+// adminWorkspace is RequireWorkspaceOrInstanceAdmin with this router's
+// instance-admin rule.
+func (r *Router) adminWorkspace(optional bool, next http.Handler) http.Handler {
+	return r.authMw.RequireWorkspaceOrInstanceAdmin(func(req *http.Request) bool { return isInstanceAdmin(req, r.db) }, optional, next)
+}
+
+// authedAdminPeople registers the People & workspaces reads and actions: the
+// same floor as authedAdmin (OWNER/ADMIN of the workspace, or an instance admin), except that an instance admin may
+// leave the workspace out. An instance admin need not belong to any workspace
+// (review R7), and these routes answer for the whole instance to them anyway;
+// anyone else without a workspace still gets the 400 RequireWorkspace gives.
+func (r *Router) authedAdminPeople(method, pattern string, h http.HandlerFunc) {
+	scope := scopeSelf
+	if method == http.MethodGet {
+		r.adminRoutes = append(r.adminRoutes, adminRoute{Method: method, Pattern: pattern})
+	} else {
+		scope = scopeForRoute(pattern)
+		r.recordMut(method, pattern, roleManage, scope)
+	}
+	r.mux.Handle(method+" "+pattern,
+		r.authMw.RequireAuth(r.adminWorkspace(true, r.requireAdminFloorMW(scope, h))))
+}
+
+// requireAdminFloorMW is the admin console's floor: OWNER/ADMIN of the
+// current workspace, or an instance administrator — who runs the console
+// whatever their role where they happen to stand. It marks the request when
+// the instance rule is what let it through, for canAdministerInstance.
+func (r *Router) requireAdminFloorMW(scope string, h http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ctx := req.Context()
+		if !canRole(RoleFromContext(ctx), roleManage) {
+			if !isInstanceAdmin(req, r.db) {
+				writeProblem(w, req, http.StatusForbidden, "Forbidden")
+				return
+			}
+			req = req.WithContext(context.WithValue(ctx, ctxInstanceAdmin, true))
+		}
+		if scope != scopeSelf && !canScope(req.Context(), scope) {
+			writeProblem(w, req, http.StatusForbidden, "Forbidden")
+			return
+		}
+		h(w, req)
+	})
 }

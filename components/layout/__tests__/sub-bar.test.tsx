@@ -132,7 +132,7 @@ describe("SubBar", () => {
         }
       />,
     )
-    expect(screen.getByRole("button", { name: /New Issue/ }).getAttribute("data-variant")).toBe("soft")
+    expect(screen.getByRole("button", { name: /New Issue/ }).getAttribute("data-variant")).toBe("default")
     expect(screen.getByRole("button", { name: /New Project/ }).getAttribute("data-variant")).toBe("ghost")
     expect(screen.getByRole("button", { name: /Settings/ }).getAttribute("data-variant")).toBe("ghost")
   })
@@ -155,6 +155,6 @@ describe("SubBar", () => {
     )
 
     expect(screen.getByRole("link", { name: /New issue/ }).getAttribute("data-variant")).toBe("ghost")
-    expect(screen.getByRole("link", { name: /Chat with agent/ }).getAttribute("data-variant")).toBe("soft")
+    expect(screen.getByRole("link", { name: /Chat with agent/ }).getAttribute("data-variant")).toBe("default")
   })
 })

@@ -276,7 +276,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
   return (
     <div className="h-full grid grid-cols-1 md:grid-cols-[minmax(220px,40%)_1fr] gap-0">
       {/* Tree */}
-      <div className="overflow-y-auto p-3 text-xs border-r border-white/8">
+      <div className="overflow-y-auto p-3 text-xs border-r border-foreground/8">
         <div className="text-muted-foreground mb-2 font-mono">{rootPath}</div>
         <ul className="font-mono space-y-0.5">
           {tree.map((f) => (
@@ -297,7 +297,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
       <div className="overflow-hidden flex flex-col min-h-0">
         {previewPath ? (
           <>
-            <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/8 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 px-3 py-1.5 border-b border-foreground/8 text-xs text-muted-foreground">
               <File className="h-3 w-3 shrink-0" />
               <span className="font-mono truncate flex-1">{previewPath}</span>
               {dirty && (
@@ -333,7 +333,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
                           "flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors",
                           dirty && !saving
                             ? "bg-primary hover:bg-primary text-white border-primary"
-                            : "bg-muted text-muted-foreground border-white/10 cursor-default",
+                            : "bg-muted text-muted-foreground border-foreground/10 cursor-default",
                         )}
                       >
                         {saving
@@ -350,7 +350,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
                           if (previewPath) void openFile(previewPath, previewPath.split("/").pop() ?? "")
                         }}
                         disabled={saving}
-                        className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-white/10 hover:bg-white/5 text-muted-foreground"
+                        className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-foreground/10 hover:bg-foreground/5 text-muted-foreground"
                       >
                         Cancel
                       </button>
@@ -426,7 +426,7 @@ function FileRow({ entry, parentPath, depth, expanded, onToggleFolder, onOpenFil
           }}
           className={cn(
             "w-full flex items-center gap-2 px-2 -mx-2 py-0.5 rounded text-left transition-colors",
-            isActive ? "bg-primary/15 text-primary" : "text-foreground/85 hover:bg-white/[0.03]",
+            isActive ? "bg-primary/15 text-primary" : "text-foreground/85 hover:bg-foreground/[0.03]",
           )}
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
         >

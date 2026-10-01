@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils"
 // header, the same pill, at its own size. A count across app/ + components/
 // found twelve different ways to write "small text" (text-xs 1292×, text-[11px]
 // 752×, text-[10px] 729×, the token scale 505×) and 211 hand-rolled
-// border-white/10 dividers.
+// border-foreground/10 dividers.
 //
 // So the routine vocabulary moves here unchanged, and every detail screen —
 // agent, crew, issue, credential — builds from it. Adopting these is a visual
@@ -185,15 +185,16 @@ export function DetailCard({
 }: DetailCardProps) {
   return (
     <div
+      data-slot="detail-card"
       data-testid={testId}
-      className={cn("overflow-hidden rounded-xl border bg-card", TONE_BORDER[tone], className)}
+      className={cn("overflow-hidden rounded-card border bg-card", TONE_BORDER[tone], className)}
     >
       {(title || action) && (
         <div className="flex items-center gap-2 border-b border-hairline px-4 py-2.5">
           {title && (
             <span className="inline-flex items-center gap-1.5">
               {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground-soft" />}
-              <span className="type-section text-foreground/70">{title}</span>
+              <span className="type-section text-primary-hover">{title}</span>
             </span>
           )}
           {subtitle && <span className="type-meta font-mono text-muted-foreground">{subtitle}</span>}
@@ -266,8 +267,8 @@ export interface EmptyStateProps {
 export function EmptyState({ icon: Icon, title, description, action }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
-      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-white/[0.04]">
-        <Icon className="h-6 w-6 text-muted-foreground" />
+      <div className="icon-tile mb-3 flex h-12 w-12 items-center justify-center rounded-2xl">
+        <Icon className="h-6 w-6" />
       </div>
       <div className="text-body font-medium text-foreground">{title}</div>
       {description && <p className="type-row mt-1.5 max-w-sm leading-relaxed text-muted-foreground">{description}</p>}
@@ -298,10 +299,10 @@ const STAT_TONE: Record<NonNullable<StatItem["tone"]>, string> = {
  */
 export function StatStrip({ items, className }: { items: StatItem[]; className?: string }) {
   return (
-    <div className={cn("flex flex-wrap overflow-hidden rounded-xl border border-border/60 bg-card", className)}>
+    <div className={cn("flex flex-wrap overflow-hidden rounded-card border border-border bg-card", className)}>
       {items.map((s) => (
         <div key={s.label} className="min-w-[120px] flex-1 border-r border-hairline px-4 py-2.5 last:border-r-0">
-          <div className="type-meta uppercase tracking-wide text-muted-foreground-soft">{s.label}</div>
+          <div className="eyebrow text-muted-foreground">{s.label}</div>
           <div
             className={cn(
               "type-row mt-0.5 truncate font-semibold tabular-nums",

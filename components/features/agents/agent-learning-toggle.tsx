@@ -47,7 +47,7 @@ export interface AgentLearningToggleProps {
 }
 
 export function AgentLearningToggle({ agentId, workspaceId, canEdit , bare = false }: AgentLearningToggleProps) {
-  const SHELL = bare ? "p-4" : "rounded-xl border border-white/8 bg-card p-4"
+  const SHELL = bare ? "p-4" : "rounded-xl border border-foreground/8 bg-card p-4"
   // Mirrors the CrewPolicyControls pattern: if caller passes canEdit
   // explicitly we honor it (lets admin overlays override), otherwise
   // derive from CASL abilities. Self-learning is ADMIN+ on the server
@@ -200,7 +200,7 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit , bare = fal
       </div>
 
       {dirty && (
-        <div className="space-y-2 pt-2 border-t border-white/5">
+        <div className="space-y-2 pt-2 border-t border-foreground/5">
           <label
             htmlFor={`agent-learning-reason-${agentId}`}
             className="block text-xs uppercase tracking-wider text-muted-foreground"
@@ -241,7 +241,7 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit , bare = fal
       )}
 
       {state?.set_at && (
-        <div className="text-[11px] text-muted-foreground pt-2 border-t border-white/5">
+        <div className="text-[11px] text-muted-foreground pt-2 border-t border-foreground/5">
           Last changed {new Date(state.set_at).toLocaleString()}
           {state.reason ? ` — ${state.reason}` : ""}
         </div>

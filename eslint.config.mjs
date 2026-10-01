@@ -54,7 +54,6 @@ const paletteRestrictions = [
 // token, or is one of two genuinely-ambiguous deferrals. Kept literal on
 // purpose; see the brief §2.
 const PALETTE_ALLOWLIST = [
-  "components/admin/backup-list.tsx",
   "components/features/activity/overview-nodes.tsx",
   "components/features/activity/sub-span-visual.tsx",
   "components/features/activity/trace-step-node.tsx",

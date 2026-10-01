@@ -41,7 +41,17 @@ CREATE TABLE backup_catalog (
     size INTEGER NOT NULL,
     sha256 TEXT NOT NULL,
     encrypted INTEGER NOT NULL,
-    format_version INTEGER NOT NULL
+    format_version INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'full',
+    plan_id TEXT,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    proof_level INTEGER NOT NULL DEFAULT 1,
+    proof_checked_at TEXT,
+    drill_result TEXT,
+    drill_at TEXT,
+    drill_report TEXT,
+    incomplete TEXT,
+    run_id TEXT
 )`); err != nil {
 		t.Fatalf("schema: %v", err)
 	}

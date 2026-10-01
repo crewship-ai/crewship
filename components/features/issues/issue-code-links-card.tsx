@@ -273,7 +273,7 @@ function RowAction({
       onClick={onClick}
       className={cn(
         "rounded p-0.5 text-muted-foreground-soft opacity-0 transition-all",
-        "hover:bg-white/[0.08] focus-visible:opacity-100 group-hover:opacity-100",
+        "hover:bg-foreground/[0.08] focus-visible:opacity-100 group-hover:opacity-100",
         "disabled:cursor-not-allowed disabled:opacity-40",
         destructive ? "hover:text-destructive" : "hover:text-foreground",
       )}
@@ -336,7 +336,7 @@ function AttachCodeLinkPicker({ edit }: { edit: CodeLinkEdit }) {
         <button
           type="button"
           aria-label="Attach a pull request"
-          className="rounded p-1 text-muted-foreground-soft transition-colors hover:bg-white/[0.06] hover:text-foreground"
+          className="rounded p-1 text-muted-foreground-soft transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
         >
           <GitPullRequest className="h-3.5 w-3.5" />
         </button>

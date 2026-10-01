@@ -48,6 +48,24 @@ type orchestrationHandlers struct {
 func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
+	r.mux.Handle("GET /api/v1/agents/{agentId}/run-profile", authed(wsCtx(http.HandlerFunc(r.restrictedRunProfile))))
+	r.authedMut("POST", "/api/v1/agents/{agentId}/restricted-cli-chats", roleSelf, r.createRestrictedCLIContext)
+	r.authedMut("POST", "/api/v1/chats/{chatId}/restricted-run", roleSelf, r.restrictedTextRun)
+	r.mux.Handle("GET /api/v1/chats/{chatId}/restricted-attempts", authed(wsCtx(http.HandlerFunc(r.restrictedOutcomes))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/restricted-files", authed(wsCtx(http.HandlerFunc(r.restrictedFiles))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/restricted-context", authed(wsCtx(http.HandlerFunc(r.restrictedContext))))
+	r.authedMut("POST", "/api/v1/chats/{chatId}/restricted-memory", roleSelf, r.restrictedContext)
+	r.authedMut("DELETE", "/api/v1/chats/{chatId}/restricted-memory/{entryId}", roleSelf, r.restrictedContext)
+	r.mux.Handle("GET /api/v1/chats/{chatId}/restricted-files/{fileId}/download", authed(wsCtx(http.HandlerFunc(r.restrictedFiles))))
+	r.authedMut("POST", "/api/v1/chats/{chatId}/restricted-cli-run", roleSelf, r.restrictedCLIRun)
+	r.mux.Handle("GET /api/v1/chats/{chatId}/execution-profile", authed(wsCtx(http.HandlerFunc(r.executionProfile))))
+
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight", roleSelf, r.restrictedIssuePreflight)
+	r.mux.Handle("GET /api/v1/chats/{chatId}/project-input-options", authed(wsCtx(http.HandlerFunc(r.projectInputOptions))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files", authed(wsCtx(http.HandlerFunc(r.projectFiles))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{versionId}/download", authed(wsCtx(http.HandlerFunc(r.projectFiles))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/projects/{projectId}/files", roleCreate, r.projectFiles)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{fileId}", roleCreate, r.projectFiles)
 
 	// Human conversations share workspace authentication and enforce their own
 	// participant ACL in every store operation, independently of agent sessions.
@@ -233,17 +251,17 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Feature Flags (instance-default + per-workspace override). SPEC-2: new in this PR.
 	ff := NewFeatureFlagHandler(r.db, r.hub, r.logger)
 	r.mux.Handle("GET /api/v1/feature-flags", authed(wsCtx(http.HandlerFunc(ff.List))))
-	r.authedMut("POST", "/api/v1/feature-flags", roleManage, ff.Create)
-	r.authedMut("PATCH", "/api/v1/feature-flags/{key}", roleManage, ff.Update)
-	r.authedMut("DELETE", "/api/v1/feature-flags/{key}", roleManage, ff.Delete)
+	r.authedInstanceMut("POST", "/api/v1/feature-flags", ff.Create)
+	r.authedInstanceMut("PATCH", "/api/v1/feature-flags/{key}", ff.Update)
+	r.authedInstanceMut("DELETE", "/api/v1/feature-flags/{key}", ff.Delete)
 	r.authedMut("PUT", "/api/v1/feature-flags/{key}/override", roleManage, ff.UpsertOverride)
 	r.authedMut("DELETE", "/api/v1/feature-flags/{key}/override", roleManage, ff.DeleteOverride)
 	// Instance Settings (admin-only key/value config). SPEC-2: new in this PR.
 	inst := NewInstanceSettingsHandler(r.db, r.hub, r.logger)
 	r.mux.Handle("GET /api/v1/instance/settings", authed(wsCtx(http.HandlerFunc(inst.List))))
 	r.mux.Handle("GET /api/v1/instance/settings/{key}", authed(wsCtx(http.HandlerFunc(inst.Get))))
-	r.authedMut("PUT", "/api/v1/instance/settings/{key}", roleManage, inst.Put)
-	r.authedMut("DELETE", "/api/v1/instance/settings/{key}", roleManage, inst.Delete)
+	r.authedInstanceMut("PUT", "/api/v1/instance/settings/{key}", inst.Put)
+	r.authedInstanceMut("DELETE", "/api/v1/instance/settings/{key}", inst.Delete)
 	// Runtime capacity: what host admission control is holding, and why
 	// (#1668). Instance-scoped and read-only — the host is a property of the
 	// instance, not of a workspace. Authenticated but not admin-gated: any
@@ -375,8 +393,10 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// member (roleSelf — informational, no secrets); the enable/disable
 	// toggle is ADMIN/OWNER (roleManage).
 	nph := NewNotifyProvidersHandler(r.db, r.logger)
-	r.mux.Handle("GET /api/v1/notification-providers", authed(wsCtx(http.HandlerFunc(nph.List))))
-	r.authedMut("PATCH", "/api/v1/notification-providers/{provider}", roleManage, nph.Patch)
+	// The list is instance-wide: an instance admin may read it with no
+	// workspace (Admin › Notifications); a member still reads it in theirs.
+	r.mux.Handle("GET /api/v1/notification-providers", authed(r.adminWorkspace(true, http.HandlerFunc(nph.List))))
+	r.authedInstanceMut("PATCH", "/api/v1/notification-providers/{provider}", nph.Patch)
 
 	// Per-user category x channel preference matrix (#1412). Self-scoped:
 	// every member manages their OWN matrix; the workspace is still in

@@ -103,7 +103,9 @@ func (h *KeeperStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	if workspaceID == "" {
+	// An instance admin who names no workspace gets the instance's figures;
+	// anyone else needs one.
+	if workspaceID == "" && !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusBadRequest, "workspace context required")
 		return
 	}
@@ -144,7 +146,7 @@ func (h *KeeperStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Per-workspace governance model (M2a, #1001) + any §4.4 degrade.
-	if h.govModel != nil {
+	if h.govModel != nil && workspaceID != "" {
 		gm := h.govModel.Status(r.Context(), workspaceID)
 		resp.GovModelConfigured = gm.Configured
 		resp.GovModelProvider = gm.Provider
@@ -155,7 +157,12 @@ func (h *KeeperStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	// Query request stats from DB, scoped to this workspace's agents.
 	if h.db != nil {
-		const inWorkspace = ` WHERE requesting_agent_id IN (SELECT id FROM agents WHERE workspace_id = ?)`
+		inWorkspace := ` WHERE requesting_agent_id IN (SELECT id FROM agents WHERE workspace_id = ?)`
+		wsArgs := []any{workspaceID}
+		secretsWhere := `workspace_id = ? AND `
+		if workspaceID == "" {
+			inWorkspace, wsArgs, secretsWhere = "", nil, ""
+		}
 		// #1055: one conditional-aggregate scan instead of four separate
 		// COUNT(*) passes over the append-only, unbounded keeper_requests
 		// (which has no workspace_id column and no (agent, decision) index, so
@@ -165,7 +172,7 @@ func (h *KeeperStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 			        COALESCE(SUM(CASE WHEN decision='ALLOW' THEN 1 ELSE 0 END), 0),
 			        COALESCE(SUM(CASE WHEN decision='DENY' THEN 1 ELSE 0 END), 0),
 			        COALESCE(SUM(CASE WHEN decision='ESCALATE' THEN 1 ELSE 0 END), 0)
-			 FROM keeper_requests`+inWorkspace, workspaceID).
+			 FROM keeper_requests`+inWorkspace, wsArgs...).
 			Scan(&resp.TotalRequests, &resp.AllowCount, &resp.DenyCount, &resp.EscalateCount)
 		// Keeper-managed secrets in this workspace — same predicate the
 		// SecretStore loads with (keeper/secrets/store.go), workspace-scoped.
@@ -173,8 +180,8 @@ func (h *KeeperStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 		// that the server never returned (always rendered 0).
 		h.db.QueryRowContext(r.Context(),
 			`SELECT COUNT(*) FROM credentials
-			 WHERE workspace_id = ? AND type = 'SECRET' AND status = 'ACTIVE' AND deleted_at IS NULL`,
-			workspaceID).Scan(&resp.SecretCount)
+			 WHERE `+secretsWhere+`type = 'SECRET' AND status = 'ACTIVE' AND deleted_at IS NULL`,
+			wsArgs...).Scan(&resp.SecretCount)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

@@ -91,7 +91,10 @@ describe("entryKindPill", () => {
 
   it("uses plain words for the schedule kinds", () => {
     expect(entryKindPill(inboxEntry(item({ kind: "schedule_missed" })))).toEqual({ label: "Missed run", tone: "blue" })
-    expect(entryKindPill(inboxEntry(item({ kind: "schedule_circuit_breaker_tripped" })))).toEqual({ label: "Paused schedule", tone: "danger" })
+    // A paused schedule is waiting for a person to resume it: attention, not a
+    // failure. Red stays for what actually broke (Failed run), so one list of
+    // alerts no longer reads as three alarms of the same weight.
+    expect(entryKindPill(inboxEntry(item({ kind: "schedule_circuit_breaker_tripped" })))).toEqual({ label: "Paused schedule", tone: "warn" })
     expect(entryKindPill(inboxEntry(item({ kind: "failed_run" })))).toEqual({ label: "Failed run", tone: "danger" })
   })
 

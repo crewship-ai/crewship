@@ -111,8 +111,9 @@ export function ResourcesStrip({ workspaceId, crewId, mode = "single" }: Resourc
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 border-b border-border/50 bg-card/40 relative">
       {mode === "aggregate" && s.crewCount > 0 && (
-        <div className="absolute top-1 right-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground/70 pointer-events-none">
-          ∑ {s.crewCount} crews
+        // Bottom edge, not top: at the top it sat on the NET reading.
+        <div className="pointer-events-none absolute bottom-0.5 right-2 font-mono text-[10px] text-muted-foreground-soft">
+          ∑ {s.crewCount} {s.crewCount === 1 ? "crew" : "crews"}
         </div>
       )}
       <Cell
@@ -170,7 +171,7 @@ function Cell({
         <button
           type="button"
           aria-label={`Open ${label} history chart`}
-          className="px-3 py-2 flex items-center gap-3 border-r border-border/50 last:border-r-0 min-w-0 text-left hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-success/40 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+          className="px-3 py-2 flex items-center gap-3 border-r border-border/50 last:border-r-0 min-w-0 text-left hover:bg-foreground/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-success/40 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
           disabled={!hasData}
         >
           <div className="flex items-center gap-1.5 shrink-0 w-12">
@@ -256,21 +257,21 @@ function ChartPanel({
                 <stop offset="100%" stopColor={color} stopOpacity={0.02} />
               </linearGradient>
             </defs>
-            <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+            <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
             <XAxis
               dataKey="ts"
               type="number"
               domain={["dataMin", "dataMax"]}
               tickFormatter={fmtClock}
-              tick={{ fontSize: 10, fill: "rgba(255,255,255,0.45)" }}
-              axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+              tick={{ fontSize: 10, fill: "var(--chart-axis)" }}
+              axisLine={{ stroke: "var(--chart-grid)" }}
               tickLine={false}
               minTickGap={32}
             />
             <YAxis
               tickFormatter={(v) => format(v as number)}
-              tick={{ fontSize: 10, fill: "rgba(255,255,255,0.45)" }}
-              axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+              tick={{ fontSize: 10, fill: "var(--chart-axis)" }}
+              axisLine={{ stroke: "var(--chart-grid)" }}
               tickLine={false}
               width={50}
               domain={max !== undefined ? [0, max] : ["auto", "auto"]}
@@ -278,7 +279,7 @@ function ChartPanel({
             <Tooltip
               contentStyle={{
                 background: "rgba(20,22,28,0.95)",
-                border: "1px solid rgba(255,255,255,0.08)",
+                border: "1px solid var(--border)",
                 borderRadius: 6,
                 fontSize: 11,
               }}

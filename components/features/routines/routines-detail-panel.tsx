@@ -636,7 +636,7 @@ export function RoutinesDetailPanel({
           Run, so the user isn't left wondering what's happening
           after clicking. Full history stays in the Runs tab. */}
       {routine && lastRunId && (
-        <div className="border-b border-white/[0.06]">
+        <div className="border-b border-foreground/[0.06]">
           {pendingApproval && (
             <div className="px-4 pt-3">
               <RoutineApprovalBanner

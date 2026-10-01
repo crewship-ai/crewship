@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { FileCode2, FileImage, FileSpreadsheet, FileText, RefreshCw } from "lucide-react"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
+import { InlineEmpty } from "@/components/ui/inline-empty"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { relativeToAgent } from "../files/file-scope"
 import { isClientArtifactPath } from "../artifact/artifact-scope"
@@ -63,20 +64,20 @@ export function AgentArtifactsTab({ agentId, workspaceId, crewId, agentSlug }: {
     .map((file) => [file.path, file] as const)).values()]
 
   return <div className="p-3 text-xs">
-    <div className="mb-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-      <span>Documents and outputs · {artifacts.length}</span>
+    <div className="mb-2 flex items-center justify-between gap-2">
+      <span className="eyebrow">Documents and outputs <span className="text-muted-foreground-soft">· {artifacts.length}</span></span>
       <button type="button" onClick={() => setRevision((n) => n + 1)} aria-label="Refresh artifacts" className="rounded p-1 hover:bg-accent"><RefreshCw className="size-3" /></button>
     </div>
     {loading ? <p role="status" className="py-3 text-muted-foreground">Loading artifacts…</p>
       : error ? <p role="alert" className="py-3 text-muted-foreground">Artifacts could not be loaded. Try refresh.</p>
-      : artifacts.length === 0 ? <p className="rounded-md border border-dashed p-3 text-muted-foreground">No artifacts yet.</p>
+      : artifacts.length === 0 ? <InlineEmpty icon={FileText} text="No artifacts yet. Documents, sheets and pages the agent writes appear here." />
       : <ul className="space-y-1.5">{artifacts.map((file) => {
         const ext = extension(file.name)
         const Icon = ext === "csv" || ext === "tsv" || ext === "xlsx" || ext === "xls" ? FileSpreadsheet : ext === "html" || ext === "htm" ? FileCode2 : ["png", "jpg", "jpeg", "webp"].includes(ext) ? FileImage : FileText
-        return <li key={file.path}><button type="button" aria-current={activeId === `${agentId}:${file.path}` ? "true" : undefined} className={cn("flex w-full items-start gap-2 rounded-md border bg-muted/20 p-2 text-left hover:border-primary/40 hover:bg-accent", activeId === `${agentId}:${file.path}` && "border-primary/50 bg-primary/10")} onClick={() => openArtifact({ id: `${agentId}:${file.path}`, agentId, path: file.path, title: file.name })}>
+        return <li key={file.path}><button type="button" aria-current={activeId === `${agentId}:${file.path}` ? "true" : undefined} className={cn("lift flex w-full items-start gap-2 rounded-xl border border-border bg-card p-2.5 text-left", activeId === `${agentId}:${file.path}` && "border-primary/50 bg-primary/10")} onClick={() => openArtifact({ id: `${agentId}:${file.path}`, agentId, path: file.path, title: file.name })}>
           <Icon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
           <span className="min-w-0 flex-1"><span className="block truncate font-medium">{file.name}</span><span className="block truncate text-[10px] text-muted-foreground">{fileKind(ext)}{typeof file.size === "number" && ` · ${fileSize(file.size)}`}</span></span>
-          <span className="rounded border px-1 py-0.5 text-[9px] uppercase text-muted-foreground">{ext}</span>
+          <span className="rounded border border-border px-1 py-0.5 font-mono text-[9px] uppercase text-muted-foreground">{ext}</span>
         </button></li>
       })}</ul>}
   </div>

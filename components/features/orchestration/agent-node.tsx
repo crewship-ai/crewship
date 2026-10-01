@@ -208,7 +208,7 @@ function AgentNodeComponent({ data }: NodeProps) {
 
         {/* Live activity snippet */}
         {d.status === "IN_PROGRESS" && d.activitySnippet && (
-          <div className="mt-2 pt-1.5 border-t border-white/[0.04]">
+          <div className="mt-2 pt-1.5 border-t border-foreground/[0.04]">
             <p className="text-[10px] text-info/50 italic truncate leading-relaxed">
               {d.activitySnippet}
             </p>

@@ -93,7 +93,7 @@ export function EmptyRoster({ agents, crews, onAgentSelect, showCrews = false }:
       </div>
 
       {agents.length === 0 ? (
-        <div className="rounded-xl border border-white/8 bg-card p-12 text-center">
+        <div className="rounded-xl border border-foreground/8 bg-card p-12 text-center">
           <p className="text-sm text-muted-foreground mb-2">No agents yet</p>
           <p className="text-xs text-muted-foreground">
             Use the <span className="text-foreground/80">+ Crew</span> and{" "}
@@ -102,15 +102,15 @@ export function EmptyRoster({ agents, crews, onAgentSelect, showCrews = false }:
         </div>
       ) : (
         <TooltipProvider delayDuration={150}>
-          <div className="rounded-xl border border-white/8 bg-card overflow-hidden" data-testid="fleet-roster">
-            <div className={cn("hidden px-4 py-2.5 border-b border-white/8 text-[10px] uppercase tracking-wide text-muted-foreground", GRID)}>
+          <div className="rounded-xl border border-foreground/8 bg-card overflow-hidden" data-testid="fleet-roster">
+            <div className={cn("hidden px-4 py-2.5 border-b border-foreground/8 text-[10px] uppercase tracking-wide text-muted-foreground", GRID)}>
               <span>Agent</span>
               <span>Crew</span>
               <span>Role</span>
               <span>Last active</span>
               <span>Status</span>
             </div>
-            <div className="divide-y divide-white/5 text-sm">
+            <div className="divide-y divide-foreground/5 text-sm">
               {agents.map((a) => {
                 const ghost = isGhost(a)
                 const statusKey = effectiveStatus(a)
@@ -134,7 +134,7 @@ export function EmptyRoster({ agents, crews, onAgentSelect, showCrews = false }:
                       type="button"
                       onClick={() => onAgentSelect(a.slug)}
                       className={cn(
-                        "w-full min-h-11 px-4 py-2.5 hover:bg-white/[0.03] text-left",
+                        "w-full min-h-11 px-4 py-2.5 hover:bg-foreground/[0.03] text-left",
                         "flex items-center gap-3",
                         GRID,
                       )}

@@ -22,9 +22,8 @@ import (
 func (h *BackupHandler) Unlock(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -57,9 +56,8 @@ type rotateRequest struct {
 func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -90,7 +88,9 @@ func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Failed to resolve backup directory")
 		return
 	}
-	deleted, err := backup.Rotate(ctx, dir, workspaceID, req.KeepLast, req.KeepDays, req.DryRun)
+	// keep_last is the floor age never touches; keep_days applies only
+	// beyond it; pinned bundles (backup_catalog) are never deleted.
+	deleted, err := backup.RotateWithPolicy(ctx, h.db, dir, workspaceID, backup.LegacyRetentionPolicy(req.KeepLast, req.KeepDays), req.DryRun)
 	if err != nil {
 		h.logger.Error("backup rotate", "workspace_id", workspaceID, "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to rotate backups")
@@ -124,9 +124,8 @@ func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -160,6 +159,11 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if err := backup.DeleteCatalogEntry(ctx, h.db, path); err != nil {
 		h.logger.Warn("backup catalog delete failed", "error", err, "path", path)
 	}
+	// Its complete-environment layers go too, unless another bundle
+	// still needs them.
+	if err := backup.ReleaseBundleEnvironments(ctx, h.db, path); err != nil {
+		h.logger.Warn("backup environment layers not collected", "error", err, "path", path)
+	}
 	WriteAuditLog(ctx, h.db, h.journal, "backup.delete", "backup", path, user.ID, workspaceID, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -171,9 +175,8 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -247,9 +250,8 @@ type selfTestRequest struct {
 
 func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}

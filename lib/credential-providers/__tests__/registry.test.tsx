@@ -93,8 +93,24 @@ describe("registry shape", () => {
     }
     for (const b of BRAND_REGISTRY) {
       if (luminance(b.hex) >= 0.03) continue
-      expect(luminance(brandColor(b)), `${b.key} (${b.hex}) vanishes on the dark theme`).toBeGreaterThan(0.05)
+      expect(b.darkHex, `${b.key} (${b.hex}) vanishes on the dark theme`).toBeDefined()
+      expect(luminance(b.darkHex!), `${b.key} darkHex is still near-black`).toBeGreaterThan(0.05)
     }
+  })
+
+  // Two themes now: the official colour on the light ground, the dark-surface
+  // override on the dark one. A bare darkHex painted white GitHub and Notion
+  // marks onto the light card, where they vanished.
+  it.each([
+    ["VERCEL", "light-dark(#000000, #FFFFFF)"],
+    ["COHERE", "light-dark(#39594D, #7BAF9B)"],
+  ])("brandColor(%s) follows the theme", (key, css) => {
+    expect(brandColor(byKey(key))).toBe(css)
+  })
+
+  it("brandColor is the plain hex when a brand reads on both grounds", () => {
+    const b = BRAND_REGISTRY.find((x) => !x.darkHex)!
+    expect(brandColor(b)).toBe(b.hex)
   })
 
   it("uses only declared categories", () => {

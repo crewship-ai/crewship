@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // RunnerOptions configures the background runner's cadence and paths.
@@ -267,7 +268,14 @@ func consolidateAllCrews(ctx context.Context, db *sql.DB, c *Consolidator, opts 
 			ProposalMode: hitlEnabled(),
 			BlobRoot:     opts.BlobRoot,
 		}
-		res, rerr := c.Run(ctx, cfg)
+		// One crew's pass is one writer in the quiet window's barrier:
+		// it waits out a backup's window, and a window waits for it.
+		var res ConsolidationResult
+		rerr := quiesce.Do(ctx, func(ctx context.Context) error {
+			var err error
+			res, err = c.Run(ctx, cfg)
+			return err
+		})
 		switch {
 		case rerr != nil:
 			errs = append(errs, fmt.Errorf("crew %s: %w", cr.ID, rerr))
@@ -308,7 +316,12 @@ func runCompactionLoop(ctx context.Context, db *sql.DB, comp *Compactor, opts Ru
 		// off-peak hours; adding a third goroutine would complicate
 		// shutdown for no real benefit. Errors are logged but do not
 		// affect compaction — these are independent best-efforts.
-		if n, err := episodic.DecayAndReinforce(ctx, db, time.Now()); err != nil {
+		var n int
+		if err := quiesce.Do(ctx, func(ctx context.Context) error {
+			var derr error
+			n, derr = episodic.DecayAndReinforce(ctx, db, time.Now())
+			return derr
+		}); err != nil {
 			opts.Logger.Warn("memory decay tick failed", "err", err)
 		} else {
 			opts.Logger.Info("memory decay tick completed", "rows_updated", n)
@@ -378,7 +391,13 @@ func runCompactionLoop(ctx context.Context, db *sql.DB, comp *Compactor, opts Ru
 // makes this safe to run from the boot catch-up as well as the daily tick.
 func runRetentionPasses(ctx context.Context, db *sql.DB, comp *Compactor, opts RunnerOptions) {
 	if opts.BlobRoot != "" && opts.MemoryVersionsRetention > 0 {
-		res, err := memory.PruneOldVersions(ctx, db, opts.BlobRoot, opts.MemoryVersionsRetention, opts.MemoryVersionsKeepLatest)
+		// Deletes rows and blobs: one writer in the quiet window's barrier.
+		var res *memory.PruneResult
+		err := quiesce.Do(ctx, func(ctx context.Context) error {
+			var perr error
+			res, perr = memory.PruneOldVersions(ctx, db, opts.BlobRoot, opts.MemoryVersionsRetention, opts.MemoryVersionsKeepLatest)
+			return perr
+		})
 		if err != nil {
 			opts.Logger.Warn("memory_versions retention sweep failed", "err", err)
 		} else {
@@ -416,7 +435,9 @@ func snapshotAllWorkspaces(ctx context.Context, db *sql.DB, opts RunnerOptions) 
 			opts.Logger.Warn("health compute failed", "err", err, "workspace_id", id)
 			continue
 		}
-		if err := PersistSnapshot(ctx, db, snap); err != nil {
+		if err := quiesce.Do(ctx, func(ctx context.Context) error {
+			return PersistSnapshot(ctx, db, snap)
+		}); err != nil {
 			opts.Logger.Warn("health persist failed", "err", err, "workspace_id", id)
 		}
 	}
@@ -438,7 +459,13 @@ func compactAllWorkspaces(ctx context.Context, db *sql.DB, comp *Compactor, opts
 			return ctx.Err()
 		default:
 		}
-		res, rerr := comp.Run(ctx, id, opts.CompactionOlderThan)
+		// One workspace's compaction is one writer in the barrier.
+		var res CompactResult
+		rerr := quiesce.Do(ctx, func(ctx context.Context) error {
+			var err error
+			res, err = comp.Run(ctx, id, opts.CompactionOlderThan)
+			return err
+		})
 		if rerr != nil {
 			errs = append(errs, fmt.Errorf("workspace %s: %w", id, rerr))
 			continue

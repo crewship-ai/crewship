@@ -23,6 +23,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/quota"
 )
 
 var _ provider.ContainerProvider = (*Provider)(nil)
@@ -35,6 +36,7 @@ type Config struct {
 	InstanceID  string                              // persisted installation identity; empty disables auto cleanup labels.
 	OwnerActive func(context.Context, string) error // installed once before serving requests.
 
+	QuotaCatalog    quota.Catalog // trusted host helper; nil rejects quota-enabled services
 	RuntimeImage    string
 	DefaultRuntime  string // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"
 	Network         string

@@ -89,7 +89,7 @@ export function ContainerResourcesTile({ entries }: ContainerResourcesTileProps)
             <div className="hidden md:block min-w-0">
               <Progress
                 value={Math.min(100, e.memory_percent)}
-                className="h-[3px] bg-white/[0.05]"
+                className="h-[3px] bg-foreground/[0.05]"
                 indicatorClassName={cn(
                   "transition-all",
                   e.memory_percent > 85 ? "bg-destructive" : bgClass,
@@ -116,7 +116,7 @@ function CpuSparkline({ history, color }: { history: number[]; color: string }) 
   if (history.length < 2) {
     return (
       <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden>
-        <line x1="0" y1={H - 2} x2={W} y2={H - 2} stroke="rgba(255,255,255,0.08)" strokeWidth="1" strokeDasharray="2 3" />
+        <line x1="0" y1={H - 2} x2={W} y2={H - 2} stroke="var(--chart-grid)" strokeWidth="1" strokeDasharray="2 3" />
       </svg>
     )
   }

@@ -37,8 +37,7 @@ func (h *JournalIntegrityHandler) Verify(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden: ADMIN or OWNER only")
 		return
 	}

@@ -25,7 +25,11 @@ import (
 func symlinkSectionIsStrict(name string) bool {
 	switch {
 	case strings.HasPrefix(name, "workspace/"),
-		strings.HasPrefix(name, "volumes/"):
+		strings.HasPrefix(name, "volumes/"),
+		// A mount of a complete environment holds user data like the
+		// volumes do; it lands in a fresh volume through Docker's archive
+		// API, which is the containment boundary.
+		strings.HasPrefix(name, environmentsPrefix):
 		return false
 	default:
 		return true
@@ -89,6 +93,13 @@ type ExtractedPayload struct {
 	// backup time).
 	memoryBlobsPath  string
 	pageProjectsPath string
+	// attachmentBlobsPath is the temp tar holding the attachment-blobs/
+	// section (see attachmentblobs.go). Empty for bundles written before
+	// the section existed.
+	attachmentBlobsPath string
+
+	// Complete environments (environment_payload.go).
+	environments
 }
 
 // storageOrDefault returns the payload's captured StorageOps, or the
@@ -122,6 +133,8 @@ func (p *ExtractedPayload) Close() error {
 	p.systemPathsBySlug = nil
 	p.memoryBlobsPath = ""
 	p.pageProjectsPath = ""
+	p.attachmentBlobsPath = ""
+	p.environments = environments{}
 	return err
 }
 
@@ -242,6 +255,21 @@ func (p *ExtractedPayload) OpenMemoryBlobs(ctx context.Context) (io.ReadCloser, 
 	f, err := p.storageOrDefault().Open(ctx, p.memoryBlobsPath)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open memory-blobs section: %w", err)
+	}
+	return f, true, nil
+}
+
+// OpenAttachmentBlobs returns a reader over the inner tar of attachment
+// blobs collected by WriteAttachmentBlobsSection, entries named
+// "<sha[:2]>/<sha>". Returns (nil, false, nil) for bundles without the
+// section.
+func (p *ExtractedPayload) OpenAttachmentBlobs(ctx context.Context) (io.ReadCloser, bool, error) {
+	if p.attachmentBlobsPath == "" {
+		return nil, false, nil
+	}
+	f, err := p.storageOrDefault().Open(ctx, p.attachmentBlobsPath)
+	if err != nil {
+		return nil, true, fmt.Errorf("backup: open attachment-blobs section: %w", err)
 	}
 	return f, true, nil
 }
@@ -443,6 +471,14 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 			if err := repackIntoSink(tr, hdr, name, memoryBlobsSectionPrefix, sinkFor); err != nil {
 				return nil, err
 			}
+		case strings.HasPrefix(name, attachmentBlobsSectionPrefix):
+			if err := repackIntoSink(tr, hdr, name, attachmentBlobsSectionPrefix, sinkFor); err != nil {
+				return nil, err
+			}
+		case strings.HasPrefix(name, environmentsPrefix), strings.HasPrefix(name, environmentBlobsPrefix), strings.HasPrefix(name, environmentKeysPrefix):
+			if err := out.extractEnvironmentEntry(tr, hdr, name, sinkFor); err != nil {
+				return nil, err
+			}
 
 		default:
 			// Forward-compat: unknown entries are silently discarded.
@@ -473,6 +509,13 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 		}
 		if key == memoryBlobsSinkKey {
 			out.memoryBlobsPath = name
+			continue
+		}
+		if key == attachmentBlobsSinkKey {
+			out.attachmentBlobsPath = name
+			continue
+		}
+		if out.placeEnvironmentSink(key, name) {
 			continue
 		}
 		parts := strings.SplitN(key, "/", 3)
@@ -590,6 +633,10 @@ func repackIntoSink(tr *TarZstReader, hdr *tar.Header, name, topPrefix string, s
 		// already "<sha[:2]>/<sha>", so it rides straight through as
 		// both the sink key and the inner tar entry name.
 		key = memoryBlobsSinkKey
+		strip = ""
+	case attachmentBlobsSectionPrefix:
+		// Same shape as memory-blobs: "<sha[:2]>/<sha>", no crew slug.
+		key = attachmentBlobsSinkKey
 		strip = ""
 	default:
 		return nil

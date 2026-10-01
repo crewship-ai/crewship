@@ -38,7 +38,7 @@ export function CredentialTierBadge({ level, serverLabel, className }: Credentia
       <Badge
         variant="outline"
         className={cn(
-          "h-4 shrink-0 border-dashed border-white/15 px-1 font-mono text-[9px] text-muted-foreground-soft",
+          "h-4 shrink-0 border-dashed border-foreground/15 px-1 font-mono text-[9px] text-muted-foreground-soft",
           className,
         )}
         title="This server did not report a Keeper tier for this credential."

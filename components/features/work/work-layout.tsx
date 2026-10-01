@@ -120,9 +120,16 @@ export function WorkLayout({ workspaceId, tab, onTabChange }: WorkLayoutProps) {
               items={work.items}
               selectedId={selectedWorkId}
               onSelect={(item) => setSelectedWorkId(item.id)}
+              {...(stateFilter
+                ? { emptyTitle: `No ${WORK_STATE_LABEL[stateFilter].toLowerCase()} work`, emptyDescription: "pick All to see every item." }
+                : {})}
             />
           ) : (
-            <WebhookDeliveriesList deliveries={deliveries.deliveries} onOpenWork={openWork} />
+            <WebhookDeliveriesList
+              deliveries={deliveries.deliveries}
+              onOpenWork={openWork}
+              filterLabel={decisionFilter ? (decisionFilter === "accepted" ? "Accepted" : "Ignored") : undefined}
+            />
           )}
         </div>
 

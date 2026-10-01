@@ -55,7 +55,7 @@ export function LogsTypeChips({ counts, muted, onToggle, onResetAll }: LogsTypeC
           >
             <span
               className="h-1.5 w-1.5 rounded-full inline-block"
-              style={{ background: off ? "rgba(255,255,255,0.2)" : GROUP_COLOR[g] }}
+              style={{ background: off ? "var(--chart-grid)" : GROUP_COLOR[g] }}
             />
             <span>{GROUP_LABEL[g]}</span>
             <span className="opacity-60 tabular-nums">{count}</span>

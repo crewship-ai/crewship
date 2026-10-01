@@ -196,7 +196,7 @@ export function ActivityDetail({
 
           <div className="flex flex-wrap items-center gap-2">
             <span
-              className="rounded border border-white/[0.08] px-1.5 py-px font-mono text-[10px] uppercase tracking-wider"
+              className="rounded border border-foreground/[0.08] px-1.5 py-px font-mono text-[10px] uppercase tracking-wider"
               style={{ color: `var(${meta.token})` }}
             >
               {meta.label}
@@ -233,7 +233,7 @@ export function ActivityDetail({
                   <button
                     type="button"
                     onClick={() => onSpineClick(l)}
-                    className="rounded bg-white/[0.05] px-1.5 py-px text-[11px] text-foreground/85 transition-colors hover:bg-white/[0.1]"
+                    className="rounded bg-foreground/[0.05] px-1.5 py-px text-[11px] text-foreground/85 transition-colors hover:bg-foreground/[0.1]"
                   >
                     <span className="mr-1 font-mono text-[9.5px] uppercase text-muted-foreground-soft">
                       {l.kind}
@@ -311,7 +311,7 @@ export function ActivityDetail({
             </div>
           )}
           {run && (
-            <div className="h-[420px] w-full overflow-hidden rounded-md border border-white/[0.06]">
+            <div className="h-[420px] w-full overflow-hidden rounded-md border border-foreground/[0.06]">
               <TraceCanvas
                 run={run}
                 dsl={dsl}
@@ -414,7 +414,7 @@ export function ActivityDetail({
               {entry.payload && Object.keys(entry.payload).length > 0 && (
                 <div className="flex flex-col gap-1">
                   <FieldLabel>Payload</FieldLabel>
-                  <pre className="max-h-72 overflow-auto rounded border border-white/[0.06] bg-background p-2 font-mono text-[10.5px] text-muted-foreground">
+                  <pre className="max-h-72 overflow-auto rounded border border-foreground/[0.06] bg-background p-2 font-mono text-[10.5px] text-muted-foreground">
                     {JSON.stringify(entry.payload, null, 2)}
                   </pre>
                 </div>

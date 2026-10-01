@@ -81,7 +81,7 @@ export function AgentChannelsCard({ agentId, agentName, workspaceId }: AgentChan
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-white/8 bg-card">
+    <div className="overflow-hidden rounded-xl border border-foreground/8 bg-card">
       <div className="flex flex-wrap items-center gap-2 px-4 py-3">
         <Bell className="h-3.5 w-3.5 shrink-0 text-foreground/60" />
         <span className="text-sm font-medium">Notifications</span>
@@ -94,7 +94,7 @@ export function AgentChannelsCard({ agentId, agentName, workspaceId }: AgentChan
         )}
       </div>
 
-      <div className="border-t border-white/5 px-4 py-3">
+      <div className="border-t border-foreground/5 px-4 py-3">
         {loading ? (
           <Skeleton className="h-5 w-52 rounded" />
         ) : editing ? (
@@ -150,8 +150,8 @@ export function AgentChannelsCard({ agentId, agentName, workspaceId }: AgentChan
                 className={cn(
                   "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px]",
                   c.enabled
-                    ? "border-white/10 bg-white/[0.03] text-foreground/85"
-                    : "border-white/8 bg-white/[0.02] text-muted-foreground line-through",
+                    ? "border-foreground/10 bg-foreground/[0.03] text-foreground/85"
+                    : "border-foreground/8 bg-foreground/[0.02] text-muted-foreground line-through",
                 )}
               >
                 <ProviderMark

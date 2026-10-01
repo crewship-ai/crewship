@@ -19,8 +19,8 @@ function HealthCard({ label, value, hint, tone, href }: {
       className={cn(
         "rounded-xl border bg-card p-4 transition-colors",
         tone === "danger" ? "border-destructive/30 ring-1 ring-destructive/20" :
-        tone === "active" ? "border-white/10" : "border-white/8",
-        href && "hover:border-white/20",
+        tone === "active" ? "border-foreground/10" : "border-foreground/8",
+        href && "hover:border-foreground/20",
       )}
     >
       <div className="flex items-center justify-between mb-2">
@@ -51,7 +51,7 @@ function QuickAction({ icon, label, onClick, disabled }: {
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="rounded-lg border border-white/8 bg-card px-3 py-2.5 flex items-center gap-2.5 text-left hover:border-white/15 hover:bg-white/[0.02] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      className="rounded-lg border border-foreground/8 bg-card px-3 py-2.5 flex items-center gap-2.5 text-left hover:border-foreground/15 hover:bg-foreground/[0.02] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
     >
       <span className="text-foreground/70">{icon}</span>
       <span className="text-xs text-foreground/85">{label}</span>

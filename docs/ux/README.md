@@ -44,13 +44,51 @@ A screen that cannot answer 1 says so in one line, not with an empty pane.
 | Disabled primary button | a one-line reason beside it | onboarding's `blocking reason` pattern |
 | Irreversible action | `AlertDialog` that says what is lost and where to recover | Skip setup, delete, nuke |
 
-Type scale: `text-micro` / `text-label` / `text-body`; mono for ids, times,
-counts. Radii: cards 12px, chips 6px, pills full. Surfaces: `bg-card` on
-`bg-background`, borders `border-border/60`. Dark theme is the one the app runs
-today (`app/layout.tsx` pins `dark`); design for it. Whether light is
-supported is PLAN.md decision D5 — until it is decided, do not spend time on
-light-theme readability, and do not paint colours that would be impossible
-there either.
+Type scale: `text-micro` / `text-label` / `text-body`; mono only for machine
+text (ids, times, counts, durations). Section labels use the `eyebrow`
+utility.
+
+### Harbor: where the look lives
+
+The design language is Harbor (the marketing site's), expressed only through
+tokens and a handful of utilities, so it can be changed in one place.
+
+| What | Where | Rule |
+|---|---|---|
+| Light / dark palettes | `app/globals.css` (`:root`, `.dark`) | dark is the default; both are held to AA by `lib/__tests__/theme-contrast.test.ts` |
+| Accent (brand) colour | `app/styles/accents.css` + `lib/theme/accents.ts` | one light and one dark block per accent; components never name an accent colour, they use `primary` / `primary-hover` / `primary-strong` |
+| Theme + accent pickers | `components/layout/theme-switcher.tsx` (profile menu) | per browser; accent painted before first paint by `ACCENT_BOOT_SCRIPT` |
+| Selected row | `.row-selected` (via `ListRow` / `SidebarRow`, `lib/interaction.ts`) | tint + hairline + straight 3px bar; never a `border-left` on a rounded row |
+| Status chip | `StatusPill` and the `--chip-*-bg/fg` tokens | the only place a row shows severity |
+| Icon in a box | `icon-tile` utility (`ConceptIcon variant="chip"`) | tint via `--ic`; neutral unless the icon itself is the status |
+| Cards | `rounded-[20px] border bg-card`, hover `lift` | no resting shadow |
+| Deep panel | `panel-surface` | heroes, terminals, graph canvases |
+| Nested page | `DrillPage` (`components/layout/drill-page`) | a big sub-area (Settings › Crew links, › Audit log) gets its own route; its side panel REPLACES the parent's and starts with "← Parent", then the sidebar-kit toolbar (search, Filter, collapse) and collapsible `DrillNavSection`s whose values carry counts. Never a third column, never a nested page inside a nested page; on a phone the panel becomes a bottom sheet behind a "Filters" button, and view tabs stay on the page |
+
+**One colour per row.** Severity is carried by the status pill. Icon tiles,
+avatars and titles in the same row stay neutral, so the one red or amber on a
+list is the thing to look at. The exception is identity: an entity that has
+its own colour — a crew (`CrewIcon`) or a routine (`RoutineGlyph`) — is always
+drawn in it, everywhere it appears. That colour names the thing; it never
+carries status. Red is for what broke (failed run); amber for
+what waits on a person (paused, needs a tool, approval).
+
+**Adding an accent:** a light and a dark block in `accents.css`, a row in
+`ACCENTS`. Never a status hue (green, red, amber). The tests fail if the two
+files disagree or any pair drops below AA.
+
+### Admin › Backups
+
+Data › Backups is one Admin sidebar row that folds out six pages (Overview,
+Backup history, Schedules, Storage, Recovery, Keys & alerts) indented under it,
+with Data retention beside it — `?tab=backups&section=…`, `?tab=retention`.
+The scope (Whole instance / Selected workspaces, workspace chips with "N of
+M") is a strip in the content header, never in the panel, kept in
+`?scope=&ws=`; instance-only pages say "Instance setting · applies to every
+backup plan". Proof is always three levels (checksum, contents checked, test
+restore) and a partial test restore reads as partial, in the warn tone.
+Sections live in `components/features/admin/backups/`; `?demo=1` (never in a
+production build) draws them from `__fixtures__` for review.
 
 ## 3. Motion (all under `useReducedMotion`)
 

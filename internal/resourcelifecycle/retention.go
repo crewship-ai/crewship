@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -117,6 +118,12 @@ func (r *Retention) Tick(ctx context.Context) {
 	if r == nil || r.DB == nil || r.Runtime == nil || r.InstanceID == "" {
 		return
 	}
+	writer, ok := quiesce.Enter(ctx)
+	if !ok {
+		return
+	}
+	defer writer.Leave()
+	ctx = writer.Context()
 	if r.RuntimeAfter > 0 {
 		r.runtimes(ctx)
 	}
@@ -153,6 +160,9 @@ func (r *Retention) runtimes(ctx context.Context) {
 		return
 	}
 	for _, c := range list {
+		if quiesce.Yield(ctx) != nil {
+			return
+		}
 		// Cheap filter on the list view; FinishedAt needs an inspect.
 		if c.Kind != "crew" || c.InstanceID != r.InstanceID || c.CrewID == "" || c.State != "exited" {
 			continue
@@ -240,6 +250,9 @@ func (r *Retention) cache(ctx context.Context) {
 	now := r.now()
 	present := map[string]bool{}
 	for _, img := range images {
+		if quiesce.Yield(ctx) != nil {
+			return
+		}
 		present[img.ID] = true
 		if inUse[img.ID] {
 			if _, tracked := seen[img.ID]; tracked {

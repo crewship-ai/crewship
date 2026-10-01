@@ -251,10 +251,8 @@ export function IssueCardDetail({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-3">
                 <div
-                  className={cn(
-                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/60",
-                    "bg-surface-raised",
-                  )}
+                  className="icon-tile flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                  style={{ "--ic": "var(--primary)" } as React.CSSProperties}
                 >
                   <StatusIcon status={issue.status} className="h-5 w-5" />
                 </div>
@@ -516,7 +514,7 @@ export function IssueCardDetail({
                 <ul className="space-y-2">
                   {relations.map((rel) => (
                     <li key={rel.id} className="group flex items-center gap-2.5 text-[12px]">
-                      <span className="w-[86px] shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground-soft">
+                      <span className="w-[86px] shrink-0 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground-soft">
                         {rel.relation_type.replace(/_/g, " ")}
                       </span>
                       <Link
@@ -540,7 +538,7 @@ export function IssueCardDetail({
                   ))}
                   {subIssues.map((sub) => (
                     <li key={sub.id} className="flex items-center gap-2.5 text-[12px]">
-                      <span className="w-[86px] shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground-soft">
+                      <span className="w-[86px] shrink-0 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground-soft">
                         sub-issue
                       </span>
                       <Link
@@ -802,7 +800,7 @@ export function IssueCardDetail({
                 )}
                 {project && (
                   <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-foreground/[0.06]">
                       <div
                         className="h-full rounded-full bg-primary/60"
                         style={{ width: `${Math.min(project.progress, 100)}%` }}
@@ -861,7 +859,7 @@ export function IssueCardDetail({
                 the badge stays even though the rest is a plain fact grid. */}
             {issue.created_by && (
               <div className="min-w-0" data-testid="issue-created-by">
-                <dt className="text-[10px] uppercase tracking-wider text-muted-foreground-soft">
+                <dt className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground-soft">
                   author
                 </dt>
                 <dd className="truncate text-foreground/85">
@@ -931,7 +929,7 @@ function RunSourceBreakdown({ sources }: { sources: RunSource[] }) {
   if (sources.length === 0) return null
   return (
     <div data-testid="issue-routine-provenance" className="space-y-1 pt-1">
-      <p className="text-[10px] uppercase tracking-wider text-muted-foreground-soft">
+      <p className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground-soft">
         Recent runs started by
       </p>
       <ul className="space-y-1">
@@ -1170,7 +1168,7 @@ function Muted({ children }: { children: React.ReactNode }) {
 function Fact({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground-soft">{label}</dt>
+      <dt className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground-soft">{label}</dt>
       <dd className={cn("truncate text-foreground/85", mono && "font-mono text-[10px]")}>{value}</dd>
     </div>
   )

@@ -246,11 +246,23 @@ password shouldn't be redistributed at all), mint a scoped CLI token once from
 a session-authed browser (§6) and use `crewship login --token <token>`
 instead — that path already avoided the TTY entirely.
 
+### Instance administrators
+
+The Admin console runs the server itself, so it belongs to **instance administrators**, not to whoever administers a workspace. An instance administrator is, in this order:
+
+1. the account whose email is `CREWSHIP_OWNER_EMAIL` on the server (break-glass; cannot be removed or suspended over the API);
+2. anyone named in **Admin › People & workspaces** or with `crewship admin instance add-admin`;
+3. on an install that has neither, the OWNERs of the oldest workspace — named once, the first time anyone's status is asked, recorded in the instance audit (`instance.admin_bootstrapped`), and never again. From then on the list is explicit: removing every named admin later does not bring the rule back.
+
+Only an instance administrator sees Admin in the navigation and can change instance-wide settings: log level, rate limits, re-encryption, legacy resource pruning, Keeper's judge and evaluator models, notification providers, instance settings and feature-flag definitions. The same holds for everything under `/api/v1/admin/instance/`: adding people, giving or taking access in any workspace, creating, handing over and deleting workspaces, suspending accounts. A CLI token reaches those routes with the `instance:admin` scope or no scope restriction. `GET /api/auth/session` returns `is_instance_admin`. If nobody can sign in to do it, `crewship admin instance add-admin <email> --local` on the database host names one.
+
+A suspended account cannot sign in, refresh a session or use a CLI token; its sessions and tokens end at once, and its workspace memberships stay for reactivation.
+
 ### The admin authorization floor
 
-The admin console and everything behind it sit on one uniform floor: **ADMIN+ (ADMIN or OWNER)**. This is enforced at the route table, not per-handler, so the read surface and the destructive mutations can't drift apart.
+The rest of the admin surface sits on one uniform floor: **ADMIN+ (ADMIN or OWNER)** of the current workspace, which an instance administrator also passes. This is enforced at the route table, not per-handler, so the read surface and the destructive mutations can't drift apart.
 
-- **`/admin/*` and the admin console** — every admin route requires ADMIN+. Reads (stats, users, workspaces, memory versions, backups listing, keeper audit) go through the same floor as the mutations they sit next to, so an ADMIN who can drive the destructive APIs can also open the console that fronts them. A below-floor MEMBER/VIEWER gets **403**.
+- **`/admin/*` workspace-scoped routes** — ADMIN+. Reads (stats, users, workspaces, memory versions, backups listing, keeper audit) go through the same floor as the mutations they sit next to, so an ADMIN who can drive the destructive APIs can also open the console that fronts them. A below-floor MEMBER/VIEWER gets **403**.
 - **`GET /api/v1/system/keeper`** — ADMIN+, and its request counts are **scoped to your workspace** (previously it returned instance-wide totals to any authenticated user). It also reports the configured Ollama URL/model, which is why it carries the admin floor.
 - **`GET /api/v1/system/runtime`** — reachable by any authenticated user (the runtime banner and onboarding probe it), but **host detail is redacted** unless you resolve to ADMIN+ in a workspace: non-admins get `{ "available": true|false }`, admins additionally get container versions and socket paths. Pass `?workspace_id=<id>` so the server can resolve your role.
 - **GDPR endpoints** keep their documented separation (see the [Admin CLI](/guides/admin-cli) and data-handling guides) — the erase/export routes are ADMIN+ like the rest of the surface.

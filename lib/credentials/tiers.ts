@@ -72,7 +72,7 @@ export const CREDENTIAL_TIERS: readonly CredentialTier[] = [
     // "how guarded is this?" deserves an answer on every row, not silence that
     // could equally mean "no tier" — but a colourless one, so the rows that
     // carry real blast radius are still the ones the eye lands on.
-    badgeClass: "border-white/15 text-muted-foreground",
+    badgeClass: "border-foreground/15 text-muted-foreground",
     dotClass: "bg-muted-foreground/50",
   },
   {

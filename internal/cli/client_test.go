@@ -50,6 +50,34 @@ func TestClientDoesNotOverrideExistingWorkspaceID(t *testing.T) {
 	}
 }
 
+// An explicit workspace_id is the caller's choice: the client neither
+// rewrites it nor runs the /workspaces preflight for its own configured slug,
+// which would refuse a workspace the caller is not a member of (an instance
+// admin naming another workspace) before the request is even sent.
+func TestClientExplicitWorkspaceIDSkipsTheSlugPreflight(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path+"?"+r.URL.RawQuery)
+		if r.URL.Path == "/api/v1/workspaces" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"ws-people-cuid","slug":"people"}]}`))
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	t.Setenv("CREWSHIP_NO_SLUG_CACHE", "1")
+	c := NewClient(srv.URL, "tok", "some-slug-not-listed")
+	resp, err := c.Get("/api/v1/admin/backups?workspace_id=lab")
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	resp.Body.Close()
+	if len(paths) != 1 || paths[0] != "/api/v1/admin/backups?workspace_id=lab" {
+		t.Fatalf("requests = %v, want only the call itself with workspace_id=lab", paths)
+	}
+}
+
 func TestClientSendsAuthHeader(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

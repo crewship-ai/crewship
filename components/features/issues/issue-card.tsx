@@ -6,7 +6,7 @@ import { StatusIcon } from "./status-icon"
 import { PriorityIcon } from "./priority-icon"
 import { LabelBadge } from "./label-badge"
 import { Clock, UserRound } from "lucide-react"
-import { formatShortDate } from "@/lib/time"
+import { formatShortDate, timeAgo } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import { getIssueWorker } from "@/lib/issue-execution"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -37,78 +37,78 @@ export const IssueCard = memo(function IssueCard({ issue, onClick }: IssueCardPr
     <Card
       role="button"
       tabIndex={0}
+      data-slot="issue-card"
       aria-label={`Issue ${issue.identifier || ""}: ${issue.title}`}
       className={cn(
-        "px-2.5 py-2 cursor-pointer hover:bg-accent/50 transition-colors border-border/60 gap-0",
+        // Harbor board card: 16px radius, hairline border, no resting
+        // shadow; the lift on hover is the only depth.
+        "card-interactive card-hover gap-0 rounded-2xl px-3 py-2.5 shadow-none",
         overdue && "border-destructive/40",
         issue.status === "IN_PROGRESS" && "agent-active-card",
       )}
       onClick={onClick}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick() } }}
     >
-      {/* Row 1: identifier + agent name + avatar */}
-      <div className="flex items-center justify-between gap-2 mb-0.5">
-        <div className="flex items-center gap-1">
-          {issue.identifier && (
-            <span className="text-[10px] font-mono text-foreground/50">{issue.identifier}</span>
-          )}
-          {overdue && <Clock className="h-2.5 w-2.5 text-destructive" />}
-        </div>
+      {/* Row 1: the machine line — status, id, priority, when; the worker on the right. */}
+      <div className="mb-1 flex items-center gap-1.5">
+        <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+        {issue.identifier && (
+          <span className="font-mono text-[11px] text-muted-foreground">{issue.identifier}</span>
+        )}
+        <PriorityIcon priority={issue.priority || "none"} className="h-3.5 w-3.5 shrink-0" />
+        {overdue && <Clock aria-label="Overdue" className="h-3 w-3 shrink-0 text-destructive" />}
+        <time
+          dateTime={dateValue}
+          title={`${dateLabel} ${formatShortDate(dateValue)}`}
+          className="ml-auto truncate font-mono text-[11px] text-muted-foreground-soft"
+        >
+          {timeAgo(dateValue)}
+        </time>
         {issue.assignee_id && (
-          <div className="flex items-center gap-1 shrink-0">
-            <span className="text-[10px] text-foreground/50 truncate max-w-[80px]">{issue.assignee_name}</span>
-            <div className="relative">
-              {issue.assignee_type === "user" ? (
-                // Human assignee: neutral user glyph — the DiceBear agent
-                // avatar would misrepresent a person as an agent.
-                <div
-                  data-testid="assignee-avatar-user"
-                  title={issue.assignee_name || ""}
-                  className="h-4.5 w-4.5 rounded-full bg-muted flex items-center justify-center"
-                >
-                  <UserRound aria-label={issue.assignee_name || "User assignee"} className="h-3 w-3 text-foreground/60" />
-                </div>
-              ) : (
-                <AgentAvatar
-                  data-testid="assignee-avatar-agent"
-                  seed={issue.assignee_id}
-                  alt={issue.assignee_name || ""}
-                  title={issue.assignee_name || ""}
-                  className="h-4.5 w-4.5 rounded-full"
-                />
-              )}
-              {issue.status === "IN_PROGRESS" && (
-                <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-success ring-1 ring-card agent-active-dot" />
-              )}
-            </div>
+          <div className="relative shrink-0">
+            {issue.assignee_type === "user" ? (
+              // Human assignee: neutral user glyph — the DiceBear agent
+              // avatar would misrepresent a person as an agent.
+              <div
+                data-testid="assignee-avatar-user"
+                title={issue.assignee_name || ""}
+                className="flex h-5 w-5 items-center justify-center rounded-full bg-muted"
+              >
+                <UserRound aria-label={issue.assignee_name || "User assignee"} className="h-3 w-3 text-foreground/60" />
+              </div>
+            ) : (
+              <AgentAvatar
+                data-testid="assignee-avatar-agent"
+                seed={issue.assignee_id}
+                alt={issue.assignee_name || ""}
+                title={issue.assignee_name || ""}
+                className="h-5 w-5 rounded-full"
+              />
+            )}
+            {issue.status === "IN_PROGRESS" && (
+              <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-success ring-1 ring-card agent-active-dot" />
+            )}
           </div>
         )}
       </div>
 
-      {/* Row 2: status icon + title */}
-      <div className="flex gap-1.5 mb-1">
-        <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0 mt-[1px]" />
-        <p className="text-[12.5px] font-medium leading-[1.35] text-foreground">{issue.title}</p>
-      </div>
+      {/* Row 2: the title, in the UI font, at most three lines. */}
+      <p className="line-clamp-3 text-[13px] font-medium leading-[1.4] text-foreground">{issue.title}</p>
 
-      {/* Row 3: priority + label badges */}
-      {(issue.priority !== "none" || (issue.labels && issue.labels.length > 0)) && (
-        <div className="flex items-center gap-1 flex-wrap mb-1">
-          <PriorityIcon priority={issue.priority || "none"} className="h-3.5 w-3.5 shrink-0" />
+      {/* Row 3, only when there is something to say: labels, a person working it. */}
+      {((issue.labels && issue.labels.length > 0) || issue.work_mode === "human") && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
           {issue.labels && issue.labels.slice(0, 3).map((label) => (
             <LabelBadge key={label.id} label={label} />
           ))}
           {issue.labels && issue.labels.length > 3 && (
-            <span className="text-[9px] text-foreground/40">+{issue.labels.length - 3}</span>
+            <span className="font-mono text-[10px] text-muted-foreground-soft">+{issue.labels.length - 3}</span>
+          )}
+          {issue.work_mode === "human" && (
+            <span className="text-[11px] text-warn">{issue.work_stopping ? "Taking over…" : "With a person"}</span>
           )}
         </div>
       )}
-
-      {issue.work_mode === "human" && <p className="mb-1 text-[10px] text-warn">{issue.work_stopping ? "Taking over…" : "With a person"}</p>}
-      {/* Row 4: date */}
-      <div className="text-[10px] text-foreground/40">
-        {dateLabel} {formatShortDate(dateValue)}
-      </div>
     </Card>
   )
 })

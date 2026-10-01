@@ -72,13 +72,13 @@ export function AgentAccessTab({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Filter agents…"
-              className="w-44 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
+              className="w-44 rounded-lg border border-foreground/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
             />
           </div>
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value as AccessFilter)}
-            className="rounded-lg border border-white/10 bg-card px-2.5 py-1.5 text-xs focus:border-primary/50 focus:outline-none"
+            className="rounded-lg border border-foreground/10 bg-card px-2.5 py-1.5 text-xs focus:border-primary/50 focus:outline-none"
           >
             <option value="any">Any app</option>
             <option value="has">Has access</option>
@@ -99,7 +99,7 @@ export function AgentAccessTab({
       ) : visible.length === 0 ? (
         <EmptyHint text="No agents match the current filter." />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-white/10 bg-card">
+        <div className="overflow-hidden rounded-xl border border-foreground/10 bg-card">
           {visible.map((a) => {
             const bs = bindings[a.id] ?? []
             const actsAs = bs[0]?.user_id
@@ -107,7 +107,7 @@ export function AgentAccessTab({
               <div
                 key={a.id}
                 data-testid="agent-row"
-                className="flex items-start justify-between gap-3 border-t border-white/[0.06] px-4 py-3 first:border-t-0"
+                className="flex items-start justify-between gap-3 border-t border-foreground/[0.06] px-4 py-3 first:border-t-0"
               >
                 <div className="flex min-w-0 items-start gap-3">
                   {/* Lead with the agent's DiceBear avatar (same seed/style as

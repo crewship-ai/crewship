@@ -3,11 +3,13 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -821,5 +823,57 @@ func TestCLITokenCreate_TokenIsRandomAndUnique(t *testing.T) {
 		if len(resp.Token) != 77 {
 			t.Errorf("token length = %d, want 77 (prefix 13 + 64-char hex of 32-byte random)", len(resp.Token))
 		}
+	}
+}
+
+// The token list is the one screen for spotting live access, and it used to
+// drop the scopes column: a token narrowed to credentials:write looked the
+// same as one carrying the user's full role (Settings › Profile › CLI tokens).
+func TestCLITokenList_ReturnsScopes(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewCLITokenHandler(db, logger)
+
+	for _, tc := range []struct {
+		id, scopes string
+		valid      bool
+	}{
+		{"tok-scoped", `["credentials:write","issues:write"]`, true},
+		{"tok-full", "", false},
+	} {
+		if _, err := db.Exec(
+			`INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, scopes, created_at) VALUES (?, ?, ?, ?, 'STANDARD', ?, '2026-09-29T00:00:00Z')`,
+			tc.id, userID, tc.id, "hash-"+tc.id, sql.NullString{String: tc.scopes, Valid: tc.valid},
+		); err != nil {
+			t.Fatalf("insert %s: %v", tc.id, err)
+		}
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/auth/cli-tokens", nil)
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID, Email: "test@example.com"}))
+	rr := httptest.NewRecorder()
+	h.List(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list status = %d", rr.Code)
+	}
+	var result struct {
+		Data []struct {
+			ID     string   `json:"id"`
+			Scopes []string `json:"scopes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string][]string{}
+	for _, d := range result.Data {
+		got[d.ID] = d.Scopes
+	}
+	if want := []string{"credentials:write", "issues:write"}; !reflect.DeepEqual(got["tok-scoped"], want) {
+		t.Errorf("scoped token scopes = %v, want %v", got["tok-scoped"], want)
+	}
+	if len(got["tok-full"]) != 0 {
+		t.Errorf("unscoped token scopes = %v, want none", got["tok-full"])
 	}
 }

@@ -23,6 +23,12 @@ func TestCategoryForItem_SeparatesRoutineUpdatesFromChatReplies(t *testing.T) {
 		t.Errorf("chat reply → %q, want %q", got, CategoryChatReplies)
 	}
 
+	// A backup incident is the server's health, not a chat reply.
+	incident := map[string]interface{}{"subkind": SubkindBackupIncident, "incident_id": "bin_1"}
+	if got := CategoryForItem("message", incident); got != CategorySystemHealth {
+		t.Errorf("backup incident → %q, want %q", got, CategorySystemHealth)
+	}
+
 	// No payload at all must not panic, and must not become a routine update.
 	if got := CategoryForItem("message", nil); got != CategoryChatReplies {
 		t.Errorf("bare message → %q, want %q", got, CategoryChatReplies)

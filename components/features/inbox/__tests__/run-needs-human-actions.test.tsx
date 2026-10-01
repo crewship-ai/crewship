@@ -122,6 +122,16 @@ describe("run_needs_human renders its actions[]", () => {
 })
 
 describe("answer", () => {
+  // Harbor: the primary action is the solid brand button. It used to be a
+  // green tint, which read as "already done" next to two outline buttons.
+  it("is the solid brand button, not a green tint", () => {
+    mount(card())
+    const answer = screen.getByRole("button", { name: "Answer" })
+    expect(answer).toHaveAttribute("data-variant", "default")
+    expect(answer.className).not.toMatch(/\b(bg|text)-success\b/)
+    expect(screen.getByRole("button", { name: "Take over" })).toHaveAttribute("data-variant", "outline")
+  })
+
   it("opens an input and refuses to send until there is text", async () => {
     mount(card())
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument()

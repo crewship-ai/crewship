@@ -44,7 +44,7 @@ export function InboxTile({ entries, emptyLabel = "Inbox empty — you're clear 
         const meta = KIND_META[e.kind]
         const Icon = meta.Icon
         const content = (
-          <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border/60 bg-card hover:border-white/[0.12] transition-colors">
+          <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border/60 bg-card hover:border-foreground/[0.12] transition-colors">
             <div className={cn("inline-flex items-center justify-center w-6 h-6 rounded shrink-0", meta.cls)}>
               <Icon className="h-3 w-3" />
             </div>

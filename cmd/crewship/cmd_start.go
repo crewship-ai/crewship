@@ -46,8 +46,11 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
 	"github.com/crewship-ai/crewship/internal/quartermaster"
+	"github.com/crewship-ai/crewship/internal/quiesce"
+	"github.com/crewship-ai/crewship/internal/quota"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
+	"github.com/crewship-ai/crewship/internal/retention"
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/secrets"
 	"github.com/crewship-ai/crewship/internal/server"
@@ -217,6 +220,22 @@ var startCmd = &cobra.Command{
 		if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
 			return fmt.Errorf("failed to run migrations: %w", err)
 		}
+		// Automations an instance restore left held (`crewship recover`):
+		// schedulers, inbound webhooks and queued work read this in-memory
+		// copy on every tick and request until an admin resumes them. Loaded
+		// before anything that fires can start. The quiet window itself is
+		// memory-only, so a crash mid-backup comes back with nothing held.
+		if err := quiesce.DefaultHolds().Load(context.Background(), db.DB); err != nil {
+			return fmt.Errorf("read instance holds: %w", err)
+		}
+		if held := quiesce.DefaultHolds().List(); len(held) > 0 {
+			keys := make([]string, 0, len(held))
+			for _, h := range held {
+				keys = append(keys, h.Key)
+			}
+			logger.Warn("automations are held after an instance restore; resume with `crewship admin instance holds resume <key>`",
+				"held", strings.Join(keys, ","))
+		}
 		// Installation identity needs the migrated database: it is keyed by a
 		// per-database nonce and the database location, so servers sharing a
 		// data directory and copied databases stay distinct. A database without
@@ -376,6 +395,11 @@ var startCmd = &cobra.Command{
 		}
 
 		srv := server.New(cfg, logger, deps)
+		closeRestricted, err := startRestrictedTextRuntime(ctx, db.DB, db.Path(), srv.APIRouter(), noDocker, logger)
+		if err != nil {
+			return fmt.Errorf("initialize restricted text runtime: %w", err)
+		}
+		defer closeRestricted()
 
 		resolver := chatbridge.NewIPCResolver(cfg.Auth.NextjsURL, cfg.Auth.InternalToken, logger)
 		bridge := chatbridge.New(
@@ -597,10 +621,9 @@ var startCmd = &cobra.Command{
 		// leader when election is active (so only one replica re-delivers), or
 		// always-on for a lone replica / disabled election.
 		if startNotifyRecovery != nil {
-			var isLeader func() bool
-			if schedulerLease != nil {
-				isLeader = schedulerLease.IsLeader
-			}
+			// Re-delivery is an external retry: it also waits out an
+			// instance restore's queue hold and a backup's quiet window.
+			isLeader := quiesce.QueueGate(schedulerLease).IsLeader
 			startNotifyRecovery(isLeader)
 		}
 
@@ -615,9 +638,11 @@ var startCmd = &cobra.Command{
 				},
 				logger,
 			)
-			if schedulerLease != nil {
-				sched.SetLeaderGate(schedulerLease)
-			}
+			// quiesce.SchedulerGate: no fire while an instance restore holds
+			// routines or a backup's quiet window is open; a due occurrence
+			// stays due and the overdue sweep fires it afterwards. A nil
+			// lease (election off) still reads "leader" otherwise.
+			sched.SetLeaderGate(quiesce.SchedulerGate(schedulerLease))
 			// A scheduled occurrence must reach the same durable admission
 			// transaction as webhook work. Open its bounded write handle before
 			// cron starts; a missing handle is a startup error, never permission
@@ -1144,6 +1169,12 @@ var startCmd = &cobra.Command{
 				// internal/harbormaster/retention.go.
 				go harbormaster.StartApprovalsRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
 
+				// Inbox, chats and Keeper decisions — the windows an instance
+				// admin sets in Admin › Data retention. Forever until set, so
+				// this deletes nothing on an instance nobody configured. See
+				// internal/retention/sweep.go.
+				go retention.StartSweeper(ctx, deps.DB, logger, 24*time.Hour)
+
 				// Routine webhook receipts — the dedup record a routine
 				// delivery leaves behind. §6 keeps it for 30 days from
 				// acceptance; after that the same identifier is new work
@@ -1155,6 +1186,22 @@ var startCmd = &cobra.Command{
 				// 30-day and 7-day retention clocks. Non-terminal work keeps both
 				// regardless of age; Sweep enforces that predicate in each write.
 				go work.StartRetentionSweeper(ctx, work.NewStore(deps.DB), logger, 24*time.Hour)
+
+				// Backup plans (Admin › Backups › Schedules): a backend service,
+				// never an agent. Start marks runs the last process died in as
+				// interrupted (and retries each once), then every 30 s starts
+				// due plans in their timezone — one catch-up after downtime,
+				// waiting out busy workspaces — and works the run queue.
+				// Gated on the scheduler lease like the other schedulers.
+				if apiRouter := srv.APIRouter(); apiRouter != nil {
+					if bp := apiRouter.BackupPlans(); bp != nil {
+						if schedulerLease != nil {
+							bp.Leader = schedulerLease
+						}
+						bp.Start(ctx)
+						logger.Info("backup scheduler wired (plans, busy window, catch-up; 30s tick)")
+					}
+				}
 			}
 
 			// Pipeline schedules — cron triggers for saved pipelines.
@@ -1214,9 +1261,7 @@ var startCmd = &cobra.Command{
 					VerdictWG: srv.APIRouter().PipelinesHandler.VerdictWaitGroup(),
 				})
 				scheduler := pipeline.NewPipelineScheduler(schedStore, schedPipelineStore, schedExec, logger)
-				if schedulerLease != nil {
-					scheduler.SetLeaderGate(schedulerLease)
-				}
+				scheduler.SetLeaderGate(quiesce.SchedulerGate(schedulerLease))
 				// Journal emitter for scheduler-level events (circuit breaker
 				// trips #1405, missed-occurrence catch-up #1409) — reuses the
 				// same writer the executor emits run/step events through.
@@ -1230,6 +1275,7 @@ var startCmd = &cobra.Command{
 				// past-ttl rows. Shares the scheduler's executor so deferred
 				// runs hit the same registry + run-store projection.
 				pendingDispatcher := pipeline.NewPendingRunDispatcher(pipeline.NewPendingRunStore(deps.DB), schedExec, logger)
+				pendingDispatcher.SetPaused(quiesce.QueuePaused)
 				pendingDispatcher.Start(ctx)
 				defer pendingDispatcher.Stop()
 				logger.Info("pending-run dispatcher wired (delay/ttl/debounce/priority; 5s tick)")
@@ -1239,9 +1285,7 @@ var startCmd = &cobra.Command{
 				// it, recurring issues had CRUD + a next_run column but no
 				// runtime consumer — they looked scheduled and never fired.
 				recurringIssues := api.NewRecurringIssueDispatcher(deps.DB, srv.WSHub(), logger)
-				if schedulerLease != nil {
-					recurringIssues.SetLeaderGate(schedulerLease)
-				}
+				recurringIssues.SetLeaderGate(quiesce.SchedulerGate(schedulerLease))
 				recurringIssues.Start(ctx)
 				defer recurringIssues.Stop()
 				logger.Info("recurring-issue dispatcher wired (cron triggers; 30s tick)")
@@ -1536,7 +1580,12 @@ type containerProviderCandidate struct {
 // value, or the providers' `if gate == nil` short-circuit stops working and
 // every start is routed through a controller that is not there.
 func dockerProviderConfig(cfg *config.Config, gate provider.AdmissionGate) docker.Config {
+	var catalog quota.Catalog
+	if cfg.Container.QuotaHelperSocket != "" {
+		catalog = quota.Client{Socket: cfg.Container.QuotaHelperSocket, Namespace: cfg.Container.QuotaHelperNamespace}
+	}
 	return docker.Config{
+		QuotaCatalog:      catalog,
 		RuntimeImage:      cfg.Container.RuntimeImage,
 		DefaultRuntime:    cfg.Container.DefaultRuntime,
 		Network:           cfg.Container.Network,

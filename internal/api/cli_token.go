@@ -31,6 +31,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 )
@@ -182,8 +184,12 @@ var knownScopes = map[string]struct{}{
 	"skills:write":      {},
 	"workspace:*":       {},
 	"workspace:admin":   {},
-	"webhooks:*":        {},
-	"webhooks:write":    {},
+	// instance:admin reaches the instance-gated routes (instance_admin.go).
+	// The gate still checks that the token's user IS an instance admin; the
+	// scope only lets a restricted token carry that power at all.
+	"instance:admin": {},
+	"webhooks:*":     {},
+	"webhooks:write": {},
 }
 
 // scopesPermittedByRole reports whether a caller with the given
@@ -209,7 +215,7 @@ func scopesPermittedByRole(role string, scopes []string) string {
 	rank := roleRank[role]
 	for _, s := range scopes {
 		switch s {
-		case "*", "workspace:admin", "workspace:*":
+		case "*", "workspace:admin", "workspace:*", "instance:admin":
 			// workspace:* grants workspace:admin via canScope's
 			// resource-wildcard, so it needs the same ADMIN gate.
 			if rank < roleRank["ADMIN"] {
@@ -280,7 +286,16 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// role implicitly — no need to consult the membership table at
 	// all, which keeps the legacy "create a basic token" path working
 	// even in unit-test setups that didn't seed workspace_members.
-	if len(normalisedScopes) > 0 {
+	// instance:admin follows the instance role, not a workspace role: an
+	// instance admin may be a MEMBER somewhere, or in no workspace at all,
+	// and still has exactly that power to narrow a token to (review R7).
+	// It is taken out of the workspace check below; everything else still
+	// has to fit the caller's best workspace role.
+	roleScopes := normalisedScopes
+	if slices.Contains(normalisedScopes, "instance:admin") && isInstanceAdmin(r, h.db) {
+		roleScopes = slices.DeleteFunc(slices.Clone(normalisedScopes), func(s string) bool { return s == "instance:admin" })
+	}
+	if len(roleScopes) > 0 {
 		var callerRole string
 		if err := h.db.QueryRowContext(r.Context(), `
 			SELECT role FROM workspace_members
@@ -304,7 +319,7 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 			replyInternalError(w, h.logger, "cli_token: lookup caller role", err)
 			return
 		}
-		if denied := scopesPermittedByRole(callerRole, normalisedScopes); denied != "" {
+		if denied := scopesPermittedByRole(callerRole, roleScopes); denied != "" {
 			h.logger.Warn("cli_token: scope exceeds caller role",
 				"user_id", user.ID, "role", callerRole, "scope", denied)
 			replyError(w, http.StatusForbidden,
@@ -451,7 +466,7 @@ func (h *CLITokenHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.QueryContext(r.Context(),
-		`SELECT id, name, tier, expires_at, created_at, last_used_at, revoked_at
+		`SELECT id, name, tier, expires_at, created_at, last_used_at, revoked_at, scopes
 		 FROM cli_tokens WHERE user_id = ? ORDER BY created_at DESC`, user.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "list cli_tokens", err)
@@ -462,8 +477,8 @@ func (h *CLITokenHandler) List(w http.ResponseWriter, r *http.Request) {
 	var tokens []map[string]interface{}
 	for rows.Next() {
 		var id, name, tier, createdAt string
-		var expiresAt, lastUsedAt, revokedAt sql.NullString
-		if err := rows.Scan(&id, &name, &tier, &expiresAt, &createdAt, &lastUsedAt, &revokedAt); err != nil {
+		var expiresAt, lastUsedAt, revokedAt, scopesRaw sql.NullString
+		if err := rows.Scan(&id, &name, &tier, &expiresAt, &createdAt, &lastUsedAt, &revokedAt, &scopesRaw); err != nil {
 			continue
 		}
 		t := map[string]interface{}{
@@ -480,6 +495,18 @@ func (h *CLITokenHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		if revokedAt.Valid {
 			t["revoked_at"] = revokedAt.String
+		}
+		// Scopes narrow the token below the user's role. Without them in the
+		// list, a narrowed token looked exactly like an unrestricted one on the
+		// screen meant for auditing live access. Omitted when unrestricted,
+		// matching the create response.
+		if scopes := parseScopes(scopesRaw.String); len(scopes) > 0 {
+			list := make([]string, 0, len(scopes))
+			for s := range scopes {
+				list = append(list, s)
+			}
+			sort.Strings(list)
+			t["scopes"] = list
 		}
 		tokens = append(tokens, t)
 	}
@@ -604,7 +631,7 @@ func lookupCLIToken(ctx context.Context, db *sql.DB, token string) (tokenID, use
 		SELECT ct.id, ct.user_id, u.email, COALESCE(u.full_name, ''), ct.tier, ct.expires_at, ct.revoked_at, ct.scopes
 		FROM cli_tokens ct
 		JOIN users u ON u.id = ct.user_id
-		WHERE ct.token_hash = ?
+		WHERE ct.token_hash = ? AND u.suspended_at IS NULL
 	`, tokenHash).Scan(&tokenID, &userID, &email, &name, &tier, &expiresAt, &revokedAt, &scopesRaw)
 	if dbErr != nil {
 		if dbErr == sql.ErrNoRows {

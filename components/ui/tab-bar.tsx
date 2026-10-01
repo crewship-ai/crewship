@@ -56,7 +56,7 @@ function TabBar({
       <div
         role="tablist"
         aria-label={ariaLabel}
-        className={cn("flex items-center gap-0 border-b border-white/[0.06]", className)}
+        className={cn("flex items-center gap-0 border-b border-foreground/[0.06]", className)}
       >
         {children}
       </div>
@@ -90,7 +90,7 @@ function TabBarItem({ value, count, className, children }: TabBarItemProps) {
     >
       <span>{children}</span>
       {count !== null && count !== undefined && (
-        <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] tabular-nums text-foreground/50">
+        <span className="rounded bg-foreground/[0.06] px-1.5 py-0.5 text-[10px] tabular-nums text-foreground/50">
           {count}
         </span>
       )}

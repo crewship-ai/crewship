@@ -57,7 +57,7 @@ function ToolbarButton({
         // every one of these is a control someone has to hit.
         // min-h-12, not min-h-11: `--spacing: 0.23rem` makes h-11 40.5px.
         "coarse:min-h-12 coarse:min-w-12 max-sm:p-3",
-        "hover:bg-white/[0.08] disabled:pointer-events-none disabled:opacity-30",
+        "hover:bg-foreground/[0.08] disabled:pointer-events-none disabled:opacity-30",
         active
           ? "bg-primary/20 text-primary"
           // Was muted-foreground/60 — a dimmed version of the dimmest text
@@ -92,8 +92,8 @@ function BubbleButton({
       title={title}
       className={cn(
         "p-1 rounded transition-colors",
-        "hover:bg-white/[0.12]",
-        active ? "text-primary bg-primary/20" : "text-white/70",
+        "hover:bg-foreground/[0.12]",
+        active ? "text-primary bg-primary/20" : "text-foreground/70",
       )}
     >
       {children}
@@ -105,7 +105,7 @@ function BubbleButton({
 // Toolbar separator
 // ---------------------------------------------------------------------------
 function Sep() {
-  return <div className="w-px h-4 bg-white/[0.06] mx-0.5 shrink-0" />
+  return <div className="w-px h-4 bg-foreground/[0.06] mx-0.5 shrink-0" />
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +129,7 @@ function LanguageSelector({
         onClick={() => setOpen(!open)}
         className={cn(
           "flex items-center gap-1 px-2 py-1 rounded text-[11px] font-mono",
-          "bg-white/[0.06] border border-white/[0.1] hover:bg-white/[0.1] transition-colors",
+          "bg-foreground/[0.06] border border-foreground/[0.1] hover:bg-foreground/[0.1] transition-colors",
           "text-muted-foreground hover:text-foreground",
         )}
       >
@@ -147,7 +147,7 @@ function LanguageSelector({
           <div
             className={cn(
               "absolute top-full left-0 mt-1 z-50",
-              "bg-[#1a1a2e] border border-white/[0.1] rounded-lg shadow-xl",
+              "bg-[#1a1a2e] border border-foreground/[0.1] rounded-lg shadow-xl",
               "max-h-[240px] overflow-y-auto py-1 w-[160px]",
               "scrollbar-thin scrollbar-thumb-white/10",
             )}
@@ -162,7 +162,7 @@ function LanguageSelector({
                 }}
                 className={cn(
                   "w-full text-left px-3 py-1.5 text-[11px] font-mono",
-                  "hover:bg-white/[0.08] transition-colors",
+                  "hover:bg-foreground/[0.08] transition-colors",
                   lang.value === language
                     ? "text-primary bg-primary/10"
                     : "text-muted-foreground",
@@ -198,7 +198,7 @@ function CodeBlockView({ node, updateAttributes }: any) {
         </div>
       )}
       <pre
-        className="bg-[#0d1117] border border-white/[0.08] rounded-lg p-4 pt-3 overflow-x-auto !my-0"
+        className="bg-[#0d1117] border border-foreground/[0.08] rounded-lg p-4 pt-3 overflow-x-auto !my-0"
         spellCheck={false}
       >
         <NodeViewContent
@@ -250,7 +250,7 @@ function ColorDropdown({
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="absolute bottom-full left-0 mb-1 z-50 bg-[#1a1a2e] border border-white/[0.12] rounded-lg shadow-2xl p-2">
+      <div className="absolute bottom-full left-0 mb-1 z-50 bg-[#1a1a2e] border border-foreground/[0.12] rounded-lg shadow-2xl p-2">
         <div className="text-[10px] text-muted-foreground/50 mb-1.5 px-0.5">
           {label}
         </div>
@@ -264,7 +264,7 @@ function ColorDropdown({
                 onSelect(color.value)
                 onClose()
               }}
-              className="w-5 h-5 rounded border border-white/[0.1] hover:scale-110 transition-transform"
+              className="w-5 h-5 rounded border border-foreground/[0.1] hover:scale-110 transition-transform"
               style={{
                 backgroundColor: color.value || "transparent",
                 ...(color.value === "" && {

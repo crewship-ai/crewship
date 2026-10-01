@@ -30,16 +30,16 @@ export function MissionsTab({ crew, recentMissions, issues, recentIssues }: Miss
           </Link>
         </div>
         {recentMissions.length === 0 ? (
-          <div className="rounded-xl border border-white/8 bg-card p-6 text-center text-xs text-muted-foreground">
+          <div className="rounded-xl border border-foreground/8 bg-card p-6 text-center text-xs text-muted-foreground">
             No missions yet for this crew.
           </div>
         ) : (
-          <ul className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
+          <ul className="rounded-xl border border-foreground/8 bg-card divide-y divide-foreground/5">
             {recentMissions.map((m) => (
               <li key={m.id}>
                 <Link
                   href={`/missions/${encodeURIComponent(m.id)}/timeline`}
-                  className="px-4 py-2 flex items-center gap-3 text-sm hover:bg-white/[0.03] transition-colors"
+                  className="px-4 py-2 flex items-center gap-3 text-sm hover:bg-foreground/[0.03] transition-colors"
                 >
                   <span className={cn(
                     "w-1.5 h-1.5 rounded-full shrink-0",
@@ -72,7 +72,7 @@ export function MissionsTab({ crew, recentMissions, issues, recentIssues }: Miss
             Open in /issues →
           </Link>
         </div>
-        <div className="rounded-xl border border-white/8 bg-card grid grid-cols-5 divide-x divide-white/5">
+        <div className="rounded-xl border border-foreground/8 bg-card grid grid-cols-5 divide-x divide-foreground/5">
           {(["Backlog", "Todo", "InProgress", "InReview", "Done"] as const).map((bucket) => (
             <div key={bucket} className="px-4 py-3">
               <div className="text-[10px] text-muted-foreground uppercase">{bucket.replace(/([A-Z])/g, " $1").trim()}</div>
@@ -83,12 +83,12 @@ export function MissionsTab({ crew, recentMissions, issues, recentIssues }: Miss
           ))}
         </div>
         {recentIssues.length > 0 && (
-          <ul className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
+          <ul className="rounded-xl border border-foreground/8 bg-card divide-y divide-foreground/5">
             {recentIssues.map((i) => (
               <li key={i.id}>
                 <Link
                   href={i.identifier ? `/issues/${encodeURIComponent(i.identifier)}` : "/issues"}
-                  className="px-4 py-2 flex items-center gap-3 text-sm hover:bg-white/[0.03] transition-colors"
+                  className="px-4 py-2 flex items-center gap-3 text-sm hover:bg-foreground/[0.03] transition-colors"
                 >
                   <span className={cn(
                     "w-1.5 h-1.5 rounded-full shrink-0",

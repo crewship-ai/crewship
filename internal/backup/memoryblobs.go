@@ -31,7 +31,9 @@ import (
 	"archive/tar"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -349,6 +351,20 @@ func RestoreMemoryBlobs(ctx context.Context, blobRoot string, payload *Extracted
 // call to it so the two packages share one durability primitive
 // instead of two copies of the same sequence.
 func restoreMemoryBlobFile(dst string, r io.Reader) error {
+	return writeBlobDurable(dst, r, "")
+}
+
+// errBlobDigestMismatch is returned by writeBlobDurable when the bytes it
+// was handed do not hash to the digest the caller expected. Nothing is left
+// at dst in that case.
+var errBlobDigestMismatch = errors.New("blob content does not match its sha256")
+
+// writeBlobDurable is restoreMemoryBlobFile's body, shared with the
+// attachment-blob restore. When wantSha is non-empty the bytes are hashed
+// on the way to the tempfile and the rename only happens if they match —
+// a content-addressed file whose name lies about its content is worse than
+// no file, because every later reader trusts the name.
+func writeBlobDurable(dst string, r io.Reader, wantSha string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
@@ -367,10 +383,16 @@ func restoreMemoryBlobFile(dst string, r io.Reader) error {
 	}
 	cleanup := func() { _ = os.Remove(tmp) }
 
-	if _, err = io.Copy(out, r); err != nil {
+	hasher := sha256.New()
+	if _, err = io.Copy(io.MultiWriter(out, hasher), r); err != nil {
 		_ = out.Close()
 		cleanup()
 		return fmt.Errorf("write: %w", err)
+	}
+	if wantSha != "" && hex.EncodeToString(hasher.Sum(nil)) != wantSha {
+		_ = out.Close()
+		cleanup()
+		return errBlobDigestMismatch
 	}
 	if err = out.Sync(); err != nil {
 		_ = out.Close()

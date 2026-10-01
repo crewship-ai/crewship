@@ -105,6 +105,7 @@ or a listed endpoint nobody calls.
 | `ContainerWait` | `POST /containers/{id}/wait` | Blocks on one-shot helpers (secrets sweep, image cache warm) |
 | `ContainerPause` | `POST /containers/{id}/pause` | Quiesces a crew for a consistent backup |
 | `ContainerUnpause` | `POST /containers/{id}/unpause` | Resumes it afterwards |
+| `ContainerUpdate` | `POST /containers/{id}/update` | Applies managed service resource bounds before startup and recovery |
 | `CopyToContainer` | `HEAD` + `PUT /containers/{id}/archive` | Writes devcontainer features, restored backups, the sidecar binary |
 | `CopyFromContainer` | `GET /containers/{id}/archive` | Streams crew content out for a backup |
 | `ExecCreate` | `POST /containers/{id}/exec` | Creates the exec session an agent turn runs in |
@@ -129,7 +130,9 @@ API puts exec *creation* under `/containers`, so `EXEC: 0` does not stop it.
 | `ImageInspect` | `GET /images/{name}/json` | Checks presence locally, reads baked-in env |
 | `ImageList` | `GET /images/json` | Finds cached provisioning images to reuse, and unused ones when idle cache eviction is enabled |
 | `ImageRemove` | `DELETE /images/{name}` | Garbage-collects unreferenced `crewship-cache:*` images, and evicts unused ones when idle cache eviction is enabled (never forced) |
-| `ImageTag` | `POST /images/{name}/tag` | Restores the local tag after a digest-pinned pull |
+| `ImageTag` | `POST /images/{name}/tag` | Restores the local tag after a digest-pinned pull, and a restored crew image's tag |
+| `ImageSave` | `GET /images/get` | Saves a crew's committed image into the backup environment store (complete environments) |
+| `ImageLoad` | `POST /images/load` | Loads a backed-up environment image back on restore |
 
 ### Networks and volumes — `NETWORKS: 1`, `VOLUMES: 1`
 
@@ -179,6 +182,12 @@ turn them on, be clear about what you are granting: `BUILD` lets the caller run
 arbitrary `RUN` steps against arbitrary base images, and `COMMIT` lets it turn any
 running container into an image. Both are opt-in for that reason.
 
+Backups that take **complete container environments** (plans or runs with
+*Complete environment*, see [Backup and restore](/guides/backup#complete-container-environments))
+commit each crew container to a temporary image before saving it, so they need
+`COMMIT: 1` as well. Without it those runs still write every crew's files and
+record the environment as not captured; files-only backups never commit.
+
 <Note>
 The BuildKit path behind a proxy is documented from the code, not from a live
 run — we have not driven a feature build end to end through the proxy. Depending
@@ -212,12 +221,12 @@ inside the Crewship process is inconvenienced, not stopped.
 **The granularity is a path prefix, not an endpoint.** The table above is what
 *we* call. What the proxy *opens* is five whole namespaces. `CONTAINERS: 1` also
 allows `POST /containers/prune` (removes every stopped container on the host),
-`POST /containers/{id}/kill`, `POST /containers/{id}/update` (raise resource
-limits), `GET /containers/{id}/logs` and `GET /containers/{id}/export` —
+`POST /containers/{id}/kill`; the permitted update endpoint can also raise resource
+limits. It also permits `GET /containers/{id}/logs` and `GET /containers/{id}/export` —
 including for containers that have nothing to do with Crewship. `IMAGES: 1` also
 allows `POST /images/prune` and `POST /images/{name}/push`. `VOLUMES: 1` also
 allows `POST /volumes/prune`. The proxy has no way to express "only these
-thirty-one calls".
+listed calls".
 
 **You have moved the trust, not removed it.** The proxy container is now the one
 holding the socket. It is a smaller, simpler process than Crewship, which is a

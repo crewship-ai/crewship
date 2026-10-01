@@ -84,7 +84,7 @@ function PeerMessageCard({ m }: { m: PeerMessage }) {
     ? (m.to_agent_name ?? "unknown")
     : m.from_agent_name
   return (
-    <div className="rounded border border-white/10 bg-muted/40 px-3 py-2 space-y-1.5">
+    <div className="rounded border border-foreground/10 bg-muted/40 px-3 py-2 space-y-1.5">
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className={cn("text-[10px] px-1.5 py-px rounded inline-flex items-center gap-0.5", directionChip.cls)}>
           <span className="font-mono">{directionChip.icon}</span>
@@ -113,7 +113,7 @@ function PeerMessageCard({ m }: { m: PeerMessage }) {
       </div>
       <div className="text-foreground/85 whitespace-pre-wrap text-xs">{m.question}</div>
       {m.response && (
-        <div className="mt-1 pt-1.5 border-t border-white/5">
+        <div className="mt-1 pt-1.5 border-t border-foreground/5">
           <div className="text-[10px] text-muted-foreground mb-0.5">Reply</div>
           <div className="text-foreground/70 whitespace-pre-wrap text-xs italic">{m.response}</div>
         </div>

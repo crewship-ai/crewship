@@ -31,6 +31,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 // =============================================================================
 
 vi.mock("@/hooks/use-auth", () => ({
+  useIsInstanceAdmin: () => true,
   useAuth: () => ({
     session: { user: { name: "Demo User", email: "demo@crewship.ai" } },
     signOut: vi.fn().mockResolvedValue(undefined),

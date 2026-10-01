@@ -70,12 +70,12 @@ export function RecentMissionsTable({ missions }: RecentMissionsTableProps) {
             <Link
               key={m.id}
               href={m.identifier ? `/issues/${m.identifier}` : "/issues"}
-              className="grid items-center gap-3 px-1.5 py-2 text-[11px] border-b border-border/60 last:border-b-0 hover:bg-white/[0.02] rounded grid-cols-[56px_minmax(0,1fr)_110px_78px_64px_72px]"
+              className="grid items-center gap-3 px-1.5 py-2 text-[11px] border-b border-border/60 last:border-b-0 hover:bg-foreground/[0.02] rounded grid-cols-[56px_minmax(0,1fr)_110px_78px_64px_72px]"
             >
               <span className="font-mono text-[10px] text-muted-foreground truncate">{m.identifier ?? "—"}</span>
               <span className="text-foreground/80 truncate">{m.title}</span>
               <div className="flex items-center gap-1.5">
-                <Progress value={pct} className="h-1 flex-1 bg-white/[0.06]" indicatorClassName={progressCls} />
+                <Progress value={pct} className="h-1 flex-1 bg-foreground/[0.06]" indicatorClassName={progressCls} />
                 <span className="text-[9px] font-mono text-muted-foreground tabular-nums w-8 text-right shrink-0">{pct}%</span>
               </div>
               <span className={cn("inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide border", statusCls)}>

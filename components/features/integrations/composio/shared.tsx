@@ -58,7 +58,7 @@ export function StatusDot({ status }: { status: string }) {
 
 export function EmptyHint({ text }: { text: string }) {
   return (
-    <div className="rounded-xl border border-dashed border-white/10 p-4 text-[11px] text-muted-foreground">
+    <div className="rounded-xl border border-dashed border-foreground/10 p-4 text-[11px] text-muted-foreground">
       {text}
     </div>
   )
@@ -73,7 +73,7 @@ export function AppChip({
   children?: React.ReactNode
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px]">
+    <span className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/10 bg-foreground/[0.03] px-2 py-1 text-[11px]">
       <ToolkitIcon toolkit={toolkit} size={14} />
       <span className="capitalize">{toolkit.slug}</span>
       {children}

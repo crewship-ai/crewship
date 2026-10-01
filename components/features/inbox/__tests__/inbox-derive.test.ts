@@ -189,6 +189,10 @@ describe("categoryOf mirrors internal/notify/categories.go", () => {
     expect(categoryOf(item({ kind: "schedule_circuit_breaker_tripped" }))).toBe("routines.missed")
   })
 
+  it("files a backup incident under system health, not chat replies", () => {
+    expect(categoryOf(item({ kind: "message", payload: { subkind: "backup_incident" } }))).toBe("system.health")
+  })
+
   it("shows the raw kind rather than nothing for a kind added later", () => {
     expect(categoryOf(item({ kind: "brand_new" as InboxItem["kind"] }))).toBe("brand_new")
   })

@@ -63,8 +63,10 @@ func (r *Router) registerSystemRoutes() {
 	// ADMIN+ in a workspace (#865). OptionalWorkspaceRole stamps the role when
 	// a workspace_id is supplied and never fails when it isn't, so the
 	// role-less callers keep working with the redacted shape.
+	// An instance administrator gets the full detail too, with or without a
+	// workspace (markInstanceAdmin stamps ctxInstanceAdmin for them).
 	r.mux.Handle("GET /api/v1/system/runtime",
-		authed(r.authMw.OptionalWorkspaceRole(http.HandlerFunc(system.Runtime))))
+		authed(r.authMw.OptionalWorkspaceRole(r.markInstanceAdmin(http.HandlerFunc(system.Runtime)))))
 	r.mux.Handle("GET /api/v1/system/version", authed(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Same re-read-per-request reason for r.build as for r.version:
 		// cmd_start calls SetBuild after construction (#1645).
@@ -82,7 +84,7 @@ func (r *Router) registerSystemRoutes() {
 	keeperStatus := NewKeeperStatusHandler(r.db, r.keeperConfig, r.keeperGK, r.logger).
 		WithGovModelStatus(r.govModelStatus).
 		WithKeeperSettings(r.keeperSettings)
-	r.authedAdmin("GET", "/api/v1/system/keeper", keeperStatus.Status)
+	r.authedAdminAny("GET", "/api/v1/system/keeper", keeperStatus.Status)
 
 	// PR-B F3 aux-status (auth required). Diagnostic read of the
 	// resolved provider/model/timeout per Slot. Pulls config through
@@ -106,5 +108,5 @@ func (r *Router) registerSystemRoutes() {
 	// ADMIN+ floor (#868): aux-status enumerates provider + model id for every
 	// slot (incl. Keeper) — the same operational-metadata leak class #893
 	// closed for /system/keeper, so it sits behind the same admin floor.
-	r.authedAdmin("GET", "/api/v1/system/aux-status", auxStatus.Status)
+	r.authedAdminAny("GET", "/api/v1/system/aux-status", auxStatus.Status)
 }

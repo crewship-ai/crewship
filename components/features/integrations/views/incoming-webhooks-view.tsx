@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
+import { StatusPill } from "@/components/ui/status-pill"
 import { Switch } from "@/components/ui/switch"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
@@ -264,7 +265,7 @@ export function IncomingWebhooksView({
             {!rows.length && !data.error && section !== "page" && (
               <Empty onAdd={() => onAdd()} />
             )}
-            <div className="border-t border-white/[0.06] px-4 py-3 text-xs text-muted-foreground">
+            <div className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
               Workspace totals cover routine and agent endpoints. Page endpoints
               are read on demand from each Page; missing data is not counted as
               zero. Actions remain subject to the target&apos;s permissions.
@@ -273,7 +274,7 @@ export function IncomingWebhooksView({
           {(section === "page" || section === "endpoints") &&
             data.targets.some((t) => t.kind === "page") && (
               <Panel title="Pages · endpoints listed per Page">
-                <ul className="divide-y divide-white/[0.04]">
+                <ul className="divide-y divide-border">
                   {data.targets
                     .filter(
                       (t) =>
@@ -378,16 +379,16 @@ function EndpointTable({
             ].map((h) => (
               <th
                 key={h}
-                className="whitespace-nowrap px-4 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+                className="eyebrow whitespace-nowrap px-4 py-2 text-muted-foreground"
               >
                 {h}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-white/[0.04]">
+        <tbody className="divide-y divide-border">
           {rows.map((r) => (
-            <tr key={r.id} className="hover:bg-white/[0.02]">
+            <tr key={r.id} className="hover:bg-foreground/[0.02]">
               <td className="px-4 py-3">
                 {onSelect ? (
                   <button
@@ -414,15 +415,16 @@ function EndpointTable({
               </td>
               <td className="px-4 py-3">{r.sender}</td>
               <td className="px-4 py-3">
-                <span
-                  className={`rounded-full px-2 py-1 text-[10px] ${r.signed ? "bg-success/10 text-success" : "bg-warn/10 text-warn"}`}
-                >
-                  {r.target.kind === "page"
-                    ? "Producer token"
-                    : r.signed
-                      ? "Signing configured"
-                      : "Missing secret"}
-                </span>
+                <StatusPill
+                  tone={r.signed ? "success" : "warn"}
+                  label={
+                    r.target.kind === "page"
+                      ? "Producer token"
+                      : r.signed
+                        ? "Signing configured"
+                        : "Missing secret"
+                  }
+                />
                 {r.routine && (
                   <span className="mt-1 block text-[10px] text-muted-foreground">
                     {r.routine.rate_limit_per_min || 600}/min
@@ -436,12 +438,10 @@ function EndpointTable({
                 </span>
               </td>
               <td className="px-4 py-3">
-                <span className="flex items-center gap-1.5">
-                  <span
-                    className={`size-1.5 rounded-full ${r.enabled ? "bg-success" : "bg-muted-foreground/40"}`}
-                  />
-                  {r.enabled ? "Enabled" : "Disabled"}
-                </span>
+                <StatusPill
+                  tone={r.enabled ? "success" : "muted"}
+                  label={r.enabled ? "Enabled" : "Disabled"}
+                />
               </td>
               <td className="px-4 py-3">
                 <div className="flex items-center gap-1">
@@ -536,7 +536,7 @@ function PageEndpoints({
   return (
     <>
       {read.loading ? (
-        <Skeleton className="h-36 rounded-xl" />
+        <Skeleton className="h-36 rounded-card" />
       ) : (
         <Panel title="Endpoints">
           <EndpointTable
@@ -664,7 +664,7 @@ function RecentReceipts({
           />
         </div>
       ) : query.data?.length ? (
-        <ul className="divide-y divide-white/[0.04]">
+        <ul className="divide-y divide-border">
           {query.data.map((r) => (
             <li
               key={r.id}

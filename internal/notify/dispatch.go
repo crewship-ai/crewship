@@ -103,6 +103,7 @@ func SetProviderForTesting(p Provider) func() {
 // SafeTransport blocks. Production code never reassigns it; see TestMain in
 // this package for the test override.
 var webhookTransport http.RoundTripper = httpsafe.SafeTransport()
+var webhookTransportMu sync.RWMutex
 
 // SetWebhookTransportForTesting swaps the webhook transport — normally the
 // SSRF-safe SafeTransport, which blocks loopback — so tests in OTHER packages
@@ -110,9 +111,15 @@ var webhookTransport http.RoundTripper = httpsafe.SafeTransport()
 // httptest server on 127.0.0.1. Returns a restore func. Production never calls
 // it; this package's own tests use the TestMain override instead.
 func SetWebhookTransportForTesting(rt http.RoundTripper) func() {
+	webhookTransportMu.Lock()
 	prev := webhookTransport
 	webhookTransport = rt
-	return func() { webhookTransport = prev }
+	webhookTransportMu.Unlock()
+	return func() {
+		webhookTransportMu.Lock()
+		webhookTransport = prev
+		webhookTransportMu.Unlock()
+	}
 }
 
 // Event types. These mirror the run terminal states the dispatcher fires
@@ -304,10 +311,13 @@ func NewDispatcher(lister ChannelLister, mail mailer.Mailer, logger *slog.Logger
 // CheckRedirect) is what keeps this path in lockstep with hooks / http-steps by
 // construction.
 func (d *Dispatcher) webhookClient(crewID string) *http.Client {
+	webhookTransportMu.RLock()
+	transport := webhookTransport
+	webhookTransportMu.RUnlock()
 	return egresspolicy.Client(egresspolicy.DBChecker(d.db, crewID), egresspolicy.Options{
 		Timeout:   15 * time.Second,
 		Schemes:   []string{"http", "https"},
-		Transport: webhookTransport,
+		Transport: transport,
 	})
 }
 

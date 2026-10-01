@@ -769,7 +769,7 @@ export function CredentialDetailSheet({
                       ) : undefined
                     }
                   >
-                    <div className="rounded-md border border-white/10 bg-background px-3 py-2 font-mono text-xs text-muted-foreground">
+                    <div className="rounded-md border border-foreground/10 bg-background px-3 py-2 font-mono text-xs text-muted-foreground">
                       ••••••••••••••••
                     </div>
 
@@ -943,7 +943,7 @@ export function CredentialDetailSheet({
                             return (
                               <li
                                 key={b.id}
-                                className="flex items-center gap-2 rounded-md border border-white/10 bg-background px-3 py-2 text-xs"
+                                className="flex items-center gap-2 rounded-md border border-foreground/10 bg-background px-3 py-2 text-xs"
                               >
                                 <Badge variant="outline" className="px-1 text-[9px]">
                                   {b.scope}
@@ -983,7 +983,7 @@ export function CredentialDetailSheet({
                         {assignments.map((a) => (
                           <li
                             key={`${a.agentName}:${a.envVarName}:${a.grantSource}`}
-                            className="flex items-center gap-2 rounded-md border border-white/10 bg-background px-3 py-2 text-[13px]"
+                            className="flex items-center gap-2 rounded-md border border-foreground/10 bg-background px-3 py-2 text-[13px]"
                           >
                             <AgentAvatar seed={a.agentName} className="h-4 w-4 shrink-0" alt="" />
                             <span className="truncate">{a.agentName}</span>
@@ -1029,7 +1029,7 @@ export function CredentialDetailSheet({
                         {credential.agent_names.map((name, i) => (
                           <li
                             key={name}
-                            className="flex items-center gap-2 rounded-md border border-white/10 bg-background px-3 py-2 text-[13px]"
+                            className="flex items-center gap-2 rounded-md border border-foreground/10 bg-background px-3 py-2 text-[13px]"
                           >
                             <AgentAvatar
                               seed={credential.agent_ids?.[i] ?? name}
@@ -1120,7 +1120,7 @@ export function CredentialDetailSheet({
                               initial={{ opacity: 0, y: 4 }}
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ duration: 0.12, delay: Math.min(idx, 12) * 0.015 }}
-                              className="flex flex-wrap items-center gap-2 rounded-md px-1.5 py-1.5 text-xs transition-colors hover:bg-white/[0.03]"
+                              className="flex flex-wrap items-center gap-2 rounded-md px-1.5 py-1.5 text-xs transition-colors hover:bg-foreground/[0.03]"
                             >
                               <AuditActor event={e} crewsById={crewsById} />
                               <Badge variant="outline" className="px-1.5 font-mono text-[10px]">
@@ -1191,7 +1191,7 @@ export function CredentialDetailSheet({
                           {credential.last_used_ips.map((ip) => (
                             <li
                               key={ip}
-                              className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] px-2 py-0.5 font-mono text-[10px] text-foreground/80"
+                              className="inline-flex items-center gap-1.5 rounded-full border border-foreground/[0.08] px-2 py-0.5 font-mono text-[10px] text-foreground/80"
                             >
                               <span className="h-1 w-1 rounded-full bg-success/60" />
                               {ip}
@@ -1337,7 +1337,7 @@ export function CredentialDetailSheet({
                                 "rounded-full border px-2.5 py-0.5 text-[11px] transition-colors disabled:opacity-40",
                                 level === current
                                   ? "border-primary/50 bg-primary/10 text-primary-hover"
-                                  : "border-white/10 text-muted-foreground hover:text-foreground",
+                                  : "border-foreground/10 text-muted-foreground hover:text-foreground",
                               )}
                             >
                               {level}

@@ -58,7 +58,7 @@ export function BottomPanelTerminal({
 
   return (
     <div className="h-full flex flex-col bg-[#0a0a0a]">
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 shrink-0 text-xs">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-foreground/5 shrink-0 text-xs">
         <div className="flex items-center gap-2 text-muted-foreground">
           <TerminalSquare className="h-3.5 w-3.5" />
           <StatusDot status={status} />
@@ -69,7 +69,7 @@ export function BottomPanelTerminal({
           <button
             type="button"
             onClick={reconnect}
-            className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-foreground/85"
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-foreground/5 hover:bg-foreground/10 text-foreground/85"
             title="Reconnect"
           >
             <RefreshCw className="h-3 w-3" />

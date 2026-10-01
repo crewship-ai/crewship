@@ -130,7 +130,7 @@ export function ScheduleEditor({
         </div>
       </div>
 
-      <div className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
+      <div className="rounded-xl border border-foreground/8 bg-card divide-y divide-foreground/5">
         {editing ? (
           <>
             <div className="px-4 py-2.5 grid grid-cols-[180px_1fr] gap-3 items-center">
@@ -139,7 +139,7 @@ export function ScheduleEditor({
                 value={form.draft.cron}
                 onChange={(e) => form.set("cron", e.target.value)}
                 placeholder="0 9 * * 1-5"
-                className="bg-background border border-white/15 rounded px-2 py-1 text-sm font-mono outline-none focus:border-primary"
+                className="bg-background border border-foreground/15 rounded px-2 py-1 text-sm font-mono outline-none focus:border-primary"
               />
             </div>
             <div className="px-4 py-2.5 grid grid-cols-[180px_1fr] gap-3 items-start">
@@ -148,7 +148,7 @@ export function ScheduleEditor({
                 value={form.draft.prompt}
                 onChange={(e) => form.set("prompt", e.target.value)}
                 rows={3}
-                className="bg-background border border-white/15 rounded px-2 py-1 text-sm outline-none focus:border-primary resize-y min-h-[60px]"
+                className="bg-background border border-foreground/15 rounded px-2 py-1 text-sm outline-none focus:border-primary resize-y min-h-[60px]"
                 placeholder="What this agent should do every time the schedule fires…"
               />
             </div>
@@ -183,7 +183,7 @@ export function ScheduleEditor({
               <span className="text-xs text-muted-foreground">Cron</span>
               <div className="flex items-center gap-2">
                 {cron ? (
-                  <code className="text-sm bg-background px-2 py-0.5 rounded border border-white/10 font-mono">
+                  <code className="text-sm bg-background px-2 py-0.5 rounded border border-foreground/10 font-mono">
                     {cron}
                   </code>
                 ) : (

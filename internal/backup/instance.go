@@ -27,6 +27,13 @@ func IsInstanceOwner(userEmail string) bool {
 	return strings.EqualFold(strings.TrimSpace(userEmail), target)
 }
 
+// InstanceOwnerConfigured reports whether CREWSHIP_OWNER_EMAIL is set. While
+// it is, the env owner is the instance's break-glass administrator and the
+// "oldest workspace owner" fallback (internal/api/instance_admin.go) is off.
+func InstanceOwnerConfigured() bool {
+	return strings.TrimSpace(os.Getenv(InstanceOwnerEmailEnv)) != ""
+}
+
 // EnsureInstanceHostname populates instance_config.hostname on first
 // boot after migration v50. Idempotent: subsequent calls are no-ops
 // unless the row is empty (e.g. after a restore without rotation).

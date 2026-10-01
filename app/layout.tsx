@@ -1,12 +1,17 @@
 import type { Metadata, Viewport } from "next"
-import { Open_Sans } from "next/font/google"
+import { JetBrains_Mono } from "next/font/google"
 import { Providers } from "@/components/providers"
 import { HISTORY_NAVIGATION_GUARD_SCRIPT } from "@/lib/navigation-history-guard"
+import { ACCENT_BOOT_SCRIPT } from "@/lib/theme/accents"
 import "./globals.css"
 
-const openSans = Open_Sans({
+// Harbor typography: the UI runs on the platform's system face (SF on Apple,
+// Segoe UI on Windows — the stack lives in --font-sans in globals.css), so
+// only the mono face is downloaded. It carries eyebrows, ids, chips and code.
+const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin", "latin-ext"],
-  variable: "--font-sans",
+  weight: ["400", "500", "600"],
+  variable: "--font-jetbrains",
 })
 
 export const metadata: Metadata = {
@@ -46,11 +51,13 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark" suppressHydrationWarning>
       <head>
         <script id="crewship-history-guard" dangerouslySetInnerHTML={{ __html: HISTORY_NAVIGATION_GUARD_SCRIPT }} />
+        {/* Paints the stored accent theme before first paint (lib/theme/accents.ts). */}
+        <script id="crewship-accent" dangerouslySetInnerHTML={{ __html: ACCENT_BOOT_SCRIPT }} />
       </head>
-      <body className={`${openSans.variable} font-sans antialiased`}>
+      <body className={`${jetbrainsMono.variable} font-sans antialiased`}>
         <Providers>{children}</Providers>
       </body>
     </html>

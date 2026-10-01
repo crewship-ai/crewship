@@ -10,6 +10,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { StatusPill } from "@/components/ui/status-pill"
+import { InlineEmpty } from "@/components/ui/inline-empty"
+import { kpiStripIsEmpty } from "@/lib/kpi-strip"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { ProviderMark } from "../provider-marks"
 import {
@@ -83,10 +85,10 @@ export function ConnectionsView({
       <div className="space-y-4 p-4 md:p-6">
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-[92px] rounded-xl" />
+            <Skeleton key={i} className="h-[92px] rounded-card" />
           ))}
         </div>
-        <Skeleton className="h-[260px] rounded-xl" />
+        <Skeleton className="h-[260px] rounded-card" />
       </div>
     )
   }
@@ -95,6 +97,16 @@ export function ConnectionsView({
   const failing = rows.filter((r) => r.status === "failing").length
   const sent24h = rows.reduce((a, r) => a + (r.sent24h ?? 0), 0)
   const hiddenByFilters = totalRows - rows.length
+  // Nothing connected anywhere: four zero tiles over an empty box said
+  // "nothing" five times. One line with the action says it once.
+  const nothingAtAll =
+    totalRows === 0 &&
+    kpiStripIsEmpty([
+      rows.length,
+      canSeeDeliveries ? delivering : null,
+      canSeeDeliveries ? failing : null,
+      canSeeDeliveries ? sent24h : null,
+    ])
 
   return (
     <div className="space-y-4 p-4 md:p-6">
@@ -107,6 +119,7 @@ export function ConnectionsView({
       {/* KPI strip — the summary before the detail. `canSeeDeliveries` gates
           the two cards that can only be answered from the delivery log; a
           member is told they cannot see it rather than shown a plausible 0. */}
+      {!nothingAtAll && (
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <KpiCard
           label="Connections"
@@ -120,13 +133,13 @@ export function ConnectionsView({
         <KpiCard
           label="Delivering"
           value={canSeeDeliveries ? delivering : "—"}
-          valueColor={canSeeDeliveries && delivering > 0 ? "rgb(52, 211, 153)" : undefined}
+          valueColor={canSeeDeliveries && delivering > 0 ? "var(--success)" : undefined}
           subtitle={canSeeDeliveries ? `of ${rows.length}` : "admins only"}
         />
         <KpiCard
           label="Needs attention"
           value={canSeeDeliveries ? failing : "—"}
-          valueColor={canSeeDeliveries && failing > 0 ? "rgb(248, 113, 113)" : undefined}
+          valueColor={canSeeDeliveries && failing > 0 ? "var(--destructive)" : undefined}
           subtitle={
             !canSeeDeliveries ? "admins only" : failing > 0 ? "failing right now" : "all healthy"
           }
@@ -137,6 +150,7 @@ export function ConnectionsView({
           subtitle={canSeeDeliveries ? "across every connection" : "admins only"}
         />
       </div>
+      )}
 
       {rows.length === 0 ? (
         <EmptyConnections
@@ -146,12 +160,12 @@ export function ConnectionsView({
           onOpenAdd={onOpenAdd}
         />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-card">
-          <div className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-2.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground/50">
+        <div className="overflow-hidden rounded-card border border-border bg-card">
+          <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+            <span className="eyebrow">
               Connections
             </span>
-            <span className="font-mono text-[10px] text-muted-foreground/60">
+            <span className="font-mono text-[10px] text-muted-foreground-soft">
               {rows.length} shown
             </span>
           </div>
@@ -159,7 +173,7 @@ export function ConnectionsView({
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-xs">
               <thead>
-                <tr className="border-b border-white/[0.06]">
+                <tr className="border-b border-border">
                   <Th>Connection</Th>
                   <Th>Kind</Th>
                   <Th>Scope</Th>
@@ -176,7 +190,7 @@ export function ConnectionsView({
                   return (
                     <tr
                       key={row.id}
-                      className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.02]"
+                      className="border-b border-foreground/[0.04] last:border-0 hover:bg-foreground/[0.02]"
                     >
                       <td className="px-4 py-2.5">
                         {/* The whole identity cell opens the detail. The action
@@ -287,7 +301,7 @@ export function ConnectionsView({
             </table>
           </div>
 
-          <div className="border-t border-white/[0.06] px-4 py-2 text-[10px] text-muted-foreground/70">
+          <div className="border-t border-border px-4 py-2 text-[10px] text-muted-foreground/70">
             {canManageWorkspace
               ? "Workspace connections are shared with everyone here; personal ones are yours alone."
               : "You can add and manage your own personal connections. Workspace-wide ones need ADMIN or OWNER."}
@@ -308,7 +322,7 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
   return (
     <th
       className={cn(
-        "whitespace-nowrap px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-foreground/45",
+        "eyebrow whitespace-nowrap px-4 py-2 text-left",
         className,
       )}
     >
@@ -330,31 +344,38 @@ function EmptyConnections({
   onOpenAdd: () => void
 }) {
   const filtered = totalRows > 0
+  const q = search.trim()
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-white/[0.08] bg-card px-6 py-14 text-center">
-      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-white/[0.04]">
-        <Plug className="h-4 w-4 text-muted-foreground/60" />
-      </div>
-      <div className="text-sm font-medium text-foreground/85">
-        {filtered ? "Nothing matches those filters" : "No connections yet"}
-      </div>
-      <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
-        {filtered
-          ? "Clear a facet in the sidebar, or add a service you have not connected yet."
-          : "A connection is where Crewship reaches you — a chat room, a phone, an on-call rota, an inbox or your own endpoint."}
-      </p>
-      {/* The honest answer to "I searched for telegram and got nothing": say
-          where the matches actually are instead of showing a bare empty list. */}
-      {search.trim() && catalogMatches > 0 && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          {catalogMatches} {catalogMatches === 1 ? "service matches" : "services match"}{" "}
-          <span className="font-medium text-foreground/80">“{search.trim()}”</span> and can be added.
-        </p>
-      )}
-      <Button variant="soft" size="sm" className="mt-4 h-7 gap-1.5 text-xs" onClick={onOpenAdd}>
-        <Plug className="h-3 w-3" />
-        Add an integration
-      </Button>
-    </div>
+    <InlineEmpty
+      icon={Plug}
+      text={
+        <>
+          <span className="font-medium text-foreground">
+            {filtered ? "Nothing matches those filters" : "No connections yet"}
+          </span>
+          <span className="hidden text-muted-foreground sm:inline">
+            {" — "}
+            {filtered
+              ? "clear a facet in the sidebar, or add a service you have not connected yet."
+              : "a connection is where Crewship reaches you: a chat room, a phone, an on-call rota, an inbox or your own endpoint."}
+          </span>
+          {/* The honest answer to "I searched for telegram and got nothing":
+              say where the matches actually are. */}
+          {q && catalogMatches > 0 && (
+            <span className="text-muted-foreground">
+              {" "}
+              {catalogMatches} {catalogMatches === 1 ? "service matches" : "services match"}{" "}
+              <span className="font-medium text-foreground">“{q}”</span> and can be added.
+            </span>
+          )}
+        </>
+      }
+      action={
+        <Button variant="soft" size="sm" className="h-7 shrink-0 gap-1.5 text-xs" onClick={onOpenAdd}>
+          <Plug className="h-3 w-3" />
+          Add an integration
+        </Button>
+      }
+    />
   )
 }

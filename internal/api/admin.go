@@ -20,8 +20,7 @@ func NewAdminHandler(db *sql.DB, logger *slog.Logger) *AdminHandler {
 // Stats returns aggregate counts (workspaces, users, agents, running) for the current workspace.
 // GET /api/v1/admin/stats — requires ADMIN+ (OWNER or ADMIN).
 func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden: ADMIN or OWNER only")
 		return
 	}
@@ -36,9 +35,37 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 		Running int `json:"running"`
 	}
 
-	// Scope stats to the current workspace to prevent cross-workspace data leakage
+	// Scope stats to the current workspace to prevent cross-workspace data
+	// leakage. An instance admin who names no workspace sees the instance.
 	wsID := WorkspaceIDFromContext(r.Context())
 	var s stats
+	if wsID == "" {
+		for _, q := range []struct {
+			sql  string
+			dest *int
+		}{
+			{"SELECT COUNT(*) FROM workspaces WHERE deleted_at IS NULL", &s.Workspaces},
+			{"SELECT COUNT(*) FROM users", &s.Users},
+			{"SELECT COUNT(*) FROM crews WHERE deleted_at IS NULL", &s.Crews},
+			{"SELECT COUNT(*) FROM agents WHERE deleted_at IS NULL", &s.Agents},
+			{`SELECT COUNT(DISTINCT je1.workspace_id || ':' || je1.trace_id) FROM journal_entries je1
+				WHERE je1.entry_type = 'run.started'
+				AND NOT EXISTS (
+					SELECT 1 FROM journal_entries je2
+					WHERE je2.workspace_id = je1.workspace_id
+					AND je2.trace_id = je1.trace_id
+					AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
+				)`, &s.Running},
+		} {
+			if err := h.db.QueryRowContext(r.Context(), q.sql).Scan(q.dest); err != nil {
+				h.logger.Error("stats query", "sql", q.sql, "error", err)
+				replyError(w, http.StatusInternalServerError, "Internal server error")
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, s)
+		return
+	}
 	queries := []struct {
 		sql  string
 		args []any
@@ -72,131 +99,5 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s)
 }
 
-// ListUsers returns all members of the current workspace with their user details.
-// GET /api/v1/admin/users — requires ADMIN+ (OWNER or ADMIN).
-func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
-		replyError(w, http.StatusForbidden, "Forbidden: ADMIN or OWNER only")
-		return
-	}
-
-	// Scope to users in the current workspace to prevent cross-workspace data leakage
-	workspaceID := WorkspaceIDFromContext(r.Context())
-	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT u.id, u.email, u.full_name, u.avatar_url, u.created_at,
-			wm.workspace_id, w.name AS workspace_name, w.slug AS workspace_slug, wm.role
-		FROM users u
-		JOIN workspace_members wm ON wm.user_id = u.id
-		JOIN workspaces w ON w.id = wm.workspace_id
-		WHERE wm.workspace_id = ?
-		ORDER BY u.created_at DESC
-	`, workspaceID)
-	if err != nil {
-		replyInternalError(w, h.logger, "list users", err)
-		return
-	}
-	defer rows.Close()
-
-	type userRow struct {
-		ID        string  `json:"id"`
-		Email     string  `json:"email"`
-		FullName  *string `json:"full_name"`
-		AvatarURL *string `json:"avatar_url"`
-		CreatedAt string  `json:"created_at"`
-		Workspace *struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-			Slug string `json:"slug"`
-		} `json:"workspace"`
-		Role *string `json:"role"`
-	}
-
-	var result []userRow
-	for rows.Next() {
-		var u userRow
-		var wsID, wsName, wsSlug, role sql.NullString
-		if err := rows.Scan(&u.ID, &u.Email, &u.FullName, &u.AvatarURL, &u.CreatedAt,
-			&wsID, &wsName, &wsSlug, &role); err != nil {
-			replyInternalError(w, h.logger, "scan user", err)
-			return
-		}
-		if wsID.Valid {
-			u.Workspace = &struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
-				Slug string `json:"slug"`
-			}{ID: wsID.String, Name: wsName.String, Slug: wsSlug.String}
-		}
-		if role.Valid {
-			u.Role = &role.String
-		}
-		result = append(result, u)
-	}
-	if err := rows.Err(); err != nil {
-		replyInternalError(w, h.logger, "rows iteration (users)", err)
-		return
-	}
-	if result == nil {
-		result = []userRow{}
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-// ListWorkspaces returns the current workspace with member, agent, and crew counts.
-// GET /api/v1/admin/workspaces — requires ADMIN+ (OWNER or ADMIN).
-func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
-		replyError(w, http.StatusForbidden, "Forbidden: ADMIN or OWNER only")
-		return
-	}
-
-	// Scope to the current workspace to prevent cross-workspace data leakage
-	wsID := WorkspaceIDFromContext(r.Context())
-	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT w.id, w.name, w.slug, w.created_at, w.updated_at,
-			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count,
-			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
-			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count
-		FROM workspaces w
-		WHERE w.id = ? AND w.deleted_at IS NULL
-		ORDER BY w.created_at DESC
-	`, wsID)
-	if err != nil {
-		replyInternalError(w, h.logger, "list workspaces (admin)", err)
-		return
-	}
-	defer rows.Close()
-
-	type wsRow struct {
-		ID          string `json:"id"`
-		Name        string `json:"name"`
-		Slug        string `json:"slug"`
-		CreatedAt   string `json:"created_at"`
-		UpdatedAt   string `json:"updated_at"`
-		MemberCount int    `json:"_count_members"`
-		AgentCount  int    `json:"_count_agents"`
-		CrewCount   int    `json:"_count_crews"`
-	}
-
-	var result []wsRow
-	for rows.Next() {
-		var ws wsRow
-		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug,
-			&ws.CreatedAt, &ws.UpdatedAt,
-			&ws.MemberCount, &ws.AgentCount, &ws.CrewCount); err != nil {
-			replyInternalError(w, h.logger, "scan workspace (admin)", err)
-			return
-		}
-		result = append(result, ws)
-	}
-	if err := rows.Err(); err != nil {
-		replyInternalError(w, h.logger, "rows iteration (workspaces)", err)
-		return
-	}
-	if result == nil {
-		result = []wsRow{}
-	}
-	writeJSON(w, http.StatusOK, result)
-}
+// ListUsers and ListWorkspaces live in admin_people.go, with the per-user
+// session and lockout actions that go with them.

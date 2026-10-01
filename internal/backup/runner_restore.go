@@ -97,10 +97,25 @@ type RestoreOptions struct {
 	// "empty disables" convention.
 	BlobRoot         string
 	PageProjectsPath string
+	// AttachmentRoot is the storage root on THIS (target) instance that
+	// attachment blobs are written back under, at attachments/<target
+	// workspace id>/<sha[:2]>/<sha> — the TARGET id, so a forked restore's
+	// rows (whose workspace_id RemapIDs regenerated) find their files. Empty
+	// lands no attachment files; the report then counts them as missing.
+	AttachmentRoot string
+	// EnvironmentStore is an extra place complete-environment layers are
+	// read from, after the bundle's inline blobs and the store beside the
+	// bundle file (e.g. layers an off-site download fetched elsewhere).
+	EnvironmentStore *EnvironmentStore
 }
 
 // RestoreResult summarises what was restored.
 type RestoreResult struct {
+	// Environments reports each crew's complete environment: restored,
+	// rebuilt (architecture or missing layers: data back, environment
+	// rebuilt from the crew image) or skipped, with the reason and what
+	// was not carried over for safety. On a dry run: what would happen.
+	Environments        []EnvironmentOutcome
 	Manifest            *Manifest
 	RestoredWs          string
 	RestoredWorkspaceID string // new CUID when --as-workspace remapped IDs
@@ -207,6 +222,20 @@ type RestoreResult struct {
 	// by-email-reconciled user row as short — see expectedInsertCounts's
 	// doc comment for why those two are excluded rather than reported.
 	RowsInsertedShortfalls []TableRowCountMismatch
+	// AttachmentsRestored counts attachment blobs this restore wrote (or,
+	// on a dry run, would write); AttachmentsAlreadyPresent those whose
+	// identical file was already on the target; AttachmentsMissing the
+	// attachment rows' distinct blobs the bundle did not carry, so their
+	// downloads will 404; AttachmentsConflicts blobs whose path on the
+	// target already held DIFFERENT bytes — never overwritten, reported.
+	AttachmentsRestored       int
+	AttachmentsAlreadyPresent int
+	AttachmentsMissing        int
+	AttachmentsConflicts      int
+	// Incomplete lists what this restore could not land: the gaps the
+	// bundle's manifest already recorded, plus what the restore itself
+	// found (attachment blobs absent from the bundle or in conflict).
+	Incomplete []IncompleteItem
 }
 
 // warnSecurityLevelClamps emits the operator-facing warning for a restore
@@ -313,7 +342,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 
 	manifest, sealedReader, closeBundle, err := ReadBundleStream(f)
 	if err != nil {
-		return nil, err
+		return nil, WithConvertHint(opts.Path, manifest, err)
 	}
 	defer func() {
 		if closeBundle != nil {
@@ -357,6 +386,13 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	}
 	if opts.Replace && manifest.Scope != ScopeWorkspace {
 		return nil, fmt.Errorf("%w: --replace is only supported for workspace-scope bundles", ErrInvalidScope)
+	}
+	// A custom bundle carries only some categories. --replace wipes the whole
+	// workspace first, so replacing from one would delete everything the
+	// bundle does not hold (a memory-only bundle would take the chats, issues
+	// and routines with it).
+	if opts.Replace && manifest.Kind == KindCustom {
+		return nil, fmt.Errorf("%w: --replace is refused for a custom bundle (it carries only %s); restore it without --replace", ErrInvalidScope, strings.Join(manifest.Categories, ", "))
 	}
 
 	// Schema skew detection. The bundle records which DB migrations
@@ -737,6 +773,16 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// manifest's crew count and exit 0. An operator would read that as
 	// "my crews' files are back".
 	crewsRestored := 0
+	var envOutcomes []EnvironmentOutcome
+	defer func() {
+		if result == nil {
+			return
+		}
+		if envOutcomes == nil && opts.DryRun {
+			envOutcomes = restoreBundleEnvironments(ctx, opts, extracted, true)
+		}
+		result.Environments = envOutcomes
+	}()
 	dockerRestore := func(_ context.Context) error {
 		if skipDocker {
 			// The Logger callback is best-effort (a nil Logger from an
@@ -758,6 +804,11 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		if opts.DockerOps == nil || opts.ContainerFor == nil {
 			return nil
 		}
+		// Complete environments first: a managed crew's image comes back
+		// (and gets its crew image tag) before its container is looked
+		// for. Never fatal — each crew reports restored, rebuilt or
+		// skipped with its reason.
+		envOutcomes = restoreBundleEnvironments(ctx, opts, extracted, false)
 		// Preflight: every target container that ACTUALLY HAS DATA in
 		// the bundle must exist before we start writing. Crews whose
 		// manifest entries report WorkspaceIncluded=false AND
@@ -858,6 +909,47 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}
 		return nil
 	}
+	// attachmentsRestore lands the attachment-blobs/ section under the
+	// TARGET workspace id each restored row carries (after RemapIDs on a
+	// fork). Not gated on skipDocker for the same reason as memory blobs:
+	// these are host-side files, not container state. Runs inside PreCommit
+	// so a write failure rolls the DB insert back too.
+	var attachmentStats AttachmentRestoreStats
+	attachmentsRestore := func(ctx context.Context, dryRun bool) error {
+		st, err := RestoreAttachmentBlobs(ctx, opts.AttachmentRoot, extracted, extracted.DBDump, dryRun)
+		if err != nil {
+			return fmt.Errorf("backup: restore attachment files: %w", err)
+		}
+		attachmentStats = st
+		if opts.Logger != nil && (st.Restored > 0 || st.Missing > 0 || st.Conflicts > 0) {
+			verb := "restored"
+			if dryRun {
+				verb = "would restore"
+			}
+			opts.Logger(fmt.Sprintf("attachments: %s %d file(s), %d already present, %d missing from the bundle, %d left untouched because a different file was in the way",
+				verb, st.Restored, st.AlreadyPresent, st.Missing, st.Conflicts))
+		}
+		return nil
+	}
+	// restoreIncomplete is the report's list of gaps: what the manifest
+	// already recorded, plus what this restore found.
+	restoreIncomplete := func() []IncompleteItem {
+		out := append([]IncompleteItem(nil), manifest.Contents.Incomplete...)
+		// The manifest's attachment_missing item and the restore's own
+		// count describe the same files; keep the restore's (it also
+		// covers a target without attachment storage) when it has one.
+		restoreSide := attachmentStats.Incomplete(firstWorkspaceID(extracted.DBDump))
+		if len(restoreSide) > 0 {
+			kept := out[:0]
+			for _, it := range out {
+				if it.Kind != IncompleteAttachmentMissing {
+					kept = append(kept, it)
+				}
+			}
+			out = append(kept, restoreSide...)
+		}
+		return out
+	}
 	// #2009: compare what the decrypted payload actually carries against
 	// what the manifest recorded at create time — the same comparison
 	// Verify makes for an unencrypted bundle, run here unconditionally
@@ -919,6 +1011,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		warnDroppedColumns(opts.Logger, droppedColumns, columnsDropped, true)
 		warnIssueCountersMigrated(opts.Logger, issueCountersMigrated, true)
 		warnCapabilityTokensReminted(opts.Logger, capabilityTokensReminted, true)
+		if err := attachmentsRestore(ctx, true); err != nil {
+			return nil, err
+		}
 		return &RestoreResult{
 			Manifest:                  manifest,
 			RestoredWs:                firstWorkspaceSlug(extracted.DBDump),
@@ -948,6 +1043,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			// public links will arrive revoked" is exactly the kind of fact
 			// an operator wants before committing, not after.
 			CapabilityTokensReminted: capabilityTokensReminted,
+
+			AttachmentsRestored:       attachmentStats.Restored,
+			AttachmentsAlreadyPresent: attachmentStats.AlreadyPresent,
+			AttachmentsMissing:        attachmentStats.Missing,
+			AttachmentsConflicts:      attachmentStats.Conflicts,
+			Incomplete:                restoreIncomplete(),
 		}, nil
 	}
 
@@ -1085,6 +1186,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				if err := memoryBlobsRestore(ctx); err != nil {
 					return err
 				}
+				if err := attachmentsRestore(ctx, false); err != nil {
+					return err
+				}
 				return dockerRestore(ctx)
 			},
 			PreInsert: func(ctx context.Context, tx *sql.Tx) error {
@@ -1107,6 +1211,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		warnCapabilityTokensReminted(opts.Logger, capabilityTokensReminted, false)
 	} else {
 		if err := memoryBlobsRestore(ctx); err != nil {
+			return nil, err
+		}
+		if err := attachmentsRestore(ctx, false); err != nil {
 			return nil, err
 		}
 		if err := dockerRestore(ctx); err != nil {
@@ -1183,6 +1290,11 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			IssueCountersMigrated:     stats.IssueCountersMigrated,
 			PayloadRowCountMismatches: payloadMismatches,
 			RowsInsertedShortfalls:    rowsInsertedShortfalls,
+			AttachmentsRestored:       attachmentStats.Restored,
+			AttachmentsAlreadyPresent: attachmentStats.AlreadyPresent,
+			AttachmentsMissing:        attachmentStats.Missing,
+			AttachmentsConflicts:      attachmentStats.Conflicts,
+			Incomplete:                restoreIncomplete(),
 		}, fmt.Errorf("%w: 0 of %d rows inserted — every primary key collided with an existing row. Restore into a clean target instance, or supply --as-workspace to re-scope IDs (workspace scope only)", ErrNoOpRestore, stats.RowsSeen)
 	}
 
@@ -1209,6 +1321,11 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		JournalEntriesResigned:     journalChainResigned.Entries,
 		JournalCheckpointsResigned: journalChainResigned.Checkpoints,
 		CapabilityTokensReminted:   capabilityTokensReminted,
+		AttachmentsRestored:        attachmentStats.Restored,
+		AttachmentsAlreadyPresent:  attachmentStats.AlreadyPresent,
+		AttachmentsMissing:         attachmentStats.Missing,
+		AttachmentsConflicts:       attachmentStats.Conflicts,
+		Incomplete:                 restoreIncomplete(),
 	}, nil
 }
 

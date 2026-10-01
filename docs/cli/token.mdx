@@ -32,7 +32,7 @@ crewship token <subcommand> [flags]
 
 ## `crewship token list`
 
-`GET /api/v1/auth/cli-tokens`. Columns: `ID` (first 12 chars), `NAME`, `CREATED`, `LAST USED`, `STATUS`.
+`GET /api/v1/auth/cli-tokens`. Columns: `ID` (first 12 chars), `NAME`, `SCOPES` (comma-separated, or `all` for a token that carries your full role), `CREATED`, `LAST USED`, `STATUS`.
 
 ```bash
 crewship token list

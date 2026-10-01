@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/quiesce"
+
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -95,6 +97,16 @@ func (c *Controller) store(ctx context.Context, workspace string, s Status) erro
 // Statuses returns this installation's observations for one workspace. Rows
 // are instance-wide, but workspace admins must not see other tenants' crews.
 func (c *Controller) Statuses(ctx context.Context, workspace string) ([]Status, error) {
+	return c.statuses(ctx, &workspace)
+}
+
+// InstanceStatuses returns all observations owned by this installation. Its
+// caller must enforce instance-admin authorization; workspace reads use Statuses.
+func (c *Controller) InstanceStatuses(ctx context.Context) ([]Status, error) {
+	return c.statuses(ctx, nil)
+}
+
+func (c *Controller) statuses(ctx context.Context, workspace *string) ([]Status, error) {
 	out := []Status{}
 	if c == nil || c.DB == nil || c.InstanceID == "" {
 		return out, nil
@@ -108,7 +120,13 @@ func (c *Controller) Statuses(ctx context.Context, workspace string) ([]Status, 
 	if t, parseErr := time.Parse(time.RFC3339, scan.observedAt); err == nil && parseErr == nil {
 		fresh = scan.complete && !t.Before(c.BootAt) && time.Since(t) <= StaleAfter && !c.lastScanFailed.Load()
 	}
-	rows, err := c.DB.QueryContext(ctx, `SELECT crew_id,state,complete,remaining,unattributed,error_code FROM resource_cleanup_status WHERE instance_id=? AND workspace_id=? ORDER BY crew_id`, c.InstanceID, workspace)
+	query := `SELECT crew_id,state,complete,remaining,unattributed,error_code FROM resource_cleanup_status WHERE instance_id=?`
+	args := []any{c.InstanceID}
+	if workspace != nil {
+		query += ` AND workspace_id=?`
+		args = append(args, *workspace)
+	}
+	rows, err := c.DB.QueryContext(ctx, query+` ORDER BY crew_id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +211,16 @@ func (c *Controller) Tick(ctx context.Context) {
 	if c == nil || c.DB == nil || c.InstanceID == "" || c.Connect == nil {
 		return
 	}
+	// Docker removal and its mount evidence are one background writer. A
+	// backup closes admission and drains any stop/remove already in flight
+	// before copying the database and container files. A new tick stays due
+	// while admission is closed; it resumes on the next scheduled scan.
+	writer, ok := quiesce.Enter(ctx)
+	if !ok {
+		return
+	}
+	defer writer.Leave()
+	ctx = writer.Context()
 	rows, err := c.DB.QueryContext(ctx, `SELECT id,workspace_id FROM crews WHERE deleted_at IS NOT NULL`)
 	if err != nil {
 		c.invalidate(ctx, "owner_inventory_failed")
@@ -243,6 +271,12 @@ func (c *Controller) Tick(ctx context.Context) {
 		start = c.nextOffset % len(list)
 	}
 	for pos := 0; pos < len(list); pos++ {
+		// Let a backup copy between candidates, rather than holding its drain
+		// up for the entire removal backlog. Never yield halfway through a
+		// candidate's mount evidence, owner checks and stop/remove.
+		if err := quiesce.Yield(ctx); err != nil {
+			return
+		}
 		x := list[(start+pos)%len(list)]
 		s, ok := states[x.CrewID]
 		if !ok {

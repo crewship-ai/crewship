@@ -41,6 +41,13 @@ import { EgressAllowlistAction } from "./egress-allowlist-action"
 import { shortenId } from "./ids"
 import { ChatJumpLink } from "./chat-jump-link"
 
+/** A group colour as text. The palette is tuned to glow on the dark ground;
+ * as 10px type on the light theme it measured under AA. Pulling it toward the
+ * foreground keeps the hue and passes on both (the icon keeps the pure hue). */
+function groupInk(color: string): string {
+  return `color-mix(in oklch, ${color} 62%, var(--foreground))`
+}
+
 /**
  * Row grid, left to right:
  *
@@ -389,7 +396,7 @@ const LogRow = memo(function LogRow({
         <TypeIcon className="h-3 w-3 shrink-0" style={{ color: GROUP_COLOR[grp] }} />
         {/* Group membership is otherwise carried by colour alone. */}
         <span className="sr-only">{GROUP_LABEL[grp]} group</span>
-        <span className="font-mono text-[10px] truncate" style={{ color: GROUP_COLOR[grp] }}>
+        <span className="font-mono text-[10px] truncate" style={{ color: groupInk(GROUP_COLOR[grp]) }}>
           {entry.entry_type}
         </span>
       </span>
@@ -407,7 +414,7 @@ const LogRow = memo(function LogRow({
         aria-hidden
       >
         <span className="tabular-nums">{tsLabel}</span>
-        <span style={{ color: GROUP_COLOR[grp] }} className="truncate">{entry.entry_type}</span>
+        <span style={{ color: groupInk(GROUP_COLOR[grp]) }} className="truncate">{entry.entry_type}</span>
         {agent?.name && <span className="truncate">· {agent.name}</span>}
         {crew?.name && <span className="truncate">· {crew.name}</span>}
       </span>

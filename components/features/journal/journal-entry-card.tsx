@@ -308,7 +308,7 @@ function ContextChips({
         // use-crews-selection matches; an id there gets cleared on arrival.
         <Link
           href={`/crews?agent=${encodeURIComponent(agent.slug)}`}
-          className="inline-flex items-center gap-1 rounded border border-border/60 bg-card px-1.5 py-0.5 text-[10px] text-foreground/80 hover:bg-white/[0.04] transition-colors"
+          className="inline-flex items-center gap-1 rounded border border-border/60 bg-card px-1.5 py-0.5 text-[10px] text-foreground/80 hover:bg-foreground/[0.04] transition-colors"
         >
           <User className="h-3 w-3 opacity-60" />
           {agent.name}

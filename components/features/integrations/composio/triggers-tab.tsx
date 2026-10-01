@@ -101,7 +101,7 @@ export function TriggersTab({
       </p>
 
       {/* Active instances */}
-      <div className="rounded-xl border border-white/10 bg-card p-3">
+      <div className="rounded-xl border border-foreground/10 bg-card p-3">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Active triggers
         </div>
@@ -119,7 +119,7 @@ export function TriggersTab({
             {active.map((t) => (
               <div
                 key={t.id}
-                className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-2.5 py-1.5 text-[12px]"
+                className="flex items-center justify-between gap-3 rounded-lg border border-foreground/[0.06] bg-foreground/[0.02] px-2.5 py-1.5 text-[12px]"
               >
                 <span className="font-mono">{t.trigger_name}</span>
                 <span className="font-mono text-[11px] text-muted-foreground">{t.user_id}</span>
@@ -144,7 +144,7 @@ export function TriggersTab({
           value={toolkit}
           onChange={(e) => setToolkit(e.target.value)}
           placeholder="Filter by toolkit (gmail…)"
-          className="w-48 rounded-lg border border-white/10 bg-card px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
+          className="w-48 rounded-lg border border-foreground/10 bg-card px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
         />
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -152,7 +152,7 @@ export function TriggersTab({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search trigger types…"
-            className="w-56 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
+            className="w-56 rounded-lg border border-foreground/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
           />
         </div>
       </div>
@@ -164,7 +164,7 @@ export function TriggersTab({
       ) : types.length === 0 ? (
         <EmptyHint text="No trigger types match." />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-white/10 bg-card">
+        <div className="overflow-hidden rounded-xl border border-foreground/10 bg-card">
           {/* Clipped by the rounded wrapper on a narrow screen without this. */}
           <div className="overflow-x-auto">
           <table className="w-full border-collapse">
@@ -182,7 +182,7 @@ export function TriggersTab({
             </thead>
             <tbody>
               {types.map((t) => (
-                <tr key={t.slug} className="border-t border-white/[0.06]">
+                <tr key={t.slug} className="border-t border-foreground/[0.06]">
                   <td className="px-3 py-2.5">
                     <span className="flex items-center gap-2">
                       <ToolkitIcon toolkit={t.toolkit} size={16} />
@@ -269,7 +269,7 @@ function TriggerModal({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="block max-w-md rounded-xl border-white/10 bg-card shadow-2xl sm:max-w-md">
+      <DialogContent className="block max-w-md rounded-xl border-foreground/10 bg-card shadow-2xl sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-base">Enable trigger</DialogTitle>
           <DialogDescription className="text-xs leading-relaxed">
@@ -286,7 +286,7 @@ function TriggerModal({
               <select
                 value={users.includes(userId) ? userId : ""}
                 onChange={(e) => setUserId(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
+                className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
               >
                 <option value="">— enter a user id —</option>
                 {users.map((u) => (
@@ -303,7 +303,7 @@ function TriggerModal({
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
               placeholder="e.g. alice@acme.com"
-              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
+              className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
             />
           </div>
         </div>

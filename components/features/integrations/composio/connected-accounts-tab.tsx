@@ -78,7 +78,7 @@ export function ConnectedAccountsTab({
       ) : (
         <div className="space-y-2">
           {data.users.map((u) => (
-            <div key={u.user_id} className="rounded-xl border border-white/10 bg-card p-3">
+            <div key={u.user_id} className="rounded-xl border border-foreground/10 bg-card p-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 font-mono text-xs text-foreground/90 truncate">
                   {u.user_id}
@@ -100,14 +100,14 @@ export function ConnectedAccountsTab({
                   duplicates and long slugs read top-to-bottom instead of
                   wrapping unpredictably as inline pills. Reuses the bordered-
                   rows pattern from the access editor's granted-apps list. */}
-              <div className="mt-2 overflow-hidden rounded-lg border border-white/10">
+              <div className="mt-2 overflow-hidden rounded-lg border border-foreground/10">
                 {u.connected_accounts.map((a) => {
                   const pending = busy[a.id]
                   return (
                     <div
                       key={a.id}
                       data-testid={`account-row-${a.id}`}
-                      className="flex items-center gap-3 border-t border-white/[0.06] px-3 py-2 first:border-t-0"
+                      className="flex items-center gap-3 border-t border-foreground/[0.06] px-3 py-2 first:border-t-0"
                     >
                       <span className="flex min-w-0 flex-1 items-center gap-2 text-[13px]">
                         <ToolkitIcon toolkit={a.toolkit} size={16} />
@@ -116,7 +116,7 @@ export function ConnectedAccountsTab({
                         </span>
                       </span>
                       <StatusDot status={a.status} />
-                      <span className="flex shrink-0 items-center gap-1 border-l border-white/10 pl-2.5">
+                      <span className="flex shrink-0 items-center gap-1 border-l border-foreground/10 pl-2.5">
                         <AccountAction
                           label="Refresh"
                           onClick={() => act(a.id, "refresh")}
