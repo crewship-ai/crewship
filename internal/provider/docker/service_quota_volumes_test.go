@@ -46,13 +46,13 @@ func (*fakeQuotaCatalog) Recover(context.Context) error { return nil }
 func TestQuotaServiceUnavailableNeverUsesLegacyStorage(t *testing.T) {
 	svc := provider.CrewService{Name: "database", Image: "alpine:3", QuotaEnforced: true, Volumes: []provider.CrewServiceVolume{{Name: "data", Mount: "/data", QuotaBytes: 64 << 20}}}
 	for _, catalog := range []quota.Catalog{nil, &fakeQuotaCatalog{unavailable: true}} {
-		calls := 0
-		p := newCovProvider(t, Config{QuotaCatalog: catalog}, func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(500) })
+		daemon := newFakeQuotaDaemon(t)
+		p := newCovProvider(t, Config{QuotaCatalog: catalog}, daemon.ServeHTTP)
 		if _, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", &svc); err == nil {
 			t.Fatal("missing quota helper permitted service")
 		}
-		if calls != 0 {
-			t.Fatal("quota denial touched Docker or created unlimited volume")
+		if daemon.mutatingCalls() != 0 {
+			t.Fatal("quota denial mutated Docker or created unlimited volume")
 		}
 	}
 }
@@ -64,6 +64,8 @@ func TestQuotaServiceOwnedVolumeAndReadOnlyRoot(t *testing.T) {
 	p := newCovProvider(t, Config{QuotaCatalog: catalog}, func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
+		case strings.HasSuffix(path, "/info"):
+			_, _ = w.Write([]byte(`{"SwapLimit":true,"PidsLimit":true}`))
 		case strings.Contains(path, "/volumes/") && r.Method == http.MethodGet:
 			http.Error(w, `{"message":"not found"}`, 404)
 		case strings.HasSuffix(path, "/volumes/create"):

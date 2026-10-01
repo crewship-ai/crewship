@@ -31,14 +31,20 @@ func (p *Provider) quotaServiceVolumes(ctx context.Context, crewID, crewSlug str
 	if err := validateQuotaService(svc); err != nil {
 		return nil, err
 	}
-	if !svc.QuotaEnforced || len(svc.Volumes) == 0 {
-		// A quota service without persistent volumes needs only the
-		// Docker-enforced profile, not the host helper.
+	if !svc.QuotaEnforced {
 		return nil, nil
 	}
+	// A quota service without persistent volumes needs only the
+	// Docker-enforced profile, not the host helper.
 	catalog, ok := p.cfg.QuotaCatalog.(quota.ReferenceCatalog)
-	if !ok || catalog == nil {
+	if len(svc.Volumes) > 0 && (!ok || catalog == nil) {
 		return nil, quota.ErrUnavailable
+	}
+	if err := p.checkQuotaHostSupport(ctx); err != nil {
+		return nil, err
+	}
+	if len(svc.Volumes) == 0 {
+		return nil, nil
 	}
 	mounts := make([]mount.Mount, 0, len(svc.Volumes))
 	for _, v := range svc.Volumes {

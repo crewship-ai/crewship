@@ -1,10 +1,14 @@
 package docker
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 )
 
 const serviceQuotaPolicyVersion = "service-quotas-v1"
@@ -62,6 +66,32 @@ func checkServiceRestartPolicy(h *container.HostConfig, managed bool) error {
 	}
 	if managed && (h.RestartPolicy.Name != container.RestartPolicyDisabled || h.RestartPolicy.MaximumRetryCount != 0) {
 		return fmt.Errorf("managed service automatic restart drift")
+	}
+	return nil
+}
+
+var errQuotaHostUnsupported = errors.New("docker host cannot enforce service quotas")
+
+// checkQuotaHostSupport refuses quota services on daemons without swap or
+// PID cgroup accounting. Docker accepts the limits there but records -1, so
+// the drift audit would fail on every ensure and recreate the service in a
+// loop; refusing up front also avoids allocating disk for a service that
+// cannot run.
+func (p *Provider) checkQuotaHostSupport(ctx context.Context) error {
+	info, err := p.client.Info(ctx, client.InfoOptions{})
+	if err != nil {
+		return fmt.Errorf("read docker host capabilities: %w", err)
+	}
+	var missing []string
+	if !info.Info.SwapLimit {
+		missing = append(missing, "swap limit (SwapLimit)")
+	}
+	if !info.Info.PidsLimit {
+		missing = append(missing, "PID limit (PidsLimit)")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("%w: docker info reports no %s support; enable the cgroup controllers (for example swapaccount=1 on cgroup v1) or run this service without quota_enforced",
+			errQuotaHostUnsupported, strings.Join(missing, " or "))
 	}
 	return nil
 }
