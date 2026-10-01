@@ -194,8 +194,9 @@ func TestAudienceRemovalAndRegrantCannotRestoreOldState(t *testing.T) {
 	if _, err := s.DB.Exec(`UPDATE chats SET visibility='group' WHERE id='c1'; INSERT INTO chat_participants(chat_id,user_id,role) VALUES('c1','h2','member')`); err != nil {
 		t.Fatal(err)
 	}
-	policy(t, s, "h2", Right{"agent", "a", "run"})
-	handle, before, err := s.Admit(t.Context(), "h2", "w", "a", "c1", "", nil)
+	policy(t, s, "h1", Right{"agent", "a", "chat"})
+	policy(t, s, "h2", Right{"agent", "a", "chat"})
+	handle, before, err := s.AdmitChat(t.Context(), "h2", "w", "a", "c1", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +206,7 @@ func TestAudienceRemovalAndRegrantCannotRestoreOldState(t *testing.T) {
 	if _, err = s.Resolve(t.Context(), handle); !errors.Is(err, ErrDenied) {
 		t.Fatalf("removed participant's attempt revived: %v", err)
 	}
-	_, after, err := s.Admit(t.Context(), "h2", "w", "a", "c1", "", nil)
+	_, after, err := s.AdmitChat(t.Context(), "h2", "w", "a", "c1", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

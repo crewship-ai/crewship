@@ -86,6 +86,7 @@ func collectAgentStream(src chatEventSource, timeout time.Duration) collectResul
 
 	var res collectResult
 	var fullText []byte
+	var wait provisioningWait
 	for {
 		select {
 		case <-deadline:
@@ -102,7 +103,14 @@ func collectAgentStream(src chatEventSource, timeout time.Duration) collectResul
 			if err != nil || event == nil {
 				continue
 			}
+			wait.observe(event)
 			switch event.Type {
+			case wsproto.CrewProvisioningEventType:
+				if failed, notice := provisioningFailed(event); failed {
+					res.StreamErr = notice
+					res.Text = string(fullText)
+					return res
+				}
 			case "text":
 				fullText = append(fullText, event.Content...)
 			case "error":
@@ -113,6 +121,9 @@ func collectAgentStream(src chatEventSource, timeout time.Duration) collectResul
 				res.Text = string(fullText)
 				return res
 			case "done":
+				if wait.deferredDone() {
+					continue // the deferral's done; the replayed run follows
+				}
 				res.GotDone = true
 				res.Text = string(fullText)
 				return res
@@ -143,4 +154,52 @@ func collectAgentStream(src chatEventSource, timeout time.Duration) collectResul
 			}
 		}
 	}
+}
+
+// provisioningWait tracks a send the server parked behind an environment
+// build. The chat bridge answers such a send with a crew_provisioning event
+// and a done, attaches the message to the build job, and replays it on the
+// same session channel once the image is ready — that replay is the real run
+// and ends with its own done or error. Before this existed `crewship run`
+// treated the first done as the end and printed an empty answer while the
+// agent ran unseen (cache image evicted, first run of a new crew).
+type provisioningWait struct {
+	deferred bool // a crew_provisioning event arrived
+	ran      bool // a run event arrived after it
+}
+
+func (w *provisioningWait) observe(event *cli.ChatEventPayload) {
+	switch event.Type {
+	case wsproto.CrewProvisioningEventType:
+		w.deferred, w.ran = true, false
+	case "done", "error", wsproto.AgentBusyEventType:
+	default:
+		if w.deferred {
+			w.ran = true
+		}
+	}
+}
+
+// deferredDone reports whether a done only closes the deferral. A done that
+// follows any event of the replayed run is that run's own terminal frame.
+func (w *provisioningWait) deferredDone() bool {
+	if w.deferred && !w.ran {
+		w.deferred = false
+		return true
+	}
+	return false
+}
+
+// provisioningFailed reports a crew_provisioning event whose build never
+// started: nothing will replay the message, so waiting would hang.
+func provisioningFailed(event *cli.ChatEventPayload) (bool, string) {
+	meta, _ := event.Metadata.(map[string]any)
+	if status, _ := meta["status"].(string); status != "failed" {
+		return false, ""
+	}
+	notice := sanitizeTerminal(event.Content)
+	if notice == "" {
+		notice = "the environment build could not be started"
+	}
+	return true, notice
 }

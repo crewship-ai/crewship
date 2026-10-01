@@ -138,6 +138,11 @@ var allowList = []Endpoint{
 		Why: "resumes a crew after the backup snapshot",
 	},
 	{
+		Method: "ContainerUpdate", HTTP: "POST /containers/{id}/update", ProxyVars: []string{"CONTAINERS", proxyVarPOST},
+		Tier: TierCore, Packages: []string{"internal/provider/docker"},
+		Why: "applies managed service resource bounds before startup and recovery",
+	},
+	{
 		Method: "ContainerWait", HTTP: "POST /containers/{id}/wait", ProxyVars: []string{"CONTAINERS", proxyVarPOST},
 		Tier: TierCore, Packages: []string{"internal/provider/docker"},
 		Why: "blocks on one-shot helper containers (secrets sweep, image cache warm)",

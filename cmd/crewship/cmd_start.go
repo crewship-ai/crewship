@@ -47,6 +47,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
 	"github.com/crewship-ai/crewship/internal/quartermaster"
 	"github.com/crewship-ai/crewship/internal/quiesce"
+	"github.com/crewship-ai/crewship/internal/quota"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/retention"
@@ -394,6 +395,11 @@ var startCmd = &cobra.Command{
 		}
 
 		srv := server.New(cfg, logger, deps)
+		closeRestricted, err := startRestrictedTextRuntime(ctx, db.DB, db.Path(), srv.APIRouter(), noDocker, logger)
+		if err != nil {
+			return fmt.Errorf("initialize restricted text runtime: %w", err)
+		}
+		defer closeRestricted()
 
 		resolver := chatbridge.NewIPCResolver(cfg.Auth.NextjsURL, cfg.Auth.InternalToken, logger)
 		bridge := chatbridge.New(
@@ -1574,7 +1580,12 @@ type containerProviderCandidate struct {
 // value, or the providers' `if gate == nil` short-circuit stops working and
 // every start is routed through a controller that is not there.
 func dockerProviderConfig(cfg *config.Config, gate provider.AdmissionGate) docker.Config {
+	var catalog quota.Catalog
+	if cfg.Container.QuotaHelperSocket != "" {
+		catalog = quota.Client{Socket: cfg.Container.QuotaHelperSocket, Namespace: cfg.Container.QuotaHelperNamespace}
+	}
 	return docker.Config{
+		QuotaCatalog:      catalog,
 		RuntimeImage:      cfg.Container.RuntimeImage,
 		DefaultRuntime:    cfg.Container.DefaultRuntime,
 		Network:           cfg.Container.Network,

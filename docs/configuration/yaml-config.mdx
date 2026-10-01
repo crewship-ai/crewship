@@ -50,6 +50,12 @@ container:
   default_runtime: "runc"       # "runc" | "runsc" | "kata-runtime" | "sysbox-runc"
   network: "crewship-agents"    # Docker bridge network name
   container_prefix: ""          # Name prefix for multi-instance isolation
+  quota_helper_socket: ""       # Root quota helper socket; empty = quota services
+                                # with volumes cannot start. Env override:
+                                # CREWSHIP_QUOTA_HELPER_SOCKET
+  quota_helper_namespace: ""    # Immutable database identity in the helper; set
+                                # together with the socket. Env override:
+                                # CREWSHIP_QUOTA_HELPER_NAMESPACE
   default_memory_mb: 8192       # Default container memory limit
   default_cpus: 2.0             # Default container CPU limit
   sidecar_enabled: false        # Enable sidecar proxy for credential injection

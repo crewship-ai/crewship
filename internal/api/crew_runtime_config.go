@@ -471,6 +471,9 @@ func ResolveManagedService(ctx context.Context, db *sql.DB, crewID, wsID, name s
 		if err != nil || missing {
 			return provider.CrewConfig{}, fmt.Errorf("service configuration or credentials unavailable")
 		}
+		for i := range services {
+			services[i].ControllerManaged = true
+		}
 		return provider.CrewConfig{ID: crewID, Slug: slug, Services: services}, nil
 	}
 	return provider.CrewConfig{}, fmt.Errorf("service no longer declared")

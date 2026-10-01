@@ -102,7 +102,7 @@ const actionRetryAfterSeconds = 5
 
 // dispatchRequest is the ENTIRE wire format of a click.
 //
-// One field. There is no `routine`, no `pipeline`, no `verb`, no `params`, and
+// Declared inputs plus an optional restricted-client intent fingerprint. There is no `routine`, no `pipeline`, no `verb`, no `params`, and
 // none of them is coming — §8b.2 is a statement about this struct. A body that
 // carries any of those names is decoded into nothing and the declared routine
 // runs, because the field it would have to land in does not exist.
@@ -112,7 +112,8 @@ const actionRetryAfterSeconds = 5
 // (an older server tolerating a newer client's field), not inside the one map a
 // caller controls.
 type dispatchRequest struct {
-	Inputs map[string]any `json:"inputs"`
+	Inputs             map[string]any `json:"inputs"`
+	ExpectedIntentHash string         `json:"expected_intent_hash,omitempty"`
 }
 
 // actionWire is one declared action as the API serves it. It is the spec's own
@@ -362,6 +363,14 @@ func (h *PageHandler) DispatchAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authority := pipeline.PageActionInvocation{PageID: res.page.ID, PanelID: panelID, ActionID: actionID, PipelineID: pipelineID, ActionDigest: pipeline.PageActionDigest(res.action)}
+	if fence := pageApplicationFenceFrom(r.Context()); fence != nil {
+		authority.Publication = fence.version
+	}
+	if h.serveRestrictedPageWorkflow(w, r, authority, inputs, pipelineSlug) {
+		return
+	}
+
 	// Idempotency before the in-flight gate, deliberately: a genuine replay of a
 	// click that is still running must get its original receipt back, not the
 	// 429 that a SECOND, different click would correctly get.
@@ -407,7 +416,7 @@ func (h *PageHandler) DispatchAction(w http.ResponseWriter, r *http.Request) {
 		h.forgetActionKeys(r.Context(), wsID, pipelineID, keys)
 		return
 	}
-	authority := pipeline.PageActionInvocation{PageID: res.page.ID, PanelID: panelID, ActionID: actionID, PipelineID: pipelineID, ActionDigest: pipeline.PageActionDigest(res.action)}
+	authority = pipeline.PageActionInvocation{PageID: res.page.ID, PanelID: panelID, ActionID: actionID, PipelineID: pipelineID, ActionDigest: pipeline.PageActionDigest(res.action)}
 	if fence := pageApplicationFenceFrom(r.Context()); fence != nil {
 		authority.Publication = fence.version
 	}
@@ -570,6 +579,7 @@ func (h *PageHandler) collectActionInputs(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
+	*r = *r.WithContext(context.WithValue(r.Context(), restrictedPageIntentKey{}, body.ExpectedIntentHash))
 	inputs, err := action.ResolveInputs(body.Inputs)
 	if err != nil {
 		var ve *pages.ValidationError

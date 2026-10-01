@@ -169,7 +169,8 @@
 #                     SKIP-WAIVER(#2472 precedent): every CI lane that
 #                     builds the seed carries python3, so the guard is
 #                     honest where it fires and enforced where it matters.
-# 2026-10-01          145 -> 146. The Harbor backups branch (#2740) adds
+# 2026-09-30          145 -> 148. #2703: two root/unprivileged assertions and one forked-identity helper retain explicit platform waivers; physical acceptance uses opt-in build tags.
+# 2026-10-01          148 -> 149. The Harbor backups branch (#2740) adds
 #                     TestCopyTree_UnreadableFilesAreSkippedAndNamed's euid
 #                     guard in internal/backup/partial_failure_test.go —
 #                     mode 0000 cannot deny root, the same permanent platform
@@ -179,4 +180,4 @@
 #                     timing check is now a benchmark pair, and the
 #                     staging-cleanup test injects a regular file in place
 #                     of the store root, which fails for root too.
-146
+149

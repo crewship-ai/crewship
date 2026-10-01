@@ -3,6 +3,7 @@
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { PagesLayout } from "@/components/features/pages/pages-layout"
+import { RestrictedPages } from "@/components/features/pages/restricted-pages"
 
 // /pages — the Pages surface (docs/specs/pages.md §9b).
 //
@@ -13,7 +14,7 @@ import { PagesLayout } from "@/components/features/pages/pages-layout"
 //
 // Everything below the workspace gate lives in components/features/pages.
 export default function PagesPage() {
-  const { workspaceId, loading: wsLoading } = useWorkspace()
+  const { workspaceId, workspace, loading: wsLoading } = useWorkspace()
 
   if (wsLoading || !workspaceId) {
     return (
@@ -27,5 +28,5 @@ export default function PagesPage() {
     )
   }
 
-  return <PagesLayout workspaceId={workspaceId} />
+  return workspace?.currentUserAccessMode === "restricted" ? <RestrictedPages key={workspaceId} workspaceId={workspaceId} /> : <PagesLayout workspaceId={workspaceId} />
 }

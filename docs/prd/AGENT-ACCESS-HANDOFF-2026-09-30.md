@@ -6,6 +6,53 @@ splněného PRD. Jde o Agent Access / Runtime, **nikoli UX Routines**.
 
 ## Aktualizace nástupce — 30. 9. 2026
 
+### Integrační stav v 11:49 UTC
+
+Práce pokračuje v `/tmp/crewship-1-runtime-wiring`, větev
+`feat/restricted-runtime-startup-2711`. Nová implementace dosud není nasazená
+na dev1. Historické výroky níže o nezapojeném chatu/CLI/rutinách popisují
+ranní stav, nikoli současný integrační strom.
+
+- Scoped kontext, lidské poznámky, vyhledávání, výstupní soubory a export
+  posledních 256 autorizovaných verzí mají implementaci a cílené testy.
+  Export není úplný historický export. Projektové soubory a jejich read-only
+  snapshot pro native runtime jsou další rozpracovaná dodávka.
+- Chat, CLI, lineární soukromé rutiny a Pages dispatch mají skutečné pozitivní
+  HTTP/Docker testy. Nativní Codex používá vlastní scratch, host broker,
+  připnutý sandbox a soukromé soubory. Nativní HTTP test prošel normálně
+  (13.549 s) i s race (64.071 s); raw logy jsou
+  `/tmp/crewship-1-native-http-live.log` a
+  `/tmp/crewship-1-native-http-live-race.log`.
+- C má implementované fyzické service kvóty, helper installer, namespace,
+  UI/CAS a skutečnou přejímku řadiče v oddělené QEMU VM včetně restartu
+  procesu, Dockeru a VM. Stop nepovolí automatické oživení; data zůstávají.
+  `/tmp/crewship-1-quota-controller-recovery-final.log` je pozitivní důkaz
+  pro syntetickou VM, nikoli instalaci helperu na produkčním hostu.
+- F dodávka `2d30c4910` přidává explicitní soukromý preflight projektového
+  přiřazeného úkolu: přesný aktuální zdroj, budget/capacity, atomické enqueue,
+  vlastní dedup receipt a legacy busy fence. Po nejistém failed/canceled
+  výsledku vyžaduje explicitní reconciliation; není hotový automatický retry
+  ani srovnávací benchmark celého heartbeat systému.
+- E explicitní delegace má classified provenance primitive `46cb15ff6`;
+  vnořený graf, vlastní provider sloty, přesné výstupní proof a catalog/UI
+  stále vznikají. Primitive sám neznamená zapojenou delegovanou inferenci.
+- D podepsaná identity proof a atomic refresh guard `0c5510e90` mají cílené
+  testy; inference přes login zůstává zablokovaná. Legacy login není důkaz
+  SIWC entitlement. Není doložen předem pevný finanční strop tohoto režimu.
+  API-key broker rezervuje před voláním; souběh trusted Middleware/sidecar
+  nad společným hard budget je další otevřená průřezová brána.
+- Celý poslední integrační strom zatím nemá finální kompletní Go/vet,
+  frontend build, browser a dev1 přejímku. Browser pokus 11:45 skončil
+  nedostatkem paměti hostu (kernel ukončil Chromium a lint), není PASS.
+  Náročné kontroly nyní běží sériově s omezenou pamětí.
+- #2723 po aktualizaci main má head `2dfeb1c819a38ab749a6798f65fb9c4f8555a446`.
+  Skutečné review tohoto headu je APPROVED; v 11:49 ještě dobíhá API race CI.
+  Předchozí zelený head nebyl sloučen, protože byl za main. Merge nebyl
+  obejit administrátorskou výjimkou.
+
+**Release 1.0 nadále není hotový ani přijatý.** Pozitivní důkazy jednotlivých
+dodávek nenahrazují koncovou přejímku finálního stejného zdroje.
+
 Níže je historické předání ze 07:49 UTC. Nástupce převzal claim #2711
 a opravil timestamp lint v `provider_linux_test.go` pomocí
 `tsformat.Format(expires)`; test stále porovnává přesnou deadline včetně nanos.

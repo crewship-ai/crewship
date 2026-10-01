@@ -38,6 +38,8 @@ type Credential struct{ ID, Env, File string }
 type Plan struct {
 	Profile                                                                 string // empty is the existing offline prototype
 	Network                                                                 *NetworkPlan
+	NativeSandbox                                                           string               // exact host-owned native sandbox policy fingerprint
+	NativeInputs                                                            *NativeInputManifest // exact explicitly selected host-frozen source snapshot
 	Workspace, Principal, Agent, Scope, Attempt, Origin, OriginID, Revision string
 	PrincipalKind                                                           string
 	Generation                                                              uint64
@@ -50,6 +52,9 @@ type Plan struct {
 }
 
 func (p Plan) validate(now time.Time) error {
+	if p.NativeInputs != nil && p.NativeSandbox == "" {
+		return ErrDenied
+	}
 	if err := p.validateNetwork(); err != nil {
 		return err
 	}

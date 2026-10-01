@@ -437,6 +437,7 @@ func NewServer(cfg ServerConfig) *Server {
 		AllowPrivate:       allowPrivateEndpoints,
 		OnEgress:           s.buildEgressObserver(),
 		OnLLMCall:          s.buildLLMCallObserver(),
+		OnLLMAdmission:     s.buildLLMAdmission(),
 		OnGraceFallback:    s.buildGraceFallbackObserver(),
 		ResolveLLMIdentity: s.llmRouteIdentity,
 		BillingMode:        billingMode,

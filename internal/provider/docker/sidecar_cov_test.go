@@ -223,6 +223,10 @@ func TestEnsureCrewServices_ReusesMatchingRunningSidecar(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/cid-redis/json"):
+			hc := &container.HostConfig{}
+			applyServiceQuotas(hc)
+			_ = json.NewEncoder(w).Encode(map[string]any{"Id": "cid-redis", "HostConfig": hc})
 		case strings.HasSuffix(r.URL.Path, "/containers/json"):
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
@@ -276,6 +280,10 @@ func TestEnsureCrewServices_StartsStoppedMatchingSidecar(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/cid-redis/json"):
+			hc := &container.HostConfig{}
+			applyServiceQuotas(hc)
+			_ = json.NewEncoder(w).Encode(map[string]any{"Id": "cid-redis", "HostConfig": hc})
 		case strings.HasSuffix(r.URL.Path, "/containers/json"):
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
@@ -322,6 +330,10 @@ func TestEnsureSidecar_StartExistingError(t *testing.T) {
 
 	p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/cid-redis/json"):
+			hc := &container.HostConfig{}
+			applyServiceQuotas(hc)
+			_ = json.NewEncoder(w).Encode(map[string]any{"Id": "cid-redis", "HostConfig": hc})
 		case strings.HasSuffix(r.URL.Path, "/containers/json"):
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
@@ -881,7 +893,9 @@ func TestEnsureCrewServices_HealthcheckGate(t *testing.T) {
 				_, _ = w.Write([]byte(`{"Volumes":[],"Warnings":null}`))
 			case strings.Contains(path, "/containers/cid-redis/json"):
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"Id":"cid-redis","State":{"Running":true,"Health":{"Status":"` + healthStatus + `"}}}`))
+				hc := &container.HostConfig{}
+				applyServiceQuotas(hc)
+				_ = json.NewEncoder(w).Encode(map[string]any{"Id": "cid-redis", "HostConfig": hc, "State": map[string]any{"Running": true, "Health": map[string]string{"Status": healthStatus}}})
 			default:
 				w.WriteHeader(http.StatusInternalServerError)
 			}
@@ -1283,6 +1297,10 @@ func TestEnsureSidecar_IgnoresUnrelatedContainers(t *testing.T) {
 	hash := computeSidecarSpecHash(&svc)
 	p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/cid-redis/json"):
+			hc := &container.HostConfig{}
+			applyServiceQuotas(hc)
+			_ = json.NewEncoder(w).Encode(map[string]any{"Id": "cid-redis", "HostConfig": hc})
 		case strings.HasSuffix(r.URL.Path, "/containers/json"):
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]map[string]any{
@@ -1358,6 +1376,17 @@ func TestStopCrewService_OnlyStopsExactOwnedService(t *testing.T) {
 	p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/containers/json") {
 			_, _ = io.WriteString(w, `[{"Id":"owned","State":"running","Labels":{"crewship.crew-id":"crew-a","crewship.kind":"sidecar","crewship.svc":"redis"}},{"Id":"sibling","State":"running","Labels":{"crewship.crew-id":"crew-b","crewship.kind":"sidecar","crewship.svc":"redis"}},{"Id":"other-service","State":"running","Labels":{"crewship.crew-id":"crew-a","crewship.kind":"sidecar","crewship.svc":"postgres"}}]`)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/update") {
+			var body struct{ RestartPolicy container.RestartPolicy }
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.RestartPolicy.Name != container.RestartPolicyDisabled {
+				t.Fatal("missing durable stop policy")
+			}
+			if !strings.Contains(r.URL.Path, "/owned/") {
+				t.Fatal("foreign service restart updated")
+			}
+			_, _ = io.WriteString(w, `{}`)
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/stop") {

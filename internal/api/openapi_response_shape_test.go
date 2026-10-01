@@ -10,9 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
 
@@ -43,6 +45,22 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "RestrictedAgentProfile", pointer: "/components/schemas/RestrictedAgentProfile", value: restrictedAgentProfileResponse{}},
+	{name: "RestrictedOperationMode", pointer: "/components/schemas/RestrictedOperationMode", value: restrictedOperationModeResponse{}},
+	{name: "RestrictedChatMode", pointer: "/components/schemas/RestrictedChatMode", value: restrictedChatModeResponse{}},
+	{name: "RestrictedCLIContext", pointer: "/components/schemas/RestrictedCLIContext", value: restrictedCLIContextResponse{}},
+	{name: "RestrictedContextEntry", pointer: "/components/schemas/RestrictedContextEntry", value: access.ContextEntry{}},
+	{name: "RestrictedContextList", pointer: "/components/schemas/RestrictedContextList", value: restrictedContextListResponse{}},
+	{name: "RestrictedAttemptOutcome", pointer: "/components/schemas/RestrictedAttemptOutcome", value: access.Outcome{}},
+	{name: "RestrictedOutputFile", pointer: "/components/schemas/RestrictedOutputFile", value: access.FileVersion{}},
+	{name: "RestrictedOutputFiles", pointer: "/components/schemas/RestrictedOutputFiles", value: restrictedOutputFilesResponse{}},
+	{name: "RestrictedRoutine", pointer: "/components/schemas/RestrictedRoutine", value: restrictedworkflow.CatalogRoutine{}},
+	{name: "RestrictedRoutineInput", pointer: "/components/schemas/RestrictedRoutineInput", value: restrictedworkflow.CatalogInput{}},
+	{name: "RestrictedWorkflowResult", pointer: "/components/schemas/RestrictedWorkflowResult", value: restrictedworkflow.Result{}},
+	{name: "RestrictedPage", pointer: "/components/schemas/RestrictedPage", value: restrictedPage{}},
+	{name: "RestrictedPageAction", pointer: "/components/schemas/RestrictedPageAction", value: restrictedPageAction{}},
+	{name: "RestrictedPageInput", pointer: "/components/schemas/RestrictedPageInput", value: restrictedPageInput{}},
+	{name: "RestrictedPageWorkflowStatus", pointer: "/components/schemas/RestrictedPageWorkflowStatus", value: restrictedPageWorkflowStatusResponse{}},
 	{name: "ChatShareListResponse", pointer: "/components/schemas/ChatShareListResponse", value: chatShareListResponse{}},
 	{name: "ChatShareMessagesResponse", pointer: "/components/schemas/ChatShareMessagesResponse", value: chatShareMessagesResponse{}},
 	{name: "RoutineAccessMe", pointer: "/components/schemas/RoutineAccessMe", value: routineAccessMeResponse{}},

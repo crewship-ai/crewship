@@ -65,9 +65,10 @@ type ProviderLoginRefresher struct {
 	container provider.ContainerProvider
 	now       func() time.Time
 
-	mu       sync.Mutex
-	refresh  map[string]providerlogin.TokenRefresher // by provider
-	interval time.Duration
+	mu            sync.Mutex
+	refresh       map[string]providerlogin.TokenRefresher // by provider
+	interval      time.Duration
+	identityProof *providerlogin.CodexProofStore
 }
 
 // NewProviderLoginRefresher wires the production token endpoints. ctr may be
@@ -82,7 +83,8 @@ func NewProviderLoginRefresher(db *sql.DB, logger *slog.Logger, ctr provider.Con
 		refresh: map[string]providerlogin.TokenRefresher{
 			"OPENAI": providerlogin.NewOpenAIRefresher(nil),
 		},
-		interval: time.Minute,
+		interval:      time.Minute,
+		identityProof: providerlogin.NewCodexProofStore(db, nil),
 	}
 	if google := providerlogin.NewGoogleRefresher(nil); google != nil {
 		refresher.refresh["GOOGLE"] = google
@@ -370,6 +372,13 @@ func (r *ProviderLoginRefresher) Refresh(ctx context.Context, credID string, for
 // dead the moment the endpoint answered; a half-written row is a login that
 // can never refresh again, so all-or-nothing is the only acceptable shape.
 func (r *ProviderLoginRefresher) storeRotated(ctx context.Context, credID, expectedRefreshEnc string, res providerlogin.RefreshResult, now time.Time) (string, error) {
+	proof, err := r.identityProof.PrepareRotation(ctx, credID, expectedRefreshEnc, res)
+	if err != nil {
+		return "", err
+	}
+	if proof != nil {
+		res.ExpiresAt = proof.AccessExpiry()
+	}
 	accessEnc, err := encryption.Encrypt(res.AccessToken)
 	if err != nil {
 		return "", fmt.Errorf("encrypt access token: %w", err)
@@ -445,6 +454,9 @@ func (r *ProviderLoginRefresher) storeRotated(ctx context.Context, credID, expec
 	if err := RecordCredentialEventTx(ctx, tx, credID, AuditEventRefresh, "", "",
 		map[string]any{"outcome": "ok", "expires_at": expS}); err != nil {
 		return "", fmt.Errorf("audit refresh: %w", err)
+	}
+	if err := r.identityProof.CommitRotation(ctx, tx, credID, proof); err != nil {
+		return "", err
 	}
 	if err := tx.Commit(); err != nil {
 		return "", err

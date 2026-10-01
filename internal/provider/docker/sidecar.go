@@ -56,6 +56,8 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -64,6 +66,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/quota"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
@@ -126,7 +129,22 @@ func computeSidecarSpecHash(svc *provider.CrewService) string {
 		envPairs = append(envPairs, [2]string{k, svc.Env[k]})
 	}
 
-	vols := append([]provider.CrewServiceVolume(nil), svc.Volumes...)
+	// The digest is stored on every running service. A service that does
+	// not opt in to quotas must hash exactly as it did before quota fields
+	// existed, or the upgrade recreates it (and orphans image-declared
+	// anonymous volumes). New fields are therefore omitempty and appended.
+	// ControllerManaged is not part of the spec: its restart policy is
+	// corrected in place with ContainerUpdate.
+	type hashVolume struct {
+		Name       string
+		Mount      string
+		QuotaBytes int64 `json:",omitempty"`
+		Generation int64 `json:",omitempty"`
+	}
+	vols := make([]hashVolume, 0, len(svc.Volumes))
+	for _, v := range svc.Volumes {
+		vols = append(vols, hashVolume{Name: v.Name, Mount: v.Mount, QuotaBytes: v.QuotaBytes, Generation: v.Generation})
+	}
 	sort.Slice(vols, func(i, j int) bool {
 		if vols[i].Name != vols[j].Name {
 			return vols[i].Name < vols[j].Name
@@ -135,17 +153,23 @@ func computeSidecarSpecHash(svc *provider.CrewService) string {
 	})
 
 	payload := struct {
-		Command     []string
-		Env         [][2]string
-		Ports       []string
-		Volumes     []provider.CrewServiceVolume
-		Healthcheck *provider.CrewServiceHealthcheck
+		Command       []string
+		Env           [][2]string
+		Ports         []string
+		Volumes       []hashVolume
+		Healthcheck   *provider.CrewServiceHealthcheck
+		QuotaPolicy   string `json:",omitempty"`
+		QuotaEnforced bool   `json:",omitempty"`
 	}{
-		Command:     svc.Command,
-		Env:         envPairs,
-		Ports:       svc.Ports,
-		Volumes:     vols,
-		Healthcheck: svc.Healthcheck,
+		Command:       svc.Command,
+		Env:           envPairs,
+		Ports:         svc.Ports,
+		Volumes:       vols,
+		Healthcheck:   svc.Healthcheck,
+		QuotaEnforced: svc.QuotaEnforced,
+	}
+	if svc.QuotaEnforced {
+		payload.QuotaPolicy = serviceQuotaPolicyVersion
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -172,6 +196,17 @@ func readToDiscard(r io.Reader) (int64, error) {
 // label-based filter change touches one site.
 func volumeListOptions() client.VolumeListOptions {
 	return client.VolumeListOptions{}
+}
+
+// hasNamePrefix reports whether any of Docker's slash-prefixed container
+// names was minted under prefix.
+func hasNamePrefix(names []string, prefix string) bool {
+	for _, n := range names {
+		if strings.HasPrefix(strings.TrimPrefix(n, "/"), prefix+"-") {
+			return true
+		}
+	}
+	return false
 }
 
 // sidecarContainerName returns the docker container name for one sidecar:
@@ -348,6 +383,10 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 // stop + remove + recreate so apply is true sync for sidecars,
 // not just "fresh creates work."
 func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, svc *provider.CrewService) (string, error) {
+	quotaMounts, err := p.quotaServiceVolumes(ctx, crewID, crewSlug, svc)
+	if err != nil {
+		return "", fmt.Errorf("service quota catalog: %w", err)
+	}
 	name := p.sidecarContainerName(crewID, crewSlug, svc.Name)
 	desiredHash := computeSidecarSpecHash(svc)
 
@@ -364,6 +403,29 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 			}
 		}
 		if !matched {
+			// A crew rename changes the container name but not the quota
+			// volume, which is keyed by crew id. The old-name container
+			// still mounts it: replace it rather than start a second
+			// writer on the same filesystem.
+			if svc.QuotaEnforced && sidecarMatchesCrew(c.Labels, crewID, sidecarKind) && c.Labels[sidecarSvcLabel] == svc.Name && hasNamePrefix(c.Names, p.namePrefix()) {
+				// A restored or cloned database on the same daemon carries
+				// the same crew ids: replace only a container this
+				// installation provably labelled.
+				if p.cfg.InstanceID == "" {
+					return "", fmt.Errorf("quota service %q was renamed but this installation has no identity to prove it owns the old container %s; remove it by hand (volumes are kept)", svc.Name, c.ID)
+				}
+				if c.Labels[resourcelifecycle.InstanceLabel] != p.cfg.InstanceID {
+					continue
+				}
+				p.logger.Info("quota service renamed; replacing old container", "service", svc.Name, "container", c.ID)
+				timeout := 10
+				if _, err := p.client.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
+					p.logger.Debug("renamed quota service stop returned error", "service", svc.Name, "error", err)
+				}
+				if _, err := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); err != nil {
+					return "", fmt.Errorf("remove renamed quota service %q: %w", svc.Name, err)
+				}
+			}
 			continue
 		}
 
@@ -384,6 +446,37 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 			drift = fmt.Sprintf("image drift: %s → %s", c.Image, svc.Image)
 		} else if c.Labels[sidecarSpecHashLabel] != desiredHash {
 			drift = "spec drift (command/env/ports/volumes/healthcheck)"
+		}
+		// Services that did not opt in to quota enforcement keep exactly the
+		// pre-quota reuse rule (image + spec hash). Auditing them against the
+		// quota profile would recreate every existing service on upgrade and
+		// orphan image-declared anonymous volumes (an empty database).
+		var inspectedHost *container.HostConfig
+		if drift == "" && (svc.QuotaEnforced || svc.ControllerManaged) {
+			inspected, err := p.client.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
+			if err != nil {
+				return "", fmt.Errorf("inspect service runtime policy: %w", err)
+			}
+			inspectedHost = inspected.Container.HostConfig
+			if inspectedHost == nil {
+				return "", fmt.Errorf("inspect service runtime policy: HostConfig unavailable")
+			}
+		}
+		if drift == "" && svc.QuotaEnforced {
+			if err = checkServiceQuotaProfile(inspectedHost); err != nil {
+				drift = err.Error()
+			} else if err = checkQuotaMounts(inspectedHost.Mounts, quotaMounts); err != nil {
+				drift = err.Error()
+			}
+		}
+		if drift == "" && svc.ControllerManaged && checkServiceRestartPolicy(inspectedHost, true) != nil {
+			// The durable controller owns restarts. Correct the policy in
+			// place: recreating would discard the container's anonymous
+			// volumes for a change Docker can apply live.
+			policy := container.RestartPolicy{Name: container.RestartPolicyDisabled}
+			if _, err := p.client.ContainerUpdate(ctx, c.ID, client.ContainerUpdateOptions{RestartPolicy: &policy}); err != nil {
+				return "", fmt.Errorf("hand service restarts to the controller: %w", err)
+			}
 		}
 		if drift != "" {
 			p.logger.Info("sidecar drift; recreating", "service", svc.Name, "reason", drift)
@@ -420,7 +513,13 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 	// create so docker doesn't auto-create unowned anonymous
 	// volumes that we then can't clean up.
 	mounts := make([]mount.Mount, 0, len(svc.Volumes))
+	if svc.QuotaEnforced {
+		mounts = quotaMounts
+	}
 	for _, vol := range svc.Volumes {
+		if svc.QuotaEnforced {
+			break
+		}
 		fullName := p.sidecarVolumeName(crewID, crewSlug, vol.Name)
 		if err := p.ensureVolumeLabeled(ctx, fullName,
 			sidecarVolumeLabels(crewID, crewSlug, svc.Name, vol.Name)); err != nil {
@@ -514,6 +613,20 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 			NanoCPUs:  sidecarNanoCPUs,
 			PidsLimit: &pidsLimit,
 		},
+	}
+
+	// Exactly one restart owner: the durable controller for services with an
+	// intent row, Docker's on-failure policy for everything else — quota
+	// services included, since the controller never reconciles a service
+	// without an intent row.
+	if svc.ControllerManaged {
+		hostCfg.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyDisabled}
+	}
+	if svc.QuotaEnforced {
+		// Opt-in only: the bounded /tmp tmpfs is charged to the memory
+		// limit and hides the image's /tmp, and the log driver override
+		// replaces the operator's daemon default.
+		applyServiceQuotas(hostCfg)
 	}
 
 	// NetworkingConfig wires the sidecar to the crew bridge with a
@@ -692,6 +805,36 @@ func (p *Provider) RemoveCrewServiceVolumes(ctx context.Context, crewID, crewSlu
 		if !sidecarMatchesCrew(vol.Labels, crewID, sidecarVolumeKind) {
 			continue
 		}
+		if vol.Labels[quotaBytesLabel] != "" {
+			catalog, ok := p.cfg.QuotaCatalog.(quota.ReferenceCatalog)
+			if !ok || catalog == nil {
+				failures = append(failures, quota.ErrUnavailable)
+				continue
+			}
+			generation, err := strconv.ParseInt(vol.Labels[quotaGenerationLabel], 10, 64)
+			if err != nil {
+				failures = append(failures, quota.ErrDenied)
+				continue
+			}
+			key := quota.Key{Crew: crewID, Service: vol.Labels[sidecarSvcLabel], Volume: vol.Labels[sidecarVolNameLabel], Generation: generation}
+			// Helper first, Docker volume last. The labelled Docker volume
+			// is the durable record that this crew owns a quota image; it
+			// must outlive every helper step so a failure anywhere leaves
+			// something the next teardown finds and retries. Release and
+			// Remove are idempotent for an already-removed image.
+			if err = catalog.Release(ctx, key, vol.Name); err != nil {
+				failures = append(failures, fmt.Errorf("release quota volume %s: %w", vol.Name, err))
+				continue
+			}
+			if err = catalog.Remove(ctx, key); err != nil {
+				failures = append(failures, fmt.Errorf("remove quota image for %s: %w", vol.Name, err))
+				continue
+			}
+			if _, err = p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); err != nil {
+				failures = append(failures, fmt.Errorf("remove %s: %w", vol.Name, err))
+			}
+			continue
+		}
 		if _, err := p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); err != nil {
 			p.logger.Warn("remove sidecar volume failed", "volume", vol.Name, "error", err)
 			failures = append(failures, fmt.Errorf("remove %s: %w", vol.Name, err))
@@ -717,16 +860,23 @@ func (p *Provider) StopCrewService(ctx context.Context, crewID, crewSlug, name s
 		return err
 	}
 	timeout := 10
+	var failures []error
 	for _, c := range result.Items {
 		if !sidecarMatchesCrew(c.Labels, crewID, sidecarKind) || c.Labels[sidecarSvcLabel] != name {
 			continue
+		}
+		// Correct pre-upgrade containers too: a stopped process with the old
+		// on-failure policy could otherwise resume during Docker/host reboot.
+		policy := container.RestartPolicy{Name: container.RestartPolicyDisabled}
+		if _, err := p.client.ContainerUpdate(ctx, c.ID, client.ContainerUpdateOptions{RestartPolicy: &policy}); err != nil {
+			failures = append(failures, fmt.Errorf("disable service restart: %w", err))
 		}
 		if c.State != "running" && c.State != "restarting" {
 			continue
 		}
 		if _, err := p.client.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
-			return err
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }

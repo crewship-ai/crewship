@@ -1,0 +1,34 @@
+[Unit]
+Description=Crewship privileged persistent quota catalog (%i)
+Documentation=https://docs.crewship.ai
+After=local-fs.target
+Before=docker.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=root
+Group=root
+EnvironmentFile=/etc/crewship-quota/%i.env
+ExecStart=/usr/local/libexec/crewship-quota-helper --namespace %i --root /var/lib/crewship-quota/%i --socket /run/crewship-quota/%i/helper.sock --server-uid ${SERVER_UID} --capacity-bytes ${CAPACITY_BYTES} --headroom-bytes ${HEADROOM_BYTES}
+Restart=on-failure
+RestartSec=2
+TimeoutStartSec=120
+TimeoutStopSec=30
+UMask=0077
+RuntimeDirectory=crewship-quota/%i
+RuntimeDirectoryMode=0755
+# These must remain false: loop mounts must be visible to the Docker daemon,
+# and Remove inspects every process mount namespace before physical removal.
+PrivateMounts=no
+PrivateTmp=no
+PrivateDevices=no
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_CHOWN CAP_SYS_PTRACE CAP_MKNOD
+RestrictAddressFamilies=AF_UNIX
+RestrictRealtime=yes
+LockPersonality=yes
+# Do not add ProtectSystem/ReadWritePaths: they create a private mount namespace.
+
+[Install]
+WantedBy=multi-user.target

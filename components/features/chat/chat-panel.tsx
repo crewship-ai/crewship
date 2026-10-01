@@ -47,6 +47,10 @@ import { ChatComposer } from "./composer/chat-composer"
 import { checkChatMessageSize } from "./hooks/use-message-submit"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
 import { ArtifactPane } from "./artifact/artifact-pane"
+import { RestrictedFiles } from "./files/restricted-files"
+import { RestrictedMemory } from "./restricted-memory"
+import { Button } from "@/components/ui/button"
+import { ProjectInputPicker } from "./files/project-input-picker"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { isClientArtifactPath } from "./artifact/artifact-scope"
 import { relativeToAgent } from "./files/file-scope"
@@ -149,6 +153,7 @@ const CHAT_PALETTE_SHORTCUT = "⌘/"
 /** Cold-start rail cap: two rows at 1280px (PRD §5.1). The rest collapses
  *  into `+N`. Follow-ups keep their own cap of 3, inside FollowUps. */
 const EMPTY_STATE_CHIP_LIMIT = 6
+const NO_PROJECT_INPUTS: string[] = []
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
 export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, pageContextSlug, mobilePanel, onSend, onReplySettled, onNewConversation, onMobilePanelChange }: ChatPanelProps) {
@@ -226,7 +231,12 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     sessionLoadedFor.current = sessionId
   }, [sessionId])
 
+  const executionProfileRef = useRef<"trusted" | "restricted" | "pending">("pending")
   const openFilePreview = useCallback((path: string) => {
+    if (executionProfileRef.current !== "trusted") {
+      toast.info("Use Output files to download files from this conversation.")
+      return
+    }
     const relative = relativeToAgent(path, chatAgent?.crewId, chatAgent?.slug)
     if (!isClientArtifactPath(relative)) {
       toast.error("This file is not available in Artifacts")
@@ -307,7 +317,27 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     }
   }, [pageContextSlug])
 
+  const [preparingProjectInputs, setPreparingProjectInputs] = useState(false)
+  const [sharedRestrictedChat,setSharedRestrictedChat] = useState(false)
+  const [executionProfile, setExecutionProfile] = useState<"trusted" | "restricted" | "pending">("pending")
+  useEffect(() => {
+    executionProfileRef.current = "pending"
+    setExecutionProfile("pending")
+    setSharedRestrictedChat(false)
+    if (!sessionId || !workspaceId) return
+    const controller = new AbortController()
+    void apiFetch(`/api/v1/chats/${encodeURIComponent(sessionId)}/execution-profile?workspace_id=${encodeURIComponent(workspaceId)}`,{signal:controller.signal}).then(async response => {
+      if (!response.ok) return
+      const profile = await response.json() as {mode:string;audience?:string}
+      if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
+    }).catch(() => {})
+    return () => controller.abort()
+  }, [sessionId,workspaceId])
+
   const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, resubscribeSession, isStreaming, connectionStatus } = useChat({
+    executionProfile,
+    getExecutionProfile: () => executionProfileRef.current,
+    workspaceId,
     wsUrl: getWsUrl(),
     getToken: getWsToken,
     sessionId,
@@ -316,7 +346,15 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     onReplyCompleted: onAgentReplyCompleted,
     onOwnMessageSaved: handleOwnMessageSaved,
   })
+  const projectInputScope = JSON.stringify([currentUserId, workspaceId, sessionId])
+  const [projectInputSelection, setProjectInputSelection] = useState<{ scope: string; ids: string[] }>({ scope: "", ids: [] })
+  const selectedProjectInputs = projectInputSelection.scope === projectInputScope ? projectInputSelection.ids : NO_PROJECT_INPUTS
+  const changeProjectInputs = useCallback((ids: string[]) => {
+    setProjectInputSelection({ scope: projectInputScope, ids })
+  }, [projectInputScope])
+  useEffect(() => { setProjectInputSelection({ scope: projectInputScope, ids: [] }) }, [projectInputScope])
   const sendMessageWithPage = useCallback((text: string, metadata?: Record<string, unknown>) => {
+    if (executionProfileRef.current === "restricted" && selectedProjectInputs.length) { metadata = { ...metadata, project_file_versions: [...selectedProjectInputs] } }
     if (pageContextSlug && !pageContextRemoved && !pageContextError) {
       const withPage = { ...metadata, page_context: { slug: pageContextSlug } }
       const sizeCheck = checkChatMessageSize(sessionId, text, withPage)
@@ -335,7 +373,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       if (sent === false) toast.error("Not connected — your message is still here. Try again when chat reconnects.")
       return sent
     }
-  }, [sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId])
+  }, [sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId, selectedProjectInputs])
 
   // Reply-settled hook: when a stream the user watched in THIS session
   // finishes (isStreaming true→false), tell the parent so it can re-fire
@@ -577,12 +615,23 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
    *  (toastUploadFailure), and the send path leaves the draft in the box where
    *  the user can see it. */
   const ensureSessionForSend = useCallback(async (): Promise<boolean> => {
-    const ok = await ensureSession()
+    let ok = await ensureSession()
+    if (ok) {
+      try {
+        const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(sessionId)}/execution-profile?workspace_id=${encodeURIComponent(workspaceId ?? "")}`)
+        if (!response.ok) ok = false
+        else {
+          const profile = await response.json() as {mode:string;audience?:string}
+          if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
+          else ok = false
+        }
+      } catch {ok = false}
+    }
     if (!ok) {
       toast.error("Couldn't start this conversation. Check your connection and try again.")
     }
     return ok
-  }, [ensureSession])
+  }, [ensureSession,sessionId,workspaceId])
 
   // #2121 — a suggestion/follow-up chip sends the instant it's clicked, and
   // on a draft session `ensureSessionForSend` awaits a real POST. `isStreaming`
@@ -614,7 +663,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   // lives inside the composer, next to the state it clears.
   const handleSent = useCallback(() => {
     setPinNonce((n) => n + 1)
-  }, [])
+    changeProjectInputs([])
+  }, [changeProjectInputs])
 
   // Auto-send the initial prompt once, after the socket is connected.
   // The WS `send` silently drops while not OPEN, so we gate on
@@ -886,7 +936,24 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     </Conversation>
   )
 
+  const prepareProjectInputs = executionProfile === "pending" && sessionKind === "direct" && currentUserId && sessionId && workspaceId ? (
+    <div className="px-4 pb-2">
+      <Button variant="outline" size="sm" className="coarse:min-h-12" disabled={preparingProjectInputs || isStreaming} onClick={async () => {
+        setPreparingProjectInputs(true)
+        try { await ensureSessionForSend() } finally { setPreparingProjectInputs(false) }
+      }}>
+        {preparingProjectInputs ? "Preparing conversation…" : "Prepare project inputs"}
+      </Button>
+      <p className="text-xs text-muted-foreground mt-1">Creates this conversation without sending a message. Available project inputs appear for native chats.</p>
+    </div>
+  ) : null
+
   if (mobilePanel === "artifacts" || mobilePanel === "work") {
+    if (executionProfile !== "trusted") return <div className="h-full overflow-auto">
+      {executionProfile === "restricted" && sessionId && workspaceId
+        ? <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />
+        : <p className="p-4 text-sm text-muted-foreground">Checking conversation access…</p>}
+    </div>
     return (
       <div className="relative h-full">
         <RightPanel
@@ -896,7 +963,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           initialTab={mobilePanel}
           style={{ width: "100%", height: "100%" }}
         />
-        <ArtifactPane agentId={agentId} />
+        {executionProfile === "trusted" && <ArtifactPane agentId={agentId} />}
       </div>
     )
   }
@@ -905,6 +972,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return (
       <div className="relative flex flex-col h-full">
         <ReconnectBanner status={connectionStatus} />
+        {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
           <ConnectionBadge status={connectionStatus} />
           {isGroupChat && (
@@ -933,6 +1001,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
         </div>
+        {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
+        {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {turns.length === 0 && !historyLoading && sessionKind === "direct" && (
           <div className="px-4 pb-2 shrink-0">
             <AskRail
@@ -945,6 +1015,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
             />
           </div>
         )}
+        {prepareProjectInputs}
+        {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
         <ChatComposer
           agentId={agentId}
@@ -985,7 +1057,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         )}
         <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
         <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
-        <ArtifactPane agentId={agentId} />
+        {executionProfile === "trusted" && <ArtifactPane agentId={agentId} />}
       </div>
     )
   }
@@ -994,8 +1066,9 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const pushOpen = drawerOpen && drawerMode === "push"
   return (
     <div className="relative flex h-full">
-      <div className={cn("flex flex-col overflow-hidden min-w-0", artifactFocus && artifactOpen ? "hidden" : "flex-1")}>
+      <div className={cn("flex flex-col overflow-hidden min-w-0", executionProfile === "trusted" && artifactFocus && artifactOpen ? "hidden" : "flex-1")}>
         <ReconnectBanner status={connectionStatus} />
+        {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         {/* Who you are talking to, not the session id. The strip carries the
             agent (face, status, role, crew, model, skills, credentials); the
             connection badge still appears when the socket is not connected,
@@ -1032,6 +1105,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
         </div>
+        {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
+        {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {/* Starter chips are for a conversation; a routine step or an issue
             chat is a transcript, and "Help me get started" under one is
             noise. */}
@@ -1067,6 +1142,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           }
         />
         </div>
+        {prepareProjectInputs}
+        {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
         <ChatComposer
           agentId={agentId}
@@ -1088,8 +1165,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         />
       </div>
 
-      <ArtifactPane agentId={agentId} expanded={artifactFocus} />
-      {(!artifactOpen || artifactFocus) && <RightDrawer>
+      {executionProfile === "trusted" && <ArtifactPane agentId={agentId} expanded={artifactFocus} />}
+      {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightDrawer>
         <RightPanel
           key={`${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
@@ -1100,7 +1177,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         />
       </RightDrawer>}
 
-      {(!artifactOpen || artifactFocus) && <RightRail className={cn(pushOpen && "border-l-0")} />}
+      {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightRail className={cn(pushOpen && "border-l-0")} />}
       {/* workspaceId is what makes the server-driven Actions group exist at
           all: useSlashCommands(undefined) never runs its query, so the palette
           rendered without it could only ever show the client rows. */}

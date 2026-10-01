@@ -13,6 +13,9 @@ import (
 )
 
 func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
+	if restrictedDirectory(h.db, w, r) {
+		return
+	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
 		replyError(w, http.StatusBadRequest, "workspace_id is required")
@@ -75,7 +78,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			a.created_at, a.updated_at,
 			a.created_by_user_id,
 			c.name, c.slug, c.color, c.avatar_style,
-			a.ephemeral, a.expires_at, a.expired_at, a.parent_lead_id, a.hire_reason
+			a.ephemeral, a.expires_at, a.expired_at, a.parent_lead_id, a.hire_reason, a.restricted_execution_profile
 		FROM agents a
 		LEFT JOIN crews c ON c.id = a.crew_id
 		WHERE a.workspace_id = ? AND a.deleted_at IS NULL
@@ -140,7 +143,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&a.CreatedAt, &a.UpdatedAt,
 			&createdByUserID,
 			&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
-			&ephemeral, &a.ExpiresAt, &a.ExpiredAt, &a.ParentLeadID, &a.HireReason); err != nil {
+			&ephemeral, &a.ExpiresAt, &a.ExpiredAt, &a.ParentLeadID, &a.HireReason, &a.RestrictedExecutionProfile); err != nil {
 			replyInternalError(w, h.logger, "scan agent", err)
 			return
 		}
@@ -226,6 +229,9 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 // batch helper kept out of the handler file.
 
 func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
+	if restrictedDirectory(h.db, w, r) {
+		return
+	}
 	agentID := r.PathValue("agentId")
 	if agentID == "" {
 		replyError(w, http.StatusBadRequest, "agentId is required")
@@ -261,7 +267,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM chats c WHERE c.agent_id = a.id AND (`+chataudience.VisibleSQL+`)),
-			a.ephemeral, a.expires_at, a.expired_at, a.parent_lead_id, a.hire_reason
+			a.ephemeral, a.expires_at, a.expired_at, a.parent_lead_id, a.hire_reason, a.restricted_execution_profile
 		FROM agents a
 		LEFT JOIN crews c ON c.id = a.crew_id
 		WHERE a.id = ? AND a.workspace_id = ? AND a.deleted_at IS NULL
@@ -280,7 +286,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&createdByUserID,
 		&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats,
-		&ephemeral, &a.ExpiresAt, &a.ExpiredAt, &a.ParentLeadID, &a.HireReason)
+		&ephemeral, &a.ExpiresAt, &a.ExpiredAt, &a.ParentLeadID, &a.HireReason, &a.RestrictedExecutionProfile)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "Agent not found")

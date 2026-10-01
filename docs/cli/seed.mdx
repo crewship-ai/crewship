@@ -36,15 +36,18 @@ On a fresh database, seed bootstraps the admin user (`demo@crewship.ai`) itself.
 | `--with-team-chat` | `false` | Add six fictional colleagues with actual workspace roles, bundled portraits, a shared Chat channel and separately authored DMs. Requires OWNER and current create-only provisioning support; signup is not required. |
 | `--state-dir <path>` | User configuration directory | Private owned-account state outside Git, separated by server/workspace. Passwords are random and never printed. |
 | `--with-users` | `false` | Add four extra users (`ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`) to the workspace for RBAC matrix testing. Requires the server to have been started with `CREWSHIP_ALLOW_SIGNUP=true` — seed checks before it starts and **fails** rather than placing nobody. |
+| `--codex-auth-file <path>` | `$SEED_CODEX_AUTH_FILE` | Absolute path to a private Codex `auth.json` (mode `0600`, outside the repo) holding a ChatGPT subscription login. Switches the demo agents from Claude Code to `CODEX_CLI` — see [below](#seed-codex-agents-with-a-chatgpt-login). The flag overrides `SEED_CODEX_AUTH_FILE`; when neither is set, the env var loaded from `.env.local` applies. |
 
 ### Seed Codex agents with a ChatGPT login
 
 Set `SEED_CODEX_AUTH_FILE` to the absolute path of a Codex `auth.json` created
 by `codex login`. Keep the file outside the checkout with mode `0600`. To leave
-`.env.local` untouched, pass the path for one CLI invocation:
+`.env.local` untouched, pass the path for one CLI invocation — as an env
+prefix or as the `--codex-auth-file` flag, which overrides the variable:
 
 ```bash
 SEED_CODEX_AUTH_FILE=/private/path/to/auth.json crewship seed --server http://localhost:8081
+crewship seed --codex-auth-file /private/path/to/auth.json --server http://localhost:8081
 ```
 
 For repeated `./dev.sh seed` runs, put only the path in `.env.local`, never

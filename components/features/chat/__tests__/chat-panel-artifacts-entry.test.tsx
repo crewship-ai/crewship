@@ -34,22 +34,35 @@ beforeEach(() => {
   toastError.mockReset()
   useDrawerStore.setState({ open: false, activeTab: "artifacts" })
   useArtifactStore.getState().closeAll()
-  global.fetch = vi.fn((url: string) => Promise.resolve({ ok: true, status: 200, json: async () => String(url).includes("/messages") ? { messages: [] } : String(url).includes("/participants") ? { participants: [] } : {} })) as unknown as typeof fetch
+  global.fetch = vi.fn((url: string) => Promise.resolve({ ok: true, status: 200, json: async () => String(url).includes("/execution-profile") ? { mode: "trusted" } : String(url).includes("/restricted-files") ? { files: [] } : String(url).includes("/messages") ? { messages: [] } : String(url).includes("/participants") ? { participants: [] } : {} })) as unknown as typeof fetch
 })
 afterEach(cleanup)
 
 describe("chat artifact entry points", () => {
-  it("opens Artifacts on the mobile context page", () => {
+  it("hides cached agent-wide artifacts while the conversation authority is pending", () => {
     render(<ChatPanel {...props} mobilePanel="artifacts" />)
-    expect(screen.getByTestId("context-tab")).toHaveTextContent("artifacts")
+    expect(screen.queryByTestId("context-tab")).not.toBeInTheDocument()
+    expect(screen.getByText("Checking conversation access…")).toBeInTheDocument()
   })
-  it("opens Work through the mobile Work page", () => {
+  it("uses classified conversation files for restricted mobile artifact access", async () => {
+    global.fetch = vi.fn((url: string) => Promise.resolve({ ok: true, status: 200, json: async () => String(url).includes("/execution-profile") ? { mode: "restricted" } : String(url).includes("/restricted-files") ? { files: [] } : String(url).includes("/messages") ? { messages: [] } : {} })) as unknown as typeof fetch
+    render(<ChatPanel {...props} mobilePanel="artifacts" />)
+    await screen.findByText("Output files")
+    expect(screen.queryByTestId("context-tab")).not.toBeInTheDocument()
+    expect(screen.getByText("No output files in this conversation.")).toBeInTheDocument()
+  })
+  it("opens Artifacts on the mobile context page", async () => {
+    render(<ChatPanel {...props} mobilePanel="artifacts" />)
+    expect(await screen.findByTestId("context-tab")).toHaveTextContent("artifacts")
+  })
+  it("opens Work through the mobile Work page", async () => {
     render(<ChatPanel {...props} mobilePanel="work" />)
-    expect(screen.getByTestId("context-tab")).toHaveTextContent("work")
+    expect(await screen.findByTestId("context-tab")).toHaveTextContent("work")
   })
   it("opens a generated PDF in the artifact pane", async () => {
     chatStub.turns = [{ id: "turn-1", role: "assistant", parts: [], timestamp: new Date() }]
     render(<ChatPanel {...props} />)
+    await screen.findByTestId("context-tab")
     fireEvent.click(await screen.findByRole("button", { name: "Preview generated PDF" }))
     expect(useArtifactStore.getState().activeId).toBe("agent-1:reports/result.pdf")
     expect(useDrawerStore.getState().activeTab).toBe("artifacts")
@@ -57,6 +70,7 @@ describe("chat artifact entry points", () => {
   it("does not open agent configuration from a transcript link", async () => {
     chatStub.turns = [{ id: "turn-1", role: "assistant", parts: [], timestamp: new Date() }]
     render(<ChatPanel {...props} />)
+    await screen.findByTestId("context-tab")
     fireEvent.click(await screen.findByRole("button", { name: "Preview agent configuration" }))
     expect(useArtifactStore.getState().open).toBe(false)
     expect(toastError).toHaveBeenCalledWith("This file is not available in Artifacts")

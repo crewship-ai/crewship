@@ -30,6 +30,7 @@ DELETE /api/v1/automations/{id} roleManage
 DELETE /api/v1/cache/images/{tag} roleManage
 DELETE /api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji} roleSelf
 DELETE /api/v1/chats/{chatId}/participants/{userId} roleSelf
+DELETE /api/v1/chats/{chatId}/restricted-memory/{entryId} roleSelf
 DELETE /api/v1/checkpoints/{id} roleCreate
 DELETE /api/v1/conversations/{conversationId}/agents/{agentId} roleSelf
 DELETE /api/v1/conversations/{conversationId}/participants/{userId} roleSelf
@@ -94,6 +95,7 @@ DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags/{tag} roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust/{grantId} roleCreate
+DELETE /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{fileId} roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId} roleManage
 GET /api/v1/approvals roleManage
 GET /api/v1/approvals/{id} roleManage
@@ -191,6 +193,7 @@ POST /api/v1/agents/{agentId}/credentials roleManage
 POST /api/v1/agents/{agentId}/integrations roleCreate
 POST /api/v1/agents/{agentId}/persona/suggest roleCreate
 POST /api/v1/agents/{agentId}/rehire roleCreate
+POST /api/v1/agents/{agentId}/restricted-cli-chats roleSelf
 POST /api/v1/agents/{agentId}/skills roleCreate
 POST /api/v1/agents/{agentId}/stop roleCreate
 POST /api/v1/agents/{agentId}/webhook-secret/rotate roleInline
@@ -204,6 +207,9 @@ POST /api/v1/automations roleManage
 POST /api/v1/automations/preview roleCreate
 POST /api/v1/chats/{chatId}/messages/{messageId}/reactions roleSelf
 POST /api/v1/chats/{chatId}/participants roleSelf
+POST /api/v1/chats/{chatId}/restricted-cli-run roleSelf
+POST /api/v1/chats/{chatId}/restricted-memory roleSelf
+POST /api/v1/chats/{chatId}/restricted-run roleSelf
 POST /api/v1/chats/{chatId}/steer roleSelf
 POST /api/v1/checkpoints/{id}/fork roleCreate
 POST /api/v1/checkpoints/{id}/restore roleCreate
@@ -334,6 +340,7 @@ POST /api/v1/users/me/password roleSelf
 POST /api/v1/workflow-templates roleCreate
 POST /api/v1/workspaces roleSelf
 POST /api/v1/workspaces/{workspaceId}/invitations roleManage
+POST /api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight roleSelf
 POST /api/v1/workspaces/{workspaceId}/members roleManage
 POST /api/v1/workspaces/{workspaceId}/members/provision roleManage
 POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal roleCreate
@@ -362,6 +369,7 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run roleInline
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust roleCreate
+POST /api/v1/workspaces/{workspaceId}/projects/{projectId}/files roleCreate
 POST /api/v1/workspaces/{workspaceId}/signals roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/bulk-import roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/generate roleInline
@@ -387,6 +395,7 @@ PUT /api/v1/agents/{agentId}/avatar roleInline
 PUT /api/v1/agents/{agentId}/chats/{chatId}/read roleSelf
 PUT /api/v1/agents/{agentId}/files/save roleCreate
 PUT /api/v1/agents/{agentId}/persona roleCreate
+PUT /api/v1/agents/{agentId}/restricted-execution roleInline
 PUT /api/v1/conversations/{conversationId}/activity roleSelf
 PUT /api/v1/credentials/reveal-policy roleInline
 PUT /api/v1/credentials/{credentialId} roleCreate

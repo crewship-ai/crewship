@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/spf13/cobra"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,6 +43,61 @@ func TestResolveSeedCodexLogin(t *testing.T) {
 	}
 	if _, err := resolveSeedCodexLogin(); err == nil || !strings.Contains(err.Error(), "renewable") {
 		t.Fatalf("login without refresh token must be refused: %v", err)
+	}
+}
+
+func TestSeedCodexAuthFileFlagOverridesEnv(t *testing.T) {
+	writeLogin := func(name string) (string, string) {
+		content := `{"auth_mode":"chatgpt","OPENAI_API_KEY":null,"tokens":{"id_token":"id","access_token":"access","refresh_token":"refresh","account_id":"account"}}`
+		if name == "flag-auth.json" {
+			content = strings.Replace(content, `"account_id":"account"`, `"account_id":"flag-account"`, 1)
+		}
+		path := filepath.Join(t.TempDir(), name)
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path, content
+	}
+	envPath, envContent := writeLogin("env-auth.json")
+	flagPath, flagContent := writeLogin("flag-auth.json")
+	t.Setenv(seedCodexAuthFileEnv, envPath)
+	t.Cleanup(func() { seedCodexAuthFileOverride = "" })
+
+	// Without the flag the env var is the default and governs.
+	seedCodexAuthFileOverride = ""
+	login, err := resolveSeedCodexLogin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if login.Value != envContent {
+		t.Fatal("env var did not serve as the default login path")
+	}
+
+	// An explicit flag value wins over the env var.
+	seedCodexAuthFileOverride = flagPath
+	login, err = resolveSeedCodexLogin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if login.Value != flagContent || login.Value == envContent {
+		t.Fatal("--codex-auth-file did not override SEED_CODEX_AUTH_FILE")
+	}
+
+	// Errors name the knob the operator actually turned.
+	seedCodexAuthFileOverride = "relative/auth.json"
+	if _, err := resolveSeedCodexLogin(); err == nil || !strings.Contains(err.Error(), "--codex-auth-file") {
+		t.Fatalf("relative flag path must be refused in the flag's name: %v", err)
+	}
+}
+
+func TestSeedCmdCodexAuthFileFlagDefaultsEmpty(t *testing.T) {
+	t.Setenv(seedCodexAuthFileEnv, "/tmp/seed-review-auth.json")
+	flag := seedCmd.Flags().Lookup("codex-auth-file")
+	if flag == nil {
+		t.Fatal("crewship seed has no --codex-auth-file flag")
+	}
+	if got := flag.DefValue; got != "" {
+		t.Fatalf("--codex-auth-file default = %q, want empty", got)
 	}
 }
 
@@ -117,5 +173,32 @@ func TestSeedCodexLoginGrantsOnlyConvertedAgents(t *testing.T) {
 	}
 	if len(stub.CallsFor("POST", "/api/v1/agents/alex-id/credentials")) != 1 || len(stub.CallsFor("POST", "/api/v1/agents/ollie-id/credentials")) != 0 {
 		t.Fatal("Codex login was not limited to the converted agents")
+	}
+}
+
+// The env var alone must be named as the source; only a passed flag is
+// blamed as --codex-auth-file (CodeRabbit on #2702).
+func TestSeedCodexAuthFlagSourceOnlyWhenPassed(t *testing.T) {
+	t.Cleanup(func() { seedCodexAuthFileOverride = "" })
+	newCmd := func() *cobra.Command {
+		c := &cobra.Command{Use: "seed"}
+		c.Flags().String("codex-auth-file", "", "")
+		return c
+	}
+	t.Setenv(seedCodexAuthFileEnv, "relative/auth.json")
+
+	cmd := newCmd()
+	applySeedCodexAuthFlag(cmd)
+	if _, err := resolveSeedCodexLogin(); err == nil || !strings.Contains(err.Error(), seedCodexAuthFileEnv) || strings.Contains(err.Error(), "--codex-auth-file") {
+		t.Fatalf("env-only path: err = %v, want it to name %s", err, seedCodexAuthFileEnv)
+	}
+
+	cmd = newCmd()
+	if err := cmd.Flags().Set("codex-auth-file", "also/relative.json"); err != nil {
+		t.Fatal(err)
+	}
+	applySeedCodexAuthFlag(cmd)
+	if _, err := resolveSeedCodexLogin(); err == nil || !strings.Contains(err.Error(), "--codex-auth-file") {
+		t.Fatalf("flag path: err = %v, want it to name --codex-auth-file", err)
 	}
 }

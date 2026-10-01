@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/askforms"
+	"github.com/crewship-ai/crewship/internal/serviceconfig"
 )
 
 // Action enumerates the per-resource operations a plan can describe.
@@ -583,6 +584,9 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 		// PATCH ignores slug so strip before sending.
 		updateBody := copyMap(crewBody)
 		delete(updateBody, "slug")
+		if err := checkCrewQuotaTransition(existing, crewBody); err != nil {
+			return fmt.Errorf("crew %q: %w", slug, err)
+		}
 		if crewBodyDiffers(existing, crewBody) {
 			existingID := existing.ID
 			pb.appendItem(ActionUpdate, "crew", slug,
@@ -1368,4 +1372,15 @@ func buildMCPBody(s *MCPServer) map[string]any {
 		body["env_mapping"] = s.EnvMapping
 	}
 	return body
+}
+
+// checkCrewQuotaTransition fails the plan when the manifest changes a quota
+// volume's capacity without a generation bump. The server rejects the same
+// edit; checking here surfaces it at plan time with the crew named.
+func checkCrewQuotaTransition(existing *CrewResponse, body map[string]any) error {
+	next, ok := body["services_json"].(string)
+	if !ok || existing == nil || existing.ServicesJSON == nil {
+		return nil
+	}
+	return serviceconfig.QuotaTransition(*existing.ServicesJSON, next)
 }

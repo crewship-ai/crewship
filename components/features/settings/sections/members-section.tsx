@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
 import { SettingsCard, SettingsRow } from "../shared"
+import { MemberResourceAccess } from "../member-resource-access"
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -488,6 +489,7 @@ function MemberRow({
                 granted={granted}
                 isLoading={capsLoading}
               />
+              <MemberResourceAccess workspaceId={workspaceId} memberId={member.id} label={label} role={member.role} />
             </>
           )}
         </div>

@@ -27,14 +27,48 @@ const cleanupTimeout = 3 * time.Second
 // attempt; renewal never reconstructs a prompt from newer or broader context.
 type BuildCommand func(context.Context, access.Attempt) ([]string, error)
 
+// BoundBuildCommand is a host-only builder for explicit delegated context. The
+// handle is never supplied to a model or returned through an application API.
+type BoundBuildCommand func(context.Context, string, access.Attempt) ([]string, error)
+
 // Prepare is a host-only boundary. The caller authenticates user; public task
 // JSON must not populate it, parent, or build. A failed preparation revokes its
 // attempt, so it cannot later be resumed with a different payload.
 func (a Authority) Prepare(ctx context.Context, user, workspace, agent, chat, parent string, rights []access.Right, build BuildCommand) (string, access.Attempt, error) {
+	return a.prepare(ctx, user, workspace, agent, chat, parent, rights, build, false)
+}
+
+func (a Authority) PrepareChat(ctx context.Context, user, workspace, agent, chat, parent string, rights []access.Right, build BuildCommand) (string, access.Attempt, error) {
+	return a.prepare(ctx, user, workspace, agent, chat, parent, rights, build, true)
+}
+func (a Authority) prepare(ctx context.Context, user, workspace, agent, chat, parent string, rights []access.Right, build BuildCommand, chatOperation bool) (string, access.Attempt, error) {
 	if build == nil {
 		return "", access.Attempt{}, access.ErrDenied
 	}
-	handle, attempt, err := a.Store.Admit(ctx, user, workspace, agent, chat, parent, rights)
+	return a.prepareBound(ctx, user, workspace, agent, chat, parent, rights, func(ctx context.Context, _ string, attempt access.Attempt) ([]string, error) {
+		return build(ctx, attempt)
+	}, chatOperation)
+}
+
+func (a Authority) prepareBound(ctx context.Context, user, workspace, agent, chat, parent string, rights []access.Right, build BoundBuildCommand, chatOperation bool) (string, access.Attempt, error) {
+	return a.prepareBoundAdmission(ctx, user, workspace, agent, chat, parent, rights, build, chatOperation, false)
+}
+
+func (a Authority) prepareBoundAdmission(ctx context.Context, user, workspace, agent, chat, parent string, rights []access.Right, build BoundBuildCommand, chatOperation, continuation bool) (string, access.Attempt, error) {
+	if build == nil {
+		return "", access.Attempt{}, access.ErrDenied
+	}
+	admit := a.Store.Admit
+	if chatOperation {
+		admit = a.Store.AdmitChat
+	}
+	if continuation {
+		if chatOperation {
+			return "", access.Attempt{}, access.ErrDenied
+		}
+		admit = a.Store.AdmitWorkflowContinuation
+	}
+	handle, attempt, err := admit(ctx, user, workspace, agent, chat, parent, rights)
 	if err != nil {
 		return "", access.Attempt{}, fmt.Errorf("admit isolated attempt: %w", err)
 	}
@@ -47,7 +81,7 @@ func (a Authority) Prepare(ctx context.Context, user, workspace, agent, chat, pa
 			_ = a.Store.RevokeAttempt(cleanup, handle)
 		}
 	}()
-	command, err := build(ctx, attempt)
+	command, err := build(ctx, handle, attempt)
 	if err != nil {
 		return "", access.Attempt{}, fmt.Errorf("build isolated command: %w", err)
 	}
@@ -103,6 +137,9 @@ func (a Authority) Resolve(ctx context.Context, handle string) (restrictedruntim
 		Command: command,
 	}
 	if err := a.attachProvider(ctx, attempt, &plan); err != nil {
+		return restrictedruntime.Plan{}, err
+	}
+	if err := a.attachNative(ctx, attempt, &plan); err != nil {
 		return restrictedruntime.Plan{}, err
 	}
 	// Binding removal and provider/grant updates revoke in the same mutation

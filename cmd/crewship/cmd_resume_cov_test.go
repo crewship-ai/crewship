@@ -246,6 +246,7 @@ func covResetRunCmdFlags(t *testing.T) {
 // without opening a real stream.
 func TestResumeRunE_RunIDDispatches(t *testing.T) {
 	stub := clitest.NewStubServer()
+	stub.OnGet("/api/v1/chats/chat-55/execution-profile", clitest.JSONResponse(200, map[string]string{"mode": "trusted"}))
 	defer stub.Close()
 	covSetupCli8(t, stub.URL())
 	covResetRunCmdFlags(t)
@@ -279,6 +280,7 @@ func TestResumeRunE_RunIDDispatches(t *testing.T) {
 // and `resume <chat-id>` could never resolve an agent.
 func TestResumeRunE_ChatIDLooksUpAgent(t *testing.T) {
 	stub := clitest.NewStubServer()
+	stub.OnGet("/api/v1/chats/chat-77/execution-profile", clitest.JSONResponse(200, map[string]string{"mode": "trusted"}))
 	defer stub.Close()
 	covSetupCli8(t, stub.URL())
 	covResetRunCmdFlags(t)

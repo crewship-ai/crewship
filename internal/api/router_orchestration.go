@@ -48,6 +48,24 @@ type orchestrationHandlers struct {
 func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
+	r.mux.Handle("GET /api/v1/agents/{agentId}/run-profile", authed(wsCtx(http.HandlerFunc(r.restrictedRunProfile))))
+	r.authedMut("POST", "/api/v1/agents/{agentId}/restricted-cli-chats", roleSelf, r.createRestrictedCLIContext)
+	r.authedMut("POST", "/api/v1/chats/{chatId}/restricted-run", roleSelf, r.restrictedTextRun)
+	r.mux.Handle("GET /api/v1/chats/{chatId}/restricted-attempts", authed(wsCtx(http.HandlerFunc(r.restrictedOutcomes))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/restricted-files", authed(wsCtx(http.HandlerFunc(r.restrictedFiles))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/restricted-context", authed(wsCtx(http.HandlerFunc(r.restrictedContext))))
+	r.authedMut("POST", "/api/v1/chats/{chatId}/restricted-memory", roleSelf, r.restrictedContext)
+	r.authedMut("DELETE", "/api/v1/chats/{chatId}/restricted-memory/{entryId}", roleSelf, r.restrictedContext)
+	r.mux.Handle("GET /api/v1/chats/{chatId}/restricted-files/{fileId}/download", authed(wsCtx(http.HandlerFunc(r.restrictedFiles))))
+	r.authedMut("POST", "/api/v1/chats/{chatId}/restricted-cli-run", roleSelf, r.restrictedCLIRun)
+	r.mux.Handle("GET /api/v1/chats/{chatId}/execution-profile", authed(wsCtx(http.HandlerFunc(r.executionProfile))))
+
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight", roleSelf, r.restrictedIssuePreflight)
+	r.mux.Handle("GET /api/v1/chats/{chatId}/project-input-options", authed(wsCtx(http.HandlerFunc(r.projectInputOptions))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files", authed(wsCtx(http.HandlerFunc(r.projectFiles))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{versionId}/download", authed(wsCtx(http.HandlerFunc(r.projectFiles))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/projects/{projectId}/files", roleCreate, r.projectFiles)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{fileId}", roleCreate, r.projectFiles)
 
 	// Human conversations share workspace authentication and enforce their own
 	// participant ACL in every store operation, independently of agent sessions.

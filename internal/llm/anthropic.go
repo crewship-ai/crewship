@@ -115,11 +115,17 @@ func (a *Anthropic) Complete(ctx context.Context, req Request) (*Response, error
 		return nil, err
 	}
 
-	var raw anthropicResponse
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	var data json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, fmt.Errorf("decode %s response: %w", a.name(), err)
 	}
-	return raw.toResponse(), nil
+	var raw anthropicResponse
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("decode %s response: %w", a.name(), err)
+	}
+	out := raw.toResponse()
+	out.UsageKnown = anthropicUsageKnown(data, "usage") && (raw.StopReason == "end_turn" || raw.StopReason == "max_tokens" || raw.StopReason == "tool_use" || raw.StopReason == "stop_sequence")
+	return out, nil
 }
 
 // Stream sends a streaming completion request, calling handler for each event.
@@ -360,6 +366,10 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 	// caller got nil error with truncated content. See the check after the
 	// scan loop below.
 	var sawMessageStop bool
+	starts, deltas := 0, 0
+	startUsageKnown, finalUsageKnown := false, false
+	usageOrderValid := true
+	stops := 0
 
 	// 4KB initial (SSE lines are small), 1MB max for tool results.
 	// Real Anthropic streams end on "message_stop" and don't send "[DONE]" at
@@ -396,9 +406,13 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 			} `json:"error"`
 		}
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			usageOrderValid = false
 			return false, nil
 		}
 
+		if usageObject([]byte(data)) == nil {
+			usageOrderValid = false
+		}
 		switch event.Type {
 		case "error":
 			// Anthropic's own explicit error event (e.g. overloaded_error,
@@ -413,6 +427,11 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 			return false, fmt.Errorf("anthropic stream error event with no error payload")
 
 		case "message_start":
+			if sawMessageStop || deltas > 0 {
+				usageOrderValid = false
+			}
+			starts++
+			startUsageKnown = starts == 1 && anthropicUsageKnown([]byte(data), "message", "usage")
 			// Anthropic ships the full usage block (incl. cache token counts)
 			// on message_start. Both the streaming caller's final.* slots and
 			// the surrounding cache-read/creation slots are populated here
@@ -461,6 +480,13 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 			}
 
 		case "message_delta":
+			if sawMessageStop || starts != 1 {
+				usageOrderValid = false
+			}
+			deltas++
+			usage := usageObject([]byte(data), "usage")
+			_, validOutput := usageCount(usage, "output_tokens", true)
+			finalUsageKnown = deltas == 1 && validOutput
 			if event.Delta != nil {
 				switch event.Delta.StopReason {
 				case "tool_use":
@@ -476,6 +502,10 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 			}
 
 		case "message_stop":
+			stops++
+			if starts != 1 || deltas != 1 {
+				usageOrderValid = false
+			}
 			sawMessageStop = true
 		}
 		return false, nil
@@ -484,6 +514,7 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 		return final, fnErr
 	}
 
+	final.UsageKnown = starts == 1 && deltas == 1 && stops == 1 && usageOrderValid && startUsageKnown && finalUsageKnown
 	final.Content = strings.Join(textParts, "")
 	final.ToolCalls = toolCalls
 
