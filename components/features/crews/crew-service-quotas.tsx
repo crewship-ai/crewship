@@ -3,6 +3,7 @@
 import { useEffect, useId, useState } from "react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 
 type Volume = { name: string; mount: string; quota_bytes?: number; generation?: number }
@@ -29,6 +30,13 @@ function parseServices(raw: string | null | undefined): Service[] | null {
   } catch { return null }
 }
 
+// The draft keeps quota settings while quotas are toggled off, so turning
+// them back on restores the volume's capacity and generation. Only the
+// saved payload drops them from services without enforcement.
+function toPayload(services: Service[] | null): Service[] | null {
+  return services?.map(service => service.quota_enforced ? service : { ...service, volumes: service.volumes?.map(({ quota_bytes: _capacity, generation: _generation, ...legacy }) => legacy) }) ?? null
+}
+
 export function CrewServiceQuotas({ servicesJSON, canManage, save }: {
   servicesJSON?: string | null
   canManage: boolean
@@ -42,7 +50,8 @@ export function CrewServiceQuotas({ servicesJSON, canManage, save }: {
   const [error, setError] = useState<string | null>(null)
   useEffect(() => { setDraft(parseServices(servicesJSON)); setAcknowledged(false); setError(null) }, [servicesJSON])
 
-  const changed = JSON.stringify(draft) !== JSON.stringify(original)
+  const payload = toPayload(draft)
+  const changed = JSON.stringify(payload) !== JSON.stringify(toPayload(original))
   const usesQuotaStorage = draft?.some(service => service.quota_enforced && (service.volumes?.length ?? 0) > 0) ?? false
   const storageChanged = draft?.some((service, i) => {
     const before = original?.[i]
@@ -76,7 +85,7 @@ export function CrewServiceQuotas({ servicesJSON, canManage, save }: {
     if (storageChanged && !acknowledged) { setError("Acknowledge the storage change before saving."); return }
     setPending(true); setError(null)
     try {
-      await save({ services_json: JSON.stringify(draft), expected_services_json: servicesJSON ?? "" })
+      await save({ services_json: JSON.stringify(payload), expected_services_json: servicesJSON ?? "" })
       toast.success("Service disk policy saved")
     } catch {
       setError("Could not save the policy. Refresh the crew if its service configuration changed, then retry.")
@@ -90,13 +99,9 @@ export function CrewServiceQuotas({ servicesJSON, canManage, save }: {
     {draft?.length === 0 && <p className="text-sm text-muted-foreground">Declare services through a crew manifest or the CLI to configure their disk policy here.</p>}
     {draft?.map((service, i) => <div key={service.name} className="rounded-xl border p-4 space-y-3">
       <div><h3 className="font-medium">{service.name}</h3><p className="text-sm text-muted-foreground">{service.quota_enforced ? "Enforced disk quotas requested" : "Legacy trusted storage · root and persistent disks have no capacity limit"}</p></div>
-      {canManage && <label className="flex items-center gap-2 text-sm coarse:min-h-12"><input type="checkbox" checked={!!service.quota_enforced} disabled={pending} aria-label={`${service.name}: Enforce disk quotas`} onChange={event => {
-        const enabled = event.target.checked
-        update(i, { quota_enforced: enabled, volumes: service.volumes?.map(volume => {
-          if (enabled) return { ...volume, quota_bytes: volume.quota_bytes ?? 512 * MIB, generation: volume.generation ?? 1 }
-          const { quota_bytes: _capacity, generation: _generation, ...legacy } = volume
-          return legacy
-        }) })
+      {canManage && <label className="flex items-center gap-2 text-sm coarse:min-h-12"><Checkbox checked={!!service.quota_enforced} disabled={pending} aria-label={`${service.name}: Enforce disk quotas`} onCheckedChange={checked => {
+        const enabled = checked === true
+        update(i, { quota_enforced: enabled, volumes: enabled ? service.volumes?.map(volume => ({ ...volume, quota_bytes: volume.quota_bytes ?? 512 * MIB, generation: volume.generation ?? 1 })) : service.volumes })
       }} />Enforce disk quotas</label>}
       {service.volumes?.map((volume, j) => <div key={volume.name} className="grid gap-3 sm:grid-cols-3 items-center">
         <div className="text-sm">{volume.name}<span className="block text-muted-foreground">{volume.mount}</span></div>
@@ -111,7 +116,7 @@ export function CrewServiceQuotas({ servicesJSON, canManage, save }: {
       </div>)}
     </div>)}
     {usesQuotaStorage && !(canManage && changed && storageChanged) && <p role="note" className="text-sm text-muted-foreground">{BACKUP_WARNING}</p>}
-    {canManage && changed && storageChanged && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={acknowledged} disabled={pending} onChange={event => setAcknowledged(event.target.checked)} /><span>I understand that changing storage policy or generation recreates the service and switches volumes. New quota generations start empty; existing data is not copied automatically. {usesQuotaStorage && BACKUP_WARNING}</span></label>}
+    {canManage && changed && storageChanged && <label className="flex items-start gap-2 text-sm"><Checkbox className="mt-1" checked={acknowledged} disabled={pending} onCheckedChange={checked => setAcknowledged(checked === true)} /><span>I understand that changing storage policy or generation recreates the service and switches volumes. New quota generations start empty; existing data is not copied automatically. {usesQuotaStorage && BACKUP_WARNING}</span></label>}
     {error && <p role="alert" className="text-sm">{error}</p>}
     {canManage && draft && draft.length > 0 && <Button className="coarse:h-12" disabled={!changed || pending} onClick={() => void submit()}>{pending ? "Saving…" : "Save disk policy"}</Button>}
   </section>
