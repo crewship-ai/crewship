@@ -34,7 +34,9 @@ func Seal(raw string) (string, error) {
 // The encrypted purpose marker prevents ciphertext from another vault field
 // from being interpreted as a service document.
 func Open(raw string) (string, error) {
-	return openWithDecryptor(raw, encryption.Decrypt)
+	return openWithDecryptor(raw, func(value string) (string, error) {
+		return encryption.Decrypt(value)
+	})
 }
 
 // OpenWithKeys reads a recovered service document using only the supplied
