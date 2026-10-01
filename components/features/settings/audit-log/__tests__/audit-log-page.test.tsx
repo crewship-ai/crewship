@@ -18,7 +18,7 @@ beforeEach(() => {
   role = "OWNER"
   window.history.replaceState(null, "", "/settings/audit")
 })
-afterEach(() => cleanup())
+afterEach(() => { cleanup(); vi.useRealTimers() })
 
 // The Audit log as a nested page: the side panel picks the trail and the
 // time range, the table is full width, and both live in the URL.
@@ -46,6 +46,10 @@ describe("Audit log page", () => {
 
   // A day in the calendar is a one-day custom range, sent as whole UTC days.
   it("picks a day from the calendar and stretches it with shift", async () => {
+    // Mid-month, so the current month has past days to pick: on the 1st only
+    // today is enabled. Only Date is faked; React's timers stay real.
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date("2026-09-15T12:00:00Z"))
     render(<AuditLogPage />)
     const days = document.querySelectorAll<HTMLButtonElement>("[data-slot=audit-calendar] [data-day]")
     const enabled = [...days].filter((d) => !d.disabled)
