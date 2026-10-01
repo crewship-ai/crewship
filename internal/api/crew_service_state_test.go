@@ -73,7 +73,11 @@ func TestManagedServices_DurableStateAndAuthority(t *testing.T) {
 	update("MANAGER", ws, "running", 0, 202)
 	update("MANAGER", ws, "stopped", 0, 409)
 	resolver := func(ctx context.Context, c, w, n string) (provider.CrewConfig, error) {
-		return ResolveManagedService(ctx, db, c, w, n)
+		cfg, err := ResolveManagedService(ctx, db, c, w, n)
+		if err == nil && (len(cfg.Services) != 1 || !cfg.Services[0].ControllerManaged) {
+			return provider.CrewConfig{}, fmt.Errorf("managed service permits Docker to bypass durable intent")
+		}
+		return cfg, err
 	}
 	c := &servicelifecycle.Controller{DB: db, Runtime: runtime, Resolve: resolver}
 	c.Reconcile(context.Background())

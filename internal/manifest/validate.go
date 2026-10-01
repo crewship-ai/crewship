@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/askforms"
+	"github.com/crewship-ai/crewship/internal/quota"
 )
 
 // slugFormat mirrors api.validSlugFormat: lowercase letters, digits,
@@ -373,6 +374,9 @@ func (v *validator) checkServices(scope string, services []Service, creds map[st
 		}
 		seenVol := map[string]bool{}
 		for j, vol := range s.Volumes {
+			if err := quota.ValidateVolume(s.QuotaEnforced, s.Name, vol.Name, vol.Mount, vol.Generation, vol.QuotaBytes); err != nil {
+				v.errf("%s service %q: invalid volume quota policy", scope, s.Name)
+			}
 			if vol.Name == "" || vol.Mount == "" {
 				v.errf("%s service %q: volumes[%d] needs both name and mount", scope, s.Name, j)
 				continue

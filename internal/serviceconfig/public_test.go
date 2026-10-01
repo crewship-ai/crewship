@@ -22,3 +22,10 @@ func TestPublic(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicQuotaConfiguration(t *testing.T) {
+	raw := `[{"name":"database","image":"alpine:3","quota_enforced":true,"volumes":[{"name":"data","mount":"/data","quota_bytes":67108864,"generation":1}]}]`
+	if got := Public(raw); got != raw {
+		t.Fatalf("nonsecret quota schema withheld: %s", got)
+	}
+}

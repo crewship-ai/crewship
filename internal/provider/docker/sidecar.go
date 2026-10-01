@@ -56,6 +56,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -64,6 +65,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/quota"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
@@ -135,17 +137,23 @@ func computeSidecarSpecHash(svc *provider.CrewService) string {
 	})
 
 	payload := struct {
-		Command     []string
-		Env         [][2]string
-		Ports       []string
-		Volumes     []provider.CrewServiceVolume
-		Healthcheck *provider.CrewServiceHealthcheck
+		QuotaPolicy       string
+		ControllerManaged bool `json:"controller_managed,omitempty"`
+		QuotaEnforced     bool `json:"quota_enforced,omitempty"`
+		Command           []string
+		Env               [][2]string
+		Ports             []string
+		Volumes           []provider.CrewServiceVolume
+		Healthcheck       *provider.CrewServiceHealthcheck
 	}{
-		Command:     svc.Command,
-		Env:         envPairs,
-		Ports:       svc.Ports,
-		Volumes:     vols,
-		Healthcheck: svc.Healthcheck,
+		QuotaPolicy:       serviceQuotaPolicyVersion,
+		ControllerManaged: svc.ControllerManaged,
+		QuotaEnforced:     svc.QuotaEnforced,
+		Command:           svc.Command,
+		Env:               envPairs,
+		Ports:             svc.Ports,
+		Volumes:           vols,
+		Healthcheck:       svc.Healthcheck,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -348,6 +356,10 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 // stop + remove + recreate so apply is true sync for sidecars,
 // not just "fresh creates work."
 func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, svc *provider.CrewService) (string, error) {
+	quotaMounts, err := p.quotaServiceVolumes(ctx, crewID, crewSlug, svc)
+	if err != nil {
+		return "", fmt.Errorf("service quota catalog: %w", err)
+	}
 	name := p.sidecarContainerName(crewID, crewSlug, svc.Name)
 	desiredHash := computeSidecarSpecHash(svc)
 
@@ -385,6 +397,25 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 		} else if c.Labels[sidecarSpecHashLabel] != desiredHash {
 			drift = "spec drift (command/env/ports/volumes/healthcheck)"
 		}
+		if drift == "" {
+			inspected, err := p.client.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
+			if err != nil {
+				return "", fmt.Errorf("inspect service quota enforcement: %w", err)
+			}
+			if err = checkServiceQuotaProfile(inspected.Container.HostConfig, svc.QuotaEnforced); err != nil {
+				drift = err.Error()
+			}
+			if drift == "" && svc.QuotaEnforced {
+				if err = checkQuotaMounts(inspected.Container.HostConfig.Mounts, quotaMounts); err != nil {
+					drift = err.Error()
+				}
+			}
+			if drift == "" {
+				if err = checkServiceRestartPolicy(inspected.Container.HostConfig, svc.ControllerManaged || svc.QuotaEnforced); err != nil {
+					drift = err.Error()
+				}
+			}
+		}
 		if drift != "" {
 			p.logger.Info("sidecar drift; recreating", "service", svc.Name, "reason", drift)
 			timeout := 5
@@ -416,11 +447,21 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 		return "", err
 	}
 
+	if err = p.validateQuotaImage(ctx, svc); err != nil {
+		return "", fmt.Errorf("unclassified image volume: %w", err)
+	}
+
 	// Volumes: ensure each named volume exists before container
 	// create so docker doesn't auto-create unowned anonymous
 	// volumes that we then can't clean up.
 	mounts := make([]mount.Mount, 0, len(svc.Volumes))
+	if svc.QuotaEnforced {
+		mounts = quotaMounts
+	}
 	for _, vol := range svc.Volumes {
+		if svc.QuotaEnforced {
+			break
+		}
 		fullName := p.sidecarVolumeName(crewID, crewSlug, vol.Name)
 		if err := p.ensureVolumeLabeled(ctx, fullName,
 			sidecarVolumeLabels(crewID, crewSlug, svc.Name, vol.Name)); err != nil {
@@ -514,6 +555,15 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 			NanoCPUs:  sidecarNanoCPUs,
 			PidsLimit: &pidsLimit,
 		},
+	}
+
+	applyServiceQuotas(hostCfg)
+	if svc.ControllerManaged || svc.QuotaEnforced {
+		hostCfg.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyDisabled}
+	}
+	if svc.QuotaEnforced {
+		hostCfg.ReadonlyRootfs = true
+		hostCfg.Tmpfs["/run"] = "rw,nosuid,nodev,noexec,size=16777216,mode=0755"
 	}
 
 	// NetworkingConfig wires the sidecar to the crew bridge with a
@@ -692,6 +742,31 @@ func (p *Provider) RemoveCrewServiceVolumes(ctx context.Context, crewID, crewSlu
 		if !sidecarMatchesCrew(vol.Labels, crewID, sidecarVolumeKind) {
 			continue
 		}
+		if vol.Labels[quotaBytesLabel] != "" {
+			catalog, ok := p.cfg.QuotaCatalog.(quota.ReferenceCatalog)
+			if !ok || catalog == nil {
+				failures = append(failures, quota.ErrUnavailable)
+				continue
+			}
+			generation, err := strconv.ParseInt(vol.Labels[quotaGenerationLabel], 10, 64)
+			if err != nil {
+				failures = append(failures, quota.ErrDenied)
+				continue
+			}
+			key := quota.Key{Crew: crewID, Service: vol.Labels[sidecarSvcLabel], Volume: vol.Labels[sidecarVolNameLabel], Generation: generation}
+			if _, err = p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); err != nil {
+				failures = append(failures, err)
+				continue
+			}
+			if err = catalog.Release(key, vol.Name); err != nil {
+				failures = append(failures, err)
+				continue
+			}
+			if err = catalog.Remove(key); err != nil {
+				failures = append(failures, err)
+			}
+			continue
+		}
 		if _, err := p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); err != nil {
 			p.logger.Warn("remove sidecar volume failed", "volume", vol.Name, "error", err)
 			failures = append(failures, fmt.Errorf("remove %s: %w", vol.Name, err))
@@ -717,16 +792,23 @@ func (p *Provider) StopCrewService(ctx context.Context, crewID, crewSlug, name s
 		return err
 	}
 	timeout := 10
+	var failures []error
 	for _, c := range result.Items {
 		if !sidecarMatchesCrew(c.Labels, crewID, sidecarKind) || c.Labels[sidecarSvcLabel] != name {
 			continue
+		}
+		// Correct pre-upgrade containers too: a stopped process with the old
+		// on-failure policy could otherwise resume during Docker/host reboot.
+		policy := container.RestartPolicy{Name: container.RestartPolicyDisabled}
+		if _, err := p.client.ContainerUpdate(ctx, c.ID, client.ContainerUpdateOptions{RestartPolicy: &policy}); err != nil {
+			failures = append(failures, fmt.Errorf("disable service restart: %w", err))
 		}
 		if c.State != "running" && c.State != "restarting" {
 			continue
 		}
 		if _, err := p.client.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
-			return err
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }

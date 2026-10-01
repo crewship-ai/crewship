@@ -19,23 +19,27 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/quota"
 	"github.com/crewship-ai/crewship/internal/serviceconfig"
 )
 
 type serviceWire struct {
-	Name        string              `json:"name"`
-	Image       string              `json:"image"`
-	Command     []string            `json:"command,omitempty"`
-	Env         map[string]string   `json:"env,omitempty"`
-	EnvRefs     []string            `json:"env_refs,omitempty"`
-	Ports       []string            `json:"ports,omitempty"`
-	Volumes     []serviceVolumeWire `json:"volumes,omitempty"`
-	Healthcheck *serviceHealthWire  `json:"healthcheck,omitempty"`
+	QuotaEnforced bool                `json:"quota_enforced,omitempty"`
+	Name          string              `json:"name"`
+	Image         string              `json:"image"`
+	Command       []string            `json:"command,omitempty"`
+	Env           map[string]string   `json:"env,omitempty"`
+	EnvRefs       []string            `json:"env_refs,omitempty"`
+	Ports         []string            `json:"ports,omitempty"`
+	Volumes       []serviceVolumeWire `json:"volumes,omitempty"`
+	Healthcheck   *serviceHealthWire  `json:"healthcheck,omitempty"`
 }
 
 type serviceVolumeWire struct {
-	Name  string `json:"name"`
-	Mount string `json:"mount"`
+	QuotaBytes int64  `json:"quota_bytes,omitempty"`
+	Generation int64  `json:"generation,omitempty"`
+	Name       string `json:"name"`
+	Mount      string `json:"mount"`
 }
 
 type serviceHealthWire struct {
@@ -97,7 +101,10 @@ func DecodeServices(body string, envValueFor func(envVar string) string) ([]prov
 		}
 		vols := make([]provider.CrewServiceVolume, 0, len(s.Volumes))
 		for _, v := range s.Volumes {
-			vols = append(vols, provider.CrewServiceVolume{Name: v.Name, Mount: v.Mount})
+			if err := quota.ValidateVolume(s.QuotaEnforced, s.Name, v.Name, v.Mount, v.Generation, v.QuotaBytes); err != nil {
+				return nil, fmt.Errorf("services[%q]: invalid volume quota", s.Name)
+			}
+			vols = append(vols, provider.CrewServiceVolume{Name: v.Name, Mount: v.Mount, QuotaBytes: v.QuotaBytes, Generation: v.Generation})
 		}
 		var hc *provider.CrewServiceHealthcheck
 		if s.Healthcheck != nil {
@@ -110,13 +117,14 @@ func DecodeServices(body string, envValueFor func(envVar string) string) ([]prov
 			hc.StartPeriod = parseDuration(s.Healthcheck.StartPeriod, 0)
 		}
 		out = append(out, provider.CrewService{
-			Name:        s.Name,
-			Image:       s.Image,
-			Command:     s.Command,
-			Env:         env,
-			Ports:       s.Ports,
-			Volumes:     vols,
-			Healthcheck: hc,
+			QuotaEnforced: s.QuotaEnforced,
+			Name:          s.Name,
+			Image:         s.Image,
+			Command:       s.Command,
+			Env:           env,
+			Ports:         s.Ports,
+			Volumes:       vols,
+			Healthcheck:   hc,
 		})
 	}
 	return out, nil

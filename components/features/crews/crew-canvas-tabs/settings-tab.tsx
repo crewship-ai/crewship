@@ -10,6 +10,7 @@ import { useAbilities } from "@/hooks/use-abilities"
 import { EditableField } from "@/components/shared/editable-field"
 import { CrewRuntimeConfig } from "@/components/features/crews/crew-runtime-config"
 import { CrewImageFreshness } from "@/components/features/crews/crew-image-freshness"
+import { CrewServiceQuotas } from "@/components/features/crews/crew-service-quotas"
 import { CrewServiceLifecycle } from "@/components/features/crews/crew-service-lifecycle"
 import { CrewContainerConfig } from "@/components/features/crews/crew-container-config"
 import { CrewNetworkPolicy } from "@/components/features/crews/crew-network-policy"
@@ -309,6 +310,8 @@ export function SettingsTab({
           </div>
         )}
       </section>
+
+      <CrewServiceQuotas key={`quotas-${crew.id}`} servicesJSON={crew.services_json} canManage={canEditRuntime} save={patch} />
 
       <CrewServiceLifecycle key={crew.id} crewId={crew.id} workspaceId={workspaceId} canManage={canEditRuntime} />
 
