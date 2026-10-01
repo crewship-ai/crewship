@@ -388,13 +388,17 @@ func (c Credential) loginMode() string {
 // RunState tracks the runtime state of an active agent run, persisted in the
 // state provider for crash recovery.
 type RunState struct {
-	ID           string    `json:"id"`
-	AgentID      string    `json:"agent_id"`
-	ChatID       string    `json:"chat_id"`
-	Status       string    `json:"status"`
-	StartedAt    time.Time `json:"started_at"`
-	ContainerID  string    `json:"container_id"`
-	ExecID       string    `json:"exec_id"`
+	ID          string    `json:"id"`
+	AgentID     string    `json:"agent_id"`
+	ChatID      string    `json:"chat_id"`
+	Status      string    `json:"status"`
+	StartedAt   time.Time `json:"started_at"`
+	ContainerID string    `json:"container_id"`
+	ExecID      string    `json:"exec_id"`
+	// AgentSlug names the run's tmux session together with ID. Recorded so a
+	// run outliving its server process can still be stopped by location
+	// after the agent row's slug was released for reuse.
+	AgentSlug    string    `json:"agent_slug,omitempty"`
 	LastActivity time.Time `json:"last_activity"`
 	CredentialID string    `json:"credential_id,omitempty"`
 }
@@ -472,16 +476,19 @@ type Orchestrator struct {
 	agentRuns              sync.Map // run id -> *agentRunControl; independent of credential HOME cleanup
 	userModelReader        func(context.Context, string, string) (string, error)
 	personalizationAllowed func(context.Context, string, string) (bool, error)
-	container              provider.ContainerProvider
-	state                  provider.StateProvider
-	convStore              *conversation.Store
-	scrubber               *scrubber.Scrubber
-	logger                 *slog.Logger
-	cooldown               *CooldownManager
-	sidecarEnabled         bool
-	keeperEnabled          bool
-	ipcBaseURL             string
-	ipcToken               string
+	// agentLive refuses process creation for an agent that may no longer run
+	// (soft-deleted). Asked at the creation boundary of every run.
+	agentLive      func(context.Context, string) error
+	container      provider.ContainerProvider
+	state          provider.StateProvider
+	convStore      *conversation.Store
+	scrubber       *scrubber.Scrubber
+	logger         *slog.Logger
+	cooldown       *CooldownManager
+	sidecarEnabled bool
+	keeperEnabled  bool
+	ipcBaseURL     string
+	ipcToken       string
 	// localModelBaseURL is the OpenAI-compatible local model endpoint
 	// (cfg.LocalModels.BaseURL) used only as a deprecated fallback when no
 	// ENDPOINT_URL credential resolved a URL (#955); see SetLocalModelBaseURL.
@@ -1600,6 +1607,23 @@ func (o *Orchestrator) SetUserModelReader(reader func(context.Context, string, s
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.userModelReader = reader
+}
+
+// SetAgentLiveness installs the check asked immediately before every agent
+// process is created. Each entry point validates the agent when it accepts
+// work, but preparation (provisioning, container start) can take minutes; an
+// agent deleted in that window must not start. A non-nil error refuses the
+// exec and nothing is created.
+func (o *Orchestrator) SetAgentLiveness(check func(context.Context, string) error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.agentLive = check
+}
+
+func (o *Orchestrator) agentLiveness() func(context.Context, string) error {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.agentLive
 }
 
 // SetPersonalizationAllowed makes consent authoritative at prompt assembly,

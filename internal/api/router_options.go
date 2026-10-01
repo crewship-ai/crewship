@@ -6,6 +6,7 @@ package api
 // `router.go` stays focused on Router lifecycle + dispatch.
 
 import (
+	"context"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -460,4 +461,13 @@ func WithMemoryInventoryRoot(path string) RouterOption {
 
 func WithContainerCleanup(c *resourcelifecycle.Controller) RouterOption {
 	return func(r *Router) { r.containerCleanup = c }
+}
+
+// AgentRunStopper stops the live runs of one deleted agent and reports how
+// many were confirmed gone and how many are still pending.
+type AgentRunStopper func(ctx context.Context, agentID string) (stopped, pending int, err error)
+
+// WithAgentRunStopper lets agent DELETE stop that agent's runs at once.
+func WithAgentRunStopper(f AgentRunStopper) RouterOption {
+	return func(r *Router) { r.agentRunStopper = f }
 }

@@ -236,6 +236,29 @@ func (s *Server) Start(ctx context.Context) error {
 		go func() { defer s.bgWg.Done(); retention.Run(ctx) }()
 	}
 
+	// Runs of deleted agents survive a server restart inside the crew
+	// container; the agent DELETE stops what it can at once, this pass keeps
+	// retrying whatever it could not confirm.
+	if s.orchestrator != nil && s.db != nil {
+		s.bgWg.Add(1)
+		go func() {
+			defer s.bgWg.Done()
+			lookup := deletedAgentLookup(s.db)
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				if res := s.orchestrator.StopDeletedAgentRuns(ctx, "", lookup); res.Stopped > 0 || res.Pending > 0 {
+					s.logger.Info("deleted agent runs", "stopped", res.Stopped, "pending", res.Pending, "error", errors.Join(res.Errors...))
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+	}
+
 	if s.containerCleanup != nil {
 		s.bgWg.Add(1)
 		go func() { defer s.bgWg.Done(); s.containerCleanup.Run(ctx) }()

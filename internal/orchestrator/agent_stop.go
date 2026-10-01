@@ -41,12 +41,19 @@ func (o *Orchestrator) trackAgentRun(ctx context.Context, req *AgentRunRequest) 
 	ctx, cancel := context.WithCancel(ctx)
 	c := &agentRunControl{agentID: req.AgentID, location: RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID}, cancel: cancel, done: make(chan struct{})}
 	prior := req.ExecGate
+	live := o.agentLiveness()
+	agentID := req.AgentID
 	req.ExecGate = func(ctx context.Context) error {
 		c.mu.Lock()
 		stopped := c.stopped
 		c.mu.Unlock()
 		if stopped {
 			return context.Canceled
+		}
+		if live != nil {
+			if err := live(ctx, agentID); err != nil {
+				return err
+			}
 		}
 		// A caller's durable gate can block on storage. Never hold the stop
 		// mutex across it: a stop must be able to cancel preparation.
