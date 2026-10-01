@@ -89,6 +89,11 @@ func TestHoldCapReleasesAndEndsTheCopy(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("the hold cap never ended the window's context")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := c.WaitReleased(ctx); err != nil {
+		t.Fatal("the cancelled copy never released its guards:", err)
+	}
 	if !w.Expired() || c.Holding() {
 		t.Fatalf("expired=%v holding=%v", w.Expired(), c.Holding())
 	}
@@ -162,5 +167,46 @@ func TestGatesReadHolds(t *testing.T) {
 				t.Errorf("webhooks paused = %v, want %v", got, tc.webhooks)
 			}
 		})
+	}
+}
+
+// Cancellation stops the copy before release callbacks reopen writer admission.
+func TestReleaseCancelsCopyBeforeReopeningAdmission(t *testing.T) {
+	c := New()
+	releasing := make(chan struct{})
+	finish := make(chan struct{})
+	w, err := c.Begin(context.Background(), Options{HoldCap: time.Minute,
+		Acquire: func() (func(), error) { return func() { close(releasing); <-finish }, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { w.Release(); close(done) }()
+	<-releasing
+	select {
+	case <-w.Context().Done():
+	default:
+		t.Error("release callback ran before the copy was cancelled")
+	}
+	if !c.Holding() {
+		t.Error("writers admitted before the release callback completed")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := c.WaitReleased(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("WaitReleased during callback = %v, want context.Canceled", err)
+	}
+	close(finish)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("release did not finish")
+	}
+	if err := c.WaitReleased(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c.Holding() {
+		t.Fatal("writers still held after release completed")
 	}
 }

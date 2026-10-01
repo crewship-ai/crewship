@@ -158,6 +158,7 @@ POST /api/v1/admin/instance/backups/plans/preview-contents roleInstance
 POST /api/v1/admin/instance/backups/recipients roleInstance
 POST /api/v1/admin/instance/backups/restore/checks roleInstance
 POST /api/v1/admin/instance/backups/run roleInstance
+POST /api/v1/admin/instance/backups/services/land roleInstance
 POST /api/v1/admin/instance/backups/settings/test-alert roleInstance
 POST /api/v1/admin/instance/holds/resume roleInstance
 POST /api/v1/admin/instance/people roleInstance

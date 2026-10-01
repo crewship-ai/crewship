@@ -61,6 +61,7 @@ type Executor interface {
 // WorkspaceExecutor writes a workspace bundle with backup.CreateBackup,
 // wired like the per-workspace backup endpoint.
 type WorkspaceExecutor struct {
+	ServiceSnapshots  backup.ServiceSnapshotRuntime
 	DB                *sql.DB
 	DockerOps         backup.DockerOps
 	CrewContainerName func(id, slug string) string
@@ -144,6 +145,7 @@ func (s RunSpec) ScopeLevel() backup.ScopeLevel {
 func (e *WorkspaceExecutor) Run(ctx context.Context, spec RunSpec, progress func(string)) (*RunResult, error) {
 	level := spec.ScopeLevel()
 	res, err := backup.CreateBackup(ctx, e.DB, backup.CreateOptions{
+		ServiceSnapshots:   e.ServiceSnapshots,
 		Scope:              backup.ScopeWorkspace,
 		WorkspaceID:        spec.WorkspaceID,
 		Level:              level,

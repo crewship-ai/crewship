@@ -879,6 +879,12 @@ func TestEnsureCrewServices_HealthcheckGate(t *testing.T) {
 		return func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 			switch {
+			case strings.HasSuffix(path, "/images/create"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte("{}\n"))
+			case strings.Contains(path, "/images/"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"Id":"redis-image"}`))
 			case strings.HasSuffix(path, "/containers/json"):
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode([]map[string]any{{

@@ -57,6 +57,8 @@ func TestOpenAPIBackupSchemas_AcceptEncodedResponses(t *testing.T) {
 		name, component string
 		response        any
 	}{
+		{"status without maintenance", "FinalAdminPlatformBackupStatus", backupStatusResponse{ServiceMaintenance: []backup.ServiceMaintenance{}}},
+		{"status with maintenance", "FinalAdminPlatformBackupStatus", backupStatusResponse{ServiceMaintenance: []backup.ServiceMaintenance{{CrewID: "crew", CrewSlug: "crew", Operation: "restore", CreatedAt: "2026-09-30T00:00:00Z", ProducerLive: true}}}},
 		{"verify without diagnostics", "FinalAdminPlatformBackupVerify", backupVerifyResponse{Valid: true}},
 		{"verify with diagnostics", "FinalAdminPlatformBackupVerify", backupVerifyResponse{TableRowCountMismatches: []backup.TableRowCountMismatch{{Table: "missions", Recorded: 2, Actual: 1}}}},
 		{"restore without diagnostics", "FinalAdminPlatformBackupRestore", backupRestoreResponse{}},
@@ -81,6 +83,9 @@ func TestOpenAPIBackupSchemas_AcceptEncodedResponses(t *testing.T) {
 			field := "table_row_count_mismatches"
 			if tc.component == "FinalAdminPlatformBackupRestore" {
 				field = "rows_inserted_shortfalls"
+			}
+			if tc.component == "FinalAdminPlatformBackupStatus" {
+				field = "service_maintenance"
 			}
 			payload.(map[string]any)[field] = "not a list"
 			if schema.Validate(payload) == nil {

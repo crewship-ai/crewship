@@ -35,6 +35,7 @@ const (
 	DrillCheckCredentials = "credentials_unlock"
 	DrillCheckJournal     = "journal_verifies"
 	DrillCheckHeld        = "routines_held"
+	DrillCheckServiceData = "service_data_staged"
 
 	DrillStatusOK      = "ok"
 	DrillStatusFailed  = "failed"
@@ -142,6 +143,16 @@ func DrillInstance(ctx context.Context, opts DrillOptions) (*DrillReport, error)
 		drillJournal(ctx, db.DB, chainSeed),
 		drillHeld(ctx, db.DB),
 	)
+	if restore.ServiceSnapshots > 0 {
+		checked, err := LandRecoveredServices(ctx, db.DB, dataDir, nil, ServiceLandingOptions{DryRun: true})
+		c := DrillCheck{Name: DrillCheckServiceData, Checked: checked, Status: DrillStatusOK, Detail: "disk images, ownership, fresh generations and maintenance verified; physical helper import is a separate host check"}
+		if err != nil {
+			c.Status = DrillStatusFailed
+			c.Failed = 1
+			c.Detail = err.Error()
+		}
+		rep.Checks = append(rep.Checks, c)
+	}
 	rep.Result = RestoreResultOK
 	for _, c := range rep.Checks {
 		if c.Status != DrillStatusOK {

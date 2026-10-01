@@ -3,6 +3,8 @@
 package quota
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -184,7 +187,12 @@ func ServeNamespace(ctx context.Context, socket string, serverUID uint32, b *Bac
 			return err
 		}
 	}
+	ctx, cancelServer := context.WithCancel(ctx)
 	go func() { <-ctx.Done(); listener.Close() }()
+	var workers sync.WaitGroup
+	defer workers.Wait()
+	defer cancelServer()
+	slots := make(chan struct{}, 32)
 	for {
 		conn, err := listener.AcceptUnix()
 		if err != nil {
@@ -193,9 +201,20 @@ func ServeNamespace(ctx context.Context, socket string, serverUID uint32, b *Bac
 			}
 			return err
 		}
-		// Serial processing plus the backend's file lock serialize disk reservations.
-		func() {
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			conn.Close()
+			return nil
+		}
+		workers.Add(1)
+		go func(conn *net.UnixConn) {
+			defer workers.Done()
+			defer func() { <-slots }()
 			defer conn.Close()
+			stopClose := context.AfterFunc(ctx, func() { _ = conn.Close() })
+			defer stopClose()
+			var err error
 			uid, err := peerUID(conn)
 			if err != nil || uid != 0 && uid != serverUID {
 				return
@@ -204,13 +223,40 @@ func ServeNamespace(ctx context.Context, socket string, serverUID uint32, b *Bac
 			opCtx, cancelOp := context.WithTimeout(ctx, helperCallTimeout)
 			defer cancelOp()
 			var request Request
-			decoder := json.NewDecoder(io.LimitReader(conn, 4096))
+			reader := bufio.NewReader(conn)
+			line, readErr := reader.ReadSlice('\n')
+			decoder := json.NewDecoder(bytes.NewReader(line))
 			decoder.DisallowUnknownFields()
-			if decoder.Decode(&request) != nil || request.Namespace != namespace {
+			if readErr != nil || len(line) > 4096 || decoder.Decode(&request) != nil || request.Namespace != namespace {
 				return
 			}
+			var trailing any
+			if decoder.Decode(&trailing) != io.EOF {
+				return
+			}
+
 			response := Response{Namespace: namespace}
 			switch request.Operation {
+			case "export":
+				_ = conn.SetDeadline(time.Now().Add(30 * time.Minute))
+				snapshotCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+				defer cancel()
+				d, readErr := b.read(request.Key)
+				if readErr != nil || Validate(request.Key, request.Bytes) != nil || d.Bytes != request.Bytes {
+					err = ErrDenied
+					break
+				}
+				response.Descriptor = d
+				if json.NewEncoder(conn).Encode(response) != nil {
+					return
+				}
+				err = b.Export(snapshotCtx, request.Key, request.Bytes, conn)
+				response.Descriptor = Descriptor{}
+			case "import":
+				_ = conn.SetDeadline(time.Now().Add(30 * time.Minute))
+				snapshotCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+				defer cancel()
+				response.Descriptor, err = b.Import(snapshotCtx, request.Key, request.Bytes, reader)
 			case "ensure":
 				response.Descriptor, err = b.Ensure(opCtx, request.Key, request.Bytes, request.Owner)
 			case "verify":
@@ -230,7 +276,7 @@ func ServeNamespace(ctx context.Context, socket string, serverUID uint32, b *Bac
 				response.Error = "operation denied or backend unavailable"
 			}
 			_ = json.NewEncoder(conn).Encode(response)
-		}()
+		}(conn)
 	}
 }
 

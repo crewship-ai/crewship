@@ -58,6 +58,7 @@ var schemaKeyContracts = []struct {
 	// ever sees.
 	{name: "PATCH /api/v1/workspaces/{workspaceId} body", pointer: "/components/schemas/CoreWorkspaceUpdateRequestV2", value: updateWorkspaceRequest{}},
 	{name: "CrewAssignmentsResponseV1[]", pointer: "/components/schemas/CrewAssignmentsResponseV1/items", value: assignmentListItem{}},
+	{name: "GET /api/v1/admin/backups/status", pointer: "/components/schemas/FinalAdminPlatformBackupStatus", value: backupStatusResponse{}},
 	{name: "GET /api/v1/admin/backups/verify", pointer: "/components/schemas/FinalAdminPlatformBackupVerify", value: backupVerifyResponse{}},
 	{name: "POST /api/v1/admin/backups/restore", pointer: "/components/schemas/FinalAdminPlatformBackupRestore", value: backupRestoreResponse{}},
 	{

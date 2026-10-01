@@ -236,11 +236,12 @@ you need to know who acquired the lock (or wait for its TTL).`,
 			return err
 		}
 		var out struct {
-			Held        bool   `json:"held" yaml:"held"`
-			AcquiredBy  string `json:"acquired_by,omitempty" yaml:"acquired_by,omitempty"`
-			AcquiredAt  string `json:"acquired_at,omitempty" yaml:"acquired_at,omitempty"`
-			ExpiresAt   string `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
-			WorkspaceID string `json:"workspace_id,omitempty" yaml:"workspace_id,omitempty"`
+			Held               bool                        `json:"held" yaml:"held"`
+			ServiceMaintenance []backup.ServiceMaintenance `json:"service_maintenance" yaml:"service_maintenance"`
+			AcquiredBy         string                      `json:"acquired_by,omitempty" yaml:"acquired_by,omitempty"`
+			AcquiredAt         string                      `json:"acquired_at,omitempty" yaml:"acquired_at,omitempty"`
+			ExpiresAt          string                      `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
+			WorkspaceID        string                      `json:"workspace_id,omitempty" yaml:"workspace_id,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -250,6 +251,9 @@ you need to know who acquired the lock (or wait for its TTL).`,
 		// the full status payload instead of silently rendering the
 		// table (or nothing) regardless of --format (#1195).
 		return newFormatter().AutoHuman(out, func() {
+			for _, service := range out.ServiceMaintenance {
+				fmt.Fprintf(os.Stderr, "Service maintenance: crew=%s operation=%s producer_live=%t; retry the selected backup/restore with --recover-services after prior writers stop.\n", service.CrewSlug, service.Operation, service.ProducerLive)
+			}
 			if !out.Held {
 				fmt.Fprintln(os.Stderr, "No backup in progress on this workspace.")
 				return
@@ -264,6 +268,8 @@ you need to know who acquired the lock (or wait for its TTL).`,
 }
 
 func init() {
+	backupCreateCmd.Flags().Bool("recover-services", false, "Retry selected interrupted service snapshots after the previous producer and writer leases expire")
+	backupRestoreCmd.Flags().Bool("recover-services", false, "Recover selected interrupted service maintenance after prior producer and writer leases expire")
 	backupCreateCmd.Flags().String("scope", "workspace", "Backup scope: workspace | crew")
 	backupCreateCmd.Flags().String("crew", "", "Crew slug or ID (required for --scope=crew)")
 	backupCreateCmd.Flags().Bool("no-encrypt", false, "Refused: every new backup is encrypted (kept so old scripts get a clear error)")
