@@ -289,7 +289,7 @@ func openLocalDB(ctx context.Context) (*database.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve data directory: %w", err)
 	}
-	db, err := database.Open(dataDir.DatabaseURL())
+	db, err := database.Open(dataDir.DatabaseURL(), database.WithExclusiveWriter())
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}

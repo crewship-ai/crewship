@@ -37,7 +37,7 @@ Such shared storage is unsupported.
 Upgrade requires stopping every old daemon using the database before starting
 the enforcing version. Older binaries and arbitrary SQLite tools do not
 participate in the new OS lock protocol. Offline mutating maintenance must run
-with the server stopped; the gated local database commands and ledger repair
+with the server stopped; the gated local database commands, telemetry consent and ledger repair
 acquire the same exclusive ownership. Live administrative changes use the API.
 Do not move, unlink or replace a database while its server is running.
 

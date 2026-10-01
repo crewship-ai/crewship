@@ -2,6 +2,11 @@
 // single scheduler instance fires each due job when several crewshipd replicas
 // run against one database.
 //
+// Release 1.0 enforces one writing daemon per local database at startup.
+// These logical scheduler leases remain useful for crash/restart ownership;
+// they do not authorize active replicas or replace backup writer fencing.
+// Distributed replicas need their own runtime and file-storage contract.
+//
 // # Why
 //
 // The three scheduling loops (the agent cron scheduler in internal/scheduler,

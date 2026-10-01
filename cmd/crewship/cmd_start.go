@@ -396,9 +396,9 @@ var startCmd = &cobra.Command{
 		defer deps.Close()
 		deps.DebugLogs = debugBuffer
 		deps.DB = db.DB
-		deps.WriterOwnerCheck = db.VerifyWriterLease
 		deps.License = lic
 		deps.Admission = admissionCtl
+		deps.WriterOwnerCheck = db.VerifyWriterLease
 
 		webFS, err := web.FS()
 		if err != nil {
