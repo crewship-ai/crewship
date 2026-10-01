@@ -39,6 +39,11 @@ type Backend struct {
 	run func(ctx context.Context, name string, args ...string) ([]byte, error)
 	// attach mounts and verifies a descriptor; nil means the loop mount.
 	attach func(ctx context.Context, d Descriptor) error
+	// backingLoops lists loop devices backed by an image; nil reads sysfs.
+	backingLoops func(image string) ([]string, error)
+	// attachedElsewhere refuses a device still mounted anywhere but at
+	// mount in this namespace; nil scans every process's mount namespace.
+	attachedElsewhere func(dev, mount string) error
 	// logf reports recovery decisions; nil discards them.
 	logf func(format string, args ...any)
 }
@@ -563,6 +568,7 @@ func (b *Backend) Remove(ctx context.Context, k Key) error {
 	if len(refs) > 0 {
 		return ErrDenied
 	}
+	meta, image, mount := b.paths(k)
 	dev, err := mountedDevice(d.Mount)
 	if err != nil {
 		return err
@@ -571,7 +577,7 @@ func (b *Backend) Remove(ctx context.Context, k Key) error {
 		if err = b.verify(d); err != nil {
 			return err
 		}
-		if err = detachedFromOtherMounts(dev, d.Mount); err != nil {
+		if err = b.checkAttachedElsewhere(dev, d.Mount); err != nil {
 			return err
 		}
 		if err = b.command(ctx, "/usr/bin/umount", d.Mount); err != nil {
@@ -580,8 +586,23 @@ func (b *Backend) Remove(ctx context.Context, k Key) error {
 		if err = b.command(ctx, "/usr/sbin/losetup", "-d", dev); err != nil {
 			return err
 		}
+	} else {
+		// Not mounted here, but a loop device may still back the image
+		// and be mounted in another namespace: deleting the image would
+		// leave that filesystem alive and its space unreclaimed.
+		loops, err := b.loopsBacking(image)
+		if err != nil {
+			return err
+		}
+		for _, loop := range loops {
+			if err = b.checkAttachedElsewhere(loop, ""); err != nil {
+				return err
+			}
+			if err = b.command(ctx, "/usr/sbin/losetup", "-d", loop); err != nil {
+				return err
+			}
+		}
 	}
-	meta, image, mount := b.paths(k)
 	if err = os.Remove(image); err != nil {
 		return err
 	}
@@ -770,13 +791,75 @@ func trustedParent(path string) error {
 	}
 	return nil
 }
+func (b *Backend) checkAttachedElsewhere(dev, mount string) error {
+	if b.attachedElsewhere != nil {
+		return b.attachedElsewhere(dev, mount)
+	}
+	return detachedFromOtherMounts(dev, mount)
+}
+
+func (b *Backend) loopsBacking(image string) ([]string, error) {
+	if b.backingLoops != nil {
+		return b.backingLoops(image)
+	}
+	return sysfsLoopsBacking(image)
+}
+
+// sysfsLoopsBacking lists the loop devices whose backing file is image.
+func sysfsLoopsBacking(image string) ([]string, error) {
+	entries, err := os.ReadDir("/sys/block")
+	if err != nil {
+		return nil, err
+	}
+	var loops []string
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "loop") {
+			continue
+		}
+		backing, err := os.ReadFile(filepath.Join("/sys/block", e.Name(), "loop/backing_file"))
+		if os.IsNotExist(err) {
+			continue // unbound loop device
+		}
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(string(backing)) == image {
+			loops = append(loops, "/dev/"+e.Name())
+		}
+	}
+	return loops, nil
+}
+
+// detachedFromOtherMounts refuses dev while any process can still reach it
+// anywhere but at mount in the helper's own namespace. An empty mount means
+// the helper does not mount it at all, so every attachment counts.
 func detachedFromOtherMounts(dev, mount string) error {
+	selfNS, err := os.Readlink("/proc/self/ns/mnt")
+	if err != nil {
+		return err
+	}
+	selfRaw, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return err
+	}
+	own := parseMountinfo(string(selfRaw))
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return err
 	}
+	seen := map[string]bool{}
 	for _, e := range entries {
 		if e.Name() == "" || e.Name()[0] < '0' || e.Name()[0] > '9' {
+			continue
+		}
+		ns, err := os.Readlink(filepath.Join("/proc", e.Name(), "ns/mnt"))
+		if os.IsNotExist(err) || err != nil && inactiveProcess(e.Name()) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect mount namespace %s: %w", e.Name(), err)
+		}
+		if seen[ns] {
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join("/proc", e.Name(), "mountinfo"))
@@ -786,18 +869,69 @@ func detachedFromOtherMounts(dev, mount string) error {
 		if err != nil {
 			return fmt.Errorf("inspect mount namespace %s: %w", e.Name(), err)
 		}
-		for _, line := range strings.Split(string(raw), "\n") {
-			parts := strings.Split(line, " - ")
-			if len(parts) != 2 {
-				continue
-			}
-			left, right := strings.Fields(parts[0]), strings.Fields(parts[1])
-			if len(left) > 4 && len(right) > 1 && right[1] == dev && left[4] != mount {
-				return fmt.Errorf("quota still attached in process %s at %s: %w", e.Name(), left[4], ErrDenied)
-			}
+		seen[ns] = true
+		if where, alias := mountAlias(dev, mount, own, parseMountinfo(string(raw)), ns == selfNS); alias {
+			return fmt.Errorf("quota still attached in process %s at %s: %w", e.Name(), where, ErrDenied)
 		}
 	}
 	return nil
+}
+
+// mountEntry is one /proc/<pid>/mountinfo line: mount point, source and
+// the propagation tags (shared:N, master:N).
+type mountEntry struct {
+	path, source string
+	tags         []string
+}
+
+func parseMountinfo(raw string) []mountEntry {
+	var out []mountEntry
+	for _, line := range strings.Split(raw, "\n") {
+		parts := strings.Split(line, " - ")
+		if len(parts) != 2 {
+			continue
+		}
+		left, right := strings.Fields(parts[0]), strings.Fields(parts[1])
+		if len(left) < 6 || len(right) < 2 {
+			continue
+		}
+		out = append(out, mountEntry{path: left[4], source: right[1], tags: left[6:]})
+	}
+	return out
+}
+
+// mountAlias reports an attachment of dev in other that survives the
+// helper unmounting mount in its own namespace. In that namespace only
+// mount itself is expected. Elsewhere a copy at the same path is safe only
+// when the umount propagates to it: it shares or is a slave of the helper
+// mount's peer group. Any other copy, including a private one at the same
+// path, keeps the filesystem alive.
+func mountAlias(dev, mount string, own, other []mountEntry, sameNS bool) (string, bool) {
+	group := ""
+	for _, e := range own {
+		if e.source == dev && e.path == mount {
+			for _, tag := range e.tags {
+				if id, ok := strings.CutPrefix(tag, "shared:"); ok {
+					group = id
+				}
+			}
+		}
+	}
+	for _, e := range other {
+		if e.source != dev {
+			continue
+		}
+		if mount != "" && e.path == mount {
+			if sameNS {
+				continue
+			}
+			if group != "" && (slices.Contains(e.tags, "shared:"+group) || slices.Contains(e.tags, "master:"+group)) {
+				continue
+			}
+		}
+		return e.path, true
+	}
+	return "", false
 }
 
 func inactiveProcess(pid string) bool {
