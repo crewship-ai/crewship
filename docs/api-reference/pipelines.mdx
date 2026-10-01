@@ -326,15 +326,22 @@ cron.
 ### The executed definition on a run detail
 
 `GET /api/v1/workspaces/{wsId}/pipeline-runs/{runId}` resolves the recipe a
-run **actually executed** from the run's own archived record — by content
-hash first, then numeric version — and never from the routine's current
-HEAD:
+run **actually executed**, never from the routine's current HEAD
+(`internal/api/pipeline_run_definition.go`). Precedence:
+
+1. The run's own `executed_definition_json`, when it stamped one.
+2. Otherwise the archived version whose content hash equals the run's
+   `definition_hash`. When the run has a hash and no archive matches it,
+   there is **no** fallback to the numeric version — the definition is
+   reported unavailable rather than guessed.
+3. Only when the run stamped **no** hash: the archived version with the run's
+   numeric `pipeline_version`.
 
 | Field | Meaning |
 |---|---|
-| `pipeline_version` | The numeric archived version, when one resolves |
+| `pipeline_version` | The matched archive's version; falls back to the version the run stamped when no archive matched |
 | `definition_hash` | The content hash the run stamped |
-| `definition` | The executed recipe (parsed DSL), or `null` when neither a hash nor a version identifies an archive — outputs remain useful on their own |
+| `definition` | The executed recipe (parsed DSL), or `null` when none of the sources above yields one — outputs remain useful on their own |
 | `definition_status` | `available` / `unavailable` / `error` — an unavailable archive is reported, not guessed at |
 | `behavior` | A prose description of the executed recipe's behaviour, when the definition is available |
 
