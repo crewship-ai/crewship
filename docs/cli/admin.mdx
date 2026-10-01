@@ -1202,6 +1202,18 @@ crewship admin instance backups environments land
 | `--dry-run` | no | Check each staged environment without loading anything. |
 | `--timeout` | no | How long to wait for the server, 35m by default (loading images takes a while; the server's own limit is 30m). |
 
+### backups upload
+
+`POST /api/v1/admin/instance/backups/bundles/upload`. Streams an encrypted local
+archive, up to 64 GiB, with an instance-admin token and no selected workspace.
+No private key is sent. The returned path is catalogued with checksum proof;
+contents checks and a test restore are separate. Ctrl+C cancels the request.
+Legacy archives needing conversion are marked explicitly.
+
+```bash
+crewship admin instance backups upload ./backup.tar.zst
+```
+
 ### backups services land
 
 `POST /api/v1/admin/instance/backups/services/land`. Verifies the quota-service

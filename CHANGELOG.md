@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Added
+
+- Upload encrypted recovery archives through Admin › Backups › Recovery or `crewship admin instance backups upload`, with cancellation, checksum validation, disk-space checks and atomic catalog/audit recording.
+
 ### Fixed
 - Complete backups preserve persistent quota-service disks in encrypted format v4. Offline instance recovery stages verified images under fresh generations and keeps services in maintenance until an audited import on the destination host. (#2744)
 - Restricted members can invoke an admitted routine from a minimal private catalog and poll their own routine or declared Page action receipts without a shared journal fallback. Catalog fingerprints also pin nested declarations across submission retries. (#2711)

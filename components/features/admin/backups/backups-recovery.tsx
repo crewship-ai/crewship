@@ -19,6 +19,8 @@ import { saveBackupSettings, useBackupSettings, useDestinations, useVaultKeys } 
 import { perform } from "./use-backups-data"
 import type { SectionCtx } from "./backups-console"
 
+import { BackupsUpload, type UploadReceipt } from "./backups-upload"
+
 type Sub = "new" | "history" | "drills"
 const STEPS = ["Backup", "Target", "Keys", "Checks", "Dry run", "Restore", "Resume"] as const
 // An instance target restores offline, where the key is: after the checks the
@@ -93,6 +95,7 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
   const [busy, setBusy] = React.useState(false)
   const [confirm, setConfirm] = React.useState(false)
   const [offsite, setOffsite] = React.useState(false)
+  const [uploaded, setUploaded] = React.useState<UploadReceipt | null>(null)
   const instance = ctx.scope === "instance"
   const cliOnly = target === "empty_server" || target === "isolated"
   const key = { identity: identity.trim() || undefined, passphrase: passphrase || undefined }
@@ -152,8 +155,16 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
       {step === 1 && !offsite && (
         <SettingsCard title="Pick a backup" actions={<>
           <SmallButton onClick={() => setOffsite(true)}>From off-site storage…</SmallButton>
-          <SmallButton disabled title="Uploading a backup from another machine comes later">Upload a backup…</SmallButton>
+          <BackupsUpload disabled={ctx.demo} onUploaded={(receipt) => { setUploaded(receipt); runs.reload() }} />
         </>}>
+          {uploaded && <div className="flex flex-wrap items-center gap-3 border-b p-4 text-sm">
+            <p className="min-w-0 flex-1">Archive uploaded. Checksum verified; contents and restore have not been checked.
+              {uploaded.conversion_required && " This legacy archive requires conversion before recovery."}
+              {(instance ? uploaded.scope !== "instance" : uploaded.scope === "instance") && " Switch to the archive’s scope to restore it."}
+            </p>
+            {!uploaded.conversion_required && (instance ? uploaded.scope === "instance" : uploaded.scope !== "instance") &&
+              <SmallButton onClick={() => { setPath(uploaded.path); setStep(2) }}>Use uploaded backup</SmallButton>}
+          </div>}
           <Gate resource={runs} what="Backups">
             {() => pool.length === 0 ? <p className="px-4 py-3 text-[12.5px] text-muted-foreground">No backup in this scope yet.</p> : (
               <div className="overflow-x-auto">

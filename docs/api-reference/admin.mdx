@@ -75,6 +75,7 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `POST` | [/api/v1/admin/instance/backups/bundles/check](#post-api-v1-admin-instance-backups-bundles-check) | Check a bundle's contents against its manifest (proof level 2) |
 | `POST` | [/api/v1/admin/instance/backups/restore/checks](#post-api-v1-admin-instance-backups-restore-checks) | Space, format, runtime, unsafe settings and conflicts before a restore |
 | `POST` | [/api/v1/admin/instance/backups/environments/land](#post-api-v1-admin-instance-backups-environments-land) | Load the crew environments an offline recover staged |
+| `POST` | [/api/v1/admin/instance/backups/bundles/upload](#post-api-v1-admin-instance-backups-bundles-upload) | Upload an encrypted recovery archive |
 | `POST` | [/api/v1/admin/instance/backups/services/land](#post-api-v1-admin-instance-backups-services-land) | Import the quota-service disks an offline recover staged |
 | `POST` | [/api/v1/admin/instance/backups/drills](#post-api-v1-admin-instance-backups-drills) | Record a test restore (proof level 3) |
 | `GET` | [/api/v1/admin/instance/backups/drills](#get-api-v1-admin-instance-backups-drills) | Every recorded test restore |
@@ -2012,6 +2013,37 @@ audit log (`instance.environments_landed`).
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
 | `500` | The staged files could not be read. |
+
+## `POST /api/v1/admin/instance/backups/bundles/upload`
+
+**Auth:** instance administrator, with or without workspace membership.
+**Request:** encrypted `.tar.zst` archive bytes, `Content-Type: application/octet-stream`
+or `application/zstd`, up to 64 GiB. No private key, destination path or workspace
+parameter is accepted. One upload per server process is admitted at a time.
+
+**Response** (`201`):
+
+```json
+{"path":"/backups/uploaded-sha256.tar.zst","scope":"instance","size_bytes":513000000,"format_version":4,"proof_level":1,"duplicate":false,"conversion_required":false}
+```
+
+Proof level 1 confirms the encrypted payload checksum, not decryptability or
+successful recovery. Duplicate bytes preserve the catalog's existing proof.
+Publication, catalog and audit either commit together or the owned file is
+removed. Interrupted uploads remove staging. No restore is started.
+
+| Status | Condition |
+|---|---|
+| `201` | Validated encrypted archive catalogued and audited. |
+| `400` | Interrupted upload. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `409` | Another upload is in progress. |
+| `413` | Archive exceeds 64 GiB. |
+| `415` | Unsupported content type. |
+| `422` | Invalid, unencrypted, corrupted or unsupported archive. |
+| `507` | Insufficient free space. |
+| `500` | File, catalog or audit failure. |
 
 ## `POST /api/v1/admin/instance/backups/services/land`
 
