@@ -13,7 +13,8 @@ scripts/build-stamp.sh commit
 scripts/build-stamp.sh dirty
 CGO_ENABLED=0 go build -ldflags "$probe_ldflags" -o "$probe_context/runner" ./scripts/restricted-runtime-probe
 CGO_ENABLED=0 go build -ldflags "$probe_ldflags" -o "$probe_context/sidecar" ./cmd/crewship-sidecar
-sha256sum "$probe_context/runner" "$probe_context/sidecar"
+CGO_ENABLED=0 go build -ldflags "$probe_ldflags" -o "$probe_context/native-runner" ./cmd/crewship-restricted-native-runner
+sha256sum "$probe_context/runner" "$probe_context/sidecar" "$probe_context/native-runner"
 cp scripts/restricted-runtime-probe/Dockerfile "$probe_context/Dockerfile"
 probe_base=$(docker image inspect alpine:3 --format '{{index .RepoDigests 0}}')
 docker build --network=none --build-arg "BASE=$probe_base" -t "$probe_tag" "$probe_context"

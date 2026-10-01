@@ -3,5 +3,6 @@ ARG BASE=alpine:3
 FROM ${BASE}
 COPY runner /opt/crewship-runner
 COPY sidecar /opt/crewship-sidecar
+COPY native-runner /opt/crewship-native-runner
 USER 1001:1001
 ENTRYPOINT ["/opt/crewship-runner", "hold"]
