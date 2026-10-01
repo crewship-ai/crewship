@@ -193,6 +193,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 				replyError(w, http.StatusBadRequest, "invalid services_json: "+err.Error())
 				return
 			}
+			if err := serviceconfig.QuotaTransition(previousPlain, trimmedServices); err != nil {
+				replyError(w, http.StatusBadRequest, "invalid services_json: "+err.Error())
+				return
+			}
 		}
 	}
 
