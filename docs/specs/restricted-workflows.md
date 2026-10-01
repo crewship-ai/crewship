@@ -84,3 +84,9 @@ with current generation, stop evidence and a reason. Other members cannot list,
 read, cancel, replay or resolve these records through generic Work routes.
 Private replay always requires a new authorized routine or Page admission;
 resolving to success requires an already captured private completion.
+
+A graph failure with confirmed physical cleanup is terminal `failed`, releasing
+shared agent capacity without retrying the graph or asserting that no paid
+request or external effect occurred. Failure before graph execution is likewise
+terminal. Failed physical cleanup and recovered start intents retain
+`needs_reconciliation` and their capacity hold until explicitly resolved.

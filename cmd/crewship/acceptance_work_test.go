@@ -94,6 +94,10 @@ func startWorkAcceptanceServer(t *testing.T, withReconciliation ...bool) string 
 	if len(withReconciliation) > 0 && withReconciliation[0] {
 		seed("wk-reconcile-1", "needs_reconciliation", "manual", "", "agent-c", `{}`, false)
 	}
+	if len(withReconciliation) > 1 && withReconciliation[1] {
+		seed("wk-private-001", "needs_reconciliation", "manual", "", "agent-c", `{}`, false)
+		mustExec(`UPDATE work_items SET domain_kind='restricted_workflow',domain_id=id WHERE id='wk-private-001'`)
+	}
 	seed("wk-queued-0001", "queued", "manual", "", "agent-a", `{}`, false)
 	seed("wk-historical-1", "succeeded", "schedule", "2026-01-01T00:00:00Z", "cmucdeletedagent000000001", `{}`, true)
 	seed("wk-replay-0001", "failed", "webhook", "dlv-held-00001", "agent-b", `{"payload":"kept"}`, true)
@@ -501,5 +505,21 @@ func TestAcceptance_RoutineWebhookReceipts_ReadByIdentityWithoutInventingARun(t 
 
 	if unknownOut, err := runWorkCLI(t, cfgPath, "routine", "webhooks", "receipts", "get", "rcpt-does-not-exist"); err == nil {
 		t.Fatalf("expected an unknown receipt to fail, got:\n%s", unknownOut)
+	}
+}
+
+func TestAcceptance_WorkResolve_PrivateCannotInventCompletion(t *testing.T) {
+	cfg := startWorkAcceptanceServer(t, false, true)
+	out, err := runWorkCLI(t, cfg, "work", "resolve", "wk-private-001", "--state", "succeeded", "--generation", "2", "--reason", "container stopped", "--runtime-stopped", "-f", "json")
+	if err == nil || !strings.Contains(out, "no captured completion") {
+		t.Fatalf("CLI invented completion: %v: %s", err, out)
+	}
+	detail, err := runWorkCLI(t, cfg, "work", "get", "wk-private-001", "-f", "json")
+	if err != nil || !strings.Contains(detail, `"state": "needs_reconciliation"`) {
+		t.Fatalf("409 changed work: %v: %s", err, detail)
+	}
+	out, err = runWorkCLI(t, cfg, "work", "resolve", "wk-private-001", "--state", "failed", "--generation", "2", "--reason", "container stopped; failure verified", "--runtime-stopped", "-f", "json")
+	if err != nil || !strings.Contains(out, `"state": "failed"`) {
+		t.Fatalf("CLI failed resolution: %v: %s", err, out)
 	}
 }

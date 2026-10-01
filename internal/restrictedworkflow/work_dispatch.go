@@ -79,9 +79,10 @@ func (s *Service) markJobRunning(ctx context.Context, a dispatch.Assignment) err
 }
 
 type workflowAttempt struct {
-	cancel     context.CancelFunc
-	done       chan struct{}
-	workflowID string
+	cancel           context.CancelFunc
+	done             chan struct{}
+	workflowID       string
+	executionStarted bool
 }
 type workflowRuntime struct {
 	service  *Service
@@ -115,43 +116,68 @@ func (r *workflowRuntime) Authorize(ctx context.Context, a dispatch.Assignment) 
 	}
 	return dispatch.Allow(), nil
 }
+
+// workflowReconciliationRequired preserves unconfirmed cleanup or lost ownership
+// independently of a terminal graph failure. Failed graphs are never retried.
+type workflowReconciliationRequired struct{ error }
+
 func (r *workflowRuntime) Run(ctx context.Context, a dispatch.Assignment, started func()) (err error) {
-	wr, ok := quiesce.Enter(ctx)
-	if !ok {
-		return errors.New("private workflow writer unavailable")
-	}
-	defer wr.Leave()
-	ctx, cancel := context.WithCancel(wr.Context())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	j, err := r.service.load(ctx, a.Item.DomainID)
-	if err != nil {
-		return err
-	}
-	live := &workflowAttempt{cancel: cancel, done: make(chan struct{}), workflowID: j.ID}
+	live := &workflowAttempt{cancel: cancel, done: make(chan struct{}), workflowID: a.Item.DomainID}
 	r.mu.Lock()
 	r.attempts[r.Locator(a)] = live
 	r.mu.Unlock()
+	var leave func()
 	defer func() {
-		if checker, ok := r.service.executor.(interface {
-			ConfirmWorkflowStopped(context.Context, string) error
-		}); ok {
-			clean, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			err = errors.Join(err, checker.ConfirmWorkflowStopped(clean, live.workflowID))
-			cancel()
+		if leave != nil {
+			defer leave()
+		}
+		if live.executionStarted {
+			ownershipCtx, ownershipCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			ownershipErr := r.service.checkOwnership(ownershipCtx, r.service.db, a)
+			ownershipCancel()
+			if ownershipErr != nil {
+				err = errors.Join(err, workflowReconciliationRequired{ownershipErr})
+			}
+			if checker, ok := r.service.executor.(interface {
+				ConfirmWorkflowStopped(context.Context, string) error
+			}); ok {
+				clean, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				stopErr := checker.ConfirmWorkflowStopped(clean, live.workflowID)
+				cancel()
+				if stopErr != nil {
+					err = errors.Join(err, workflowReconciliationRequired{stopErr})
+				}
+			}
 		}
 		close(live.done)
 		if err != nil {
 			r.recordError(err)
 		}
 	}()
-	return r.service.executeAssignment(ctx, a, started)
+	wr, ok := quiesce.Enter(ctx)
+	if !ok {
+		return errors.New("private workflow writer unavailable")
+	}
+	leave = wr.Leave
+	return r.service.executeAssignment(wr.Context(), a, func() {
+		live.executionStarted = true
+		started()
+	})
 }
 func (r *workflowRuntime) Classify(_ dispatch.Assignment, err error) dispatch.Outcome {
 	if err == nil {
 		return dispatch.OutcomeSucceeded
 	}
-	// A failed graph may already have paid for a model or made external changes.
-	return dispatch.OutcomeUnclear
+	var uncertain workflowReconciliationRequired
+	if errors.As(err, &uncertain) {
+		return dispatch.OutcomeUnclear
+	}
+	// Failure can retain paid requests or external effects. Terminal failure
+	// releases capacity, without scheduling a retry or claiming those effects
+	// never happened. Unconfirmed cleanup or lost ownership requires reconciliation.
+	return dispatch.OutcomeFailed
 }
 func (r *workflowRuntime) Alive(ctx context.Context, locator string) (bool, error) {
 	r.mu.Lock()
@@ -162,6 +188,9 @@ func (r *workflowRuntime) Alive(ctx context.Context, locator string) (bool, erro
 	}
 	select {
 	case <-live.done:
+		if !live.executionStarted {
+			return false, nil
+		}
 		if checker, ok := r.service.executor.(interface {
 			ConfirmWorkflowStopped(context.Context, string) error
 		}); ok {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 	"github.com/crewship-ai/crewship/internal/work"
 )
@@ -320,6 +321,7 @@ func TestWorkflowMemberRemovalRetainsStopIdentitiesAndRevokesDescendants(t *test
 
 func TestWorkflowInterruptedExecutionKeepsAuthorizedReconciliationReceipt(t *testing.T) {
 	s, runner := fixture(t)
+	s.executor = unconfirmedGraphStop{runner}
 	r := admitFixtureJob(t, s)
 	runner.StartSession = func(context.Context, string) (restricteddispatch.TextSession, error) { return nil, context.Canceled }
 	if worked, err := s.DispatchNext(t.Context()); !worked || err == nil {
@@ -331,5 +333,121 @@ func TestWorkflowInterruptedExecutionKeepsAuthorizedReconciliationReceipt(t *tes
 	}
 	if worked, err := s.DispatchNext(t.Context()); worked || err != nil {
 		t.Fatalf("interrupted model request repeated %v %v", worked, err)
+	}
+}
+
+type confirmedGraphStop struct {
+	*restricteddispatch.TextRunner
+	checks int
+}
+
+func (s *confirmedGraphStop) ConfirmWorkflowStopped(context.Context, string) error {
+	s.checks++
+	return nil
+}
+
+func TestWorkflowFailedClientReleasesAgentForOtherClientAndTrustedWork(t *testing.T) {
+	for _, failure := range []string{"provider", "oversized output", "denied"} {
+		t.Run(failure, func(t *testing.T) {
+			s, runner := fixture(t)
+			stopped := &confirmedGraphStop{TextRunner: runner}
+			s.executor = stopped
+			h1 := admitFixtureJob(t, s)
+			h2, err := s.AdmitManual(t.Context(), "h2", "w", "private-work", map[string]any{"task": "H2_PRIVATE"}, "", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			base := runner.StartSession
+			h1Starts, h2Starts := 0, 0
+			runner.StartSession = func(ctx context.Context, handle string) (restricteddispatch.TextSession, error) {
+				a, err := runner.Authority.Store.Resolve(ctx, handle)
+				if err != nil {
+					return nil, err
+				}
+				if a.Principal == "h1" {
+					h1Starts++
+					switch failure {
+					case "provider":
+						return nil, errors.New("synthetic provider failure")
+					case "denied":
+						return nil, access.ErrDenied
+					default:
+						done := make(chan struct{})
+						close(done)
+						return session{strings.Repeat("x", 257*1024), done}, nil
+					}
+				}
+				h2Starts++
+				return base(ctx, handle)
+			}
+			if worked, err := s.DispatchNext(t.Context()); !worked || err == nil {
+				t.Fatalf("H1 failure: %v %v", worked, err)
+			}
+			failed, err := s.ledger.Get(t.Context(), h1.ID)
+			if err != nil || failed.State != work.StateFailed || stopped.checks == 0 {
+				t.Fatalf("H1 holds slot: %+v %v", failed, err)
+			}
+			if worked, err := s.DispatchNext(t.Context()); !worked || err != nil {
+				t.Fatalf("H2 blocked: %v %v", worked, err)
+			}
+			result, err := s.Result(t.Context(), "h2", "w", h2.ID)
+			if err != nil || result.State != "completed" || h1Starts != 1 || h2Starts != 2 {
+				t.Fatalf("H2 result/replay: %+v %v starts=%d/%d", result, err, h1Starts, h2Starts)
+			}
+			if _, err := s.Result(t.Context(), "h1", "w", h2.ID); !errors.Is(err, ErrDenied) {
+				t.Fatalf("foreign output: %v", err)
+			}
+			for _, source := range []work.Source{work.SourceSchedule, work.SourceWebhook} {
+				tx, err := s.db.BeginTx(t.Context(), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				accepted, err := s.ledger.AcceptTx(t.Context(), tx, work.AcceptRequest{WorkspaceID: "w", Source: source, DomainKind: work.DomainAgentRun, AgentID: "agent", Class: work.ClassBackground})
+				if err != nil {
+					tx.Rollback()
+					t.Fatal(err)
+				}
+				if err := tx.Commit(); err != nil {
+					t.Fatal(err)
+				}
+				claim, err := s.ledger.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "trusted", Limits: work.SerialAgentLimits(), WorkID: accepted.WorkID})
+				if err != nil {
+					t.Fatalf("trusted %s blocked: %v", source, err)
+				}
+				if err := s.ledger.Transition(t.Context(), work.TransitionRequest{WorkID: accepted.WorkID, RunID: claim.RunID, Generation: claim.Generation, To: work.StateFailed, Reason: "synthetic trusted completion"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if worked, err := s.DispatchNext(t.Context()); worked || err != nil {
+				t.Fatalf("failed model request replayed: %v %v", worked, err)
+			}
+		})
+	}
+}
+
+func TestWorkflowFailureBeforeExecutionDoesNotRequirePhysicalReconciliation(t *testing.T) {
+	s, runner := fixture(t)
+	s.executor = unconfirmedGraphStop{runner}
+	r := admitFixtureJob(t, s)
+	// An unavailable state write cannot have launched a graph or model request.
+	if _, err := s.db.Exec(`CREATE TRIGGER reject_running BEFORE UPDATE OF state ON restricted_workflow_jobs WHEN NEW.state='running' BEGIN SELECT RAISE(ABORT,'synthetic state write failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := s.DispatchNext(t.Context()); !worked || err == nil {
+		t.Fatalf("start failure: %v %v", worked, err)
+	}
+	item, err := s.ledger.Get(t.Context(), r.ID)
+	if err != nil || item.State != work.StateFailed {
+		t.Fatalf("pre-execution error held capacity: %+v %v", item, err)
+	}
+	// Loading a missing domain job likewise cannot create a runtime. The known
+	// in-process attempt must report absence, while restart locators stay unknown.
+	a := dispatch.Assignment{Item: &work.Item{DomainID: "missing"}, RunID: "missing-run"}
+	err = s.runtime.Run(t.Context(), a, func() { t.Fatal("missing job started") })
+	if err == nil || s.runtime.Classify(a, err) != dispatch.OutcomeFailed {
+		t.Fatalf("missing job outcome: %v", err)
+	}
+	if alive, err := s.runtime.Alive(t.Context(), s.runtime.Locator(a)); alive || err != nil {
+		t.Fatalf("unlaunched job absence: %v %v", alive, err)
 	}
 }

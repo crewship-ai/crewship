@@ -89,6 +89,13 @@ func TestHoldCapReleasesAndEndsTheCopy(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("the hold cap never ended the window's context")
 	}
+	// Cancellation stops the copy before release hooks finish and admission
+	// reopens. Observe release completion before asserting those later effects.
+	releasedCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := c.WaitReleased(releasedCtx); err != nil {
+		t.Fatal(err)
+	}
 	if !w.Expired() || c.Holding() {
 		t.Fatalf("expired=%v holding=%v", w.Expired(), c.Holding())
 	}
