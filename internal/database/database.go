@@ -112,6 +112,9 @@ func (d *DB) Close() error {
 	if err := d.DB.Close(); err != nil {
 		return err
 	}
+	if d.writerLease != nil && d.DB.Stats().OpenConnections != 0 {
+		return fmt.Errorf("database writer ownership retained: SQLite connections are still open")
+	}
 	return d.writerLease.Close()
 }
 
