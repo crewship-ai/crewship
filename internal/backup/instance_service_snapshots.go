@@ -183,12 +183,18 @@ func stageInstanceServiceRecovery(ctx context.Context, db *sql.DB, payload *Extr
 	if err != nil {
 		return err
 	}
-	defer os.Remove(temporaryPlan)
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(temporaryPlan)
+		}
+	}()
 	if err = tx.Commit(); err != nil {
 		return err
 	}
 	// Once committed, these images are referenced by the recovered database.
 	// Retain them on publication failure, with maintenance still in force.
+	committed = true
 	payload.serviceRecoveryCommitted = true
 	path := filepath.Join(dataDir, RecoveredServicesDir, instanceServicePlanFile)
 	if err = os.Rename(temporaryPlan, path); err != nil {
