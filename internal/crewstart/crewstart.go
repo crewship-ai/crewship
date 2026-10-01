@@ -181,6 +181,12 @@ func (s *Starter) StartResolved(ctx context.Context, cfg provider.CrewConfig, no
 		return "", cfg, ErrNoContainerProvider
 	}
 
+	// Before complete: a rebuild rewrites crews.cached_image, which complete
+	// then reads.
+	if err := waitForImage(ctx, cfg.ID); err != nil {
+		return "", cfg, err
+	}
+
 	cfg = s.complete(ctx, cfg, notify)
 	if policy, ok := s.completer.(interface {
 		FilterServices(context.Context, provider.CrewConfig) (provider.CrewConfig, error)
