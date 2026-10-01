@@ -1041,7 +1041,7 @@ Runs started on this route are recorded as user-driven: `invoking_user_id` is th
 |---|---|
 | `404` | Pipeline not found |
 | `409` | The recipe changed since preview; refresh it before starting. |
-| `422` | A required credential, integration or resource is confirmed missing. During execution, an HTTP step whose `credential_ref` cannot be resolved stops before sending the request (a store error blocks with `503`). |
+| `422` | A required credential, integration or resource is confirmed missing. |
 | `429` | A run with the same `concurrency_key` is already in flight (sets `Retry-After: 5`) |
 | `503` | Runner not wired, or the credential store is unavailable so a required-credential check cannot be decided — both fail closed rather than dispatch without the check. |
 
@@ -1063,6 +1063,15 @@ Runs started on this route are recorded as user-driven: `invoking_user_id` is th
   "deduped": false
 }
 ```
+
+**Step failures.** The status codes above are decided before dispatch. Once the
+run is executing, a failing step does not change the HTTP status: it fails the
+run, and the `RunResult` comes back `200` with `status: "FAILED"`,
+`failed_at_step` and `error_message`. In particular, an HTTP step whose
+`credential_ref` cannot be resolved — the credential is missing, empty, or the
+credential store errors — fails that step **before** the request is sent; the
+step error names only the declared credential type
+(`internal/pipeline/runner_http.go`).
 
 ### List pipeline runs (journal-backed)
 
