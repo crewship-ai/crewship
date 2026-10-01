@@ -307,9 +307,27 @@ See [Agent memory](/guides/agent-memory) for the profiles and conflict vocabular
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/v1/internal/keeper/request` | Sidecar forwards a credential read request. |
-| `GET` | `/api/v1/internal/keeper/request/{requestId}` | Fetch the status / decision of a previously submitted request. |
-| `POST` | `/api/v1/internal/keeper/execute` | Sidecar forwards a sealed credential-use request after gatekeeper approval. See the [Keeper section](#keeper) for the full request flow. |
+| `POST` | `/api/v1/internal/keeper/request` | Sidecar forwards a credential read request. Accepts an optional body field `approval_request_id` to present a previously approved escalation on the retry — see below. crewshipd reads only the body field; an agent that uses the sidecar's `X-Keeper-Approval` header has it translated into `approval_request_id` by the sidecar before the forward. |
+| `GET` | `/api/v1/internal/keeper/request/{requestId}` | Fetch the status / decision of a previously submitted request. Pinned to the acting agent (`?agent_id=` set by the sidecar; a mismatch answers `404`), so an agent can poll whether its escalation was approved. Carries `request_type` and, once consumed, `approval_consumed_at`. |
+| `POST` | `/api/v1/internal/keeper/execute` | Sidecar forwards a sealed credential-use request after gatekeeper approval. Accepts the same `approval_request_id` body field (the sidecar translates its `X-Keeper-Approval` header into it). See the [Keeper section](#keeper) for the full request flow. |
+
+**Presenting a human approval.** A request or execute retry may carry the id of
+an escalation a person resolved as ALLOW. The approval binds to the same
+agent, credential and request type — and, for `/execute`, the identical
+command — is **single-use** (races resolve to exactly one winner; the retry's
+own row is never spendable, so approvals cannot chain), expires after
+**15 minutes**, and is spent *before* execution. Only a row resolved by a
+person is consumable; an adjudicator/model ALLOW mints nothing. Binding
+failures (`internal/api/keeper_approval.go`):
+
+| Status | When |
+|---|---|
+| `400` | `approval_request_id` is empty. |
+| `404` | Unknown id, or an id that belongs to another tenant (`404`, not `403`, so the id's existence does not leak). |
+| `403` | The escalation is not yet resolved (still pending / escalated), was resolved as `DENY`, was not resolved by a person (an adjudicator/model ALLOW), or does not bind to this request (agent, credential, request type or command differ). |
+| `409` | The approval was already spent, or a concurrent retry spent it first. |
+| `410 Gone` | The approval is older than 15 minutes, or its decision time is missing or unreadable. | The full agent-side flow is in
+[Keeper → Rule on an escalation](/guides/keeper#rule-on-an-escalation).
 
 Keeper Phase 2 (aux-LLM evaluators, PR-C / PRD §6 F4). All four are wrapped in `internalAuth` **and** `internalWsCtx` (which reads `?workspace_id=` into the request context — see the [Authentication](#authentication) known-exception note). They are always registered, returning a deterministic `503` ("evaluator not configured") until the evaluators are wired (`router_internal.go:177-202`).
 

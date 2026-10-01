@@ -27,7 +27,8 @@ GET /api/v1/models?provider=<PROVIDER>
 ```
 
 `provider` is required and case-insensitive. Supported values:
-`ANTHROPIC`, `OPENAI`, `GOOGLE`, `OLLAMA`.
+`ANTHROPIC`, `OPENAI`, `GOOGLE`, `OLLAMA`, `OPENCODE`, `OPENCODE_GO`,
+`ZAI_CODING_PLAN`.
 
 Response:
 
@@ -49,6 +50,15 @@ Response:
 | OPENAI    | `GET /v1/models`       | Yes              |
 | GOOGLE    | (none yet)             | Yes              |
 | OLLAMA    | `GET /api/tags`        | **No**           |
+| OPENCODE  | (none — curated only)  | Yes — partial, non-rejecting |
+| OPENCODE_GO | (none — curated only) | Yes — partial, non-rejecting |
+| ZAI_CODING_PLAN | (none — curated only) | Yes — partial, non-rejecting |
+
+The three gateway providers have **no live lister** — the endpoint always
+answers them from a curated list (`source: "curated"`). That list is
+deliberately partial: OpenCode's own catalog decides at run time which ids
+actually work, so the curated suggestions never reject a custom model id on
+the agent update path.
 
 <Note>
 **OLLAMA has no curated fallback.** Its model set is whatever the local Ollama
@@ -62,11 +72,12 @@ An unknown or unsupported `provider` returns **400 Bad Request**. `CURSOR` and
 
 <Note>
   **Discovery is not pricing, and the two answer for different provider sets.**
-  This endpoint covers the four providers above, from a live call or a curated
+  This endpoint covers the seven providers above, from a live call or a curated
   list, and answers *"which model ids may I type"*. What a model **costs** comes
-  from an embedded models.dev snapshot covering eight providers —
+  from an embedded models.dev snapshot covering nine providers —
   `amazon-bedrock`, `anthropic`, `deepseek`, `google`, `mistral`, `openai`,
-  `openrouter`, `xai` — which is neither a discovery surface nor a claim that
+  `opencode`, `openrouter`, `xai` — which is neither a discovery surface nor a
+  claim that
   Crewship can call those models. `crewship model price` queries it offline.
   See [Multi-provider LLM configuration](/guides/multi-provider-llm#the-model-catalog).
 

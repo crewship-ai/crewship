@@ -867,10 +867,15 @@ statement, deliberately kept honest here:
   sidecar router directly from source and fails when one is not classified, so
   the next route cannot silently join the first category by accident.
 
-The raw LLM-proxy cost ledger still attributes usage to the boot agent:
-provider API calls carry the provider key, not a per-agent token, so the
-proxy has no per-request identity to bind — an accepted limitation of the
-metering path, distinct from the identity-bearing agent routes above.
+The LLM-proxy cost ledger attributes usage per run, not per boot agent: each
+provider call's dummy key carries a run-bound route token (`llmrv2`, derived
+per agent and per run), the proxy resolves the acting agent and run from it
+before credential injection, and a request whose run has ended is refused —
+durably, because the run registry replays run ends on sidecar restart. The
+older agent-only token (`llmrv1`) is refused outright. Run-bound revocation
+closes the window a leaked dummy key would otherwise keep open for the rest
+of an agent's lifetime; the shared-container caveat above still applies for
+as long as the run is live.
 
 ### Resolved exception — Keeper Phase 2 family
 

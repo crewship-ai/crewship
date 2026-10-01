@@ -106,6 +106,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- OpenAI gains GPT-5.6 Luna (fast tier) on both the general API list and the Codex CLI adapter; the Codex default stays GPT-5.5. (#2614, issue #2613)
+
 - Credentials: connect OpenCode Go and OpenCode Zen with separate encrypted API-key accounts, existing access assignments, and OpenCode model selection. Gateway calls use the sidecar with native model protocols; setup explains Go subscription limits and optional Zen balance overage. (#2618)
 
 - Credentials: connect a Z.AI GLM Coding Plan subscription with its own encrypted API-key account, sidecar route and `zai-coding-plan/` model selection on the OpenCode runner. The plan is kept separate from metered Z.AI credit — no shared payer, no fallback — and remaining quota is never inferred from token counts. (#2621)

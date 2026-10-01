@@ -9,6 +9,16 @@ tag: Stable
 The Harbormaster approval queue is the human-in-the-loop gate for agent actions that match a policy rule. Enqueue is internal-only -- it fires from `harbormaster.Gate` when an agent hits a rule-matching action -- so the public surface is the read + decide flow operators use to triage, approve, or deny pending requests. See the [Harbormaster guide](/guides/harbormaster).
 
 <Note>
+  This queue is **not** where a Keeper escalation is decided. Keeper's
+  `ESCALATE` verdicts resolve through
+  `POST /api/v1/admin/keeper/requests/{requestId}/resolve`
+  ([Keeper](/api-reference/keeper)), and a human ALLOW there additionally mints
+  the single-use consumable approval the agent presents on its retry. The rows
+  on this page are Harbormaster's own rule-matched actions and share no state
+  with Keeper requests.
+</Note>
+
+<Note>
   All endpoints require authentication and are workspace-scoped, and every
   endpoint on this page — reads included — additionally requires `OWNER` or
   `ADMIN` role (#2233). Before this, the two read endpoints were reachable by
