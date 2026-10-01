@@ -55,6 +55,7 @@ var workspaceTablesNotBundled = map[string]string{
 	"backup_runs":             "THIS instance's backup run history; a restored copy would describe runs the target never ran",
 	"backup_locks":            "in-flight backup mutex rows; process-local by definition",
 	"backup_restore_origins":  "lineage evidence for DR resume authorisation (#1716); carrying it forward asserts a history the target never had",
+	"resource_cleanup_status": "this installation's container cleanup observations; a restored copy never scanned the target's daemon and must not inherit cleanup state",
 	"crew_audit_log":          "crew action audit trail (operational)",
 	"peer_card_audit":         "audit trail",
 	"notification_deliveries": "delivery log for notification_channels (which DO ride the bundle); operational, not config",

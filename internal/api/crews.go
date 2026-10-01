@@ -16,6 +16,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -95,6 +96,8 @@ type crewActivityNoter interface {
 }
 
 type CrewHandler struct {
+	containerCleanup *resourcelifecycle.Controller
+
 	db          *sql.DB
 	hub         *ws.Hub
 	logger      *slog.Logger

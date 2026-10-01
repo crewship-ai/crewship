@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * Panel actions — the front half of PRD `docs/prd/pages.md` §8b.
+ * Panel actions — the front half of PRD `docs/specs/pages.md` §8b.
  *
  * A page that cannot *do* anything is a report. This file is the whole of the
  * doing: the vocabulary normaliser, the one dispatcher every button goes

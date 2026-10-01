@@ -36,9 +36,10 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
-	"access_grants":       IntentInclude,        // exact member/resource rights survive restore
-	"access_attempts":     IntentExcludeRuntime, // restoring a bundle must not revive execution capabilities
-	"restricted_launches": IntentExcludeRuntime, // frozen execution payloads require fresh admission after restore
+	"access_grants":                IntentInclude,        // exact member/resource rights survive restore
+	"access_attempts":              IntentExcludeRuntime, // restoring a bundle must not revive execution capabilities
+	"restricted_launches":          IntentExcludeRuntime, // frozen execution payloads require fresh admission after restore
+	"restricted_provider_bindings": IntentExcludeRuntime, // provider authority must be admitted anew after restore
 	// Durable human collaboration: restore preserves history/ACL but suspends work.
 	"workspace_conversations":              IntentInclude,
 	"workspace_conversation_direct_pairs":  IntentInclude,
@@ -135,7 +136,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"saved_views":        IntentInclude,
 
 	// === Pages (round-trip) ===================================
-	// PRD docs/prd/pages.md §10b.5 draws the line here: `crewship
+	// PRD docs/specs/pages.md §10b.5 draws the line here: `crewship
 	// export` carries the page SPEC only, because export moves
 	// configuration between installs. A BACKUP is a whole-instance
 	// snapshot, so it carries spec, grants, versions AND panel data —
@@ -673,6 +674,11 @@ var NonBackedUpTables = map[string]struct{}{
 	"backup_incidents":            {},
 	"backup_offsite_destinations": {},
 	"backup_copies":               {},
+
+	"resource_cleanup_status":       {}, // source-installation observations, not portable workspace state or target cleanup authority
+	"resource_cleanup_mounts":       {}, // source-container mount references retained locally; must never authorize cleanup on a restored instance
+	"resource_cleanup_scans":        {}, // source-installation scan freshness; a restored copy has not scanned anything
+	"resource_cleanup_installation": {}, // per-database identity nonce; importing it would hand the target the source's cleanup authority
 	// keeper_aux_settings moved to BackupTableIntent (IntentExcludeOperational)
 	// in #1554: its new credential_id FK makes the reverse-FK walk discover it,
 	// and a discovered table must be classified there, not here. Same verdict —

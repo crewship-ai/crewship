@@ -398,8 +398,9 @@ not say which, and neither does the API. The raw payload is never returned;
 `body_sha256` and `body_bytes` identify it.
 
 **Dedup window and retention.** A receipt deduplicates redeliveries of its
-identifier for 30 days from acceptance (`dedup_expires_at`). A daily sweeper
-removes expired receipts; from then on the same identifier is **new work and
+identifier for 30 days from acceptance (`dedup_expires_at`). A sweeper removes
+expired receipts **at startup and then daily**, so downtime cannot extend the
+window; from then on the same identifier is **new work and
 runs again** — the contract promises no replay suppression past the window.
 Receipts recorded before the window existed were dated from the upgrade and
 keep the full 30 days from there.

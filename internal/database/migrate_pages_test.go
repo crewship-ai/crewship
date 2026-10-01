@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Pages — the six tables behind PRD §10 (docs/prd/pages.md).
+// Pages — the six tables behind PRD §10 (docs/specs/pages.md).
 //
 // A page holds no query, no datasource and no credentials; it renders the last
 // payload a producer pushed. That makes the SCHEMA the whole security model:

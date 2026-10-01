@@ -11,7 +11,7 @@ Status: draft · 2026-08-01 · Companion to `agent-identity-signing.md` (isolati
 > container-per-agent because the per-container costs multiply.
 >
 > All `file:line` references verified against `fix/aux-reach-probes-the-slots-endpoint`
-> on 2026-08-01. Live measurements taken against dev1 (`crewship-dev1.unifylab.cz`) the
+> on 2026-08-01. Live measurements taken against dev1 (`localhost:8081`) the
 > same day via the CLI. Re-verify before implementing.
 
 ---

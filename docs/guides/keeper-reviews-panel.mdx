@@ -78,7 +78,7 @@ Sampled post-tool-call. The orchestrator's `EventPostToolCall` hook fires on a p
 - `tool_name` (`shell_exec`, `http_post`, `file_write`, etc.)
 - `tool_args_snippet` (truncated args — secrets scrubbed before storage)
 - `decision` + `risk_score`
-- `should_block` (true only when crew's `behavior_mode='block'` AND decision is DENY or ESCALATE at strict/guided autonomy)
+- `should_block` (true when the crew's `behavior_mode='block'` AND the decision is DENY — any autonomy — or ESCALATE at strict/guided autonomy)
 
 For `behavior_mode='warn'` (the default) every DENY here is a **non-blocking** inbox notification — the agent's NEXT tool call proceeds. The operator's job is to skim the warns, spot patterns ("agent X keeps trying to call `rm -rf`"), and either:
 

@@ -1,6 +1,6 @@
 package api
 
-// Pages — the grants surface (docs/prd/pages.md §7.1 rule 3, §7.1b, §11).
+// Pages — the grants surface (docs/specs/pages.md §7.1 rule 3, §7.1b, §11).
 //
 //	GET    /api/v1/pages/{slug}/grants
 //	PUT    /api/v1/pages/{slug}/grants

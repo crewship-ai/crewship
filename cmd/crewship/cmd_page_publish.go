@@ -1,7 +1,7 @@
 package main
 
 // `crewship page publish` / `links` / `unpublish` — public pages (PRD
-// docs/prd/pages.md §7.3).
+// docs/specs/pages.md §7.3).
 //
 // One command per endpoint, which is the repo rule:
 //

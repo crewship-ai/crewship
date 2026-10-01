@@ -7,7 +7,7 @@ JSON output:
 TEAM_CHAT_STATE=/private/path/accounts.json node e2e/team-chat-live.mjs
 ```
 
-The script targets `https://crewship-dev2.unifylab.cz` only. It logs in separately
+The script targets `http://localhost:8082` only. It logs in separately
 as each of the six fictional colleagues through normal CSRF/password endpoints.
 It never prints passwords or saves browser cookies/traces. Authentication 429s
 respect `Retry-After`, with progress messages every at most 20 seconds during

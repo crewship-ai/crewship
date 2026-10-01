@@ -5,6 +5,7 @@ package api
 // All require workspace context and (per-handler) OWNER role.
 
 import (
+	"net/http"
 	"os"
 
 	"github.com/crewship-ai/crewship/internal/backup"
@@ -12,6 +13,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/notify"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/usermodel"
 )
 
@@ -31,6 +33,34 @@ func (r *Router) registerAdminRoutes() {
 	r.authedAdmin("GET", "/api/v1/audit", audit.List)
 
 	// Admin
+	r.authedAdminAny("GET", "/api/v1/admin/resource-cleanup", func(w http.ResponseWriter, req *http.Request) {
+		// Workspace admins keep the tenant boundary from the cleanup PR.
+		// Only an instance admin can read every workspace, including deleted
+		// ones, without selecting or belonging to a workspace.
+		var statuses []resourcelifecycle.Status
+		var err error
+		if isInstanceAdmin(req, r.db) {
+			if !canScope(req.Context(), scopeInstanceAdmin) {
+				writeProblem(w, req, http.StatusForbidden, "Instance cleanup diagnostics require instance:admin permission")
+				return
+			}
+			statuses, err = r.containerCleanup.InstanceStatuses(req.Context())
+		} else if WorkspaceIDFromContext(req.Context()) == "" {
+			writeProblem(w, req, http.StatusForbidden, "Instance cleanup diagnostics require instance:admin permission")
+			return
+		} else {
+			statuses, err = r.containerCleanup.Statuses(req.Context(), WorkspaceIDFromContext(req.Context()))
+		}
+		if err != nil {
+			replyInternalError(w, r.logger, "read container cleanup diagnostics", err)
+			return
+		}
+		state := "disabled"
+		if r.containerCleanup != nil {
+			state = "enabled"
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"scope": "containers", "state": state, "items": statuses})
+	})
 	admin := NewAdminHandler(r.db, r.logger)
 	r.authedAdminAny("GET", "/api/v1/admin/stats", admin.Stats)
 	r.authedAdminPeople("GET", "/api/v1/admin/users", admin.ListUsers)

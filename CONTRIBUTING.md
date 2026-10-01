@@ -28,211 +28,12 @@ cp .env.example .env.local        # set NEXTAUTH_SECRET + ENCRYPTION_KEY
 Other `./dev.sh` subcommands: `stop`, `restart`, `status`, `seed`,
 `nuke`, `logs`. Never start the services manually.
 
-### The `web/out` embed
-
-`web/embed.go` does `//go:embed all:out`, so **`web/out/` must exist at
-compile time or nothing in the repo builds** — not the package you
-changed, everything. `web/out/` is a gitignored build artifact, so a
-fresh clone or `git worktree add` has nothing to embed and every
-`go build` / `go test` dies with:
-
-```
-web/embed.go:19:12: pattern all:out: no matching files found
-```
-
-That error names `web/embed.go`, a file you did not touch, and says
-nothing about a missing directory — it has been misread as "my change
-doesn't compile" more than once.
-
-**It is fixed, and you should not need to do anything.** One file,
-`web/out/.placeholder.html`, is tracked in git precisely to keep the
-directory non-empty (see the `.gitignore` block around it). `go build`
-and `go test` work in any checkout, worktree included, with no setup.
-
-What you get from that build is a binary with **no UI**: every UI route
-answers `503` with a page saying the web UI was not built and naming the
-command to run, and `crewship start` logs a warning at boot. Build the
-real thing with `make build` (or just run `./dev.sh start`).
-
-Two things to not do:
-
-- **Don't hand-roll a stub** (`echo '<!doctype html>' > web/out/index.html`).
-  It satisfies the embed and then serves a blank `200`, which looks like
-  a broken frontend instead of a skipped build step.
-- **Don't `git add -A` after a build that wiped `web/out/`.** Use
-  `scripts/embed-web-out.sh sync` (what `make build` and `dev.sh` call) —
-  it preserves the tracked placeholder, so the tree stays clean. Deleting
-  the placeholder re-breaks the build for every fresh clone; CI fails with
-  a named error if it goes missing.
-
-A release cannot ship a UI-less binary: `scripts/embed-web-out.sh verify`
-runs on the release, nightly, image and Binary Build paths and fails
-unless `web/out/` holds a real Next.js export (`index.html` **and**
-`_next/`).
-
-### Build identity in a worktree (`go build` gets it wrong)
-
-A binary built by a bare `go build` inside `.claude/worktrees/<name>/`
-reports the **parent clone's** commit and dirty flag — silently, with
-nothing in the output to say so. `crewship version` will happily print a
-commit that was never built and "(uncommitted changes)" for a tree with
-none (#1686).
-
-It is a Go toolchain limitation, not a repo bug: `cmd/go` recognises a
-repository by a `.git` **directory**, and a linked worktree's `.git` is a
-**file**, so the search walks up to the enclosing clone and stamps
-`vcs.revision` / `vcs.time` / `vcs.modified` from there.
-
-`git` itself honours the `.git` file, so the fix is to ask git and stamp
-the answer. `scripts/build-stamp.sh` is the one place that does:
-
-```bash
-scripts/build-stamp.sh dirty            # true | false | "" (not a repo)
-scripts/build-stamp.sh commit           # full SHA of the tree you are in
-go build -ldflags "$(scripts/build-stamp.sh ldflags)" ./cmd/crewship
-```
-
-**`make build` and `./dev.sh` already route through it**, so anything they
-produce is correct — including every dev slot, where the reported commit
-is the only way to tell a stale deploy from a stale CLI. Deploying a slot
-from a hand-rolled `go build` re-opens the hole. Never emit a confident
-`false` for the dirty bit when it is unknown: `buildinfo` models "nobody
-stamped this" as a third state precisely so it is not flattened into
-"clean".
-
-### Bumping the Go toolchain (never a one-line change)
-
-Thirteen files name the Go version, and they must all name the same one:
-
-| Where | Line |
-|---|---|
-| `go.mod` | `toolchain go1.27.1` — the anchor everything else is checked against |
-| `Dockerfile` | `FROM golang:1.27.1-alpine` — the compiler for the **shipped** binary |
-| ten workflows | `GO_VERSION: "1.27.1"` |
-| `.github/workflows/codeql.yml` | a literal `go-version: "1.27.1"` |
-
-`scripts/go-toolchain-pin.sh` parses all of them and fails on disagreement;
-it runs in CI's `Shell` job on every PR. Run it before you push:
-
-```bash
-bash scripts/go-toolchain-pin.sh
-```
-
-Two things it deliberately does **not** do, both worth knowing:
-
-- **It ignores `go.mod`'s `go` directive.** The language floor is a promise
-  to consumers and is not the same decision as which compiler builds the
-  release (#2060), so it does not ride along with a toolchain bump. It moves
-  only when a dependency forces it — which is why it reads 1.27 today:
-  shoutrrr v0.19.0 declares `go 1.27`, and the go command refuses a main
-  module whose floor is below its dependencies'.
-- **It does not build the image.** The root `Dockerfile` is built by
-  `release.yml` and `nightly.yml` only, so image-only breakage (a missing
-  `COPY`, a `pnpm prisma generate` regression) is still first caught by
-  nightly. That gap is #2064 and is open.
-
-The Dockerfile's `ENV GOTOOLCHAIN=local` is what stops the image from
-downloading a different compiler than its `FROM` tag names — the default,
-`auto`, would fetch whatever `go.mod`'s `toolchain` line asks for. Leave it as
-`local`; a version literal there would be a fourteenth copy of the string, and
-it fails backwards — bump the `FROM` tag, forget the literal, and Go downloads
-the *old* toolchain and undoes the bump with CI still green.
-
-Do not expect the image build to catch drift for you. Under `local` the
-`toolchain` directive is ignored outright, so `toolchain go1.27.2` against a
-`golang:1.27.1-alpine` base builds silently with 1.27.1 and exits 0. Only the
-`go` directive can fail a build, and it tracks the language floor rather than
-this pin. The static check is the only thing that sees this.
-
-Bumping the toolchain also means **re-checking the analyser pins**.
-`golangci-lint` and `govulncheck` each vendor `golang.org/x/tools`, and an
-`x/tools` older than the standard library it is asked to analyse dies on
-syntax it does not know — 1.26 → 1.27 needed both to move. Their pins carry
-comments saying so; the guard cannot check this one for you.
-
-### Why `@sentry/nextjs` is aliased in `vitest.config.ts`
-
-Every entry under `pnpm.overrides` in `package.json` is a security *floor*
-(`"ws": ">=8.21.0"`) — raise a transitive dependency past a known CVE. There
-is no ceiling among them, and there should not be one: a ceiling freezes a
-package at whatever version last worked and hides the reason it stopped.
-
-`@sentry/nextjs` carried one (`"<10.72.0"`) from 2026-08-31 to 2026-09-07,
-and it did not even hold: it named one package while the throwing code lived
-in `@sentry/server-utils`, which floats on its own. The fault (#2235, upstream
-getsentry/sentry-javascript#23789) was in a vendored bundler plugin that picked
-its Node-vs-browser branch on `typeof document === 'undefined'`. Under
-`happy-dom` a `document` exists, so it took the browser branch, built an
-`http:` URL from `document.baseURI`, and handed it to `fileURLToPath` — which
-threw `TypeError: The URL must be of scheme file` at module scope. Anything
-that transitively imported `@sentry/nextjs` then failed to load at all: on
-#2444 that was twelve suites, every assertion inside them still passing, which
-reads like anything but a dependency problem. Upstream fixed it in 10.74.0 by
-deriving the loader path from `__filename` instead of from the environment;
-the Node entry now loads under `happy-dom` too.
-
-Production was never affected — `next build` and the server runtime have no
-`document`, so they took the Node branch — and that is the tell. The suite
-runs under `happy-dom`, so a component importing the SDK should get the same
-client build the browser bundle gets, not the Node one. That holds whether or
-not the Node entry happens to load, which is why the alias outlived the bug.
-`vitest.config.ts` says so directly, with the entry the package's own
-`browser` export condition names:
-
-```ts
-'@sentry/nextjs': path.resolve(__dirname, 'node_modules/@sentry/nextjs/build/esm/index.client.js'),
-```
-
-That client build is browser code and imports `next/router` extensionless,
-which Node's ESM resolver rejects, so it is also listed in
-`test.server.deps.inline` to route it through Vite's resolver — the one the
-Next bundler stands in for at runtime.
-
-If a future bump breaks the import again, check that entry path against the
-package's `exports` map before reaching for a version pin. The alias fails
-loudly (every Sentry-importing suite stops loading); a ceiling fails quietly,
-by never moving.
-
-### Dependency drift (the check on lockfile PRs)
-
-Every PR that touches `pnpm-lock.yaml`, `go.mod` or `go.sum` gets a
-**Dependency drift** check (`.github/workflows/deps-drift.yml`, driven by
-`scripts/deps-drift`). It diffs the resolved version of every *direct*
-dependency between the merge base and the PR — read straight from the
-lockfile's `importers` section and from `go.mod`, no install at either
-side — and posts the result as a table in the job summary and in one PR
-comment that is updated in place. Direct dependencies only: ~200 rows a
-person will actually read, against the tens of thousands of lockfile lines
-nobody does.
-
-It fails on exactly one thing:
-
-> A direct dependency's resolved version changed while its spec in
-> `package.json` / `go.mod` did not.
-
-That is the #2237 shape. Two Dependabot PRs each moved `@sentry/nextjs`
-10.71.0 → 10.72.0 — the version the alias above works around — with
-`package.json` still saying `^10.70.0` on both, because Dependabot regenerates
-the whole lockfile per branch. Nothing declared it, nothing reviewed it
-(CodeRabbit ignores both `dependabot[bot]` and the lockfile), and CI reported
-it as eleven suites failing to import. A normal bump moves the spec and the
-resolution together and stays green; everything else — added and removed
-dependencies, a spec widened with nothing new resolving, a `go.sum`-only
-change — is printed and never blocks. For Go, "resolved" is the `require`
-version unless a `replace` directive redirects it, so adding or changing a
-`replace` without touching the require line is drift too.
-
-When the drift is wanted (you regenerated the lockfile on purpose, or a
-transitive floor forced it), apply the **`deps-drift-ok`** label: the
-failure becomes a warning, the table still posts, and the check re-runs on
-the label event without a push. Otherwise, either pin the spec so the bump
-is declared, or regenerate the lockfile against the base without it.
-
-Locally, the same table for your branch:
-
-```bash
-go run ./scripts/deps-drift -base origin/main -head HEAD
-```
+The long-form explanations that used to live in this file moved to
+[docs/development/](docs/development/README.md): the [`web/out` embed](docs/development/web-out-embed.md),
+[build identity in a worktree](docs/development/build-identity-in-worktrees.md),
+[Go toolchain pinning](docs/development/go-toolchain-pinning.md),
+[the Sentry vitest alias](docs/development/sentry-vitest-alias.md) and
+[dependency drift](docs/development/dependency-drift.md).
 
 ## CI and release verification
 
@@ -244,7 +45,7 @@ runs as part of CI Result, including for frontend changes.
 
 The publication flow, exact-SHA gates, artifact identities, local commands
 and runtime credential requirements are documented in
-[the CI/CD implementation runbook](docs/prd/reports/ci-cd-implementation-2026-09-11.md).
+[the CI/CD implementation runbook](docs/runbooks/ci-cd-implementation-2026-09-11.md).
 
 ## Verify any change
 
@@ -252,9 +53,15 @@ Run the relevant checks locally before pushing. CI routes checks by change type
 (see Pull requests below); unknown paths and main pushes run the full suite:
 
 ```bash
-go test ./... -count=1 && go vet ./...      # Go: must pass
+go test ./... -count=1 -timeout 40m && go vet ./... # Go: must pass
 pnpm lint && pnpm build                      # Frontend: must pass for UI changes
 ```
+
+The full Go suite can exceed the default ten-minute timeout on shared machines.
+The explicit timeout is a ceiling, not a reason to ignore a failed or hanging
+test. For preliminary checks and script side effects, see the
+[script catalog](scripts/README.md); for code placement, see the
+[repository layout](docs/development/repository-layout.md).
 
 The `cmd/crewship` suite scrubs every `CREWSHIP_*` variable from its own
 environment before running, so a shell that exports `CREWSHIP_PROFILE` or
@@ -268,8 +75,11 @@ feature correctness.
 ## House rules (the short list)
 
 - **`pnpm` only** — never `npm` or `yarn`.
-- **Migrations are Go-side** in `internal/database/migrate.go`.
-  **Never run `prisma migrate`** — Prisma is TypeScript types only.
+- **Migrations are one `.sql` file each** in `internal/database/migrations/` —
+  the directory *is* the registry, versions strictly ascending. Go-side
+  migrations only for cases that genuinely need schema discovery or table
+  rebuilds. **Never run `prisma migrate`** — Prisma is TypeScript types only.
+  Full detail: [`internal/database/migrations/README.md`](internal/database/migrations/README.md).
 - **No new API routes in `app/`** — the static export drops them in
   prod. All API routes go in `internal/api/`.
 - **Driver name is `"sqlite"`** (not `"sqlite3"`).
@@ -278,87 +88,30 @@ feature correctness.
 - **No `Co-Authored-By` lines in commits.**
 - **Never amend after a pre-commit hook failure** — make a new commit.
 - **A detached goroutine in `internal/api` registers with
-  `beginBackgroundWork`** (see `internal/api/background.go`). Work that
-  outlives its request also outlives the *test* that drove it, where it
-  races that test's teardown and fails a bystander at random (#1596).
-  A long-lived daemon that genuinely cannot be drained goes in
-  `unregisteredSpawnSites` with its reason. A test that hands a storage
-  directory to **any** handler with a detached writer takes it from
-  `storageDir(t)`, not `t.TempDir()` — `t.TempDir()` fails the test when
-  its `RemoveAll` races a late write, and a `t.TempDir()` taken after
-  `setupTestDB` is cleaned up *before* the drain runs.
-- **`Commands()` on a shared Cobra command is a *write*.** Cobra sorts
-  the child slice in place on first call, behind an unsynchronised bool
-  — and `ExecuteC` re-arms that bool on **every** run, because
-  `InitDefaultHelpCmd` unconditionally removes and re-adds the help
-  command. In `cmd/crewship` that let 34 `t.Parallel()` tests enumerate
-  `rootCmd` at once, sort the same slice concurrently, and hand back a
-  corrupted list — a `WARNING: DATA RACE` blaming a random test in a
-  package the PR never touched (#1989). Its `TestMain` now freezes the
-  order with `cobra.EnableCommandSorting = false`, taken **after** the
-  pristine walk has sorted the tree, so `Commands()` is a pure read for
-  the rest of the test binary. Test-scoped: production `main()` still
-  sorts, so `crewship --help` ordering is unchanged. What that does
-  *not* make safe is **executing** a shared command from a parallel
-  test — `ExecuteC` still rewrites the child slice — so don't; build a
-  local command tree instead. `cobra_sort_parallel_guard_test.go`
-  fails the build on both halves.
-- **`go test -race ./internal/api/` needs `-timeout`.** That package
-  takes ~23m under the race detector (`ok … 1405s` on a CI runner,
-  measured 2026-08-20; local numbers on crewship-dev swing with what
-  else is running) and `go test`'s default timeout is 10m,
-  so a plain run is **killed mid-test** — it prints a goroutine dump
-  headed by whichever `t.Parallel()` test was running when the axe
-  fell, and **zero `WARNING: DATA RACE`**. That reads exactly like a
-  failure and it is not one; it is the same ghost people chased in
-  #1597. Run it as `go test -race -timeout 40m ./internal/api/`.
-  CI's dedicated **Go Race (internal/api)** job passes a timeout
-  derived from a measured baseline (`RACE_API_BASELINE_SECONDS` in
-  `.github/workflows/ci.yml`), so a green CI and a red local run are
-  consistent, not contradictory. Before blaming your diff, check the
-  log for `WARNING: DATA RACE` — no such line plus a `panic: test
-  timed out` means you hit the ceiling, not a race. That ceiling is
-  #2031's subject: the CI job now prints its own `ok … Ns` into the
-  run summary and warns when it crosses 1.6x the baseline, so budget
-  erosion is reported as budget erosion rather than as your bug.
-- **Don't hash at production strength in a test.** `internal/api`
-  hashes passwords with `bcryptCost` (`internal/api/bcrypt_cost.go`),
-  which `TestMain` lowers to `bcrypt.MinCost` for the test binary
-  only. bcrypt's cost is exponential, so production's 12 is ~256x
-  MinCost, and under `-race` — where blowfish's key schedule is
-  instrumented on every array access — a single cost-12 hash costs
-  seconds. Never write a literal cost at a call site: four guard tests
-  in `bcrypt_cost_test.go` pin the production value at 12, prove the
-  test binary really lowered it, reject any call site that passes its
-  own number, and reject any write to the var outside the test binary.
+  `beginBackgroundWork`** (`internal/api/background.go`) — work that outlives
+  its request also outlives the test that drove it. Background and the
+  `storageDir(t)` rule: [house-rules background](docs/development/house-rules-background.md).
+- **`Commands()` on a shared Cobra command is a *write*.** Never execute a
+  shared command from a parallel test; build a local command tree. Why:
+  [house-rules background](docs/development/house-rules-background.md#commands-on-a-shared-cobra-command-is-a-write).
+- **`go test -race ./internal/api/` needs `-timeout 40m`** — the package
+  takes ~23m under the race detector and the default 10m kills it mid-test in
+  a way that looks exactly like a failure. Details:
+  [house-rules background](docs/development/house-rules-background.md#go-test--race-internalapi-needs--timeout).
+- **Don't hash at production strength in a test.** Never write a literal
+  bcrypt cost at a call site — guard tests reject it. Details:
+  [house-rules background](docs/development/house-rules-background.md#dont-hash-at-production-strength-in-a-test).
 
 ## Frontend data fetching
 
-New or migrated client data hooks use **@tanstack/react-query** (the
-client is wired in `components/providers.tsx`) instead of hand-rolled
-`fetch` + `useState`. Reference implementations:
+New or migrated client data hooks use **@tanstack/react-query** (wired in
+`components/providers.tsx`) with `apiFetch` from `lib/api-fetch.ts`, not
+hand-rolled `fetch` + `useState`; reference implementations:
 `hooks/use-dashboard-data.ts` and `hooks/use-inbox.ts`.
 
-- **Query keys**: `[resource, workspaceId, params?]` — e.g.
-  `["missions", wsId, { limit: 50 }]`. The workspace id at position 1
-  isolates caches across workspace switches and lets
-  `invalidateQueries({ queryKey: [resource, wsId] })` scope to one
-  workspace. Export a small `…Keys` factory next to the hooks.
-- **Transport**: always `apiFetch` from `lib/api-fetch.ts` (never bare
-  `fetch`) so 401s go through the shared refresh-once-then-retry path.
-  Pass React Query's `signal` through so unmounts abort the request.
-- **Freshness**: where a WebSocket event exists (see
-  `hooks/use-realtime.tsx`), subscribe with `useRealtimeEvent` and call
-  `queryClient.invalidateQueries` — do not poll. A long
-  `refetchInterval` (minutes, `refetchIntervalInBackground: false`) is
-  acceptable only as a missed-event safety net.
-- **Errors**: throw from the `queryFn` when the surface renders an
-  error state; map non-ok responses to the slice's empty value for
-  best-effort aggregate tiles (see the policy note in
-  `hooks/use-dashboard-data.ts`).
-- **Tests**: Vitest + `renderHook` with a fresh `QueryClient`
-  (`retry: false, gcTime: 0`) per test — see
-  `hooks/__tests__/use-dashboard-data.test.tsx`.
+The full conventions — query keys, transport, freshness via realtime events,
+error mapping, and test setup — live in
+[docs/development/frontend-data-fetching.md](docs/development/frontend-data-fetching.md).
 
 ## Commit messages
 
@@ -411,161 +164,46 @@ CI calls the image workflow and its final verdict requires the image job.
 
 ## Changelog entries
 
-`RELEASING.md` cuts release notes from `CHANGELOG.md`'s
-`## [Unreleased]` section. That makes a missing entry not untidiness but
-a release note that does not exist — and a change nobody is told about.
+`RELEASING.md` cuts release notes from `CHANGELOG.md`'s `## [Unreleased]`
+section. That makes a missing entry not untidiness but a release note that
+does not exist — and a change nobody is told about.
 
 **A PR that touches `internal/api/`, `internal/orchestrator/`,
 `internal/harbormaster/`, `cmd/crewship/`, `app/`, `components/`, `lib/`,
 `hooks/` or `stores/` must add an entry under `## [Unreleased]`.** The
-**Changelog Guard** workflow enforces it. The three frontend trees at the
-end are peer top-level trees, not sub-directories of `app/` and
-`components/`, and they carry as much user-visible behaviour: a chat or
-socket fix lands in `hooks/use-chat.ts`, retry and error copy in
-`lib/api-error.ts`. The two extra `internal/` packages are the agent's
-runtime (what lands in its environment, how a run starts and stops) and
-the approval gate a human reads; the rest of `internal/` is deliberately
-not watched, because it reaches a user through the trees already listed. Test files inside any of those trees don't count as
-user-visible, and Dependabot is exempt by actor.
+**Changelog Guard** workflow enforces it; test files inside those trees don't
+count as user-visible, and Dependabot is exempt by actor.
 
-**The entry has to be under `## [Unreleased]`, and the guard checks that**,
-not merely that you touched the file. It compares that one section between
-your base and your head, because `RELEASING.md` cuts release notes from it
-and nowhere else — a typo fix in a shipped version's section, or a stray
-blank line at the bottom, is not a release note and no longer passes. What
-it still cannot judge is entry *quality*; `- fix bug` satisfies it. The
-guard buys the reviewer that conversation, it does not replace them.
+Write the entry the way the file already does — lead with the **user-visible
+symptom in bold**, then what was actually wrong and what changed. Mark a
+change that can break a working setup with `⚠️ **Behaviour change:**`. If the
+change genuinely has no user-visible effect, apply the **`skip-changelog`**
+label — when it is true, not when the entry is inconvenient. The guard's
+history, its exact comparison, and the label mechanics:
+[docs/development/changelog-guard.md](docs/development/changelog-guard.md).
 
-The guard's own logic is unit-tested by
-`scripts/changelog-guard-test.sh`, which extracts the step's script
-verbatim from the workflow and runs it against a throwaway repository —
-including the case that matters most, a `git diff` that dies. That used
-to be reported as an empty diff and a green check.
+## CodeRabbit — wait for a review, not for a green check
 
-If the change genuinely has no user-visible effect — a chore, an
-internal refactor, a test-only fix — apply the **`skip-changelog`**
-label. The guard re-runs on `labeled`/`unlabeled`, so it clears within
-seconds and no push is needed. Reach for the label when it is true, not
-when the entry is inconvenient: the guard exists because 18 user-visible
-PRs merged in one window with no trace anywhere — the #2086 audit found
-fifteen of them and the backfill turned up three more — including a
-breaking credential-model change across 117 files.
+After `gh pr create`, give CodeRabbit ~2–5 minutes to post its review, and
+**never merge before it does** — merging first kills the run and the findings
+are lost. But when it is *rate-limited*, do not wait: the limit runs 30–45
+minutes and waiting buys a queue position, not a verdict. Review the PR
+yourself, say in the PR what was machine-reviewed, and queue a re-review for
+your own PR.
 
-Write the entry the way the file already does — lead with the
-**user-visible symptom in bold**, then what was actually wrong and what
-changed. Mark a change that can break a working setup with
-`⚠️ **Behaviour change:**` and say plainly what used to succeed and now
-fails. Group under `### Added` / `### Changed` / `### Fixed` /
-`### Security`.
-
-`docs/changelog/overview.mdx` is a different surface with a different
-job — a curated highlights reel for users, cut per release window, not
-a per-PR log. It is deliberately **not** gated; see the scope note at
-the top of the page. Adding to it is a release-time editorial call, not
-a per-PR obligation.
-
-## CodeRabbit — wait when it is reviewing, not when it is throttled
-
-After `gh pr create`, give CodeRabbit ~2–5 minutes to post its review.
-**If a review is coming, do not merge before it does.** Merge first and
-the run errors with *"Review failed — PR is closed"*, and any findings
-it would have raised are lost for good.
-
-**If it is rate-limited, do not wait for it.** The per-developer limit
-runs 30–45 minutes and stacks across a batch, so waiting buys a queue
-position rather than a verdict and stalls everything behind it. Review
-the PR yourself instead — a red-first test plus a mutation proving the
-test has teeth is the standard this repo applies anyway, and it is a
-real review where a queue position is not. Then say in the PR what was
-machine-reviewed and what was not, and queue a re-review for **your own
-PR** (`scripts/review-status.sh --retrigger <PR>`) so it still lands.
-
-Red CI is a separate gate and stays absolute: throttled or not, never
-merge on a failing check.
-
-The trap is that the rule does not verify itself. CodeRabbit reports
-through a commit **status**, and when it hits the per-developer review
-limit that status is:
-
-```
-$ gh pr checks 1568
-CodeRabbit    pass    0    Review rate limited
-```
-
-`pass` — the same word, colour and position as a PR that really was
-read, where the description says `Review completed`. On 2026-07-30
-eleven of twelve open PRs carried that green and none of them had been
-reviewed. Waiting for the check is not the same as waiting for a review.
-
-So ask the thing that cannot lie about it — the posted comments and
-reviews themselves:
+The trap the timing rule does not verify itself: when throttled, CodeRabbit's
+commit **status** still reads `pass` with description `Review rate limited`.
+Only the posted comments/reviews can tell reviewed from throttled:
 
 ```bash
-scripts/review-status.sh                 # every open PR
-scripts/review-status.sh 1568            # one
-scripts/review-status.sh --checks        # + skipped-but-green CI checks
+scripts/review-status.sh                 # every open PR: reviewed/throttled/…
+scripts/review-status.sh 1568 --checks   # one PR + skipped-but-green checks
+scripts/review-status.sh --retrigger 2227   # re-request one review
 ```
 
-It reports one state per PR: **reviewed** (a review was submitted, with
-its actionable-comment count), **throttled** (a rate-limit notice was
-posted instead — not reviewed), **failed**, **pending** (still inside
-the window), **absent** (window elapsed, nothing arrived), or
-**unknown** when the API call itself failed. Exit code 3 means at least
-one PR is not reviewed. It also flags a review that covers an older
-commit than the current head: real review, wrong code.
-
-Two of those states arrive as *the same bytes*. A rate-limited
-CodeRabbit sometimes still submits an `APPROVED` review with an empty
-body and no inline comments; so does a review on the CHILL profile that
-read the diff and found nothing. The tie-breaker is the walkthrough
-comment, which on a finished review names the range it read —
-`between <base> and <head>`. An empty approval counts as reviewed only
-when a walkthrough names that same commit; otherwise it stays the
-non-event the green check was. So read the headline, not just the tick:
-`review approved, 0 actionable comment(s) (empty body; the walkthrough
-records a completed review of <sha>)` is a clean review, and any PR
-still described as approving "with no content" is not.
-
-Throttling is a queue problem, not something to fight. Re-request the
-reviews serially, seeded from the "next review available in N minutes"
-the notice itself carries:
-
-```bash
-scripts/review-status.sh --retrigger --dry-run   # see the schedule, post nothing
-scripts/review-status.sh --retrigger 2227        # re-request that one
-scripts/review-status.sh --retrigger --all       # …or every PR above (long-lived; background it)
-```
-
-`--retrigger` refuses to run without a target, because it posts and each
-post spends the one slot the limit replenishes — an unscoped run spends
-other sessions' slots and pushes your own PR to the back of the queue it
-just filled (#2231). Firing `@coderabbitai review` at every throttled PR
-at once just re-throttles all but the first. And read the answer carefully: a
-re-trigger fired while the limit is still in force comes back with
-
-> ✅ **Action performed** — Review finished.
-
-and nothing else. That reply acknowledges the *command*; no review was
-submitted, and CodeRabbit will not re-review a commit it has already
-seen. `review-status.sh` flags it rather than counting it.
-
-**The same failure shape, other producers.** `--checks` reports them on
-the PR's head commit:
-
-- Jobs that concluded `skipped` — green in the checks list without
-  having run. (The Go twin of this is why `scripts/skip-budget.sh`
-  exists: `go test ./...` prints `ok` for a package whose every test
-  called `t.Skip`.)
-- Jobs that concluded `neutral`, which `gh pr checks` renders as
-  `skipping`. CodeQL reports this way.
-- Green jobs carrying **annotations** — CodeQL findings surface in a
-  run's annotations, where no check status shows them.
-
-None of this is enforced. CI runs only the script's offline classifier
-tests (`scripts/review-status-test.sh`); nothing blocks a merge on a
-missing review, because whether a green CodeRabbit status may block a
-merge is branch-protection policy and the repo owner's call. The script
-is the instrument; the judgement stays with the person merging.
+The full protocol — tie-breaking empty approvals, re-trigger etiquette, the
+same failure shape from other producers — lives in
+[docs/development/coderabbit-review-process.md](docs/development/coderabbit-review-process.md).
 
 ## Issues
 
@@ -583,20 +221,15 @@ Security issues are handled separately — see
 
 ## Claiming an issue before you work it
 
-Several agent sessions work this repo in parallel — ten at once is
-normal, and there are ~40 worktrees under `.claude/worktrees/`. They all
-push as the same GitHub account, so **the assignee field cannot tell
-"taken by another session" from "that's me"**. It is not a lock.
+Several agent sessions work this repo in parallel — ten at once is normal —
+and they all push as the same GitHub account, so **the assignee field cannot
+tell "taken by another session" from "that's me"**. It is not a lock. What it
+costs when nobody claims: #1481 re-fixed what #1471 had already fixed two
+hours earlier, from another session, better.
 
-What it costs when nobody claims: #1481 re-fixed what #1471 had already
-fixed two hours earlier, from another session, better. It surfaced as a
-merge conflict, after both sides had done the work.
-
-### The convention
-
-**Before your first commit on an issue, post a claim comment naming
-clone + branch + UTC time. Release it in the same thread when you stop —
-whether it shipped or not.**
+**Before your first commit on an issue, post a claim comment naming clone +
+branch + UTC time. Release it in the same thread when you stop — whether it
+shipped or not.**
 
 ```bash
 scripts/claim-issue.sh 1488                 # checks first, then claims
@@ -605,72 +238,18 @@ scripts/claim-issue.sh --list               # every open claim in the repo
 scripts/claim-issue.sh 1488 --release "hypothesis unconfirmed, see above"
 ```
 
-Claiming *checks before it posts*. If another clone or branch holds the
-issue it prints the claim and exits **3** without commenting, so you find
-out before the work, not at the merge conflict. `--dry-run` prints the
-comment and posts nothing; `--force` overrides a refusal (say why in the
-thread first). Exit codes: `0` clear or claimed · `2` usage error · `3`
-held by another session.
-
-The comment shape is plain text and hand-writable — the script only fills
-in what you would otherwise mistype:
-
-```
-**CLAIM** — clone `crewship_3` · branch `fix/schedule-editor-save` · 2026-07-30T20:58Z
-**RELEASE** — clone `crewship_3` · branch `fix/schedule-editor-save` · 2026-07-30T22:10Z
-```
-
-A release ends the claim(s) it names by **clone alone** (#2107) — branch is
-recorded for readability but is not part of the match, because a claim is
-posted before the feature branch exists (see below) and would otherwise
-never be released from the branch that replaced it. A hand-written release
-that names a branch but no clone still ends that branch's claims and leaves
-the rest — global cancellation is reserved for a release that names neither
-field, which is what "released it" means when someone types it without
-ceremony.
-
-**Release even when you failed.** #1482 was claimed, the hypothesis did
-not hold, and the session said so and released — so the next one started
-from evidence instead of re-deriving it. A dead end, written down, is
-worth more than a silent unassign.
-
-### When it goes wrong
-
-- **A claim with nobody behind it (session died).** Claims older than 24h
-  are reported as `STALE`. Stale still blocks `claim-issue.sh` — that is
-  deliberate, because "old" and "abandoned" are not the same thing. Post
-  in the thread that you are taking it over, then `--force`. Tune the
-  threshold with `CLAIM_STALE_HOURS`.
-- **No claim, but a branch or PR already exists.** `--check` also lists
-  open PRs and local branches naming the issue number, because someone
-  who got as far as pushing has effectively claimed it whether or not
-  they commented. Treat that as held: ask in the thread first.
-- **The claim is honest but the work was abandoned** — released with a
-  reason, or claimed months ago with nothing pushed. The claim comment is
-  a record, not a reservation: re-claim it, and say in the thread what
-  you are picking up from the previous attempt.
-- **The script guesses your identity wrong.** It reads the clone from the
-  checkout path (`crewship_3`) and the branch from `git rev-parse`. A fresh
-  `git worktree` (the normal way an agent session starts, before its first
-  commit) checks out an auto-minted `worktree-agent-<hash>` branch; the
-  script refuses that value on sight and falls back to the upstream branch
-  if one is already tracked, otherwise the worktree path — no action needed
-  from you. A detached-HEAD checkout (branch is the literal `HEAD`) or a
-  container path with no `crewship_N` in it still guesses badly. Set
-  `CLAIM_CLONE` / `CLAIM_BRANCH` to state it instead:
-
-  ```bash
-  CLAIM_CLONE=crewship_3 CLAIM_BRANCH=fix/aux-status scripts/claim-issue.sh 1488
-  ```
-
-- **You claimed only part of the issue.** Say so in the claim comment.
-  A claim that names its scope ("items 1–2, not the Keeper panel") lets
-  another session take the rest instead of the whole thing stalling.
-
+Claiming checks before it posts (exit 3 = held by another session). Failure
+modes — stale claims, claims with nobody behind them, partial-scope claims,
+identity guessing in fresh worktrees — are documented in
+[docs/development/claiming-issues.md](docs/development/claiming-issues.md).
 The discipline that costs nothing and saves the most: **grep the issue
 tracker before starting, not after the merge conflict.**
 
 ## License and contributor terms
+
+Crewship is maintained by **Unify Technology, s.r.o.** (Czech Republic,
+Company ID: 17266637). See [GOVERNANCE.md](GOVERNANCE.md) for project stewardship
+and [NOTICE](NOTICE) for company identification.
 
 The project ships under [Apache License 2.0](LICENSE). Contributions are
 accepted under the same terms — by opening a PR you agree that:
@@ -685,19 +264,3 @@ accepted under the same terms — by opening a PR you agree that:
 
 We do not currently require a CLA or DCO sign-off. If that changes,
 we will say so here and in the PR template.
-
-
-### Type-checking test fixtures
-
-`pnpm test:types` type-checks every test file through `tsconfig.tests.json`
-(Vitest globals plus the jest-dom matcher types) and fails on any diagnostic.
-It runs in the Frontend Test CI job. There is no baseline: a harness that
-renders a component without a required prop, or a fixture built to a wire
-shape the product does not have, is a red gate, not a warning (#2493).
-
-Type a mock with the signature of what it replaces
-(`vi.fn<typeof apiFetch>()`, `Mock<Props["onSelect"]>`) rather than reaching
-into `mock.calls` through a cast, and build fixtures as the product type
-(`const run = (over: Partial<PipelineRunRecord> = {}): PipelineRunRecord`) so a
-renamed field fails here instead of at runtime. `@ts-expect-error` is for a
-test that deliberately feeds a wrong shape, and it says why.

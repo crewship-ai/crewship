@@ -604,7 +604,7 @@ func TestOrphanedPagesReportsFilesTheNavigationDoesNotDeclare(t *testing.T) {
 func TestOrphanedPagesExcusesTheDeliberatelyUnlistedTrees(t *testing.T) {
 	root := t.TempDir()
 	writeDocsPage(t, root, "docs/audit-methodology.md", "# How the audits run\n")
-	writeDocsPage(t, root, "docs/prd/pages.md", "# Pages PRD\n")
+	writeDocsPage(t, root, "docs/specs/pages.md", "# Pages PRD\n")
 	writeDocsPage(t, root, "docs/prd/reports/release-1-0.md", "# Report\n")
 
 	orphans, reachable, err := orphanedPages(root, nil)

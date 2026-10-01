@@ -1,6 +1,6 @@
 package api
 
-// Pages — `on_failure` and the sweeper that notices (docs/prd/pages.md §4).
+// Pages — `on_failure` and the sweeper that notices (docs/specs/pages.md §4).
 //
 // "A page that quietly stops updating must generate work for a human." Every
 // test here is a way that sentence fails: nobody notices, everybody notices

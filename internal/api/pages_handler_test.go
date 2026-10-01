@@ -1,6 +1,6 @@
 package api
 
-// Pages — the handler contract (docs/prd/pages.md §4, §7, §10, §10b.3, §11b).
+// Pages — the handler contract (docs/specs/pages.md §4, §7, §10, §10b.3, §11b).
 //
 // The CLI's acceptance test (cmd/crewship/cmd_page_test.go) proves the client
 // never SENDS provenance and repeats what it is told. This file proves the

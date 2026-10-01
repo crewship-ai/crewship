@@ -319,7 +319,7 @@ export function SettingsTab({
           <div>
             <div className="text-sm font-medium">Delete this crew</div>
             <div className="text-xs text-muted-foreground">
-              All {agentsForCrew.length} agent{agentsForCrew.length === 1 ? "" : "s"} will be detached. Container torn down. Journal kept 30 days.
+              Deletes the crew and all {agentsForCrew.length} agent{agentsForCrew.length === 1 ? "" : "s"}. Background cleanup removes verified runtimes while preserving mounted volumes and host data. Declared sidecar data volumes are deleted separately.
             </div>
           </div>
           <button

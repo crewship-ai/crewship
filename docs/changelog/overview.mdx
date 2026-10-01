@@ -21,6 +21,203 @@ tag: Experimental
   user-visible pull request is required to add to it.
 </Note>
 
+<Update label="September 26, 2026" tags={["features", "updates", "fixes", "security"]}>
+
+## Routines reads as an operator console
+
+The routine page says in one line which version is published, whether a draft
+is waiting and which version **Run** will use; "In one look" answers what you
+get, what you provide, who does the work, what is checked, when it needs you
+and what it can touch. Steps group into phases from their declared
+dependencies, `foreach` blocks nest, hooks show around the run, and a recipe
+with more than twelve steps opens on a map with one node per group. A **Files
+this routine runs** card lists the scripts a recipe declares as a tree under
+the crew share, and says when a declared file is missing. A run that could
+not finish explains the stopping point in plain words — what was kept, what
+was not done, what to do next — with the raw error under *Technical details*.
+The Routines overview is built from the dashboard's own pieces, **Activity**
+absorbs the old Work page (the `/work` bookmark opens the matching Activity
+view), and publishing a draft, editing inputs and creating a routine are
+popups on the routine page. The in-browser recipe editor is gone — steps,
+checks and agent behaviour are authored with the CLI or by the lead and
+arrive as drafts to publish. Editing is safe: unsaved edits survive declined
+reloads and navigation, **Run** and **Plan** follow your actual permissions
+(an explicit Run grant starts a one-time run even for a viewer), and
+**Run again** pins the version you reviewed — a changed HEAD returns `409`
+with a reload action instead of quietly running different code. Deleting a
+routine now deletes its schedules with it. See
+[Routines](/guides/routines) and [Activity](/guides/activity).
+
+## Scheduled work goes through the durable queue
+
+Cron-driven agent runs no longer bypass the durable work queue. A due
+occurrence is accepted atomically (the cursor advances and the occurrence is
+reserved in one commit), the shared dispatcher re-checks current permissions,
+serial capacity and cancellation before executing, and a restart catches
+overdue occurrences instead of skipping them. A run is acknowledged only
+after its `run.started` record is durable — an unavailable journal fails
+closed rather than letting the agent start unrecorded. Editing or re-enabling
+a schedule commits settings and the next due cursor together, so an old due
+occurrence cannot fire after a schedule change. The old direct cron executor
+is out of the production build. See
+[Scheduling](/guides/scheduling) and [Automations](/guides/automations).
+
+<Warning>
+  **LLM proxy tokens are bound to a single agent run.** A finished run's
+  requests are refused before credential injection — including after a
+  sidecar restart — and the older agent-only tokens are refused outright.
+  **Drain active agent processes when deploying this protocol change**; see
+  [Upgrades](/guides/upgrades).
+  **HTTP routine steps with `credential_ref` now stop before sending** if the
+  credential cannot be resolved (store errors block with `503`, a confirmed
+  miss returns `422` — public calls should omit the reference). **Synchronous
+  peer queries return `409`** when execution capacity is occupied, instead of
+  waiting on a reservation their own parent may hold.
+</Warning>
+
+## Provenance you can trust, evidence you can share
+
+A routine run's invoking crew and agent now come only from a **verified
+identity**: `POST …/pipelines/{slug}/run` no longer reads the invoking
+headers any member could stamp, and the sidecar's internal route verifies the
+named agent is live and its crew belongs to the workspace. Run details show
+the trigger, the executed recipe version and the declared credential types
+from that run's *archived* definition — declarations are distinguished from
+per-run use, and legacy invoking IDs are not dressed up as verified ones.
+Routine and agent run details offer a **Run evidence** card: a bounded,
+previewable copy of run references and recorded activity, safe to share,
+with missing journal records shown as unavailable rather than as proof
+nothing ran. Issue run rows show assignment IDs separately, and new routine
+tool events carry their run ID for accurate correlation. Routine reports
+(CLI) show a failed step as failed even when its final journal event is
+missing. See [Activity](/guides/activity) and
+[Troubleshooting](/guides/routines#troubleshooting).
+
+## A Keeper approval now grants what was approved
+
+Resolving an escalation as ALLOW used to be a dead end — the agent had no
+route to learn the outcome and a retry was judged afresh, so an approved
+production credential could never execute. The agent can now poll
+`GET /keeper/request/{id}` on its sidecar and present the approved request id
+on the retry. The approval binds to the same agent, credential and request
+type (and the identical command for `/execute`), is single-use, expires after
+15 minutes and is spent before execution — approvals cannot chain. The
+sampled behaviour watchdog also stopped discarding soft verdicts: WARN and
+ESCALATE samples now fan out to the inbox and operator review exactly like
+the synchronous review path. Separately, the L4 credential tier's risk floor
+now sits at the default DENY-notify threshold, so an L4 credential-request
+DENY always reaches someone. See
+[Keeper](/guides/keeper) and
+[Keeper reviews panel](/guides/keeper-reviews-panel).
+
+## Three new ways to pay for models
+
+Credentials can connect **OpenCode Go** and **OpenCode Zen** as separate
+encrypted API-key accounts (setup explains Go subscription limits and Zen
+balance overage), and a **Z.AI GLM Coding Plan** subscription with its own
+account, sidecar route and `zai-coding-plan/` model selection — kept strictly
+separate from metered Z.AI credit, with quota never inferred from token
+counts. OpenAI gains **GPT-5.6 Luna**, including on Codex. Testing a stored
+Codex subscription login no longer sends its OAuth credential to an API-key
+probe or reports the resulting `403` as an invalid login. Credential details
+now explain the caller's **effective actions** (role, capability, policy and
+scope gates — the same answers as `crewship credential access` and `routine
+access`), link the routines that declare the credential's type and show
+whether those routines would select it (`crewship credential dependents`),
+and a rotated credential's **grace window** is actually consumed: after a
+`401` on the new value the sidecar replays once with the previous value while
+the rotation is ACTIVE, and records the fallback in the journal. Routine
+credential lookup honors every live crew grant, not only the legacy first
+`crew_id`. See [Credentials](/guides/credentials).
+
+## Backups tell the truth
+
+A forked restore (`--as-workspace` / `--as-crew`) **re-mints every capability
+token it carries** — invitation links, port exposures, pipeline webhooks,
+page public links and page webhooks — so no secret that worked against the
+source works against the fork; invitations stay usable and the other
+capabilities arrive revoked, reported per table. Forks also keep their inbox
+and feedback rows instead of silently dropping them. A workspace export no
+longer fails on a stopped crew container, no longer resumes a container it
+did not pause, and names a DB-rows-only export as incomplete instead of
+presenting it as complete. See [Backup](/guides/backup).
+
+## Updates
+
+- **CLI:** the routines surface the UI had — `routine calendar`, `routine
+  executions`, `routine artifacts` (with `--download`), `routine run
+  --fire-at/--pinned-version/--async` (understands the `202 IN_PROGRESS`
+  receipt; `--wait` follows it) and `routine save --trigger-inputs` — plus
+  `routine webhooks --ingress-profile crewship|github` and `routine webhooks fire`,
+  a signed test delivery with the receipt printed back.
+- **CLI:** `memory inventory --agent|--crew` lists the knowledge documents
+  the server actually reads; `run insights --agent/--crew` scope the fleet
+  aggregate; `issue list --counts`; `page project panel-history
+  --publication`; `workspace update --pages-theme`; `work list --agent`
+  accepts a slug (an unknown slug is refused with suggestions, not an empty
+  page).
+- **Dashboard "Needs your attention" counts are exact** — `GET
+  /api/v1/inbox` returns `active_by_kind` and the dashboard counts from it
+  instead of the inbox's 100-row window; durations over an hour roll over to
+  hours; colourless crews rotate the chart palette.
+- **The nightly gate now fails on WCAG regressions** — the axe wcag2a/wcag2aa
+  scan replaced an unread drift report, and contrast regressions across the
+  dashboard, crews, routines, credentials, settings, admin and chat surfaces
+  are fixed.
+- **Routine inputs and recovery rules are visible before starting work** —
+  accepted types and ranges on run forms, configured checks and failure
+  handling in recipe details, retained evidence and duration/attempt
+  diagnostics on runs.
+- **Newly extracted user-model facts keep their source evidence** — quote,
+  message, source type and time stored beside the model file, surfaced with
+  `--provenance`, and purged by every delete path.
+- **The published OpenAPI document names the fields the rows actually
+  carry** — `client_review_required` on issue rows, optional `assignee_slug`,
+  `code_links`, `execution` projections, agents' `ask_forms` and
+  `suggested_prompts` — pinned by a schema-keys contract test.
+- **Ask about this Page** opens an unsent agent chat draft; the reference
+  survives a refused or disconnected send and is consumed only when the
+  message is saved.
+
+## Fixes
+
+- **A detached still-running exec no longer reads as success.** When the
+  agent CLI's stream ends while the process lives on, the run is monitored
+  until it truly terminates and resolves with its real exit code; an
+  unconfirmed stop holds the agent's run slot (`ErrAgentDetachedBusy`) until
+  the runtime is confirmed gone — a stop attempt is not a stop confirmation.
+- **Agentless routine runs settle `SUCCEEDED`, not `FAILED`** — a run with no
+  agent step had nobody to report an outcome, so every clean completion was
+  recorded as a failure and success-keyed consumers read zero.
+- **Confirmed webhook stops appear as cancelled in run history** — captured
+  usage survives settlement retries, and only the dispatcher's confirmed
+  outcome can finish a work-owned run; a retried history write never reruns
+  the agent.
+- **Pending guaranteed-memory writes are reconciled at boot**, before the
+  server accepts requests; startup fails rather than admitting a second
+  writer over an unresolved file.
+- **Webhook delivery receipts receive their documented retention sweep** on
+  boot and daily; a non-terminal work item keeps its receipt and payload
+  regardless of age.
+- **Routine approval waiting displays as a waiting status**, not a red
+  failure alert — actual failures keep their diagnostics.
+- **Routine Edit again exposes approval questions and named decision
+  actions**, including approvals in nested loops and hooks; changes stay
+  drafts until publication.
+- **Routine step details again offer Test with captured run data** — folded
+  transforms and map selection reach the same testing surface.
+- **Agents return to online after simultaneous detached-run completions** —
+  the last-hold decision retires completed peers atomically.
+- **Reassigning a previously removed provider key works without a manual
+  runtime restart**; sidecar reuse checks live credential counts, and
+  provider logins survive the periodic credential check.
+- **Z.AI Coding Plan usage is labelled as subscription usage** — zero
+  per-call prices are no longer presented as precise monetary estimates.
+- **Solo agents report model usage and observe credential revocation** —
+  sidecar IPC is initialised for non-lead agents with no peers.
+
+</Update>
+
 <Update label="September 15, 2026" tags={["features", "updates", "fixes", "security"]}>
 
 ## Pages: folders, one editor, and applications you review before they go live

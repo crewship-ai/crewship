@@ -1,10 +1,10 @@
 # Restricted runtime: dev2 implementation and evidence
 
-Aktuální stav a zbývající release brány: [finální předání](RESTRICTED-RUNTIME-FINAL-HANDOFF-2026-09-28.md).
+Aktuální stav a zbývající release brány: [finální předání](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/RESTRICTED-RUNTIME-FINAL-HANDOFF-2026-09-28.md).
 Níže je původní záznam; omezení při pádu Manageru již překonává nezávislý lease dohled.
 
 Follow-up: the user subsequently authorized dev2 deployment and CLI validation;
-see the [deployment report](RESTRICTED-RUNTIME-DEV2-DEPLOYMENT-2026-09-28.md).
+see the [deployment report](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/RESTRICTED-RUNTIME-DEV2-DEPLOYMENT-2026-09-28.md).
 The original prototype-only observations below retain their original scope.
 
 Date: 2026-09-28. Issue [#2709](https://github.com/crewship-ai/crewship/issues/2709),
@@ -108,7 +108,7 @@ for a bare `! command` cannot silently mark an allowed attack as denied.
 
 Source: `454abbd95ad458326659659bdb3492bea6c80430`, clean worktree.
 Host: Linux 6.8.0-139-generic, Docker 29.3.0, Go 1.27.1 linux/amd64.
-[Recorded test output and binary SHA-256s](reports/restricted-runtime-dev2-2026-09-28.txt)
+[Recorded test output and binary SHA-256s](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/restricted-runtime-dev2-2026-09-28.txt)
 identify the exact bootstrap and actual sidecar build. The final
 `run.sh -race` gate passed all **seven** live tests in 80.641 seconds. Race
 instrumentation applies to the host test/Manager; the separately built
@@ -148,7 +148,7 @@ TMPDIR="$owned_test_dir" GOTMPDIR="$owned_test_dir" GOMAXPROCS=4 \
 GOOS=windows GOARCH=amd64 go build ./...
 ```
 
-[Full Go output](reports/restricted-runtime-dev2-go-2026-09-28.txt) includes API
+[Full Go output](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/restricted-runtime-dev2-go-2026-09-28.txt) includes API
 (217.151 s), database (84.424 s) and orchestrator (21.247 s). The test process
 returned 0; the outer temporary-directory cleanup encountered Docker-created
 UID-owned fixtures, which were subsequently removed from that exact owned

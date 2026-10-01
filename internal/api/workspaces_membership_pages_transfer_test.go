@@ -1,6 +1,6 @@
 package api
 
-// RemoveMember × page-owner transfer (docs/prd/pages.md §7.1 rule 1b,
+// RemoveMember × page-owner transfer (docs/specs/pages.md §7.1 rule 1b,
 // issue #1952).
 //
 // A page owner leaves the workspace through exactly one door in this

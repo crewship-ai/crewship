@@ -1,13 +1,13 @@
 # Z.AI GLM Coding Plan — P1 implementation record
 
-> **Current status — 2026-09-22:** deployed and tested on the main dev3 origin, including the original Správce záloh agent and the user’s stored Coding Plan key. The `:8443` acceptance service is retired. See the [current deployment, acceptance and rollback report](reports/opencode-main-dev3-2026-09-22.md). Older deployment/checklist sections below are historical and do not request another key from the user. Required CI remains pending; CodeRabbit waiting was explicitly waived by the user.
+> **Current status — 2026-09-22:** deployed and tested on the main dev3 origin, including the original Správce záloh agent and the user’s stored Coding Plan key. The `:8443` acceptance service is retired. See the [current deployment, acceptance and rollback report](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/opencode-main-dev3-2026-09-22.md). Older deployment/checklist sections below are historical and do not request another key from the user. Required CI remains pending; CodeRabbit waiting was explicitly waived by the user.
 
 Date: 2026-09-18. Issue: #2621 (created per the expansion analysis's
 one-issue-per-slice rule). Branch `feat/opencode-zai-coding-plan`, based on
 `feat/opencode-go-zen` at `555ab2573` — a stacked slice, because the OpenCode
 runner plumbing it builds on lives in PR #2619 and is not merged. Companion
 documents: [integration PRD](opencode-go-zen-integration-2026-09-16.md),
-[acceptance handoff](opencode-go-zen-handoff-2026-09-18.md),
+[acceptance handoff](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/opencode-go-zen-handoff-2026-09-18.md),
 [provider expansion analysis](opencode-provider-expansion-2026-09-18.md).
 
 ## What this slice is
@@ -117,7 +117,7 @@ conflict on instance 3, not a defect in this slice:
   was rebuilt on `bbc7ea0b9`; subsequent changes are Go-only. The observed QA
   container runs OpenCode **1.18.30**. Older `75343b541` / `f67ed83a1` references
   describe deployment history, not current state.
-- `https://crewship-dev3.unifylab.cz:8443` (Caddy block appended to
+- `http://localhost:8083:8443` (Caddy block appended to
   `/etc/caddy/Caddyfile`, backup `Caddyfile.bak-zai-acceptance-20260918`;
   note: `caddy reload` is broken on this host — admin API disabled — so
   config changes require `systemctl restart caddy`, and the new block
@@ -141,7 +141,7 @@ conflict on instance 3, not a defect in this slice:
   `/keeper/execute` would have returned 500 at ALLOW. The launcher now
   sources `/home/ubuntu/.crewship/secrets.env` explicitly; boot logs show
   zero decrypt errors and a healthy secrets store). Pages origins are set to
-  `https://crewship-dev3.unifylab.cz:8443` (studio and runtime), so generated
+  `http://localhost:8083:8443` (studio and runtime), so generated
   page URLs point back at this instance, not at main dev3.
 - The live `crewship-ws@3` (webhook build) was untouched and verified
   serving before and after; its staged sidecar under
@@ -150,7 +150,7 @@ conflict on instance 3, not a defect in this slice:
 
 ## Live acceptance checklist (owed — needs the user's key via UI)
 
-On `https://crewship-dev3.unifylab.cz:8443`: add provider **Z.AI Coding
+On `http://localhost:8083:8443`: add provider **Z.AI Coding
 Plan** (key entered by the user in the UI — never via chat), then: streamed
 completion with `zai-coding-plan/glm-5.3`; a tool-calling run; custom model
 ID; invalid key → actionable error without secret leakage; second
@@ -179,7 +179,7 @@ are not yet deployed to the acceptance instance.
 
 ## Live continuation results (2026-09-20)
 
-See [acceptance evidence](reports/zai-acceptance-2026-09-20/results.json) and the
+See [acceptance evidence](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/zai-acceptance-2026-09-20/results.json) and the
 [audit continuation](opencode-security-performance-audit-2026-09-20.md#continuation-deployed-acceptance-and-runtime-defects-2026-09-20).
 
 PASS on isolated dev3: desktop/mobile connection wizard, empty-key rejection,
@@ -220,7 +220,7 @@ unknown monetary confidence (not a fabricated per-token price). Key retention
 across a 66-second reaper watch PASS; grant removal reaped key in45.26s and
 blocked the next run PASS; regrant automatically refreshed the sidecar and
 completed another paid run PASS. Final binding is restored and readiness ready.
-See [machine-readable evidence](reports/zai-paid-acceptance-2026-09-21.json).
+See [machine-readable evidence](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/zai-paid-acceptance-2026-09-21.json).
 
 Four live-discovered bugs were fixed in separate commits: solo-agent IPC,
 subscription classification, provider-login reaper metadata, and replenishing
@@ -234,7 +234,7 @@ exhaustion tests are not claimed. P2–P6 remain separate backlog. No merge yet.
 
 The main dev3 screenshot shows the supported-provider catalogue inside a five-row, independently scrolling sidebar viewport. Z.AI was below the visible rows; Gemini and Zen were supported catalogue entries with zero connections. The filter now uses workspace provider facets with positive account counts and relies on the outer sidebar scroll. Add provider keeps the supported catalogue. The facet source is the complete provider-login list, before user filters. Regression coverage verifies connected Z.AI selection, exclusion of unused providers, and an empty workspace.
 
-The GLM test agent remains in the separate `ZAI acceptance` workspace on `https://crewship-dev3.unifylab.cz:8443/chat/spravce-zaloh-glm-test`; the main dev3 database contains the original backup agent. Browser verification on September 22 confirmed the test agent name and Coding Plan credential are visible on the acceptance instance. This source change does not by itself update main dev3. Do not deploy the integration binary against main dev3's newer webhook schema.
+The GLM test agent remains in the separate `ZAI acceptance` workspace on `http://localhost:8083:8443/chat/spravce-zaloh-glm-test`; the main dev3 database contains the original backup agent. Browser verification on September 22 confirmed the test agent name and Coding Plan credential are visible on the acceptance instance. This source change does not by itself update main dev3. Do not deploy the integration binary against main dev3's newer webhook schema.
 
 Deployment evidence (2026-09-22): acceptance server is now clean code commit `dde95a42d`; sidecar remains the previously accepted `ce3457d4ad83` build (server compiled with that expected hash). Browser checks at `/credentials?tab=providers` found exactly one connected-provider count, visible Z.AI Coding Plan, zero Gemini/Zen rows, and the test agent visible at its chat URL. Main dev3 binary and staged sidecar hashes remain unchanged. Targeted sidebar tests: 6 passed; targeted ESLint, webpack static export, and `go vet ./...`: passed. Full Go suite was started separately; its result is not implied by these UI checks.
 

@@ -10,7 +10,7 @@ import (
 )
 
 // The producer door for a process inside a crew container (#1946). What these
-// tests are really pinning is one sentence from docs/prd/pages.md §4 rule 5:
+// tests are really pinning is one sentence from docs/specs/pages.md §4 rule 5:
 // the identity on a push comes from the token, never from the body. The
 // sidecar is the only place that sentence can be made true for an agent,
 // because the agent is the one writing the body.

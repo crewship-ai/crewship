@@ -1,7 +1,7 @@
 /**
  * Entity ref → route, the ONE resolver on the Pages surface.
  *
- * PRD `docs/prd/pages.md` §8 rule 3: *"No free-form links. A narrative block may
+ * PRD `docs/specs/pages.md` §8 rule 3: *"No free-form links. A narrative block may
  * reference an internal Crewship entity by id (issue, run, page, agent) and the
  * renderer builds the URL. It may not carry a URL."* §8b.1 says the same thing
  * about `kind: "link"` actions — a link action names an entity, never a

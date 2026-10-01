@@ -1,6 +1,6 @@
 package api
 
-// Inbound panel webhooks — route registration (docs/prd/pages.md §10b.5c).
+// Inbound panel webhooks — route registration (docs/specs/pages.md §10b.5c).
 //
 // ⚠ THE `router_` PREFIX ON THIS FILENAME IS LOAD-BEARING. Two build gates glob
 // exactly `internal/api/router_*.go` — cmd/gen-openapi/main.go:97, which is why

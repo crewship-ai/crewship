@@ -1,5 +1,5 @@
 /**
- * The public page wire (PRD `docs/prd/pages.md` §7.3).
+ * The public page wire (PRD `docs/specs/pages.md` §7.3).
  *
  * This mirrors `pagePublicPanelWire` / `pagePublicWire` in
  * `internal/api/pages_public.go`, and the mirroring is the point: the server

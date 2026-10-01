@@ -1,7 +1,7 @@
 package main
 
 // `crewship page webhook create|list|revoke` — inbound panel webhooks (PRD
-// docs/prd/pages.md §10b.5c).
+// docs/specs/pages.md §10b.5c).
 //
 // One command per endpoint, which is the repo rule:
 //

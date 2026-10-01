@@ -281,6 +281,9 @@ Only older already-stored unpinned entries retain live-at-dispatch behavior.
 
 Soft-delete a routine after a confirmation prompt. The row is preserved for
 audit, but the routine is no longer available for normal listing or invocation.
+Its schedules are deleted with it: the same transaction soft-deletes and
+disables every schedule targeting the routine, so nothing keeps firing (or
+plan-listing) against a deleted routine.
 
 ```bash
 crewship routine delete my-routine

@@ -37,9 +37,9 @@ const fetchRestrictions = [
 // the bug the semantic tokens (success/warn/destructive/info/notice/purple/
 // gold + surface tokens) exist to fix. Ban them in components/app so the next
 // feature can't reintroduce text-emerald-400. See
-// .claude/context/prd/BRIEF-COLOR-TOKENS-2026.md.
+// docs/prd/BRIEF-COLOR-TOKENS-2026.md.
 const paletteTokenMessage =
-  "Use a semantic token (success/warn/destructive/info/notice/purple/gold) or a surface token (card/muted/accent/border/muted-foreground/surface-*). Raw palette colours don't follow the theme. See .claude/context/prd/BRIEF-COLOR-TOKENS-2026.md";
+  "Use a semantic token (success/warn/destructive/info/notice/purple/gold) or a surface token (card/muted/accent/border/muted-foreground/surface-*). Raw palette colours don't follow the theme. See docs/prd/BRIEF-COLOR-TOKENS-2026.md";
 const paletteRegex =
   "/\\b(bg|text|border|ring|fill|stroke|from|to|via|divide|outline|decoration|caret|placeholder)-(emerald|green|red|rose|amber|yellow|orange|blue|sky|cyan|teal|violet|purple|fuchsia|zinc|slate|gray|neutral|stone|pink|lime|indigo)-[0-9]{2,3}\\b/";
 const paletteRestrictions = [

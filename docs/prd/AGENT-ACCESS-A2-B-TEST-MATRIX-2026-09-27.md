@@ -2,27 +2,28 @@
 
 Date: 2026-09-27. This is a test plan based on the current source tree, not a claim that A2/B is implemented or passing. It supplements [the implementation tracker](AGENT-ACCESS-RELEASE-1-IMPLEMENTATION-2026-09-27.md) and [runtime research](RESEARCH-AGENT-ACCESS-RUNTIME-HEARTBEAT-2026-09-27.md). A1's agent-to-crew gate does not prove human-to-agent, conversation, project, or process isolation.
 
-## Verified deltas on dev1, 2026-09-29
+## Verified deltas on dev1, through 2026-09-30
 
 The source descriptions in the table below are the **27 September inventory**.
-PR #2716 subsequently unified private-chat audience checks. Draft
-[#2717](https://github.com/crewship-ai/crewship/pull/2717) adds the next limited
-slice; it does not complete every acceptance case in a row.
+PR #2716 subsequently unified private-chat audience checks. #2717, #2720,
+#2721 and #2722 are merged. The provider-binding continuation is tested on
+dev1 at `7c1cad17d` but not yet merged. These slices do not complete every
+acceptance case in a row.
 
 | Gate | Evidence now available | Still required |
 |---|---|---|
 | Human chat admission before context | `13cb8b29f`: real router + bridge tests for actor/audience/revocation; dev1 group participant send through host-only IPC, no-mention completion | Restricted runtime launch, durable service origins, scoped prompt/recall/provider and queued run authority |
 | Queued human admission epoch | Provisioning options preserve server-issued membership/chat receipt; migrated-DB revoke/restore tests and mutation control; restored chat receives a fresh generation; dev1 host resolver rejects old receipt after member rejoin and accepts a fresh one | Independent review, full live deferred execution, durable queue/service authority and isolated execution |
-| Exact human resource grants | Migrated-DB tests for agent/project operations, revision conflicts, removal/rejoin and two humans | Administrative API/Settings/CLI rollout, agent-side ceilings and service principals |
+| Exact human resource grants | Migrated-DB tests for agent/project operations, revision conflicts, removal/rejoin and two humans; live API/CLI grant/revoke/stale-409 smoke | Settings UI, agent-side ceilings and service principals; API/CLI shipped in #2721 |
 | Private chat discovery | Authenticated router tests for exact chat grants, own list/count, foreign direct lookup; live dev1 two-human same-agent fixture | Complete restricted create/send flow and storage provenance |
 | Delivery revocation | Per-frame WS and HTTP checks; real dev1 positive delivery, member removal, socket close; other human stays connected | Restricted run output, logs/artifacts/journal and full-grant revocation through the production management API |
 | Delegation/retry | Durable authority tests: child cannot widen parent, parent revoke denies child, old membership/revision cannot resume | Queue/orchestrator integration and target-agent rights |
 | Backup | Full backup suite; policy roundtrip and fork remap; old attempt capability absent | Scoped runtime data, instance recovery and quotas |
-| Linux/process | Dev1 ran the standalone runtime harness with race: 11/11 live Docker cases passed | Real chat/CLI/routine dispatch into that runtime and provider adapters |
+| Linux/process | Historical raw harness passed 15/15 but records `317d8257` with a dirty tree, so it does not prove clean `7c1cad17d` source identity. The successor audit in the handoff records an independent clean `3acdaa260` repeat: 15/15 with race, synthetic keys and no paid model | Real chat/CLI/routine dispatch into that runtime and provider adapters |
 
 Unintegrated restricted HTTP routes and shared terminals are denied. **A denial
-is not a passing positive scenario.** Restricted profile activation remains
-unavailable in the product. Build and evidence details are in the
+is not a passing positive scenario.** Restricted membership can be configured through API/CLI; ordinary restricted
+execution remains unavailable. Build and evidence details are in the
 [continuation record](AGENT-ACCESS-CONTINUATION-2026-09-29.md).
 
 ## Shared fixture and invariant

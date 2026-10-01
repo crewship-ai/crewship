@@ -1,7 +1,7 @@
 package main
 
 // `crewship page grant|revoke|grants` — the Pages ACL from the command line
-// (docs/prd/pages.md §7.1b, §11, §11b decision 13).
+// (docs/specs/pages.md §7.1b, §11, §11b decision 13).
 //
 //	GET    /api/v1/pages/{slug}/grants   page grants <slug>
 //	PUT    /api/v1/pages/{slug}/grants   page grant  <slug> --user|--crew|--agent <ref> --level …

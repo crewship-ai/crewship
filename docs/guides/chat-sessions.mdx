@@ -383,7 +383,13 @@ Page's identity (name, slug and ID) to the message and records server-derived
 `page_context` provenance. Panel payloads and application data are not copied.
 If either reader loses access, the send is refused without persisting the
 message. The recipient needs an explicit Page grant; opening the draft does
-not issue one. The transcript shows the Page provenance after history reload.
+not issue one. The transcript shows the Page provenance after history reload. The
+Page chip is one-shot and is consumed only when the server confirms the message
+was saved: a send that is refused or disconnects keeps the draft *and* the Page
+reference, so the person can retry without re-adding it. **Regenerate** on a
+Page-attributed reply requests a fresh snapshot — access is rechecked and the
+old server-attributed suffix is stripped rather than copied — and never replays
+an ask-form submission.
 
 The state of which message is being edited, whether the slash palette is open, and the like is held in **shallow router** state — `useShallowSearchParam` writes to `window.history.replaceState` directly without triggering a Next.js navigation. This keeps the page interactive (no rerender on tab switch) while still giving you a copyable URL for any state.
 

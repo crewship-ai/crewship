@@ -2,7 +2,7 @@
 import fs from "node:fs"
 import assert from "node:assert/strict"
 import { chromium, expect } from "@playwright/test"
-const base = "https://crewship-dev1.unifylab.cz"
+const base = process.env.CREWSHIP_SERVER || "http://localhost:8081"
 const account = JSON.parse(fs.readFileSync(process.env.CREWSHIP_CLARITY_ACCOUNT, "utf8"))
 const api = `/api/v1/workspaces/${account.workspace_id}`
 const report = { checks: [], cleanup: [], errors: [] }

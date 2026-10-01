@@ -497,7 +497,7 @@ than the model.
 
   - **Same request.** The same agent, the same credential, the same request
     type, and for `/execute` the *identical* command. Anything else is a
-    `403` and the request is judged afresh.
+    `403`; to be judged afresh, the agent resubmits without the approval.
   - **Single use.** The first retry that presents the approval consumes it
     (`409` for every later one). The row the retry creates is itself never
     spendable, so approvals cannot chain.
@@ -1180,8 +1180,10 @@ server restart needed:
   synchronous review endpoint (`crewship keeper review run behavior`) write the
   same `keeper_requests` row and the same inbox fan-out: `WARN` → non-blocking
   inbox item, `ESCALATE` → operator review (blocking in `block` mode at
-  strict/guided autonomy), `DENY` in `block` mode → blocking inbox item,
-  `ALLOW` → journal telemetry only. What each mode/autonomy combination
+  strict/guided autonomy), `DENY` in `block` mode → blocking inbox item at
+  strict/guided (at `trusted` the block verdict is journalled, without an
+  inbox row), `ALLOW` → journal telemetry only. What each
+  mode/autonomy combination
   produces is the [behaviour
   evaluator](/guides/autonomy-and-self-learning#behavior_mode-—-what-happens-when-the-monitor-fires)
   matrix, and the sampled path honours it — the journal and the inbox both

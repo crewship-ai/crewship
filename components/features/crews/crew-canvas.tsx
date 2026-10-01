@@ -387,12 +387,12 @@ export function CrewCanvas({
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         title={`Delete crew ${crew.name}?`}
-        description="This tears down the crew container and detaches its agents. It cannot be undone."
+        description="This deletes the crew and its agents. Background cleanup removes runtimes whose ownership is verified; older runtimes may need manual cleanup. Removing a runtime stops its processes and discards files stored only in its container writable layer."
         consequences={[
-          { tone: "lost", text: `${agentsForCrew.length === 1 ? "1 agent becomes" : `${agentsForCrew.length} agents become`} unassigned — they keep their skills and chats` },
-          { tone: "lost", text: "The container image and its files are removed" },
-          { tone: "kept", text: "Issues and routines stay in the workspace, unowned" },
-          { tone: "kept", text: "The journal is kept 30 days; a workspace backup restores the crew" },
+          { tone: "lost", text: `${agentsForCrew.length === 1 ? "1 agent is" : `${agentsForCrew.length} agents are`} deleted along with the crew` },
+          { tone: "lost", text: "Declared sidecar containers and their data volumes are also deleted" },
+          { tone: "lost", text: "Crew issues are deleted" },
+          { tone: "kept", text: "Background runtime cleanup preserves mounted volumes, host data and shared images" },
         ]}
         confirmLabel="Delete crew"
         destructive

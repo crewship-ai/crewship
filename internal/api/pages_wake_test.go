@@ -1,6 +1,6 @@
 package api
 
-// Pages — the wake gate, end to end (docs/prd/pages.md §5).
+// Pages — the wake gate, end to end (docs/specs/pages.md §5).
 //
 // These tests drive the REAL path: a push through the handler emits the real
 // journal entry, the real automation.Registry matches it against the rules the

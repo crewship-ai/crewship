@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * A page for somebody with no account (PRD `docs/prd/pages.md` §7.3).
+ * A page for somebody with no account (PRD `docs/specs/pages.md` §7.3).
  *
  * §7.3.1 calls this "a different product, not a permission level", and the
  * component reflects that: no sidebar, no rail, no breadcrumb, no workspace

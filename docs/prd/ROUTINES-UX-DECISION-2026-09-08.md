@@ -2,7 +2,12 @@
 
 2026-09-08 · nový návrh k rozhodnutí, nikoli schválená implementace.
 
-[Otevřít přehled pěti směrů a tři interaktivní wireframy](https://crewship-dev1.unifylab.cz/design/crewship-1-0/routines-directions-20260908/index.html).
+[Archiv zdrojového HTML přehledu a wireframů](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/public/design/crewship-1-0/routines-directions-20260908/index.html).
+
+Odkazy níže vedou na archiv zdrojů, nikoli na živou interaktivní stránku.
+Pro lokální prohlížení stáhněte celou složku z uvedené revize a otevřete
+`index.html`. Mockupy už nejsou součástí nových exportů produktu; tato změna
+neodstraňuje kopie ze starších nasazení ani Git historie.
 
 > **Aktualizace doporučení:** nová klientská interpretace a priority jsou v oddílu 16. Původní varianty A/B/C zůstávají srovnávacími exploracemi, nikoli doporučeným finálním řešením.
 
@@ -116,9 +121,9 @@ stejného draftu, ne další oddělený editor. Časovou osu použít pro Activi
 
 ## 7. Tři wireframy a jak je hodnotit
 
-- [A — Pracovní list](https://crewship-dev1.unifylab.cz/design/crewship-1-0/routines-directions-20260908/a-recipe.html)
-- [B — Mapa toku](https://crewship-dev1.unifylab.cz/design/crewship-1-0/routines-directions-20260908/b-flow.html)
-- [C — Pracovní stůl](https://crewship-dev1.unifylab.cz/design/crewship-1-0/routines-directions-20260908/c-workbench.html)
+- [A — Pracovní list](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/public/design/crewship-1-0/routines-directions-20260908/a-recipe.html)
+- [B — Mapa toku](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/public/design/crewship-1-0/routines-directions-20260908/b-flow.html)
+- [C — Pracovní stůl](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/public/design/crewship-1-0/routines-directions-20260908/c-workbench.html)
 
 Každý má přímé odkazy `#edit` a `#run`, dvě velikosti receptu, přepínání stavů,
 náhled výsledku, lokální editaci, knihovnu kroků a zdrojů, historii/verze,
@@ -325,7 +330,7 @@ nasadit nový backend ani upravovat aplikaci. Žádná živá rutina nebyla spu�
 
 ## 16. Revidované doporučení: klientská práce a prokazatelný výsledek
 
-Nový [klikací klientský návrh](https://crewship-dev1.unifylab.cz/design/crewship-1-0/routines-directions-20260908/client-workspace.html)
+Nový [klikací klientský návrh](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/public/design/crewship-1-0/routines-directions-20260908/client-workspace.html)
 rozvíjí předchozí kritiku. Nejde o čtvrtý volitelný režim aplikace, ale návrh
 jednoho výchozího detailu. A/B/C zůstávají archivem srovnání, nikoli třemi
 produktovými povrchy. Předchozí preference A byla předčasná.

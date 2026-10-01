@@ -1,7 +1,7 @@
 package api
 
 // Pages — what the review snapshot actually guarantees about concurrency
-// (docs/prd/pages.md §11).
+// (docs/specs/pages.md §11).
 //
 // The claim under test, as the endpoint's own comments put it, is that the
 // live definition, the candidate definition and `definition_digest` describe

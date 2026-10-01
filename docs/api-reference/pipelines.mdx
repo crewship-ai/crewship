@@ -17,7 +17,7 @@ Problem Details shape (`error` is the human-readable message).
 |---|---|---|---|
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines` | member | List; `status`, `author_crew_id`, `tag`, `order` (`popularity`, `recent`, `name`), `limit` (1–500), `offset` (0–1000000), `include_ephemeral=1`, `include_hidden=1` |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}` | member | Get definition |
-| DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}` | delete | Soft-delete |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}` | delete | Soft-delete; the routine's schedules are disabled and soft-deleted in the same transaction |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/save` | create | Create/update a definition |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/test_run` | create | Validate an unsaved definition and mint `save_token` |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run` | create **or** `routine.run` | Execute a saved, active pipeline |
@@ -222,6 +222,33 @@ does not change what fires. A routine with no archived version is refused
 with `409` -- publish one first. The governance, integration, resource and
 credential preflight always judges the version that will run, never head.
 
+`expected_definition_hash` is the reviewed-start guard: the SHA-256 of the
+definition you previewed. For a HEAD start, a changed hash answers `409` and
+an accepted immediate start pins that archived version before dispatch; with
+`pinned_version`, it checks the selected archive. Not supported for delayed,
+debounced or one-time starts, and mutable step overrides are skipped for this
+reviewed start.
+
+### Dry-run response
+
+`POST .../pipelines/{slug}/dry_run` answers the same `RunResult` shape with
+`would_execute` instead of real execution: a static plan of what a live run
+would do, with every template rendered against the supplied inputs and no
+agent invoked (the only journal trace is a single `pipeline.dry_run` audit
+row). Each `would_execute` row is one planned step:
+
+| Field | Meaning |
+|---|---|
+| `step_id`, `step_type` | The step and its type, as declared |
+| `would_pass` | The rendered prompt/input the step would receive |
+| `would_call_agent` | The agent slug an `agent_run` step would invoke |
+| `would_call_pipeline` | The nested routine slug a `call_pipeline` step would invoke (not recursed into) |
+| `tier_adapter`, `tier_model` | The execution tier the step resolves to after the recipe's tier map |
+| `estimated_cost_usd` | Per-step cost estimate for agent steps; the estimate also sums into the run-level cost |
+
+A dry run is an honest static plan, not a proof the run will succeed — no
+preflight, dial or credential check runs here.
+
 ### Run statuses and responses
 
 `POST .../pipelines/{slug}/run` requires `member` plus either `create`
@@ -295,6 +322,34 @@ deferred run is fired by the same pending-run dispatcher and stored with
 presence to identify a rule-fired run; treat a `"schedule"` row without it as a
 cron.
 </Warning>
+
+### The executed definition on a run detail
+
+`GET /api/v1/workspaces/{wsId}/pipeline-runs/{runId}` resolves the recipe a
+run **actually executed**, never from the routine's current HEAD
+(`internal/api/pipeline_run_definition.go`). Precedence:
+
+1. The run's own `executed_definition_json`, when it stamped one.
+2. Otherwise the archived version whose content hash equals the run's
+   `definition_hash`. When the run has a hash and no archive matches it,
+   there is **no** fallback to the numeric version — the definition is
+   reported unavailable rather than guessed.
+3. Only when the run stamped **no** hash: the archived version with the run's
+   numeric `pipeline_version`.
+
+| Field | Meaning |
+|---|---|
+| `pipeline_version` | The matched archive's version; falls back to the version the run stamped when no archive matched |
+| `definition_hash` | The content hash the run stamped |
+| `definition` | The executed recipe (parsed DSL), or `null` when none of the sources above yields one — outputs remain useful on their own |
+| `definition_status` | `available` / `unavailable` / `error` — an unavailable archive is reported, not guessed at |
+| `behavior` | A prose description of the executed recipe's behaviour, when the definition is available |
+
+A run detail's credential-type declarations come from this archived
+definition, not from the live routine: they are what the recipe **declared**,
+and are distinct from per-run credential **use**, which is not recorded. A
+legacy run's invoking crew/agent ids are shown as recorded and are not
+presented as verified identities.
 
 ## Outcome
 

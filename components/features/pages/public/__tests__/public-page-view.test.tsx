@@ -1,5 +1,5 @@
 /**
- * The public page, rendered (PRD `docs/prd/pages.md` §7.3).
+ * The public page, rendered (PRD `docs/specs/pages.md` §7.3).
  *
  * The server tests (`internal/api/pages_public_test.go`) prove what crosses the
  * boundary. These prove what the browser does with it, and there are exactly

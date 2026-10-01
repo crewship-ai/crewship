@@ -366,7 +366,7 @@ Override any of: `CREWSHIP` (binary path — absolute, or relative to your cwd),
 > the profile:
 >
 > ```bash
-> CREWSHIP_SERVER=https://crewship-dev3.unifylab.cz \
+> CREWSHIP_SERVER=http://localhost:8083 \
 > CREWSHIP_PROFILE=dev3-fresh CREWSHIP_WORKSPACE=<workspace id> ./run-all.sh
 > ```
 

@@ -1,5 +1,5 @@
 /**
- * Panel registry + the three v0 panels (PRD `docs/prd/pages.md` §3, §4, §9, §9b.4).
+ * Panel registry + the three v0 panels (PRD `docs/specs/pages.md` §3, §4, §9, §9b.4).
  *
  * The load-bearing assertions here are the freshness ones. A dashboard that
  * shows an old number as if it were current is the failure this whole feature

@@ -44,7 +44,7 @@ that selection. A selected run adds `&run=` and keeps its recorded recipe versio
 
 | View | What it answers |
 | --- | --- |
-| **Overview** | Three answers first: *What it does* (readable steps, List or Map), *Last time* (the last run and its verdict) and *Before you run* (the questions asked, declared results, what a run can reach, and how it runs). Status chrome, metadata and access fold into **Technical details**. **Edit** opens the recipe as a page at `?view=edit`; nothing there is live until Publish is confirmed. |
+| **Overview** | Three answers first: *What it does* (readable steps, List or Map — recipes with more than twelve steps open on the Map, one node per phase group), *Last time* (the last run and its verdict) and *Before you run* (the questions asked, declared results, what a run can reach, and how it runs). Status chrome, metadata and access fold into **Technical details**. **Edit** opens the Edit dialog over the page, addressed as `?view=edit` (reload, Back and Forward land on it); nothing there is live until Publish is confirmed. |
 | **History** | Recorded runs, their verdicts and how they started. Each opens its run detail. Composition depth is under Technical details. |
 | **Versions** | Published recipes and an explicit comparison of chosen versions. Comparison starts real work and can change connected systems or incur costs. |
 | **Plan** | Repeating plans, one-time starts, webhooks and the automations that can start this routine, with their saved inputs, shared with Calendar. |
@@ -54,6 +54,14 @@ Stable IDs remain secondary technical identifiers. Empty schedules and results
 collapse to a short row. The run page leads with its verdict, error and failed
 step, and opens failed, current or waiting steps automatically. Missing evidence
 is distinguished from an empty result. Stopping a run does not undo prior actions.
+
+A run detail's recipe comes from the run's **own archived record** — resolved by
+content hash, then numeric version, never from the routine's current head — so
+the trigger, executed version and declared credential types it shows are what
+ran, not what is saved now. Credential-type declarations are what the recipe
+*declared*; per-run credential use is not recorded. Runs recorded before
+verified provenance keep their invoking ids as recorded, without presenting
+them as verified.
 
 Waiting decisions appear in the run and the authenticated **Inbox**. Typed forms
 use the same decision contract in both places. A routine proposed for review also

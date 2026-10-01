@@ -168,3 +168,25 @@ func TestCrewDeletePromptSaysSoWhenItCannotCheckForSidecars(t *testing.T) {
 		t.Errorf("an unreadable crew was silently treated as one with nothing to lose:\n%s", out)
 	}
 }
+
+func TestCrewDeleteReportsPendingRuntimeScope(t *testing.T) {
+	stub := stubCrewWithServices(t, "")
+	stub.OnDelete("/api/v1/crews/"+covCrewIDCli4, clitest.JSONResponse(200, map[string]any{"success": true, "cleanup": map[string]string{"scope": "containers", "state": "pending"}}))
+	c := covFreshCmd(crewDeleteCmd, func(c *cobra.Command) { c.Flags().BoolP("yes", "y", false, "") })
+	covSetFlagsCli4(t, c, map[string]string{"yes": "true"})
+	out, err := covCaptureStdoutCli4(t, func() error { return c.RunE(c, []string{covCrewIDCli4}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "containers") || !strings.Contains(out, "pending") {
+		t.Fatalf("cleanup pending hidden: %s", out)
+	}
+}
+
+func TestCrewDeletePromptExplainsWritableLossAndLegacy(t *testing.T) {
+	stubCrewWithServices(t, "")
+	out := deletePromptText(t, covCrewIDCli4)
+	if !strings.Contains(out, "writable layer") || !strings.Contains(out, "older runtimes may need manual cleanup") {
+		t.Fatalf("missing runtime scope warning: %s", out)
+	}
+}

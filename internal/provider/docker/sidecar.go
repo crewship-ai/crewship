@@ -64,6 +64,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
 // sidecarSpecHashLabel stores a digest of the full desired spec on
@@ -265,6 +266,11 @@ func sidecarMatchesCrew(labels map[string]string, crewID, kind string) bool {
 // one — services without a healthcheck are considered ready as
 // soon as the container reports running.
 func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewConfig) (map[string]string, error) {
+	if p.cfg.OwnerActive != nil {
+		if err := p.cfg.OwnerActive(ctx, team.ID); err != nil {
+			return nil, err
+		}
+	}
 	if len(team.Services) == 0 {
 		return nil, nil
 	}
@@ -359,6 +365,12 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 		}
 		if !matched {
 			continue
+		}
+
+		// Also with an empty local identity: never adopt or recreate a service
+		// container another installation labelled.
+		if id := c.Labels[resourcelifecycle.InstanceLabel]; id != "" && id != p.cfg.InstanceID {
+			return "", fmt.Errorf("existing service container %s is labelled for another installation; if this installation's identity was reset, remove it by hand (volumes are kept) so it can be recreated", name)
 		}
 
 		// Drift detection in two passes so the operator log gets
@@ -458,7 +470,7 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 		Image:        svc.Image,
 		Env:          envSlice,
 		ExposedPorts: exposed,
-		Labels:       sidecarContainerLabels(crewID, crewSlug, svc.Name, desiredHash),
+		Labels:       resourcelifecycle.WithInstanceLabel(sidecarContainerLabels(crewID, crewSlug, svc.Name, desiredHash), p.cfg.InstanceID),
 		Healthcheck:  hc,
 	}
 	if len(svc.Command) > 0 {

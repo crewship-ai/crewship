@@ -220,6 +220,11 @@ func (s *Server) Start(ctx context.Context) error {
 		s.rehydrateContainers(ctx)
 	}
 
+	if s.containerCleanup != nil {
+		s.bgWg.Add(1)
+		go func() { defer s.bgWg.Done(); s.containerCleanup.Run(ctx) }()
+	}
+
 	if runtime, ok := s.container.(servicelifecycle.Runtime); ok && s.db != nil {
 		controller := &servicelifecycle.Controller{DB: s.db, Runtime: runtime, Resolve: func(ctx context.Context, crew, ws, name string) (provider.CrewConfig, error) {
 			return goapi.ResolveManagedService(ctx, s.db, crew, ws, name)

@@ -14,8 +14,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/restrictedruntime"
 )
 
-// Authority initially supports commands with no persistent mounts, credentials,
-// or network. Provider/storage adapters must explicitly extend this boundary;
+// Authority supports offline commands and explicitly prepared text Responses
+// operations. Persistent mounts and agent-visible credentials remain denied;
 // callers cannot supply a broader Plan or fall back to a shared crew process.
 type Authority struct{ Store access.Store }
 
@@ -95,13 +95,22 @@ func (a Authority) Resolve(ctx context.Context, handle string) (restrictedruntim
 	if len(raw) > 131072 || json.Unmarshal([]byte(raw), &command) != nil || !validCommand(command) {
 		return restrictedruntime.Plan{}, access.ErrDenied
 	}
-	return restrictedruntime.Plan{
+	plan := restrictedruntime.Plan{
 		Workspace: attempt.Workspace, Principal: attempt.Principal, PrincipalKind: "human",
 		Agent: attempt.Agent, Scope: attempt.Scope, Attempt: attempt.ID,
 		Origin: "chat", OriginID: attempt.Chat, Revision: strconv.FormatInt(attempt.Revision, 10),
 		Generation: uint64(attempt.Generation), Mode: "restricted", Expires: attempt.Expires,
 		Command: command,
-	}, nil
+	}
+	if err := a.attachProvider(ctx, attempt, &plan); err != nil {
+		return restrictedruntime.Plan{}, err
+	}
+	// Binding removal and provider/grant updates revoke in the same mutation
+	// transaction. Fence changes that happened during command/binding reads.
+	if _, err := a.Store.Resolve(ctx, handle); err != nil {
+		return restrictedruntime.Plan{}, err
+	}
+	return plan, nil
 }
 
 func (a Authority) Secrets(ctx context.Context, handle string) (map[string]string, error) {

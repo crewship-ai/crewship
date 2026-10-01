@@ -66,7 +66,10 @@ func operationalDomainSchemaCatalog() map[string]map[string]DomainSchema {
 	text := func() map[string]any { return map[string]any{"type": "string"} }
 	binary := func() map[string]any { return map[string]any{"type": "string", "format": "binary"} }
 
+	cleanupResponse := objectSchema(map[string]any{"scope": stringSchema(), "state": stringSchema(), "items": arraySchema(containerCleanupStatusSchema())})
+	cleanupResponse["required"] = []string{"scope", "state", "items"}
 	admin := map[string]DomainSchema{
+		"GET /api/v1/admin/resource-cleanup":    {Response: cleanupResponse},
 		"GET /api/v1/admin/stats":               {Response: anyObject()},
 		"GET /api/v1/admin/users":               {Response: list(anyObject())},
 		"GET /api/v1/admin/workspaces":          {Response: list(anyObject())},
@@ -183,4 +186,10 @@ func operationalDomainSchemaCatalog() map[string]map[string]DomainSchema {
 		"notifications": notifications, "integrations": integrations,
 		"files-media": filesMedia, "auth-public": authPublic, "system": system,
 	}
+}
+
+func containerCleanupStatusSchema() map[string]any {
+	str := func() map[string]any { return map[string]any{"type": "string"} }
+	return map[string]any{"type": "object", "properties": map[string]any{
+		"crew_id": str(), "scope": str(), "state": str(), "observed_at": str(), "complete": map[string]any{"type": "boolean"}, "remaining": map[string]any{"type": "integer"}, "unattributed": map[string]any{"type": "integer"}, "error": str()}, "required": []string{"crew_id", "scope", "state", "complete", "remaining", "unattributed"}}
 }

@@ -29,6 +29,10 @@ RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm prisma generate
+# License texts of the embedded frontend's npm dependencies, from the
+# lockfile-installed tree (no network). Collected in-stage so every docker
+# build path — PR image build, release, nightly, local — is self-contained.
+RUN node scripts/gen-frontend-licenses.mjs /licenses-frontend
 ARG VERSION=dev
 ARG NEXT_PUBLIC_SENTRY_DSN=""
 ENV NEXT_PUBLIC_CREWSHIP_VERSION=$VERSION
@@ -121,6 +125,9 @@ ARG SENTRY_DSN=""
 # Build it for the same target architecture as the server.
 RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+    go run ./tools/gen-licenses -out /licenses-go
+RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=go-build,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
     -ldflags="-s -w" -o /crewship-sidecar ./cmd/crewship-sidecar
 # -trimpath strips workspace paths from binary debug info — same
@@ -153,6 +160,16 @@ RUN mkdir -p /var/lib/crewship /var/log/crewship /data && \
 COPY --from=backend /crewship /usr/local/bin/crewship
 COPY --from=backend /crewship-sidecar /usr/local/bin/crewship-sidecar
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+# Distribution legal files, produced inside the frontend/backend stages
+# (self-contained: PR image builds and local docker builds need no host
+# pre-step). The test refuses an image without them, so no supported build
+# path ships license-less.
+COPY LICENSE NOTICE /usr/share/doc/crewship/
+COPY --from=backend /licenses-go /usr/share/doc/crewship/licenses/go
+COPY --from=frontend /licenses-frontend /usr/share/doc/crewship/licenses/frontend
+RUN test -f /usr/share/doc/crewship/NOTICE \
+    && test -d /usr/share/doc/crewship/licenses/go \
+    && test -f /usr/share/doc/crewship/licenses/frontend/npm-licenses.json
 COPY docker/server-entrypoint.sh /usr/local/bin/crewship-entrypoint
 RUN chmod +x /usr/local/bin/crewship-entrypoint
 

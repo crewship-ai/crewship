@@ -47,6 +47,8 @@ describe("Audit log page", () => {
   // A day in the calendar is a one-day custom range, sent as whole UTC days.
   it("picks a day from the calendar and stretches it with shift", async () => {
     render(<AuditLogPage />)
+    // A completed month always has enough selectable days, even on the first.
+    fireEvent.click(screen.getByRole("button", { name: "Previous month" }))
     const days = document.querySelectorAll<HTMLButtonElement>("[data-slot=audit-calendar] [data-day]")
     const enabled = [...days].filter((d) => !d.disabled)
     const a = enabled[0].dataset.day!, b = enabled[2].dataset.day!

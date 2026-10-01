@@ -325,6 +325,9 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 	if err := opts.validate(); err != nil {
 		return nil, err
 	}
+	if err := requireSupportedInstanceServiceBackups(ctx, db); err != nil {
+		return nil, err
+	}
 	level := opts.Level
 	if !level.Valid() {
 		level = DefaultScopeLevel
@@ -755,6 +758,9 @@ func stageInstanceCopy(ctx context.Context, db *sql.DB, stage string, sc *stagin
 			_ = ms.Close()
 		}
 	}()
+	if err := requireSupportedInstanceServiceBackups(ctx, ms.DB); err != nil {
+		return nil, nil, err
+	}
 	outAbs, _ := filepath.Abs(opts.OutputDir)
 	skip := []string{stage, outAbs}
 	stores := map[string]*stagedStore{}

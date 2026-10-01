@@ -39,8 +39,9 @@ package api
 // recoverable by hand, deleting a different tenant's database is not.
 //
 // The crew's own RUNTIME container is deliberately NOT removed here: it has an
-// idle TTL and a reaper, so it stops on its own. Sidecars have neither, which is
-// exactly why they need this.
+// separate installation-labelled container cleanup controller; the idle TTL
+// reaper does not remove deleted owners. This explicit teardown keeps its
+// declared sidecar data-volume contract.
 
 import (
 	"context"

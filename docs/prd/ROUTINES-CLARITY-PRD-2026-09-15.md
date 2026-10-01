@@ -1,7 +1,7 @@
 # Routines: vstupy, pravidla práce a řešení problémů
 
 Datum: 2026-09-15. Stav: implementováno a browserem ověřeno na dev1; CI/review a lidská přejímka zůstávají otevřené.
-[Validační report](reports/routines-clarity-validation-2026-09-15.md).
+[Validační report](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/routines-clarity-validation-2026-09-15.md).
 Issue: #2555. Jedna větev `feat/routines-clarity-release-1`, jeden PR, testování na dev1.
 Navazuje na [hlavní PRD](ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08.md).
 Historické opravy #2553 jsou uzavřené podle [protokolu po mergi](https://github.com/crewship-ai/crewship/pull/2553#issuecomment-5672592832).

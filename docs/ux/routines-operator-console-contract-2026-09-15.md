@@ -1,5 +1,11 @@
 # Routines operator console — implementation contract (PR for #2560)
 
+**Status update, 2026-09-28:** PR #2562 merged on 2026-09-16 as
+`e705a498a6db9188037e31c54db6e5032be46fc6`, included in this checkout's base.
+The work-package and integration instructions below record the original
+implementation process; they do not override today's CONTRIBUTING/AGENTS
+workflow. The implementation contract remains public.
+
 Companion to [the proposal](routines-operator-console-2026-09-15.md) and the
 prototype `public/design/routines-operator-console-20260915.html`. Three work
 packages build in parallel against this contract; the integrator merges them
