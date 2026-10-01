@@ -42,6 +42,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// runtime directly; nil (tests / --no-docker) makes it answer an
 	// empty list rather than erroring — see crew_service_inventory.go.
 	crews.SetContainer(r.keeperContainer)
+	crews.containerCleanup = r.containerCleanup
 	agents := NewAgentHandler(r.db, r.logger)
 	r.agentHandler = agents
 	if r.hub != nil {

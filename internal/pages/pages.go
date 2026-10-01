@@ -1,4 +1,4 @@
-// Package pages holds the domain layer of the Pages feature (docs/prd/pages.md):
+// Package pages holds the domain layer of the Pages feature (docs/specs/pages.md):
 // the closed panel vocabulary, the payload and spec types with their
 // validation, the freshness state machine, and the payload ring's eviction
 // rule.

@@ -1,5 +1,5 @@
 /**
- * `refresh:` survives every hop on the client (PRD `docs/prd/pages.md` §12 v1.1).
+ * `refresh:` survives every hop on the client (PRD `docs/specs/pages.md` §12 v1.1).
  *
  * This branch has now had the same bug four times — a panel field enumerated
  * by hand and dropped in ONE path, so the page saves and the field quietly

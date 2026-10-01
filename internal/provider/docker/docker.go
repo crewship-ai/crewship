@@ -32,6 +32,9 @@ var _ provider.VolumeManager = (*Provider)(nil)
 
 // Config holds Docker provider configuration for container creation and runtime selection.
 type Config struct {
+	InstanceID  string                              // persisted installation identity; empty disables auto cleanup labels.
+	OwnerActive func(context.Context, string) error // installed once before serving requests.
+
 	RuntimeImage    string
 	DefaultRuntime  string // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"
 	Network         string

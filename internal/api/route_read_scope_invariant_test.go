@@ -153,7 +153,7 @@ var readRoutesWithoutWorkspace = map[string]string{
 	// Token-scoped: the credential IS the scope.
 	//
 	// A public page link is served from its own URL space to somebody with no
-	// account, no session and no workspace (docs/prd/pages.md §7.3.1), so there
+	// account, no session and no workspace (docs/specs/pages.md §7.3.1), so there
 	// is no wsCtx to wrap it in — the workspace is resolved FROM the token, and
 	// the token is the only thing that resolves it. Wrapping it would require a
 	// session that by construction does not exist.

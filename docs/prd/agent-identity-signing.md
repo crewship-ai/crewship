@@ -837,7 +837,7 @@ shared `/workspace` (`docker.go:625`). Coordination + the human view are **git**
 branches/diffs per agent, merged like PRs. This is *simpler* for humans than any
 filesystem scheme because they already understand files/branches/diffs.
 - **Remote human view = the dashboard, not SSH.** The control plane
-  (`crewship.unifylab.cz`) exposes ONE file/diff browser over the crew repo/volume;
+  (`crewship.example.com`) exposes ONE file/diff browser over the crew repo/volume;
   the human never touches a container. Local or remote is identical. Containers are
   an implementation detail the UI never surfaces.
 

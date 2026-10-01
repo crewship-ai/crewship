@@ -643,7 +643,7 @@ const (
 	EntryNotificationFailed    EntryType = "notification.failed"
 	EntryNotificationDropped   EntryType = "notification.dropped"
 
-	// Pages — docs/prd/pages.md §5 and §7.1b. Unknown journal types are
+	// Pages — docs/specs/pages.md §5 and §7.1b. Unknown journal types are
 	// forwarded by design (feed_filter.go:33-35), so these reach the
 	// activity feed with no filter change.
 	//

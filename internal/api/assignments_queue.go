@@ -4,7 +4,7 @@ package api
 // assignments_queue.go so it composes with the existing
 // AssignmentHandler in assignments.go and assignments_run.go without a
 // package split. The design is captured in
-// .claude/context/prd/QUEUE-MECHANISM-2026.md — read that first if
+// docs/prd/QUEUE-MECHANISM-2026.md — read that first if
 // you're touching this code.
 //
 // Two primitives:

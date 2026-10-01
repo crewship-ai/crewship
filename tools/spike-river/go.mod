@@ -1,5 +1,5 @@
 // Isolated spike module: keeps River out of the main crewship go.mod until the
-// ADR in docs/prd/ADR-QUEUE-RIVER-SQLITE.md says otherwise.
+// ADR in docs/decisions/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md says otherwise.
 module github.com/crewship-ai/crewship/tools/spike-river
 
 go 1.27

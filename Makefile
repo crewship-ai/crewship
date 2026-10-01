@@ -253,6 +253,12 @@ sbom:
 notices:
 	@./scripts/gen-notices.sh
 
+# Distribution license bundle (Go dependency texts + npm attribution
+# inventory + project legal files) into build/licenses/ — consumed by
+# goreleaser archives, nfpm packages and the container image build.
+licenses:
+	@./scripts/gen-license-bundle.sh
+
 e2e:
 	pnpm test:e2e
 

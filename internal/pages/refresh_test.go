@@ -9,7 +9,7 @@ import (
 // four things the server has to refuse, because each of them is a declaration
 // that would otherwise be stored, believed and never act.
 
-// prdRefreshExample is the PRD's own worked example (§6, docs/prd/pages.md:422)
+// prdRefreshExample is the PRD's own worked example (§6, docs/specs/pages.md:422)
 // at the v1.1 feature level: a status panel whose gate wakes devops, and a
 // narrative panel produced by a routine that runs when it does.
 const prdRefreshExample = `

@@ -161,7 +161,7 @@ and the next run failed closed. This measures revocation after a completed run,
 not cancellation of a request already forwarded to the vendor. Custom native
 model IDs persisted through the update API (verified with a read-only DB query).
 All dummy credentials were deleted and the QA runtime stopped. Evidence and
-screenshots: [acceptance report](reports/zai-acceptance-2026-09-20/results.json).
+screenshots: [acceptance report](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/zai-acceptance-2026-09-20/results.json).
 Successful paid stream/tool/usage checks still require the user's real Coding
 Plan key. The earlier failed runs remain failed diagnostic evidence.
 
@@ -298,7 +298,7 @@ staged sidecar hashes unchanged. No plaintext key match in checked application
 and sidecar logs. Auth files were already cleaned up when inspected (zero files),
 so that inspection is NOT proof of secret absence during execution.
 
-Current evidence and scope are in reports/zai-paid-acceptance-2026-09-21.json.
+Current evidence and scope are in the archived [zai-paid-acceptance-2026-09-21.json](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/zai-paid-acceptance-2026-09-21.json).
 Historical metered/precise test ledger rows and failed diagnostic runs were not
 rewritten or deleted; successful post-fix rows are flat_rate/unknown.
 

@@ -797,7 +797,7 @@ func array(items map[string]any) map[string]any {
 // a response schema that names its properties but not its required ones
 // accepts a body that shares no field name with what the server sends, so the
 // contract gate certifies the drift instead of catching it (see
-// docs/prd/response-shape-contract.md).
+// docs/specs/response-shape-contract.md).
 //
 // The list is not written from memory. TestOpenAPIRequired_MatchesTheStructsOwnJSONTags
 // in internal/api derives it from the response struct's json tags — a field

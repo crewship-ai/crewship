@@ -6,7 +6,7 @@ import { useUrlSegment } from "@/lib/use-url-segment"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 
-// /pages/<slug> — one page's panel grid (docs/prd/pages.md §9).
+// /pages/<slug> — one page's panel grid (docs/specs/pages.md §9).
 //
 // Same shell as /pages: the slug is what turns the main pane from the
 // overview into the page. A page is slug-addressable because the slug goes

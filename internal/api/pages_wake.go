@@ -1,6 +1,6 @@
 package api
 
-// Pages — wake gates (docs/prd/pages.md §5, §12 v1.1).
+// Pages — wake gates (docs/specs/pages.md §5, §12 v1.1).
 //
 // §0 calls this the feature's entire payoff: "a cheap script pushes, a
 // threshold wakes an agent, and the agent writes its analysis back onto the
@@ -301,7 +301,7 @@ func buildWakeAutomation(wsID, pageID, pageSlug string, panel gatePlanPanel, g p
 			Body: fmt.Sprintf(
 				"Panel **%s** on page **%s** satisfied its wake gate: `%s`%s.\n\n"+
 					"Look at panel `%s` on that page and decide what to do about it.%s\n\n"+
-					"_Opened by a wake gate on the page spec (docs/prd/pages.md §5). "+
+					"_Opened by a wake gate on the page spec (docs/specs/pages.md §5). "+
 					"Editing or deleting this automation directly will not stop it: the page spec owns the rule "+
 					"and the next save rewrites it. Remove the gate from the page instead._",
 				panel.panelID, pageSlug, g.When, held, panel.panelID, writes),

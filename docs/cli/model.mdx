@@ -25,9 +25,12 @@ crewship model list --provider ollama                    # live only; needs a re
 | `--search` | `string` | Only show models whose id or name contains this substring. Applied after the fetch. |
 
 **Two sources, and `auto` picks between them.** For a provider the server can
-answer for — `anthropic`, `openai`, `google`, `ollama` — the list comes from the
-server: live from the provider when the workspace has an active API key,
-a curated fallback otherwise, and the `source` field says which. That path needs
+answer for — `anthropic`, `openai`, `google`, `ollama`, `opencode`,
+`opencode_go`, `zai_coding_plan` — the list comes from the server: live from
+the provider when it has a live lister (`anthropic` and `openai` with an
+active API key, `ollama` from its daemon), the curated list otherwise
+(`google` and the three gateway providers are always curated), and the
+`source` field says which. That path needs
 a login and a workspace. Every other provider is answered from the snapshot
 compiled into the binary, with **no token, no workspace and no server**, which
 is how the providers this build has no codec for are still visible and priced.

@@ -509,7 +509,7 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 			// nothing at all would satisfy the contract. ApprovalsHandler.List
 			// writes this envelope as a map literal, so there is no struct to
 			// derive it from — see the DTO note in
-			// docs/prd/response-shape-contract.md.
+			// docs/specs/response-shape-contract.md.
 			"rows", "status", "count", "has_more")},
 		"GET /api/v1/approvals/{id}":                               {Response: approval},
 		"POST /api/v1/approvals/{id}/decide":                       {Request: object(map[string]any{"status": str(), "comment": str()}), Response: object(map[string]any{"status": str(), "decided_by": str()})},

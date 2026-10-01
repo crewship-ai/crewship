@@ -1,10 +1,10 @@
 # Restricted runtime: server contract and dev2 acceptance
 
-Aktuální stav a zbývající release brány: [finální předání](RESTRICTED-RUNTIME-FINAL-HANDOFF-2026-09-28.md).
+Aktuální stav a zbývající release brány: [finální předání](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/RESTRICTED-RUNTIME-FINAL-HANDOFF-2026-09-28.md).
 Níže je původní záznam; omezení při pádu Manageru již překonává nezávislý lease dohled.
 
 Follow-up: the user subsequently authorized dev2 deployment and CLI validation;
-see the [deployment report](RESTRICTED-RUNTIME-DEV2-DEPLOYMENT-2026-09-28.md).
+see the [deployment report](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/RESTRICTED-RUNTIME-DEV2-DEPLOYMENT-2026-09-28.md).
 The original prototype-only observations below retain their original scope.
 
 Date: 2026-09-28. Follow-up: [#2709](https://github.com/crewship-ai/crewship/issues/2709).

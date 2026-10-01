@@ -1,23 +1,21 @@
-# Release 1.0 report artifacts
+# Documentation audit output
 
-Dated instance audits and acceptance reports were preserved in the versioned
-internal archive before removal from the public working tree. The public tree
-retains maintained specifications and the regression source fixture needed by
-contributors. Historical public versions remain available through Git history.
+Dated instance audits, session handoffs, acceptance logs and experiment outputs
+are retained in [private working context](../../development/private-context.md).
+Public references to earlier reports use immutable historical source links;
+they are evidence about that revision, not current product guarantees.
 
-**Generated, and deliberately not checked in.**
-`release-1-0-api-cli-inventory.json` and `release-1-0-api-cli-inventory.md` are
-rewritten from the router table and the cobra command tree every time
-`docs-inventory` runs. Write them with:
+The retained [regression source fixture](codex-review-work-regressions-2026-09-11.go.txt)
+explains the adversarial cases now exercised by `internal/work/binding_test.go`.
+It remains available to public contributors alongside those tests.
 
-```
-make docs-inventory
-```
+## Generated API and CLI inventory
 
-They used to be committed. Every pull request that touched a command changed
-them, so they conflicted with every other such pull request — and resolving
-that conflict always meant discarding both sides and re-running the generator,
-which is what a build artifact is. CI still regenerates and gates on them
-(`go run ./scripts/docs-inventory -strict`, the "API and CLI documentation is
-complete" step), so the invariants are checked on every pull request; the
-output is simply no longer stored.
+`release-1-0-api-cli-inventory.json` and `release-1-0-api-cli-inventory.md`
+are generated locally and ignored by Git. Run `make docs-inventory` to refresh
+them. CI regenerates and checks coverage with
+`go run ./scripts/docs-inventory -strict`; moving historical reports does not
+change that gate or require access to private documentation.
+
+Current specifications are indexed in [docs/specs](../../specs/README.md).
+New internal reports belong in private working context, not this directory.

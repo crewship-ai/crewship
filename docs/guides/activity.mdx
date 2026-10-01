@@ -151,7 +151,7 @@ Each kind gets the surface that kind already has elsewhere, not a fifth renderin
 
 | Row | Opens |
 |-----|-------|
-| **Run** | Status, started, duration, cost, trigger and composed depth; the run's **Result** (its output, or the error and the step it failed at); and **Steps** — the live run-activity rail from the journal. The run's record comes from the routine's `run-records` list, so a run opened without a routine on the path says so and still shows its journal. |
+| **Run** | Status, started, duration, cost, trigger and composed depth; the run's **Result** (its output, or the error and the step it failed at); and **Steps** — the live run-activity rail from the journal. The record comes from the run API (`GET /api/v1/runs/{id}`), which resolves the run to an agent or routine detail by its kind and only falls back to the routine run record (`GET /api/v1/workspaces/{ws}/pipeline-runs/{id}`) when the run API has no record. A run with no execution record says so — and says that a missing record does not prove the agent never started. A **Run evidence** card offers a bounded, previewable copy of the run's references and recorded activity (`Copy evidence`), and marks a missing journal as unavailable evidence rather than as proof nothing ran. |
 | **Issue** | What Activity knows that `/issues` does not: which workflows reached this issue, whether it was **created here** or merely changed, which agents did the reaching. An **Open issue ↗** link appears only when the workspace uses issue identifiers — `/issues/[identifier]` resolves nothing else, and a button that 404s is worse than an absent one. |
 | **Agent** | Workflows, assignments, issues reached, and the wall clock of the chains it worked in, with a link to the agent's own page. Its sessions and messages stay there. |
 | **Routine** | That routine's runs, grouped by the reader's local hour. |
@@ -205,7 +205,7 @@ Whatever you are looking at on `/activity` is in the address bar, and a change o
 
 Position (the walk, the opened record) is pushed; lens and status are replaced, so Back does not step through every tab you tried. Ids read from a URL show as ids until the entities they name load, then the trail re-labels them.
 
-A bare `?run=` with no routine used to render "This run's record is not loaded", because the record lives in the routine's run list and the link carried no routine. The run page now asks the journal which routine emitted the run and loads the record from there. Under the run's heading a **Related** row links its routine, its issue, its agent, its crew and its own journal trace — the second leg of the one timeline (issue → run → journal → issue).
+A bare `?run=` with no routine used to render "This run's record is not loaded", because the record lives in the routine's run list and the link carried no routine. The run page now asks the run API for the record and resolves the routine (or agent) behind it from there. Under the run's heading a **Related** row links its routine, its issue, its agent, its crew and its own journal trace — the second leg of the one timeline (issue → run → journal → issue).
 
 ## Deep links
 
@@ -270,11 +270,11 @@ Activity is a shell over existing endpoints; each has a CLI command with the sam
 | `GET /api/v1/chains` | `crewship chain list` (`ls`) | The workflow index — one row per chain, newest first. `--limit` / `--offset`; default 50, ceiling 200. |
 | `GET /api/v1/chains/{anchor}` | `crewship chain <anchor>` (`why`) | The walk behind the topology card and the sequence. `--depth`, `--limit`, `--gaps`. |
 | `GET /api/v1/journal` | `crewship activity`, `crewship journal` | The event feed, the Overview and the opened-event chain. |
-| `GET /api/v1/workspaces/{ws}/pipelines/{slug}/run-records` | `crewship routine records <slug>` | A routine's runs, which the runs page and the run drill-down read. |
+| `GET /api/v1/workspaces/{ws}/pipelines/{slug}/run-records` | `crewship routine records <slug>` | A routine's runs, which the runs page reads; the run drill-down goes through `GET /api/v1/runs/{id}` instead |
 
 Schemas: [`/api-reference/chains`](/api-reference/chains), [`/api-reference/journal`](/api-reference/journal), [`/api-reference/runs`](/api-reference/runs). CLI pages: [`crewship chain`](/cli/chain), [`crewship activity`](/cli/activity).
 
-The legacy `/orchestration` route still redirects to `/activity` so old bookmarks keep working.
+The legacy `/orchestration` route still redirects to `/activity` so old bookmarks keep working — and so does the retired Work page: `/work` (with its `?section=work|deliveries` view) opens the corresponding Activity view.
 
 ## Activity Bar (toolbar)
 

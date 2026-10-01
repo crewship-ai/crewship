@@ -1,6 +1,6 @@
 package api
 
-// Pages — the two definitions on the review snapshot (docs/prd/pages.md §11).
+// Pages — the two definitions on the review snapshot (docs/specs/pages.md §11).
 //
 // The review screen used to derive the "Definition changes" list from the Page
 // DETAIL query and the candidate's document from `GET .../project`, while the

@@ -31,6 +31,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/ws"
 	dockerclient "github.com/moby/moby/client"
 )
@@ -126,7 +127,8 @@ type Router struct {
 	// passes deps.Container here, and leaves it nil when the server has none
 	// (--no-docker, or a provider that failed to build). The name records its
 	// first consumer, not an exclusive owner; read it through activeContainer.
-	keeperContainer provider.ContainerProvider
+	keeperContainer  provider.ContainerProvider
+	containerCleanup *resourcelifecycle.Controller
 	// loginRefresher renews provider logins (docs/prd/provider-logins.md
 	// §5.3). Built in registerCrewRoutes; the server reads it through
 	// LoginRefresher to run it from the credential monitor's tick.

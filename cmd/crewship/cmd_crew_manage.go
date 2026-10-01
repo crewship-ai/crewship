@@ -421,7 +421,7 @@ var crewDeleteCmd = &cobra.Command{
 			return err
 		}
 
-		prompt := fmt.Sprintf("Delete crew %q?", args[0])
+		prompt := fmt.Sprintf("Delete crew %q?\n\nRemoving a verified runtime stops its processes and loses its container writable layer.\nAutomatic cleanup preserves mounted persistent data; older runtimes may need manual cleanup.", args[0])
 		if warning := crewSidecarDeleteWarning(client, crewID); warning != "" {
 			prompt += "\n\n" + warning
 		}
@@ -443,6 +443,10 @@ var crewDeleteCmd = &cobra.Command{
 		// the operator has to hear it here rather than believe
 		// a promise the server could not keep.
 		var deleted struct {
+			Cleanup *struct {
+				Scope string `json:"scope" yaml:"scope"`
+				State string `json:"state" yaml:"state"`
+			} `json:"cleanup" yaml:"cleanup"`
 			SidecarTeardown struct {
 				Status string `json:"status" yaml:"status"`
 				Reason string `json:"reason" yaml:"reason"`
@@ -461,6 +465,9 @@ var crewDeleteCmd = &cobra.Command{
 		}
 
 		cli.PrintSuccess("Crew deleted.")
+		if deleted.Cleanup != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Runtime cleanup (%s): %s. Inspect with crewship admin cleanup or local doctor cleanup.\n", deleted.Cleanup.Scope, deleted.Cleanup.State)
+		}
 		switch {
 		case unreadable:
 			cli.PrintWarning("Could not read what happened to the crew's sidecar services — " +

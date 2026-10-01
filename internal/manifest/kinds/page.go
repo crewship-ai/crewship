@@ -1,5 +1,5 @@
 // Package kinds holds one Go file per declarative manifest kind. This
-// file implements kind: Page — the 21st kind (docs/prd/pages.md §6,
+// file implements kind: Page — the 21st kind (docs/specs/pages.md §6,
 // §12 v1): a named grid of typed, permissioned panels that producers
 // push payloads into.
 //
@@ -12,7 +12,7 @@
 // structural half to pages.Document.Validate. What this layer adds is
 // the part internal/pages cannot do: resolving every declared crew,
 // agent and routine against the rest of the bundle before anything is
-// sent (docs/prd/pages.md §10b.1, the authoring gate's second half).
+// sent (docs/specs/pages.md §10b.1, the authoring gate's second half).
 package kinds
 
 import (

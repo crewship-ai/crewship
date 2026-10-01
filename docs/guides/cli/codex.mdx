@@ -116,15 +116,18 @@ Chat-Completions-only compatible endpoint.
 
 ## Models
 
-Codex CLI is a STRICT subset of OpenAI's general API — only the GPT-5.x coding-tuned family is accepted:
+Codex CLI is a STRICT subset of OpenAI's general API — only the coding-tuned GPT-5.x/6.x family is accepted:
 
 | API string | Tier |
 |---|---|
+| `gpt-6-astra` | frontier — opt-in; availability depends on account and rollout |
+| `gpt-5.6-luna` | fast |
 | `gpt-5.5` | frontier — Crewship default |
 | `gpt-5.4` | frontier |
 | `gpt-5.4-mini` | fast |
 | `gpt-5.3-codex` | frontier (coding-specialised) |
 | `gpt-5.3-codex-spark` | reasoning preview |
+| `gpt-5.2` | legacy — may require API-key sign-in |
 
 Codex CLI rejects `o3`, `o4-mini`, `gpt-4o` etc. — those are general-API only.
 

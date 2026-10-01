@@ -1,6 +1,6 @@
 package api
 
-// Pages — `refresh:`, the panel that pulls itself (docs/prd/pages.md §12 v1.1,
+// Pages — `refresh:`, the panel that pulls itself (docs/specs/pages.md §12 v1.1,
 // and the worked example at §6).
 //
 // internal/pages/refresh.go decides what is SAYABLE. This file is what makes it

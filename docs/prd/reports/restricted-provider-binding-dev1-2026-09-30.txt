@@ -1,0 +1,24 @@
+Source: 7c1cad17d6b5328a2040ed8d86ffd58ff3d1c7fa (clean production code).
+Development 1 only, 2026-09-30. Synthetic credentials, no external provider request.
+
+Deploy: sudo systemctl reload crewship-ws@1; exit 0.
+Actual running /proc/266663/exe version:
+  commit: 7c1cad17d6b5328a2040ed8d86ffd58ff3d1c7fa (clean)
+  built: 2026-09-30T07:29:10Z; go1.27.1; linux/amd64
+web/out marker: 7c1cad17, built 07:29 UTC.
+Backend /proc/PID/environ: UID 1000, mode 0400.
+GET /api/health, /healthz, /readyz: 200, ready DB/state both ok.
+Read-only live database check: restricted_provider_bindings present;
+10 restricted_provider_* lifecycle triggers installed.
+Authenticated CLI workspace list: exit 0; private roster not retained.
+
+Post-deploy real CLI/API policy smoke:
+CLI policies: exact grant, private audience, unintegrated routes denied, stale replacement 409: PASS
+CLI deny-all revoked H1 chat/history; H2 still reads; old policy cannot restore grants: PASS
+Owned workspace removed; synthetic users have no workspace access.
+
+Provider binding itself was exercised with migrated owned synthetic databases
+and real Docker containers in the linked live report. Ordinary production
+chat/CLI/routine dispatch remains gated; this is not model/chat acceptance.
+An earlier deploy overlapped Go compilation and replaced embedded web assets;
+the subsequent full Go verification ran after this clean deployment completed.

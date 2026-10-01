@@ -49,7 +49,7 @@ Popularita je doložitelná: [OpenRouter rankings](https://openrouter.ai/ranking
 
 ## Benchmarky: co je skutečně doložené
 
-Rozlišoval jsem originální experimenty od přebírání čísel. Následující výsledky publikovali jejich autoři; v této relaci jsem jejich placené běhy nereprodukoval. Konkrétní Git revize a SHA-256 vybraných podkladů jsou v [source-provenance.json](reports/jev-2026-09-20/source-provenance.json). U tak mladého ekosystému se přehledy mění i během jednoho dne.
+Rozlišoval jsem originální experimenty od přebírání čísel. Následující výsledky publikovali jejich autoři; v této relaci jsem jejich placené běhy nereprodukoval. Konkrétní Git revize a SHA-256 vybraných podkladů jsou v [source-provenance.json](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/jev-2026-09-20/source-provenance.json). U tak mladého ekosystému se přehledy mění i během jednoho dne.
 
 ### 1. Firemní workflow evaly: zajímavý směr, omezený důkaz
 
@@ -147,11 +147,11 @@ Případně `--provider typesafe` a `TYPESAFE_API_KEY`. Výstupní adresář mus
 
 ### Skutečně provedené ověření
 
-24/24 lokálních požadavků prošlo sestavením a validací přes CLI; byl ověřen i OpenRouter rerank dry-run. [Doklad](reports/jev-2026-09-20/dry-run.json). **Úspěšných autentizovaných inferencí: 0.** Měřicí skript ukončil živý pokus před voláním kvůli chybějícímu `OPENROUTER_API_KEY`; přesnost a cena jsou správně `null`. [Doklad](reports/jev-2026-09-20/live-attempt.json).
+24/24 lokálních požadavků prošlo sestavením a validací přes CLI; byl ověřen i OpenRouter rerank dry-run. [Doklad](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/jev-2026-09-20/dry-run.json). **Úspěšných autentizovaných inferencí: 0.** Měřicí skript ukončil živý pokus před voláním kvůli chybějícímu `OPENROUTER_API_KEY`; přesnost a cena jsou správně `null`. [Doklad](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/jev-2026-09-20/live-attempt.json).
 
 Ověřil jsem názvy credential proměnných shellu, odpovídající položky lokálních env souborů, prostředí běžícího procesu dev3 a metadata credentialů aktuálního workspace přes CLI na `localhost:8083`: OpenRouter ani TypeSafe zde nebyly dostupné. Kontrola veřejného endpointu bez autentizace vrátila TypeSafe HTTP 403 a OpenRouter HTTP 401; nevypovídá o kvalitě modelu. Uživatel dostal průběžnou žádost o umístění klíče, nikoli o jeho zveřejnění.
 
-Testy a úplná verifikace jsou zaznamenány v [verification.md](reports/jev-2026-09-20/verification.md).
+Testy a úplná verifikace jsou zaznamenány v [verification.md](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/jev-2026-09-20/verification.md).
 
 ## Ekonomika: co opravdu počítat
 

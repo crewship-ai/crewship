@@ -40,6 +40,7 @@ import (
 	appleprovider "github.com/crewship-ai/crewship/internal/provider/apple"
 	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/terminal"
@@ -50,6 +51,8 @@ import (
 // listener, WebSocket hub, orchestrator, scheduler, and all supporting services.
 
 type Server struct {
+	containerCleanup *resourcelifecycle.Controller
+
 	httpServer    *http.Server
 	ipcServer     *http.Server
 	mux           *http.ServeMux
@@ -134,6 +137,8 @@ type Server struct {
 // Deps holds the external dependencies injected into the server at startup.
 
 type Deps struct {
+	ContainerCleanup *resourcelifecycle.Controller
+
 	Container provider.ContainerProvider
 	Storage   provider.StorageProvider
 	State     provider.StateProvider
@@ -331,6 +336,23 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	// Promote the closure's view of the server now that it exists.
 	// The file-watcher closure declared above reads via this pointer.
 	serverPtr = s
+	if deps != nil && deps.ContainerCleanup != nil {
+		s.containerCleanup = deps.ContainerCleanup
+		s.containerCleanup.DB = deps.DB
+		s.containerCleanup.BootAt = time.Now().UTC()
+	}
+	if docker, ok := ctr.(*dockerprovider.Provider); ok && deps != nil && deps.DB != nil {
+		docker.SetCrewOwnerCheck(func(ctx context.Context, id string) error {
+			var deleted sql.NullString
+			if err := deps.DB.QueryRowContext(ctx, "SELECT deleted_at FROM crews WHERE id=?", id).Scan(&deleted); err != nil {
+				return fmt.Errorf("crew owner unavailable: %w", err)
+			}
+			if deleted.Valid {
+				return fmt.Errorf("crew is deleted")
+			}
+			return nil
+		})
+	}
 
 	// Wire the orchestrator's container-ready callback now that `s` is
 	// constructed. The callback fans out to two concerns: (1) register
@@ -626,7 +648,7 @@ func (s *Server) mountAPIRouter(
 	if goapi.E2EFixturesEnabled(os.Getenv) {
 		opts = append(opts, goapi.WithE2EFixtures())
 	}
-	// Pages' embed.v1 allow-list (docs/prd/pages.md §3.1). Installed once, here,
+	// Pages' embed.v1 allow-list (docs/specs/pages.md §3.1). Installed once, here,
 	// because internal/pages deliberately reads no environment of its own — a
 	// validator whose answer depends on an ambient variable cannot be tested at
 	// its boundary.
@@ -822,6 +844,7 @@ func (s *Server) mountAPIRouter(
 			// timeout, so changing it rebuilds on the next evaluation.
 			gatekeeper.WithCallTimeout(time.Duration(eff.TimeoutMS.Value)*time.Millisecond)), nil
 	})
+	opts = append(opts, goapi.WithContainerCleanup(s.containerCleanup))
 	opts = append(opts, goapi.WithKeeperGatekeeper(gk))
 	opts = append(opts, goapi.WithGovModelStatus(govResolver))
 	// Same object, concretely typed, so the admin judge routes can probe a hosted

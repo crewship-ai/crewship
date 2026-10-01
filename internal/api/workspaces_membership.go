@@ -189,7 +189,7 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 
 // RemoveMember removes a user from the workspace (owners cannot remove themselves).
 //
-// docs/prd/pages.md §7.1 rule 1b: "When a user owner leaves the workspace,
+// docs/specs/pages.md §7.1 rule 1b: "When a user owner leaves the workspace,
 // the page transfers to a crew, it is not deleted." Leaving a workspace
 // happens here (an admin removing a member) and nowhere else in this
 // package — there is no self-service "leave workspace" endpoint (verified:

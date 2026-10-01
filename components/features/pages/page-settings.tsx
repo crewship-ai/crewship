@@ -4,7 +4,7 @@
  * The Pages editor's card library — who reaches this page, and what this
  * page is.
  *
- * PRD `docs/prd/pages.md` §7.1b (three verbs, three subject kinds), §7.1
+ * PRD `docs/specs/pages.md` §7.1b (three verbs, three subject kinds), §7.1
  * rule 3 (who may issue), §10b.1 (versions and rollback), §9b (the visual
  * language, copied and not re-invented).
  *

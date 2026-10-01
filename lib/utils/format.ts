@@ -14,7 +14,7 @@ const EM_DASH = "—"
  * direction that costs money to misread — #1205 was a real instance of cost
  * silently not being recorded, and it would have looked exactly like a free
  * run. The rule here is the one the rest of the product already follows
- * (docs/prd/pages.md §9b.4; lib/routines-insights.ts's formatUsd renders zero
+ * (docs/specs/pages.md §9b.4; lib/routines-insights.ts's formatUsd renders zero
  * as "$0.00", as do the dashboard, journal-spend and mission tables).
  *
  * A caller that wants an empty state rather than a number must pass `null`;

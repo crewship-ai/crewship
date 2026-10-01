@@ -161,14 +161,15 @@ internal-docs/
 !.claude/audits/
 !.claude/commands/
 !.claude/settings.json
-# PRDs are forward-looking roadmap docs — tracked so they survive
-# across machines and are visible to teammates. Other subdirs under
+# Public design proposals/PRDs live in docs/prd/. New internal working
+# records belong in the separate private context repository; see
+# docs/development/private-context.md.
+# (moved out of .claude/context/prd/ on 2026-09-28 — an assistant-specific
+# directory is not a documentation category). Other subdirs under
 # .claude/context/ (wireframes, scratch) stay ignored by default;
 # add further `!.claude/context/<subdir>/` exceptions when needed.
 !.claude/context/
 .claude/context/*
-!.claude/context/prd/
-!.claude/context/prd/**
 # .claude/context/notes/ is NOT tracked in this public repo. It holds
 # internal working notes (infra recon, live-instance findings) that must
 # stay private — they live in the private GitLab `infrastructure/crewship-notes`.

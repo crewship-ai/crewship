@@ -103,7 +103,7 @@ A record, it does:
 
 ```
 $ getent hosts 127.0.0.1.unreachable.invalid
-192.168.1.200   127.0.0.1.unreachable.invalid.unifylab.cz
+192.168.1.200   127.0.0.1.unreachable.invalid.<search-domain>
 $ ss -ltn | grep :443
 LISTEN 0 4096 *:443 *:*
 ```

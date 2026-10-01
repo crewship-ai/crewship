@@ -1,7 +1,7 @@
 package main
 
 // `crewship page export|import|versions|rollback` — portability and history
-// (docs/prd/pages.md §10b.1, §10b.2).
+// (docs/specs/pages.md §10b.1, §10b.2).
 //
 // One command per endpoint, the repo rule:
 //

@@ -5,7 +5,7 @@ import (
 )
 
 // `refresh:` — the panel that pulls itself (PRD §12 v1.1, and the worked
-// example at §6, docs/prd/pages.md:422).
+// example at §6, docs/specs/pages.md:422).
 //
 // ## What it MEANS, decided here rather than left open
 //

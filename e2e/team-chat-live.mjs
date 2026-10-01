@@ -11,7 +11,7 @@ const statePath=process.env.TEAM_CHAT_STATE;
 if (!statePath) throw new Error('TEAM_CHAT_STATE must identify protected seed state');
 const state = await readPrivateJson(statePath);
 assert.ok(state.channel_id && state.workspace_id);
-const base='https://crewship-dev2.unifylab.cz';
+const base = process.env.CREWSHIP_SERVER || 'http://localhost:8082';
 const roles={thomas:'ADMIN',paul:'MANAGER',peter:'MEMBER',anna:'MANAGER',sofia:'MEMBER',emma:'VIEWER'};
 const report={server:base,workspace_id:state.workspace_id,channel_id:state.channel_id,checks:[],actors:[],page_errors:[]};
 const artifacts = await createPrivateArtifacts('team-chat-live');

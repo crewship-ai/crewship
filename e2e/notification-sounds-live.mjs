@@ -8,7 +8,7 @@ import path from 'node:path';
 const statePath=process.env.TEAM_CHAT_STATE;
 if(!statePath)throw new Error('TEAM_CHAT_STATE must point to private demo credentials');
 const state = await readPrivateJson(statePath);
-const base='https://crewship-dev2.unifylab.cz';
+const base = process.env.CREWSHIP_SERVER || 'http://localhost:8082';
 const report={server:base,workspace_id:state.workspace_id,checks:[],page_errors:[],audio_evidence:'Native OscillatorNode.start calls in running AudioContexts; physical speaker output is not measured.'};
 const browser=await chromium.launch({headless:true});
 const contexts=[];

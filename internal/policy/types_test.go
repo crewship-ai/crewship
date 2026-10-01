@@ -507,7 +507,7 @@ func TestPolicy_StrictCrew_RefusesTheUnattendedWrites(t *testing.T) {
 	// page_write joins the list for the same reason and with the same cost,
 	// stated in the PRD's terms: a strict crew's routines do not write panels,
 	// and a panel nobody writes reads as `stale` rather than as a number nobody
-	// checked (docs/prd/pages.md §4). The public PUT stays open to a human.
+	// checked (docs/specs/pages.md §4). The public PUT stays open to a human.
 	for _, a := range []Action{ActionIssueWrite, ActionAssignmentCreate, ActionPageWrite} {
 		got := strict.DecideAction(a)
 		if got == DecisionAutoJournal || got == DecisionAutoLogJournal || got == DecisionAutoLogInbox {

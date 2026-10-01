@@ -1,6 +1,6 @@
 package api
 
-// Inbound panel webhooks — one test per rule (docs/prd/pages.md §10b.5c).
+// Inbound panel webhooks — one test per rule (docs/specs/pages.md §10b.5c).
 //
 // §10b.5c is four clauses long and every one of them is a thing that fails
 // silently when it is wrong, so every one of them gets a test that fails loudly:

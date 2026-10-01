@@ -1,6 +1,6 @@
 package api
 
-// Pages — grant RESOLUTION (docs/prd/pages.md §7.1 rules 3–5, §7.1b).
+// Pages — grant RESOLUTION (docs/specs/pages.md §7.1 rules 3–5, §7.1b).
 //
 // pages_authz.go answers "what may this caller see"; this file answers the
 // prior question — "which grant rows are still worth anything" — and it is

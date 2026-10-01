@@ -5,31 +5,27 @@ Tracking: [#2703](https://github.com/crewship-ai/crewship/issues/2703).
 Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 `8dc421fdb` na main; jiné instance ani produkce nejsou cílem.
 
-## Aktuální stav k 29. 9. 2026
+## Aktuální stav k 30. 9. 2026
 
-Základ #2704, opravy #2712/#2713, izolovaný runtime prototyp #2710 a
-omezený síťový broker #2715 jsou v `main`. Prototyp runtime má živé testy na
-dev2, ale běžný chat, CLI ani rutiny do něj zatím nevstupují. Starší níže
-uvedené poznámky o draft PR zachycují stav v čase daného testu.
+Základ #2704, opravy #2712/#2713/#2716, runtime #2710 a broker #2715 jsou
+sloučené. Navíc jsou v main #2717 (durable autorita a omezení vstupů), #2720
+(aplikační adaptér izolovaného runtime), #2721 (správa grantů API/CLI) a #2722
+(omezené textové Responses požadavky). GitHub billing již CI neblokuje;
+PR #2722 prošlo CI a skutečným nezávislým review před merge. Starší poznámky níže
+jsou historický protokol, včetně omezení review/CI u #2716.
 
-Sloučená navazující oprava #2716 (v rámci #2711) sjednocuje publikum lidských soukromých chatů
-pro seznam, vyhledávání, historii, přílohy, reakce, účastníky, feedback a
-session stream. Samotná oprava čtecích cest není autorita A2/B: zůstávají
-granty ke konkrétním agentům a projektům, soubory, paměť, běhy, journal,
-delegace, přijetí a opětovné ověření práce z fronty a napojení izolovaného
-runtime. Release 1.0 proto zůstává otevřený do průchodu celé A2/B matice a
-živé přejímky na konkrétním buildu.
-Historické anonymní chaty bez prokazatelného původu zůstávají skryté; nové
-plánované a webhookové běhy svůj původ při vzniku zapisují.
+Na dev1 je nyní čistý build `7c1cad17d`, navazující dosud nesloučená větev
+`feat/restricted-provider-binding-2711`. Přidává neměnnou vazbu pokusu na
+konkrétní provider klíč, grant, model a limit; revokace a opětovné udělení
+neobnovují starý pokus. Živé Docker testy používají syntetické credentials.
+Důkazy a stav odevzdání: [průběžný záznam](AGENT-ACCESS-CONTINUATION-2026-09-29.md).
 
-Na dev1 pokračuje společná serverová autorita, konzervativní vstupní brány a
-kontroly doručování streamů: [průběžný záznam](AGENT-ACCESS-CONTINUATION-2026-09-29.md).
-Tato rozpracovaná větev zatím není sloučená ani důkaz úplné klientské izolace.
-Dev1 je ověřené na `13cb8b29f`: 149 Go balíčků, vet, cílené race testy,
-živé dva účty a revokace streamů; lidský odesílatel se nově kontroluje ještě
-před materializací kontextu. Podrobnosti a hranice jsou v průběžném záznamu.
-CI posledního main buildu je nadále blokované billingem GitHub účtu;
-#2716 před merge nemělo dokončené nezávislé review.
+**Release 1.0 není přijatý.** API/CLI umí nastavit restricted členství, ale běžný
+omezený chat, `crewship run` a rutiny stále nejsou napojené na izolovaný runtime.
+Chybí scoped prompt/paměť/výstup, úplná fronta a delegace, další provider adaptéry,
+účtování a diskové kvóty i provozní přejímka. Odmítnutí dosud neintegrovaných
+vstupů není pozitivní akceptace jejich funkcí. Rozhoduje celá A2/B matice na
+konkrétním buildu, ne počet sloučených PR.
 
 ## Dodávky a hranice
 

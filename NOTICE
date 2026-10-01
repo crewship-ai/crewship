@@ -1,8 +1,15 @@
 Crewship
-Copyright 2025-2026 Unify Technology s.r.o.
+Copyright 2025-2026 Unify Technology, s.r.o.
 
-This product includes software developed at Unify Technology s.r.o.
+This product includes software developed at Unify Technology, s.r.o.
 (https://unify.cz).
+
+Company identification:
+Unify Technology, s.r.o.
+Company ID (ICO): 17266637
+Registered office: Korunní 2569/108, Vinohrady, 101 00 Praha 10,
+Czech Republic.
+Commercial Register: Section C, File 369155, Municipal Court in Prague.
 
 Crewship is distributed under the Apache License, Version 2.0
 (see LICENSE). Third-party Go dependencies and their licenses are
@@ -10,9 +17,24 @@ listed in THIRD-PARTY-NOTICES.md, auto-generated from go.mod by
 `scripts/gen-notices.sh` (uses github.com/google/go-licenses).
 
 Notable upstream NOTICE attributions are reproduced below as required
-by Apache License §4.4. The full per-dependency license texts and
-upstream NOTICE entries ship inside the Sigstore-signed release
-archives under the `LICENSES/` directory.
+by Apache License §4.4. Distribution license material ships per channel:
+release archives carry a LICENSES/ tree with the license/NOTICE texts of the
+Go dependencies linked into the shipped binaries and the license texts of
+the embedded Next.js build's npm dependencies (the production set when the
+lockfile index is available; otherwise the full installed tree, which
+over-includes build tooling and never omits a production dependency), each
+listed with its SHA-256 in shipped manifests (LICENSES/{go,frontend}/manifest.tsv);
+deb and rpm packages carry LICENSE, NOTICE, THIRD-PARTY-NOTICES.md and the
+same texts flattened under /usr/share/doc/crewship/licenses/ with flat
+manifests; the container image carries LICENSE and NOTICE under
+/usr/share/doc/crewship/ with the same trees under
+/usr/share/doc/crewship/licenses/. Packages or modules that declare a
+license but ship no text are represented by an EXCEPTION-NOTICE recording
+the declaration — it is not a copy of the upstream license text. Generation
+is reproducible from the locked dependency sets
+(scripts/gen-license-bundle.sh, `make licenses`); CI verifies the actual
+artifact contents, hash-matched against the shipped manifests, on every
+release and nightly.
 
 ----
 

@@ -92,7 +92,7 @@ const (
 	// bundle includes this above the MEMBER tier.
 	CapabilityIssueCreate = "issue.create"
 
-	// CapabilityPageCreate gates authoring a Page (docs/prd/pages.md
+	// CapabilityPageCreate gates authoring a Page (docs/specs/pages.md
 	// §11, POST /api/v1/pages). A page is a workspace-visible surface
 	// that names crews as panel owners and routines as producers, so
 	// creating one is a MANAGER+ action by default — this capability

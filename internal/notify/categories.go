@@ -62,7 +62,7 @@ const (
 	CategorySecurity        = "security"
 
 	// CategoryPagesStale fires when a Page's panel data ages past its SLA
-	// (docs/prd/pages.md §10b.6). It notifies the page owner only — default
+	// (docs/specs/pages.md §10b.6). It notifies the page owner only — default
 	// on for the owner, off for everyone else; `on_failure` → issue remains
 	// the escalation path for anything that needs work rather than
 	// awareness.

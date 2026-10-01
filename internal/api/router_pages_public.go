@@ -1,6 +1,6 @@
 package api
 
-// Public pages — route registration (docs/prd/pages.md §7.3.1).
+// Public pages — route registration (docs/specs/pages.md §7.3.1).
 //
 // "A public page is served from a SEPARATE URL SPACE (/p/{token}) that shares
 // no session, no cookie and no workspace context with the app. Nothing about it
