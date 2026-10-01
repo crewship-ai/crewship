@@ -670,11 +670,10 @@ var NonBackedUpTables = map[string]struct{}{
 	// made there. The instance's own backup configuration and history — a
 	// workspace bundle carrying them would hand the target keys, alerts and
 	// buckets it never set up.
-	"backup_recipients":           {},
-	"backup_incidents":            {},
-	"backup_offsite_destinations": {},
-	"backup_copies":               {},
-
+	"backup_recipients":             {},
+	"backup_incidents":              {},
+	"backup_offsite_destinations":   {},
+	"backup_copies":                 {},
 	"resource_cleanup_status":       {}, // source-installation observations, not portable workspace state or target cleanup authority
 	"resource_cleanup_mounts":       {}, // source-container mount references retained locally; must never authorize cleanup on a restored instance
 	"resource_cleanup_scans":        {}, // source-installation scan freshness; a restored copy has not scanned anything

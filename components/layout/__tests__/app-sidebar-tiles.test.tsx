@@ -28,7 +28,7 @@ describe("the rail's icon tiles", () => {
   it("puts every destination in a tile", () => {
     render(<SidebarProvider><AppSidebar /></SidebarProvider>)
     for (const name of ["Dashboard", /^Inbox/, "Chat", "Crews", "Settings", "Admin"]) {
-      expect(tileOf(name), name).not.toBeNull()
+      expect(tileOf(name), String(name)).not.toBeNull()
     }
   })
 
