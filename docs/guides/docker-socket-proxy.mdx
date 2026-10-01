@@ -127,8 +127,8 @@ API puts exec *creation* under `/containers`, so `EXEC: 0` does not stop it.
 | --- | --- | --- |
 | `ImagePull` | `POST /images/create` | Pulls a crew's base image and the sidecar image |
 | `ImageInspect` | `GET /images/{name}/json` | Checks presence locally, reads baked-in env |
-| `ImageList` | `GET /images/json` | Finds cached provisioning images to reuse |
-| `ImageRemove` | `DELETE /images/{name}` | Garbage-collects unreferenced `crewship-cache:*` images |
+| `ImageList` | `GET /images/json` | Finds cached provisioning images to reuse, and unused ones when idle cache eviction is enabled |
+| `ImageRemove` | `DELETE /images/{name}` | Garbage-collects unreferenced `crewship-cache:*` images, and evicts unused ones when idle cache eviction is enabled (never forced) |
 | `ImageTag` | `POST /images/{name}/tag` | Restores the local tag after a digest-pinned pull, and a restored crew image's tag |
 | `ImageSave` | `GET /images/get` | Saves a crew's committed image into the backup environment store (complete environments) |
 | `ImageLoad` | `POST /images/load` | Loads a backed-up environment image back on restore |

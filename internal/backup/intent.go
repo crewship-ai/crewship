@@ -678,6 +678,7 @@ var NonBackedUpTables = map[string]struct{}{
 	"resource_cleanup_mounts":       {}, // source-container mount references retained locally; must never authorize cleanup on a restored instance
 	"resource_cleanup_scans":        {}, // source-installation scan freshness; a restored copy has not scanned anything
 	"resource_cleanup_installation": {}, // per-database identity nonce; importing it would hand the target the source's cleanup authority
+	"resource_retention_images":     {}, // this installation's view of how long each daemon-local cache image has gone unused
 	// keeper_aux_settings moved to BackupTableIntent (IntentExcludeOperational)
 	// in #1554: its new credential_id FK makes the reverse-FK walk discover it,
 	// and a discovered table must be classified there, not here. Same verdict —
