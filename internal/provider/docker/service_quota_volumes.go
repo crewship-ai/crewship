@@ -6,6 +6,7 @@ import (
 	"path"
 	"reflect"
 	"strconv"
+	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/mount"
@@ -43,6 +44,10 @@ func (p *Provider) quotaServiceVolumes(ctx context.Context, crewID, crewSlug str
 	if err := p.checkQuotaHostSupport(ctx); err != nil {
 		return nil, err
 	}
+	owner, err := p.quotaImageOwner(ctx, svc)
+	if err != nil {
+		return nil, err
+	}
 	if len(svc.Volumes) == 0 {
 		return nil, nil
 	}
@@ -53,7 +58,7 @@ func (p *Provider) quotaServiceVolumes(ctx context.Context, crewID, crewSlug str
 			gen = 1
 		}
 		key := quota.Key{Crew: crewID, Service: svc.Name, Volume: v.Name, Generation: gen}
-		d, err := catalog.Ensure(ctx, key, v.QuotaBytes, quota.Owner{})
+		d, err := catalog.Ensure(ctx, key, v.QuotaBytes, owner)
 		if err != nil {
 			return nil, err
 		}
@@ -101,16 +106,22 @@ func (p *Provider) quotaServiceVolumes(ctx context.Context, crewID, crewSlug str
 	return mounts, nil
 }
 
-func (p *Provider) validateQuotaImage(ctx context.Context, svc *provider.CrewService) error {
-	if !svc.QuotaEnforced {
-		return nil
-	}
+// quotaImageOwner inspects (pulling only when absent) the service image
+// before any disk is allocated. It refuses image-declared volumes the
+// service did not classify, and returns the numeric owner a fresh volume
+// root is formatted for.
+func (p *Provider) quotaImageOwner(ctx context.Context, svc *provider.CrewService) (quota.Owner, error) {
 	image, err := p.client.ImageInspect(ctx, svc.Image)
 	if err != nil {
-		return err
+		if pullErr := p.pullSidecarImage(ctx, svc.Image); pullErr != nil {
+			return quota.Owner{}, pullErr
+		}
+		if image, err = p.client.ImageInspect(ctx, svc.Image); err != nil {
+			return quota.Owner{}, err
+		}
 	}
 	if image.Config == nil {
-		return quota.ErrDenied
+		return quota.Owner{}, quota.ErrDenied
 	}
 	for target := range image.Config.Volumes {
 		found := false
@@ -121,10 +132,38 @@ func (p *Provider) validateQuotaImage(ctx context.Context, svc *provider.CrewSer
 			}
 		}
 		if !found {
-			return quota.ErrDenied
+			return quota.Owner{}, fmt.Errorf("unclassified image volume %s: %w", target, quota.ErrDenied)
 		}
 	}
-	return nil
+	owner, ok := imageUserOwner(image.Config.User)
+	if !ok {
+		p.logger.Warn("quota volume root stays root-owned: image user is not numeric", "service", svc.Name, "user", image.Config.User)
+	}
+	return owner, nil
+}
+
+// imageUserOwner maps an image USER to a volume root owner. Only numeric
+// users resolve without the image's /etc/passwd; a missing or non-numeric
+// group falls back to gid 0, which is what Docker itself uses for a uid
+// with no passwd entry. Root needs no hand-over. ok is false for a named
+// user that cannot be resolved.
+func imageUserOwner(user string) (quota.Owner, bool) {
+	if user == "" || user == "root" {
+		return quota.Owner{}, true
+	}
+	name, group, _ := strings.Cut(user, ":")
+	uid, err := strconv.ParseUint(name, 10, 32)
+	if err != nil {
+		return quota.Owner{}, false
+	}
+	gid, err := strconv.ParseUint(group, 10, 32)
+	if err != nil {
+		gid = 0
+	}
+	if uid == 0 && gid == 0 {
+		return quota.Owner{}, true
+	}
+	return quota.Owner{UID: uint32(uid), GID: uint32(gid), Set: true}, true
 }
 
 func checkQuotaMounts(actual, desired []mount.Mount) error {

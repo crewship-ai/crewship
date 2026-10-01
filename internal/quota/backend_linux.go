@@ -263,12 +263,27 @@ func (b *Backend) Ensure(ctx context.Context, k Key, size int64, owner Owner) (D
 	return d, b.prepareRoot(d)
 }
 
+// mkfsArgs formats a fully allocated image. root_owner hands the volume
+// root to the service image's numeric user, so a non-root image can write
+// to it without an entrypoint chown.
 func mkfsArgs(image string, owner Owner) []string {
-	return []string{"-q", "-F", "-m", "0", "-E", "nodiscard,lazy_itable_init=0,lazy_journal_init=0", image}
+	extended := "nodiscard,lazy_itable_init=0,lazy_journal_init=0"
+	if owner.Set {
+		extended += fmt.Sprintf(",root_owner=%d:%d", owner.UID, owner.GID)
+	}
+	return []string{"-q", "-F", "-m", "0", "-E", extended, image}
 }
 
-// prepareRoot runs once on a freshly formatted, mounted volume.
-func (b *Backend) prepareRoot(Descriptor) error { return nil }
+// prepareRoot runs once on a freshly formatted, mounted volume: it removes
+// the empty lost+found mkfs creates, because data-directory initialisers
+// such as postgres initdb refuse a non-empty directory. Existing
+// generations are never touched (their lost+found may hold fsck output).
+func (b *Backend) prepareRoot(d Descriptor) error {
+	if err := os.Remove(filepath.Join(d.Mount, "lost+found")); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("prepare quota volume root: %w", err)
+	}
+	return nil
+}
 
 func (b *Backend) allocatingPath(k Key) string {
 	return filepath.Join(b.root, "images", k.id()+".allocating")

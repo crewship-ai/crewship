@@ -488,10 +488,6 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 		return "", err
 	}
 
-	if err = p.validateQuotaImage(ctx, svc); err != nil {
-		return "", fmt.Errorf("unclassified image volume: %w", err)
-	}
-
 	// Volumes: ensure each named volume exists before container
 	// create so docker doesn't auto-create unowned anonymous
 	// volumes that we then can't clean up.
