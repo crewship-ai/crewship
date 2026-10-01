@@ -9,6 +9,30 @@ import (
 	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
+func TestIdleRetentionDefersWhileBackupWindowIsHeld(t *testing.T) {
+	r, runtime, now := retentionFixture(t)
+	runtime.containers["idle"] = runtimeContainer("idle", "live", r.InstanceID, "exited", 2*week)
+	runtime.images = []CacheImage{{ID: "unused", Refs: []string{"crewship-cache:unused"}, Created: now.Add(-2 * 24 * time.Hour)}}
+	w, err := quiesce.Default().Begin(context.Background(), quiesce.Options{HoldCap: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { w.Release() })
+	r.Tick(context.Background())
+	if len(runtime.removed) != 0 || len(runtime.untagged) != 0 {
+		t.Fatal("idle retention mutated Docker while the backup window was held")
+	}
+	var observations int
+	if err := r.DB.QueryRow(`SELECT COUNT(*) FROM resource_retention_images`).Scan(&observations); err != nil || observations != 0 {
+		t.Fatalf("retention wrote observations while held: count=%d error=%v", observations, err)
+	}
+	w.Release()
+	r.Tick(context.Background())
+	if len(runtime.removed) != 1 {
+		t.Fatal("idle retention did not resume after the backup window was released")
+	}
+}
+
 func TestCleanupDefersWhileBackupWindowIsHeld(t *testing.T) {
 	c, rt := fixture(t)
 	rt.items["runtime"] = item("runtime", "deleted", c.InstanceID)

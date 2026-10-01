@@ -127,6 +127,16 @@ type ContainerConfig struct {
 	// use our init script instead of their default /bin/sh.
 	// Empty = autodetect; see SidecarBinaryPath for the same semantics.
 	EntrypointPath string `yaml:"entrypoint_path"`
+
+	// IdleRuntimeRetentionDays removes this installation's stopped runtime
+	// containers of live crews once they have been stopped this many days.
+	// Volumes and host data stay; the next start recreates the container.
+	// 0 (default) disables it.
+	IdleRuntimeRetentionDays int `yaml:"idle_runtime_retention_days"`
+	// CacheEviction removes crewship-cache images that no container on the
+	// daemon has used for an hour; the next start rebuilds them. Off by
+	// default.
+	CacheEviction bool `yaml:"cache_eviction"`
 }
 
 // StorageConfig holds file storage settings for agent outputs and logs.
@@ -474,6 +484,14 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_CONTAINER_PREFIX"); v != "" {
 		cfg.Container.ContainerPrefix = v
+	}
+	if v := os.Getenv("CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS"); v != "" {
+		if days, err := strconv.Atoi(v); err == nil && days >= 0 {
+			cfg.Container.IdleRuntimeRetentionDays = days
+		}
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_CACHE_EVICTION"); ok {
+		cfg.Container.CacheEviction = v == "true" || v == "1"
 	}
 	if v := os.Getenv("CREWSHIP_STORAGE_PROVIDER"); v != "" {
 		cfg.Storage.Provider = v

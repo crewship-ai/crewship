@@ -184,8 +184,8 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "ImageList", HTTP: "GET /images/json", ProxyVars: []string{"IMAGES"},
-		Tier: TierCore, Packages: []string{"internal/api", "internal/devcontainer"},
-		Why: "finds cached provisioning images for reuse and garbage collection",
+		Tier: TierCore, Packages: []string{"internal/api", "internal/devcontainer", "internal/provider/docker"},
+		Why: "finds cached provisioning images for reuse, garbage collection and opt-in idle cache eviction",
 	},
 	{
 		Method: "ImageLoad", HTTP: "POST /images/load", ProxyVars: []string{"IMAGES", proxyVarPOST},
@@ -199,8 +199,8 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "ImageRemove", HTTP: "DELETE /images/{name}", ProxyVars: []string{"IMAGES", proxyVarPOST},
-		Tier: TierCore, Packages: []string{"internal/api", "internal/backup"},
-		Why: "garbage-collects unreferenced crewship-cache:* images",
+		Tier: TierCore, Packages: []string{"internal/api", "internal/backup", "internal/provider/docker"},
+		Why: "garbage-collects unreferenced crewship-cache:* images and evicts unused ones when idle cache eviction is enabled",
 	},
 	{
 		Method: "ImageSave", HTTP: "GET /images/get", ProxyVars: []string{"IMAGES"},
