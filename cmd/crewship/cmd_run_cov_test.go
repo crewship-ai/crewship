@@ -77,8 +77,9 @@ func sendScriptedEvents(conn *websocket.Conn, events []cli.ChatEventPayload) err
 		mb, _ := json.Marshal(wsproto.ServerMessage{
 			Type: "chat_event",
 			Payload: wsproto.ChatEvent{
-				Type:    ev.Type,
-				Content: ev.Content,
+				Type:     ev.Type,
+				Content:  ev.Content,
+				Metadata: ev.Metadata,
 			},
 		})
 		if err := websocket.Message.Send(conn, string(mb)); err != nil {
@@ -1122,5 +1123,75 @@ func TestRunNoStream_AgentBusyRejection(t *testing.T) {
 		t.Fatal("runNoStream blocked on an agent_busy frame: with timeout 0 " +
 			"there is no deadline to save it, so a missed busy case is an " +
 			"unbounded hang (dev3 2026-09-05: 200 s, empty output, exit 124)")
+	}
+}
+
+// rebuildEvents is what a send receives when its crew's cache image is
+// missing: the bridge parks it behind a build (crew_provisioning + done) and
+// the server replays it on the same session channel once the image is ready.
+func rebuildEvents() []cli.ChatEventPayload {
+	return []cli.ChatEventPayload{
+		{Type: wsproto.CrewProvisioningEventType, Content: "p0c's environment is being built", Metadata: map[string]any{"status": "pending"}},
+		{Type: "done"},
+		{Type: "status", Content: "Starting container..."},
+		{Type: "text", Content: "answer-after-rebuild"},
+		{Type: "done"},
+	}
+}
+
+// Before the fix `crewship run` stopped at the deferral's done and printed an
+// empty answer while the agent ran unseen (dev2 2026-10-01, P0c restore test).
+func TestRunCmdRunE_WaitsThroughEnvironmentRebuild(t *testing.T) {
+	newRunServerCov(t, &wsCapture{}, rebuildEvents(), http.StatusOK, http.StatusOK)
+	setFlagCov(t, runCmd, "quiet", "true")
+	t.Cleanup(ResetAIFirstLatches)
+
+	out, err := captureStdoutCov(t, func() error {
+		return runCmd.RunE(runCmd, []string{"viktor", "ask it something"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "answer-after-rebuild") {
+		t.Fatalf("stdout %q lacks the replayed run's answer", out)
+	}
+}
+
+func TestRunNoStream_WaitsThroughEnvironmentRebuild(t *testing.T) {
+	srv := newRunServerCov(t, &wsCapture{}, rebuildEvents(), http.StatusOK, http.StatusOK)
+	out, err := captureStdoutCov(t, func() error {
+		return runNoStream(srv.URL, "ws-tok", covAgentID, "rebuild-chat", "hi", true, nil, nil, 0)
+	})
+	if err != nil {
+		t.Fatalf("runNoStream: %v", err)
+	}
+	if !strings.Contains(out, "answer-after-rebuild") {
+		t.Fatalf("stdout %q lacks the replayed run's answer", out)
+	}
+}
+
+// A build that never started replays nothing: waiting would hang, so the
+// failed deferral is the end of the exchange and a non-zero exit.
+func TestRunCmdRunE_EnvironmentBuildFailedToStart(t *testing.T) {
+	newRunServerCov(t, &wsCapture{}, []cli.ChatEventPayload{
+		{Type: wsproto.CrewProvisioningEventType, Content: "Could not start build for p0c: queue full", Metadata: map[string]any{"status": "failed"}},
+	}, http.StatusOK, http.StatusOK)
+	setFlagCov(t, runCmd, "quiet", "true")
+	t.Cleanup(ResetAIFirstLatches)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := captureStdoutCov(t, func() error {
+			return runCmd.RunE(runCmd, []string{"viktor", "ask it something"})
+		})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "build failed to start") {
+			t.Fatalf("want a build-failed error, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run waited for a replay after a build that never started")
 	}
 }

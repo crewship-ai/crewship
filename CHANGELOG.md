@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **`crewship run` printed an empty answer when the crew's environment had to be built first.** A send parked behind an image build (a new crew, or an evicted cache image) gets a deferral `done` before the server replays it; `run`, `run --no-stream`, routine iterate and `ask` with several agents now wait for the replayed run's answer and exit non-zero when the build never started.
 - **Deleted crews could keep runtime containers running after Docker failures.** A periodic controller now stops and removes containers of positively deleted owners with matching installation labels (bound to both the database and the data directory, so servers sharing one data directory never act on each other's containers), retries after reconnect, and preserves volumes and mounted host data. Crew deletion returns a container cleanup observation; admin and local doctor diagnostics retain failures across restarts. Legacy and foreign containers remain untouched.
 - **Crew deletion confirmation described the wrong data effects.** The UI and CLI now warn that runtime processes and container writable files are lost, while automatic cleanup preserves mounts; the existing explicit sidecar data deletion remains visible.
 

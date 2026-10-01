@@ -198,6 +198,7 @@ func fanoutOne(ctx context.Context, client *cli.Client, server, wsToken, agentID
 
 	var text strings.Builder
 	var closeReason string
+	var wait provisioningWait
 	for {
 		msg, err := ws.ReadMessage()
 		if err != nil {
@@ -220,7 +221,12 @@ func fanoutOne(ctx context.Context, client *cli.Client, server, wsToken, agentID
 		if err != nil || event == nil {
 			continue
 		}
+		wait.observe(event)
 		switch event.Type {
+		case wsproto.CrewProvisioningEventType:
+			if failed, notice := provisioningFailed(event); failed {
+				return text.String(), fmt.Errorf("environment build failed to start: %s", notice)
+			}
 		case "text":
 			text.WriteString(event.Content)
 		case wsproto.AgentBusyEventType:
@@ -235,6 +241,9 @@ func fanoutOne(ctx context.Context, client *cli.Client, server, wsToken, agentID
 		case "error":
 			return text.String(), fmt.Errorf("agent error: %s", event.Content)
 		case "done":
+			if wait.deferredDone() {
+				continue // the deferral's done; the replayed run follows
+			}
 			return text.String(), nil
 		}
 	}

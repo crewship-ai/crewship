@@ -490,6 +490,7 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 		return saveErr
 	}
 	var closeReason string
+	var wait provisioningWait
 	for {
 		msg, err := ws.ReadMessage()
 		if err != nil {
@@ -521,7 +522,18 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			continue
 		}
 
+		wait.observe(event)
 		switch event.Type {
+		case wsproto.CrewProvisioningEventType:
+			if failed, notice := provisioningFailed(event); failed {
+				flush()
+				fmt.Fprintf(os.Stderr, "%s[error]%s %s\n", cli.Red, cli.Reset, notice)
+				maybeNotifyRunComplete(startedAt, "", "FAILED")
+				return joinErrs(fmt.Errorf("environment build failed to start: %s", notice))
+			}
+			if !quiet {
+				fmt.Fprintf(os.Stderr, "%s[building]%s %s\n", cli.Dim, cli.Reset, sanitizeTerminal(event.Content))
+			}
 		case "text":
 			emitText(event.Content)
 		case "thinking":
@@ -589,6 +601,13 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			maybeNotifyRunComplete(startedAt, "", "FAILED")
 			return joinErrs(fmt.Errorf("agent error: %s", safeErr))
 		case "done":
+			if wait.deferredDone() {
+				// The send was parked behind an environment build; this done
+				// closes the deferral, not the run. The server replays the
+				// message on this same session channel once the build
+				// finishes and ends that run with its own done (or error).
+				continue
+			}
 			flush()
 			if save != nil && saveErr == nil {
 				if err := save.Commit(); err != nil {

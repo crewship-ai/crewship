@@ -769,7 +769,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			evtContent = fmt.Sprintf("%s's environment is being built — this is a one-time setup step. Your message will run automatically once the build finishes.", info.CrewSlug)
 		}
 		streamFn(ws.ChatEvent{
-			Type:     "crew_provisioning",
+			Type:     ws.CrewProvisioningEventType,
 			Content:  evtContent,
 			Metadata: evtMeta,
 		})
