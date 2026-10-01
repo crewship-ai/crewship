@@ -3,6 +3,7 @@
 package quota
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -28,11 +29,24 @@ type Descriptor struct {
 	Bytes int64
 	Mount string
 }
+
+// Owner is the numeric owner a freshly formatted volume root is given
+// (mkfs.ext4 -E root_owner). The zero value keeps root ownership. It only
+// applies when an image is first created; an existing generation keeps its
+// ownership, exactly like its capacity.
+type Owner struct {
+	UID, GID uint32
+	Set      bool
+}
+
+// Catalog calls honour ctx: a cancelled caller (controller lease, CLI
+// timeout) stops waiting for the helper instead of blocking for the
+// helper's own two-minute operation cap.
 type Catalog interface {
-	Ensure(Key, int64) (Descriptor, error)
-	Verify(Key, int64) (Descriptor, error)
-	Remove(Key) error
-	Recover() error
+	Ensure(context.Context, Key, int64, Owner) (Descriptor, error)
+	Verify(context.Context, Key, int64) (Descriptor, error)
+	Remove(context.Context, Key) error
+	Recover(context.Context) error
 }
 
 var component = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`)
@@ -84,6 +98,6 @@ func ValidateVolume(enabled bool, service, volume, mount string, generation, n i
 // exists, including the interval before its first container mount.
 type ReferenceCatalog interface {
 	Catalog
-	Protect(Key, string) error
-	Release(Key, string) error
+	Protect(context.Context, Key, string) error
+	Release(context.Context, Key, string) error
 }

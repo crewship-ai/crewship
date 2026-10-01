@@ -21,6 +21,7 @@ type Request struct {
 	Operation string
 	Key       Key
 	Bytes     int64
+	Owner     Owner
 }
 type Response struct {
 	Namespace  string
@@ -48,16 +49,32 @@ func peerUID(c *net.UnixConn) (uint32, error) {
 	}
 	return uid, inner
 }
-func (c Client) call(request Request) (Descriptor, error) {
+
+// helperCallTimeout caps one helper round trip; an earlier caller deadline
+// or cancellation always wins.
+const helperCallTimeout = 2 * time.Minute
+
+func (c Client) call(ctx context.Context, request Request) (Descriptor, error) {
 	request.Namespace = c.Namespace
 	if c.Socket == "" {
 		return Descriptor{}, ErrUnavailable
 	}
-	connection, err := net.DialTimeout("unix", c.Socket, 2*time.Second)
+	if err := ctx.Err(); err != nil {
+		return Descriptor{}, err
+	}
+	dialCtx, cancelDial := context.WithTimeout(ctx, 2*time.Second)
+	connection, err := (&net.Dialer{}).DialContext(dialCtx, "unix", c.Socket)
+	cancelDial()
 	if err != nil {
+		if ctx.Err() != nil {
+			return Descriptor{}, ctx.Err()
+		}
 		return Descriptor{}, ErrUnavailable
 	}
 	defer connection.Close()
+	// Unblock the encode/decode below as soon as the caller gives up.
+	stop := context.AfterFunc(ctx, func() { _ = connection.SetDeadline(time.Now()) })
+	defer stop()
 	socket, ok := connection.(*net.UnixConn)
 	if !ok {
 		return Descriptor{}, ErrDenied
@@ -66,12 +83,22 @@ func (c Client) call(request Request) (Descriptor, error) {
 	if err != nil || uid != 0 {
 		return Descriptor{}, ErrDenied
 	}
-	_ = connection.SetDeadline(time.Now().Add(2 * time.Minute))
+	deadline := time.Now().Add(helperCallTimeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	_ = connection.SetDeadline(deadline)
 	if err = json.NewEncoder(connection).Encode(request); err != nil {
+		if ctx.Err() != nil {
+			return Descriptor{}, ctx.Err()
+		}
 		return Descriptor{}, err
 	}
 	var response Response
 	if err = json.NewDecoder(io.LimitReader(connection, 8192)).Decode(&response); err != nil {
+		if ctx.Err() != nil {
+			return Descriptor{}, ctx.Err()
+		}
 		return Descriptor{}, err
 	}
 	if response.Namespace != c.Namespace {
@@ -88,17 +115,20 @@ func (c Client) call(request Request) (Descriptor, error) {
 	}
 	return response.Descriptor, nil
 }
-func (c Client) Ensure(k Key, n int64) (Descriptor, error) {
-	return c.call(Request{Operation: "ensure", Key: k, Bytes: n})
+func (c Client) Ensure(ctx context.Context, k Key, n int64, owner Owner) (Descriptor, error) {
+	return c.call(ctx, Request{Operation: "ensure", Key: k, Bytes: n, Owner: owner})
 }
-func (c Client) Verify(k Key, n int64) (Descriptor, error) {
-	return c.call(Request{Operation: "verify", Key: k, Bytes: n})
+func (c Client) Verify(ctx context.Context, k Key, n int64) (Descriptor, error) {
+	return c.call(ctx, Request{Operation: "verify", Key: k, Bytes: n})
 }
-func (c Client) Remove(k Key) error {
-	_, err := c.call(Request{Operation: "remove", Key: k})
+func (c Client) Remove(ctx context.Context, k Key) error {
+	_, err := c.call(ctx, Request{Operation: "remove", Key: k})
 	return err
 }
-func (c Client) Recover() error { _, err := c.call(Request{Operation: "recover"}); return err }
+func (c Client) Recover(ctx context.Context) error {
+	_, err := c.call(ctx, Request{Operation: "recover"})
+	return err
+}
 
 // Serve accepts only root and the administrator-configured host server UID.
 // Agent/broker UIDs are never accepted, even if misconfigured as serverUID.
@@ -176,7 +206,9 @@ func ServeNamespace(ctx context.Context, socket string, serverUID uint32, b *Bac
 			if err != nil || uid != 0 && uid != serverUID {
 				return
 			}
-			_ = conn.SetDeadline(time.Now().Add(2 * time.Minute))
+			_ = conn.SetDeadline(time.Now().Add(helperCallTimeout))
+			opCtx, cancelOp := context.WithTimeout(ctx, helperCallTimeout)
+			defer cancelOp()
 			var request Request
 			decoder := json.NewDecoder(io.LimitReader(conn, 4096))
 			decoder.DisallowUnknownFields()
@@ -186,17 +218,17 @@ func ServeNamespace(ctx context.Context, socket string, serverUID uint32, b *Bac
 			response := Response{Namespace: namespace}
 			switch request.Operation {
 			case "ensure":
-				response.Descriptor, err = b.Ensure(request.Key, request.Bytes)
+				response.Descriptor, err = b.Ensure(opCtx, request.Key, request.Bytes, request.Owner)
 			case "verify":
-				response.Descriptor, err = b.Verify(request.Key, request.Bytes)
+				response.Descriptor, err = b.Verify(opCtx, request.Key, request.Bytes)
 			case "protect":
-				err = b.Protect(request.Key, request.Reference)
+				err = b.Protect(opCtx, request.Key, request.Reference)
 			case "release":
-				err = b.Release(request.Key, request.Reference)
+				err = b.Release(opCtx, request.Key, request.Reference)
 			case "remove":
-				err = b.Remove(request.Key)
+				err = b.Remove(opCtx, request.Key)
 			case "recover":
-				err = b.Recover()
+				err = b.Recover(opCtx)
 			default:
 				err = ErrDenied
 			}
@@ -208,11 +240,11 @@ func ServeNamespace(ctx context.Context, socket string, serverUID uint32, b *Bac
 	}
 }
 
-func (c Client) Protect(k Key, ref string) error {
-	_, err := c.call(Request{Operation: "protect", Key: k, Reference: ref})
+func (c Client) Protect(ctx context.Context, k Key, ref string) error {
+	_, err := c.call(ctx, Request{Operation: "protect", Key: k, Reference: ref})
 	return err
 }
-func (c Client) Release(k Key, ref string) error {
-	_, err := c.call(Request{Operation: "release", Key: k, Reference: ref})
+func (c Client) Release(ctx context.Context, k Key, ref string) error {
+	_, err := c.call(ctx, Request{Operation: "release", Key: k, Reference: ref})
 	return err
 }

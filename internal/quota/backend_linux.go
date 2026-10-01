@@ -29,7 +29,21 @@ type Backend struct {
 	capacity, headroom int64
 	mu                 sync.Mutex
 	lock               *os.File
+
+	// owner is the UID every catalog file and directory must belong to.
+	// NewBackend pins it to root; unit tests use their own UID.
+	owner uint32
+	// reservePath is the cross-helper host allocation lock.
+	reservePath string
+	// run executes a fixed system tool with the restricted environment.
+	run func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// attach mounts and verifies a descriptor; nil means the loop mount.
+	attach func(ctx context.Context, d Descriptor) error
+	// logf reports recovery decisions; nil discards them.
+	logf func(format string, args ...any)
 }
+
+const defaultReservePath = "/run/crewship-quota-host-reserve.lock"
 
 func NewBackend(root string, capacity, headroom int64) (*Backend, error) {
 	if os.Geteuid() != 0 || !filepath.IsAbs(root) || filepath.Clean(root) != root || strings.ContainsAny(root, " \t\n") || capacity < MinBytes || capacity > 1<<40 || headroom < 0 || headroom > 1<<40 {
@@ -66,7 +80,24 @@ func NewBackend(root string, capacity, headroom int64) (*Backend, error) {
 		f.Close()
 		return nil, ErrUnavailable
 	}
-	return &Backend{root: root, capacity: capacity, headroom: headroom, lock: f}, nil
+	return &Backend{root: root, capacity: capacity, headroom: headroom, lock: f, reservePath: defaultReservePath, run: runTool}, nil
+}
+
+// SetLogger routes recovery decisions (quarantine, cleanup) to the helper log.
+func (b *Backend) SetLogger(logf func(format string, args ...any)) { b.logf = logf }
+
+func (b *Backend) tool(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if b.run == nil {
+		return runTool(ctx, name, args...)
+	}
+	return b.run(ctx, name, args...)
+}
+
+func (b *Backend) attachDescriptor(ctx context.Context, d Descriptor) error {
+	if b.attach != nil {
+		return b.attach(ctx, d)
+	}
+	return b.mount(ctx, d)
 }
 func (b *Backend) Close() error {
 	b.mu.Lock()
@@ -82,14 +113,17 @@ func (b *Backend) paths(k Key) (string, string, string) {
 	id := k.id()
 	return filepath.Join(b.root, "images", id+".json"), filepath.Join(b.root, "images", id+".ext4"), filepath.Join(b.root, "mounts", id)
 }
-func safeFile(path string) (*os.File, error) {
+func (b *Backend) safeFile(path string) (*os.File, error) {
+	return safeFileOwned(path, b.owner)
+}
+func safeFileOwned(path string, owner uint32) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, err
 	}
 	i, err := f.Stat()
 	var stat unix.Stat_t
-	if unix.Fstat(int(f.Fd()), &stat) != nil || stat.Uid != 0 || err != nil || !i.Mode().IsRegular() || i.Mode().Perm() != 0600 {
+	if unix.Fstat(int(f.Fd()), &stat) != nil || stat.Uid != owner || err != nil || !i.Mode().IsRegular() || i.Mode().Perm() != 0600 {
 		f.Close()
 		return nil, ErrDenied
 	}
@@ -97,7 +131,7 @@ func safeFile(path string) (*os.File, error) {
 }
 func (b *Backend) read(k Key) (Descriptor, error) {
 	meta, _, mount := b.paths(k)
-	f, err := safeFile(meta)
+	f, err := b.safeFile(meta)
 	if err != nil {
 		return Descriptor{}, err
 	}
@@ -108,17 +142,27 @@ func (b *Backend) read(k Key) (Descriptor, error) {
 	}
 	return d, nil
 }
-func command(name string, args ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+
+// runTool runs one fixed system tool with a minimal environment and a
+// two-minute cap (the caller's ctx may cut it shorter). Stdout is returned;
+// on failure the combined output is folded into the error.
+func runTool(ctx context.Context, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"}
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("quota operation failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("quota operation failed: %w (%s)", err, strings.TrimSpace(stdout.String()+stderr.String()))
 	}
-	return nil
+	return []byte(stdout.String()), nil
 }
-func (b *Backend) Ensure(k Key, size int64) (Descriptor, error) {
+func (b *Backend) command(ctx context.Context, name string, args ...string) error {
+	_, err := b.tool(ctx, name, args...)
+	return err
+}
+func (b *Backend) Ensure(ctx context.Context, k Key, size int64, owner Owner) (Descriptor, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.lock == nil || !k.valid() || !validBytes(size) {
@@ -129,17 +173,14 @@ func (b *Backend) Ensure(k Key, size int64) (Descriptor, error) {
 		if d.Bytes != size {
 			return Descriptor{}, ErrDenied
 		}
-		if err = b.mount(d); err != nil {
-			return Descriptor{}, err
-		}
-		return d, b.verify(d)
+		return d, b.attachDescriptor(ctx, d)
 	}
 	if !os.IsNotExist(err) {
 		return Descriptor{}, err
 	}
 	// Separate per-database helpers share one host allocation lock. Physical
 	// preallocation survives a crash; the next process observes reduced free space.
-	reservation, err := hostReservationLock()
+	reservation, err := hostReservationLock(b.reservePath, b.owner)
 	if err != nil {
 		return Descriptor{}, err
 	}
@@ -189,7 +230,7 @@ func (b *Backend) Ensure(k Key, size int64) (Descriptor, error) {
 	if err = f.Sync(); err != nil {
 		return Descriptor{}, err
 	}
-	if err = command("/usr/sbin/mkfs.ext4", "-q", "-F", "-m", "0", "-E", "nodiscard,lazy_itable_init=0,lazy_journal_init=0", image); err != nil {
+	if err = b.command(ctx, "/usr/sbin/mkfs.ext4", "-q", "-F", "-m", "0", "-E", "nodiscard,lazy_itable_init=0,lazy_journal_init=0", image); err != nil {
 		return Descriptor{}, err
 	}
 	if err = f.Sync(); err != nil {
@@ -204,10 +245,7 @@ func (b *Backend) Ensure(k Key, size int64) (Descriptor, error) {
 		return Descriptor{}, err
 	}
 	allocated = true
-	if err = b.mount(d); err != nil {
-		return Descriptor{}, err
-	}
-	return d, b.verify(d)
+	return d, b.attachDescriptor(ctx, d)
 }
 func atomicFile(path string, data []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(path), ".catalog-")
@@ -258,7 +296,7 @@ func mountedDevice(path string) (string, error) {
 	}
 	return "", nil
 }
-func (b *Backend) mount(d Descriptor) error {
+func (b *Backend) mount(ctx context.Context, d Descriptor) error {
 	dev, err := mountedDevice(d.Mount)
 	if err != nil {
 		return err
@@ -271,10 +309,10 @@ func (b *Backend) mount(d Descriptor) error {
 		return err
 	}
 	var stat unix.Stat_t
-	if err = unix.Lstat(d.Mount, &stat); err != nil || stat.Uid != 0 || stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Mode&0777 != 0700 {
+	if err = unix.Lstat(d.Mount, &stat); err != nil || stat.Uid != b.owner || stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Mode&0777 != 0700 {
 		return ErrDenied
 	}
-	f, err := safeFile(image)
+	f, err := b.safeFile(image)
 	if err != nil {
 		return err
 	}
@@ -283,7 +321,7 @@ func (b *Backend) mount(d Descriptor) error {
 	if err != nil || info.Size() != d.Bytes {
 		return ErrDenied
 	}
-	out, err := exec.Command("/usr/sbin/losetup", "--find", "--show", "--nooverlap", image).Output()
+	out, err := b.tool(ctx, "/usr/sbin/losetup", "--find", "--show", "--nooverlap", image)
 	if err != nil {
 		return fmt.Errorf("loopback unavailable: %w", err)
 	}
@@ -291,8 +329,8 @@ func (b *Backend) mount(d Descriptor) error {
 	if !strings.HasPrefix(dev, "/dev/loop") {
 		return ErrDenied
 	}
-	if err = command("/usr/bin/mount", "-t", "ext4", "-o", "nosuid,nodev,noexec", dev, d.Mount); err != nil {
-		_ = command("/usr/sbin/losetup", "-d", dev)
+	if err = b.command(ctx, "/usr/bin/mount", "-t", "ext4", "-o", "nosuid,nodev,noexec", dev, d.Mount); err != nil {
+		_ = b.command(ctx, "/usr/sbin/losetup", "-d", dev)
 		return err
 	}
 	return b.verify(d)
@@ -310,7 +348,7 @@ func (b *Backend) verify(d Descriptor) error {
 	if err != nil || strings.TrimSpace(string(backing)) != image {
 		return ErrDenied
 	}
-	f, err := safeFile(image)
+	f, err := b.safeFile(image)
 	if err != nil {
 		return err
 	}
@@ -332,7 +370,7 @@ func (b *Backend) verify(d Descriptor) error {
 	}
 	return nil
 }
-func (b *Backend) Verify(k Key, size int64) (Descriptor, error) {
+func (b *Backend) Verify(_ context.Context, k Key, size int64) (Descriptor, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.lock == nil || !k.valid() || !validBytes(size) {
@@ -344,7 +382,7 @@ func (b *Backend) Verify(k Key, size int64) (Descriptor, error) {
 	}
 	return d, b.verify(d)
 }
-func (b *Backend) Remove(k Key) error {
+func (b *Backend) Remove(ctx context.Context, k Key) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.lock == nil || !k.valid() {
@@ -381,10 +419,10 @@ func (b *Backend) Remove(k Key) error {
 		if err = detachedFromOtherMounts(dev, d.Mount); err != nil {
 			return err
 		}
-		if err = command("/usr/bin/umount", d.Mount); err != nil {
+		if err = b.command(ctx, "/usr/bin/umount", d.Mount); err != nil {
 			return err
 		}
-		if err = command("/usr/sbin/losetup", "-d", dev); err != nil {
+		if err = b.command(ctx, "/usr/sbin/losetup", "-d", dev); err != nil {
 			return err
 		}
 	}
@@ -400,7 +438,7 @@ func (b *Backend) Remove(k Key) error {
 	}
 	return os.Remove(mount)
 }
-func (b *Backend) Recover() error {
+func (b *Backend) Recover(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.lock == nil {
@@ -415,7 +453,7 @@ func (b *Backend) Recover() error {
 		if !strings.HasSuffix(e.Name(), ".ext4") {
 			continue
 		}
-		f, err := safeFile(filepath.Join(b.root, "images", e.Name()))
+		f, err := b.safeFile(filepath.Join(b.root, "images", e.Name()))
 		if err != nil {
 			return err
 		}
@@ -430,7 +468,7 @@ func (b *Backend) Recover() error {
 		if !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		f, err := safeFile(filepath.Join(b.root, "images", e.Name()))
+		f, err := b.safeFile(filepath.Join(b.root, "images", e.Name()))
 		if err != nil {
 			return err
 		}
@@ -444,7 +482,7 @@ func (b *Backend) Recover() error {
 		if err != nil {
 			return err
 		}
-		if err = b.mount(known); err != nil {
+		if err = b.attachDescriptor(ctx, known); err != nil {
 			return err
 		}
 	}
@@ -521,7 +559,7 @@ func inactiveProcess(pid string) bool {
 
 func (b *Backend) references(k Key) ([]string, error) {
 	p := filepath.Join(b.root, "images", k.id()+".references")
-	f, err := safeFile(p)
+	f, err := b.safeFile(p)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -538,7 +576,7 @@ func (b *Backend) references(k Key) ([]string, error) {
 
 var referenceName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,255}$`)
 
-func (b *Backend) Protect(k Key, reference string) error {
+func (b *Backend) Protect(_ context.Context, k Key, reference string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.lock == nil || !k.valid() || !referenceName.MatchString(reference) {
@@ -565,7 +603,7 @@ func (b *Backend) Protect(k Key, reference string) error {
 	raw, _ := json.Marshal(refs)
 	return atomicFile(filepath.Join(b.root, "images", k.id()+".references"), raw)
 }
-func (b *Backend) Release(k Key, reference string) error {
+func (b *Backend) Release(_ context.Context, k Key, reference string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.lock == nil || !k.valid() || !referenceName.MatchString(reference) {
@@ -591,7 +629,7 @@ func (b *Backend) BindNamespace(namespace string) error {
 		return ErrDenied
 	}
 	target := filepath.Join(b.root, "namespace")
-	f, err := safeFile(target)
+	f, err := b.safeFile(target)
 	if err == nil {
 		raw, e := io.ReadAll(io.LimitReader(f, 129))
 		f.Close()
@@ -613,13 +651,13 @@ func (b *Backend) BindNamespace(namespace string) error {
 	return atomicFile(target, []byte(namespace))
 }
 
-func hostReservationLock() (*os.File, error) {
-	f, err := os.OpenFile("/run/crewship-quota-host-reserve.lock", os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0600)
+func hostReservationLock(path string, owner uint32) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0600)
 	if err != nil {
 		return nil, err
 	}
 	var st unix.Stat_t
-	if err = unix.Fstat(int(f.Fd()), &st); err != nil || st.Uid != 0 || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Mode&0777 != 0600 {
+	if err = unix.Fstat(int(f.Fd()), &st); err != nil || st.Uid != owner || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Mode&0777 != 0600 {
 		f.Close()
 		return nil, ErrDenied
 	}

@@ -758,11 +758,11 @@ func (p *Provider) RemoveCrewServiceVolumes(ctx context.Context, crewID, crewSlu
 				failures = append(failures, err)
 				continue
 			}
-			if err = catalog.Release(key, vol.Name); err != nil {
+			if err = catalog.Release(ctx, key, vol.Name); err != nil {
 				failures = append(failures, err)
 				continue
 			}
-			if err = catalog.Remove(key); err != nil {
+			if err = catalog.Remove(ctx, key); err != nil {
 				failures = append(failures, err)
 			}
 			continue

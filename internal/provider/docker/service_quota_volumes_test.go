@@ -17,20 +17,32 @@ import (
 type fakeQuotaCatalog struct {
 	unavailable bool
 	verify      int
+	owners      []quota.Owner
+	calls       []string
+	removeErr   error
+	releaseErr  error
 }
 
-func (f *fakeQuotaCatalog) Ensure(k quota.Key, n int64) (quota.Descriptor, error) {
+func (f *fakeQuotaCatalog) descriptor(k quota.Key, n int64) (quota.Descriptor, error) {
 	if f.unavailable {
 		return quota.Descriptor{}, quota.ErrUnavailable
 	}
 	return quota.Descriptor{ID: "syntheticquota", Key: k, Bytes: n, Mount: "/trusted-quota/syntheticquota"}, nil
 }
-func (f *fakeQuotaCatalog) Verify(k quota.Key, n int64) (quota.Descriptor, error) {
-	f.verify++
-	return f.Ensure(k, n)
+func (f *fakeQuotaCatalog) Ensure(_ context.Context, k quota.Key, n int64, owner quota.Owner) (quota.Descriptor, error) {
+	f.owners = append(f.owners, owner)
+	f.calls = append(f.calls, "ensure")
+	return f.descriptor(k, n)
 }
-func (*fakeQuotaCatalog) Remove(quota.Key) error { return nil }
-func (*fakeQuotaCatalog) Recover() error         { return nil }
+func (f *fakeQuotaCatalog) Verify(_ context.Context, k quota.Key, n int64) (quota.Descriptor, error) {
+	f.verify++
+	return f.descriptor(k, n)
+}
+func (f *fakeQuotaCatalog) Remove(context.Context, quota.Key) error {
+	f.calls = append(f.calls, "remove")
+	return f.removeErr
+}
+func (*fakeQuotaCatalog) Recover(context.Context) error { return nil }
 func TestQuotaServiceUnavailableNeverUsesLegacyStorage(t *testing.T) {
 	svc := provider.CrewService{Name: "database", Image: "alpine:3", QuotaEnforced: true, Volumes: []provider.CrewServiceVolume{{Name: "data", Mount: "/data", QuotaBytes: 64 << 20}}}
 	for _, catalog := range []quota.Catalog{nil, &fakeQuotaCatalog{unavailable: true}} {
@@ -106,8 +118,14 @@ func TestQuotaServiceNoPathOrLegacyQuotaAliasing(t *testing.T) {
 	}
 }
 
-func (*fakeQuotaCatalog) Protect(quota.Key, string) error { return nil }
-func (*fakeQuotaCatalog) Release(quota.Key, string) error { return nil }
+func (f *fakeQuotaCatalog) Protect(context.Context, quota.Key, string) error {
+	f.calls = append(f.calls, "protect")
+	return nil
+}
+func (f *fakeQuotaCatalog) Release(context.Context, quota.Key, string) error {
+	f.calls = append(f.calls, "release")
+	return f.releaseErr
+}
 
 func TestQuotaMountAuditRejectsUnboundedDrift(t *testing.T) {
 	bounded := mount.Mount{Type: mount.TypeVolume, Source: "owned", Target: "/data", VolumeOptions: &mount.VolumeOptions{NoCopy: true}}

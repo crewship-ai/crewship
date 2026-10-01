@@ -3,6 +3,7 @@
 package quota
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -28,13 +29,13 @@ func TestLiveBoundedFilesystemRecoveryAndAttachment(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := Key{"synthetic-crew", "probe", "data", 1}
-	d, err := b.Ensure(key, 64<<20)
+	d, err := b.Ensure(t.Context(), key, 64<<20, Owner{})
 	if err != nil {
 		b.Close()
 		t.Fatalf("loop/mount support unavailable or quota create failed: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := b.Remove(key); err != nil {
+		if err := b.Remove(context.Background(), key); err != nil {
 			if !errors.Is(err, ErrDenied) {
 				t.Error(err)
 			} else {
@@ -42,13 +43,13 @@ func TestLiveBoundedFilesystemRecoveryAndAttachment(t *testing.T) {
 			}
 			dev, _ := mountedDevice(d.Mount)
 			if dev != "" {
-				_ = command("/usr/bin/umount", d.Mount)
-				_ = command("/usr/sbin/losetup", "-d", dev)
+				_ = b.command(context.Background(), "/usr/bin/umount", d.Mount)
+				_ = b.command(context.Background(), "/usr/sbin/losetup", "-d", dev)
 			}
 		}
 		b.Close()
 	})
-	if _, err = b.Ensure(key, 128<<20); !errors.Is(err, ErrDenied) {
+	if _, err = b.Ensure(t.Context(), key, 128<<20, Owner{}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("existing quota silently expanded: %v", err)
 	}
 	if err = os.WriteFile(filepath.Join(d.Mount, "canary"), []byte("DURABLE_QUOTA_CANARY"), 0600); err != nil {
@@ -66,27 +67,27 @@ func TestLiveBoundedFilesystemRecoveryAndAttachment(t *testing.T) {
 	if err = os.Remove(filepath.Join(d.Mount, "overflow")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.Ensure(Key{"synthetic-crew", "probe", "other", 1}, 96<<20); !errors.Is(err, ErrDenied) {
+	if _, err = b.Ensure(t.Context(), Key{"synthetic-crew", "probe", "other", 1}, 96<<20, Owner{}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("aggregate capacity not reserved: %v", err)
 	}
 	binding := filepath.Join(root, "test-bind")
 	if err = os.Mkdir(binding, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err = command("/usr/bin/mount", "--bind", d.Mount, binding); err != nil {
+	if err = b.command(context.Background(), "/usr/bin/mount", "--bind", d.Mount, binding); err != nil {
 		t.Fatal(err)
 	}
-	if err = b.Remove(key); !errors.Is(err, ErrDenied) {
-		_ = command("/usr/bin/umount", binding)
+	if err = b.Remove(t.Context(), key); !errors.Is(err, ErrDenied) {
+		_ = b.command(context.Background(), "/usr/bin/umount", binding)
 		t.Fatalf("attached quota removed: %v", err)
 	}
-	if err = command("/usr/bin/umount", binding); err != nil {
+	if err = b.command(context.Background(), "/usr/bin/umount", binding); err != nil {
 		t.Fatal(err)
 	}
-	if err = b.Protect(key, "owned-docker-volume"); err != nil {
+	if err = b.Protect(t.Context(), key, "owned-docker-volume"); err != nil {
 		t.Fatal(err)
 	}
-	if err = b.Remove(key); !errors.Is(err, ErrDenied) {
+	if err = b.Remove(t.Context(), key); !errors.Is(err, ErrDenied) {
 		t.Fatalf("protected quota removed before Docker attachment: %v", err)
 	}
 	b.Close()
@@ -94,16 +95,16 @@ func TestLiveBoundedFilesystemRecoveryAndAttachment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = b.Recover(); err != nil {
+	if err = b.Recover(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.Verify(key, 64<<20); err != nil {
+	if _, err = b.Verify(t.Context(), key, 64<<20); err != nil {
 		t.Fatal(err)
 	}
-	if err = b.Remove(key); !errors.Is(err, ErrDenied) {
+	if err = b.Remove(t.Context(), key); !errors.Is(err, ErrDenied) {
 		t.Fatalf("helper recovery lost durable protection: %v", err)
 	}
-	if err = b.Release(key, "owned-docker-volume"); err != nil {
+	if err = b.Release(t.Context(), key, "owned-docker-volume"); err != nil {
 		t.Fatal(err)
 	}
 	canary, err := os.ReadFile(filepath.Join(d.Mount, "canary"))
@@ -136,7 +137,7 @@ func TestLiveCatalogNamespaceIsolation(t *testing.T) {
 		if err = b.BindNamespace("wrong-database"); !errors.Is(err, ErrDenied) {
 			t.Fatalf("catalog identity changed: %v", err)
 		}
-		d, err := b.Ensure(key, 64<<20)
+		d, err := b.Ensure(t.Context(), key, 64<<20, Owner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -144,7 +145,7 @@ func TestLiveCatalogNamespaceIsolation(t *testing.T) {
 	}
 	defer func() {
 		for _, b := range backends {
-			if err := b.Remove(key); err != nil {
+			if err := b.Remove(t.Context(), key); err != nil {
 				t.Error(err)
 			}
 			b.Close()
@@ -165,14 +166,14 @@ func TestLiveHostReservationSerialization(t *testing.T) {
 	if os.Getenv("CREWSHIP_LIVE_QUOTA_BACKEND") != "1" || os.Geteuid() != 0 {
 		t.Fatal("isolated root host-reservation lock")
 	}
-	first, err := hostReservationLock()
+	first, err := hostReservationLock(defaultReservePath, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
 	acquired := make(chan error, 1)
 	go func() {
-		second, e := hostReservationLock()
+		second, e := hostReservationLock(defaultReservePath, 0)
 		if e == nil {
 			second.Close()
 		}

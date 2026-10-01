@@ -30,7 +30,7 @@ func TestVMQuotaServiceRecovery(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	catalog := quota.Client{Socket: os.Getenv("CREWSHIP_QUOTA_VM_SOCKET"), Namespace: "quota-acceptance"}
-	if _, err := (quota.Client{Socket: catalog.Socket, Namespace: "another-database"}).Ensure(quota.Key{Crew: "quota-vm-owned", Service: "probe", Volume: "data", Generation: 1}, 64<<20); err == nil {
+	if _, err := (quota.Client{Socket: catalog.Socket, Namespace: "another-database"}).Ensure(ctx, quota.Key{Crew: "quota-vm-owned", Service: "probe", Volume: "data", Generation: 1}, 64<<20, quota.Owner{}); err == nil {
 		t.Fatal("foreign database namespace admitted")
 	}
 	p, err := New(ctx, Config{ContainerPrefix: "crewship-quota-vm-owned", QuotaCatalog: catalog}, slog.Default())
@@ -63,7 +63,7 @@ func TestVMQuotaServiceRecovery(t *testing.T) {
 		if e = checkServiceRestartPolicy(inspected.Container.HostConfig, true); e != nil {
 			t.Fatal(e)
 		}
-		if _, e = catalog.Verify(quota.Key{Crew: crew, Service: "probe", Volume: "data", Generation: 1}, 64<<20); e != nil {
+		if _, e = catalog.Verify(ctx, quota.Key{Crew: crew, Service: "probe", Volume: "data", Generation: 1}, 64<<20); e != nil {
 			t.Fatalf("helper not ready after boot: %v", e)
 		}
 		return
@@ -97,7 +97,7 @@ func TestVMQuotaServiceRecovery(t *testing.T) {
 		if e != nil {
 			t.Fatalf("physical limits: %v %s", e, out)
 		}
-		if _, e = catalog.Ensure(quota.Key{Crew: crew, Service: "probe", Volume: "second", Generation: 1}, 96<<20); e == nil {
+		if _, e = catalog.Ensure(ctx, quota.Key{Crew: crew, Service: "probe", Volume: "second", Generation: 1}, 96<<20, quota.Owner{}); e == nil {
 			t.Fatal("aggregate capacity admitted overflow")
 		}
 	} else {

@@ -49,12 +49,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "quota namespace denied:", err)
 		os.Exit(1)
 	}
-	if err = backend.Recover(); err != nil {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+	if err = backend.Recover(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "quota catalog recovery failed:", err)
 		os.Exit(1)
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
 	if err = quota.ServeNamespace(ctx, *socket, uint32(*uid), backend, *namespace, notifyReady); err != nil {
 		fmt.Fprintln(os.Stderr, "quota helper failed:", err)
 		os.Exit(1)

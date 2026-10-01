@@ -45,7 +45,7 @@ func TestLiveSocketPeerIdentityAndPrivateCatalog(t *testing.T) {
 		cancel()
 		<-done
 		key := Key{"synthetic-crew", "socket-probe", "data", 1}
-		if err := b.Remove(key); err != nil {
+		if err := b.Remove(context.Background(), key); err != nil {
 			t.Error(err)
 		}
 		b.Close()

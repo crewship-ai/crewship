@@ -69,7 +69,7 @@ func TestLivePersistentQuotaService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = b.Recover(); err != nil {
+	if err = b.Recover(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	p.cfg.QuotaCatalog = b

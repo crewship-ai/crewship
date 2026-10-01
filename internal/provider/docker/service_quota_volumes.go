@@ -45,7 +45,7 @@ func (p *Provider) quotaServiceVolumes(ctx context.Context, crewID, crewSlug str
 			gen = 1
 		}
 		key := quota.Key{Crew: crewID, Service: svc.Name, Volume: v.Name, Generation: gen}
-		d, err := catalog.Ensure(key, v.QuotaBytes)
+		d, err := catalog.Ensure(ctx, key, v.QuotaBytes, quota.Owner{})
 		if err != nil {
 			return nil, err
 		}
@@ -56,7 +56,7 @@ func (p *Provider) quotaServiceVolumes(ctx context.Context, crewID, crewSlug str
 		labels := sidecarVolumeLabels(crewID, crewSlug, svc.Name, v.Name)
 		labels[quotaBytesLabel] = strconv.FormatInt(d.Bytes, 10)
 		labels[quotaGenerationLabel] = strconv.FormatInt(gen, 10)
-		if err = catalog.Protect(key, name); err != nil {
+		if err = catalog.Protect(ctx, key, name); err != nil {
 			return nil, err
 		}
 		options := map[string]string{"type": "none", "o": "bind", "device": d.Mount}
@@ -79,7 +79,7 @@ func (p *Provider) quotaServiceVolumes(ctx context.Context, crewID, crewSlug str
 				return nil, err
 			}
 		}
-		if _, err = catalog.Verify(key, v.QuotaBytes); err != nil {
+		if _, err = catalog.Verify(ctx, key, v.QuotaBytes); err != nil {
 			return nil, err
 		}
 		mounts = append(mounts, mount.Mount{Type: mount.TypeVolume, Source: name, Target: v.Mount, VolumeOptions: &mount.VolumeOptions{NoCopy: true}})
