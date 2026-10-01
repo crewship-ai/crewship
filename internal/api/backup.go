@@ -267,6 +267,13 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// checks we already use for Inspect / Restore / Download.
 	outputDir := req.OutputDir
 	if outputDir != "" {
+		// validateBackupPath rejects ".." too; the inline check is the guard
+		// CodeQL's go/path-injection recognises on this value, which reaches
+		// every staging and environment-store path of the run.
+		if strings.Contains(outputDir, "..") {
+			replyError(w, http.StatusBadRequest, "invalid backup path")
+			return
+		}
 		if err := validateBackupPath(outputDir); err != nil {
 			// Log the specific reason (which may include the backups
 			// directory path) server-side only; return a generic message
