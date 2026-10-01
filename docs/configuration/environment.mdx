@@ -445,6 +445,24 @@ These variables are used by the `./dev.sh seed` command:
 
 The Docker provider checks `DOCKER_HOST` first, then auto-detects from candidate socket paths.
 
+## Idle runtime retention and cache eviction
+
+Both are **off by default**. They reclaim disk held by crews nobody is using;
+neither removes volumes or host data, and the next start of the crew rebuilds
+whatever was removed. See `docs/specs/container-cleanup.md` (section "Idle retention") in the repository
+for the exact rules.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS` | `0` (off) | Remove this installation's **stopped** runtime container of a **live** crew once it has been stopped this many days. The stop time comes from Docker; an unknown stop time keeps the container. Volumes, host data and sidecar services stay. The next start recreates the runtime (about 35–40 s when its cache image must be rebuilt as well). |
+| `CREWSHIP_CACHE_EVICTION` | (unset — off) | Set to `true` or `1` to remove `crewship-cache:*` images that no container on the Docker daemon — of any installation, in any state — has used for a continuous hour, are older than a day, and while no `crewship-provision-*` build runs anywhere on the daemon. A crew still pointing at an evicted image rebuilds it on its next start. |
+
+<Note>
+  Images are shared through the Docker daemon. On a host where several
+  installations share one daemon, eviction enabled on one of them can make
+  another rebuild an image on its next start. That costs time, not data.
+</Note>
+
 ## Devcontainer Cache GC
 
 Crewship runs a background sweeper every 30 minutes that detects three kinds

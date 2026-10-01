@@ -65,6 +65,40 @@ exists. Revive/restore racing the last check can lose that container's process
 and writable layer. Strong incarnation/restore coordination and persistent data
 removal are outside this contract.
 
+## Idle retention
+
+Opt-in, separate from deletion cleanup, and never acting on deleted owners
+(those are the controller above) or on another installation's containers.
+Enabled by `CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS` and `CREWSHIP_CACHE_EVICTION`
+(`container.idle_runtime_retention_days`, `container.cache_eviction`); runs at
+boot and every 10 minutes while the Docker provider is available.
+
+**Stopped runtimes.** A runtime container (kind `crew`, this installation's
+`crewship.instance-id`) of a crew that is live in this database is removed once
+Docker reports it stopped at least the configured number of days. Docker's
+`FinishedAt` is the stop time: a stopped runtime cannot have run anything since.
+A zero or unreadable stop time, a running or never-started container, a
+sidecar service, a legacy container without the installation label, a deleted
+owner and an owner this database does not know all stay. The removal holds the
+crew's start lock, re-inspects the container and re-checks the owner, records
+its mount references in `resource_cleanup_mounts`, and removes it with
+`Force=false` and `RemoveVolumes=false`; a start that won the race leaves a
+running container Docker refuses to remove. Named volumes, anonymous volumes
+and the host data behind them stay. The next start recreates the runtime.
+
+**Cache images.** A `crewship-cache:*` image is evicted when no container on the
+daemon uses it — any installation, any state — continuously for one hour
+(tracked per installation in `resource_retention_images`; any use restarts the
+hour), it is older than one day, and no `crewship-provision-*` build container
+exists anywhere on the daemon. A database reference from a crew does not keep
+an image: the next `crew start`, chat run or dispatch rebuilds a missing cache
+image, verified for `crew start` and chat runs (about 35–40 s with the base
+image present). Removal uses `Force=false`; Docker refusing it keeps the image
+and restarts its hour. Base images, `crewship-feat:*` images and BuildKit
+cache are out of scope. Because tags are configuration hashes shared through
+the daemon, eviction by one installation can make another rebuild on its next
+start.
+
 ## Observations
 
 Crew DELETE retains HTTP 200 and adds `cleanup` with `scope=containers`,

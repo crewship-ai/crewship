@@ -34,6 +34,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/presence"
 	"github.com/crewship-ai/crewship/internal/provider"
+	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 	"github.com/crewship-ai/crewship/internal/servicelifecycle"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -218,6 +220,20 @@ func (s *Server) Start(ctx context.Context) error {
 	// the bookkeeping is in place before the collectors start polling.
 	if s.statsCollector != nil && s.db != nil {
 		s.rehydrateContainers(ctx)
+	}
+
+	// Idle retention (P0c): opt-in, Docker provider only, and only with a
+	// settled installation identity — it must recognise its own containers.
+	if docker, ok := s.container.(*dockerprovider.Provider); ok && s.db != nil && s.cfg != nil &&
+		s.cfg.Container.InstanceID != "" && (s.cfg.Container.IdleRuntimeRetentionDays > 0 || s.cfg.Container.CacheEviction) {
+		retention := &resourcelifecycle.Retention{
+			DB: s.db, InstanceID: s.cfg.Container.InstanceID, Runtime: docker, Logger: s.logger,
+			RuntimeAfter: time.Duration(s.cfg.Container.IdleRuntimeRetentionDays) * 24 * time.Hour,
+			EvictCache:   s.cfg.Container.CacheEviction,
+		}
+		s.logger.Info("idle retention enabled", "runtime_after_days", s.cfg.Container.IdleRuntimeRetentionDays, "cache_eviction", s.cfg.Container.CacheEviction)
+		s.bgWg.Add(1)
+		go func() { defer s.bgWg.Done(); retention.Run(ctx) }()
 	}
 
 	if s.containerCleanup != nil {

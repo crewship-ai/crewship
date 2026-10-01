@@ -67,6 +67,12 @@ container:
                                 # way; when set, the container entrypoint is forced
                                 # to /usr/local/bin/entrypoint.sh. Empty = autodetect.
                                 # Env override: CREWSHIP_ENTRYPOINT_PATH
+  idle_runtime_retention_days: 0  # Remove stopped runtimes of live crews after this
+                                # many days stopped; volumes stay. 0 = off.
+                                # Env override: CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS
+  cache_eviction: false         # Evict crewship-cache images no container on the
+                                # daemon has used for an hour. Env override:
+                                # CREWSHIP_CACHE_EVICTION
 
 # Note: Crewship injects the sidecar binary and entrypoint script into the
 # container at runtime via bind mount from the host. Any glibc-based Linux
