@@ -73,7 +73,7 @@ func CheckBundleContents(ctx context.Context, bundlePath string, identities []ag
 	if m.Scope == ScopeInstance {
 		err = checkInstanceContents(ctx, tr, m, filepath.Dir(bundlePath), res)
 	} else {
-		err = checkWorkspaceContents(ctx, tr, m, res)
+		err = checkWorkspaceContents(ctx, tr, m, filepath.Dir(bundlePath), res)
 	}
 	if err != nil {
 		return nil, err
@@ -266,8 +266,8 @@ func checkInstanceContents(ctx context.Context, tr *TarZstReader, m *Manifest, t
 	return nil
 }
 
-func checkWorkspaceContents(ctx context.Context, tr *TarZstReader, m *Manifest, res *ContentsCheck) error {
-	tmp, err := os.MkdirTemp("", "crewship-service-check-")
+func checkWorkspaceContents(ctx context.Context, tr *TarZstReader, m *Manifest, tmpParent string, res *ContentsCheck) error {
+	tmp, err := os.MkdirTemp(tmpParent, ".service-check-")
 	if err != nil {
 		return err
 	}

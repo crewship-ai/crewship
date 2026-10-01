@@ -152,7 +152,7 @@ func (o *RecoverOptions) validate() error {
 // written out, and every automation held. The report is returned (and stored
 // in the restored database) even when the result is partial; an error means
 // the result is failed.
-func RecoverInstance(ctx context.Context, opts RecoverOptions) (*RecoverReport, error) {
+func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport, retErr error) {
 	if err := opts.validate(); err != nil {
 		return nil, err
 	}
@@ -197,8 +197,28 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (*RecoverReport, 
 		return rep, err
 	}
 
+	// This directory is exclusively recovery staging. A forced retry replaces
+	// its previous images and plan, rather than mixing recovery generations.
+	recoveryRoot, err := os.OpenRoot(dataDir)
+	if err != nil {
+		return rep, err
+	}
+	defer recoveryRoot.Close()
+	if opts.Force {
+		if err := recoveryRoot.RemoveAll(RecoveredServicesDir); err != nil {
+			return rep, err
+		}
+	}
+	var ex *extractedInstance
+	defer func() {
+		if retErr != nil && (ex == nil || ex.services == nil || !ex.services.serviceRecoveryCommitted) {
+			if err := recoveryRoot.RemoveAll(RecoveredServicesDir); err != nil {
+				logger.Error("backup: remove failed recovery service staging", "error", err)
+			}
+		}
+	}()
 	// 3. Decrypt and extract.
-	ex, err := extractInstancePayload(ctx, opts, m, dataDir)
+	ex, err = extractInstancePayload(ctx, opts, m, dataDir)
 	if err != nil {
 		return rep, err
 	}
@@ -487,6 +507,16 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 		}
 	}
 	if err := services.validateServiceSnapshotArchive(ctx, m.Contents.ServiceSnapshots); err != nil {
+		return nil, err
+	}
+	// Make image directory entries durable before the database references them.
+	dir, err := os.Open(serviceDir)
+	if err != nil {
+		return nil, err
+	}
+	err = dir.Sync()
+	closeErr := dir.Close()
+	if err = errors.Join(err, closeErr); err != nil {
 		return nil, err
 	}
 	return ex, nil

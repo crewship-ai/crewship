@@ -3,6 +3,7 @@ package servicelifecycle
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -186,5 +187,20 @@ func TestBackupFenceAndLegacyServiceAdmissionAreAtomic(t *testing.T) {
 		if (fenceErr == nil) == (opErr == nil) {
 			t.Fatalf("maintenance/start conservation failed: fence=%v operation=%v", fenceErr, opErr)
 		}
+	}
+}
+
+func TestBeginBackupFencePreservesDatabaseErrors(t *testing.T) {
+	db, _ := fenceDB(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := BeginBackupFence(ctx, db, "crew", "backup"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation misclassified: %v", err)
+	}
+	if _, err := db.Exec(`DROP TABLE service_backup_fences`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BeginBackupFence(t.Context(), db, "crew", "backup"); err == nil || errors.Is(err, ErrBackupMaintenance) {
+		t.Fatalf("database failure misclassified: %v", err)
 	}
 }

@@ -83,9 +83,6 @@ import (
 // format version.
 const FormatVersion = 4
 
-// Quota service images require readers that restore their persistent data.
-const FormatVersionServiceSnapshots = 4
-
 // FormatVersionCrewMemory is the first format version whose
 // memory_included flag means what it says: observed, and about the real
 // memory tree.

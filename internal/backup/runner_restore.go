@@ -466,6 +466,14 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	if err != nil {
 		return nil, err
 	}
+	serviceDatabaseCommitted := false
+	defer func() {
+		if retErr != nil && !serviceDatabaseCommitted {
+			if cleanupErr := servicePlan.removeUncommittedImports(ctx, opts.ServiceSnapshots); cleanupErr != nil {
+				retErr = errors.Join(retErr, cleanupErr)
+			}
+		}
+	}()
 	if len(servicePlan.items) > 0 && !opts.FilesOnly && (opts.ServiceSnapshots == nil || opts.ServiceSnapshots.QuotaSnapshotNamespace() == "") {
 		return nil, fmt.Errorf("backup: quota service restore requires verified image import transport")
 	}
@@ -1260,6 +1268,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		if err != nil {
 			return nil, err
 		}
+		serviceDatabaseCommitted = true
 		stats = s
 		warnSecurityLevelClamps(opts.Logger, stats.SecurityLevelClamps, stats.SecurityLevelClamped, false)
 		warnDroppedColumns(opts.Logger, stats.DroppedColumns, stats.ColumnsDropped, false)

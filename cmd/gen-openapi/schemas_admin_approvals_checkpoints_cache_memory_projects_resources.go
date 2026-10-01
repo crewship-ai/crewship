@@ -466,6 +466,9 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 			}, "space", "format", "runtime", "unsafe", "conflicts", "environments")},
 		// Loads the complete container environments `crewship recover`
 		// staged; each one restored, rebuilt or skipped with its reason.
+		"POST /api/v1/admin/instance/backups/services/land": {
+			Request:  object(map[string]any{"dry_run": boolean()}),
+			Response: object(map[string]any{"images": integer(), "dry_run": boolean()}, "images", "dry_run")},
 		"POST /api/v1/admin/instance/backups/environments/land": {
 			Request: object(map[string]any{"dry_run": boolean()}),
 			Response: object(map[string]any{

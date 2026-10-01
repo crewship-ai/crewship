@@ -9,10 +9,18 @@ import (
 	"github.com/crewship-ai/crewship/internal/backup"
 )
 
+type landServicesRequest struct {
+	DryRun bool `json:"dry_run"`
+}
+type landServicesResponse struct {
+	Images int  `json:"images"`
+	DryRun bool `json:"dry_run"`
+}
+
 // LandServices imports the verified service images staged by offline recover.
 // Clearing maintenance and recording the audit are one database transaction.
 func (h *InstanceBackupsHandler) LandServices(w http.ResponseWriter, r *http.Request) {
-	var req landEnvironmentsRequest
+	var req landServicesRequest
 	if r.ContentLength != 0 && !decodeInstanceBody(w, r, &req) {
 		return
 	}
@@ -31,5 +39,5 @@ func (h *InstanceBackupsHandler) LandServices(w http.ResponseWriter, r *http.Req
 		h.fail(w, "land service data", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"images": count, "dry_run": req.DryRun})
+	writeJSON(w, http.StatusOK, landServicesResponse{Images: count, DryRun: req.DryRun})
 }

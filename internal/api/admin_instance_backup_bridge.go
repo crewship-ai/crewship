@@ -115,6 +115,12 @@ func (q backupQuiescer) Quiesce(ctx context.Context, spec backupplan.RunSpec, ca
 	if spec.Scope != backupplan.ScopeInstance {
 		return func() {}, nil
 	}
+	// The executor captures fenced quota disks before opening the global
+	// writer window. CreateInstanceBackup owns the drain and window in this
+	// case, and still reports its measured hold time through RunResult.
+	if q.h.recoveryConfig().ServiceSnapshots != nil {
+		return func() {}, nil
+	}
 	w, err := q.h.quiesceController().Begin(ctx, quiesce.Options{
 		BusyWait: instanceDrainWait, HoldCap: capDur, Busy: backup.InstanceBusy(q.db), Reason: "instance backup",
 	})

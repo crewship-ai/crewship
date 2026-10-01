@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -45,6 +46,9 @@ func (p *ExtractedPayload) prepareServiceRestorePlan(ctx context.Context, count 
 	declarations := map[string]serviceSnapshot{}
 	crewRows := map[string]map[string]any{}
 	for _, row := range p.DBDump.Tables["crews"] {
+		if rowIsDeleted(row) {
+			continue
+		}
 		id, _ := row["id"].(string)
 		slug, _ := row["slug"].(string)
 		body, _ := row["services_json"].(string)
@@ -216,7 +220,12 @@ func (p *serviceRestorePlan) insertFences(ctx context.Context, tx *sql.Tx) error
 	return nil
 }
 
-func (p *serviceRestorePlan) importImages(ctx context.Context, runtime ServiceSnapshotRuntime) error {
+func (p *serviceRestorePlan) importImages(ctx context.Context, runtime ServiceSnapshotRuntime) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			retErr = errors.Join(retErr, p.removeUncommittedImports(ctx, runtime))
+		}
+	}()
 	if len(p.items) == 0 {
 		return nil
 	}
@@ -374,4 +383,31 @@ func (p *serviceRestorePlan) renewCommitFences(ctx context.Context, tx *sql.Tx) 
 		}
 	}
 	return nil
+}
+
+// Only fresh target generations successfully imported by this attempt are
+// eligible for rollback. Never remove source images or committed targets.
+func (p *serviceRestorePlan) removeUncommittedImports(ctx context.Context, runtime ServiceSnapshotRuntime) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	var result error
+	for i := range p.items {
+		item := &p.items[i]
+		if !item.imported {
+			continue
+		}
+		remover, ok := runtime.(interface {
+			RemoveQuotaVolume(context.Context, quota.Key) error
+		})
+		if !ok {
+			result = errors.Join(result, fmt.Errorf("backup: import transport cannot remove uncommitted quota generation"))
+			continue
+		}
+		if err := remover.RemoveQuotaVolume(cleanupCtx, item.target); err != nil {
+			result = errors.Join(result, err)
+			continue
+		}
+		item.imported = false
+	}
+	return result
 }

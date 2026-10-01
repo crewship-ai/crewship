@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/tsformat"
@@ -29,9 +30,10 @@ func BeginBackupFence(ctx context.Context, db *sql.DB, crew, operation string) (
 	result, err := db.ExecContext(ctx, `INSERT INTO service_backup_fences(crew_id,workspace_id,token,created_at,operation,producer_until)
  SELECT id,workspace_id,?,?,?,? FROM crews WHERE id=? AND deleted_at IS NULL
  AND NOT EXISTS(SELECT 1 FROM service_runtime_intents WHERE crew_id=? AND lease_until>?)
- AND NOT EXISTS(SELECT 1 FROM service_operation_leases WHERE crew_id=? AND lease_until>?)`, token, now, operation, tsformat.Format(time.Now().Add(2*time.Minute)), crew, crew, now, crew, now)
+ AND NOT EXISTS(SELECT 1 FROM service_operation_leases WHERE crew_id=? AND lease_until>?)
+ ON CONFLICT(crew_id) DO NOTHING`, token, now, operation, tsformat.Format(time.Now().Add(2*time.Minute)), crew, crew, now, crew, now)
 	if err != nil {
-		return "", ErrBackupMaintenance
+		return "", fmt.Errorf("begin service backup fence: %w", err)
 	}
 	n, err := result.RowsAffected()
 	if err != nil {
@@ -44,7 +46,8 @@ func BeginBackupFence(ctx context.Context, db *sql.DB, crew, operation string) (
 }
 
 // EndBackupFence is host-only. The transport calls it only after a successful
-// export/remount or complete verified restore; error paths never auto-resume.
+// export/remount or complete verified restore. A later packaging failure may
+// release a completed export; failed or uncertain exports retain maintenance.
 func EndBackupFence(ctx context.Context, db *sql.DB, crew, token string) error {
 	result, err := db.ExecContext(ctx, `DELETE FROM service_backup_fences WHERE crew_id=? AND token=?`, crew, token)
 	if err != nil {

@@ -258,7 +258,13 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		return nil, err
 	}
 
-	if err := requireSupportedServiceBackups(ctx, db, target.CrewTargets, opts.ServiceSnapshots); err != nil {
+	serviceCrews := target.CrewTargets
+	// Custom exports without crew declarations must not stop or copy services
+	// they did not select. Their filtered dump carries neither bindings nor intent.
+	if !filter.has(CategoryAgents) {
+		serviceCrews = nil
+	}
+	if err := requireSupportedServiceBackups(ctx, db, serviceCrews, opts.ServiceSnapshots); err != nil {
 		return nil, err
 	}
 
@@ -380,21 +386,23 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	ctx = captureCtx
 	fenceKeeper := &serviceFenceKeeper{db: db}
 	go fenceKeeper.run(ctx, cancelCapture)
-	serviceFences, capturedServiceSnapshots, err := captureServiceSnapshots(ctx, db, opts.ServiceSnapshots, payloadWriter, target.CrewTargets, now, opts.RecoverServiceMaintenance, fenceKeeper.add)
+	serviceFences, capturedServiceSnapshots, err := captureServiceSnapshots(ctx, db, opts.ServiceSnapshots, payloadWriter, serviceCrews, now, opts.RecoverServiceMaintenance, fenceKeeper.add)
 	if err != nil {
 		_ = payloadWriter.Close()
 		_ = sealedFile.Close()
 		return nil, err
 	}
 	defer func() {
-		if retErr != nil {
-			return
-		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
 		for _, fence := range serviceFences {
-			if err := servicelifecycle.EndBackupFence(context.WithoutCancel(ctx), db, fence.crew, fence.token); err != nil {
-				result = nil
-				retErr = err
-				return
+			if err := servicelifecycle.EndBackupFence(cleanupCtx, db, fence.crew, fence.token); err != nil {
+				if retErr == nil {
+					result = nil
+					retErr = err
+				}
+				slog.Error("backup: release service maintenance", "error", err)
+
 			}
 		}
 	}()
@@ -600,9 +608,6 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	if filter != nil {
 		manifest.Kind = KindCustom
 		manifest.Categories = filter.sorted()
-	}
-	if serviceSnapshotCount > 0 {
-		manifest.FormatVersion = FormatVersionServiceSnapshots
 	}
 	switch {
 	case opts.NoEncrypt:

@@ -82,3 +82,45 @@ func TestDeclaredServiceSnapshotsPreservesImmutableGenerationAndRejectsAliases(t
 		t.Fatal("duplicate physical volume accepted")
 	}
 }
+
+func TestCustomJournalBackupDoesNotStopUnselectedQuotaServices(t *testing.T) {
+	db := openMigratedDBCov(t)
+	ws, crew := seedCovWorkspace(t, db, "custom-journal-quota")
+	body := `[{"name":"database","quota_enforced":true,"volumes":[{"name":"data","mount":"/data","quota_bytes":33554432,"generation":3}]}]`
+	if _, err := db.Exec(`UPDATE crews SET services_json=? WHERE id=?`, body, crew); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO service_runtime_intents(id,crew_id,service_name,desired_state,version,updated_at) VALUES('custom-journal-intent',?,'database','running',7,'2026-10-01T16:00:00Z')`, crew); err != nil {
+		t.Fatal(err)
+	}
+	probe := &snapshotProbe{fail: true}
+	result, err := CreateBackup(t.Context(), db, CreateOptions{Scope: ScopeWorkspace, WorkspaceID: ws, OutputDir: t.TempDir(), Passphrase: "synthetic-custom-passphrase", Actor: covAdminActor(), Categories: []string{CategoryJournal}, ServiceSnapshots: probe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probe.stop != 0 || probe.export != 0 || result.Manifest.Contents.ServiceSnapshots != 0 {
+		t.Fatal("custom journal export touched an unselected service")
+	}
+}
+
+func TestQuotaSnapshotGuardsIgnoreDeletedCrewDeclarations(t *testing.T) {
+	db := openMigratedDBCov(t)
+	ws, crew := seedCovWorkspace(t, db, "deleted-quota")
+	if _, err := db.Exec(`UPDATE crews SET services_json=?,deleted_at='2026-10-01T16:00:00Z' WHERE id=?`, `[{"name":"database","quota_enforced":true,"volumes":[{"name":"data","mount":"/data","quota_bytes":33554432,"generation":3}]}]`, crew); err != nil {
+		t.Fatal(err)
+	}
+	dump, err := DumpWorkspace(t.Context(), db, ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = requireSupportedDumpServiceBackups(dump, nil); err != nil {
+		t.Fatal(err)
+	}
+	p := &ExtractedPayload{DBDump: dump, serviceImages: map[string]string{}, serviceMetadata: map[string]serviceSnapshot{}}
+	if _, err = p.prepareServiceRestorePlan(t.Context(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(dump.Tables["crews"]) != 1 {
+		t.Fatal("tombstone was removed from history")
+	}
+}

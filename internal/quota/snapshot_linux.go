@@ -62,7 +62,23 @@ func (r snapshotReader) Read(p []byte) (int, error) {
 
 func (b *Backend) Export(ctx context.Context, k Key, size int64, dst io.Writer) (result error) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	locked := true
+	owned := false
+	defer func() {
+		if !locked {
+			b.mu.Lock()
+		}
+		if owned {
+			delete(b.activeSnapshots, k.id())
+		}
+		b.mu.Unlock()
+	}()
+	if b.activeSnapshots[k.id()] {
+		b.mu.Unlock()
+		locked = false
+		// Do not erase the other operation's ownership in our deferred cleanup.
+		return ErrUnavailable
+	}
 	if b.lock == nil || Validate(k, size) != nil || dst == nil {
 		return ErrDenied
 	}
@@ -76,6 +92,13 @@ func (b *Backend) Export(ctx context.Context, k Key, size int64, dst io.Writer) 
 	if err = b.offline(ctx, d); err != nil {
 		return err
 	}
+	if b.activeSnapshots == nil {
+		b.activeSnapshots = map[string]bool{}
+	}
+	b.activeSnapshots[k.id()] = true
+	owned = true
+	b.mu.Unlock()
+	locked = false
 	// Restore the helper mount even after a disconnect. Runtime remains fenced by
 	// the caller until capture succeeds; no application alias is resurrected here.
 	defer func() { result = errors.Join(result, b.attachDescriptor(context.WithoutCancel(ctx), d)) }()
@@ -96,7 +119,23 @@ func (b *Backend) Export(ctx context.Context, k Key, size int64, dst io.Writer) 
 // offline fsck. An interrupted or invalid import cannot be mounted by Recover.
 func (b *Backend) Import(ctx context.Context, k Key, size int64, src io.Reader) (Descriptor, error) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	locked := true
+	owned := false
+	defer func() {
+		if !locked {
+			b.mu.Lock()
+		}
+		if owned {
+			delete(b.activeSnapshots, k.id())
+		}
+		b.mu.Unlock()
+	}()
+	if b.activeSnapshots[k.id()] {
+		b.mu.Unlock()
+		locked = false
+		// Do not erase the other operation's ownership in our deferred cleanup.
+		return Descriptor{}, ErrUnavailable
+	}
 	if b.lock == nil || Validate(k, size) != nil || src == nil {
 		return Descriptor{}, ErrDenied
 	}
@@ -137,6 +176,18 @@ func (b *Backend) Import(ctx context.Context, k Key, size int64, src io.Reader) 
 	if err = unix.Fallocate(int(f.Fd()), 0, 0, size); err != nil {
 		return Descriptor{}, err
 	}
+	// Fallocate has charged the image on disk. Allocation controls are now
+	// independent of this image's potentially long stream and fsck.
+	if err = reservation.Close(); err != nil {
+		return Descriptor{}, err
+	}
+	if b.activeSnapshots == nil {
+		b.activeSnapshots = map[string]bool{}
+	}
+	b.activeSnapshots[k.id()] = true
+	owned = true
+	b.mu.Unlock()
+	locked = false
 	if _, err = io.CopyN(f, snapshotReader{ctx, src}, size); err != nil {
 		return Descriptor{}, err
 	}

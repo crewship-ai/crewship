@@ -5,12 +5,15 @@ package quota
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 type snapshotZeroBytes struct{}
@@ -177,6 +180,53 @@ func TestLiveQuotaSnapshotProtocolBindsNamespaceAndRejectsPartialImport(t *testi
 	}
 	if _, err = client.Import(context.Background(), target, MinBytes, bytes.NewReader(image.Bytes())); err != nil {
 		t.Fatal(err)
+	}
+	// A stalled authenticated image stream must not monopolize the helper.
+	stalled, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stalled.Close()
+	_ = stalled.SetDeadline(time.Now().Add(5 * time.Second))
+	if err = json.NewEncoder(stalled).Encode(Request{Namespace: client.Namespace, Operation: "import", Key: partial, Bytes: MinBytes}); err != nil {
+		t.Fatal(err)
+	}
+	until := time.Now().Add(2 * time.Second)
+	active := false
+	for time.Now().Before(until) {
+		b.mu.Lock()
+		active = b.activeSnapshots[partial.id()]
+		b.mu.Unlock()
+		if active {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !active {
+		t.Fatal("streaming import never admitted")
+	}
+	controlCtx, cancelControl := context.WithTimeout(context.Background(), time.Second)
+	err = client.Release(controlCtx, Key{"unrelated", "database", "data", 1}, "crewship-quota-unrelated")
+	cancelControl()
+	if err != nil {
+		t.Fatalf("stream blocked unrelated RPC: %v", err)
+	}
+	if err = b.Close(); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("closed backend during active transfer: %v", err)
+	}
+	_ = stalled.Close()
+	until = time.Now().Add(2 * time.Second)
+	for time.Now().Before(until) {
+		b.mu.Lock()
+		active = b.activeSnapshots[partial.id()]
+		b.mu.Unlock()
+		if !active {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if active {
+		t.Fatal("disconnected import retained ownership")
 	}
 	wrong := Client{Socket: socket, Namespace: "wrong-instance"}
 	if err = wrong.Export(context.Background(), source, MinBytes, io.Discard); err == nil {

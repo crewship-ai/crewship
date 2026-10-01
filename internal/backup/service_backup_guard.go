@@ -68,6 +68,9 @@ func requireSupportedDumpServiceBackups(dump *DBDump, captured []serviceSnapshot
 		intents[key] = row
 	}
 	for _, row := range dump.Tables["crews"] {
+		if rowIsDeleted(row) {
+			continue
+		}
 		var raw string
 		switch value := row["services_json"].(type) {
 		case nil:
@@ -128,4 +131,18 @@ func requireSupportedServiceConfig(raw string, transportAvailable bool) error {
 		}
 	}
 	return nil
+}
+
+// Tombstones remain in logical dumps for history, but have no live disk promise.
+func rowIsDeleted(row map[string]any) bool {
+	switch value := row["deleted_at"].(type) {
+	case nil:
+		return false
+	case string:
+		return value != ""
+	case []byte:
+		return len(value) != 0
+	default:
+		return true
+	}
 }

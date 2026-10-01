@@ -340,14 +340,19 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 	opts.serviceCapture = &instanceServiceCapture{keeper: keeper}
 	go keeper.run(ctx, cancelCapture)
 	defer func() {
-		if retErr != nil {
+		if !opts.serviceCapture.completed {
 			return
 		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
 		for _, fence := range opts.serviceCapture.fences {
-			if err := servicelifecycle.EndBackupFence(context.WithoutCancel(ctx), db, fence.crew, fence.token); err != nil {
-				res = nil
-				retErr = err
-				return
+			if err := servicelifecycle.EndBackupFence(cleanupCtx, db, fence.crew, fence.token); err != nil {
+				if retErr == nil {
+					res = nil
+					retErr = err
+				}
+				slog.Error("backup: release instance service maintenance", "error", err)
+
 			}
 		}
 	}()
@@ -409,6 +414,19 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 	progress := func(phase string) {
 		if opts.Progress != nil {
 			opts.Progress(phase)
+		}
+	}
+	// Quota images may be large. Freeze only their owners while exporting,
+	// and open the instance-wide writer barrier for the consistent copy below.
+	// Older callers can pass an already-open window; release and reopen it
+	// through the configured controller rather than spending its cap on export.
+	if opts.Window != nil && opts.ServiceSnapshots != nil {
+		opts.Window.Release()
+		opts.Window = nil
+	}
+	if opts.serviceCapture != nil {
+		if err := opts.serviceCapture.capture(ctx, db, stage, sc, opts, workspaces); err != nil {
+			return nil, err
 		}
 	}
 	window := opts.Window
@@ -772,11 +790,6 @@ type stagedStore struct {
 // every staged file is written through sc, so nothing it stages is readable
 // on disk. On error the snapshot is freed and nil returned.
 func stageInstanceCopy(ctx context.Context, db *sql.DB, stage string, sc *stagingCipher, opts InstanceOptions, level ScopeLevel, workspaces []*instanceWorkspaceTarget, envRun *environmentRun) (_ map[string]*stagedStore, _ *database.MemorySnapshot, retErr error) {
-	if opts.serviceCapture != nil {
-		if err := opts.serviceCapture.capture(ctx, db, stage, sc, opts, workspaces); err != nil {
-			return nil, nil, err
-		}
-	}
 	ms, err := database.SnapshotToMemory(ctx, db)
 	if err != nil {
 		return nil, nil, fmt.Errorf("backup: snapshot database: %w", err)

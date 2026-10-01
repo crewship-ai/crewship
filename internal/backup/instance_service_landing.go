@@ -33,7 +33,7 @@ type instanceServiceLandingFence struct {
 
 const instanceServicePlanFile = "landing.json"
 
-func writeInstanceServicePlan(payload *ExtractedPayload, plan *serviceRestorePlan, dataDir string) error {
+func writeInstanceServicePlan(payload *ExtractedPayload, plan *serviceRestorePlan, dataDir string) (string, error) {
 	record := instanceServiceLanding{}
 	for _, item := range plan.items {
 		record.Items = append(record.Items, instanceServiceLandingItem{Source: item.source, Target: item.target, Image: filepath.Base(payload.serviceImages[item.source.name()])})
@@ -43,21 +43,22 @@ func writeInstanceServicePlan(payload *ExtractedPayload, plan *serviceRestorePla
 	}
 	raw, err := json.Marshal(record)
 	if err != nil {
-		return err
+		return "", err
 	}
-	path := filepath.Join(dataDir, RecoveredServicesDir, instanceServicePlanFile)
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	file, err := os.CreateTemp(filepath.Join(dataDir, RecoveredServicesDir), ".landing-*.json")
 	if err != nil {
-		return err
+		return "", err
 	}
+	path := file.Name()
 	if _, err = file.Write(raw); err == nil {
 		err = file.Sync()
 	}
 	closeErr := file.Close()
-	if err != nil {
-		return err
+	if err = errors.Join(err, closeErr); err != nil {
+		_ = os.Remove(path)
+		return "", err
 	}
-	return closeErr
+	return path, nil
 }
 
 type ServiceLandingOptions struct {
@@ -181,6 +182,9 @@ func LandRecoveredServices(ctx context.Context, db *sql.DB, dataDir string, runt
 			return 0, closeErr
 		}
 		if importErr != nil {
+			if err := ctx.Err(); err != nil {
+				return 0, errors.Join(importErr, err)
+			}
 			// A retry may find an already imported prefix. Accept it only after a
 			// fresh offline export proves its exact bytes, never merely its identity.
 			hash := sha256.New()

@@ -28,6 +28,7 @@ type Backend struct {
 	root               string
 	capacity, headroom int64
 	mu                 sync.Mutex
+	activeSnapshots    map[string]bool
 	lock               *os.File
 
 	// owner is the UID every catalog file and directory must belong to.
@@ -109,6 +110,9 @@ func (b *Backend) attachDescriptor(ctx context.Context, d Descriptor) error {
 func (b *Backend) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if len(b.activeSnapshots) != 0 {
+		return ErrUnavailable
+	}
 	if b.lock == nil {
 		return nil
 	}
@@ -180,6 +184,9 @@ func (b *Backend) command(ctx context.Context, name string, args ...string) erro
 func (b *Backend) Ensure(ctx context.Context, k Key, size int64, owner Owner) (Descriptor, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.activeSnapshots[k.id()] {
+		return Descriptor{}, ErrUnavailable
+	}
 	if b.lock == nil || !k.valid() || !validBytes(size) {
 		return Descriptor{}, ErrDenied
 	}
@@ -539,6 +546,9 @@ func (b *Backend) verify(d Descriptor) error {
 func (b *Backend) Verify(_ context.Context, k Key, size int64) (Descriptor, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.activeSnapshots[k.id()] {
+		return Descriptor{}, ErrUnavailable
+	}
 	if b.lock == nil || !k.valid() || !validBytes(size) {
 		return Descriptor{}, ErrDenied
 	}
@@ -551,6 +561,9 @@ func (b *Backend) Verify(_ context.Context, k Key, size int64) (Descriptor, erro
 func (b *Backend) Remove(ctx context.Context, k Key) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.activeSnapshots[k.id()] {
+		return ErrUnavailable
+	}
 	if b.lock == nil || !k.valid() {
 		return ErrDenied
 	}
@@ -654,6 +667,9 @@ func (b *Backend) RecoverReport(ctx context.Context) (RecoveryReport, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	var report RecoveryReport
+	if len(b.activeSnapshots) != 0 {
+		return report, ErrUnavailable
+	}
 	if b.lock == nil {
 		return report, ErrDenied
 	}
@@ -984,6 +1000,9 @@ var referenceName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,255}$`)
 func (b *Backend) Protect(_ context.Context, k Key, reference string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.activeSnapshots[k.id()] {
+		return ErrUnavailable
+	}
 	if b.lock == nil || !k.valid() || !referenceName.MatchString(reference) {
 		return ErrDenied
 	}
@@ -1011,6 +1030,9 @@ func (b *Backend) Protect(_ context.Context, k Key, reference string) error {
 func (b *Backend) Release(_ context.Context, k Key, reference string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.activeSnapshots[k.id()] {
+		return ErrUnavailable
+	}
 	if b.lock == nil || !k.valid() || !referenceName.MatchString(reference) {
 		return ErrDenied
 	}

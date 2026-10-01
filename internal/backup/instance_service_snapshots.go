@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ type instanceServiceCapture struct {
 	fences    []serviceBackupFence
 	snapshots []serviceSnapshot
 	keeper    *serviceFenceKeeper
+	completed bool
 }
 
 func (c *instanceServiceCapture) capture(ctx context.Context, db *sql.DB, stage string, sc *stagingCipher, opts InstanceOptions, workspaces []*instanceWorkspaceTarget) error {
@@ -44,7 +46,11 @@ func (c *instanceServiceCapture) capture(ctx context.Context, db *sql.DB, stage 
 	if closeTar != nil {
 		return closeTar
 	}
-	return closeFile
+	if closeFile != nil {
+		return closeFile
+	}
+	c.completed = true
+	return nil
 }
 
 func (c *instanceServiceCapture) write(tw *TarZstWriter, sc *stagingCipher, now time.Time) error {
@@ -173,8 +179,25 @@ func stageInstanceServiceRecovery(ctx context.Context, db *sql.DB, payload *Extr
 	if _, err = tx.ExecContext(ctx, `UPDATE service_backup_fences SET producer_until=''`); err != nil {
 		return err
 	}
-	if err = writeInstanceServicePlan(payload, plan, dataDir); err != nil {
+	temporaryPlan, err := writeInstanceServicePlan(payload, plan, dataDir)
+	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	defer os.Remove(temporaryPlan)
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	// Once committed, these images are referenced by the recovered database.
+	// Retain them on publication failure, with maintenance still in force.
+	payload.serviceRecoveryCommitted = true
+	path := filepath.Join(dataDir, RecoveredServicesDir, instanceServicePlanFile)
+	if err = os.Rename(temporaryPlan, path); err != nil {
+		return err
+	}
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }

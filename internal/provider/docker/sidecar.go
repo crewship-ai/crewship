@@ -331,6 +331,32 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 		}
 	}
 
+	// Registry IO is preparation, not a service mutation. Keep it outside the
+	// bounded operation lease so cold pulls do not consume its safety budget.
+	existing, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
+	if err != nil {
+		return nil, fmt.Errorf("sidecar %q: list containers: %w", team.Services[0].Name, err)
+	}
+	pulled := map[string]bool{}
+	for _, svc := range team.Services {
+		warm := false
+		name := "/" + p.sidecarContainerName(team.ID, team.Slug, svc.Name)
+		for _, item := range existing.Items {
+			for _, candidate := range item.Names {
+				if candidate == name && item.Image == svc.Image && item.Labels[sidecarSpecHashLabel] == computeSidecarSpecHash(&svc) {
+					warm = true
+				}
+			}
+		}
+		// A matching existing container retains the original warm-reattach
+		// behavior. The authoritative ownership/spec checks still run below.
+		if !warm && !pulled[svc.Image] {
+			if err := p.pullSidecarImage(ctx, svc.Image); err != nil {
+				return nil, fmt.Errorf("sidecar %q: %w", svc.Name, err)
+			}
+			pulled[svc.Image] = true
+		}
+	}
 	mu := p.lockForCrew(team.ID)
 	mu.Lock()
 	defer mu.Unlock()
@@ -374,7 +400,7 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 	ids = make(map[string]string, len(team.Services))
 	for i := range team.Services {
 		svc := &team.Services[i]
-		id, err := p.ensureSidecar(ctx, team.ID, team.Slug, svc)
+		id, err := p.ensurePreparedSidecar(ctx, team.ID, team.Slug, svc, true)
 		if err != nil {
 			return ids, fmt.Errorf("sidecar %q: %w", svc.Name, err)
 		}
@@ -408,6 +434,10 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 // stop + remove + recreate so apply is true sync for sidecars,
 // not just "fresh creates work."
 func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, svc *provider.CrewService) (string, error) {
+	return p.ensurePreparedSidecar(ctx, crewID, crewSlug, svc, false)
+}
+
+func (p *Provider) ensurePreparedSidecar(ctx context.Context, crewID, crewSlug string, svc *provider.CrewService, imagePrepared bool) (string, error) {
 	quotaMounts, err := p.quotaServiceVolumes(ctx, crewID, crewSlug, svc)
 	if err != nil {
 		return "", fmt.Errorf("service quota catalog: %w", err)
@@ -529,9 +559,12 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 		return c.ID, nil
 	}
 
-	// Pull image (best-effort: tolerate offline + local copy).
-	if err := p.pullSidecarImage(ctx, svc.Image); err != nil {
-		return "", err
+	// Direct callers still prepare their own image. EnsureCrewServices has
+	// already pulled it before acquiring bounded mutation admission.
+	if !imagePrepared {
+		if err := p.pullSidecarImage(ctx, svc.Image); err != nil {
+			return "", err
+		}
 	}
 
 	// Volumes: ensure each named volume exists before container

@@ -175,6 +175,7 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 	out.WorkspaceID = workspaceID
 	maintenance, err := backup.ServiceMaintenanceStatus(ctx, h.db, workspaceID)
 	if err != nil {
+		h.logger.Error("backup service maintenance status", "workspace_id", workspaceID, "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to query service maintenance status")
 		return
 	}

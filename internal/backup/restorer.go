@@ -100,8 +100,9 @@ type ExtractedPayload struct {
 
 	// Complete environments (environment_payload.go).
 	environments
-	serviceImages   map[string]string
-	serviceMetadata map[string]serviceSnapshot
+	serviceImages            map[string]string
+	serviceMetadata          map[string]serviceSnapshot
+	serviceRecoveryCommitted bool
 }
 
 // storageOrDefault returns the payload's captured StorageOps, or the

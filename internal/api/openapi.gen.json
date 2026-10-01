@@ -25701,6 +25701,11 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "dry_run": {
+                    "type": "boolean"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -25711,6 +25716,18 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "dry_run": {
+                      "type": "boolean"
+                    },
+                    "images": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "images",
+                    "dry_run"
+                  ],
                   "type": "object"
                 }
               }
