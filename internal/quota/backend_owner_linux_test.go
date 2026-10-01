@@ -4,6 +4,7 @@ package quota
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -70,5 +71,45 @@ func TestEnsureLeavesExistingVolumeRootAlone(t *testing.T) {
 	}
 	if len(u.ran("mkfs.ext4")) != 0 {
 		t.Fatal("existing volume reformatted")
+	}
+}
+
+// The metadata is durable before the first attach. When that attach fails
+// (a busy loop device), the retry takes the existing-entry path; it must
+// still hand the fresh volume over without lost+found, or initdb refuses
+// it forever.
+func TestEnsurePreparesFreshRootAfterFailedFirstAttach(t *testing.T) {
+	u := newUnitBackend(t)
+	k := Key{"crew", "database", "data", 1}
+	attempts := 0
+	u.attach = func(_ context.Context, d Descriptor) error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("loop device busy")
+		}
+		if err := os.Mkdir(filepath.Join(d.Mount, "lost+found"), 0700); err != nil && !os.IsExist(err) {
+			return err
+		}
+		return nil
+	}
+	if _, err := u.Ensure(t.Context(), k, unitSize, Owner{}); err == nil {
+		t.Fatal("first Ensure succeeded despite the failed attach")
+	}
+	d, err := u.Ensure(t.Context(), k, unitSize, Owner{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(d.Mount, "lost+found")); !os.IsNotExist(err) {
+		t.Fatalf("retried fresh volume handed over with lost+found: %v", err)
+	}
+	// Once prepared, later attaches never touch the root again.
+	if err := os.Mkdir(filepath.Join(d.Mount, "lost+found"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := u.Ensure(t.Context(), k, unitSize, Owner{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(d.Mount, "lost+found")); err != nil {
+		t.Fatal("prepared volume root touched again")
 	}
 }

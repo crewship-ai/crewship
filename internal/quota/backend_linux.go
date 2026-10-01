@@ -181,7 +181,10 @@ func (b *Backend) Ensure(ctx context.Context, k Key, size int64, owner Owner) (D
 		if d.Bytes != size {
 			return Descriptor{}, ErrDenied
 		}
-		return d, b.attachDescriptor(ctx, d)
+		if err = b.attachDescriptor(ctx, d); err != nil {
+			return Descriptor{}, err
+		}
+		return d, b.finishPrepare(k, d)
 	}
 	if !os.IsNotExist(err) {
 		return Descriptor{}, err
@@ -225,12 +228,20 @@ func (b *Backend) Ensure(ctx context.Context, k Key, size int64, owner Owner) (D
 		_ = os.Remove(record)
 		return Descriptor{}, err
 	}
+	// The unprepared marker is durable before the metadata and removed
+	// only after prepareRoot succeeds, so a failed first attach still
+	// prepares the root on the retry.
+	unprepared := b.unpreparedPath(k)
+	if err = atomicFile(unprepared, nil); err != nil {
+		return Descriptor{}, err
+	}
 	allocated := false
 	defer func() {
 		f.Close()
 		if !allocated {
 			os.Remove(image)
 			os.Remove(record)
+			os.Remove(unprepared)
 		}
 	}()
 	if err = unix.Fallocate(int(f.Fd()), 0, 0, size); err != nil {
@@ -260,7 +271,26 @@ func (b *Backend) Ensure(ctx context.Context, k Key, size int64, owner Owner) (D
 	if err = b.attachDescriptor(ctx, d); err != nil {
 		return Descriptor{}, err
 	}
-	return d, b.prepareRoot(d)
+	return d, b.finishPrepare(k, d)
+}
+
+// finishPrepare prepares an attached root whose unprepared marker is still
+// present, then removes the marker. Entries without one are never touched.
+func (b *Backend) finishPrepare(k Key, d Descriptor) error {
+	marker := b.unpreparedPath(k)
+	if _, err := os.Lstat(marker); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if err := b.prepareRoot(d); err != nil {
+		return err
+	}
+	return os.Remove(marker)
+}
+
+func (b *Backend) unpreparedPath(k Key) string {
+	return filepath.Join(b.root, "images", k.id()+".unprepared")
 }
 
 // mkfsArgs formats a fully allocated image. root_owner hands the volume
@@ -338,6 +368,11 @@ func (b *Backend) adoptUnpublished(k Key) error {
 			return err
 		}
 		b.log("quota catalog: quarantined image %s without metadata", k.id())
+	}
+	// Without metadata no root was handed out; a fresh allocation writes
+	// its own marker.
+	if err := os.Remove(b.unpreparedPath(k)); err != nil && !os.IsNotExist(err) {
+		return err
 	}
 	// An empty mount directory from the interrupted attempt is harmless and
 	// reused; a mounted one would have metadata.
@@ -553,8 +588,10 @@ func (b *Backend) Remove(ctx context.Context, k Key) error {
 	if err = os.Remove(meta); err != nil {
 		return err
 	}
-	if err = os.Remove(filepath.Join(b.root, "images", k.id()+".references")); err != nil && !os.IsNotExist(err) {
-		return err
+	for _, suffix := range []string{".references", ".unprepared"} {
+		if err = os.Remove(filepath.Join(b.root, "images", k.id()+suffix)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
 	return os.Remove(mount)
 }
@@ -615,7 +652,7 @@ func (b *Backend) RecoverReport(ctx context.Context) (RecoveryReport, error) {
 		b.log(format, args...)
 	}
 	quarantine := func(id, reason string) error {
-		for _, suffix := range []string{".json", ".ext4", ".references"} {
+		for _, suffix := range []string{".json", ".ext4", ".references", ".unprepared"} {
 			if err := b.quarantine(id + suffix); err != nil {
 				return err
 			}
@@ -635,7 +672,7 @@ func (b *Backend) RecoverReport(ctx context.Context) (RecoveryReport, error) {
 			_ = os.Remove(filepath.Join(dir, id+".allocating")) // finished; record outlived a crash
 			continue
 		}
-		for _, suffix := range []string{".ext4", ".allocating"} {
+		for _, suffix := range []string{".ext4", ".unprepared", ".allocating"} {
 			if err := os.Remove(filepath.Join(dir, id+suffix)); err != nil && !os.IsNotExist(err) {
 				return report, err
 			}
