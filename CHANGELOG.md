@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Idle runtimes and unused cache images could only be reclaimed by hand.** Two opt-in settings, both off by default: `CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS` removes this installation's stopped runtime containers of live crews after that many days stopped (volumes and host data stay, the next start recreates the runtime), and `CREWSHIP_CACHE_EVICTION` removes `crewship-cache:*` images no container on the daemon has used for an hour, never during a build and never forced; the next start rebuilds them.
 - **Deleted crews could keep runtime containers running after Docker failures.** A periodic controller now stops and removes containers of positively deleted owners with matching installation labels (bound to both the database and the data directory, so servers sharing one data directory never act on each other's containers), retries after reconnect, and preserves volumes and mounted host data. Crew deletion returns a container cleanup observation; admin and local doctor diagnostics retain failures across restarts. Legacy and foreign containers remain untouched.
 - **Crew deletion confirmation described the wrong data effects.** The UI and CLI now warn that runtime processes and container writable files are lost, while automatic cleanup preserves mounts; the existing explicit sidecar data deletion remains visible.
 
