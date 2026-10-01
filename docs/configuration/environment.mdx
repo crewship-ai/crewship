@@ -36,6 +36,8 @@ All Crewship configuration can be set via environment variables. These override 
 | `CREWSHIP_RUNTIME` | (unset — uses `container.default_runtime`, else `runc`) | Overrides the OCI runtime handed to Docker for crew containers (`runc`, `runsc`, `kata-runtime`, `sysbox-runc`). Wins over the YAML `container.default_runtime`. Read by `internal/provider/docker/docker_container.go`. |
 | `CREWSHIP_CONTAINER_NETWORK` | `crewship-agents` | Docker bridge network name |
 | `CREWSHIP_CONTAINER_PREFIX` | (empty) | Container name prefix for multi-instance isolation |
+| `CREWSHIP_QUOTA_HELPER_SOCKET` | (unset — quota services with volumes cannot start) | Absolute path of the root quota helper's socket, normally `/run/crewship-quota/INSTANCE/helper.sock`. Set together with `CREWSHIP_QUOTA_HELPER_NAMESPACE`; the helper installer writes both. YAML: `container.quota_helper_socket`. See [Service disk quotas](/guides/service-disk-quotas). |
+| `CREWSHIP_QUOTA_HELPER_NAMESPACE` | (unset) | Immutable identity of this Crewship database in the quota helper (letters, digits, `_`, `-`; up to 128 characters, starting with a letter or digit). Never reuse it for another database or clone. YAML: `container.quota_helper_namespace`. |
 | `CREWSHIP_RUNTIME_IMAGE` | `debian:bookworm-slim` | Default agent runtime image for crews without an explicit `runtime_image`. Any glibc-based Linux image works — Crewship bind-mounts the sidecar and entrypoint at runtime. |
 | `CREWSHIP_SIDECAR_ENABLED` | `false` | Enable sidecar proxy (`true` or `1`) |
 | `CREWSHIP_SIDECAR_PATH` | autodetected | Absolute host path to the `crewship-sidecar` Go binary. See [Devcontainers reference](/configuration/devcontainers#environment-variables) for autodetect order. |

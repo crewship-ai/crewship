@@ -1,0 +1,170 @@
+---
+title: "Service disk quotas"
+description: "Run a crew service with a read-only root, bounded scratch space and fixed-size persistent volumes."
+icon: "hard-drive"
+stability: experimental
+tag: Experimental
+---
+
+By default a crew service (Postgres, Redis, …) gets memory, CPU and process
+caps, but its writable image root and its named volumes have no size limit: a
+runaway service can fill the host disk. A service can opt in to **disk quota
+enforcement**. It then runs with a read-only root, bounded `/tmp` and `/run`,
+and persistent volumes that are fixed-size ext4 filesystems preallocated on
+the host. Writes past the capacity fail inside the service with `ENOSPC`
+instead of filling the host.
+
+Services that do not opt in keep exactly their previous behavior. Upgrading
+Crewship does not recreate them or change their containers.
+
+## Declare a quota-enforced service
+
+In a crew manifest:
+
+```yaml
+services:
+  - name: postgres
+    image: postgres:16
+    quota_enforced: true
+    volumes:
+      - name: pgdata
+        mount: /var/lib/postgresql/data
+        quota_bytes: 2147483648   # 2 GiB
+        generation: 1             # optional, defaults to 1
+```
+
+| Field | Where | Notes |
+| --- | --- | --- |
+| `quota_enforced` | service | `true` opts the service in. Every volume of the service then needs `quota_bytes`. |
+| `quota_bytes` | volume | Capacity in bytes, a whole number of MiB from 32 MiB to 64 GiB. It includes filesystem metadata, so usable space is slightly lower. |
+| `generation` | volume | Positive whole number, default `1`. Each generation is its own filesystem with a fixed capacity. |
+
+`quota_bytes` and `generation` are only accepted on quota-enforced services.
+The same fields are editable in **Crew Settings → Service disk quotas**.
+
+A quota-enforced service:
+
+- runs with a **read-only image root**; `/tmp` (64 MiB) and `/run` (16 MiB)
+  are tmpfs mounts charged to the memory limit;
+- gets 2 GiB of memory with no extra swap, 1 CPU and 512 processes;
+- keeps at most 30 MB of rotated `json-file` logs (this overrides the daemon's
+  default log driver for this service only);
+- may not use image-declared volumes it has not listed: if the image declares
+  `VOLUME /var/lib/postgresql/data`, list that path under `volumes`;
+- cannot mount a volume at `/`, `/tmp`, `/run`, `/var/run`, `/dev`, `/proc` or
+  `/sys`.
+
+A new volume is formatted for the image's numeric `USER` (for example
+`USER 1001`) and handed over empty, without `lost+found`, so initialisers such
+as `initdb` accept it. Images that name their user (`USER postgres`) get a
+root-owned volume root; the official database images start as root and fix
+ownership in their entrypoint.
+
+## Change capacity: bump the generation
+
+A generation's capacity never changes. To resize, set a **new generation**
+with the new `quota_bytes`. The new generation is a new, empty filesystem: the
+service is recreated on it, and the data on the previous generation is not
+copied. Migrate it yourself (for example `pg_dump` from the old service before
+the switch, restore after).
+
+Changing `quota_bytes` while keeping the generation is rejected when you save
+(`400` from the API, a plan error from `crewship apply`) with the generation to
+use.
+
+Old generations are not deleted when you switch: they keep their disk
+reservation so you can still read from them. They are released when the crew is
+deleted. There is no command to release a single old generation yet, so plan
+host capacity for both generations during a migration.
+
+## Restarts
+
+A quota-enforced service without a persisted intent restarts on failure
+through Docker, like any other service. Once you persist an intent with
+[`crewship crew service-state`](/cli/crew#crewship-crew-service-state), the
+durable service controller owns its restarts and Docker's restart policy is
+disabled, so a stopped service stays stopped across Docker and host restarts.
+
+## Backups
+
+While any service of a crew has quota volumes, **crew and workspace backups
+of that crew's workspace are refused** with an explicit error. The contents of
+quota volumes cannot be captured until snapshot transport for them exists,
+and a bundle that silently omitted them would not restore the service. See
+[Backup](/guides/backup).
+
+## Host requirements
+
+Quota services need, on the Docker host:
+
+- **Swap and PID cgroup accounting.** `docker info` must report swap limit
+  and PID limit support. Without it Docker accepts the limits but does not
+  enforce them, so Crewship refuses to start the service and names the missing
+  controller. On cgroup v1 hosts, swap accounting needs the `swapaccount=1`
+  kernel parameter.
+- **The quota helper**, for services with volumes. Without it a quota service
+  with volumes does not start; it never falls back to unlimited storage.
+  A quota service without volumes needs only the cgroup support above.
+
+### Install the helper
+
+The helper is a small root process that owns the volume images. Each Crewship
+database gets its own helper instance, catalog and socket. Install it as root
+on the Docker host:
+
+```bash
+sudo scripts/install-quota-helper.sh \
+  --instance crewship-prod \
+  --server-unit crewship.service \
+  --binary /usr/local/bin/crewship-quota-helper \
+  --capacity-bytes 17179869184 \
+  --activate
+```
+
+| Flag | Default | Notes |
+| --- | --- | --- |
+| `--instance` | (required) | Immutable identity of this Crewship database. Never reuse it for another database or clone. |
+| `--server-unit` | (required) | The systemd unit of the Crewship server, plain (`crewship.service`) or a template instance (`crewship-ws@3.service`). |
+| `--binary` | (required) | Absolute path of the built `crewship-quota-helper`. |
+| `--server-uid` | `1000` | UID the Crewship server runs as. `1001` and `1002` (agent and credential broker) are refused. |
+| `--capacity-bytes` | 16 GiB | Total of all preallocated volumes for this instance. |
+| `--headroom-bytes` | 1 GiB | Free host disk that allocation never consumes. |
+| `--activate` | off | Start the helper now. Otherwise it starts at the next boot. |
+
+The installer needs `systemctl`, `mount`, `umount`, `mkfs.ext4`, `losetup`
+and `python3`. It writes a drop-in for the server unit that:
+
+- sets `CREWSHIP_QUOTA_HELPER_SOCKET` and `CREWSHIP_QUOTA_HELPER_NAMESPACE`
+  (see [Environment variables](/configuration/environment#container));
+- orders the server after the helper with `Wants=` and `After=`. A helper
+  failure does not stop the server; only quota services with volumes fail to
+  start.
+
+It does not touch `CREWSHIP_CONTAINER_PREFIX` and restarts nothing. The
+server picks up the drop-in at its next restart.
+
+### Recovery and quarantine
+
+On start the helper remounts every volume. It deletes allocations a crash
+interrupted, and moves malformed catalog entries (metadata without an image,
+an image without metadata, corrupt or inconsistent metadata) to
+`/var/lib/crewship-quota/INSTANCE/quarantine/` instead of refusing to start.
+The result shows in `systemctl status crewship-quota-helper@INSTANCE`, and each
+decision is in the helper's journal. Quarantined images still count against
+`--capacity-bytes` until you inspect and delete them.
+
+## Crew rename and deletion
+
+Volumes are bound to the crew's id, service, volume name, capacity and
+generation, not to its slug: renaming a crew keeps its data. Deleting a crew
+removes its quota volumes. The helper releases and deletes the image first and
+the Docker volume last, so an interrupted deletion is completed by the next
+one.
+
+## Limitations
+
+- Old generations are only released when the crew is deleted (see above).
+- Image users given by name are not resolved; such volumes stay root-owned.
+- The physical tests (overflow, helper restart, host reboot) run only in
+  dedicated guests with explicit opt-in. No CI workflow runs them yet.
+- Quota volume contents are not part of backups yet.

@@ -179,6 +179,7 @@
                   "guides/backup",
                   "guides/database-performance",
                   "guides/docker-socket-proxy",
+                  "guides/service-disk-quotas",
                   "guides/migrations",
                   "guides/migration-checklist",
                   "guides/troubleshooting",
