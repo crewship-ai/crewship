@@ -139,11 +139,14 @@ The response inlines both row count and unread count so the bell badge renders f
   "count": 1,
   "unread_count": 7,
   "has_more": false,
-  "active_by_kind": { "waitpoint": 2, "escalation": 1, "keeper_review": 4 }
+  "active_by_kind": { "waitpoint": 2, "escalation": 1, "failed_run": 4 },
+  "decision_count": 3
 }
 ```
 
-`active_by_kind` is an **exact** per-kind count of the caller's visible not-resolved items, independent of the request's own `state`/`kind` filters — the dashboard's "Needs your attention" counts come from it, because `rows` are a `limit` window (default 100) and silently plateau there. It is omitted — not empty — when the aggregate could not be computed completely, and its absence never means "nothing active".
+`active_by_kind` is an **exact** per-kind count of the caller's visible not-resolved items, independent of the request's own `state`/`kind` filters — the dashboard's "Needs your attention" counts come from it, because `rows` are a `limit` window (default 100) and silently plateau there. Keys are real item kinds (`waitpoint`, `escalation`, `failed_run`, `message`, `memory_consolidation`, `run_needs_human`, `schedule_missed`, …), and a kind with no active items has no key. The field is `omitempty`: it is absent when nothing is active **and** when the aggregate could not be computed completely, so its absence alone never means "nothing active".
+
+`decision_count` is the number of active items that actually block on a person (waitpoints, actionable escalations, blocking items such as `run_needs_human`; source-less Keeper advisories are excluded). It is present on every successful aggregate — `0` is a real, known-empty answer — and absent only when the aggregate failed. The dashboard's "Needs your attention" headline uses it, falling back to counting its windowed rows when it is absent.
 
 ### `GET /api/v1/inbox/count`
 
