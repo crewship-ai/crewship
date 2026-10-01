@@ -146,3 +146,28 @@ func TestPruneCrewRuntimes_IncompleteRefSkipped(t *testing.T) {
 // Provider must satisfy the optional interface so the API layer can
 // type-assert it.
 var _ provider.CrewRuntimePruner = (*Provider)(nil)
+
+// A20: a resource the daemon refuses to remove is reported, not just logged;
+// the rest of the teardown still runs.
+func TestPruneCrewRuntimes_PerResourceFailureIsReturned(t *testing.T) {
+	var delC, delV []string
+	inner := runtimeDaemonHandler(t, "crewship", &delC, &delV)
+	p, cleanup := newFakeDockerProvider(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/volumes/crewship-home-engineering-crew1") {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"message":"volume is in use"}`))
+			return
+		}
+		inner(w, r)
+	})
+	defer cleanup()
+	p.cfg.ContainerPrefix = "crewship"
+
+	removed, err := p.PruneCrewRuntimes(context.Background(), []provider.CrewRef{{ID: "crew1", Slug: "engineering"}})
+	if err == nil || !strings.Contains(err.Error(), "crewship-home-engineering-crew1") {
+		t.Fatalf("partial teardown reported as complete: removed=%v err=%v", removed, err)
+	}
+	if len(delV) == 0 || len(removed) == 0 {
+		t.Fatalf("one failure stopped the rest: removed=%v", removed)
+	}
+}

@@ -572,14 +572,18 @@ func TestSeedNuke_EveryPhaseFailingIsAggregated(t *testing.T) {
 	} {
 		s.OnGet(p, garbage)
 	}
+	// The runtime teardown is the one phase that stops the nuke instead of
+	// being aggregated (TestNukeAll_StopsBeforeDeletingWhenRuntimesFail), so it
+	// succeeds here to let every other phase report.
+	s.OnPost("/api/v1/admin/prune-crew-runtimes", clitest.JSONResponse(200, map[string]any{"removed": []string{}, "count": 0}))
 
 	err := seedNuke(context.Background(), covStubClient(s))
-	// 10 original list phases + 3 full-teardown phases (inbox purge, escalation
-	// pass, crew-runtime teardown), all failing on the unrouted/garbage stubs.
-	if err == nil || !strings.Contains(err.Error(), "workspace cleanup had 14 failures") {
-		t.Fatalf("want 14 aggregated failures, got %v", err)
+	// 10 original list phases + inbox purge, escalation pass and keeper
+	// requests, all failing on the unrouted/garbage stubs.
+	if err == nil || !strings.Contains(err.Error(), "workspace cleanup had 13 failures") {
+		t.Fatalf("want 13 aggregated failures, got %v", err)
 	}
-	for _, frag := range []string{"projects:", "labels:", "agents:", "credentials:", "integrations:", "pipeline-webhooks:", "pipeline-schedules:", "pipelines:", "crews:", "inbox:", "escalations:", "crew runtimes:"} {
+	for _, frag := range []string{"projects:", "labels:", "agents:", "credentials:", "integrations:", "pipeline-webhooks:", "pipeline-schedules:", "pipelines:", "crews:", "inbox:", "escalations:"} {
 		if !strings.Contains(err.Error(), frag) {
 			t.Errorf("missing %q in %v", frag, err)
 		}

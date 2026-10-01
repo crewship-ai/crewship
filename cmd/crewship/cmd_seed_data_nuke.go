@@ -350,18 +350,21 @@ func nukeAll(ctx context.Context, client *cli.Client) error {
 
 	var failures []string
 
-	// Escalations first — they carry a workspace_id but NO foreign key, so a
+	// Crew docker runtimes FIRST, and nothing else if they fail. The server
+	// enumerates the workspace's LIVE crews (deleted_at IS NULL): once the crew
+	// rows are deleted below, nothing can find their runtimes again. So an
+	// unavailable or partial teardown stops the nuke here, with every crew
+	// still in place for a retry, instead of reporting success over orphaned
+	// containers. Cached images are preserved (no rebuild forced on reseed).
+	if _, err := nukeRuntimes(ctx, client); err != nil {
+		return fmt.Errorf("crew runtimes: %w — nothing else was deleted; crews are kept so the nuke can be retried", err)
+	}
+
+	// Escalations next — they carry a workspace_id but NO foreign key, so a
 	// crew delete never cascades to them; clear them while the crews (needed to
 	// enumerate) still exist.
 	if err := nukeEscalations(ctx, client, ""); err != nil {
 		failures = append(failures, fmt.Sprintf("escalations: %v", err))
-	}
-	// Crew docker runtimes next — the server enumerates the workspace's LIVE
-	// crews (deleted_at IS NULL), so this too must precede crew deletion.
-	// Cached images are preserved (no rebuild forced on reseed). A docker-less
-	// server 503s — tolerated inside nukeRuntimes, not fatal.
-	if err := nukeRuntimes(ctx, client); err != nil {
-		failures = append(failures, fmt.Sprintf("crew runtimes: %v", err))
 	}
 	// Inbox is independent of crews (failed-run spam, resolved escalations,
 	// messages) — no per-entity delete cascades to it.
@@ -629,29 +632,50 @@ func nukeEscalations(ctx context.Context, client *cli.Client, crewFilter string)
 	return nil
 }
 
+// runtimeTeardown is what nukeRuntimes established about the docker side.
+type runtimeTeardown string
+
+const (
+	runtimeTeardownDone        runtimeTeardown = "removed"
+	runtimeTeardownUnsupported runtimeTeardown = "unsupported"
+)
+
 // nukeRuntimes tears down every crew's docker container(s)+volumes via the
 // server. Crew DB deletion is a soft-delete that never touched docker, so
-// without this the runtimes orphan. A docker-less server answers 503 — expected
-// on a dev box without docker — so we warn and continue rather than failing the
-// whole nuke over it. Cached images are preserved server-side (no rebuild forced
-// on reseed).
-func nukeRuntimes(ctx context.Context, client *cli.Client) error {
+// without this the runtimes orphan. Cached images are preserved server-side (no
+// rebuild forced on reseed).
+//
+// It fails rather than reports success whenever it cannot vouch for the
+// teardown: no runtime provider at all ("unavailable" — docker may simply have
+// failed at boot, its runtimes still on the daemon) and a partial teardown
+// (any container or volume the server could not remove) are errors. Only a
+// provider that never makes docker runtimes ("unsupported") is passed over,
+// and then said so.
+func nukeRuntimes(ctx context.Context, client *cli.Client) (runtimeTeardown, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return "", err
 	}
 	r, err := client.Post("/api/v1/admin/prune-crew-runtimes", nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer r.Body.Close()
-	if r.StatusCode == http.StatusServiceUnavailable {
-		fmt.Fprintln(os.Stderr, "  ! nuke: docker not configured on server; skipping crew runtime teardown")
-		return nil
+	var body struct {
+		Reason  string   `json:"reason" yaml:"reason"`
+		Removed []string `json:"removed" yaml:"removed"`
+		Count   int      `json:"count" yaml:"count"`
 	}
-	if r.StatusCode >= 300 {
-		return fmt.Errorf("POST /api/v1/admin/prune-crew-runtimes: HTTP %d", r.StatusCode)
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	switch {
+	case r.StatusCode == http.StatusServiceUnavailable && body.Reason == string(runtimeTeardownUnsupported):
+		fmt.Fprintln(os.Stderr, "  ! nuke: this server's container provider does not run docker runtimes; no runtime teardown to do")
+		return runtimeTeardownUnsupported, nil
+	case r.StatusCode == http.StatusServiceUnavailable:
+		return "", fmt.Errorf("crew runtime teardown unavailable: the server has no container runtime provider, so runtimes from an earlier start may still exist")
+	case r.StatusCode >= 300:
+		return "", fmt.Errorf("crew runtime teardown incomplete (HTTP %d): %d resource(s) removed before the failure; see the server log for the rest", r.StatusCode, body.Count)
 	}
-	return nil
+	return runtimeTeardownDone, nil
 }
 
 // ════════════════════════════════════════════════════════════════════════════
