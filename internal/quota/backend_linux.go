@@ -583,24 +583,23 @@ func (b *Backend) Remove(ctx context.Context, k Key) error {
 		if err = b.command(ctx, "/usr/bin/umount", d.Mount); err != nil {
 			return err
 		}
-		if err = b.command(ctx, "/usr/sbin/losetup", "-d", dev); err != nil {
+	}
+	// Postcondition, after the umount or with nothing mounted here: no
+	// loop device backing the image may still be attached anywhere. Whether
+	// a copy in another namespace went away with the umount depends on its
+	// parent mount's propagation and on child mounts, which the pre-check
+	// cannot prove; deleting the image under a surviving copy would leave
+	// that filesystem alive and its space unreclaimed.
+	loops, err := b.loopsBacking(image)
+	if err != nil {
+		return err
+	}
+	for _, loop := range loops {
+		if err = b.checkAttachedElsewhere(loop, ""); err != nil {
 			return err
 		}
-	} else {
-		// Not mounted here, but a loop device may still back the image
-		// and be mounted in another namespace: deleting the image would
-		// leave that filesystem alive and its space unreclaimed.
-		loops, err := b.loopsBacking(image)
-		if err != nil {
+		if err = b.command(ctx, "/usr/sbin/losetup", "-d", loop); err != nil {
 			return err
-		}
-		for _, loop := range loops {
-			if err = b.checkAttachedElsewhere(loop, ""); err != nil {
-				return err
-			}
-			if err = b.command(ctx, "/usr/sbin/losetup", "-d", loop); err != nil {
-				return err
-			}
 		}
 	}
 	if err = os.Remove(image); err != nil {

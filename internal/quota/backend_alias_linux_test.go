@@ -51,10 +51,11 @@ func TestMountAlias(t *testing.T) {
 	}
 }
 
-// A volume that is no longer mounted in the helper's namespace can still
-// have a live loop device that another namespace mounts. Remove must find
-// the device from the image, refuse while anything mounts it, and detach it
-// before deleting the image otherwise.
+// After the helper's umount, or when the helper never mounted the volume,
+// a loop device backing the image can still be mounted in another
+// namespace: a copy the umount did not propagate to. Remove must find the
+// device from the image, refuse while anything mounts it, and detach it
+// before deleting the image otherwise. Both Remove branches end here.
 func TestRemoveChecksLoopOfUnmountedImage(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
