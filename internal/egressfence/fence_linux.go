@@ -93,8 +93,9 @@ func Apply(s Spec) error {
 
 // Check reports whether the fence for s is installed in the current
 // namespace, and whether what is installed is that fence: the output hook
-// with a drop policy and exactly the rules Apply writes for s, in order,
-// identified by the per-rule marker Apply stores in each rule's user data.
+// with a drop policy and exactly the rules Apply writes for s, in order —
+// each rule's per-rule marker AND its expressions as read back from the
+// kernel.
 func Check(s Spec) (State, error) {
 	c, err := nftables.New()
 	if err != nil {
@@ -121,12 +122,30 @@ func Check(s Spec) (State, error) {
 		return State{}, fmt.Errorf("egressfence: list rules: %w", err)
 	}
 	st := State{Present: true, Rules: len(rules)}
-	want := len(Rules(s))
-	st.Valid = chainOK && len(rules) == want
+	want := Rules(s)
+	st.Valid = chainOK && len(rules) == len(want)
 	for i := 0; st.Valid && i < len(rules); i++ {
-		st.Valid = string(rules[i].UserData) == s.marker(i)
+		// The marker says which rule this claims to be; the expressions say
+		// what it does. Both must match: a rule edited in place keeps its
+		// marker.
+		st.Valid = string(rules[i].UserData) == s.marker(i) && sameExprs(rules[i].Exprs, want[i])
 	}
 	return st, nil
+}
+
+// sameExprs compares a rule read back from the kernel with the rule Apply
+// writes. Compared as rendered values so a field the decoder fills in with
+// its zero value on one side and leaves unset on the other cannot differ.
+func sameExprs(got, want []expr.Any) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if fmt.Sprintf("%T%+v", got[i], got[i]) != fmt.Sprintf("%T%+v", want[i], want[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func tablePresent(c *nftables.Conn) (bool, error) {

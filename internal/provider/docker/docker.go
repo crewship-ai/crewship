@@ -92,6 +92,8 @@ type Provider struct {
 	// egress fence was installed. A restart recreates the network namespace
 	// and drops the fence, so a different StartedAt means "install again".
 	fenced sync.Map
+	// fenceTestHook, when set, runs at each fenceExecStage. Tests only.
+	fenceTestHook func(fenceExecStage)
 
 	serviceOperation serviceOperationGate
 	client           *client.Client
@@ -1765,7 +1767,8 @@ func (p *Provider) RemoveCrewVolumes(ctx context.Context, id, slug string) error
 // Exec runs a command inside a container via Docker exec. Returns a reader
 // for the combined stdout/stderr stream.
 func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	if err := p.guardFencedExec(ctx, cfg.ContainerID); err != nil {
+	fence, err := p.guardFencedExec(ctx, cfg.ContainerID)
+	if err != nil {
 		return nil, err
 	}
 	execCfg := client.ExecCreateOptions{
@@ -1817,10 +1820,17 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 	if err != nil {
 		return nil, fmt.Errorf("exec create: %w", err)
 	}
+	if err := p.fenceBeforeStart(ctx, fence); err != nil {
+		return nil, err
+	}
 
 	resp, err := p.client.ExecAttach(ctx, exec.ID, client.ExecAttachOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("exec attach: %w", err)
+	}
+	if err := p.fenceAfterStart(ctx, fence); err != nil {
+		resp.Close()
+		return nil, err
 	}
 
 	// Stream stdin into the hijacked connection, then half-close so the process
@@ -1895,7 +1905,8 @@ const execRunningExitCode = -1
 // ExecInteractive creates an interactive TTY exec session with bidirectional I/O.
 // Unlike Exec(), this supports stdin and returns a raw connection for terminal use.
 func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.InteractiveExecConfig) (*provider.InteractiveExecResult, error) {
-	if err := p.guardFencedExec(ctx, cfg.ContainerID); err != nil {
+	fence, err := p.guardFencedExec(ctx, cfg.ContainerID)
+	if err != nil {
 		return nil, err
 	}
 	execCfg := client.ExecCreateOptions{
@@ -1931,9 +1942,16 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 		return nil, fmt.Errorf("exec interactive create: %w", err)
 	}
 
+	if err := p.fenceBeforeStart(ctx, fence); err != nil {
+		return nil, err
+	}
 	resp, err := p.client.ExecAttach(ctx, exec.ID, client.ExecAttachOptions{TTY: true})
 	if err != nil {
 		return nil, fmt.Errorf("exec interactive attach: %w", err)
+	}
+	if err := p.fenceAfterStart(ctx, fence); err != nil {
+		resp.Close()
+		return nil, err
 	}
 
 	// Set initial terminal size.

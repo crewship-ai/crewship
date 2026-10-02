@@ -85,10 +85,7 @@ func (p *Provider) ensureEgressFence(ctx context.Context, team provider.CrewConf
 	if err != nil {
 		return fmt.Errorf("egress fence: inspect crew container: %w", err)
 	}
-	startedAt := ""
-	if inspect.Container.State != nil {
-		startedAt = inspect.Container.State.StartedAt
-	}
+	startedAt := containerStartedAt(inspect.Container.State)
 	if prev, ok := p.fenced.Load(containerID); ok && prev.(string) == startedAt && startedAt != "" {
 		return nil
 	}
@@ -187,6 +184,26 @@ func (p *Provider) runFenceHelper(ctx context.Context, team provider.CrewConfig,
 // current start has no confirmed fence.
 var errFenceNotInPlace = errors.New("egress fence not in place for this container start")
 
+// fencedExec is what guardFencedExec confirmed for one exec: the container
+// and the start (StartedAt) the fence was verified for. The zero value means
+// "not a fenced crew", and the follow-up checks are no-ops for it.
+type fencedExec struct {
+	containerID string
+	team        provider.CrewConfig
+	startedAt   string
+}
+
+func (f fencedExec) active() bool { return f.containerID != "" }
+
+// fenceExecStage names the points between the exec checks; tests use
+// fenceTestHook to restart the container at exactly one of them.
+type fenceExecStage string
+
+const (
+	fenceStageBeforeStart fenceExecStage = "before-start"
+	fenceStageAfterStart  fenceExecStage = "after-start"
+)
+
 // guardFencedExec runs before every Exec / ExecInteractive. Code reaches a
 // crew container only through an exec — the entrypoint is crewship's own
 // script and ends in `sleep infinity` — so refusing the exec until the fence
@@ -197,31 +214,83 @@ var errFenceNotInPlace = errors.New("egress fence not in place for this containe
 // guard only refuses, because a container id alone does not carry the crew
 // settings (network mode, privileged) the install decision needs.
 //
+// A restart can still land between this check and the exec starting, so the
+// confirmed start is re-checked by fenceBeforeStart (after ExecCreate, before
+// the exec runs) and fenceAfterStart (once it runs).
+//
 // Free when the pilot list is empty: no inspect, no behaviour change.
-func (p *Provider) guardFencedExec(ctx context.Context, containerID string) error {
+func (p *Provider) guardFencedExec(ctx context.Context, containerID string) (fencedExec, error) {
 	if len(p.cfg.EgressFenceCrews) == 0 {
-		return nil
+		return fencedExec{}, nil
 	}
 	insp, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {
-		return fmt.Errorf("egress fence: inspect before exec: %w", err)
+		return fencedExec{}, fmt.Errorf("egress fence: inspect before exec: %w", err)
 	}
 	c := insp.Container
 	if c.Config == nil {
-		return nil
+		return fencedExec{}, nil
 	}
 	team := provider.CrewConfig{ID: c.Config.Labels[crewCrewIDLabel], Slug: c.Config.Labels[crewCrewLabel]}
 	if !p.egressFenceWanted(team) {
-		return nil
+		return fencedExec{}, nil
 	}
-	startedAt := ""
-	if c.State != nil {
-		startedAt = c.State.StartedAt
-	}
+	startedAt := containerStartedAt(c.State)
 	if prev, ok := p.fenced.Load(containerID); ok && startedAt != "" && prev.(string) == startedAt {
+		return fencedExec{containerID: containerID, team: team, startedAt: startedAt}, nil
+	}
+	return fencedExec{}, fmt.Errorf("%w (crew %s, container %s); the next crew run re-installs it", errFenceNotInPlace, team.ID, shortID(containerID))
+}
+
+// fenceBeforeStart re-checks, after ExecCreate and before the exec runs, that
+// the container is still in the start the fence was confirmed for. Docker
+// binds an exec to the container, not to one start of it, so an exec created
+// before a restart would run in the new, unfenced namespace.
+func (p *Provider) fenceBeforeStart(ctx context.Context, f fencedExec) error {
+	if !f.active() {
 		return nil
 	}
-	return fmt.Errorf("%w (crew %s, container %s); the next crew run re-installs it", errFenceNotInPlace, team.ID, shortID(containerID))
+	if p.fenceTestHook != nil {
+		p.fenceTestHook(fenceStageBeforeStart)
+	}
+	return p.fenceSameStart(ctx, f)
+}
+
+// fenceAfterStart re-checks once the exec runs. A restart that landed between
+// fenceBeforeStart and the start means the process may be running unfenced;
+// the container is stopped, which kills it. Fail closed: the crew is down,
+// not open.
+func (p *Provider) fenceAfterStart(ctx context.Context, f fencedExec) error {
+	if !f.active() {
+		return nil
+	}
+	if p.fenceTestHook != nil {
+		p.fenceTestHook(fenceStageAfterStart)
+	}
+	if err := p.fenceSameStart(ctx, f); err != nil {
+		p.stopUnfenced(ctx, f.team, f.containerID, err)
+		return err
+	}
+	return nil
+}
+
+func (p *Provider) fenceSameStart(ctx context.Context, f fencedExec) error {
+	insp, err := p.client.ContainerInspect(ctx, f.containerID, client.ContainerInspectOptions{})
+	if err != nil {
+		return fmt.Errorf("egress fence: inspect around exec: %w", err)
+	}
+	if containerStartedAt(insp.Container.State) != f.startedAt {
+		p.fenced.Delete(f.containerID)
+		return fmt.Errorf("%w (crew %s, container %s restarted during the exec)", errFenceNotInPlace, f.team.ID, shortID(f.containerID))
+	}
+	return nil
+}
+
+func containerStartedAt(st *container.State) string {
+	if st == nil {
+		return ""
+	}
+	return st.StartedAt
 }
 
 // stopUnfenced stops a crew container whose fence could not be installed, so
@@ -233,6 +302,9 @@ func (p *Provider) stopUnfenced(ctx context.Context, team provider.CrewConfig, c
 	p.logger.Error("crew requires the egress fence and it is not in place; stopping the crew container",
 		"crew_id", team.ID, "container_id", shortID(containerID), "error", cause)
 	p.fenced.Delete(containerID)
+	// Drop the warm entry too: the next EnsureCrewRuntime must take the full
+	// reconcile path (start + fence), not hand back a stopped container.
+	p.evictWarm(team.ID)
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
 	timeout := 5
