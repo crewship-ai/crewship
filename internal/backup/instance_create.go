@@ -463,8 +463,13 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 			return nil, err
 		}
 	}
+	if err := window.VerifyWriterOwner(); err != nil {
+		window.Release()
+		return nil, err
+	}
 	progress("copy")
 	stores, memSnap, copyErr := stageInstanceCopy(window.Context(), db, stage, sc, opts, level, workspaces, envRun)
+	ownerErr := window.VerifyWriterOwner()
 	expired := window.Expired()
 	holdMS := window.Release().Milliseconds()
 	releaseGuards()
@@ -475,6 +480,9 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 		}
 	}
 	defer closeSnap()
+	if ownerErr != nil {
+		return nil, errors.Join(ownerErr, copyErr)
+	}
 	if expired {
 		return nil, fmt.Errorf("%w (%s)", quiesce.ErrHoldCapExceeded, holdCapLabel(opts.HoldCap))
 	}

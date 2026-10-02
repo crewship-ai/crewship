@@ -260,7 +260,7 @@ func TestRequireLocalDB_RefusalIsActionable(t *testing.T) {
 
 // localDBGateCallSite matches the gate's two entry points and captures the
 // command name each one announces itself as.
-var localDBGateCallSite = regexp.MustCompile(`(?:requireLocalDB|openGatedLocalDB)\(cmd,\s*"([^"]+)"`)
+var localDBGateCallSite = regexp.MustCompile(`(?:requireLocalDB|openGatedLocalDB|openReadOnlyLocalDB)\(cmd,\s*"([^"]+)"`)
 
 // Every command behind the gate must have a way past it.
 //

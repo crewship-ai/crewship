@@ -78,6 +78,7 @@ type Server struct {
 	loginRefresher    *goapi.ProviderLoginRefresher
 	debugLogs         *logging.RingBuffer
 	db                *sql.DB
+	writerOwnerCheck  func() error
 	apiRouter         *goapi.Router
 	fileWatcher       *fileserver.Watcher
 	watchedCrews      sync.Map
@@ -140,13 +141,14 @@ type Server struct {
 type Deps struct {
 	ContainerCleanup *resourcelifecycle.Controller
 
-	Container provider.ContainerProvider
-	Storage   provider.StorageProvider
-	State     provider.StateProvider
-	DebugLogs *logging.RingBuffer
-	DB        *sql.DB
-	WebFS     fs.FS
-	License   *license.License
+	Container        provider.ContainerProvider
+	Storage          provider.StorageProvider
+	State            provider.StateProvider
+	DebugLogs        *logging.RingBuffer
+	DB               *sql.DB
+	WriterOwnerCheck func() error
+	WebFS            fs.FS
+	License          *license.License
 
 	// Admission is the host-admission controller (#1668). Read-only here:
 	// the server exposes its status through GET /api/v1/runtime/capacity, and
@@ -321,6 +323,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	}
 	if deps != nil {
 		s.db = deps.DB
+		s.writerOwnerCheck = deps.WriterOwnerCheck
 	}
 	// Session-channel broadcaster for boot recovery. Dispatched on a
 	// goroutine because recoverOrphanedRuns runs BEFORE wsHub.Run starts

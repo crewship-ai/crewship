@@ -85,7 +85,16 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	if detail := s.episodicDetail(); detail != "" {
 		body["episodic_error"] = detail
 	}
-	writeJSON(w, http.StatusOK, body)
+	status := http.StatusOK
+	if s.writerOwnerCheck != nil {
+		body["writer_ownership"] = "held"
+		if s.writerOwnerCheck() != nil {
+			body["writer_ownership"] = "lost"
+			body["status"] = "degraded"
+			status = http.StatusServiceUnavailable
+		}
+	}
+	writeJSON(w, status, body)
 }
 
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
@@ -100,6 +109,13 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 			checks["db"] = err.Error()
 		} else {
 			checks["db"] = "ok"
+		}
+	}
+
+	if s.writerOwnerCheck != nil {
+		checks["writer_ownership"] = "ok"
+		if s.writerOwnerCheck() != nil {
+			checks["writer_ownership"] = "lost"
 		}
 	}
 

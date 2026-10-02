@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/writerlease"
 	"github.com/spf13/cobra"
 )
 
@@ -189,6 +190,12 @@ a database that is definitely in use.`,
 		if err := guard.check(false); err != nil {
 			return err
 		}
+
+		owner, err := writerlease.Acquire(dbPath)
+		if err != nil {
+			return fmt.Errorf("acquire exclusive repair ownership: %w", err)
+		}
+		defer owner.Close()
 
 		apply, err := sql.Open("sqlite", dbPath)
 		if err != nil {
