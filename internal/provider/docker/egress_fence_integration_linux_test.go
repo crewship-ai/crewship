@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -120,11 +121,28 @@ func TestEgressFenceIntegration(t *testing.T) {
 	peerIP := pi.Container.NetworkSettings.Networks[network].IPAddress.String()
 
 	team := provider.CrewConfig{ID: "fence-it-001", Slug: "fence-it", NetworkMode: "restricted", MemoryMB: 256, CPUs: 0.5}
+	// Ensure can replace a container. Resolve its unique fixture name at cleanup
+	// time, including when Ensure fails after creating a replacement.
+	cleanupCrew := func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		name := p.CrewContainerName(team.ID, team.Slug)
+		if _, err := p.client.ContainerRemove(cleanupCtx, name, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}); err != nil && !cerrdefs.IsNotFound(err) {
+			t.Errorf("remove fixture container %s: %v", name, err)
+		}
+		// Production removal deliberately retains persistent data. This fixture
+		// owns these exact volumes and must not leave them on the shared daemon.
+		for _, name := range []string{p.homeVolumeName(team.ID, team.Slug), p.toolsVolumeName(team.ID, team.Slug)} {
+			if _, err := p.client.VolumeRemove(cleanupCtx, name, client.VolumeRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
+				t.Errorf("remove fixture volume %s: %v", name, err)
+			}
+		}
+	}
+	defer cleanupCrew()
 	cid, err := p.EnsureCrewRuntime(ctx, team)
 	if err != nil {
 		t.Fatalf("EnsureCrewRuntime: %v", err)
 	}
-	defer func() { _ = p.RemoveCrewRuntime(context.Background(), cid) }()
 
 	probe := []string{"nc", "-w", "2", peerIP, "7000"}
 	dns := []string{"nslookup", "example.com"}
@@ -340,6 +358,29 @@ func TestEgressFenceIntegration(t *testing.T) {
 	if code := fenceTestNetnsRun(ctx, t, p, cid, "alpine:3", sidecarPath, "--fence-check", "--fence-allow-uids", "1002"); code != 3 {
 		t.Fatalf("--fence-check on a tampered fence exited %d, want 3 (present but not valid)", code)
 	}
+
+	// Regression for failed runs that replaced the original container: the
+	// deferred cleanup must remove the successor, not just the initial ID.
+	if err := p.RemoveCrewRuntime(ctx, cid); err != nil {
+		t.Fatalf("remove original fixture runtime: %v", err)
+	}
+	replacement, err := p.EnsureCrewRuntime(ctx, team)
+	if err != nil {
+		t.Fatalf("create replacement fixture runtime: %v", err)
+	}
+	if replacement == cid {
+		t.Fatal("replacement fixture reused removed container ID")
+	}
+	cleanupCrew()
+	if _, err := p.client.ContainerInspect(ctx, replacement, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
+		t.Errorf("replacement fixture survived cleanup: %v", err)
+	}
+	for _, name := range []string{p.homeVolumeName(team.ID, team.Slug), p.toolsVolumeName(team.ID, team.Slug)} {
+		if _, err := p.client.VolumeInspect(ctx, name, client.VolumeInspectOptions{}); !cerrdefs.IsNotFound(err) {
+			t.Errorf("fixture volume %s survived cleanup: %v", name, err)
+		}
+	}
+
 }
 
 // fenceTestNetnsRun runs bin (bind-mounted) in a one-shot container joined to
