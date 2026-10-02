@@ -24,10 +24,10 @@ func setGate(t *testing.T, gate ImageGate) {
 func TestStartWaitsForTheImageGateBeforeTheRuntime(t *testing.T) {
 	f := &fakeRuntime{}
 	var gated string
-	setGate(t, func(_ context.Context, crewID string) error {
+	setGate(t, func(_ context.Context, crewID string) (string, error) {
 		gated = crewID
 		f.calls = append(f.calls, "gate")
-		return nil
+		return "", nil
 	})
 
 	if _, err := New(f, nil, nil).Start(context.Background(), provider.CrewConfig{ID: "crew-9", Slug: "s"}); err != nil {
@@ -44,9 +44,9 @@ func TestStartWaitsForTheImageGateBeforeTheRuntime(t *testing.T) {
 func TestStartGateRunsBeforeTheCompleterReadsTheImage(t *testing.T) {
 	// The rebuild writes crews.cached_image; the completer must read it after.
 	var order []string
-	setGate(t, func(context.Context, string) error {
+	setGate(t, func(context.Context, string) (string, error) {
 		order = append(order, "gate")
-		return nil
+		return "", nil
 	})
 	completer := CompleterFunc(func(_ context.Context, c provider.CrewConfig) (provider.CrewConfig, error) {
 		order = append(order, "complete")
@@ -63,7 +63,7 @@ func TestStartGateRunsBeforeTheCompleterReadsTheImage(t *testing.T) {
 func TestStartFailsWithoutTouchingTheRuntimeWhenTheGateFails(t *testing.T) {
 	f := &fakeRuntime{}
 	buildErr := errors.New("provisioning crew c failed: npm ERR")
-	setGate(t, func(context.Context, string) error { return buildErr })
+	setGate(t, func(context.Context, string) (string, error) { return "", buildErr })
 
 	_, err := New(f, nil, nil).Start(context.Background(), provider.CrewConfig{ID: "c", Slug: "s"})
 	if !errors.Is(err, buildErr) || !errors.Is(err, ErrImageNotReady) {
@@ -80,7 +80,7 @@ func TestStartWithoutAGateOrCrewIDStartsAsBefore(t *testing.T) {
 		t.Fatalf("no gate: %v", err)
 	}
 	called := false
-	setGate(t, func(context.Context, string) error { called = true; return nil })
+	setGate(t, func(context.Context, string) (string, error) { called = true; return "", nil })
 	if _, err := New(f, nil, nil).Start(context.Background(), provider.CrewConfig{Slug: "s"}); err != nil {
 		t.Fatalf("no crew id: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestStartTakesTheRebuiltImageOverTheCallersStaleOne(t *testing.T) {
 	// The pipeline resolves its config before Start; a rebuild for a new
 	// adapter writes a new tag, and the caller's copy must not win.
 	f := &fakeRuntime{}
-	setGate(t, func(context.Context, string) error { return nil })
+	setGate(t, func(context.Context, string) (string, error) { return "", nil })
 	completer := CompleterFunc(func(_ context.Context, c provider.CrewConfig) (provider.CrewConfig, error) {
 		c.CachedImage = "crewship-cache:new"
 		return c, nil
@@ -108,9 +108,11 @@ func TestStartTakesTheRebuiltImageOverTheCallersStaleOne(t *testing.T) {
 }
 
 func TestStartWithoutACompleterKeepsTheCallersImage(t *testing.T) {
-	// Chat resolves its own config and has no completer to re-read from.
+	// Chat resolves its own config and has no completer to re-read from; a
+	// gate that verified no image of its own (unknown crew, nothing
+	// provisioned) leaves the caller's tag alone.
 	f := &fakeRuntime{}
-	setGate(t, func(context.Context, string) error { return nil })
+	setGate(t, func(context.Context, string) (string, error) { return "", nil })
 	cfg := provider.CrewConfig{ID: "c", Slug: "s", CachedImage: "crewship-cache:chat"}
 	if _, err := New(f, nil, nil).Start(context.Background(), cfg); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -124,7 +126,7 @@ func TestStartRefusesTheCallersStaleImageWhenTheCompleterFailsAfterTheGate(t *te
 	// The gate may have rebuilt under a new tag; the caller's tag is
 	// unverified. Without the current one, nothing starts.
 	f := &fakeRuntime{}
-	setGate(t, func(context.Context, string) error { return nil })
+	setGate(t, func(context.Context, string) (string, error) { return "", nil })
 	completer := CompleterFunc(func(context.Context, provider.CrewConfig) (provider.CrewConfig, error) {
 		return provider.CrewConfig{}, errors.New("database is locked")
 	})
@@ -142,7 +144,7 @@ func TestStartRefusesAnUnverifiedConfigAfterTheGateEvenWithoutACallerImage(t *te
 	// Without a tag of its own the caller would start the default runtime
 	// image — still not the image the gate just verified.
 	f := &fakeRuntime{}
-	setGate(t, func(context.Context, string) error { return nil })
+	setGate(t, func(context.Context, string) (string, error) { return "", nil })
 	readErr := errors.New("database is locked")
 	completer := CompleterFunc(func(context.Context, provider.CrewConfig) (provider.CrewConfig, error) {
 		return provider.CrewConfig{}, readErr
@@ -160,7 +162,7 @@ func TestStartAfterTheGateKeepsAPartialCompletionWithItsImage(t *testing.T) {
 	// Undecodable services leave the image, mounts and limits valid: the
 	// crew starts from them, without the services.
 	f := &fakeRuntime{}
-	setGate(t, func(context.Context, string) error { return nil })
+	setGate(t, func(context.Context, string) (string, error) { return "", nil })
 	completer := CompleterFunc(func(_ context.Context, c provider.CrewConfig) (provider.CrewConfig, error) {
 		return provider.CrewConfig{ID: c.ID, Slug: "s", CachedImage: "crewship-cache:new"},
 			fmt.Errorf("%w: decode services_json", PartialConfigError("crew sidecar services unresolved"))
@@ -177,7 +179,7 @@ func TestStartAfterTheGateStartsACrewThatNeedsNoImage(t *testing.T) {
 	// A crew that needs no build and was never provisioned has no cached
 	// image; the completer says so successfully and the default image is right.
 	f := &fakeRuntime{}
-	setGate(t, func(context.Context, string) error { return nil })
+	setGate(t, func(context.Context, string) (string, error) { return "", nil })
 	completer := CompleterFunc(func(_ context.Context, c provider.CrewConfig) (provider.CrewConfig, error) {
 		return provider.CrewConfig{ID: c.ID, Slug: "s"}, nil
 	})
@@ -186,5 +188,19 @@ func TestStartAfterTheGateStartsACrewThatNeedsNoImage(t *testing.T) {
 	}
 	if f.runtimeCfg.CachedImage != "" {
 		t.Errorf("CachedImage = %q, want empty (default image)", f.runtimeCfg.CachedImage)
+	}
+}
+
+func TestStartWithoutACompleterTakesTheImageTheGateVerified(t *testing.T) {
+	// Chat resolves its own config and has no completer. If the gate rebuilt
+	// under a new tag, the caller's tag is stale and must not be started.
+	f := &fakeRuntime{}
+	setGate(t, func(context.Context, string) (string, error) { return "crewship-cache:rebuilt", nil })
+	cfg := provider.CrewConfig{ID: "c", Slug: "s", CachedImage: "crewship-cache:evicted"}
+	if _, err := New(f, nil, nil).Start(context.Background(), cfg); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if f.runtimeCfg.CachedImage != "crewship-cache:rebuilt" {
+		t.Errorf("runtime started from %q, want the gate's crewship-cache:rebuilt", f.runtimeCfg.CachedImage)
 	}
 }

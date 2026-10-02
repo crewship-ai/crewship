@@ -484,21 +484,30 @@ func ResolveManagedService(ctx context.Context, db *sql.DB, crewID, wsID, name s
 // EnsureCrewImage is EnsureProvisioned for callers that know only the crew:
 // the image gate every crewstart.Start consults (wired in cmd_start), so a
 // routine step, a scheduled run or a webhook waits for a missing or evicted
-// image the way a dispatch does instead of failing on it. A crew that does not
-// exist or was deleted has nothing to provision against; the start decides
-// what that means.
-func (h *ProvisioningHandler) EnsureCrewImage(ctx context.Context, crewID string) error {
+// image the way a dispatch does instead of failing on it. It returns the
+// crew's image as it stands after that wait — a rebuild may have changed the
+// tag — or "" when the crew has none. A crew that does not exist or was
+// deleted has nothing to provision against; the start decides what that means.
+func (h *ProvisioningHandler) EnsureCrewImage(ctx context.Context, crewID string) (string, error) {
 	if h == nil || h.provisioner == nil {
-		return nil
+		return "", nil
 	}
 	var workspaceID string
 	err := h.db.QueryRowContext(ctx,
 		`SELECT workspace_id FROM crews WHERE id = ? AND deleted_at IS NULL`, crewID).Scan(&workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return "", nil
 	}
 	if err != nil {
-		return fmt.Errorf("load crew for image gate: %w", err)
+		return "", fmt.Errorf("load crew for image gate: %w", err)
 	}
-	return h.EnsureProvisioned(ctx, crewID, workspaceID, 0)
+	if err := h.EnsureProvisioned(ctx, crewID, workspaceID, 0); err != nil {
+		return "", err
+	}
+	var image sql.NullString
+	if err := h.db.QueryRowContext(ctx,
+		`SELECT cached_image FROM crews WHERE id = ? AND deleted_at IS NULL`, crewID).Scan(&image); err != nil {
+		return "", fmt.Errorf("read crew image after image gate: %w", err)
+	}
+	return image.String, nil
 }

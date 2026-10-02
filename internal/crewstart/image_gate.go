@@ -13,8 +13,10 @@ var ErrImageNotReady = errors.New("crew image not ready")
 
 // ImageGate blocks until the crew's provisioned image exists locally,
 // building it when it was never built or has since been removed (idle cache
-// eviction, a manual `docker rmi`). It returns nil when no build is needed.
-type ImageGate func(ctx context.Context, crewID string) error
+// eviction, a manual `docker rmi`), and returns that image: the tag it
+// verified, which a rebuild may have changed. It returns "" when the crew has
+// no provisioned image (no build needed, or a crew it does not know).
+type ImageGate func(ctx context.Context, crewID string) (string, error)
 
 // imageGate is process-wide, like the contract it guards: the Starters are
 // built at eight sites and three of them (pipeline, orchestrator, terminal)
@@ -34,16 +36,18 @@ func SetImageGate(gate ImageGate) {
 	imageGate.Store(&gate)
 }
 
-// waitForImage reports whether a gate ran, and its failure.
-func waitForImage(ctx context.Context, crewID string) (bool, error) {
+// waitForImage reports whether a gate ran, the image it verified, and its
+// failure.
+func waitForImage(ctx context.Context, crewID string) (bool, string, error) {
 	gate := imageGate.Load()
 	if gate == nil || crewID == "" {
-		return false, nil
+		return false, "", nil
 	}
-	if err := (*gate)(ctx, crewID); err != nil {
-		return true, fmt.Errorf("%w: %w", ErrImageNotReady, err)
+	image, err := (*gate)(ctx, crewID)
+	if err != nil {
+		return true, "", fmt.Errorf("%w: %w", ErrImageNotReady, err)
 	}
-	return true, nil
+	return true, image, nil
 }
 
 // ErrPartialConfig matches a completion that is usable although part of it

@@ -189,13 +189,17 @@ func (s *Starter) StartResolved(ctx context.Context, cfg provider.CrewConfig, no
 	// dropped, and a completion that failed outright refuses the start; only a
 	// partial one (ErrPartialConfig: the image resolved, the services did not)
 	// still starts.
-	gated, err := waitForImage(ctx, cfg.ID)
+	gated, verified, err := waitForImage(ctx, cfg.ID)
 	if err != nil {
 		return "", cfg, err
 	}
 	reresolve := gated && s.completer != nil
 	if reresolve {
 		cfg.CachedImage = ""
+	} else if verified != "" {
+		// No completer to re-read from (chat): the gate's tag is the
+		// verified one, the caller's may predate a rebuild.
+		cfg.CachedImage = verified
 	}
 
 	cfg, err = s.complete(ctx, cfg, notify)

@@ -30,7 +30,7 @@ func TestEnsureCrewImageWaitsForTheBuildOfACrewWithoutAnImage(t *testing.T) {
 	h.jobs[crewID] = &ProvisionJob{CrewID: crewID, Status: "running", StartedAt: time.Now()}
 	h.mu.Unlock()
 	done := make(chan error, 1)
-	go func() { done <- h.EnsureCrewImage(context.Background(), crewID) }()
+	go func() { _, err := h.EnsureCrewImage(context.Background(), crewID); done <- err }()
 
 	select {
 	case err := <-done:
@@ -63,7 +63,7 @@ func TestEnsureCrewImageReportsAFailedBuild(t *testing.T) {
 		h.jobs[crewID].Error = "npm ERR"
 		h.mu.Unlock()
 	}()
-	err := h.EnsureCrewImage(context.Background(), crewID)
+	_, err := h.EnsureCrewImage(context.Background(), crewID)
 	if err == nil || !strings.Contains(err.Error(), "npm ERR") {
 		t.Fatalf("err = %v, want the build failure", err)
 	}
@@ -79,8 +79,8 @@ func TestEnsureCrewImageLeavesUnknownAndDeletedCrewsToTheStart(t *testing.T) {
 		t.Fatalf("delete crew: %v", err)
 	}
 	for _, id := range []string{"no-such-crew", crewID} {
-		if err := h.EnsureCrewImage(context.Background(), id); err != nil {
-			t.Errorf("crew %s: want nil (nothing to provision against), got %v", id, err)
+		if img, err := h.EnsureCrewImage(context.Background(), id); err != nil || img != "" {
+			t.Errorf("crew %s: want (\"\", nil) — nothing to provision against, got (%q, %v)", id, img, err)
 		}
 		h.mu.Lock()
 		job := h.jobs[id]
@@ -93,7 +93,7 @@ func TestEnsureCrewImageLeavesUnknownAndDeletedCrewsToTheStart(t *testing.T) {
 
 func TestEnsureCrewImageIsANoOpWithoutProvisioning(t *testing.T) {
 	var h *ProvisioningHandler
-	if err := h.EnsureCrewImage(context.Background(), "x"); err != nil {
+	if _, err := h.EnsureCrewImage(context.Background(), "x"); err != nil {
 		t.Fatalf("nil handler: %v", err)
 	}
 }
@@ -116,5 +116,32 @@ func TestCompleterMarksUnresolvedServicesAsAPartialConfig(t *testing.T) {
 	}
 	if resolved.CachedImage != "crewship-cache:partial" {
 		t.Errorf("CachedImage = %q, want the resolved image alongside the partial error", resolved.CachedImage)
+	}
+}
+
+func TestEnsureCrewImageReturnsTheImageAfterTheBuild(t *testing.T) {
+	// The tag the build wrote is what the gate hands to a caller without a
+	// completer; the one the crew had before the build is stale.
+	h := newTestProvisioningHandler(t)
+	h.provisioner = testProvisioner()
+	h.provisionPollInterval = 5 * time.Millisecond
+	userID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, userID)
+	crewID := seedCrewRow(t, h.db, "crew-gate-tag", wsID, "G", "gate-tag")
+	h.mu.Lock()
+	h.jobs[crewID] = &ProvisionJob{CrewID: crewID, Status: "running", StartedAt: time.Now()}
+	h.mu.Unlock()
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		if _, err := h.db.Exec(`UPDATE crews SET cached_image = ? WHERE id = ?`, "crewship-cache:rebuilt", crewID); err != nil {
+			t.Error(err)
+		}
+		h.mu.Lock()
+		h.jobs[crewID].Status = "completed"
+		h.mu.Unlock()
+	}()
+	img, err := h.EnsureCrewImage(context.Background(), crewID)
+	if err != nil || img != "crewship-cache:rebuilt" {
+		t.Fatalf("EnsureCrewImage = (%q, %v), want crewship-cache:rebuilt", img, err)
 	}
 }
