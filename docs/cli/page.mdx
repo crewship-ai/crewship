@@ -596,6 +596,7 @@ Queued: restart-api on fleet-201/sluzby runs routine/restart-api.
 | Flag | Required | Description |
 |---|:---:|---|
 | `--input k=v` | | An input the action declared. **Repeatable**; a value may contain a comma, so this is not a comma-separated list. |
+| `--expected-intent-hash <hash>` | Restricted callers | Pin the `intent_hash` returned by the authorized Page catalog. Keep the same hash for retries; a changed action requires a fresh selection. |
 | `--idempotency-key` | | Pin the dedupe key. Defaults to a fresh UUID per invocation. |
 | `--publication <version>` | | Dispatch through the **published application** instead of the panel, fenced on this application version. The version must still be current and the live Page definition must match what that publication recorded; otherwise 409. See [custom applications](#custom-react-projects-experimental). |
 
@@ -604,8 +605,8 @@ Backed by `POST /api/v1/pages/{slug}/panels/{id}/actions/{actionId}`, or with
 
 ### You cannot name a routine here, and that is the design
 
-There is no `--routine` flag, and the request body carries **only** the
-collected inputs. The server resolves the action id against the page's stored
+There is no `--routine` flag, and the request body carries the
+collected inputs and optional intent/publication preconditions. The server resolves the action id against the page's stored
 spec and dispatches the routine named *there*. A compromised client, an injected
 narrative panel, or an agent cannot choose what runs, because the wire format
 has no field for it. The allow-list is not a check the server remembers to
