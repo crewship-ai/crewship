@@ -4,6 +4,7 @@ package api
 // snapshot loader used by the agent canvas. Extracted from agents.go.
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -368,7 +369,10 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	WriteAuditLog(r.Context(), h.db, h.journal, "delete", "AGENT", agentID, userID, workspaceID, nil)
 
-	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+	// deleted_at is committed, so every entry point and the creation gate
+	// already refuse new runs. Stop the runs already alive — this agent's
+	// only; its crew runtime and other agents keep running.
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "runs": h.stopDeletedAgentRuns(r.Context(), agentID)})
 
 	h.broadcastAgentEvent("agent.deleted", workspaceID, map[string]string{"id": agentID})
 }
@@ -435,4 +439,37 @@ func (h *AgentHandler) Load(w http.ResponseWriter, r *http.Request) {
 		result = []agentLoadEntry{}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// agentRunsOutcome is the runs part of an agent DELETE response. "none": no
+// live run; "stopped": every live run confirmed gone; "pending": at least one
+// could not be confirmed yet and the server keeps retrying in the background.
+type agentRunsOutcome struct {
+	State   string `json:"state" yaml:"state"`
+	Stopped int    `json:"stopped" yaml:"stopped"`
+	Pending int    `json:"pending" yaml:"pending"`
+	Error   string `json:"error,omitempty" yaml:"error,omitempty"`
+}
+
+func (h *AgentHandler) stopDeletedAgentRuns(ctx context.Context, agentID string) agentRunsOutcome {
+	if h.runStopper == nil {
+		return agentRunsOutcome{State: "pending", Error: "runtime stop is handled by the server's background pass"}
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+	defer cancel()
+	stopped, pending, err := h.runStopper(ctx, agentID)
+	out := agentRunsOutcome{Stopped: stopped, Pending: pending}
+	switch {
+	case pending > 0:
+		out.State = "pending"
+	case stopped > 0:
+		out.State = "stopped"
+	default:
+		out.State = "none"
+	}
+	if err != nil {
+		h.logger.Warn("deleted agent runs not all confirmed stopped", "agent_id", agentID, "error", err)
+		out.Error = "not every run could be confirmed stopped; retrying in the background"
+	}
+	return out
 }

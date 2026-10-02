@@ -141,7 +141,12 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("POST", "/api/v1/agents/{agentId}/rehire", "RemainingAgentRehiredV1", ref("Agent"))
 	add("POST", "/api/v1/agents/{agentId}/approve-hire", "RemainingAgentHireApprovedV1", action)
 	add("PATCH", "/api/v1/agents/{agentId}", "RemainingAgentUpdatedV1", ref("Agent"))
-	addAction("DELETE", "/api/v1/agents/{agentId}", "RemainingAgentDeletedV1")
+	// Agent DELETE also reports what happened to that agent's live runs.
+	agentRuns := object(map[string]any{"state": str(), "stopped": integer(), "pending": integer(), "error": str()})
+	agentRuns["required"] = []string{"state", "stopped", "pending"}
+	agentDeleted := object(map[string]any{"success": boolean(), "runs": agentRuns})
+	agentDeleted["required"] = []string{"success", "runs"}
+	add("DELETE", "/api/v1/agents/{agentId}", "RemainingAgentDeletedV1", agentDeleted)
 	add("POST", "/api/v1/agents/{agentId}/webhook-secret/rotate", "RemainingAgentWebhookSecretV1", object(map[string]any{"webhook_secret": str(), "rotated_at": str()}))
 	addAction("DELETE", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaDeletedV1")
 	add("PUT", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaUpdatedV1", ref("RemainingAgentPersonaV1"))
