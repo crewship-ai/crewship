@@ -125,7 +125,7 @@ func (h *ProvisioningHandler) RestartCrewAgents(w http.ResponseWriter, r *http.R
 	}
 	if containerID == "" {
 		// Nothing to restart — agents will pick up the new image on next start.
-		writeJSON(w, http.StatusOK, map[string]any{"restarted": 0})
+		writeJSON(w, http.StatusOK, map[string]any{"restarted": 0, "runtime_removed": false})
 		return
 	}
 
@@ -144,5 +144,5 @@ func (h *ProvisioningHandler) RestartCrewAgents(w http.ResponseWriter, r *http.R
 	).Scan(&restarted)
 
 	h.logger.Info("crew runtime restarted", "crew_id", crewID, "slug", slug, "agents", restarted)
-	writeJSON(w, http.StatusOK, map[string]any{"restarted": restarted})
+	writeJSON(w, http.StatusOK, map[string]any{"restarted": restarted, "runtime_removed": true})
 }

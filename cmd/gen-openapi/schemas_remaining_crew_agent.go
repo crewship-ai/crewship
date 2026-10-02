@@ -102,7 +102,7 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("GET", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionStatusV1", object(map[string]any{"crew_id": str(), "status": str(), "phase": str(), "message": str(), "updated_at": str()}))
 	addAction("POST", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionTriggeredV1")
 	addAction("POST", "/api/v1/crews/{crewId}/rebuild", "RemainingCrewRebuildTriggeredV1")
-	addAction("POST", "/api/v1/crews/{crewId}/restart-agents", "RemainingCrewAgentsRestartedV1")
+	add("POST", "/api/v1/crews/{crewId}/restart-agents", "RemainingCrewAgentsRestartedV1", object(map[string]any{"restarted": integer(), "runtime_removed": boolean()}))
 	// #1845 crew image freshness. Given real shapes rather than the shared
 	// `action` envelope, because both answers are the whole point of the
 	// endpoints: a client that cannot read `behind` and `reason` off the

@@ -9944,13 +9944,10 @@
       },
       "RemainingCrewAgentsRestartedV1": {
         "properties": {
-          "message": {
-            "type": "string"
+          "restarted": {
+            "type": "integer"
           },
-          "status": {
-            "type": "string"
-          },
-          "success": {
+          "runtime_removed": {
             "type": "boolean"
           }
         },
