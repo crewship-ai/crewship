@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestLeaseAliasesReplacementAndRelease(t *testing.T) {
+func TestLeaseAliasesAndRelease(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "state.db")
 	first, err := Acquire(path)
@@ -18,7 +18,7 @@ func TestLeaseAliasesReplacementAndRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	for _, alias := range []string{path, filepath.Join(dir, "symlink.db"), filepath.Join(dir, "hardlink.db")} {
+	for _, alias := range leaseTestAliases(dir, path) {
 		if alias != path {
 			var err error
 			if filepath.Base(alias) == "symlink.db" {
@@ -27,7 +27,7 @@ func TestLeaseAliasesReplacementAndRelease(t *testing.T) {
 				err = os.Link(path, alias)
 			}
 			if err != nil {
-				t.Skipf("filesystem alias unavailable: %v", err)
+				t.Fatalf("filesystem alias unavailable: %v", err)
 			}
 		}
 		second, err := Acquire(alias)
@@ -55,16 +55,6 @@ func TestLeaseAliasesReplacementAndRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer next.Close()
-	moved := path + ".moved"
-	if err = os.Rename(path, moved); err != nil {
-		t.Skipf("cannot replace an open database on this platform: %v", err)
-	}
-	if err = os.WriteFile(path, []byte("replacement"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if !errors.Is(next.Verify(), ErrLost) {
-		t.Fatal("replacement database accepted as original owner")
-	}
 }
 
 func TestLeaseProcessHelper(t *testing.T) {

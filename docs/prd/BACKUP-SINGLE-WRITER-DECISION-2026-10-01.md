@@ -29,7 +29,11 @@ check fails.
 
 Local filesystems with an established lock contract are supported. The Linux
 implementation accepts ext2/3/4, XFS, Btrfs, tmpfs, overlay, ZFS and F2FS; macOS
-requires a local mount and Windows a fixed local drive. Network, FUSE and
+requires a local mount and Windows a fixed local drive. Linux uses flock;
+macOS uses a descriptor-lifetime OFD byte lock beyond SQLite locking/data
+regions, and Windows uses a descriptor-lifetime byte lock there too. A
+process-scoped POSIX lock is unsuitable because unrelated SQLite descriptor
+closes could release it. Network, FUSE and
 unknown Linux filesystems are refused. A filesystem reporting local storage
 is not permission to mount the same block device read/write on multiple hosts.
 Such shared storage is unsupported.
