@@ -142,6 +142,19 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// The container must belong to the requesting crew. Without this, a
+	// crew could expose another crew's container through crewshipd, which
+	// reaches every bridge — including a crew's own isolated network.
+	if cr, ok := h.docker.(ContainerCrewResolver); ok {
+		owner, err := cr.ContainerCrew(r.Context(), body.ContainerID)
+		if err != nil || owner != body.CrewID {
+			h.logger.Warn("port_expose: container is not this crew's",
+				"container_id", body.ContainerID, "crew_id", body.CrewID, "owner", owner, "error", err)
+			replyError(w, http.StatusForbidden, "container does not belong to this crew")
+			return
+		}
+	}
+
 	// Look up the container's IP on the crew bridge. Rejecting here also
 	// blocks the agent from asking us to proxy to crewshipd or host
 	// services — those aren't on the crewship-agents network.

@@ -72,6 +72,21 @@ container:
                                 # runc only; a listed crew that cannot be fenced
                                 # does not start. Empty = off.
                                 # Env override: CREWSHIP_EGRESS_FENCE_CREWS (comma list)
+  crew_network_crews: []        # Crews (slug or id) that get their own Docker network
+                                # instead of the shared one: other crews cannot reach
+                                # them and their service aliases are their own. Takes
+                                # effect when the crew's container is next recreated;
+                                # its existing services then move with it, live (same
+                                # container and data; open connections to them drop).
+                                # Empty = off. Env override: CREWSHIP_CREW_NETWORK_CREWS
+  crew_network_pool: "10.231.0.0/16"  # IPv4 range (/16 to /27) crew networks take /27
+                                # subnets from; must not overlap a host route (LAN,
+                                # VPN). Crewship checks host routes only when it can
+                                # prove it sees the daemon host's (its bridges show up
+                                # as routes); in a container, against a remote daemon
+                                # or Docker Desktop you must set this to a range you
+                                # know is free on that host.
+                                # Env override: CREWSHIP_CREW_NETWORK_POOL
   idle_runtime_retention_days: 0  # Remove stopped runtimes of live crews after this
                                 # many days stopped; volumes stay. 0 = off.
                                 # Env override: CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS

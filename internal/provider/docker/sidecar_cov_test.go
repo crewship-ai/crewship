@@ -350,7 +350,7 @@ func TestEnsureSidecar_StartExistingError(t *testing.T) {
 		}
 	})
 
-	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
+	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc)
 	if err == nil || !strings.Contains(err.Error(), "start existing sidecar") {
 		t.Fatalf("expected start-existing error, got %v", err)
 	}
@@ -364,7 +364,7 @@ func TestEnsureSidecar_ListError(t *testing.T) {
 		http.Error(w, `{"message":"down"}`, http.StatusInternalServerError)
 	})
 
-	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
+	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc)
 	if err == nil || !strings.Contains(err.Error(), "list containers") {
 		t.Fatalf("expected list error, got %v", err)
 	}
@@ -426,7 +426,7 @@ func TestEnsureSidecar_RecreateOnSpecDrift(t *testing.T) {
 		}
 	})
 
-	id, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
+	id, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc)
 	if err != nil {
 		t.Fatalf("ensureSidecar: %v", err)
 	}
@@ -466,7 +466,7 @@ func TestEnsureSidecar_RecreateOnImageDrift_RemoveFails(t *testing.T) {
 		}
 	})
 
-	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
+	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc)
 	if err == nil || !strings.Contains(err.Error(), "remove sidecar") {
 		t.Fatalf("expected remove error, got %v", err)
 	}
@@ -540,7 +540,7 @@ func TestEnsureSidecar_CreateBody(t *testing.T) {
 		}
 	})
 
-	id, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
+	id, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc)
 	if err != nil {
 		t.Fatalf("ensureSidecar: %v", err)
 	}
@@ -656,7 +656,7 @@ func TestEnsureSidecar_CreateError(t *testing.T) {
 		}
 	})
 
-	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
+	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc)
 	if err == nil || !strings.Contains(err.Error(), "create sidecar") {
 		t.Fatalf("expected create error, got %v", err)
 	}
@@ -685,7 +685,7 @@ func TestEnsureSidecar_StartError(t *testing.T) {
 		}
 	})
 
-	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
+	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc)
 	if err == nil || !strings.Contains(err.Error(), "start sidecar") {
 		t.Fatalf("expected start error, got %v", err)
 	}
@@ -713,7 +713,7 @@ func TestEnsureSidecar_VolumeEnsureError(t *testing.T) {
 		}
 	})
 
-	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
+	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc)
 	if err == nil || !strings.Contains(err.Error(), `ensure volume "data"`) {
 		t.Fatalf("expected ensure-volume error, got %v", err)
 	}
@@ -1313,7 +1313,7 @@ func TestEnsureSidecar_IgnoresUnrelatedContainers(t *testing.T) {
 		}
 	})
 
-	id, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
+	id, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc)
 	if err != nil {
 		t.Fatalf("ensureSidecar: %v", err)
 	}
@@ -1340,7 +1340,7 @@ func TestEnsureSidecar_PullErrorPropagates(t *testing.T) {
 		}
 	})
 
-	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
+	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc)
 	if err == nil || !strings.Contains(err.Error(), "pull redis:7") {
 		t.Fatalf("expected pull error from create path, got %v", err)
 	}

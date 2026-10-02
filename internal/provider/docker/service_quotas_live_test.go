@@ -32,7 +32,7 @@ func TestLiveServiceQuotaBounds(t *testing.T) {
 	crew := fmt.Sprintf("quota%d", time.Now().UnixNano())
 	slug := "quota-probe"
 	svc := provider.CrewService{Name: "probe", Image: "alpine:3", QuotaEnforced: true, Command: []string{"sh", "-c", "sleep 300"}}
-	id, err := p.ensureSidecar(ctx, crew, slug, &svc)
+	id, err := p.ensureSidecar(ctx, crew, slug, p.crewNetworkFor(crew, slug), &svc)
 	if err != nil {
 		t.Fatal(err)
 	}

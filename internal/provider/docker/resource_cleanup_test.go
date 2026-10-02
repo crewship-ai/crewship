@@ -115,7 +115,7 @@ func TestServiceCreateCarriesInstanceLabelFakeAPI(t *testing.T) {
 	})
 	defer close()
 	p.cfg.InstanceID = "installation-a"
-	if _, err := p.ensureSidecar(context.Background(), "crew-id", "slug", &provider.CrewService{Name: "redis", Image: "redis:7"}); err != nil {
+	if _, err := p.ensureSidecar(context.Background(), "crew-id", "slug", p.crewNetworkFor("crew-id", "slug"), &provider.CrewService{Name: "redis", Image: "redis:7"}); err != nil {
 		t.Fatal(err)
 	}
 	if labels[resourcelifecycle.InstanceLabel] != "installation-a" || labels[crewCrewIDLabel] != "crew-id" {
