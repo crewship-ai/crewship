@@ -86,6 +86,7 @@ The same provenance is recorded twice more: as a `run.session_init` journal entr
 | `--with-file <path>` | (unset) | Append file contents. Repeatable. |
 | `--with-cmd <shell>` | (unset) | Append the stdout of a shell command. Repeatable. |
 | `--paste` | `false` | Append the system clipboard (`pbpaste` / `wl-paste` / `xclip` / `xsel`). |
+| `--stdin` | `false` | Read stdin to EOF and append it as context after the prompt. Without it, stdin is read only when no prompt is given. |
 | `--dry-run` | `false` | Print the assembled prompt and exit. No auth, no server. |
 | `--estimate` | `false` | Print token-count + cost estimate and exit. |
 | `--markdown` | `false` | Force markdown ANSI styling. |
@@ -95,7 +96,7 @@ The same provenance is recorded twice more: as a `run.session_init` journal entr
 | `--effort <level>` | (unset) | Reasoning effort: `minimal|low|medium|high|xhigh`. |
 | `--show-thinking` | `false` | Surface reasoning blocks on stdout (un-truncated). |
 
-When stdin is a pipe and a positional prompt is also given, the positional becomes the instruction and stdin is appended as context.
+Stdin is read in exactly two cases. With no prompt argument and no `--prompt`, piped stdin is read to EOF and becomes the prompt (`echo hi | crewship run mia`). With a prompt given, stdin is appended as context only when you pass `--stdin` (`git diff | crewship run mia --stdin "review"`). Otherwise stdin is never touched, so a harness, CI step or cron job whose stdin is a pipe nobody closes cannot hang the command; when stdin is a pipe or a file the CLI prints a one-line `[stdin not read …]` hint on stderr.
 
 ## Examples
 
@@ -123,8 +124,8 @@ crewship run daniel --chat c_abc123 "follow-up: now write the integration test"
 ### Stdin as context
 
 ```bash
-cat issue.md | crewship run daniel "fix this bug"
-git diff | crewship run code-review "review" --with-git-status
+cat issue.md | crewship run daniel --stdin "fix this bug"
+git diff | crewship run code-review --stdin "review" --with-git-status
 ```
 
 ### Interactive REPL

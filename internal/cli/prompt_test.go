@@ -97,12 +97,15 @@ func TestBuildPrompt_AtDashStdin(t *testing.T) {
 	}
 }
 
-func TestBuildPrompt_AutoStdinAppends(t *testing.T) {
+// A positional prompt plus piped context needs the explicit --stdin
+// (StdinContext) since #2770; without it stdin is never read.
+func TestBuildPrompt_StdinContextAppends(t *testing.T) {
 	got, err := BuildPrompt(context.Background(), PromptOptions{
-		Positional:  []string{"review", "this"},
-		AutoStdin:   true,
-		readStdin:   stubStdin([]byte("diff line\nanother\n"), nil),
-		isStdinPipe: func() bool { return true },
+		Positional:   []string{"review", "this"},
+		AutoStdin:    true,
+		StdinContext: true,
+		readStdin:    stubStdin([]byte("diff line\nanother\n"), nil),
+		isStdinPipe:  func() bool { return true },
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)

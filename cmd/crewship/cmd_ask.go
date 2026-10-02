@@ -17,7 +17,7 @@ import (
 // askCmd is a low-friction one-shot prompt against a configured default
 // agent. It exists so common shell workflows like
 //
-//	git diff | crewship ask "review this"
+//	git diff | crewship ask --stdin "review this"
 //	crewship ask "summarize today's runs" --with-cmd "crewship run list"
 //
 // don't require the user to remember an agent slug. The agent is resolved
@@ -34,7 +34,7 @@ Set it once with:
 
 Examples:
   crewship ask "what time is it?"
-  git diff | crewship ask "review this change"
+  git diff | crewship ask --stdin "review this change"
   crewship ask "summarize" --with-file notes.md
   crewship ask --agent viktor "explain how the journal works"
   crewship ask --prompt @-                 # full prompt from stdin`,
@@ -119,11 +119,14 @@ Examples:
 		withFiles, _ := cmd.Flags().GetStringSlice("with-file")
 		withCmds, _ := cmd.Flags().GetStringSlice("with-cmd")
 		paste, _ := cmd.Flags().GetBool("paste")
+		stdinCtx, _ := cmd.Flags().GetBool("stdin")
 
 		prompt, err := cli.BuildPrompt(cmd.Context(), cli.PromptOptions{
 			Positional:        args,
 			PromptFlag:        flagPrompt,
 			AutoStdin:         true,
+			StdinContext:      stdinCtx,
+			Notice:            os.Stderr,
 			WithGitDiff:       withGitDiff,
 			WithGitDiffStaged: withGitDiffStaged,
 			WithGitLog:        withGitLog,
@@ -319,6 +322,7 @@ func init() {
 	askCmd.Flags().Bool("with-git-status", false, "Append `git status -s` as context")
 	askCmd.Flags().StringSlice("with-file", nil, "Append file content(s) as context (repeatable)")
 	askCmd.Flags().StringSlice("with-cmd", nil, "Append shell command output as context (repeatable)")
+	askCmd.Flags().Bool("stdin", false, "Append piped stdin as context after the prompt (stdin is only read implicitly when no prompt is given)")
 	askCmd.Flags().Bool("paste", false, "Append the system clipboard as context (pbpaste/wl-paste/xclip/xsel)")
 	askCmd.Flags().Bool("dry-run", false, "Print the assembled prompt and exit (no auth, no agent, no run)")
 	askCmd.Flags().Bool("estimate", false, "Print token count + cost estimate and exit (no run)")

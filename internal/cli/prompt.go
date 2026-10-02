@@ -33,9 +33,22 @@ type PromptOptions struct {
 	Positional []string
 	// PromptFlag is the --prompt value. Supports "@path" (read file) and "@-" (read stdin).
 	PromptFlag string
-	// AutoStdin enables auto-detection of piped stdin. If true and stdin is not a TTY,
-	// stdin is appended to the prompt as context. Disabled when PromptFlag is "@-".
+	// AutoStdin lets a non-TTY stdin stand in for a missing prompt: when no
+	// positional prompt and no PromptFlag were given, stdin is read to EOF and
+	// becomes the prompt (`echo hi | crewship run mia`). Once a prompt IS
+	// given, stdin is never read implicitly (#2770) — an inherited pipe that
+	// is never closed (harness shell, CI step, cron) would otherwise block
+	// the CLI forever before any network call. See StdinContext.
 	AutoStdin bool
+	// StdinContext (--stdin) explicitly appends stdin as a context block after
+	// a given prompt: `git diff | crewship ask --stdin "review this"`. Reads to
+	// EOF, so the caller asked for whatever blocking that implies. Ignored
+	// when PromptFlag is "@-" (stdin is already the prompt).
+	StdinContext bool
+	// Notice, when non-nil, receives a one-line hint when stdin carried
+	// piped or redirected data that was not read because a prompt was given
+	// without StdinContext. Callers pass os.Stderr; nil stays silent.
+	Notice io.Writer
 
 	// WithGitDiff appends `git diff` (working tree vs HEAD) as context.
 	WithGitDiff bool
@@ -65,6 +78,7 @@ type PromptOptions struct {
 	readStdin   func(ctx context.Context, max int) ([]byte, error)
 	runCmd      func(ctx context.Context, name string, args ...string) ([]byte, error)
 	isStdinPipe func() bool
+	isStdinData func() bool
 	readPaste   func(ctx context.Context, max int) ([]byte, error)
 }
 
@@ -72,7 +86,8 @@ type PromptOptions struct {
 //
 // Order of assembly:
 //  1. Base prompt: PromptFlag (with @file/@- expansion) or joined Positional.
-//  2. Stdin (if AutoStdin and stdin is a pipe), appended after a separator.
+//  2. Stdin, appended as a "stdin" block when StdinContext is set, or when
+//     AutoStdin is set, stdin is not a TTY and no prompt was given (#2770).
 //  3. Context blocks: git diff/log/status, files, command outputs — each in a fenced block.
 //
 // Empty result is allowed (caller decides whether that's an error).
@@ -95,12 +110,18 @@ func BuildPrompt(ctx context.Context, opts PromptOptions) (string, error) {
 	var sb strings.Builder
 	sb.WriteString(base)
 
-	if o.AutoStdin && !stdinConsumed && o.isStdinPipe() {
-		data, err := o.readStdin(ctx, o.MaxContextBytes)
-		if err != nil {
-			return "", fmt.Errorf("read stdin: %w", err)
+	if !stdinConsumed {
+		promptGiven := o.PromptFlag != "" || len(o.Positional) > 0
+		switch {
+		case o.StdinContext, o.AutoStdin && !promptGiven && o.isStdinPipe():
+			data, err := o.readStdin(ctx, o.MaxContextBytes)
+			if err != nil {
+				return "", fmt.Errorf("read stdin: %w", err)
+			}
+			appendBlock(&sb, "stdin", string(data))
+		case o.AutoStdin && o.Notice != nil && o.isStdinData():
+			fmt.Fprintln(o.Notice, "[stdin not read: a prompt was given; pass --stdin to append piped input as context]")
 		}
-		appendBlock(&sb, "stdin", string(data))
 	}
 
 	if o.WithGitDiff {
@@ -180,10 +201,26 @@ func withDefaults(opts PromptOptions) PromptOptions {
 	if opts.isStdinPipe == nil {
 		opts.isStdinPipe = func() bool { return !term.IsTerminal(int(os.Stdin.Fd())) }
 	}
+	if opts.isStdinData == nil {
+		opts.isStdinData = stdinIsDataSource
+	}
 	if opts.readPaste == nil {
 		opts.readPaste = readClipboard
 	}
 	return opts
+}
+
+// stdinIsDataSource reports whether stdin is a pipe or a regular file —
+// something a user plausibly meant to feed in — as opposed to a terminal or
+// a character device such as /dev/null. Stat only, never reads, so it is
+// safe on a pipe nobody will ever close.
+func stdinIsDataSource() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	m := fi.Mode()
+	return m&os.ModeNamedPipe != 0 || m.IsRegular()
 }
 
 // readFileBounded opens path and reads up to max+1 bytes via io.LimitReader,
