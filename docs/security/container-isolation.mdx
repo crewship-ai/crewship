@@ -431,6 +431,39 @@ Limits of the pilot:
 - Turning the pilot off for a crew (removing it from the list) takes effect when its container next starts; until then the rules stay in its namespace. Stop and start the crew (`crewship crew stop <crew>`, then `crewship crew start <crew>`) to apply the change at once.
 - The fence controls traffic leaving the container, and replies to connections opened into it. Inbound reachability from other crews on the shared network is tracked separately in [#2240](https://github.com/crewship-ai/crewship/issues/2240).
 
+#### Supported and refused combinations
+
+| Crew | Runtime | Result |
+|---|---|---|
+| `restricted`, not privileged | `runc` | Fenced |
+| `restricted`, privileged | any | **Refused**: the container is stopped, not run unfenced |
+| `free` | any | **Refused** when listed: there is no allowlist to enforce |
+| `restricted` | `runsc` (gVisor), `kata-runtime`, `sysbox-runc` | **Refused**: their traffic bypasses the namespace's netfilter hooks |
+| not listed | any | Unchanged behaviour, no fence |
+
+There is no silent fallback. A listed crew either runs fenced or does not run.
+
+#### What the fence does not protect: credentials inside the container
+
+The fence decides **where** traffic may go. It does not keep secrets out of the agent's reach. These still reach the agent as readable values, and an agent can use them toward any host on the crew's allowlist:
+
+| What | Where the agent sees it | Why |
+|---|---|---|
+| Claude Code subscription login | `CLAUDE_CODE_OAUTH_TOKEN` | Authenticates inside an HTTPS tunnel the proxy cannot inject into |
+| Codex and other file-based logins | a file under the agent's home | The CLI reads its login only from that file; it holds a short-lived access token, the refresh token stays on the server |
+| API keys for OpenCode, Cursor and Factory providers without a proxy route | the provider's `*_API_KEY` variable | The CLI reaches the provider over an HTTPS tunnel |
+| CLI tokens (for example `GH_TOKEN`) | their environment variable | CLI tools read them only from the environment |
+| `SECRET` credentials when Keeper is disabled | their environment variable | Enable Keeper to serve them on request instead |
+
+Each run logs these exposures, so the gap is visible rather than assumed. API keys for providers with a proxy route (the proxy-injected adapter) are not in the environment. Closing the rest needs credential injection at a gateway outside the container, which is separate work.
+
+#### Operating the pilot
+
+- **Turn on:** add the crew's slug or id to `container.egress_fence_crews` (or `CREWSHIP_EGRESS_FENCE_CREWS`) and restart the server. The fence goes in on the crew's next container start: `crewship crew stop <crew>`, then `crewship crew start <crew>`.
+- **Check:** the server log records `egress fence installed` with the crew id and the install time for every start. Blocked direct connections fail at once (`No route to host`, `Operation not permitted`, or a name-resolution failure); traffic through the proxy is unchanged and appears in the crew's journal as `network.egress`.
+- **When a crew does not start:** the log line `crew requires the egress fence and it is not in place` names the cause (an unsupported combination from the table above, or the install failing). An exec refused with `egress fence not in place for this container start` means the container was restarted outside Crewship and has not been fenced again yet; the next exec into a crew the server has fenced before re-installs it, and after a server restart the next crew start does.
+- **Turn off:** remove the crew from the list, restart the server, then stop and start the crew. The rules live in the container's network namespace and leave with it; removing the crew from the list alone does not remove them from a running container.
+
 Both in-container paths take those variables from one exported source (`orchestrator.SidecarProxyEnv`), and a routine cannot override them: any `*_proxy` variable declared in `script.env` is dropped and logged. The match is on the *shape* rather than an exact list, because CPython lowercases every environment name before looking for a `_proxy` suffix — so `HtTp_PrOxY` would otherwise reach a Python script's proxy configuration, and `.py` is a first-class script interpreter.
 
 <Note>
