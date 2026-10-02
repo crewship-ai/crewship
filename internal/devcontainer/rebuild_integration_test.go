@@ -19,7 +19,7 @@ func TestExplicitRebuild_RealLayerCache(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if out, err := exec.CommandContext(ctx, "docker", "image", "inspect", "alpine:3").CombinedOutput(); err != nil {
-		t.Skipf("requires local alpine:3 and Docker: %v: %s", err, out)
+		t.Fatalf("integration test requires local alpine:3 and Docker: %v: %s", err, out)
 	}
 	dir := t.TempDir()
 	tag := "crewship-rebuild-test:" + strings.ToLower(rand.Text())
