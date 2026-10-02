@@ -936,18 +936,27 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				// from, its own network. The build-wide runtime contract
 				// cannot see a per-crew choice, so check it here, with the
 				// same stopped-recreate / running-report rule as resources.
-				if want := p.crewNetworkFor(team.ID, team.Slug); want != "" && inspect.HostConfig != nil && string(inspect.HostConfig.NetworkMode) != want {
+				// Only crews this feature touches: listed now, or still on their
+				// own network after being delisted. An unlisted crew on the
+				// instance network is never examined, so a runtime that reports
+				// NetworkMode differently (Podman's "bridge") is not churned.
+				haveNet := ""
+				if inspect.HostConfig != nil {
+					haveNet = string(inspect.HostConfig.NetworkMode)
+				}
+				if want := p.crewNetworkFor(team.ID, team.Slug); want != "" && haveNet != want &&
+					(p.crewNetworkWanted(team.ID, team.Slug) || haveNet == p.crewNetworkName(team.ID)) {
 					if crewContainerHoldsNoProcesses(c.State) {
 						p.logger.Info("recreating stopped container (crew network changed)",
 							"container", containerName, "crew_id", team.ID,
-							"from", string(inspect.HostConfig.NetworkMode), "to", want)
+							"from", haveNet, "to", want)
 						p.forceTeardown(ctx, c.ID, team.ID)
 						break // fall through to create new container
 					}
 					p.logger.Warn("crew container is still on its previous network and serving; it moves when next recreated "+
 						"(an idle-TTL stop, or `crewship crew restart-agents <crew>`). Its services stay with it until then.",
 						"container", containerName, "crew_id", team.ID,
-						"network", string(inspect.HostConfig.NetworkMode), "configured", want)
+						"network", haveNet, "configured", want)
 				}
 				if drift := crewResourceDrift(team, inspect.HostConfig); drift != "" {
 					if crewContainerHoldsNoProcesses(c.State) {

@@ -27,6 +27,14 @@ type DockerInspector interface {
 // router wiring concise when we only need a closure over *dockerclient.Client.
 type DockerInspectorFunc func(ctx context.Context, containerID, network string) (string, error)
 
+// ContainerCrewResolver is an optional DockerInspector extension: it names
+// the crew a container belongs to (its crewship.crew-id label). When the
+// inspector implements it, a create request is refused for a container of
+// another crew, on the shared network or on a crew's own network (#2240).
+type ContainerCrewResolver interface {
+	ContainerCrew(ctx context.Context, containerID string) (string, error)
+}
+
 // ContainerIP delegates to the wrapped function.
 func (f DockerInspectorFunc) ContainerIP(ctx context.Context, containerID, network string) (string, error) {
 	return f(ctx, containerID, network)

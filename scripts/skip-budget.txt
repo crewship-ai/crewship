@@ -193,4 +193,6 @@
 # 2026-10-02 (#2240): +1 — TestCrewNetworkMovesExistingServiceWithRuntimeIntegration
 #                     moves a real container between real bridges; SKIP-WAIVER
 #                     on the Docker-unavailable guard.
-152
+# 2026-10-02 (#2240): +1 — TestCrewNetworkInheritsInternalIntegration creates
+#                     real internal bridges; SKIP-WAIVER on the Docker guard.
+153
