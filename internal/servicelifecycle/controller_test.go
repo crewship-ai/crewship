@@ -136,7 +136,6 @@ func TestControllerOldCompletionCannotOverwriteStopCrew(t *testing.T) {
 	}
 	if err := StopCrew(ctx, other, "crew"); err != nil {
 		close(release)
-		<-done
 		t.Fatal(err)
 	}
 	close(release)

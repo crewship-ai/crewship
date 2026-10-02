@@ -19,6 +19,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change:** Restricted routine, Page and assigned-issue runs now use the shared work ledger and dispatcher. Interrupted runs with uncertain effects show “Needs review” and require reconciliation before outputs are released or new work repeats; legacy running jobs are adopted into this state.
 
 ### Fixed
+- Pipeline lists, run feeds and webhook settings settle loading when their workspace is cleared; old webhook refreshes and aborted run requests cannot interfere with a newly selected workspace.
+- The quota helper checks its backend and server identity before binding a namespace, avoiding a nil-backend panic and catalog changes on rejected startup.
+- Value previews keep their configured length limit when strings include display quotes or JSON serialization falls back to text.
 - **A terminal could reconnect after being closed or show errors from a previous crew.** Disconnect now invalidates pending authentication and obsolete socket callbacks, releases resize tracking, and reports missing or malformed connection tokens as errors. (#2775)
 - **Routine approval prompts could return after their workspace was cleared.** Clearing the workspace or run selection now invalidates outstanding waitpoint requests before their results can restore stale approvals. (#2775)
 - **Run heatmaps could show an older retry or lose live results while history loaded.** Step metrics keep the newest historical completion, preserve live completions when history arrives or fails, and clear the previous run's metrics when the selection changes. (#2775)
