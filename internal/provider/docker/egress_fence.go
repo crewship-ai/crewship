@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -92,6 +93,15 @@ func (p *Provider) ensureEgressFence(ctx context.Context, team provider.CrewConf
 	}
 	if image == "" && inspect.Container.Config != nil {
 		image = inspect.Container.Config.Image
+	}
+	// One helper per container at a time: concurrent execs after an outside
+	// restart would otherwise each start one. The second waiter finds the
+	// first one's record and returns.
+	mu, _ := p.fenceLocks.LoadOrStore(containerID, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	defer mu.(*sync.Mutex).Unlock()
+	if prev, ok := p.fenced.Load(containerID); ok && prev.(string) == startedAt && startedAt != "" {
+		return nil
 	}
 	began := time.Now()
 	out, err := p.runFenceHelper(ctx, team, containerID, image)
@@ -332,6 +342,15 @@ func containerStartedAt(st *container.State) string {
 // asked for it, and running it unfenced would be the silent downgrade #1368
 // forbids.
 func (p *Provider) stopUnfenced(ctx context.Context, team provider.CrewConfig, containerID string, cause error) {
+	if !fenceFailureStopsCrew(cause) {
+		// The caller's context ended (a cancelled run, a request deadline):
+		// nothing is known to be wrong with the fence, and stopping would kill
+		// every other run on the crew. Still closed: without a confirmed
+		// record for this start, guardFencedExec refuses every exec.
+		p.logger.Warn("egress fence check interrupted by the caller; crew left running, execs stay refused until confirmed",
+			"crew_id", team.ID, "container_id", shortID(containerID), "error", cause)
+		return
+	}
 	p.logger.Error("crew requires the egress fence and it is not in place; stopping the crew container",
 		"crew_id", team.ID, "container_id", shortID(containerID), "error", cause)
 	p.fenced.Delete(containerID)
@@ -344,6 +363,13 @@ func (p *Provider) stopUnfenced(ctx context.Context, team provider.CrewConfig, c
 	if _, err := p.client.ContainerStop(stopCtx, containerID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
 		p.logger.Warn("could not stop unfenced crew container", "container_id", shortID(containerID), "error", err)
 	}
+}
+
+// fenceFailureStopsCrew reports whether err means the fence is actually not
+// in place (helper failed or reported it absent, unsupported crew, a restart
+// raced an exec) rather than that the caller gave up.
+func fenceFailureStopsCrew(err error) bool {
+	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
 func shortID(id string) string {

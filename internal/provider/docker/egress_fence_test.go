@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 
@@ -70,5 +71,25 @@ func TestEnsureEgressFenceRefusesInapplicable(t *testing.T) {
 	err := p.ensureEgressFence(context.Background(), provider.CrewConfig{Slug: "lab", NetworkMode: "restricted", Privileged: true}, "cid", "img")
 	if !errors.Is(err, errFenceUnsupported) {
 		t.Fatalf("privileged listed crew must be refused, got %v", err)
+	}
+}
+
+// A caller that gives up must not take the crew down: only a real fence
+// failure stops the container (CodeRabbit on #2760).
+func TestFenceFailureStopsCrew(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		stop bool
+	}{
+		{context.Canceled, false},
+		{context.DeadlineExceeded, false},
+		{fmt.Errorf("egress fence: inspect crew container: %w", context.Canceled), false},
+		{fmt.Errorf("egress fence: %w", errors.New("helper exited 1")), true},
+		{fmt.Errorf("%w: privileged", errFenceUnsupported), true},
+		{errFenceNotInPlace, true},
+	} {
+		if got := fenceFailureStopsCrew(tc.err); got != tc.stop {
+			t.Fatalf("fenceFailureStopsCrew(%v) = %v, want %v", tc.err, got, tc.stop)
+		}
 	}
 }

@@ -54,9 +54,9 @@ func Rules(s Spec) [][]expr.Any {
 const ctDirReply = 1
 
 // Apply installs (or replaces) the fence in the current network namespace.
-// Idempotent: an existing crewship_fence table is deleted in the same netlink
-// batch, so there is no window in which the namespace is unfenced between the
-// old and the new rule set.
+// Idempotent and race-safe: the old table is deleted in the same netlink
+// batch that creates the new one, so there is no window in which the
+// namespace is unfenced, and concurrent applies cannot stack rule sets.
 func Apply(s Spec) error {
 	if err := s.Validate(); err != nil {
 		return err
@@ -65,13 +65,13 @@ func Apply(s Spec) error {
 	if err != nil {
 		return fmt.Errorf("egressfence: netlink: %w", err)
 	}
-	present, err := tablePresent(c)
-	if err != nil {
-		return err
-	}
-	if present {
-		c.DelTable(&nftables.Table{Family: nftables.TableFamilyINet, Name: TableName})
-	}
+	// add-delete-add in ONE batch: the first add makes sure there is a table
+	// to delete (a non-exclusive add of an existing table is a no-op), the
+	// delete drops whatever is there, the second add starts clean. The batch
+	// commits atomically, so two helpers racing on the same namespace each
+	// leave exactly one fresh table — never one with both rule sets appended.
+	c.AddTable(&nftables.Table{Family: nftables.TableFamilyINet, Name: TableName})
+	c.DelTable(&nftables.Table{Family: nftables.TableFamilyINet, Name: TableName})
 	table := c.AddTable(&nftables.Table{Family: nftables.TableFamilyINet, Name: TableName})
 	policy := nftables.ChainPolicyDrop
 	chain := c.AddChain(&nftables.Chain{
