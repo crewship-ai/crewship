@@ -46,8 +46,31 @@ func Rules(s Spec) [][]expr.Any {
 	for _, uid := range s.AllowUIDs {
 		rules = append(rules, append(skuidEq(uid), accept()))
 	}
+	for _, d := range s.AllowDests {
+		rules = append(rules, destMatch(d))
+	}
 	rules = append(rules, []expr.Any{rejectAdmin()})
 	return rules
+}
+
+// destMatch accepts packets to exactly one service endpoint, any UID.
+func destMatch(d Dest) []expr.Any {
+	proto := byte(unix.IPPROTO_TCP)
+	if d.Proto == "udp" {
+		proto = unix.IPPROTO_UDP
+	}
+	addr := d.Addr.As4()
+	return []expr.Any{
+		&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.NFPROTO_IPV4}},
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 16, Len: 4},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: addr[:]},
+		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{proto}},
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.BigEndian.PutUint16(d.Port)},
+		accept(),
+	}
 }
 
 // ctDirReply is IP_CT_DIR_REPLY.

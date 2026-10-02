@@ -10,6 +10,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"net/netip"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -164,7 +165,10 @@ func (p *Provider) ensureCrewNetworkNamed(ctx context.Context, id, slug string) 
 			EnableIPv6: &enableIPv6,
 			IPAM: &network.IPAM{
 				Driver: "default",
-				Config: []network.IPAMConfig{{Subnet: subnet, Gateway: gw}},
+				// Dynamic addresses come only from the upper half, so the
+				// fixed service addresses below (serviceAddr) can never be
+				// handed to another container.
+				Config: []network.IPAMConfig{{Subnet: subnet, Gateway: gw, IPRange: dynamicRange(subnet)}},
 			},
 			Labels: resourcelifecycle.WithInstanceLabel(map[string]string{
 				"managed-by":    "crewship",
@@ -331,11 +335,19 @@ func (p *Provider) serviceNetworkFor(ctx context.Context, id, slug string) (stri
 // the service on exactly netName or returns an error and the crew's work
 // does not start on an unconfirmed topology. Open client connections to the
 // service (a database session) do not survive the move; clients reconnect.
-func (p *Provider) moveServiceNetwork(ctx context.Context, containerID string, settings *container.NetworkSettingsSummary, netName, alias string) error {
+func (p *Provider) moveServiceNetwork(ctx context.Context, containerID string, settings *container.NetworkSettingsSummary, netName, alias string, fixed netip.Addr) error {
 	attached := map[string]bool{}
 	if settings != nil {
-		for n := range settings.Networks {
+		for n, ep := range settings.Networks {
 			attached[n] = true
+			// On the target network but not at its fixed address: detach
+			// and attach again at the right one (same container, data kept).
+			if n == netName && fixed.IsValid() && ep != nil && !endpointAt(ep, fixed) {
+				if err := p.networkDisconnect(ctx, n, containerID); err != nil {
+					return fmt.Errorf("re-address service %q: %w", alias, err)
+				}
+				delete(attached, n)
+			}
 		}
 	}
 	if attached[netName] && len(attached) == 1 {
@@ -345,7 +357,7 @@ func (p *Provider) moveServiceNetwork(ctx context.Context, containerID string, s
 	if !attached[netName] {
 		if _, err := p.client.NetworkConnect(ctx, netName, client.NetworkConnectOptions{
 			Container:      containerID,
-			EndpointConfig: &network.EndpointSettings{Aliases: []string{alias}},
+			EndpointConfig: endpointFor(alias, fixed),
 		}); err != nil {
 			return fmt.Errorf("move service %q to network %s: %w", alias, netName, err)
 		}
@@ -366,8 +378,9 @@ func (p *Provider) moveServiceNetwork(ctx context.Context, containerID string, s
 	if err != nil {
 		return fmt.Errorf("verify service %q network: %w", alias, err)
 	}
-	if ns := insp.Container.NetworkSettings; ns == nil || len(ns.Networks) != 1 || ns.Networks[netName] == nil {
-		return fmt.Errorf("service %q is not on exactly network %s after the move", alias, netName)
+	if ns := insp.Container.NetworkSettings; ns == nil || len(ns.Networks) != 1 || ns.Networks[netName] == nil ||
+		(fixed.IsValid() && !endpointAt(ns.Networks[netName], fixed)) {
+		return fmt.Errorf("service %q is not on exactly network %s at its address after the move", alias, netName)
 	}
 	p.logger.Info("service moved to the crew's network", "service", alias, "network", netName)
 	return nil
@@ -478,4 +491,198 @@ func instanceNetworkInternal(nets []network.Summary, name string) (bool, error) 
 		}
 	}
 	return false, fmt.Errorf("crew network: instance network %q not found; it must exist before a crew network is created", name)
+}
+
+// Fixed service addresses on a crew's own /27 (#1368 + #2240): services take
+// .4 .. .15 by the sorted order of their names, dynamic containers (the
+// runtime, anything else) .16 .. .31. A fixed address is what lets the fence
+// open an exact service endpoint and the runtime resolve it through
+// ExtraHosts without DNS, and it never moves to another container.
+const (
+	serviceAddrFirst = 4
+	serviceAddrLast  = 15
+)
+
+// dynamicRange is the upper half of a crew subnet.
+func dynamicRange(subnet netip.Prefix) netip.Prefix {
+	base := subnet.Masked().Addr().As4()
+	base[3] += 16
+	return netip.PrefixFrom(netip.AddrFrom4(base), subnet.Bits()+1)
+}
+
+// serviceAddrs assigns each declared service its fixed address on the crew
+// subnet. Deterministic: the same names always get the same addresses.
+func serviceAddrs(subnet netip.Prefix, names []string) (map[string]netip.Addr, error) {
+	sorted := append([]string(nil), names...)
+	sort.Strings(sorted)
+	if len(sorted) > serviceAddrLast-serviceAddrFirst+1 {
+		return nil, fmt.Errorf("a crew on its own network can declare at most %d services", serviceAddrLast-serviceAddrFirst+1)
+	}
+	base := subnet.Masked().Addr().As4()
+	out := make(map[string]netip.Addr, len(sorted))
+	for i, n := range sorted {
+		a := base
+		a[3] += byte(serviceAddrFirst + i)
+		out[n] = netip.AddrFrom4(a)
+	}
+	return out, nil
+}
+
+// crewSubnet returns the subnet of crew id's own network, or false when the
+// crew is not on one (or the network does not exist yet).
+func (p *Provider) crewSubnet(ctx context.Context, id, slug string) (netip.Prefix, bool, error) {
+	if !p.crewNetworkWanted(id, slug) {
+		return netip.Prefix{}, false, nil
+	}
+	// NetworkList rather than NetworkInspect: it is already on the socket
+	// proxy allowlist and carries the IPAM config.
+	name := p.crewNetworkName(id)
+	nets, err := p.client.NetworkList(ctx, client.NetworkListOptions{Filters: make(client.Filters).Add("name", name)})
+	if err != nil {
+		return netip.Prefix{}, false, err
+	}
+	var cfgs []network.IPAMConfig
+	found := false
+	for _, n := range nets.Items {
+		if n.Name == name {
+			cfgs, found = n.IPAM.Config, true
+		}
+	}
+	if !found {
+		return netip.Prefix{}, false, fmt.Errorf("crew network %s does not exist", name)
+	}
+	for _, c := range cfgs {
+		if c.Subnet.IsValid() && c.Subnet.Addr().Is4() {
+			if !c.IPRange.IsValid() {
+				return netip.Prefix{}, false, fmt.Errorf("crew network %s has no dynamic range; remove it so it can be recreated with fixed service addresses", p.crewNetworkName(id))
+			}
+			return c.Subnet, true, nil
+		}
+	}
+	return netip.Prefix{}, false, fmt.Errorf("crew network %s has no IPv4 subnet", p.crewNetworkName(id))
+}
+
+func serviceNames(team provider.CrewConfig) []string {
+	out := make([]string, 0, len(team.Services))
+	for _, s := range team.Services {
+		out = append(out, s.Name)
+	}
+	return out
+}
+
+// endpointFor is a service's endpoint on a network: its alias, and its fixed
+// address when it has one.
+func endpointFor(alias string, fixed netip.Addr) *network.EndpointSettings {
+	ep := &network.EndpointSettings{Aliases: []string{alias}}
+	if fixed.IsValid() {
+		ep.IPAMConfig = &network.EndpointIPAMConfig{IPv4Address: fixed}
+	}
+	return ep
+}
+
+// serviceExtraHosts maps each declared service name to its fixed address on
+// the crew's own network, for the runtime container's /etc/hosts. A fenced
+// agent cannot query DNS; it resolves its services from here. Empty for a
+// crew without its own network or without services.
+func (p *Provider) serviceExtraHosts(ctx context.Context, team provider.CrewConfig) ([]string, error) {
+	if len(team.Services) == 0 {
+		return nil, nil
+	}
+	subnet, ok, err := p.crewSubnet(ctx, team.ID, team.Slug)
+	if err != nil || !ok {
+		return nil, err
+	}
+	addrs, err := serviceAddrs(subnet, serviceNames(team))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(addrs))
+	for _, n := range serviceNames(team) {
+		out = append(out, n+":"+addrs[n].String())
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// sameServiceHosts compares the service entries of a container's ExtraHosts
+// (everything but host.docker.internal) with the wanted set.
+func sameServiceHosts(have, want []string) bool {
+	var h []string
+	for _, e := range have {
+		if !strings.HasPrefix(e, "host.docker.internal:") {
+			h = append(h, e)
+		}
+	}
+	sort.Strings(h)
+	w := append([]string(nil), want...)
+	sort.Strings(w)
+	if len(h) != len(w) {
+		return false
+	}
+	for i := range h {
+		if h[i] != w[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// endpointAt reports whether an endpoint is (or, for a stopped container,
+// will be) at addr. A stopped container has no live address; its configured
+// one (IPAMConfig) is what it gets on start, so that is what counts.
+func endpointAt(ep *network.EndpointSettings, addr netip.Addr) bool {
+	if ep == nil {
+		return false
+	}
+	if ep.IPAddress == addr {
+		return true
+	}
+	return !ep.IPAddress.IsValid() && ep.IPAMConfig != nil && ep.IPAMConfig.IPv4Address == addr
+}
+
+// releaseServiceAddrs detaches from netName every service of crewID that
+// holds another declared service's fixed address. Fixed addresses follow the
+// sorted service names, so a newly declared service can take an address an
+// existing one holds; ensureSidecar then attaches each service at its own.
+// A detached service is unreachable until it is attached again — closed,
+// never wider.
+func (p *Provider) releaseServiceAddrs(ctx context.Context, crewID, netName string, fixed map[string]netip.Addr) error {
+	if len(fixed) == 0 {
+		return nil
+	}
+	owner := make(map[netip.Addr]string, len(fixed))
+	for name, a := range fixed {
+		owner[a] = name
+	}
+	list, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
+	if err != nil {
+		return fmt.Errorf("list services: %w", err)
+	}
+	for _, c := range list.Items {
+		name, ok := matchCrewService(c.Labels, crewID)
+		if !ok {
+			continue
+		}
+		insp, err := p.client.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			return fmt.Errorf("inspect service %q: %w", name, err)
+		}
+		ns := insp.Container.NetworkSettings
+		if ns == nil || ns.Networks[netName] == nil {
+			continue
+		}
+		ep := ns.Networks[netName]
+		held := ep.IPAddress
+		if !held.IsValid() && ep.IPAMConfig != nil {
+			held = ep.IPAMConfig.IPv4Address
+		}
+		if o, taken := owner[held]; !taken || o == name {
+			continue
+		}
+		if err := p.networkDisconnect(ctx, netName, c.ID); err != nil {
+			return fmt.Errorf("free address %s held by service %q: %w", held, name, err)
+		}
+		p.logger.Info("service released another service's fixed address", "service", name, "address", held.String(), "network", netName)
+	}
+	return nil
 }

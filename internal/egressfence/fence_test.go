@@ -1,6 +1,9 @@
 package egressfence
 
-import "testing"
+import (
+	"net/netip"
+	"testing"
+)
 
 func TestSpecValidate(t *testing.T) {
 	for _, tc := range []struct {
@@ -45,5 +48,38 @@ func TestSpecMarker(t *testing.T) {
 	}
 	if a.marker(2) != (Spec{AllowUIDs: []uint32{1002}}).marker(2) {
 		t.Fatal("markers must be deterministic for the same spec")
+	}
+}
+
+func TestParseDest(t *testing.T) {
+	for _, tc := range []struct {
+		in  string
+		ok  bool
+		out string
+	}{
+		{"10.231.0.3:6379/tcp", true, "10.231.0.3:6379/tcp"},
+		{"10.231.0.3:6379", true, "10.231.0.3:6379/tcp"},
+		{"10.231.0.3:53/udp", true, "10.231.0.3:53/udp"},
+		{"10.231.0.3:0/tcp", false, ""},
+		{"127.0.0.1:80/tcp", false, ""},
+		{"0.0.0.0:80/tcp", false, ""},
+		{"[fd00::1]:80/tcp", false, ""},
+		{"10.231.0.3:80/sctp", false, ""},
+		{"10.231.0.0/27", false, ""},
+	} {
+		d, err := ParseDest(tc.in)
+		if (err == nil) != tc.ok || (tc.ok && d.String() != tc.out) {
+			t.Fatalf("ParseDest(%q) = %v, %v", tc.in, d, err)
+		}
+	}
+}
+
+// A changed service endpoint must change every marker, so Check reads the
+// old fence as not valid.
+func TestSpecMarkerCoversDests(t *testing.T) {
+	a := Spec{AllowUIDs: []uint32{1002}, AllowDests: []Dest{{Addr: netip.MustParseAddr("10.231.0.3"), Port: 6379, Proto: "tcp"}}}
+	b := Spec{AllowUIDs: []uint32{1002}, AllowDests: []Dest{{Addr: netip.MustParseAddr("10.231.0.4"), Port: 6379, Proto: "tcp"}}}
+	if a.marker(0) == b.marker(0) {
+		t.Fatal("markers must differ when a service address changes")
 	}
 }

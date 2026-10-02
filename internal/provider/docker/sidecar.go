@@ -55,6 +55,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -333,6 +334,20 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 	if err != nil {
 		return nil, fmt.Errorf("ensure network for services: %w", err)
 	}
+	// On the crew's own network every service has a fixed address
+	// (serviceAddrs); elsewhere Docker assigns one.
+	var fixedAddrs map[string]netip.Addr
+	if svcNet == p.crewNetworkName(team.ID) {
+		subnet, ok, err := p.crewSubnet(ctx, team.ID, team.Slug)
+		if err != nil {
+			return nil, fmt.Errorf("crew network for services: %w", err)
+		}
+		if ok {
+			if fixedAddrs, err = serviceAddrs(subnet, serviceNames(team)); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	// Registry IO is preparation, not a service mutation. Keep it outside the
 	// bounded operation lease so cold pulls do not consume its safety budget.
@@ -400,10 +415,26 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 		return nil, err
 	}
 
+	// A fenced crew reaches its services only through exact endpoints in
+	// its fence; follow any address change now (#1368 + #2240). Also on an
+	// error part-way: the fence then still matches the declared set, never
+	// an address a moved service left behind.
+	defer func() {
+		if ferr := p.refreshFenceServices(ctx, team); ferr != nil && retErr == nil {
+			retErr = fmt.Errorf("egress fence after services: %w", ferr)
+		}
+	}()
+	// Addresses follow the sorted service names, so declaring a service
+	// shifts the others: free every fixed address another service holds
+	// before any service claims its own.
+	if err := p.releaseServiceAddrs(ctx, team.ID, svcNet, fixedAddrs); err != nil {
+		return nil, err
+	}
+
 	ids = make(map[string]string, len(team.Services))
 	for i := range team.Services {
 		svc := &team.Services[i]
-		id, err := p.ensurePreparedSidecar(ctx, team.ID, team.Slug, svcNet, svc, true)
+		id, err := p.ensurePreparedSidecar(ctx, team.ID, team.Slug, svcNet, fixedAddrs[svc.Name], svc, true)
 		if err != nil {
 			return ids, fmt.Errorf("sidecar %q: %w", svc.Name, err)
 		}
@@ -436,11 +467,11 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 // (image, command, env, ports, volumes, healthcheck) triggers a
 // stop + remove + recreate so apply is true sync for sidecars,
 // not just "fresh creates work."
-func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug, netName string, svc *provider.CrewService) (string, error) {
-	return p.ensurePreparedSidecar(ctx, crewID, crewSlug, netName, svc, false)
+func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug, netName string, fixed netip.Addr, svc *provider.CrewService) (string, error) {
+	return p.ensurePreparedSidecar(ctx, crewID, crewSlug, netName, fixed, svc, false)
 }
 
-func (p *Provider) ensurePreparedSidecar(ctx context.Context, crewID, crewSlug, netName string, svc *provider.CrewService, imagePrepared bool) (string, error) {
+func (p *Provider) ensurePreparedSidecar(ctx context.Context, crewID, crewSlug, netName string, fixed netip.Addr, svc *provider.CrewService, imagePrepared bool) (string, error) {
 	quotaMounts, err := p.quotaServiceVolumes(ctx, crewID, crewSlug, svc)
 	if err != nil {
 		return "", fmt.Errorf("service quota catalog: %w", err)
@@ -540,7 +571,7 @@ func (p *Provider) ensurePreparedSidecar(ctx context.Context, crewID, crewSlug, 
 			// On the wrong network (the crew was listed for, or removed
 			// from, its own network): move it live. Recreating would orphan
 			// image-declared anonymous volumes — an empty database.
-			if err := p.moveServiceNetwork(ctx, c.ID, c.NetworkSettings, netName, svc.Name); err != nil {
+			if err := p.moveServiceNetwork(ctx, c.ID, c.NetworkSettings, netName, svc.Name, fixed); err != nil {
 				return "", err
 			}
 		}
@@ -707,7 +738,7 @@ func (p *Provider) ensurePreparedSidecar(ctx context.Context, crewID, crewSlug, 
 	if netName != "" {
 		networkCfg = &dockernetwork.NetworkingConfig{
 			EndpointsConfig: map[string]*dockernetwork.EndpointSettings{
-				netName: {Aliases: []string{svc.Name}},
+				netName: endpointFor(svc.Name, fixed),
 			},
 		}
 	}

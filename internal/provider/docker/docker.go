@@ -105,6 +105,9 @@ type Provider struct {
 	fenceTeams sync.Map
 	// fenceLocks serialises fence installs per container id.
 	fenceLocks sync.Map
+	// fenceDests maps a fenced container id to the service endpoint set its
+	// fence was installed with (serviceTargets.key).
+	fenceDests sync.Map
 	// fencedCrew maps a container id this provider has fenced to its crew
 	// id, so the exec guard keeps treating it as fenced when its labels are
 	// missing or stale.

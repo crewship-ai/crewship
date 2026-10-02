@@ -47,6 +47,8 @@ func main() {
 		"report whether the L3 egress fence is installed in the current network namespace; exit 0 if present, 3 if absent")
 	fenceAllowUIDs := flag.String("fence-allow-uids", "1002",
 		"comma-separated socket owner UIDs allowed through the fence (the sidecar's)")
+	fenceAllowDests := flag.String("fence-allow-dests", "",
+		"comma-separated ip:port/proto endpoints any process may reach directly (the crew's own services)")
 	flag.Parse()
 
 	// --fence-apply / --fence-check run in a short-lived helper container that
@@ -54,7 +56,7 @@ func main() {
 	// crew container itself never holds NET_ADMIN (#1368). The binary is the
 	// same bind-mounted sidecar, so the helper needs nothing from the image.
 	if *fenceApply || *fenceCheck {
-		os.Exit(runFence(*fenceApply, *fenceAllowUIDs, os.Stdout, os.Stderr))
+		os.Exit(runFence(*fenceApply, *fenceAllowUIDs, *fenceAllowDests, os.Stdout, os.Stderr))
 	}
 
 	// --version is used by the Crewship container runtime as a sanity check

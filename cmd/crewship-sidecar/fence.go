@@ -17,13 +17,18 @@ const (
 	fenceExitAbsent = 3
 )
 
-func runFence(apply bool, allowUIDs string, stdout, stderr io.Writer) int {
+func runFence(apply bool, allowUIDs, allowDests string, stdout, stderr io.Writer) int {
 	uids, err := parseFenceUIDs(allowUIDs)
 	if err != nil {
 		fmt.Fprintf(stderr, "fence: %v\n", err)
 		return fenceExitError
 	}
-	spec := egressfence.Spec{AllowUIDs: uids}
+	dests, err := parseFenceDests(allowDests)
+	if err != nil {
+		fmt.Fprintf(stderr, "fence: %v\n", err)
+		return fenceExitError
+	}
+	spec := egressfence.Spec{AllowUIDs: uids, AllowDests: dests}
 	if apply {
 		if err := egressfence.Apply(spec); err != nil {
 			fmt.Fprintf(stderr, "fence: %v\n", err)
@@ -54,6 +59,21 @@ func parseFenceUIDs(s string) ([]uint32, error) {
 			return nil, fmt.Errorf("invalid uid %q", part)
 		}
 		out = append(out, uint32(n))
+	}
+	return out, nil
+}
+
+func parseFenceDests(s string) ([]egressfence.Dest, error) {
+	var out []egressfence.Dest
+	for _, part := range strings.Split(s, ",") {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		d, err := egressfence.ParseDest(part)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
 	}
 	return out, nil
 }

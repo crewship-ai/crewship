@@ -19,6 +19,7 @@
 //	    oifname "lo" accept                               # agent ↔ sidecar on 127.0.0.1:9119
 //	    ct direction reply ct state established,related accept  # replies to inbound connections only
 //	    meta skuid <allowed> accept                       # sidecar egress (allowlist on top)
+//	    ip daddr <svc> <proto> dport <port> accept        # each own-crew service endpoint
 //	    reject with icmpx admin-prohibited                # fail fast instead of timing out
 //
 // The fence rests on the UID boundary: it means nothing when the agent can
@@ -37,6 +38,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 )
@@ -61,6 +63,43 @@ type Spec struct {
 	// allowing root would let any root exec in the container bypass the
 	// fence, and root is exactly what a fenced crew must not have.
 	AllowUIDs []uint32
+	// AllowDests are the only destinations any process (the agent
+	// included) may reach directly: the crew's own declared services, by
+	// exact address, protocol and port. Never a subnet, never the host.
+	AllowDests []Dest
+}
+
+// Dest is one directly reachable service endpoint.
+type Dest struct {
+	Addr  netip.Addr
+	Port  uint16
+	Proto string // "tcp" or "udp"
+}
+
+// String renders a Dest as ip:port/proto (the --fence-allow-dests syntax).
+func (d Dest) String() string {
+	return fmt.Sprintf("%s:%d/%s", d.Addr, d.Port, d.Proto)
+}
+
+// ParseDest parses ip:port/proto.
+func ParseDest(s string) (Dest, error) {
+	hostport, proto, ok := strings.Cut(strings.TrimSpace(s), "/")
+	if !ok {
+		proto = "tcp"
+	}
+	ap, err := netip.ParseAddrPort(hostport)
+	if err != nil {
+		return Dest{}, fmt.Errorf("egressfence: destination %q: %w", s, err)
+	}
+	d := Dest{Addr: ap.Addr(), Port: ap.Port(), Proto: proto}
+	return d, d.validate()
+}
+
+func (d Dest) validate() error {
+	if !d.Addr.Is4() || d.Addr.IsUnspecified() || d.Addr.IsLoopback() || d.Port == 0 || (d.Proto != "tcp" && d.Proto != "udp") {
+		return fmt.Errorf("egressfence: destination %s must be an IPv4 address, a port and tcp or udp", d)
+	}
+	return nil
 }
 
 // ErrNotSupported is returned on platforms without nftables.
@@ -76,12 +115,17 @@ func (s Spec) Validate() error {
 			return errors.New("egressfence: uid 0 cannot be allowed; a root-allowed fence is no fence")
 		}
 	}
+	for _, d := range s.AllowDests {
+		if err := d.validate(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 // markerVersion changes whenever the rule shape changes, so a namespace
 // fenced by an older binary reads as not-valid and is re-applied.
-const markerVersion = "v2"
+const markerVersion = "v3"
 
 // marker is the user data Apply stores on rule i and Check expects back. It
 // binds each rule to the rule shape version and to this spec's UIDs, so a
@@ -92,7 +136,11 @@ func (s Spec) marker(i int) string {
 	for j, u := range s.AllowUIDs {
 		uids[j] = strconv.FormatUint(uint64(u), 10)
 	}
-	sum := sha256.Sum256([]byte(markerVersion + "|" + strings.Join(uids, ",")))
+	dests := make([]string, len(s.AllowDests))
+	for j, d := range s.AllowDests {
+		dests[j] = d.String()
+	}
+	sum := sha256.Sum256([]byte(markerVersion + "|" + strings.Join(uids, ",") + "|" + strings.Join(dests, ",")))
 	return fmt.Sprintf("crewship-fence/%s/%d/%s", markerVersion, i, hex.EncodeToString(sum[:6]))
 }
 

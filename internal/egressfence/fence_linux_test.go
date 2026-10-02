@@ -3,6 +3,7 @@
 package egressfence
 
 import (
+	"net/netip"
 	"testing"
 
 	"github.com/google/nftables/expr"
@@ -58,4 +59,23 @@ func hasPayloadDaddr(r []expr.Any) bool {
 		}
 	}
 	return false
+}
+
+// Service endpoints (own crew's services) are accepted exactly — address,
+// protocol, port — after the UID accepts and before the final reject.
+func TestRulesWithDests(t *testing.T) {
+	d1 := Dest{Addr: netip.MustParseAddr("10.231.0.3"), Port: 6379, Proto: "tcp"}
+	d2 := Dest{Addr: netip.MustParseAddr("10.231.0.4"), Port: 53, Proto: "udp"}
+	rules := Rules(Spec{AllowUIDs: []uint32{1002}, AllowDests: []Dest{d1, d2}})
+	if len(rules) != 8 {
+		t.Fatalf("got %d rules, want 8", len(rules))
+	}
+	for _, i := range []int{5, 6} {
+		if _, ok := rules[i][len(rules[i])-1].(*expr.Verdict); !ok || len(rules[i]) != 9 {
+			t.Fatalf("rule %d must be a full endpoint accept", i)
+		}
+	}
+	if !endsWithReject(rules[7]) {
+		t.Fatal("the final reject must stay last")
+	}
 }

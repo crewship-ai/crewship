@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -56,7 +57,7 @@ func TestQuotaServiceUnavailableNeverUsesLegacyStorage(t *testing.T) {
 	for _, catalog := range []quota.Catalog{nil, &fakeQuotaCatalog{unavailable: true}} {
 		daemon := newFakeQuotaDaemon(t)
 		p := newCovProvider(t, Config{QuotaCatalog: catalog}, daemon.ServeHTTP)
-		if _, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc); err == nil {
+		if _, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), netip.Addr{}, &svc); err == nil {
 			t.Fatal("missing quota helper permitted service")
 		}
 		if daemon.mutatingCalls() != 0 {
@@ -112,7 +113,7 @@ func TestQuotaServiceOwnedVolumeAndReadOnlyRoot(t *testing.T) {
 			w.WriteHeader(500)
 		}
 	})
-	if _, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc); err != nil {
+	if _, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), netip.Addr{}, &svc); err != nil {
 		t.Fatal(err)
 	}
 	if !sawCreate || !rootReadOnly || catalog.verify != 1 {
