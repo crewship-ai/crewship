@@ -14,9 +14,16 @@ type fakeNetRuntime struct {
 	inUse      map[string]bool // network id -> still has endpoints
 	removed    []string
 	failRemove bool
+	forbidden  bool
+	onList     func(call int)
+	listCalls  int
 }
 
 func (f *fakeNetRuntime) ListNetworks(context.Context) ([]Network, error) {
+	f.listCalls++
+	if f.onList != nil {
+		f.onList(f.listCalls)
+	}
 	out := []Network{}
 	for _, n := range f.nets {
 		out = append(out, n)
@@ -27,6 +34,9 @@ func (f *fakeNetRuntime) ListNetworks(context.Context) ([]Network, error) {
 func (f *fakeNetRuntime) RemoveNetwork(_ context.Context, id string) error {
 	if f.failRemove {
 		return errors.New("secret daemon error")
+	}
+	if f.forbidden {
+		return ErrNetworkForbidden
 	}
 	if f.inUse[id] {
 		return ErrNetworkInUse
@@ -135,5 +145,43 @@ func TestControllerWithoutNetworkRuntime(t *testing.T) {
 	c.Tick(context.Background())
 	if s := status(t, c); s.State != "observed_clear" {
 		t.Fatalf("status %+v", s)
+	}
+}
+
+// A socket proxy refusing NetworkRemove is a visible error, not an endless
+// pending (review of #2767).
+func TestCrewNetworkForbiddenIsVisible(t *testing.T) {
+	c, f := netFixture(t)
+	f.nets["net-deleted"] = crewNet("net-deleted", "deleted", c.InstanceID)
+	f.forbidden = true
+	c.Tick(context.Background())
+	if s := status(t, c); s.State != "error" || s.Error != "network_remove_forbidden" {
+		t.Fatalf("status %+v", s)
+	}
+}
+
+// A backup window that interrupts the network pass ends the tick with no
+// writes: the recount did not run, so a status derived from Remaining would
+// be a false observed_clear (review of #2767). The hook fails the pass's
+// Yield while the tick's context is still live, so a fall-through would be
+// able to write.
+func TestCrewNetworkPassInterruptedWritesNothing(t *testing.T) {
+	c, f := netFixture(t)
+	f.nets["net-deleted"] = crewNet("net-deleted", "deleted", c.InstanceID)
+	before := status(t, c)
+	c.yieldHook = func(context.Context) error { return errors.New("backup window: tick context ended") }
+	c.Tick(context.Background())
+	if len(f.removed) != 0 {
+		t.Fatalf("removed %v while the pass was interrupted", f.removed)
+	}
+	if after := status(t, c); after.State != before.State || after.Complete != before.Complete || after.Remaining != before.Remaining {
+		t.Fatalf("status changed by an interrupted pass: before %+v after %+v", before, after)
+	}
+	var scans int
+	if err := c.DB.QueryRow(`SELECT COUNT(*) FROM resource_cleanup_scans`).Scan(&scans); err != nil {
+		t.Fatal(err)
+	}
+	if scans != 0 {
+		t.Fatal("an interrupted pass wrote a scan record")
 	}
 }

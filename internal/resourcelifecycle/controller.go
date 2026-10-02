@@ -48,6 +48,11 @@ const NetworkKind = "crew-network"
 // attached. The controller treats it as pending, never as a reason to force.
 var ErrNetworkInUse = errors.New("network has active endpoints")
 
+// ErrNetworkForbidden is any other refusal to remove a network, typically a
+// socket proxy whose allowlist lacks NetworkRemove. Reported as a visible
+// error code, never as an endless pending.
+var ErrNetworkForbidden = errors.New("network removal forbidden")
+
 // Network is a per-crew network as the runtime reports it: its id and the
 // ownership labels, nothing else.
 type Network struct {
@@ -88,6 +93,9 @@ type Controller struct {
 	lastScanFailed atomic.Bool
 	// BootAt marks persisted observations stale until this process scans.
 	BootAt time.Time
+	// yieldHook replaces quiesce.Yield in the network pass. Tests only: it
+	// lets a test interrupt the pass while the tick's context is still live.
+	yieldHook func(context.Context) error
 }
 
 func (c *Controller) Run(ctx context.Context) {
@@ -400,8 +408,14 @@ func (c *Controller) Tick(ctx context.Context) {
 	// containers left, and is counted in Remaining until it is gone, so the
 	// crew is not reported clear while its network still exists.
 	if nr, ok := rt.(NetworkRuntime); ok {
-		if !c.cleanNetworks(ctx, nr, states, cap-attempts) {
+		switch c.cleanNetworks(ctx, nr, states, cap-attempts) {
+		case networksInventoryFailed:
 			failAll("network_inventory_failed")
+			return
+		case networksYielded:
+			// Interrupted inside a backup window: the recount did not run, so
+			// no state may be derived from Remaining. Like the container loop,
+			// write nothing; a quiesce is not a scan failure.
 			return
 		}
 	}
@@ -470,20 +484,36 @@ func (c *Controller) Tick(ctx context.Context) {
 	c.lastScanFailed.Store(false)
 }
 
+type networksOutcome int
+
+const (
+	networksDone networksOutcome = iota
+	networksInventoryFailed
+	networksYielded
+)
+
 // cleanNetworks removes networks of deleted crews whose containers are all
-// gone, then counts what is left from a fresh listing. It returns false when
-// the network inventory could not be read (the scan is then incomplete).
-func (c *Controller) cleanNetworks(ctx context.Context, nr NetworkRuntime, states map[string]Status, budget int) bool {
+// gone, then recounts what is left from a fresh listing into Remaining. Only
+// a networksDone outcome may be followed by status writes.
+//
+// A crew with no row in states (a hard-deleted crews row, not a tombstone)
+// never has its network removed: without the tombstone there is no positive
+// proof of deletion. That is deliberate; do not widen it.
+func (c *Controller) cleanNetworks(ctx context.Context, nr NetworkRuntime, states map[string]Status, budget int) networksOutcome {
 	listCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	nets, err := nr.ListNetworks(listCtx)
 	cancel()
 	if err != nil {
-		return false
+		return networksInventoryFailed
 	}
 	sort.Slice(nets, func(i, j int) bool { return nets[i].ID < nets[j].ID })
+	yield := quiesce.Yield
+	if c.yieldHook != nil {
+		yield = c.yieldHook
+	}
 	for _, n := range nets {
-		if err := quiesce.Yield(ctx); err != nil {
-			return true
+		if err := yield(ctx); err != nil {
+			return networksYielded
 		}
 		s, ok := states[n.CrewID]
 		if !ok || !eligibleNetwork(n, c.InstanceID) || s.Remaining > 0 || budget <= 0 {
@@ -497,7 +527,12 @@ func (c *Controller) cleanNetworks(ctx context.Context, nr NetworkRuntime, state
 		case ownerErr != nil:
 			code = "owner_check_failed"
 		case deleted:
-			if err := nr.RemoveNetwork(stepCtx, n.ID); err != nil && !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrNetworkInUse) {
+			err := nr.RemoveNetwork(stepCtx, n.ID)
+			switch {
+			case err == nil, errors.Is(err, ErrNotFound), errors.Is(err, ErrNetworkInUse):
+			case errors.Is(err, ErrNetworkForbidden):
+				code = "network_remove_forbidden"
+			default:
 				code = "network_remove_failed"
 			}
 		}
@@ -512,7 +547,7 @@ func (c *Controller) cleanNetworks(ctx context.Context, nr NetworkRuntime, state
 	left, err := nr.ListNetworks(listCtx)
 	cancel()
 	if err != nil {
-		return false
+		return networksInventoryFailed
 	}
 	for _, n := range left {
 		if s, ok := states[n.CrewID]; ok && eligibleNetwork(n, c.InstanceID) {
@@ -520,7 +555,7 @@ func (c *Controller) cleanNetworks(ctx context.Context, nr NetworkRuntime, state
 			states[n.CrewID] = s
 		}
 	}
-	return true
+	return networksDone
 }
 
 // Bound individual snapshots without truncating ownership evidence. Control

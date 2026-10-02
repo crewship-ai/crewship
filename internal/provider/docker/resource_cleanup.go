@@ -73,15 +73,19 @@ func (r *cleanupRuntime) Remove(ctx context.Context, id string) error {
 }
 
 // ListNetworks reports per-crew networks (#2240) with their ownership labels.
-// Every network on the daemon is listed; the controller selects by labels,
-// never by name.
+// The daemon filters on the kind label; the controller still selects by the
+// instance and crew labels, never by name.
 func (r *cleanupRuntime) ListNetworks(ctx context.Context) ([]resourcelifecycle.Network, error) {
-	result, err := r.client.NetworkList(ctx, client.NetworkListOptions{})
+	result, err := r.client.NetworkList(ctx, client.NetworkListOptions{
+		Filters: make(client.Filters).Add("label", crewKindLabel+"="+resourcelifecycle.NetworkKind),
+	})
 	if err != nil {
 		return nil, err
 	}
 	out := []resourcelifecycle.Network{}
 	for _, n := range result.Items {
+		// The daemon filtered on the kind label; re-check rather than trust
+		// a proxy or an older daemon to have applied the filter.
 		if n.Labels[crewKindLabel] != resourcelifecycle.NetworkKind {
 			continue
 		}
@@ -100,8 +104,14 @@ func (r *cleanupRuntime) RemoveNetwork(ctx context.Context, id string) error {
 	if cerrdefs.IsNotFound(err) {
 		return resourcelifecycle.ErrNotFound
 	}
-	if cerrdefs.IsConflict(err) || cerrdefs.IsPermissionDenied(err) || strings.Contains(strings.ToLower(err.Error()), "active endpoints") {
+	// Docker answers 403 for "has active endpoints", but so does a socket
+	// proxy without NetworkRemove in its allowlist. Only the endpoints
+	// message (or a conflict) is in-use; any other refusal is surfaced.
+	if cerrdefs.IsConflict(err) || strings.Contains(strings.ToLower(err.Error()), "active endpoints") {
 		return resourcelifecycle.ErrNetworkInUse
+	}
+	if cerrdefs.IsPermissionDenied(err) {
+		return fmt.Errorf("%w: %v", resourcelifecycle.ErrNetworkForbidden, err)
 	}
 	return err
 }
