@@ -134,7 +134,13 @@ Containers are created with these security measures (`internal/provider/docker/d
   `NODE_USE_ENV_PROXY=1` so Node's built-in `fetch` honours them on Node
   22.21+ and 24+) — it filters only traffic actually routed through it. A raw socket, or a tool pointed past
   the proxy (`curl --noproxy '*'`), reaches the bridge directly: the shared
-  bridge itself carries no network-layer isolation to fall back on.
+  bridge itself carries no network-layer isolation to fall back on. A crew
+  listed in `container.crew_network_crews` gets its own bridge instead
+  (IPv4 only, a `/27` from `container.crew_network_pool`): containers of
+  other crews, on their own networks or on the shared one, cannot reach it,
+  and its `services:` aliases (`postgres`, `redis`) resolve to its own
+  containers. Crews talk to each other through the Crewship API, not over
+  the network.
 - **ExtraHosts:** `host.docker.internal:host-gateway` enables container-to-host communication
 - **Named volumes:** `crewship-home-{slug}-{crewID}` and `crewship-tools-{slug}-{crewID}` for persistent home and tools directories (namespaced by crew ID to prevent cross-tenant collisions)
 

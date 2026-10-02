@@ -184,4 +184,7 @@
 #                     daemon to install nftables rules in a real network
 #                     namespace; SKIP-WAIVER on the one Docker-unavailable
 #                     guard, the OS guard is a build tag instead.
+# 2026-10-02 (#2240): +1 — TestCrewNetworkIsolationIntegration needs a live
+#                     Docker daemon to create real bridges; SKIP-WAIVER on its
+#                     Docker-unavailable guard, the OS guard is a build tag.
 150

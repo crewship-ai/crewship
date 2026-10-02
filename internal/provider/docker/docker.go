@@ -70,6 +70,12 @@ type Config struct {
 	// EgressFenceCrews lists crews (slug or id) that get the network-layer
 	// egress fence (#1368, pilot). Empty disables it everywhere.
 	EgressFenceCrews []string
+	// CrewNetworkCrews lists crews (slug or id) that get their own network
+	// (#2240, first stage). Empty keeps every crew on Network.
+	CrewNetworkCrews []string
+	// CrewNetworkPool is the IPv4 range crew-network subnets come from;
+	// empty means defaultCrewNetworkPool.
+	CrewNetworkPool string
 }
 
 // DetectResult contains info about the detected container runtime.
@@ -2009,6 +2015,14 @@ func (p *Provider) ContainerIP(ctx context.Context, containerID, network string)
 		return "", fmt.Errorf("container %s has no network settings", containerID)
 	}
 	net, ok := inspect.NetworkSettings.Networks[network]
+	if (!ok || net == nil) && inspect.Config != nil && network == p.cfg.Network {
+		// A crew on its own network (#2240) is not on the instance network.
+		// Accept that crew's network of THIS instance and nothing else, so
+		// the caller still never reaches a foreign container.
+		if id := inspect.Config.Labels[crewCrewIDLabel]; id != "" {
+			net, ok = inspect.NetworkSettings.Networks[p.crewNetworkName(id)]
+		}
+	}
 	if !ok || net == nil || !net.IPAddress.IsValid() {
 		return "", fmt.Errorf("container %s not attached to network %q", containerID, network)
 	}

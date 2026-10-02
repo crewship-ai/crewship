@@ -506,12 +506,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 
 	p.logger.Debug("EnsureCrewRuntime", "crew_id", team.ID, "crew_slug", team.Slug)
-	// Ensure network exists (auto-recreate if deleted at runtime)
-	if p.cfg.Network != "" {
-		p.logger.Debug("ensuring network", "network", p.cfg.Network)
-		if err := p.ensureNetwork(ctx, p.cfg.Network); err != nil {
-			return "", fmt.Errorf("ensure network: %w", err)
-		}
+	// Ensure the crew's network exists (auto-recreate if deleted at runtime):
+	// its own when listed (#2240), the instance network otherwise.
+	if _, err := p.ensureCrewNetwork(ctx, team.ID, team.Slug); err != nil {
+		return "", fmt.Errorf("ensure network: %w", err)
 	}
 
 	containerName := p.CrewContainerName(team.ID, team.Slug)
@@ -1561,7 +1559,7 @@ func (p *Provider) assembleCrewSpec(team provider.CrewConfig, runtimeImage, runt
 			// runtime-aware — see secretsTmpfsSpecFor and secretsTmpfsSpecPodman.
 			"/secrets": secretsTmpfsSpecFor(p.detected.Runtime),
 		},
-		NetworkMode: container.NetworkMode(p.cfg.Network),
+		NetworkMode: container.NetworkMode(p.crewNetworkFor(team.ID, team.Slug)),
 	}
 	return containerCfg, hostConfig, nil
 }
