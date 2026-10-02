@@ -5,6 +5,7 @@ package main
 // wires them onto agentCmd.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -335,9 +336,25 @@ var agentDeleteCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
+		defer resp.Body.Close()
+		var deleted struct {
+			Runs *struct {
+				State   string `json:"state" yaml:"state"`
+				Stopped int    `json:"stopped" yaml:"stopped"`
+				Pending int    `json:"pending" yaml:"pending"`
+			} `json:"runs" yaml:"runs"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&deleted)
 
 		cli.PrintSuccess("Agent deleted.")
+		if r := deleted.Runs; r != nil {
+			switch r.State {
+			case "stopped":
+				fmt.Fprintf(cmd.ErrOrStderr(), "Stopped %d running run(s) of this agent; other agents keep running.\n", r.Stopped)
+			case "pending":
+				cli.PrintWarning(fmt.Sprintf("%d run(s) of this agent could not be confirmed stopped yet; the server keeps retrying. No new run can start.", r.Pending))
+			}
+		}
 		return nil
 	},
 }

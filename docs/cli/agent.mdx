@@ -333,6 +333,20 @@ crewship agent delete viktor --yes
 Deletion is permanent. `--yes` skips the prompt — reserve it for scripts where you already know the slug is correct.
 </Warning>
 
+Deleting an agent stops **that agent's** live runs and nothing else: its crew
+runtime, sidecar services and the crew's other agents keep running. No new run
+of the agent can start, whichever way the work arrived (chat, assignment,
+routine, schedule, webhook); a run accepted before the delete is refused at the
+moment its process would start. The response reports the outcome as `runs`:
+
+| `runs.state` | Meaning |
+|---|---|
+| `none` | The agent had no live run. |
+| `stopped` | Every live run was confirmed gone. |
+| `pending` | At least one run could not be confirmed stopped yet. The server keeps retrying in the background, including after a restart. |
+
+The agent's memory, chats and attachments are kept.
+
 ---
 
 ## `crewship agent runs`

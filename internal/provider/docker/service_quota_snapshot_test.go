@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -67,5 +68,68 @@ func TestQuotaSnapshotNeverRemovesAnotherInstallationsContainer(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestQuotaSnapshotNamespaceRequiresInstanceIdentity(t *testing.T) {
+	p := &Provider{cfg: Config{QuotaCatalog: &snapshotTestCatalog{}}}
+	if got := p.QuotaSnapshotNamespace(); got != "" {
+		t.Fatalf("unowned namespace %q", got)
+	}
+	p.cfg.InstanceID = "owned"
+	if got := p.QuotaSnapshotNamespace(); got != "local-helper" {
+		t.Fatalf("namespace %q", got)
+	}
+}
+
+type snapshotLockProbe struct {
+	snapshotTestCatalog
+	mu *sync.Mutex
+	t  *testing.T
+}
+
+func (c *snapshotLockProbe) Release(context.Context, quota.Key, string) error {
+	if c.mu.TryLock() {
+		c.mu.Unlock()
+		c.t.Fatal("detach released the crew lock before catalog release")
+	}
+	return nil
+}
+func (c *snapshotLockProbe) Export(context.Context, quota.Key, int64, io.Writer) error {
+	if !c.mu.TryLock() {
+		c.t.Fatal("stream export holds the crew lifecycle lock")
+	}
+	c.mu.Unlock()
+	return nil
+}
+func (c *snapshotLockProbe) Import(_ context.Context, k quota.Key, n int64, _ io.Reader) (quota.Descriptor, error) {
+	if !c.mu.TryLock() {
+		c.t.Fatal("fresh generation import holds the crew lifecycle lock")
+	}
+	c.mu.Unlock()
+	return quota.Descriptor{Key: k, Bytes: n}, nil
+}
+func TestQuotaSnapshotStreamingDoesNotHoldCrewLock(t *testing.T) {
+	p, close := newFakeDockerProvider(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/containers/json") {
+			_, _ = io.WriteString(w, `[]`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"message":"not found"}`)
+	})
+	defer close()
+	p.cfg.InstanceID = "owned"
+	p.cfg.QuotaCatalog = &snapshotLockProbe{mu: p.lockForCrew("crew"), t: t}
+	p.SetServiceOperationGate(provider.ServiceOperationGate(func(context.Context, string) (func(context.Context) error, error) {
+		return func(context.Context) error { return nil }, nil
+	}))
+	key := quota.Key{Crew: "crew", Service: "database", Volume: "data", Generation: 1}
+	if err := p.ExportQuotaVolume(t.Context(), key, 64<<20, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ImportQuotaVolume(t.Context(), key, 64<<20, strings.NewReader("")); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -132,6 +132,7 @@ type Router struct {
 	// first consumer, not an exclusive owner; read it through activeContainer.
 	keeperContainer  provider.ContainerProvider
 	containerCleanup *resourcelifecycle.Controller
+	agentRunStopper  AgentRunStopper
 	// loginRefresher renews provider logins (docs/prd/provider-logins.md
 	// §5.3). Built in registerCrewRoutes; the server reads it through
 	// LoginRefresher to run it from the credential monitor's tick.

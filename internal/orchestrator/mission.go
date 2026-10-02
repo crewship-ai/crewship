@@ -326,22 +326,22 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 		// If context timed out, mark mission as FAILED
 		if ctx.Err() == context.DeadlineExceeded {
 			e.logger.Warn("mission timed out", "mission_id", ms.ID)
-			now := time.Now().UTC().Format(time.RFC3339)
-			// Audit #481 follow-up: parent ctx is cancelled (that's
-			// why we're in this branch). Use WithoutCancel to keep the
-			// OTel trace span + auth values flowing -- the cleanup
-			// write should land in the same trace as the timed-out
-			// mission, not show up as an orphaned root span.
-			cleanCtx := context.WithoutCancel(ctx)
-			// Fail any AWAITING_APPROVAL tasks that were never resolved.
-			e.db.ExecContext(cleanCtx,
-				`UPDATE mission_tasks SET status = 'FAILED', error_message = 'mission timed out', updated_at = ?, completed_at = ?
-				 WHERE mission_id = ? AND status = 'AWAITING_APPROVAL'`,
-				now, now, ms.ID)
-			// Best-effort cleanup on an already-timed-out mission: the
-			// UPDATE error was ignored here before the finalizeMission
-			// extraction too.
-			_ = e.finalizeMission(cleanCtx, ms, "FAILED", "mission_timeout")
+			// Cancellation must not discard finalization or its trace/auth
+			// values. This deferred path runs outside the tick's writer, so
+			// it must wait for a backup window before changing protected rows.
+			err := quiesce.Do(context.WithoutCancel(ctx), func(cleanCtx context.Context) error {
+				now := time.Now().UTC().Format(time.RFC3339)
+				if _, err := e.db.ExecContext(cleanCtx,
+					`UPDATE mission_tasks SET status = 'FAILED', error_message = 'mission timed out', updated_at = ?, completed_at = ?
+                     WHERE mission_id = ? AND status = 'AWAITING_APPROVAL'`,
+					now, now, ms.ID); err != nil {
+					return err
+				}
+				return e.finalizeMission(cleanCtx, ms, "FAILED", "mission_timeout")
+			})
+			if err != nil {
+				e.logger.Error("mission timeout cleanup failed", "mission_id", ms.ID, "error", err)
+			}
 		}
 		e.mu.Lock()
 		delete(e.active, ms.ID)
