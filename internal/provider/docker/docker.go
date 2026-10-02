@@ -66,6 +66,10 @@ type Config struct {
 	// internal/server/server.go, to the concrete *docker.Provider — a wrapper
 	// silently turns devcontainer provisioning off.
 	Admission provider.AdmissionGate
+
+	// EgressFenceCrews lists crews (slug or id) that get the network-layer
+	// egress fence (#1368, pilot). Empty disables it everywhere.
+	EgressFenceCrews []string
 }
 
 // DetectResult contains info about the detected container runtime.
@@ -84,6 +88,24 @@ type DetectResult struct {
 // It auto-detects the container runtime (Docker, Podman, Colima, OrbStack, etc.)
 // and manages crew containers with security isolation (non-root, cap-drop ALL).
 type Provider struct {
+	// fenced maps a crew container id to the State.StartedAt at which its
+	// egress fence was installed. A restart recreates the network namespace
+	// and drops the fence, so a different StartedAt means "install again".
+	fenced sync.Map
+	// fenceTeams maps a crew id to the CrewConfig its fence was last
+	// installed with, so the exec guard can re-install after a restart the
+	// provider did not perform (the orchestrator reuses a cached container id
+	// and does not always pass through EnsureCrewRuntime).
+	fenceTeams sync.Map
+	// fenceLocks serialises fence installs per container id.
+	fenceLocks sync.Map
+	// fencedCrew maps a container id this provider has fenced to its crew
+	// id, so the exec guard keeps treating it as fenced when its labels are
+	// missing or stale.
+	fencedCrew sync.Map
+	// fenceTestHook, when set, runs at each fenceExecStage. Tests only.
+	fenceTestHook func(fenceExecStage)
+
 	serviceOperation serviceOperationGate
 	client           *client.Client
 	cfg              Config
@@ -1756,6 +1778,10 @@ func (p *Provider) RemoveCrewVolumes(ctx context.Context, id, slug string) error
 // Exec runs a command inside a container via Docker exec. Returns a reader
 // for the combined stdout/stderr stream.
 func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	fence, err := p.guardFencedExec(ctx, cfg.ContainerID)
+	if err != nil {
+		return nil, err
+	}
 	execCfg := client.ExecCreateOptions{
 		Cmd:          cfg.Cmd,
 		Env:          cfg.Env,
@@ -1805,10 +1831,17 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 	if err != nil {
 		return nil, fmt.Errorf("exec create: %w", err)
 	}
+	if err := p.fenceBeforeStart(ctx, fence); err != nil {
+		return nil, err
+	}
 
 	resp, err := p.client.ExecAttach(ctx, exec.ID, client.ExecAttachOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("exec attach: %w", err)
+	}
+	if err := p.fenceAfterStart(ctx, fence); err != nil {
+		resp.Close()
+		return nil, err
 	}
 
 	// Stream stdin into the hijacked connection, then half-close so the process
@@ -1883,6 +1916,10 @@ const execRunningExitCode = -1
 // ExecInteractive creates an interactive TTY exec session with bidirectional I/O.
 // Unlike Exec(), this supports stdin and returns a raw connection for terminal use.
 func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.InteractiveExecConfig) (*provider.InteractiveExecResult, error) {
+	fence, err := p.guardFencedExec(ctx, cfg.ContainerID)
+	if err != nil {
+		return nil, err
+	}
 	execCfg := client.ExecCreateOptions{
 		Cmd:          cfg.Cmd,
 		Env:          cfg.Env,
@@ -1916,9 +1953,16 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 		return nil, fmt.Errorf("exec interactive create: %w", err)
 	}
 
+	if err := p.fenceBeforeStart(ctx, fence); err != nil {
+		return nil, err
+	}
 	resp, err := p.client.ExecAttach(ctx, exec.ID, client.ExecAttachOptions{TTY: true})
 	if err != nil {
 		return nil, fmt.Errorf("exec interactive attach: %w", err)
+	}
+	if err := p.fenceAfterStart(ctx, fence); err != nil {
+		resp.Close()
+		return nil, err
 	}
 
 	// Set initial terminal size.

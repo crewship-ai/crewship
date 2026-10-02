@@ -493,6 +493,14 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// DAG wave's sibling steps on the same crew all hit this in the same few
 	// milliseconds; without it each paid a full host scan under this mutex.
 	if cid, ok := p.warmHit(team.ID); ok {
+		// A fenced crew pays one inspect here: a restart inside the warm TTL
+		// (daemon, restart policy, operator) drops the fence, and the warm
+		// path would otherwise hand the next step an unfenced container.
+		if err := p.ensureEgressFence(ctx, team, cid, ""); err != nil {
+			p.evictWarm(team.ID)
+			p.stopUnfenced(ctx, team, cid, err)
+			return "", err
+		}
 		emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "warm cache hit"})
 		return cid, nil
 	}
@@ -664,6 +672,14 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		"container_id", resp.ID[:12],
 		"runtime", runtime,
 	)
+
+	// Network-layer egress fence (#1368) before anything runs in the
+	// container: postStart hooks and the agent run as 1001, which the fence
+	// blocks; the sidecar (1002) keeps its route.
+	if err := p.ensureEgressFence(ctx, team, resp.ID, runtimeImage); err != nil {
+		p.stopUnfenced(ctx, team, resp.ID, err)
+		return "", err
+	}
 
 	// Sanity-check the bind-mounted sidecar on any BYOI crew (user-provided
 	// base image, with or without a cached derivative). Runs the binary with
@@ -937,6 +953,13 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					)
 				}
 				if c.State == container.StateRunning {
+					// A restart this provider did not perform (daemon restart,
+					// restart policy, an operator) recreates the namespace and
+					// drops the fence; ensureEgressFence compares StartedAt.
+					if err := p.ensureEgressFence(ctx, team, c.ID, reusedImage); err != nil {
+						p.stopUnfenced(ctx, team, c.ID, err)
+						return "", false, err
+					}
 					p.setWarm(team.ID, c.ID)
 					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
 					return c.ID, true, nil
@@ -986,6 +1009,10 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 
 				if _, err := p.client.ContainerStart(ctx, c.ID, client.ContainerStartOptions{}); err != nil {
 					return "", false, fmt.Errorf("start existing container: %w", err)
+				}
+				if err := p.ensureEgressFence(ctx, team, c.ID, reusedImage); err != nil {
+					p.stopUnfenced(ctx, team, c.ID, err)
+					return "", false, err
 				}
 				// Note: postStartCommand runs ONCE when the container is
 				// freshly created (see the create-path call in
@@ -1592,6 +1619,7 @@ func (p *Provider) forceTeardown(ctx context.Context, containerID, crewID string
 	_, _ = p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout})
 	_, _ = p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
 	p.evictWarm(crewID)
+	p.forgetFenced(containerID)
 }
 
 // waitExecExit polls ContainerExecInspect for execID every 50ms until the
@@ -1630,6 +1658,16 @@ func (p *Provider) runPostStartCommands(ctx context.Context, containerID string,
 			AttachStdout: true,
 			AttachStderr: true,
 		}
+		// Same fence checks as Exec (#1368): a hook — /crew/init.sh is
+		// agent-writable — must not run in a start the fence was not
+		// confirmed for.
+		fence, err := p.guardFencedExec(runCtx, containerID)
+		if err != nil {
+			cancel()
+			p.logger.Warn("postStartCommand refused: egress fence not confirmed",
+				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
+			return
+		}
 		ex, err := p.client.ExecCreate(runCtx, containerID, execCfg)
 		if err != nil {
 			cancel()
@@ -1637,11 +1675,20 @@ func (p *Provider) runPostStartCommands(ctx context.Context, containerID string,
 				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
 			continue
 		}
+		if err := p.fenceBeforeStart(runCtx, fence); err != nil {
+			cancel()
+			p.logger.Warn("postStartCommand refused: container restarted", "container", provider.ShortID(containerID), "error", err)
+			return
+		}
 		if _, err := p.client.ExecStart(runCtx, ex.ID, client.ExecStartOptions{}); err != nil {
 			cancel()
 			p.logger.Warn("postStartCommand exec start failed",
 				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
 			continue
+		}
+		if err := p.fenceAfterStart(runCtx, fence); err != nil {
+			cancel()
+			return
 		}
 		// Poll exit code briefly; cap at ~60s total via runCtx timeout.
 		exitCode, stillRunning, ierr := p.waitExecExit(runCtx, ex.ID, 1200) // 1200 * 50ms = 60s
@@ -1713,6 +1760,7 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 
 // RemoveCrewRuntime forcefully removes a crew container.
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
+	p.forgetFenced(containerID)
 	if _, err := p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
 		return fmt.Errorf("remove crew runtime %s: %w", provider.ShortID(containerID), err)
 	}

@@ -136,6 +136,35 @@ type ExtractSpec struct {
 // Docker socket / TLS configuration stays consistent.
 type MobyDockerOps struct {
 	Client *client.Client
+	// Guard, when set, confirms each exec may run in the container's
+	// current start (the egress fence, #1368): it is called before
+	// ExecCreate and returns checks for right before and right after the
+	// exec starts. Any error refuses the exec. The server wires it to the
+	// container provider; nil means no guard (no provider, tests).
+	Guard ExecGuard
+}
+
+// ExecGuard is MobyDockerOps.Guard. beforeStart and afterStart may be nil.
+type ExecGuard func(ctx context.Context, containerID string) (beforeStart, afterStart func(context.Context) error, err error)
+
+// guard resolves Guard for one exec. The order around it is: guard →
+// ExecCreate → beforeStart → ExecAttach (which starts the exec) → afterStart.
+func (m *MobyDockerOps) guard(ctx context.Context, containerID string) (before, after func(context.Context) error, err error) {
+	noop := func(context.Context) error { return nil }
+	if m.Guard == nil {
+		return noop, noop, nil
+	}
+	before, after, err = m.Guard(ctx, containerID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("backup: exec into %s refused: %w", containerID, err)
+	}
+	if before == nil {
+		before = noop
+	}
+	if after == nil {
+		after = noop
+	}
+	return before, after, nil
 }
 
 // Pause-state sentinels (#2612). WithPaused needs to tell three
@@ -308,6 +337,10 @@ func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID string, 
 		cmd = append(cmd, "--touch")
 	}
 	cmd = append(cmd, "-f", "-", "-C", dstPath)
+	beforeStart, afterStart, err := m.guard(ctx, containerID)
+	if err != nil {
+		return err
+	}
 	exec, err := m.Client.ExecCreate(ctx, containerID, client.ExecCreateOptions{
 		Cmd:          cmd,
 		User:         user,
@@ -318,11 +351,17 @@ func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID string, 
 	if err != nil {
 		return fmt.Errorf("backup: exec-tar create %s:%s: %w", containerID, dstPath, err)
 	}
+	if err := beforeStart(ctx); err != nil {
+		return fmt.Errorf("backup: exec-tar into %s refused: %w", containerID, err)
+	}
 	resp, err := m.Client.ExecAttach(ctx, exec.ID, client.ExecAttachOptions{})
 	if err != nil {
 		return fmt.Errorf("backup: exec-tar attach %s:%s: %w", containerID, dstPath, err)
 	}
 	defer resp.Close()
+	if err := afterStart(ctx); err != nil {
+		return fmt.Errorf("backup: exec-tar into %s refused after start: %w", containerID, err)
+	}
 
 	// Drain stdout/stderr concurrently so the daemon's output buffer
 	// can never fill and back-pressure the input pump. Buffer captured
@@ -388,6 +427,10 @@ func (m *MobyDockerOps) Exec(ctx context.Context, containerID string, cmd []stri
 
 // ExecAs implements DockerOps.
 func (m *MobyDockerOps) ExecAs(ctx context.Context, containerID, user string, cmd []string) (int, []byte, error) {
+	beforeStart, afterStart, err := m.guard(ctx, containerID)
+	if err != nil {
+		return -1, nil, err
+	}
 	exec, err := m.Client.ExecCreate(ctx, containerID, client.ExecCreateOptions{
 		Cmd:          cmd,
 		User:         user,
@@ -397,11 +440,17 @@ func (m *MobyDockerOps) ExecAs(ctx context.Context, containerID, user string, cm
 	if err != nil {
 		return -1, nil, fmt.Errorf("backup: exec create %s: %w", containerID, err)
 	}
+	if err := beforeStart(ctx); err != nil {
+		return -1, nil, fmt.Errorf("backup: exec into %s refused: %w", containerID, err)
+	}
 	resp, err := m.Client.ExecAttach(ctx, exec.ID, client.ExecAttachOptions{})
 	if err != nil {
 		return -1, nil, fmt.Errorf("backup: exec attach %s: %w", containerID, err)
 	}
 	defer resp.Close()
+	if err := afterStart(ctx); err != nil {
+		return -1, nil, fmt.Errorf("backup: exec into %s refused after start: %w", containerID, err)
+	}
 
 	// ContainerExecAttach returns a multiplexed stream when Tty is false
 	// (our default): each chunk is prefixed with an 8-byte header
