@@ -718,7 +718,7 @@ func (r *Router) instanceRecoveryConfig() InstanceRecoveryConfig {
 	}
 	if r.dockerClient != nil {
 		cli := r.dockerClient
-		cfg.DockerOps = &backup.MobyDockerOps{Client: cli}
+		cfg.DockerOps = r.backupDockerOps(cli)
 		ops := cfg.DockerOps
 		// Reachability through a call the backup package already makes (a
 		// container inspect answers "no such container" when the daemon is

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -90,4 +91,23 @@ func TestStopUnfencedRespectsOnlyTheCallersContext(t *testing.T) {
 	}()
 	// Live caller, helper deadline: must stop (reaches the nil client).
 	p.stopUnfenced(context.Background(), provider.CrewConfig{ID: "c"}, "cid", context.DeadlineExceeded)
+}
+
+// A stop drops the confirmed-start record first; removing the container
+// afterwards must still drop the crew mapping and the lock, or anyFenced
+// stays true for the life of the process (review of #2760).
+func TestForgetFencedAfterStop(t *testing.T) {
+	p := &Provider{}
+	id := "abc123def4567890"
+	p.fenced.Store(id, "2026-10-02T12:00:00Z")
+	p.fencedCrew.Store(id, "crew-1")
+	p.fenceLocks.Store(id, &sync.Mutex{})
+	p.fenced.Delete(id) // what stopCrewContainer does
+	p.forgetFenced(id[:12])
+	if p.anyFenced() {
+		t.Fatal("crew mapping survived removal")
+	}
+	if _, ok := p.fenceLocks.Load(id); ok {
+		t.Fatal("per-container lock survived removal")
+	}
 }

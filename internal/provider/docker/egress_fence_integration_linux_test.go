@@ -18,6 +18,7 @@ import (
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -196,6 +197,22 @@ func TestEgressFenceIntegration(t *testing.T) {
 	}
 	assertExit("re-fenced", "1001", probe, false)
 	assertExit("re-fenced", "1002", probe, true)
+
+	// Backup flush hooks, restore scripts and memory imports exec with the
+	// backup package's own Docker client (review of #2760). Wired with
+	// GuardExternalExec, such an exec after an outside restart re-installs
+	// the fence before it runs — "restarted, before ensure" above shows the
+	// same probe reaches the peer from an unfenced start.
+	if _, err := p.client.ContainerRestart(ctx, cid, client.ContainerRestartOptions{}); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	ops := &backup.MobyDockerOps{Client: p.client, Guard: p.GuardExternalExec}
+	if code, out, err := ops.ExecAs(ctx, cid, "1001:1001", probe); err != nil {
+		t.Fatalf("backup exec after an outside restart: %v (%s)", err, out)
+	} else if code == 0 {
+		t.Fatal("a backup exec after an outside restart reached the peer: it ran unfenced")
+	}
+	assertExit("re-fenced by a backup exec", "1001", probe, false)
 
 	// Restart racing an exec, at each point between the guard and the
 	// process running. Deterministic: the hook restarts the container at

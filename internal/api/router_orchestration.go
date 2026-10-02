@@ -18,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
@@ -737,7 +736,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// process, which is correct only where it owns the tree.
 	if r.dockerClient != nil {
 		dcl := r.dockerClient
-		mpH.SetContainerWriter(&backup.MobyDockerOps{Client: dcl},
+		mpH.SetContainerWriter(r.backupDockerOps(dcl),
 			func(ctx context.Context, crewID, slug string) (string, error) {
 				suffix := "-team-" + slug + "-" + crewID
 				listed, err := dcl.ContainerList(ctx, client.ContainerListOptions{All: true})

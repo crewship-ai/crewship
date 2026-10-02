@@ -417,16 +417,21 @@ func (p *Provider) anyFenced() bool {
 	return has
 }
 
-// forgetFenced drops every record kept for a removed container.
+// forgetFenced drops every record kept for a removed container. Each map is
+// walked on its own: a stop deletes the confirmed-start entry (fenced) first,
+// so the others cannot be found through it.
 func (p *Provider) forgetFenced(containerID string) {
-	p.fenced.Range(func(k, _ any) bool {
-		if id := k.(string); id == containerID || strings.HasPrefix(id, containerID) {
-			p.fenced.Delete(k)
-			p.fenceLocks.Delete(k)
-			p.fencedCrew.Delete(k)
-		}
-		return true
-	})
+	if containerID == "" {
+		return
+	}
+	for _, m := range []*sync.Map{&p.fenced, &p.fenceLocks, &p.fencedCrew} {
+		m.Range(func(k, _ any) bool {
+			if id := k.(string); id == containerID || strings.HasPrefix(id, containerID) {
+				m.Delete(k)
+			}
+			return true
+		})
+	}
 }
 
 func shortID(id string) string {
@@ -434,4 +439,18 @@ func shortID(id string) string {
 		return id[:12]
 	}
 	return id
+}
+
+// GuardExternalExec is the exec guard for callers that exec into crew
+// containers with their own Docker client (backup flush hooks, restore and
+// memory-import tar): the same three checks as Exec — before ExecCreate,
+// before the exec starts, and once it runs (a restart there stops the crew).
+// Wired into backup.MobyDockerOps.Guard by the server.
+func (p *Provider) GuardExternalExec(ctx context.Context, containerID string) (beforeStart, afterStart func(context.Context) error, err error) {
+	f, err := p.guardFencedExec(ctx, containerID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return func(ctx context.Context) error { return p.fenceBeforeStart(ctx, f) },
+		func(ctx context.Context) error { return p.fenceAfterStart(ctx, f) }, nil
 }

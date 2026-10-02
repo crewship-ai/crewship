@@ -403,7 +403,7 @@ func (r *Router) registerAdminRoutes() {
 	// admin-backup HTTP layer doesn't see the Moby SDK directly.
 	var backupDockerOps backup.DockerOps
 	if r.dockerClient != nil {
-		backupDockerOps = &backup.MobyDockerOps{Client: r.dockerClient}
+		backupDockerOps = r.backupDockerOps(r.dockerClient)
 	}
 	backupH := NewBackupHandler(r.db, r.logger, backupDockerOps, os.Getenv("CREWSHIP_VERSION"))
 	if transport, ok := r.keeperContainer.(backup.ServiceSnapshotRuntime); ok {

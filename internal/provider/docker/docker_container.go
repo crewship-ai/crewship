@@ -1619,6 +1619,7 @@ func (p *Provider) forceTeardown(ctx context.Context, containerID, crewID string
 	_, _ = p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout})
 	_, _ = p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
 	p.evictWarm(crewID)
+	p.forgetFenced(containerID)
 }
 
 // waitExecExit polls ContainerExecInspect for execID every 50ms until the
