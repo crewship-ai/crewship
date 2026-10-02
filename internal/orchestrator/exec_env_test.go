@@ -141,6 +141,7 @@ func TestBuildEnvVarsSidecar_UnroutedOpenCodeUnchanged(t *testing.T) {
 		"https_proxy=http://127.0.0.1:9119",
 		"NO_PROXY=127.0.0.1,localhost,::1",
 		"no_proxy=127.0.0.1,localhost,::1",
+		"NODE_USE_ENV_PROXY=1",
 		"ANTHROPIC_BASE_URL=http://127.0.0.1:9119",
 		"ANTHROPIC_API_KEY=sk-ant-api03-real",
 		"OPENAI_API_KEY=sk-dummy-crewship-sidecar",
@@ -469,4 +470,22 @@ func TestCredentialFor_SkipsLapsedLeases(t *testing.T) {
 			t.Errorf("allowlist = %v, want [live.example]", got)
 		}
 	})
+}
+
+// #2763: Node's built-in fetch ignores HTTP(S)_PROXY unless NODE_USE_ENV_PROXY
+// is set (Node 22.21+ / 24+; crew images ship 22.23). Without it a Node tool
+// went straight past the sidecar allowlist (measured on dev2, 2026-10-02).
+// Loopback stays direct through NO_PROXY, so the sidecar's reverse-proxy
+// routes on 127.0.0.1:9119 are unaffected.
+func TestSidecarProxyEnvRoutesNodeFetch(t *testing.T) {
+	env := SidecarProxyEnv()
+	var found bool
+	for _, kv := range env {
+		if kv == "NODE_USE_ENV_PROXY=1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("SidecarProxyEnv() = %q, want NODE_USE_ENV_PROXY=1", env)
+	}
 }
