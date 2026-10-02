@@ -5,12 +5,13 @@ package restrictedworkflow
 import (
 	"context"
 	"errors"
-	"os"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 	"github.com/crewship-ai/crewship/internal/work"
@@ -197,16 +198,26 @@ func TestWorkflowMigrationParksLegacyStartedWorkAndPreservesData(t *testing.T) {
 	if _, err := s.db.Exec(`DELETE FROM work_items; DROP INDEX work_restricted_domain; DROP TABLE restricted_workflow_attempt_roots; DROP TRIGGER restricted_workflow_descendant_binding`); err != nil {
 		t.Fatal(err)
 	}
-	migration, err := os.ReadFile("../database/migrations/20261001160148_restricted_work_ownership.sql")
-	if err != nil {
+	const ownVersion = 20261001160148
+	var newest int64
+	if err := s.db.QueryRowContext(t.Context(), `SELECT MAX(version) FROM _migrations`).Scan(&newest); err != nil || newest <= ownVersion {
+		t.Fatalf("upgrade fixture must already include a newer migration: %d %v", newest, err)
+	}
+	if _, err := s.db.ExecContext(t.Context(), `DELETE FROM _migrations WHERE version=?`, ownVersion); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.Exec(string(migration)); err != nil {
+	// Concurrent PRs can land a newer version first. The real registry must
+	// still apply this missing version, adopting identity without losing data.
+	if err := database.Migrate(t.Context(), s.db, slog.Default()); err != nil {
 		t.Fatal(err)
+	}
+	var applied int
+	if err := s.db.QueryRowContext(t.Context(), `SELECT count(*) FROM _migrations WHERE version=?`, ownVersion).Scan(&applied); err != nil || applied != 1 {
+		t.Fatalf("older workflow migration skipped: %d %v", applied, err)
 	}
 	for _, row := range []struct{ id, state string }{{first.ID, "queued"}, {second.ID, "needs_reconciliation"}} {
 		var state, inputs string
-		if err = s.db.QueryRow(`SELECT w.state,j.inputs_json FROM work_items w JOIN restricted_workflow_jobs j ON j.id=w.id WHERE w.id=?`, row.id).Scan(&state, &inputs); err != nil || state != row.state || !strings.Contains(inputs, "PRIVATE_LEDGER_CANARY") {
+		if err := s.db.QueryRowContext(t.Context(), `SELECT w.state,j.inputs_json FROM work_items w JOIN restricted_workflow_jobs j ON j.id=w.id WHERE w.id=?`, row.id).Scan(&state, &inputs); err != nil || state != row.state || !strings.Contains(inputs, "PRIVATE_LEDGER_CANARY") {
 			t.Fatalf("migration lost intent/data %s %s %v", state, inputs, err)
 		}
 	}

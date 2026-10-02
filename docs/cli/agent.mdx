@@ -118,6 +118,12 @@ crewship agent create --name Viktor --system-prompt @prompts/backend-lead.md
 ```
 </Tip>
 
+An agent's memory and output live under its slug inside the crew. A slug that
+another agent of the same crew used — deleted, renamed or moved away — stays
+reserved for that agent, so `create` (and renaming or moving an agent with
+`update`) onto it fails with `409` instead of handing the new agent the old
+one's memory and output. The same slug is free in any other crew.
+
 ---
 
 ## `crewship agent update`

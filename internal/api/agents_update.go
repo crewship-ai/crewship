@@ -86,6 +86,37 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Renaming or moving onto a slug another agent of the target crew used
+	// would hand this agent that agent's memory and output.
+	_, slugChange := body["slug"]
+	_, crewChange := body["crew_id"]
+	if slugChange || crewChange {
+		var curSlug string
+		var curCrew sql.NullString
+		if err := h.db.QueryRowContext(r.Context(),
+			"SELECT slug, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+			agentID, workspaceID).Scan(&curSlug, &curCrew); err == nil {
+			newSlug, newCrew := curSlug, curCrew.String
+			if v, ok := body["slug"].(string); ok {
+				newSlug = v
+			}
+			if crewChange {
+				newCrew, _ = body["crew_id"].(string)
+			}
+			if newCrew != "" && (newSlug != curSlug || newCrew != curCrew.String) {
+				reserved, err := slugReservedFor(r.Context(), h.db, newCrew, newSlug, agentID)
+				if err != nil {
+					replyInternalError(w, h.logger, "check agent slug reservation", err)
+					return
+				}
+				if reserved {
+					replyError(w, http.StatusConflict, slugReservedMessage(newSlug))
+					return
+				}
+			}
+		}
+	}
+
 	// Validate agent_role if being updated
 	if roleVal, ok := body["agent_role"]; ok {
 		roleStr, _ := roleVal.(string)
