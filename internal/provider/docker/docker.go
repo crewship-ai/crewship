@@ -66,6 +66,10 @@ type Config struct {
 	// internal/server/server.go, to the concrete *docker.Provider — a wrapper
 	// silently turns devcontainer provisioning off.
 	Admission provider.AdmissionGate
+
+	// EgressFenceCrews lists crews (slug or id) that get the network-layer
+	// egress fence (#1368, pilot). Empty disables it everywhere.
+	EgressFenceCrews []string
 }
 
 // DetectResult contains info about the detected container runtime.
@@ -84,6 +88,11 @@ type DetectResult struct {
 // It auto-detects the container runtime (Docker, Podman, Colima, OrbStack, etc.)
 // and manages crew containers with security isolation (non-root, cap-drop ALL).
 type Provider struct {
+	// fenced maps a crew container id to the State.StartedAt at which its
+	// egress fence was installed. A restart recreates the network namespace
+	// and drops the fence, so a different StartedAt means "install again".
+	fenced sync.Map
+
 	serviceOperation serviceOperationGate
 	client           *client.Client
 	cfg              Config

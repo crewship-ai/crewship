@@ -493,6 +493,14 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// DAG wave's sibling steps on the same crew all hit this in the same few
 	// milliseconds; without it each paid a full host scan under this mutex.
 	if cid, ok := p.warmHit(team.ID); ok {
+		// A fenced crew pays one inspect here: a restart inside the warm TTL
+		// (daemon, restart policy, operator) drops the fence, and the warm
+		// path would otherwise hand the next step an unfenced container.
+		if err := p.ensureEgressFence(ctx, team, cid, ""); err != nil {
+			p.evictWarm(team.ID)
+			p.stopUnfenced(ctx, team, cid, err)
+			return "", err
+		}
 		emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "warm cache hit"})
 		return cid, nil
 	}
@@ -664,6 +672,14 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		"container_id", resp.ID[:12],
 		"runtime", runtime,
 	)
+
+	// Network-layer egress fence (#1368) before anything runs in the
+	// container: postStart hooks and the agent run as 1001, which the fence
+	// blocks; the sidecar (1002) keeps its route.
+	if err := p.ensureEgressFence(ctx, team, resp.ID, runtimeImage); err != nil {
+		p.stopUnfenced(ctx, team, resp.ID, err)
+		return "", err
+	}
 
 	// Sanity-check the bind-mounted sidecar on any BYOI crew (user-provided
 	// base image, with or without a cached derivative). Runs the binary with
@@ -937,6 +953,13 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					)
 				}
 				if c.State == container.StateRunning {
+					// A restart this provider did not perform (daemon restart,
+					// restart policy, an operator) recreates the namespace and
+					// drops the fence; ensureEgressFence compares StartedAt.
+					if err := p.ensureEgressFence(ctx, team, c.ID, reusedImage); err != nil {
+						p.stopUnfenced(ctx, team, c.ID, err)
+						return "", false, err
+					}
 					p.setWarm(team.ID, c.ID)
 					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
 					return c.ID, true, nil
@@ -986,6 +1009,10 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 
 				if _, err := p.client.ContainerStart(ctx, c.ID, client.ContainerStartOptions{}); err != nil {
 					return "", false, fmt.Errorf("start existing container: %w", err)
+				}
+				if err := p.ensureEgressFence(ctx, team, c.ID, reusedImage); err != nil {
+					p.stopUnfenced(ctx, team, c.ID, err)
+					return "", false, err
 				}
 				// Note: postStartCommand runs ONCE when the container is
 				// freshly created (see the create-path call in

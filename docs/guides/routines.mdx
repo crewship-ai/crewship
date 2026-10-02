@@ -921,7 +921,7 @@ An unknown extension with no explicit `interpreter` is an author-time error. The
   ([#1473](https://github.com/crewship-ai/crewship/issues/1473)).
 </Warning>
 
-Note this is the **application-layer** fence: a script that deliberately ignores the proxy (`curl --noproxy '*'`, a raw socket) still reaches the network until the L3 fence in [#1368](https://github.com/crewship-ai/crewship/issues/1368) lands. Treat the allowlist as a guardrail for well-behaved tooling, not as containment for hostile code.
+Note this is the **application-layer** fence: a script that deliberately ignores the proxy (`curl --noproxy '*'`, a raw socket) still reaches the network unless the crew is on the network-layer egress fence pilot (`container.egress_fence_crews`, see [Container isolation](/security/container-isolation#network-layer-egress-fence-pilot)). Without it, treat the allowlist as a guardrail for well-behaved tooling, not as containment for hostile code.
 
 #### Deliver the script into the crew
 

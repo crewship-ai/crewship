@@ -180,4 +180,8 @@
 #                     timing check is now a benchmark pair, and the
 #                     staging-cleanup test injects a regular file in place
 #                     of the store root, which fails for root too.
-149
+# 2026-10-02 (#1368): +1 — TestEgressFenceIntegration needs a live Docker
+#                     daemon to install nftables rules in a real network
+#                     namespace; SKIP-WAIVER on the one Docker-unavailable
+#                     guard, the OS guard is a build tag instead.
+150

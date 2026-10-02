@@ -135,6 +135,10 @@ type ContainerConfig struct {
 	// Volumes and host data stay; the next start recreates the container.
 	// 0 (default) disables it.
 	IdleRuntimeRetentionDays int `yaml:"idle_runtime_retention_days"`
+	// EgressFenceCrews opts named crews (slug or id) into the network-layer
+	// egress fence (#1368, pilot). Empty = off for every crew. Applies only to
+	// restricted, non-privileged crews on the runc runtime.
+	EgressFenceCrews []string `yaml:"egress_fence_crews"`
 	// CacheEviction removes crewship-cache images that no container on the
 	// daemon has used for an hour; the next start rebuilds them. Off by
 	// default.
@@ -511,6 +515,14 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_CONTAINER_PREFIX"); v != "" {
 		cfg.Container.ContainerPrefix = v
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_EGRESS_FENCE_CREWS"); ok {
+		cfg.Container.EgressFenceCrews = nil
+		for _, c := range strings.Split(v, ",") {
+			if c = strings.TrimSpace(c); c != "" {
+				cfg.Container.EgressFenceCrews = append(cfg.Container.EgressFenceCrews, c)
+			}
+		}
 	}
 	if v := os.Getenv("CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS"); v != "" {
 		if days, err := strconv.Atoi(v); err == nil && days >= 0 {
