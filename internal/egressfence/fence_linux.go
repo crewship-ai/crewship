@@ -25,7 +25,13 @@ func Rules(s Spec) [][]expr.Any {
 		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: ifname("lo")},
 		accept(),
 	})
+	// Replies to connections someone else opened TO this container. The
+	// direction match is the point: a connection the agent itself opened
+	// (original direction) is not let through on the strength of being
+	// established — including one opened before the fence went in.
 	rules = append(rules, []expr.Any{
+		&expr.Ct{Register: 1, Key: expr.CtKeyDIRECTION},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{ctDirReply}},
 		&expr.Ct{Register: 1, Key: expr.CtKeySTATE},
 		&expr.Bitwise{
 			SourceRegister: 1,
@@ -43,6 +49,9 @@ func Rules(s Spec) [][]expr.Any {
 	rules = append(rules, []expr.Any{rejectAdmin()})
 	return rules
 }
+
+// ctDirReply is IP_CT_DIR_REPLY.
+const ctDirReply = 1
 
 // Apply installs (or replaces) the fence in the current network namespace.
 // Idempotent: an existing crewship_fence table is deleted in the same netlink
@@ -73,8 +82,8 @@ func Apply(s Spec) error {
 		Priority: nftables.ChainPriorityFilter,
 		Policy:   &policy,
 	})
-	for _, exprs := range Rules(s) {
-		c.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: exprs})
+	for i, exprs := range Rules(s) {
+		c.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: exprs, UserData: []byte(s.marker(i))})
 	}
 	if err := c.Flush(); err != nil {
 		return fmt.Errorf("egressfence: install: %w", err)
@@ -82,8 +91,11 @@ func Apply(s Spec) error {
 	return nil
 }
 
-// Check reports whether the fence is installed in the current namespace.
-func Check() (State, error) {
+// Check reports whether the fence for s is installed in the current
+// namespace, and whether what is installed is that fence: the output hook
+// with a drop policy and exactly the rules Apply writes for s, in order,
+// identified by the per-rule marker Apply stores in each rule's user data.
+func Check(s Spec) (State, error) {
 	c, err := nftables.New()
 	if err != nil {
 		return State{}, fmt.Errorf("egressfence: netlink: %w", err)
@@ -93,11 +105,28 @@ func Check() (State, error) {
 		return State{}, err
 	}
 	table := &nftables.Table{Family: nftables.TableFamilyINet, Name: TableName}
+	chains, err := c.ListChainsOfTableFamily(nftables.TableFamilyINet)
+	if err != nil {
+		return State{}, fmt.Errorf("egressfence: list chains: %w", err)
+	}
+	var chainOK bool
+	for _, ch := range chains {
+		if ch.Table.Name == TableName && ch.Name == ChainName {
+			chainOK = ch.Hooknum != nil && *ch.Hooknum == *nftables.ChainHookOutput &&
+				ch.Policy != nil && *ch.Policy == nftables.ChainPolicyDrop
+		}
+	}
 	rules, err := c.GetRules(table, &nftables.Chain{Name: ChainName, Table: table})
 	if err != nil {
 		return State{}, fmt.Errorf("egressfence: list rules: %w", err)
 	}
-	return State{Present: true, Rules: len(rules)}, nil
+	st := State{Present: true, Rules: len(rules)}
+	want := len(Rules(s))
+	st.Valid = chainOK && len(rules) == want
+	for i := 0; st.Valid && i < len(rules); i++ {
+		st.Valid = string(rules[i].UserData) == s.marker(i)
+	}
+	return st, nil
 }
 
 func tablePresent(c *nftables.Conn) (bool, error) {

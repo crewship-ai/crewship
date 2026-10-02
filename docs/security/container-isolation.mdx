@@ -418,6 +418,8 @@ How it holds:
 
 - **The container never holds `NET_ADMIN`.** A one-shot helper container joins the crew's network namespace with only `NET_ADMIN`, runs the bind-mounted `crewship-sidecar --fence-apply`, and exits. Nothing inside the crew container can remove the rules.
 - **Every start re-installs it.** A container restart recreates the network namespace and drops the fence, so the runtime installs it after each start it performs and checks the container's start time before reusing a running container.
+- **No command runs in an unfenced start.** The container's entrypoint runs nothing of the agent's; agent code arrives only through an exec. Every exec into a listed crew, including the web terminal, is refused until the fence is confirmed for the container's current start, so a restart outside Crewship (a daemon restart, an operator) leaves the crew unusable rather than open until the next crew run re-installs the fence.
+- **Connections do not outlive it.** Established traffic is accepted only in the reply direction, for connections opened *to* the container. A connection the agent opened itself, including one opened before the fence went in, stops delivering data once it is installed.
 - **Failure is closed.** A listed crew whose fence cannot be installed is stopped, not run unfenced.
 - **The host is untouched.** The rules live only in the crew's namespace; the host firewall and Docker's own rules do not change.
 
@@ -425,6 +427,7 @@ Limits of the pilot:
 
 - It applies to `restricted` crews on the `runc` runtime. A listed crew that is privileged, `free`, or on another runtime is refused: privileged mode removes the UID boundary the fence rests on, and gVisor and Kata carry traffic outside the namespace's netfilter hooks.
 - Tools that resolve hostnames themselves before using the proxy fail, because the agent cannot query DNS. Tools that honour `HTTP_PROXY`/`HTTPS_PROXY` (curl, git, npm, pip, the agent CLIs) let the sidecar resolve and keep working.
+- Turning the pilot off for a crew (removing it from the list) takes effect when its container next starts; until then the rules stay in its namespace. Stop and start the crew (`crewship crew stop <crew>`, then `crewship crew start <crew>`) to apply the change at once.
 - The fence controls traffic leaving the container. Inbound reachability from other crews on the shared network is tracked separately in [#2240](https://github.com/crewship-ai/crewship/issues/2240).
 
 Both in-container paths take those variables from one exported source (`orchestrator.SidecarProxyEnv`), and a routine cannot override them: any `*_proxy` variable declared in `script.env` is dropped and logged. The match is on the *shape* rather than an exact list, because CPython lowercases every environment name before looking for a `_proxy` suffix — so `HtTp_PrOxY` would otherwise reach a Python script's proxy configuration, and `.py` is a first-class script interpreter.

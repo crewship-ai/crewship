@@ -183,6 +183,47 @@ func (p *Provider) runFenceHelper(ctx context.Context, team provider.CrewConfig,
 	}
 }
 
+// errFenceNotInPlace refuses an exec into a fenced crew's container whose
+// current start has no confirmed fence.
+var errFenceNotInPlace = errors.New("egress fence not in place for this container start")
+
+// guardFencedExec runs before every Exec / ExecInteractive. Code reaches a
+// crew container only through an exec — the entrypoint is crewship's own
+// script and ends in `sleep infinity` — so refusing the exec until the fence
+// is confirmed for the container's CURRENT start closes the window a restart
+// outside EnsureCrewRuntime opens (daemon, restart policy, operator), for
+// every caller including the ones that never go through EnsureCrewRuntime,
+// such as the web terminal. EnsureCrewRuntime re-installs the fence; this
+// guard only refuses, because a container id alone does not carry the crew
+// settings (network mode, privileged) the install decision needs.
+//
+// Free when the pilot list is empty: no inspect, no behaviour change.
+func (p *Provider) guardFencedExec(ctx context.Context, containerID string) error {
+	if len(p.cfg.EgressFenceCrews) == 0 {
+		return nil
+	}
+	insp, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
+	if err != nil {
+		return fmt.Errorf("egress fence: inspect before exec: %w", err)
+	}
+	c := insp.Container
+	if c.Config == nil {
+		return nil
+	}
+	team := provider.CrewConfig{ID: c.Config.Labels[crewCrewIDLabel], Slug: c.Config.Labels[crewCrewLabel]}
+	if !p.egressFenceWanted(team) {
+		return nil
+	}
+	startedAt := ""
+	if c.State != nil {
+		startedAt = c.State.StartedAt
+	}
+	if prev, ok := p.fenced.Load(containerID); ok && startedAt != "" && prev.(string) == startedAt {
+		return nil
+	}
+	return fmt.Errorf("%w (crew %s, container %s); the next crew run re-installs it", errFenceNotInPlace, team.ID, shortID(containerID))
+}
+
 // stopUnfenced stops a crew container whose fence could not be installed, so
 // nothing reaches it through a path that skips EnsureCrewRuntime. A crew the
 // fence does not apply to (errFenceUnsupported) is stopped too: the operator

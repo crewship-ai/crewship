@@ -24,7 +24,26 @@ func TestStateString(t *testing.T) {
 	if got := (State{}).String(); got != "absent" {
 		t.Fatalf("absent state = %q", got)
 	}
-	if got := (State{Present: true, Rules: 6}).String(); got != "present (6 rules)" {
+	if got := (State{Present: true, Rules: 6, Valid: true}).String(); got != "present (6 rules)" {
 		t.Fatalf("present state = %q", got)
+	}
+	if got := (State{Present: true, Rules: 6}).String(); got != "present but not valid (6 rules)" {
+		t.Fatalf("invalid state = %q", got)
+	}
+}
+
+// The per-rule marker is what lets Check tell this fence from a table that
+// merely shares its name and rule count.
+func TestSpecMarker(t *testing.T) {
+	a := Spec{AllowUIDs: []uint32{1002}}
+	b := Spec{AllowUIDs: []uint32{1003}}
+	if a.marker(0) == a.marker(1) {
+		t.Fatal("markers must differ per rule index")
+	}
+	if a.marker(0) == b.marker(0) {
+		t.Fatal("markers must differ per allowed uid set")
+	}
+	if a.marker(2) != (Spec{AllowUIDs: []uint32{1002}}).marker(2) {
+		t.Fatal("markers must be deterministic for the same spec")
 	}
 }

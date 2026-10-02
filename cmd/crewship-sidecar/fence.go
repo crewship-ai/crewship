@@ -10,6 +10,7 @@ import (
 )
 
 // Exit codes of --fence-apply / --fence-check, read by the docker provider.
+// Absent also covers a table that is present but is not this fence.
 const (
 	fenceExitOK     = 0
 	fenceExitError  = 1
@@ -17,24 +18,25 @@ const (
 )
 
 func runFence(apply bool, allowUIDs string, stdout, stderr io.Writer) int {
+	uids, err := parseFenceUIDs(allowUIDs)
+	if err != nil {
+		fmt.Fprintf(stderr, "fence: %v\n", err)
+		return fenceExitError
+	}
+	spec := egressfence.Spec{AllowUIDs: uids}
 	if apply {
-		uids, err := parseFenceUIDs(allowUIDs)
-		if err != nil {
-			fmt.Fprintf(stderr, "fence: %v\n", err)
-			return fenceExitError
-		}
-		if err := egressfence.Apply(egressfence.Spec{AllowUIDs: uids}); err != nil {
+		if err := egressfence.Apply(spec); err != nil {
 			fmt.Fprintf(stderr, "fence: %v\n", err)
 			return fenceExitError
 		}
 	}
-	st, err := egressfence.Check()
+	st, err := egressfence.Check(spec)
 	if err != nil {
 		fmt.Fprintf(stderr, "fence: %v\n", err)
 		return fenceExitError
 	}
 	fmt.Fprintf(stdout, "fence %s\n", st)
-	if !st.Present {
+	if !st.Present || !st.Valid {
 		return fenceExitAbsent
 	}
 	return fenceExitOK

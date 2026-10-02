@@ -7,4 +7,4 @@ package egressfence
 func Apply(Spec) error { return ErrNotSupported }
 
 // Check is unavailable off linux.
-func Check() (State, error) { return State{}, ErrNotSupported }
+func Check(Spec) (State, error) { return State{}, ErrNotSupported }

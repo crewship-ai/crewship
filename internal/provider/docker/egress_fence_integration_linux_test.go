@@ -4,6 +4,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -81,6 +82,26 @@ func TestEgressFenceIntegration(t *testing.T) {
 	if _, err := p.client.ContainerStart(ctx, peer.ID, client.ContainerStartOptions{}); err != nil {
 		t.Fatalf("start peer: %v", err)
 	}
+	// A second listener that holds each connection open, for the
+	// opened-before-the-fence case.
+	sink, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:     &container.Config{Image: "alpine:3", Cmd: []string{"sh", "-c", "while :; do nc -l -p 7001 | while read l; do date +%s%N > /tmp/last; done; done"}},
+		HostConfig: &container.HostConfig{NetworkMode: container.NetworkMode(network)},
+	})
+	if err != nil {
+		t.Fatalf("create sink: %v", err)
+	}
+	defer func() {
+		_, _ = p.client.ContainerRemove(context.Background(), sink.ID, client.ContainerRemoveOptions{Force: true})
+	}()
+	if _, err := p.client.ContainerStart(ctx, sink.ID, client.ContainerStartOptions{}); err != nil {
+		t.Fatalf("start sink: %v", err)
+	}
+	si, err := p.client.ContainerInspect(ctx, sink.ID, client.ContainerInspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sinkIP := si.Container.NetworkSettings.Networks[network].IPAddress.String()
 	pi, err := p.client.ContainerInspect(ctx, peer.ID, client.ContainerInspectOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -104,6 +125,9 @@ func TestEgressFenceIntegration(t *testing.T) {
 		}
 	}
 
+	// The agent cannot become the allowed UID: no capabilities and
+	// no_new_privs, so no setuid route to 1002 or 0.
+	assertExit("fenced", "1001", []string{"sh", "-c", `grep -q "^NoNewPrivs:[[:space:]]*1" /proc/self/status && grep -q "^CapEff:[[:space:]]*0000000000000000" /proc/self/status`}, true)
 	assertExit("fenced", "1001", probe, false)
 	assertExit("fenced", "0", probe, false)
 	assertExit("fenced", "1001", dns, false)
@@ -116,8 +140,38 @@ func TestEgressFenceIntegration(t *testing.T) {
 	}
 	assertExit("restarted, before ensure", "1001", probe, true)
 
+	// Every provider exec path refuses the unfenced start (the raw client
+	// above is the operator's docker socket, which is root-equivalent anyway).
+	if _, err := p.Exec(ctx, provider.ExecConfig{ContainerID: cid, Cmd: []string{"true"}, User: "1001:1001"}); !errors.Is(err, errFenceNotInPlace) {
+		t.Fatalf("Exec into an unfenced start must be refused, got %v", err)
+	}
+
+	// A connection the agent opens while unfenced must not keep flowing once
+	// the fence is in: established is accepted only in the reply direction.
+	// Measured at the receiver, because TCP retransmits a rejected segment for
+	// minutes instead of failing the sender's write.
+	longConn := []string{"sh", "-c", "(while :; do echo x; sleep 0.5; done) | nc " + sinkIP + " 7001"}
+	ex, err := p.client.ExecCreate(ctx, cid, client.ExecCreateOptions{Cmd: longConn, User: "1001"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.client.ExecStart(ctx, ex.ID, client.ExecStartOptions{Detach: true}); err != nil {
+		t.Fatal(err)
+	}
+	sinkStalled := []string{"sh", "-c", `a=$(cat /tmp/last 2>/dev/null); sleep 3; b=$(cat /tmp/last 2>/dev/null); [ -n "$a" ] && [ "$a" = "$b" ]`}
+	time.Sleep(2 * time.Second)
+	if fenceTestExec(ctx, t, p, sink.ID, "0", sinkStalled) == 0 {
+		t.Fatal("setup: the unfenced long connection should be delivering data to the sink")
+	}
+
 	if _, err := p.EnsureCrewRuntime(ctx, team); err != nil {
 		t.Fatalf("EnsureCrewRuntime after restart: %v", err)
+	}
+	if fenceTestExec(ctx, t, p, sink.ID, "0", sinkStalled) != 0 {
+		t.Fatal("a connection opened before the fence kept delivering data after it")
+	}
+	if _, err := p.Exec(ctx, provider.ExecConfig{ContainerID: cid, Cmd: []string{"true"}, User: "1001:1001"}); err != nil {
+		t.Fatalf("Exec after re-fence: %v", err)
 	}
 	assertExit("re-fenced", "1001", probe, false)
 	assertExit("re-fenced", "1002", probe, true)
