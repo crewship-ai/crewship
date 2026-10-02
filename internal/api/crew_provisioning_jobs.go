@@ -863,11 +863,13 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 // Returns 503 if the Docker client is not configured, 409 if a job is already
 // in progress for the same crew.
 
-func (h *ProvisioningHandler) ProvisionTrigger(w http.ResponseWriter, r *http.Request) {
-	h.provisionTrigger(w, r, false)
-}
+// provisionRebuildKey is internal request intent, set only by ProvisionRebuild.
+// Keep the response branches in the registered handler so OpenAPI's source
+// scanner continues to see the actual status codes and error envelopes.
+type provisionRebuildKey struct{}
 
-func (h *ProvisioningHandler) provisionTrigger(w http.ResponseWriter, r *http.Request, forceRebuild bool) {
+func (h *ProvisioningHandler) ProvisionTrigger(w http.ResponseWriter, r *http.Request) {
+	forceRebuild, _ := r.Context().Value(provisionRebuildKey{}).(bool)
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if !requireRole(w, r, "create") {
 		return
@@ -1404,7 +1406,7 @@ func (h *ProvisioningHandler) ProvisionRebuild(w http.ResponseWriter, r *http.Re
 		replyError(w, http.StatusBadRequest, "crew ID is required")
 		return
 	}
-	h.provisionTrigger(w, r, true)
+	h.ProvisionTrigger(w, r.WithContext(context.WithValue(r.Context(), provisionRebuildKey{}, true)))
 }
 
 // cacheImagePrefix is the Docker repository name used for all provisioned
