@@ -203,7 +203,7 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	// dispatch used to jump over that check entirely, so an unchanged crew on
 	// macOS rebuilt the identical tag every time — about six minutes for a
 	// no-op, where the Docker path returns at once (#1779).
-	if prober, ok := p.builder.(ImageProber); ok {
+	if prober, ok := p.builder.(ImageProber); ok && !o.forceRebuild {
 		if exists, probeErr := prober.ImageExists(ctx, tag); probeErr == nil && exists {
 			p.logger.Info("using cached image", "tag", tag)
 			emitEvt(ProvisionEvent{Step: ProvStepCacheHit, Status: ProvStatusCompleted, Tag: tag})
@@ -281,9 +281,12 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 		Tag:    tag,
 		Detail: featureRefsSummary(resolvedFeatures),
 	})
-	if err := p.builder.Build(ctx, contextDir, tag, func(line string) {
+	if err := buildProvisionImage(ctx, p.builder, contextDir, tag, func(line string) {
 		p.logger.Debug("build-only provisioning", "line", line)
-	}); err != nil {
+	}, o.forceRebuild); err != nil {
+		if o.forceRebuild {
+			return fail(ProvStepImageBuildStart, err)
+		}
 		// The builder may have produced the image and then wedged (Apple's
 		// `container build` does — see AppleContainerBuilder.Build). The tag is
 		// the authority on whether the work got done, so ask before failing a

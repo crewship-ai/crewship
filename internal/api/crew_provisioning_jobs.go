@@ -33,14 +33,15 @@ import (
 const provisionLogTailCap = 50
 
 type ProvisionJob struct {
-	CrewID      string
-	Status      string // "pending", "running", "completed", "failed"
-	StartedAt   time.Time
-	CompletedAt *time.Time
-	Error       string
-	CachedImage string
-	ConfigHash  string
-	adapters    []string // adapter snapshot used by this build; guarded by mu
+	CrewID       string
+	Status       string // "pending", "running", "completed", "failed"
+	StartedAt    time.Time
+	CompletedAt  *time.Time
+	Error        string
+	CachedImage  string
+	ConfigHash   string
+	adapters     []string // adapter snapshot used by this build; guarded by mu
+	forceRebuild bool     // immutable after admission
 
 	Step      int       // 1-based current milestone
 	Total     int       // total milestones; 0 until the first progress event
@@ -437,6 +438,10 @@ var (
 // "send first message" can auto-provision a crew whose devcontainer hasn't
 // been built yet — without the bridge needing to round-trip through HTTP.
 func (h *ProvisioningHandler) EnqueueForCrew(ctx context.Context, crewID, workspaceID string) (EnqueueResult, error) {
+	return h.enqueueForCrew(ctx, crewID, workspaceID, false)
+}
+
+func (h *ProvisioningHandler) enqueueForCrew(ctx context.Context, crewID, workspaceID string, forceRebuild bool) (EnqueueResult, error) {
 	if h.provisioner == nil {
 		return EnqueueResult{}, ErrProvisionerUnavailable
 	}
@@ -501,10 +506,24 @@ func (h *ProvisioningHandler) EnqueueForCrew(ctx context.Context, crewID, worksp
 		h.rateLimiter.release(workspaceID)
 		return EnqueueResult{AlreadyRunning: true, Status: status}, nil
 	}
+	// Invalidate only after admission. A conflicting or rate-limited rebuild
+	// must not erase a working image reference. Keep cached_requirements: they
+	// still describe the running container until the replacement is ready.
+	if forceRebuild {
+		_, err := h.db.ExecContext(ctx,
+			`UPDATE crews SET cached_image = NULL, config_hash = NULL, updated_at = datetime('now')
+			 WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`, crewID, workspaceID)
+		if err != nil {
+			h.mu.Unlock()
+			h.rateLimiter.release(workspaceID)
+			return EnqueueResult{}, fmt.Errorf("clear cached image for rebuild: %w", err)
+		}
+	}
 	job := &ProvisionJob{
-		CrewID:    crewID,
-		Status:    "pending",
-		StartedAt: time.Now(),
+		forceRebuild: forceRebuild,
+		CrewID:       crewID,
+		Status:       "pending",
+		StartedAt:    time.Now(),
 	}
 	h.jobs[crewID] = job
 	h.mu.Unlock()
@@ -845,13 +864,17 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 // in progress for the same crew.
 
 func (h *ProvisioningHandler) ProvisionTrigger(w http.ResponseWriter, r *http.Request) {
+	h.provisionTrigger(w, r, false)
+}
+
+func (h *ProvisioningHandler) provisionTrigger(w http.ResponseWriter, r *http.Request, forceRebuild bool) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if !requireRole(w, r, "create") {
 		return
 	}
 
 	crewID := r.PathValue("crewId")
-	res, err := h.EnqueueForCrew(r.Context(), crewID, workspaceID)
+	res, err := h.enqueueForCrew(r.Context(), crewID, workspaceID, forceRebuild)
 	if err != nil {
 		// Match by typed sentinel — message strings drift; an HTTP contract
 		// keyed off strings.Contains(err.Error(), "rate limited") would
@@ -869,6 +892,10 @@ func (h *ProvisioningHandler) ProvisionTrigger(w http.ResponseWriter, r *http.Re
 			writeProblem(w, r, http.StatusTooManyRequests, err.Error())
 		default:
 			h.logger.Error("provision trigger", "error", err)
+			if forceRebuild {
+				replyInternalError(w, h.logger, "enqueue rebuild", err)
+				return
+			}
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		}
 		return
@@ -1211,6 +1238,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		devcontainer.WithProgress(progress),
 		devcontainer.WithProvisionSink(provisionEventSink),
 		devcontainer.WithRequiredBinaries(cliPlan.Binaries),
+		devcontainer.WithForceRebuild(job.forceRebuild),
 	)
 	if err != nil {
 		h.markJobFailed(job, workspaceID, fmt.Errorf("provision: %w", err))
@@ -1365,39 +1393,18 @@ func (h *ProvisioningHandler) markJobFailed(job *ProvisionJob, workspaceID strin
 }
 
 // ProvisionRebuild invalidates the cached image and triggers re-provisioning.
-// Implemented as: clear DB cache columns, then delegate to ProvisionTrigger.
+// Cache invalidation and the force flag are applied only after job admission.
 
 func (h *ProvisioningHandler) ProvisionRebuild(w http.ResponseWriter, r *http.Request) {
-	workspaceID := WorkspaceIDFromContext(r.Context())
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
+	if !canRole(RoleFromContext(r.Context()), "create") {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
-	crewID := r.PathValue("crewId")
-	if crewID == "" {
+	if r.PathValue("crewId") == "" {
 		replyError(w, http.StatusBadRequest, "crew ID is required")
 		return
 	}
-	// Clear cache so Provisioner won't short-circuit on the existing tag.
-	// cached_requirements is deliberately left alone (#1032): it's the only
-	// signal resolveAgentConfig's fail-closed credential gate has for "is
-	// this crew's actual RUNNING container privileged", and EnqueueForCrew
-	// below is async — nulling it here would open a window where the
-	// container is STILL privileged (unchanged until the rebuild completes)
-	// but the gate reads "unknown" and hands out credentials anyway. The
-	// stale value stays accurate until the provisioning job's completion
-	// handler overwrites it with the freshly computed one.
-	_, err := h.db.ExecContext(r.Context(),
-		`UPDATE crews SET cached_image = NULL, config_hash = NULL, updated_at = datetime('now')
-		 WHERE id = ? AND workspace_id = ?`,
-		crewID, workspaceID,
-	)
-	if err != nil {
-		replyInternalError(w, h.logger, "clear cached image for rebuild", err)
-		return
-	}
-	h.ProvisionTrigger(w, r)
+	h.provisionTrigger(w, r, true)
 }
 
 // cacheImagePrefix is the Docker repository name used for all provisioned

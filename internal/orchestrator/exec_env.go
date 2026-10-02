@@ -31,7 +31,7 @@ func baseAgentEnv(req AgentRunRequest) []string {
 		// one shared tree every run of this agent writes to — see run_paths.go
 		// for why that one thing stays shared while the rest does not.
 		"HOME=" + agentHomeDir(req.AgentSlug, req.RunID),
-		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
+		"DISABLE_AUTOUPDATER=1",
 		"CREWSHIP_AGENT_ID=" + req.AgentID,
 		"CREWSHIP_CREW_ID=" + req.CrewID,
 		"CREWSHIP_CHAT_ID=" + req.ChatID,

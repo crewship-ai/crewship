@@ -83,7 +83,7 @@ func TestBuildEnvVars_NoFieldsIsByteIdentical(t *testing.T) {
 	}
 	want := []string{
 		"HOME=/crew/runs/ada/run-1",
-		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
+		"DISABLE_AUTOUPDATER=1",
 		"CREWSHIP_AGENT_ID=",
 		"CREWSHIP_CREW_ID=",
 		"CREWSHIP_CHAT_ID=",

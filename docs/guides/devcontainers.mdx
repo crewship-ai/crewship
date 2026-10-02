@@ -202,6 +202,12 @@ The agent runs through a non-login `docker exec`, which does not read `/etc/prof
 
 ### Adapter CLIs are installed and verified
 
+Crewship disables Claude Code's background updater with `DISABLE_AUTOUPDATER=1`
+and Codex's startup update check with `check_for_update_on_startup=false`.
+Updates belong to environment provisioning. These settings do not prevent an
+agent with shell access from installing another executable in writable storage;
+they are version-management settings, not an isolation boundary.
+
 An agent on `CLAUDE_CODE` needs `claude` in the image; `CODEX_CLI` needs `codex`, `GEMINI_CLI` `gemini`, `OPENCODE` `opencode`, `CURSOR_CLI` `cursor-agent`, `FACTORY_DROID` `droid`. Nobody has to remember that: every build reads the crew's agents and adds what is missing — a mise tool for each CLI no declared feature already provides (`claude`, `codex`, `gemini-cli`, `opencode`, `cursor-agent`), an install command for `droid`. Your own choices are kept: a pinned `claude` version in the mise config, or the `claude-code` feature, is used as-is.
 
 After the install steps the build runs `command -v` for every required binary as the agent user, with the agent's PATH. A binary that did not land fails the build with its name — `adapter CLI not installed in this image: claude` — instead of the first chat message failing with "No such file or directory".
@@ -279,7 +285,7 @@ Provisioning is **asynchronous**. The CLI command returns immediately after the 
 
 0. **Proactive auto-provision on config save** — when a crew is **created** (`POST /api/v1/crews`, `crewship apply`, `crewship crew create`) or its **devcontainer / mise / runtime-image config changes** (`PATCH /api/v1/crews/{crewId}`), the handler immediately kicks off the build in the background (`CrewHandler.maybeAutoProvision`). This is the primary path: by the time anyone dispatches an issue the image is usually already cached, so operators never touch a "Build now" button. Editing the config invalidates the old cached image, so the rebuild keeps the crew current automatically.
 1. **Explicit CLI/API trigger** — `crewship crew provision <slug>` or `POST /api/v1/crews/{crewId}/provision`.
-2. **Crew rebuild** — `crewship crew rebuild <slug>` clears the cached image marker and re-runs provision.
+2. **Crew rebuild** — `crewship crew rebuild <slug>` bypasses the provisioned-image cache and installation-layer caches. It re-runs provisioning, so floating tool selectors can resolve newer versions; explicit versions in the configuration are retained. A rejected request (already provisioning or rate limited) leaves the current cache marker intact. This builds an image; it does not itself replace an already running container.
 3. **Auto-provision on first chat** *(PR #230)* — when an operator opens a chat with an agent in a crew that has a config but no cached image, the chat handler calls `ProvisioningHandler.EnqueueForCrew` directly. The chat surface renders an inline `CrewProvisioningCard` with the live progress checklist; once provisioning succeeds, the agent's first message starts on the freshly cached image.
 4. **Auto-provision on dispatch** — when an **issue, mission, or routine** is dispatched to an agent in a crew that needs provisioning but has no usable cached image (never built, or the cache tag was pruned from the daemon), the dispatch path (`AssignmentHandler.runAssignment` → `ProvisioningHandler.EnsureProvisioned`) **blocks until the image is built**, then starts the agent on it. The same `provision.*` workspace events fire, so the top-right toolbar provisioning popover lights up ("preparing container") with no extra wiring. If the build fails or times out, the run finishes with a clear *"preparing the crew container failed: …"* message instead of the cryptic `exit 127` you'd get from launching the agent on a bare base image with no `claude` CLI. This guarantee means a crew is runnable the moment it's created — operators don't have to remember to `crewship crew provision` first.
 

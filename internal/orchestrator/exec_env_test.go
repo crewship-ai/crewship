@@ -129,7 +129,7 @@ func TestBuildEnvVarsSidecar_UnroutedOpenCodeUnchanged(t *testing.T) {
 
 	want := []string{
 		"HOME=/crew/runs/coder/run-1",
-		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
+		"DISABLE_AUTOUPDATER=1",
 		"CREWSHIP_AGENT_ID=agent-1",
 		"CREWSHIP_CREW_ID=crew-1",
 		"CREWSHIP_CHAT_ID=chat-1",

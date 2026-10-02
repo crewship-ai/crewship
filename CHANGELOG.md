@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Explicit crew rebuilds could keep stale agent CLIs.** Rebuild now bypasses the provisioned-image and installation-layer caches while retaining configured version pins. Claude background updates and Codex startup update checks are disabled for Crewship-managed runs; rejected concurrent rebuilds preserve the existing cache.
+
+
 ### Added
 - **A fenced crew can reach its own services.** A restricted crew on the egress-fence pilot that declares `services:` and is on its own network now gets a narrow path to them: each service has a fixed address on the crew network, the fence opens exactly those addresses on their ports, and the names resolve from the runtime's `/etc/hosts` because DNS stays closed. Declaring a service whose name sorts first shifts the others to new addresses: they are re-attached there and the fence follows, also when ensuring the services fails part-way. The same crew on the shared network is still refused. (#1368, #2240)
 

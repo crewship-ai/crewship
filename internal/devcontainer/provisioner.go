@@ -178,15 +178,22 @@ func elapsedMs(start time.Time) int64 { return time.Since(start).Milliseconds() 
 type ProvisionOption func(*provisionOpts)
 
 type provisionOpts struct {
-	onProgress  ProgressCallback
-	onPlan      PlanCallback
-	onProvision ProvisionSink
+	forceRebuild bool
+	onProgress   ProgressCallback
+	onPlan       PlanCallback
+	onProvision  ProvisionSink
 	// requiredBinaries are the executables that must resolve for the agent
 	// user from a non-login shell once everything is installed — the CLIs of
 	// the crew's adapters (adapter_clis.go). Checked by verifyRequiredBinaries
 	// in both provisioning paths; a miss fails the build with the binary's
 	// name instead of surfacing as "No such file or directory" in a chat.
 	requiredBinaries []string
+}
+
+// WithForceRebuild bypasses both the final-image cache and installation-layer
+// caches. It is per call, so rebuilding one crew cannot affect another job.
+func WithForceRebuild(force bool) ProvisionOption {
+	return func(o *provisionOpts) { o.forceRebuild = force }
 }
 
 // WithRequiredBinaries names the executables the finished image must be able
@@ -478,7 +485,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	if err != nil {
 		return fail(ProvStepStart, err)
 	}
-	if exists {
+	if exists && !o.forceRebuild {
 		p.logger.Info("using cached image", "tag", tag)
 		if o.onProgress != nil {
 			o.onProgress(1, 1, "Using cached image")
@@ -578,7 +585,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		// buildFeatureImage emits image_build_start, per-feature feature_install,
 		// image_build_done, and on any failure provision.failed (with the build
 		// log tail) — so we just propagate its error here.
-		featImage, berr := p.buildFeatureImage(ctx, baseImage, resolvedFeatures, optionsByRef, cfg.ContainerEnv, emit, o.onProvision)
+		featImage, berr := p.buildFeatureImage(ctx, baseImage, resolvedFeatures, optionsByRef, cfg.ContainerEnv, emit, o.onProvision, o.forceRebuild)
 		if berr != nil {
 			return nil, berr
 		}
