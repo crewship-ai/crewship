@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"testing"
@@ -71,7 +72,7 @@ func captureSidecarHostConfig(t *testing.T) *container.HostConfig {
 		}
 	})
 
-	if _, err := p.ensureSidecar(context.Background(), "ckalpha0001", "alpha", p.crewNetworkFor("ckalpha0001", "alpha"), &svc); err != nil {
+	if _, err := p.ensureSidecar(context.Background(), "ckalpha0001", "alpha", p.crewNetworkFor("ckalpha0001", "alpha"), netip.Addr{}, &svc); err != nil {
 		t.Fatalf("ensureSidecar: %v", err)
 	}
 

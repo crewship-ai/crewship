@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -11,8 +12,10 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
+	dockernetwork "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/egressfence"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -66,12 +69,14 @@ func (p *Provider) egressFenceApplicable(team provider.CrewConfig) error {
 	if team.Privileged {
 		return fmt.Errorf("%w: privileged crew (the 1001/1002 UID boundary the fence rests on does not hold)", errFenceUnsupported)
 	}
-	if len(team.Services) > 0 {
-		// The fence lets only the sidecar's UID leave the namespace, so the
-		// agent could not reach its own crew's postgres/redis. A narrow path
-		// to them needs the crew's own network (#2240) to bound it; until
-		// then refuse rather than run with a silently unreachable database.
-		return fmt.Errorf("%w: crew declares services, which the agent could not reach under the fence until the per-crew network path exists (#2240)", errFenceUnsupported)
+	if len(team.Services) > 0 && !p.crewNetworkWanted(team.ID, team.Slug) {
+		// The fence opens exact service endpoints (address, protocol,
+		// port). On the shared network a restarted service's old address
+		// could be handed to another crew's container before the rules
+		// follow; on the crew's own network only that crew's containers
+		// can ever hold one of its addresses. So: services under the fence
+		// require the crew's own network (container.crew_network_crews).
+		return fmt.Errorf("%w: crew declares services; under the fence they need the crew's own network (add it to container.crew_network_crews)", errFenceUnsupported)
 	}
 	if rt := p.ociRuntime(); rt != "runc" {
 		return fmt.Errorf("%w: runtime %q (the fence is verified on runc only)", errFenceUnsupported, rt)
@@ -104,7 +109,12 @@ func (p *Provider) installEgressFence(ctx context.Context, team provider.CrewCon
 	}
 	containerID = inspect.Container.ID // canonical: callers may pass a name
 	startedAt := containerStartedAt(inspect.Container.State)
-	if prev, ok := p.fenced.Load(containerID); ok && prev.(string) == startedAt && startedAt != "" {
+	targets, err := p.crewServiceTargets(ctx, team)
+	if err != nil {
+		return fmt.Errorf("egress fence: %w", err)
+	}
+	key := targets.key()
+	if p.fenceCurrent(containerID, startedAt, key) {
 		return nil
 	}
 	if image == "" && inspect.Container.Config != nil {
@@ -116,14 +126,15 @@ func (p *Provider) installEgressFence(ctx context.Context, team provider.CrewCon
 	mu, _ := p.fenceLocks.LoadOrStore(containerID, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
 	defer mu.(*sync.Mutex).Unlock()
-	if prev, ok := p.fenced.Load(containerID); ok && prev.(string) == startedAt && startedAt != "" {
+	if p.fenceCurrent(containerID, startedAt, key) {
 		return nil
 	}
 	began := time.Now()
-	out, err := p.runFenceHelper(ctx, team, containerID, image)
+	out, err := p.runFenceHelper(ctx, team, containerID, image, targets.dests)
 	if err != nil {
 		return fmt.Errorf("egress fence: %w", err)
 	}
+	p.fenceDests.Store(containerID, key)
 	p.fenced.Store(containerID, startedAt)
 	p.fencedCrew.Store(containerID, team.ID)
 	p.fenceTeams.Store(team.ID, team)
@@ -137,7 +148,15 @@ func (p *Provider) installEgressFence(ctx context.Context, team provider.CrewCon
 }
 
 // runFenceHelper runs the one-shot helper. A non-zero exit is an error.
-func (p *Provider) runFenceHelper(ctx context.Context, team provider.CrewConfig, containerID, image string) (string, error) {
+func (p *Provider) runFenceHelper(ctx context.Context, team provider.CrewConfig, containerID, image string, dests []egressfence.Dest) (string, error) {
+	cmd := []string{"--fence-apply", "--fence-allow-uids", fenceSidecarUID}
+	if len(dests) > 0 {
+		parts := make([]string, len(dests))
+		for i, d := range dests {
+			parts[i] = d.String()
+		}
+		cmd = append(cmd, "--fence-allow-dests", strings.Join(parts, ","))
+	}
 	if p.cfg.SidecarBinaryPath == "" {
 		return "", errors.New("no sidecar binary path configured; the helper runs the bind-mounted crewship-sidecar")
 	}
@@ -154,7 +173,7 @@ func (p *Provider) runFenceHelper(ctx context.Context, team provider.CrewConfig,
 			Image:      image,
 			User:       "0:0",
 			Entrypoint: []string{"/usr/local/bin/crewship-sidecar"},
-			Cmd:        []string{"--fence-apply", "--fence-allow-uids", fenceSidecarUID},
+			Cmd:        cmd,
 			Labels: map[string]string{
 				"managed-by":     "crewship",
 				fenceHelperLabel: "true",
@@ -453,4 +472,113 @@ func (p *Provider) GuardExternalExec(ctx context.Context, containerID string) (b
 	}
 	return func(ctx context.Context) error { return p.fenceBeforeStart(ctx, f) },
 		func(ctx context.Context) error { return p.fenceAfterStart(ctx, f) }, nil
+}
+
+// serviceTargets are a crew's own service endpoints the fence opens.
+type serviceTargets struct {
+	dests []egressfence.Dest
+}
+
+// key identifies the exact endpoint set, so a changed service address
+// re-installs the fence even within one container start.
+func (t serviceTargets) key() string {
+	parts := make([]string, 0, len(t.dests))
+	for _, d := range t.dests {
+		parts = append(parts, d.String())
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
+}
+
+// fenceCurrent reports whether containerID's fence is confirmed for this
+// start and this service endpoint set.
+func (p *Provider) fenceCurrent(containerID, startedAt, key string) bool {
+	prev, ok := p.fenced.Load(containerID)
+	if !ok || startedAt == "" || prev.(string) != startedAt {
+		return false
+	}
+	have, _ := p.fenceDests.Load(containerID)
+	haveKey, _ := have.(string)
+	return haveKey == key
+}
+
+// crewServiceTargets lists the endpoints the fence opens for a crew's own
+// services: each declared service's FIXED address on the crew's own network
+// (serviceAddrs), with its declared ports plus, once the service runs, the
+// ports its image exposes. Fixed addresses are never handed to another
+// container (dynamic allocation is limited to the upper half of the subnet).
+func (p *Provider) crewServiceTargets(ctx context.Context, team provider.CrewConfig) (serviceTargets, error) {
+	t := serviceTargets{}
+	if len(team.Services) == 0 {
+		return t, nil
+	}
+	subnet, ok, err := p.crewSubnet(ctx, team.ID, team.Slug)
+	if err != nil {
+		return t, err
+	}
+	if !ok {
+		return t, fmt.Errorf("crew declares services but is not on its own network")
+	}
+	addrs, err := serviceAddrs(subnet, serviceNames(team))
+	if err != nil {
+		return t, err
+	}
+	seen := map[string]bool{}
+	add := func(d egressfence.Dest) {
+		if !seen[d.String()] {
+			seen[d.String()] = true
+			t.dests = append(t.dests, d)
+		}
+	}
+	for _, svc := range team.Services {
+		for _, raw := range svc.Ports {
+			if port, err := dockernetwork.ParsePort(raw); err == nil {
+				add(egressfence.Dest{Addr: addrs[svc.Name], Port: port.Num(), Proto: string(port.Proto())})
+			}
+		}
+	}
+	list, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
+	if err != nil {
+		return t, fmt.Errorf("list services: %w", err)
+	}
+	for _, c := range list.Items {
+		name, ok := matchCrewService(c.Labels, team.ID)
+		if !ok || c.State != "running" {
+			continue
+		}
+		addr, declared := addrs[name]
+		if !declared {
+			continue
+		}
+		insp, err := p.client.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			return t, fmt.Errorf("inspect service %q: %w", name, err)
+		}
+		if insp.Container.Config == nil {
+			continue
+		}
+		for port := range insp.Container.Config.ExposedPorts {
+			add(egressfence.Dest{Addr: addr, Port: port.Num(), Proto: string(port.Proto())})
+		}
+	}
+	sort.Slice(t.dests, func(i, j int) bool { return t.dests[i].String() < t.dests[j].String() })
+	return t, nil
+}
+
+// refreshFenceServices re-reads a fenced crew's services after they were
+// ensured and re-installs the fence when their endpoints changed: the new
+// address opens, the old one closes, in one atomic rule swap.
+func (p *Provider) refreshFenceServices(ctx context.Context, team provider.CrewConfig) error {
+	if !p.egressFenceWanted(team) {
+		return nil
+	}
+	cid, running, err := p.FindCrewContainer(ctx, team.ID, team.Slug)
+	if err != nil || cid == "" || !running {
+		return err
+	}
+	if err := p.installEgressFence(ctx, team, cid, ""); err != nil {
+		p.stopUnfenced(ctx, team, cid, err)
+		return err
+	}
+	return nil
 }

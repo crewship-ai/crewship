@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net/netip"
 	"os"
 	"os/exec"
 	"strings"
@@ -83,7 +84,7 @@ func TestVMQuotaServiceRecovery(t *testing.T) {
 		}
 		return
 	}
-	id, err := p.ensureSidecar(ctx, crew, "quota-synthetic", p.crewNetworkFor(crew, "quota-synthetic"), &svc)
+	id, err := p.ensureSidecar(ctx, crew, "quota-synthetic", p.crewNetworkFor(crew, "quota-synthetic"), netip.Addr{}, &svc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestVMQuotaServiceRecovery(t *testing.T) {
 			t.Fatalf("boot lost canary: %v %s", e, out)
 		}
 	}
-	same, err := p.ensureSidecar(ctx, crew, "quota-synthetic", p.crewNetworkFor(crew, "quota-synthetic"), &svc)
+	same, err := p.ensureSidecar(ctx, crew, "quota-synthetic", p.crewNetworkFor(crew, "quota-synthetic"), netip.Addr{}, &svc)
 	if err != nil || same != id {
 		t.Fatalf("reconciliation not idempotent: %s %v", same, err)
 	}

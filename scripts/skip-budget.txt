@@ -197,4 +197,6 @@
 #                     real internal bridges; SKIP-WAIVER on the Docker guard.
 # 2026-10-02: 154 after rebasing #2240 onto #1368 — both branches bumped the
 #                     same line; the count is the sum of their waivers above.
-154
+# 2026-10-02 (#1368+#2240): +1 — TestEgressFenceOwnServicesIntegration fences a
+#                     real crew with a real service; SKIP-WAIVER on the Docker guard.
+155

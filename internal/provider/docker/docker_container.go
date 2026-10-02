@@ -944,7 +944,15 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				if inspect.HostConfig != nil {
 					haveNet = string(inspect.HostConfig.NetworkMode)
 				}
-				if want := p.crewNetworkFor(team.ID, team.Slug); want != "" && haveNet != want &&
+				// Same rule for the service host entries: they are fixed at
+				// create time, so a changed service list needs a recreate.
+				hostsDrift := false
+				if p.crewNetworkWanted(team.ID, team.Slug) && inspect.HostConfig != nil {
+					if wantHosts, err := p.serviceExtraHosts(ctx, team); err == nil {
+						hostsDrift = !sameServiceHosts(inspect.HostConfig.ExtraHosts, wantHosts)
+					}
+				}
+				if want := p.crewNetworkFor(team.ID, team.Slug); want != "" && (haveNet != want || hostsDrift) &&
 					(p.crewNetworkWanted(team.ID, team.Slug) || haveNet == p.crewNetworkName(team.ID)) {
 					if crewContainerHoldsNoProcesses(c.State) {
 						p.logger.Info("recreating stopped container (crew network changed)",
@@ -1274,6 +1282,12 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 // constructs the container.Config / container.HostConfig pair for the crew
 // container create call.
 func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.CrewConfig, containerName, runtimeImage, runtime string, memoryMB int, cpus float64, dirs crewDirs) (*container.Config, *container.HostConfig, error) {
+	// A crew on its own network resolves its services from /etc/hosts
+	// (fixed addresses): under the egress fence the agent has no DNS.
+	svcHosts, err := p.serviceExtraHosts(ctx, team)
+	if err != nil {
+		return nil, nil, fmt.Errorf("service hosts: %w", err)
+	}
 	p.logger.Debug("calling ContainerCreate", "image", runtimeImage, "name", containerName)
 	env := []string{
 		"CREWSHIP_CREW_ID=" + team.ID,
@@ -1316,6 +1330,9 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 	cfg, hostCfg, err := p.assembleCrewSpec(team, runtimeImage, runtime, memoryMB, cpus, dirs, env, imgEnv)
 	if err != nil {
 		return nil, nil, err
+	}
+	if hostCfg != nil {
+		hostCfg.ExtraHosts = append(hostCfg.ExtraHosts, svcHosts...)
 	}
 	// Stamp what this build asked for, so a container created by an older
 	// build can be recognised as such later — the whole of #1642. Written

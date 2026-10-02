@@ -41,11 +41,17 @@ func TestEgressFenceApplicable(t *testing.T) {
 		{"free has nothing to fence", "runc", provider.CrewConfig{NetworkMode: "free"}, false},
 		{"privileged breaks the uid boundary", "runc", provider.CrewConfig{NetworkMode: "restricted", Privileged: true}, false},
 		{"gvisor netstack bypasses the namespace", "runsc", provider.CrewConfig{NetworkMode: "restricted"}, false},
-		{"declared services would be unreachable", "runc", provider.CrewConfig{NetworkMode: "restricted", Services: []provider.CrewService{{Name: "pg"}}}, false},
+		{"services without the crew's own network", "runc", provider.CrewConfig{Slug: "svc", NetworkMode: "restricted", Services: []provider.CrewService{{Name: "pg"}}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CREWSHIP_RUNTIME", tc.runtime)
 			err := (&Provider{}).egressFenceApplicable(tc.team)
+			if tc.name == "services without the crew's own network" {
+				// With the crew on its own network the same crew is accepted.
+				if err := (&Provider{cfg: Config{CrewNetworkCrews: []string{"svc"}}}).egressFenceApplicable(tc.team); err != nil {
+					t.Fatalf("services on the crew's own network must be fenceable: %v", err)
+				}
+			}
 			if tc.ok != (err == nil) {
 				t.Fatalf("applicable err=%v, want ok=%v", err, tc.ok)
 			}

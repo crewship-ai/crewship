@@ -2,6 +2,7 @@ package docker
 
 import (
 	"errors"
+	"net/netip"
 	"strings"
 	"testing"
 )
@@ -29,7 +30,7 @@ func TestQuotaServiceRefusedWithoutHostAccounting(t *testing.T) {
 			catalog := &fakeQuotaCatalog{}
 			svc := quotaTestService()
 			p := newCovProvider(t, Config{QuotaCatalog: catalog}, daemon.ServeHTTP)
-			_, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc)
+			_, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), netip.Addr{}, &svc)
 			if tc.wantErrContains == "" {
 				if err != nil {
 					t.Fatal(err)
@@ -52,7 +53,7 @@ func TestLegacyServiceIgnoresHostAccounting(t *testing.T) {
 	daemon.swapLimit, daemon.pidsLimit = false, false
 	svc := covRedisSvc()
 	p := newCovProvider(t, Config{}, daemon.ServeHTTP)
-	if _, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc); err != nil {
+	if _, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), netip.Addr{}, &svc); err != nil {
 		t.Fatal(err)
 	}
 }
