@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -175,6 +176,108 @@ func TestEgressFenceIntegration(t *testing.T) {
 	}
 	assertExit("re-fenced", "1001", probe, false)
 	assertExit("re-fenced", "1002", probe, true)
+
+	// Restart racing an exec, at each point between the guard and the
+	// process running. Deterministic: the hook restarts the container at
+	// exactly that stage, once.
+	for _, stage := range []fenceExecStage{fenceStageBeforeStart, fenceStageAfterStart} {
+		t.Run(string(stage), func(t *testing.T) {
+			if _, err := p.EnsureCrewRuntime(ctx, team); err != nil {
+				t.Fatalf("EnsureCrewRuntime: %v", err)
+			}
+			fired := false
+			p.fenceTestHook = func(s fenceExecStage) {
+				if s != stage || fired {
+					return
+				}
+				fired = true
+				if _, err := p.client.ContainerRestart(ctx, cid, client.ContainerRestartOptions{}); err != nil {
+					t.Errorf("hook restart: %v", err)
+				}
+			}
+			defer func() { p.fenceTestHook = nil }()
+
+			marker := "/tmp/raced-" + string(stage)
+			_, err := p.Exec(ctx, provider.ExecConfig{ContainerID: cid, Cmd: []string{"sh", "-c", "sleep 1; touch " + marker}, User: "1001:1001"})
+			if !fired {
+				t.Fatal("hook did not fire")
+			}
+			if !errors.Is(err, errFenceNotInPlace) {
+				t.Fatalf("an exec raced by a restart must be refused, got %v", err)
+			}
+			switch stage {
+			case fenceStageBeforeStart:
+				// Refused before it ran: nothing executed in the new start.
+				if code := fenceTestExec(ctx, t, p, cid, "0", []string{"test", "-e", marker}); code == 0 {
+					t.Fatal("the raced exec ran in the unfenced start")
+				}
+			case fenceStageAfterStart:
+				// It may have started; the container must have been stopped.
+				insp, err := p.client.ContainerInspect(ctx, cid, client.ContainerInspectOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if insp.Container.State.Running {
+					t.Fatal("a crew container whose exec may have run unfenced must be stopped")
+				}
+			}
+		})
+	}
+	if _, err := p.EnsureCrewRuntime(ctx, team); err != nil {
+		t.Fatalf("EnsureCrewRuntime after races: %v", err)
+	}
+	assertExit("after races", "1001", probe, false)
+
+	// Check reads rule contents, not just markers: an in-place edit that
+	// keeps every marker (final reject -> accept) must read as not valid.
+	tamperPath := filepath.Join(tmp, "fencetamper")
+	tb := exec.CommandContext(ctx, "go", "build", "-o", tamperPath, "./testdata/fencetamper")
+	tb.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux")
+	if out, err := tb.CombinedOutput(); err != nil {
+		t.Fatalf("build fencetamper: %v\n%s", err, out)
+	}
+	if code := fenceTestNetnsRun(ctx, t, p, cid, "alpine:3", sidecarPath, "--fence-check", "--fence-allow-uids", "1002"); code != 0 {
+		t.Fatalf("--fence-check on an intact fence exited %d, want 0", code)
+	}
+	if code := fenceTestNetnsRun(ctx, t, p, cid, "alpine:3", tamperPath); code != 0 {
+		t.Fatalf("fencetamper exited %d", code)
+	}
+	assertExit("tampered (final rule now accepts)", "1001", probe, true)
+	if code := fenceTestNetnsRun(ctx, t, p, cid, "alpine:3", sidecarPath, "--fence-check", "--fence-allow-uids", "1002"); code != 3 {
+		t.Fatalf("--fence-check on a tampered fence exited %d, want 3 (present but not valid)", code)
+	}
+}
+
+// fenceTestNetnsRun runs bin (bind-mounted) in a one-shot container joined to
+// cid's network namespace with NET_ADMIN, and returns its exit code.
+func fenceTestNetnsRun(ctx context.Context, t *testing.T, p *Provider, cid, image, bin string, args ...string) int64 {
+	t.Helper()
+	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{Image: image, User: "0:0", Entrypoint: []string{"/x"}, Cmd: args},
+		HostConfig: &container.HostConfig{
+			NetworkMode: container.NetworkMode("container:" + cid),
+			CapDrop:     []string{"ALL"},
+			CapAdd:      []string{"NET_ADMIN"},
+			Mounts:      []mount.Mount{{Type: mount.TypeBind, Source: bin, Target: "/x", ReadOnly: true}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create netns runner: %v", err)
+	}
+	defer func() {
+		_, _ = p.client.ContainerRemove(context.Background(), created.ID, client.ContainerRemoveOptions{Force: true})
+	}()
+	if _, err := p.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
+		t.Fatalf("start netns runner: %v", err)
+	}
+	wait := p.client.ContainerWait(ctx, created.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
+	select {
+	case st := <-wait.Result:
+		return st.StatusCode
+	case err := <-wait.Error:
+		t.Fatalf("wait netns runner: %v", err)
+	}
+	return -1
 }
 
 func fenceTestExec(ctx context.Context, t *testing.T, p *Provider, cid, user string, cmd []string) int {
