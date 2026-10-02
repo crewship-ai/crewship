@@ -85,6 +85,7 @@ func (p *Provider) ensureEgressFence(ctx context.Context, team provider.CrewConf
 	if err != nil {
 		return fmt.Errorf("egress fence: inspect crew container: %w", err)
 	}
+	containerID = inspect.Container.ID // canonical: callers may pass a name
 	startedAt := containerStartedAt(inspect.Container.State)
 	if prev, ok := p.fenced.Load(containerID); ok && prev.(string) == startedAt && startedAt != "" {
 		return nil
@@ -237,12 +238,16 @@ func (p *Provider) guardFencedExec(ctx context.Context, containerID string) (fen
 	if !p.egressFenceWanted(team) {
 		return fencedExec{}, nil
 	}
+	// Callers pass a container id OR a name (the file-save path uses the
+	// name); the fence record is keyed by the canonical id, so look it up by
+	// what the daemon resolved, never by the caller's spelling.
+	id := c.ID
 	startedAt := containerStartedAt(c.State)
-	if prev, ok := p.fenced.Load(containerID); ok && startedAt != "" && prev.(string) == startedAt {
+	if prev, ok := p.fenced.Load(id); ok && startedAt != "" && prev.(string) == startedAt {
 		if p.fenceTestHook != nil {
 			p.fenceTestHook(fenceStageAfterGuard)
 		}
-		return fencedExec{containerID: containerID, team: team, startedAt: startedAt}, nil
+		return fencedExec{containerID: id, team: team, startedAt: startedAt}, nil
 	}
 	return fencedExec{}, fmt.Errorf("%w (crew %s, container %s); the next crew run re-installs it", errFenceNotInPlace, team.ID, shortID(containerID))
 }
