@@ -190,6 +190,8 @@ var BackupTables = []string{
 	"agent_mcp_bindings",
 	"agent_credentials",
 	"agent_config_history",
+	// Restored tombstones and crew data must keep their slugs reserved.
+	"agent_slug_reservations",
 	"checkpoints",
 	// issue_agent_sessions (§9.2, B1 — #2332) must land here: it FKs into
 	// missions and agents (both already dumped above), and "assignments"

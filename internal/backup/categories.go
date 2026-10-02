@@ -188,7 +188,7 @@ var TableCategory = map[string]string{
 	// Crews, agents and their settings.
 	"crews": CategoryAgents, "service_runtime_intents": CategoryAgents, "crew_members": CategoryAgents,
 	"agents": CategoryAgents, "crew_connections": CategoryAgents, "crew_mcp_servers": CategoryAgents,
-	"agent_skills": CategoryAgents, "agent_mcp_bindings": CategoryAgents, "agent_config_history": CategoryAgents,
+	"agent_skills": CategoryAgents, "agent_mcp_bindings": CategoryAgents, "agent_config_history": CategoryAgents, "agent_slug_reservations": CategoryAgents,
 	"crew_templates": CategoryAgents, "workspace_members": CategoryAgents, "access_grants": CategoryAgents,
 	"workspace_invitations": CategoryAgents, "workspace_mcp_servers": CategoryAgents,
 	"feature_flag_overrides": CategoryAgents, "budget_limits": CategoryAgents, "hooks_config": CategoryAgents,
