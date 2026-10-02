@@ -14,6 +14,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Upload encrypted recovery archives through Admin › Backups › Recovery or `crewship admin instance backups upload`, with cancellation, checksum validation, disk-space checks and atomic catalog/audit recording.
 
 ### Fixed
+- **Routine script steps in restricted crews could not use HTTPS through the proxy at all.** Since the provider budget admission, every HTTPS tunnel from the crew-level sidecar a script step uses was refused with 403, even to allowlisted domains, because that sidecar has no agent identity. It is now admitted under the crew's own identity, taken from its crew-bound token, with no credential and the same hard-budget rule as an agent; disallowed hosts are still refused. (#2761)
 
 - **Node's built-in `fetch` now goes through the crew proxy.** Node ignores `HTTP_PROXY`/`HTTPS_PROXY` for `fetch` unless `NODE_USE_ENV_PROXY=1` is set, so a Node tool in a restricted crew reached the network directly, past the allowlist. Agents and script steps now get the variable (Node 22.21+ and 24+; crew images ship 22.23); loopback stays direct. Older Node still ignores it. (#2763)
 - **Crew overviews showed "No runs in the last 7 days" for crews that were running.** `run.started` journal entries from chat, sidecar, assignment and peer-query runs never recorded the crew, and crew-scoped run insights read recorded ownership, so they counted nothing. New runs now record the agent's crew at run time; earlier runs stay unattributed because the journal is append-only.
