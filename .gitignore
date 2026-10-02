@@ -155,29 +155,13 @@ coverage_log.md
 CLAUDE.md
 internal-docs/
 
-# Claude Code workspace — default-deny, explicit-allow.
-# Ignore everything dropped under .claude/ so future PRDs, wireframes,
-# scratch notes, prompts, per-user state, etc. don't accidentally land
-# in the public repo. Add a `!` exception below for anything the team
-# genuinely wants tracked.
-.claude/*
-!.claude/audits/
-!.claude/commands/
-!.claude/settings.json
-# Public design proposals/PRDs live in docs/prd/. New internal working
-# records belong in the separate private context repository; see
-# docs/development/private-context.md.
-# (moved out of .claude/context/prd/ on 2026-09-28 — an assistant-specific
-# directory is not a documentation category). Other subdirs under
-# .claude/context/ (wireframes, scratch) stay ignored by default;
-# add further `!.claude/context/<subdir>/` exceptions when needed.
-!.claude/context/
-.claude/context/*
-# .claude/context/notes/ is NOT tracked in this public repo. It holds
-# internal working notes (infra recon, live-instance findings) that must
-# stay private — they live in the private GitLab `infrastructure/crewship-notes`.
-# Do not re-add a `!` exception for it here.
-.claude/context/notes/
+# Assistant-local configuration, prompts, research and session state stay private.
+# No allow-exceptions: repository-wide contributor rules live in AGENTS.md.
+/.claude/
+/.codex/
+# Also exclude the optional private-context symlink (a trailing slash matches
+# directories only). The private checkout itself lives outside this tree.
+/internal-docs
 
 # Local mockups / audit artifacts (kept untracked per user preference)
 audit-final/
@@ -225,3 +209,10 @@ docs/prd/reports/release-1-0-api-cli-inventory.md
 
 # Local Python CI helper bytecode
 __pycache__/
+
+# Dated execution reports are private. Preserve the public regression source
+# fixture and the explanation of locally generated inventory output.
+/docs/prd/reports/*
+!/docs/prd/reports/README.md
+!/docs/prd/reports/codex-review-work-regressions-2026-09-11.go.txt
+/public/design/

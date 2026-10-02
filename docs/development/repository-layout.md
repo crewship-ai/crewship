@@ -42,8 +42,9 @@ boundary is an architectural change, not a cosmetic cleanup.
 
 `tools/spike-river/` is a retained reproduction harness, not a runtime dependency
 of Crewship. The tool's own README explains its separate module and evidence.
-Historical manual files remain pending classification; absence from a CI job
-alone is not a reason to delete a test.
+The standalone tests under `tests/` remain public reproducible checks. Dated
+instance execution reports belong in private context; absence from a CI job
+alone is not a reason to delete an executable test.
 
 ## Delivery and documentation
 
@@ -54,7 +55,7 @@ alone is not a reason to delete a test.
 | `packaging/`, `.goreleaser.yml` | OS packages, service integration and release artifacts |
 | `docs/` | Public user documentation, contracts, decisions and contributor guidance; [map](../README.md) |
 | Root Markdown files | Project entrypoints and policies: README, contribution, release, security, governance and licensing |
-| `.claude/` | Existing checked-in assistant integration; product rules stay in AGENTS/CONTRIBUTING and internal research stays outside the public tree |
+| Local `.claude/`, `.codex/`, `internal-docs/` | Ignored workstation configuration and optional private-context aliases; never product source or published build inputs |
 
 Internal plans, handoffs, private experiments and instance audit evidence live
 in [optional private context](private-context.md). Public builds and tests must

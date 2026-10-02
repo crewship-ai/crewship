@@ -50,3 +50,19 @@ secret, revoke their licenses or transfer copyright.
 Generated documentation inventory reports are ignored local build output in
 `docs/prd/reports/`; their generator and CI checks remain public. They do not
 belong in either repository's version history.
+
+## Publication boundary
+
+Root assistant workspaces (`.claude/`, `.codex/`), local `internal-docs`
+aliases, internal mockups and captured run reports are ignored. The
+`agents-invariants` CI check inspects tracked paths, so a forced add cannot
+silently reintroduce these categories. The reports directory retains only its
+README and a documented public regression source fixture. This path guard
+cannot classify arbitrary prose; review the audience of new documentation.
+
+Workstation-specific synchronization, private remotes and access keys are
+configured outside this public checkout. Public builds, tests and CI do not
+require that setup. A directory ignore rule alone does not publish or back up
+its contents. Shipped migration comments are immutable; historical document
+paths in those comments refer to the source revision, not a private runtime
+dependency.

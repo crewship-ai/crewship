@@ -6,8 +6,8 @@ The work-package and integration instructions below record the original
 implementation process; they do not override today's CONTRIBUTING/AGENTS
 workflow. The implementation contract remains public.
 
-Companion to [the proposal](routines-operator-console-2026-09-15.md) and the
-prototype `public/design/routines-operator-console-20260915.html`. Three work
+Companion to [the proposal](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/routines-operator-console-2026-09-15.md) and the
+prototype [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/public/design/routines-operator-console-20260915.html). Three work
 packages build in parallel against this contract; the integrator merges them
 into `feat/routines-operator-console`, deploys dev1 and opens one PR.
 

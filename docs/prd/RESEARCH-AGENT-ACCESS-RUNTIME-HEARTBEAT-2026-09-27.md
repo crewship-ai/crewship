@@ -2,7 +2,7 @@
 
 Datum: 2026-09-27. Výchozí kód Crewship: `884d5361954c082fcc5a8dcb2c071a5692a68950`, větev `feat/chat-workspace-preview-dev2` v instanci 1. Paperclip: `640dee18029f7651d56ae0f1828d04228f9ab044`. Jde o rešerši implementace a primárních zdrojů doplněnou cílenými testy (§12), nikoli penetrační test, benchmark nebo potvrzení produkční připravenosti. Nebyly změněny runtime, oprávnění, data ani konfigurace běžící instance. Starší handoffy jsou kontext; tvrzení o dnešním chování níže vycházejí z kódu uvedeného commitu.
 
-Aktuální implementační stav a následné opravy: [delivery tracker](AGENT-ACCESS-RELEASE-1-IMPLEMENTATION-2026-09-27.md). Níže je zachován výchozí audit; není to stav po nasazení A1.
+Aktuální implementační stav a následné opravy: [delivery tracker](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/AGENT-ACCESS-RELEASE-1-IMPLEMENTATION-2026-09-27.md). Níže je zachován výchozí audit; není to stav po nasazení A1.
 
 ## Závěr a rozhodnutí pro 1.0
 

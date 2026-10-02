@@ -5,7 +5,7 @@
 **Navigace ve stavu k 18. září:** Tento PRD drží původní rozsah R1–R10 a lidskou přejímku §11. Navazující změny mají vlastní zadání a důkazy:
 
 - [Vstupy, pravidla práce a řešení problémů](ROUTINES-CLARITY-PRD-2026-09-15.md): [PR #2556](https://github.com/crewship-ai/crewship/pull/2556), issue #2555.
-- [Operator console, Edit a New routine](../ux/routines-operator-console-2026-09-15.md): [PR #2562](https://github.com/crewship-ai/crewship/pull/2562), issue #2560. [Integrační ověření DEV1 z 16. září](https://github.com/crewship-ai/crewship/pull/2562#issuecomment-5696159682) zaznamenává nasazenou větev, browser důkazy a stav merge v okamžiku ověření.
+- [Operator console, Edit a New routine](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/routines-operator-console-2026-09-15.md): [PR #2562](https://github.com/crewship-ai/crewship/pull/2562), issue #2560. [Integrační ověření DEV1 z 16. září](https://github.com/crewship-ai/crewship/pull/2562#issuecomment-5696159682) zaznamenává nasazenou větev, browser důkazy a stav merge v okamžiku ověření.
 - Opravy #2553 uzavírá [protokol po mergi](https://github.com/crewship-ai/crewship/pull/2553#issuecomment-5672592832). Novější merge, CI a identitu nasazení uvádějí validační protokoly v navazujících PR; starší důkazy nejsou nové přeměření serveru.
 - Integrační PR [#2617](https://github.com/crewship-ai/crewship/pull/2617) (CLI audit #2594–#2611 + #2616, opravy assignee-type a nullable backup schémat) je od 18. září sloučen; [validace 18. září](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/routines-validation-2026-09-18.md) potvrzuje merge ancestry, DEV1 identitu i denní živé průchody R1–R10 a opravuje defekt #2573 (kaskáda mazání rutiny na plány, PR [#2620](https://github.com/crewship-ai/crewship/pull/2620)).
 
@@ -584,13 +584,13 @@ HTTP akcí. Neproběhlo přihlášené srovnávání s konkurencí ani uživatel
 | Naplánovat a zrušit | Jednorázový start `pnd_cmtvp94qf0012632eb36d` na `2026-09-12T10:30:00Z`, připnutá verze 2; vytvořen a zrušen přes browser, nepřítomnost plánu ověřena API. |
 | Edit/Test/Publish | Vlastní název `Return the entered message`, stabilní ID `echo`, publikovaná verze 2. Test transformace vypočetl `Sample from browser`; UI správně uvádí, že výstupní kontroly nejsou deklarované. Statická kontrola receptu neslibuje spuštění agentů, skriptů ani HTTP. |
 
-Snímky skutečného průchodu: [hlavní seznam](../ux/assets/routines-acceptance-2026-09-10/main-list.png),
-[změněný vstup](../ux/assets/routines-acceptance-2026-09-10/changed-input.png),
-[chyba nahoře](../ux/assets/routines-acceptance-2026-09-10/failure-desktop.png),
-[rozhodnutí v Inbox](../ux/assets/routines-acceptance-2026-09-10/decision-in-inbox.png),
-[jednorázový plán před zrušením](../ux/assets/routines-acceptance-2026-09-10/one-time-schedule.png).
-Doplňující kontrola na `6d681bd85`: [úzký displej 390×844](../ux/assets/routines-acceptance-2026-09-10/failure-mobile.png)
-a [Edit/Test](../ux/assets/routines-acceptance-2026-09-10/edit-test.png).
+Snímky skutečného průchodu: [hlavní seznam](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/assets/routines-acceptance-2026-09-10/main-list.png),
+[změněný vstup](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/assets/routines-acceptance-2026-09-10/changed-input.png),
+[chyba nahoře](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/assets/routines-acceptance-2026-09-10/failure-desktop.png),
+[rozhodnutí v Inbox](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/assets/routines-acceptance-2026-09-10/decision-in-inbox.png),
+[jednorázový plán před zrušením](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/assets/routines-acceptance-2026-09-10/one-time-schedule.png).
+Doplňující kontrola na `6d681bd85`: [úzký displej 390×844](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/assets/routines-acceptance-2026-09-10/failure-mobile.png)
+a [Edit/Test](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/assets/routines-acceptance-2026-09-10/edit-test.png).
 Na 1440×1000 i 390×844 není vodorovný overflow dokumentu a chyba je v prvním
 viewportu (na mobilu y=547,94, výška 64 px). Kontrola běžela s reduced motion.
 Escape nyní vrací fokus na původní Edit; před opravou tato browser aserce

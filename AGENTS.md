@@ -196,7 +196,7 @@ and [`docs/guides/migrations.mdx`](docs/guides/migrations.mdx).
 
 ## NEVER DO
 
-Four of these are checked, not promised — `go run ./scripts/agents-invariants`,
+Five of these are checked, not promised — `go run ./scripts/agents-invariants`,
 which the `Shell` CI job runs. They are marked. The rest are about what a person
 does and cannot be, so they are prose and say so.
 
@@ -206,6 +206,9 @@ does and cannot be, so they are prose and say so.
 - Never use `"sqlite3"` as the driver name — `modernc.org/sqlite` registers `"sqlite"`.
 - Never use `npm`/`yarn` — `pnpm` only (a stray lockfile is the evidence).
 - Never change sidecar UID (1002) or agent UID (1001) — it's a security boundary.
+- Never track root assistant workspaces (`.claude/`, `.codex/`), private-context
+  aliases, internal mockups or captured run reports. The invariant reads the
+  Git index; ignored local files remain allowed. Public test fixtures stay public.
 
 **Prose — nothing enforces these but you:**
 
