@@ -92,6 +92,11 @@ type Provider struct {
 	// egress fence was installed. A restart recreates the network namespace
 	// and drops the fence, so a different StartedAt means "install again".
 	fenced sync.Map
+	// fenceTeams maps a crew id to the CrewConfig its fence was last
+	// installed with, so the exec guard can re-install after a restart the
+	// provider did not perform (the orchestrator reuses a cached container id
+	// and does not always pass through EnsureCrewRuntime).
+	fenceTeams sync.Map
 	// fenceTestHook, when set, runs at each fenceExecStage. Tests only.
 	fenceTestHook func(fenceExecStage)
 

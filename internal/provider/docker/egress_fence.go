@@ -99,6 +99,7 @@ func (p *Provider) ensureEgressFence(ctx context.Context, team provider.CrewConf
 		return fmt.Errorf("egress fence: %w", err)
 	}
 	p.fenced.Store(containerID, startedAt)
+	p.fenceTeams.Store(team.ID, team)
 	p.logger.Info("egress fence installed",
 		"crew_id", team.ID,
 		"container_id", shortID(containerID),
@@ -213,9 +214,11 @@ const (
 // is confirmed for the container's CURRENT start closes the window a restart
 // outside EnsureCrewRuntime opens (daemon, restart policy, operator), for
 // every caller including the ones that never go through EnsureCrewRuntime,
-// such as the web terminal. EnsureCrewRuntime re-installs the fence; this
-// guard only refuses, because a container id alone does not carry the crew
-// settings (network mode, privileged) the install decision needs.
+// such as the web terminal and the orchestrator's cached-container path.
+// When the provider has fenced this crew before it re-installs the fence for
+// the new start before letting the exec through; a container id alone does
+// not carry the settings (network mode, privileged) the install decision
+// needs, so without that record it refuses.
 //
 // A restart can still land between this check and the exec starting, so the
 // confirmed start is re-checked by fenceBeforeStart (after ExecCreate, before
@@ -249,7 +252,27 @@ func (p *Provider) guardFencedExec(ctx context.Context, containerID string) (fen
 		}
 		return fencedExec{containerID: id, team: team, startedAt: startedAt}, nil
 	}
-	return fencedExec{}, fmt.Errorf("%w (crew %s, container %s); the next crew run re-installs it", errFenceNotInPlace, team.ID, shortID(containerID))
+	// The container was (re)started without a confirmed fence. If this
+	// provider fenced the crew before, it knows the settings the install
+	// decision needs: re-install now and let the exec through only on
+	// success. Otherwise (e.g. after a server restart) refuse; the next
+	// EnsureCrewRuntime installs it.
+	if v, ok := p.fenceTeams.Load(team.ID); ok && c.State != nil && c.State.Running {
+		known := v.(provider.CrewConfig)
+		image := ""
+		if c.Config != nil {
+			image = c.Config.Image
+		}
+		if err := p.ensureEgressFence(ctx, known, id, image); err != nil {
+			p.stopUnfenced(ctx, known, id, err)
+			return fencedExec{}, err
+		}
+		if p.fenceTestHook != nil {
+			p.fenceTestHook(fenceStageAfterGuard)
+		}
+		return fencedExec{containerID: id, team: known, startedAt: startedAt}, nil
+	}
+	return fencedExec{}, fmt.Errorf("%w (crew %s, container %s); the next crew start installs it", errFenceNotInPlace, team.ID, shortID(containerID))
 }
 
 // fenceBeforeStart re-checks, after ExecCreate and before the exec runs, that
