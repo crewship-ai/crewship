@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,6 +134,17 @@ func TestEgressFenceIntegration(t *testing.T) {
 	assertExit("fenced", "0", probe, false)
 	assertExit("fenced", "1001", dns, false)
 	assertExit("fenced", "1002", probe, true)
+
+	// Some callers exec by container NAME (the file-save path). The fence is
+	// recorded by id; a name must resolve to the same confirmation, not be
+	// refused as unfenced.
+	byName, err := p.client.ContainerInspect(ctx, cid, client.ContainerInspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Exec(ctx, provider.ExecConfig{ContainerID: strings.TrimPrefix(byName.Container.Name, "/"), Cmd: []string{"true"}, User: "1001:1001"}); err != nil {
+		t.Fatalf("Exec by container name into a fenced crew: %v", err)
+	}
 
 	// Restart behind the provider's back: the namespace is recreated and the
 	// fence is gone until the provider notices.
