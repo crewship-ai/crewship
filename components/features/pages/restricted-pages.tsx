@@ -102,6 +102,6 @@ export function RestrictedPages({ workspaceId }: { workspaceId: string }) {
         <Button type="submit" disabled={active}>{submitting ? "Submitting…" : request.current ? "Retry request" : "Run action"}</Button>
       </form>}
     </>}
-    {run && <section className="space-y-3" aria-live="polite"><p>Status: {run.status}</p>{Object.entries(run.step_outputs).map(([step, output]) => <div key={step}><h2 className="text-sm font-medium">{step}</h2><pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-sm">{output}</pre></div>)}</section>}
+    {run && <section className="space-y-3" aria-live="polite"><p>Status: {run.status === "needs_reconciliation" ? "Needs review" : run.status}</p>{run.status === "needs_reconciliation" && <p className="text-sm text-muted-foreground">An administrator must review this run’s outcome. It will not run again automatically.</p>}{Object.entries(run.step_outputs).map(([step, output]) => <div key={step}><h2 className="text-sm font-medium">{step}</h2><pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-sm">{output}</pre></div>)}</section>}
   </div>
 }

@@ -3,11 +3,13 @@ package restrictedworkflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 )
@@ -80,7 +82,7 @@ func (s *Service) readGraphOutputs(ctx context.Context, j job) (map[string]strin
 	return outputs, nil
 }
 
-func (s *Service) executeGraph(ctx context.Context, j job, originHandle string) (map[string]string, string, error) {
+func (s *Service) executeGraph(ctx context.Context, j job, originHandle string, assignment dispatch.Assignment) (map[string]string, string, error) {
 	g, err := decodeGraph(j)
 	if err != nil {
 		return nil, "", err
@@ -106,6 +108,20 @@ func (s *Service) executeGraph(ctx context.Context, j job, originHandle string) 
 			_ = store.RevokeAttempt(clean, parentHandle)
 		}
 	}()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	defer tx.Rollback()
+	if err = s.checkOwnership(ctx, tx, assignment); err != nil {
+		return nil, "", err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO restricted_workflow_attempt_roots(access_attempt_id,workflow_id,run_id,generation) VALUES(?,?,?,?)`, parent.ID, j.ID, assignment.RunID, assignment.Generation); err != nil {
+		return nil, "", err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, "", err
+	}
 	if _, err = store.BuildContext(ctx, parent, "Execute the immutable admitted workflow."); err != nil {
 		return nil, "", err
 	}
@@ -139,7 +155,7 @@ func (s *Service) executeGraph(ctx context.Context, j job, originHandle string) 
 	proofs := map[string]restricteddispatch.RunProof{}
 	sealed := map[string]sealedLeaf{}
 	check := func() error {
-		if ctx.Err() != nil || s.checkJob(ctx, s.db, j, originHandle) != nil {
+		if ctx.Err() != nil || s.checkJob(ctx, s.db, j, originHandle) != nil || s.checkOwnership(ctx, s.db, assignment) != nil {
 			return ErrDenied
 		}
 		if _, err := store.Resolve(ctx, parentHandle); err != nil {
@@ -255,6 +271,12 @@ func (s *Service) executeGraph(ctx context.Context, j job, originHandle string) 
 			}
 			proof, err := executor.ExecuteWorkflowRun(stepCtx, restricteddispatch.DelegatedRunRequest{User: j.Principal, Workspace: j.Workspace, Agent: node.Agent, Chat: j.Chat, ParentHandle: parentHandle, Input: prompt, Rights: rights, SourceEntryIDs: selected}, emit)
 			stop()
+			if errors.Is(err, context.Canceled) {
+				return nil, nil, context.Canceled
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, nil, context.DeadlineExceeded
+			}
 			if err != nil || !done {
 				return nil, nil, ErrDenied
 			}
@@ -279,6 +301,15 @@ func (s *Service) executeGraph(ctx context.Context, j job, originHandle string) 
 		return outputs, uniqueSources(allSources), nil
 	}
 	outputs, _, err := run(ctx, g.Root, "", inputs, []string{seedID})
+	if ctx.Err() != nil {
+		return nil, "", ctx.Err()
+	}
+	if errors.Is(err, context.Canceled) {
+		return nil, "", context.Canceled
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil, "", context.DeadlineExceeded
+	}
 	if err != nil || check() != nil {
 		return nil, "", ErrDenied
 	}

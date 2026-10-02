@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 	"github.com/crewship-ai/crewship/internal/testutil"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 const routine = `{"dsl_version":"1.0","name":"private-work","inputs":[{"name":"task","type":"string","required":true}],"steps":[{"id":"first","type":"agent_run","agent_slug":"worker","prompt":"{{ inputs.task }}"},{"id":"second","type":"agent_run","agent_slug":"worker","prompt":"Continue {{ steps.first.output }}"}]}`
@@ -230,7 +231,7 @@ func TestWorkflowRequiresRoutinePermissionAndBoundedTypedDeclaration(t *testing.
 		t.Fatalf("unsupported queue count=%d err=%v", count, err)
 	}
 }
-func TestUnknownRunningWorkflowIsFailedWithoutRetry(t *testing.T) {
+func TestUnknownRunningWorkflowNeedsReconciliationWithoutRetry(t *testing.T) {
 	s, runner := fixture(t)
 	starts := 0
 	base := runner.StartSession
@@ -245,6 +246,16 @@ func TestUnknownRunningWorkflowIsFailedWithoutRetry(t *testing.T) {
 	if _, err = s.db.ExecContext(t.Context(), `UPDATE restricted_workflow_jobs SET state='running' WHERE id=?`, receipt.ID); err != nil {
 		t.Fatal(err)
 	}
+	claimed, err := s.ledger.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "old", Limits: work.SerialAgentLimits(), WorkID: receipt.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ledger.MarkStarting(t.Context(), receipt.ID, claimed.RunID, claimed.Generation, "old-private-runtime"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec(`UPDATE work_attempts SET lease_expires_at='2000-01-01T00:00:00Z' WHERE run_id=?`, claimed.RunID); err != nil {
+		t.Fatal(err)
+	}
 	if err = s.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -252,11 +263,12 @@ func TestUnknownRunningWorkflowIsFailedWithoutRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	var state string
-	if err = s.db.QueryRowContext(t.Context(), `SELECT state FROM restricted_workflow_jobs WHERE id=?`, receipt.ID).Scan(&state); err != nil || state != "failed" || starts != 0 {
+	if err = s.db.QueryRowContext(t.Context(), `SELECT state FROM restricted_workflow_jobs WHERE id=?`, receipt.ID).Scan(&state); err != nil || state != "running" || starts != 0 {
 		t.Fatalf("unknown paid retry %s starts=%d %v", state, starts, err)
 	}
-	if _, err = s.Result(t.Context(), "h1", "w", receipt.ID); !errors.Is(err, ErrDenied) {
-		t.Fatalf("unknown outcome visible as success %v", err)
+	result, err := s.Result(t.Context(), "h1", "w", receipt.ID)
+	if err != nil || result.State != "needs_reconciliation" || len(result.Outputs) != 0 {
+		t.Fatalf("unknown outcome %+v %v", result, err)
 	}
 }
 func TestWorkflowDeclarationRevocationStopsLiveConsumer(t *testing.T) {

@@ -68,3 +68,20 @@ it("ordinary routines page automatically selects the server membership profile",
   render(<RoutinesPage />)
   expect(screen.getByText("Trusted routine editor")).toBeTruthy()
 })
+
+it("shows interrupted work as needing review without another model wake", async () => {
+  api.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/restricted-routines")) return response(catalog)
+    if (init?.method === "POST") return response({ run_id: "private-run", status: "SCHEDULED" }, 202)
+    if (url.endsWith("/restricted-routine-runs/private-run")) return response({ run_id: "private-run", status: "needs_reconciliation", step_outputs: {} })
+    throw new Error(`Unexpected shared request ${url}`)
+  })
+  render(<RestrictedRoutines workspaceId="workspace" />)
+  await screen.findByRole("option", { name: "Allowed routine" })
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "allowed" } })
+  fireEvent.change(screen.getByRole("textbox", { name: "task" }), { target: { value: "private input" } })
+  fireEvent.click(screen.getByRole("button", { name: "Run routine" }))
+  await screen.findByText("Status: Needs review")
+  expect(screen.getByText(/It will not run again automatically/)).toBeInTheDocument()
+  expect(api.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1)
+})

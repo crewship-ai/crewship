@@ -96,7 +96,11 @@ func (s *Service) ClaimAssignedIssue(ctx context.Context, user, workspace, agent
 		if err = tx.Commit(); err != nil {
 			return restrictedworkflow.Receipt{}, err
 		}
-		return s.Workflow.ReceiptForActor(ctx, user, workspace, old)
+		receipt, e := s.Workflow.ReceiptForActor(ctx, user, workspace, old)
+		if e == nil && receipt.State == "needs_reconciliation" {
+			return restrictedworkflow.Receipt{}, ErrReconciliation
+		}
+		return receipt, e
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return restrictedworkflow.Receipt{}, err
@@ -104,7 +108,7 @@ func (s *Service) ClaimAssignedIssue(ctx context.Context, user, workspace, agent
 	// Failed/unknown effects remain held even after editing the source. A
 	// separate explicit reconciliation path is required to authorize a retry.
 	var ambiguous bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM restricted_preflight_reservations r JOIN restricted_workflow_jobs j ON j.id=r.workflow_id WHERE r.issue_id=? AND j.state IN ('failed','canceled'))`, issue).Scan(&ambiguous); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM restricted_preflight_reservations r JOIN restricted_workflow_jobs j ON j.id=r.workflow_id WHERE r.issue_id=? AND (j.state IN ('failed','canceled') OR EXISTS(SELECT 1 FROM work_items w WHERE w.id=j.id AND w.state='needs_reconciliation')))`, issue).Scan(&ambiguous); err != nil {
 		return restrictedworkflow.Receipt{}, err
 	}
 	if ambiguous {
@@ -125,6 +129,7 @@ func (s *Service) ClaimAssignedIssue(ctx context.Context, user, workspace, agent
 		return restrictedworkflow.Receipt{}, err
 	}
 	keep = true
+	s.Workflow.Wake()
 	return receipt, nil
 }
 
@@ -154,6 +159,9 @@ func (s *Service) duplicate(ctx context.Context, src source, user, routine strin
 		return restrictedworkflow.Receipt{}, true, ErrReconciliation
 	}
 	r, err := s.Workflow.ReceiptForActor(ctx, user, src.Workspace, id)
+	if err == nil && r.State == "needs_reconciliation" {
+		return restrictedworkflow.Receipt{}, true, ErrReconciliation
+	}
 	return r, true, err
 }
 
@@ -165,7 +173,8 @@ func cheap(ctx context.Context, tx *sql.Tx, s source, requireFree bool) error {
 		var busy bool
 		err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM restricted_preflight_reservations r JOIN restricted_workflow_jobs j ON j.id=r.workflow_id WHERE r.issue_id=? AND j.state IN ('pending','running'))
  OR EXISTS(SELECT 1 FROM restricted_workflow_jobs WHERE workspace_id=? AND agent_id=? AND state IN ('pending','running'))
- OR EXISTS(SELECT 1 FROM assignments WHERE workspace_id=? AND assigned_to_id=? AND status NOT IN ('COMPLETED','FAILED','CANCELLED','TIMEOUT'))`, s.Issue, s.Workspace, s.Agent, s.Workspace, s.Agent).Scan(&busy)
+ OR EXISTS(SELECT 1 FROM work_items WHERE workspace_id=? AND agent_id=? AND state IN ('starting','running','needs_reconciliation'))
+ OR EXISTS(SELECT 1 FROM assignments WHERE workspace_id=? AND assigned_to_id=? AND status NOT IN ('COMPLETED','FAILED','CANCELLED','TIMEOUT'))`, s.Issue, s.Workspace, s.Agent, s.Workspace, s.Agent, s.Workspace, s.Agent).Scan(&busy)
 		if err != nil {
 			return err
 		}

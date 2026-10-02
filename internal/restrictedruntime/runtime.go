@@ -543,3 +543,30 @@ func (m *Manager) Close() error {
 }
 
 var _ io.Writer = (*Session)(nil)
+
+// ConfirmAttemptStopped proves absence through the same owned deterministic
+// identity used by provisioning and recovery. A transport error is never absence.
+func (m *Manager) ConfirmAttemptStopped(ctx context.Context, attempt string) error {
+	if !identifier.MatchString(attempt) {
+		return ErrDenied
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.lock == nil {
+		return ErrDenied
+	}
+	data, err := os.ReadFile(filepath.Join(m.dir, attempt+".json"))
+	if err == nil {
+		var record Record
+		if json.Unmarshal(data, &record) != nil || record.Attempt != attempt || record.Status != "terminated" {
+			return errors.New("restricted termination unconfirmed")
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	ids, err := m.Docker.call(ctx, nil, "ps", "-aq", "--filter", "name=^/crewship-rtest-"+m.owner+"-"+attempt+"$")
+	if err != nil || len(bytes.TrimSpace(ids)) != 0 {
+		return errors.New("restricted runtime absence unconfirmed")
+	}
+	return nil
+}

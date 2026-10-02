@@ -250,8 +250,8 @@ func (h *WorkItemsHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `SELECT ` + workItemColumns + ` FROM work_items WHERE workspace_id=? AND id>?`
-	args := []any{ws, r.URL.Query().Get("after")}
+	query := `SELECT ` + workItemColumns + ` FROM work_items WHERE workspace_id=? AND id>?` + privateWorkVisibilitySQL
+	args := []any{ws, r.URL.Query().Get("after"), workActorID(r)}
 
 	if state := r.URL.Query().Get("state"); state != "" {
 		if !workStates[state] {
@@ -352,7 +352,7 @@ func (h *WorkItemsHandler) readItem(r *http.Request, workspaceID, workItemID str
 		return workItemView{}, false, nil
 	}
 	row := h.db.QueryRowContext(r.Context(),
-		`SELECT `+workItemColumns+` FROM work_items WHERE workspace_id=? AND id=?`, workspaceID, workItemID)
+		`SELECT `+workItemColumns+` FROM work_items WHERE workspace_id=? AND id=?`+privateWorkVisibilitySQL, workspaceID, workItemID, workActorID(r))
 	item, err := scanWorkItemView(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return workItemView{}, false, nil
@@ -556,7 +556,7 @@ func (h *WorkItemsHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	// response does not.
 	var inputJSON string
 	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT input_json FROM work_items WHERE workspace_id=? AND id=?`, ws, item.ID).Scan(&inputJSON); err != nil {
+		`SELECT input_json FROM work_items WHERE domain_kind<>'restricted_workflow' AND workspace_id=? AND id=?`, ws, item.ID).Scan(&inputJSON); err != nil {
 		replyInternalError(w, h.logger, "read work input for replay", err)
 		return
 	}
@@ -627,7 +627,23 @@ func (h *WorkItemsHandler) Replay(w http.ResponseWriter, r *http.Request) {
 // a replay cannot reproduce what the sender sent. The delivery row survives
 // the payload, so "we received it, we can no longer replay it" is a
 // distinguishable answer from "we never saw it".
+// Private scheduling facts are operational metadata for current trusted owners
+// and admins. Other members use their currently authorized private receipts.
+const privateWorkVisibilitySQL = ` AND (domain_kind<>'restricted_workflow' OR EXISTS(
+ SELECT 1 FROM workspace_members wm WHERE wm.workspace_id=work_items.workspace_id
+ AND wm.user_id=? AND wm.role IN ('OWNER','ADMIN') AND wm.access_mode='trusted'))`
+
+func workActorID(r *http.Request) string {
+	if user := UserFromContext(r.Context()); user != nil {
+		return user.ID
+	}
+	return ""
+}
+
 func (h *WorkItemsHandler) replayAvailability(r *http.Request, workspaceID string, item workItemView) (string, bool, error) {
+	if item.DomainKind == "restricted_workflow" {
+		return "Private workflow replay requires a new authorized routine or Page admission.", false, nil
+	}
 	if item.Source != string(work.SourceWebhook) || strings.TrimSpace(item.SourceRef) == "" {
 		return "", true, nil
 	}
@@ -701,6 +717,17 @@ func (h *WorkItemsHandler) Resolve(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		replyError(w, http.StatusNotFound, "Work item not found")
 		return
+	}
+	if item.DomainKind == "restricted_workflow" && body.State == "succeeded" {
+		var captured bool
+		if err = h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM restricted_workflow_jobs WHERE id=? AND state='completed')`, item.DomainID).Scan(&captured); err != nil {
+			replyInternalError(w, h.logger, "check captured private completion", err)
+			return
+		}
+		if !captured {
+			replyError(w, http.StatusConflict, "Private work has no captured completion; resolve its uncertainty without inventing an output")
+			return
+		}
 	}
 	err = work.NewStore(h.db).Resolve(r.Context(), item.ID, body.Generation, work.State(body.State), user.ID,
 		"runtime confirmed stopped by operator; "+body.Reason)

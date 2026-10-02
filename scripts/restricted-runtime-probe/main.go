@@ -117,14 +117,33 @@ func run() error {
 		if os.Getuid() != 1002 {
 			return fmt.Errorf("identity")
 		}
-		var cfg struct{ Token, Account string }
+		var cfg struct{ Token, Account, AdmissionToken, Agent string }
 		if e := json.NewDecoder(os.Stdin).Decode(&cfg); e != nil {
 			return e
 		}
 		var calls atomic.Int64
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/internal/cost/admit" {
+				var body struct {
+					Agent      string `json:"agent_id"`
+					Credential string `json:"credential_id"`
+					Provider   string `json:"provider"`
+				}
+				if r.Method != http.MethodPost || cfg.AdmissionToken == "" || r.Header.Get("X-Internal-Token") != cfg.AdmissionToken || json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&body) != nil || body.Agent != cfg.Agent || body.Credential != "mock" || body.Provider != "OPENAI_COMPAT" {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				_, statErr := os.Stat("/broker/admission-denied")
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]bool{"allowed": os.IsNotExist(statErr)})
+				return
+			}
 			if r.URL.Path == "/count" {
 				fmt.Fprint(w, calls.Load())
+				return
+			}
+			if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+				w.WriteHeader(http.StatusNotFound)
 				return
 			}
 			if r.Header.Get("Authorization") != "Bearer "+cfg.Token {

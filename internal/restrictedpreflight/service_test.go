@@ -17,6 +17,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 	"github.com/crewship-ai/crewship/internal/testutil"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 type executor struct {
@@ -345,6 +346,17 @@ func TestCompletedRevisionCanRunAgainButRecoveryNeverReplays(t *testing.T) {
 		t.Fatalf("new revision %v %#v", err, r2)
 	}
 	if _, err = s.DB.Exec(`UPDATE restricted_workflow_jobs SET state='running' WHERE id=?`, r2.ID); err != nil {
+		t.Fatal(err)
+	}
+	ledger := work.NewStore(s.DB)
+	claimed, err := ledger.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "old", Limits: work.SerialAgentLimits(), WorkID: r2.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = ledger.MarkStarting(t.Context(), r2.ID, claimed.RunID, claimed.Generation, "old-private-runtime"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.DB.Exec(`UPDATE work_attempts SET lease_expires_at='2000-01-01T00:00:00Z' WHERE run_id=?`, claimed.RunID); err != nil {
 		t.Fatal(err)
 	}
 	recovered, err := restrictedworkflow.New(s.DB, e)

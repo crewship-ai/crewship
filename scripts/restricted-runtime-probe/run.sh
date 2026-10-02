@@ -13,8 +13,10 @@ scripts/build-stamp.sh commit
 scripts/build-stamp.sh dirty
 CGO_ENABLED=0 go build -ldflags "$probe_ldflags" -o "$probe_context/runner" ./scripts/restricted-runtime-probe
 CGO_ENABLED=0 go build -ldflags "$probe_ldflags" -o "$probe_context/sidecar" ./cmd/crewship-sidecar
-sha256sum "$probe_context/runner" "$probe_context/sidecar"
+CGO_ENABLED=0 go build -ldflags "$probe_ldflags" -o "$probe_context/native-runner" ./cmd/crewship-restricted-native-runner
+sha256sum "$probe_context/runner" "$probe_context/sidecar" "$probe_context/native-runner"
 cp scripts/restricted-runtime-probe/Dockerfile "$probe_context/Dockerfile"
 probe_base=$(docker image inspect alpine:3 --format '{{index .RepoDigests 0}}')
 docker build --network=none --build-arg "BASE=$probe_base" -t "$probe_tag" "$probe_context"
-CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_IMAGE="$probe_tag" go test "${@}" -tags restrictedruntime_live -v ./internal/restrictedruntime ./internal/restricteddispatch -run TestLive -count=1 -timeout=6m
+# Caller flags may narrow a diagnostic rerun or extend its bounded timeout.
+CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_IMAGE="$probe_tag" go test -tags restrictedruntime_live -v -run TestLive -count=1 -timeout=6m "${@}" ./internal/restrictedruntime ./internal/restricteddispatch

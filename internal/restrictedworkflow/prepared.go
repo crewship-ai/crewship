@@ -78,12 +78,15 @@ func (s *Service) EnqueuePrepared(ctx context.Context, tx *sql.Tx, p *PreparedIn
 	if err = s.freezeGraph(ctx, tx, j); err != nil {
 		return Receipt{}, err
 	}
+	if err = s.acceptWork(ctx, tx, j); err != nil {
+		return Receipt{}, err
+	}
 	return Receipt{j.ID, j.Chat, "SCHEDULED"}, nil
 }
 
 // ReceiptForActor rechecks a private receipt without materializing its outputs.
 func (s *Service) ReceiptForActor(ctx context.Context, user, workspace, id string) (Receipt, error) {
-	j, err := s.load(ctx, id)
+	j, err := s.loadReceipt(ctx, id)
 	if err != nil || j.Principal != user || j.Workspace != workspace {
 		return Receipt{}, ErrDenied
 	}
@@ -94,5 +97,9 @@ func (s *Service) ReceiptForActor(ctx context.Context, user, workspace, id strin
 	if (access.Store{DB: s.db}).CheckContextAttempt(ctx, handle) != nil {
 		return Receipt{}, ErrDenied
 	}
-	return Receipt{j.ID, j.Chat, j.State}, nil
+	state, err := s.receiptState(ctx, j)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return Receipt{j.ID, j.Chat, state}, nil
 }

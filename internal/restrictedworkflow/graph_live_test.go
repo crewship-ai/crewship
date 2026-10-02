@@ -4,6 +4,7 @@ package restrictedworkflow
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 	"github.com/crewship-ai/crewship/internal/restrictedruntime"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 // This acceptance path uses the production worker image and real durable broker
@@ -80,7 +82,51 @@ func (e liveMixedGraphExecutor) ExecuteWorkflowRun(ctx context.Context, request 
 	return e.text.ExecuteWorkflowRun(ctx, request, emit)
 }
 
-func liveProductionGraph(t *testing.T, nativeImage string) {
+func TestLiveGraphFailedClientReleasesSharedAgent(t *testing.T) {
+	liveProductionGraph(t, "", true)
+}
+
+type liveGraphExecutor interface {
+	Executor
+	proofExecutor
+	SupportsWorkflowProfile(string) bool
+}
+type liveStoppedGraph struct {
+	liveGraphExecutor
+	db       *sql.DB
+	managers []*restrictedruntime.Manager
+}
+
+func (e liveStoppedGraph) ConfirmWorkflowStopped(ctx context.Context, id string) error {
+	rows, err := e.db.QueryContext(ctx, `SELECT access_attempt_id FROM restricted_workflow_attempt_roots WHERE workflow_id=?`, id)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		for _, manager := range e.managers {
+			if err := manager.ConfirmAttemptStopped(ctx, id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+func liveProductionGraph(t *testing.T, nativeImage string, failFirst ...bool) {
+	failingH1 := len(failFirst) > 0 && failFirst[0]
 	image := os.Getenv("CREWSHIP_RESTRICTED_PRODUCTION_IMAGE")
 	if image == "" {
 		t.Fatal("explicit restrictedruntime_live acceptance requires an owned production worker image")
@@ -137,6 +183,10 @@ func liveProductionGraph(t *testing.T, nativeImage string) {
 		mu.Lock()
 		calls[user+":"+key]++
 		mu.Unlock()
+		if failingH1 && user == "h1" {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		if nativeImage != "" && key == "synthetic-independent-workflow-key" {
 			items, ok := body["input"].([]any)
@@ -190,6 +240,7 @@ func liveProductionGraph(t *testing.T, nativeImage string) {
 	}
 	runner.StartSession = nil
 	runner.Manager = manager
+	managers := []*restrictedruntime.Manager{manager}
 	var nativeSessions []*restrictedruntime.Session
 	observed := &liveObservedGraphAuthority{Authority: runner.Authority, failures: map[string]int{}}
 	if nativeImage != "" {
@@ -212,13 +263,23 @@ func liveProductionGraph(t *testing.T, nativeImage string) {
 			}
 			return session, err
 		}
+		managers = append(managers, nativeManager)
 		s.executor = liveMixedGraphExecutor{runner, nativeRunner}
 	}
+	s.executor = liveStoppedGraph{s.executor.(liveGraphExecutor), s.db, managers}
 	receipts := map[string]Receipt{}
 	for _, user := range []string{"h1", "h2"} {
 		receipts[user], err = s.AdmitManual(t.Context(), user, "w", "private-work", map[string]any{"task": user + "_PRIVATE_CANARY"}, "", 0)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if failingH1 && user == "h1" {
+			worked, err := s.DispatchNext(t.Context())
+			item, getErr := s.ledger.Get(t.Context(), receipts[user].ID)
+			if !worked || err == nil || getErr != nil || item.State != work.StateFailed {
+				t.Fatalf("stopped H1 failure retained slot: %v %v %+v %v", worked, err, item, getErr)
+			}
+			continue
 		}
 		if worked, e := s.DispatchNext(t.Context()); !worked || e != nil {
 			observed.mu.Lock()
@@ -234,6 +295,15 @@ func liveProductionGraph(t *testing.T, nativeImage string) {
 		if e != nil || result.State != "completed" || result.Outputs["return"] != "answer-"+user {
 			t.Fatalf("missing own real result: %+v %v", result, e)
 		}
+	}
+	if failingH1 {
+		mu.Lock()
+		defer mu.Unlock()
+		if calls["h1:synthetic-workflow-key"] != 1 || calls["h2:synthetic-workflow-key"] != 2 || calls["h2:synthetic-independent-workflow-key"] != 1 {
+			t.Fatalf("failed H1 replayed or blocked H2: %v", calls)
+		}
+		t.Log("H1 real worker upstream failure was physically confirmed stopped; H2 completed A/B/A on the shared agent without replaying H1")
+		return
 	}
 	mu.Lock()
 	bCalls, expectedCosts := 1, 6

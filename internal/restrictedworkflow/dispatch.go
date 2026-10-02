@@ -2,16 +2,15 @@ package restrictedworkflow
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/pipeline"
-	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -88,44 +87,55 @@ func (s *Service) load(ctx context.Context, id string) (job, error) {
 	return j, err
 }
 
-// DispatchNext claims a durable queued invocation. It never accepts task JSON,
-// execution handles, principals or runner configuration from the caller.
+// DispatchNext drains one common-dispatch attempt synchronously. Production uses
+// Dispatcher.Run; this bounded entrypoint is for deterministic integration tests.
 func (s *Service) DispatchNext(ctx context.Context) (bool, error) {
 	s.dispatch.Lock()
 	defer s.dispatch.Unlock()
-	if quiesce.DefaultHolds().Held(quiesce.HoldQueue) {
-		return false, nil
+	s.lifecycle.Lock()
+	active := s.cancel != nil
+	s.lifecycle.Unlock()
+	if active {
+		return false, ErrDenied
 	}
-	writer, admitted := quiesce.Enter(ctx)
-	if !admitted {
-		return false, nil
-	}
-	defer writer.Leave()
-	ctx = writer.Context()
-	var next string
-	err := s.db.QueryRowContext(ctx, `UPDATE restricted_workflow_jobs SET state='running' WHERE id=(SELECT id FROM restricted_workflow_jobs WHERE state='pending' AND fire_at<=? ORDER BY fire_at,id LIMIT 1) AND state='pending' RETURNING id`, tsformat.Format(time.Now())).Scan(&next)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
+	s.runtime.clearError()
+	worked, err := s.dispatcher.RunOne(ctx)
 	if err != nil {
-		return false, err
+		return worked, err
 	}
+	return worked, s.runtime.lastError()
+}
+
+func (s *Service) executeAssignment(ctx context.Context, a dispatch.Assignment, started func()) error {
+	next := a.Item.DomainID
 	j, err := s.load(ctx, next)
 	if err != nil {
-		return true, err
+		return err
 	}
+	if err = s.markJobRunning(ctx, a); err != nil {
+		return err
+	}
+	started()
 	completed := false
 	defer func() {
 		if !completed {
-			s.fail(j)
+			// Uncertain execution retains a read-only receipt for the current actor.
+			// Failed authority still permanently invalidates this provenance.
+			clean, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			h, decryptErr := encryption.Decrypt(j.Handle)
+			interrupted := ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+			if decryptErr != nil || !interrupted || s.checkJob(clean, s.db, j, h) != nil {
+				s.failOwned(j, a)
+			}
 		}
 	}()
 	handle, err := encryption.Decrypt(j.Handle)
 	if err != nil {
-		return true, ErrDenied
+		return ErrDenied
 	}
 	if j.Expires <= tsformat.Format(time.Now()) || s.checkJob(ctx, s.db, j, handle) != nil {
-		return true, ErrDenied
+		return ErrDenied
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -141,61 +151,79 @@ func (s *Service) DispatchNext(ctx context.Context) (bool, error) {
 			case <-runCtx.Done():
 				return
 			case <-ticker.C:
-				if s.checkJob(runCtx, s.db, monitored, handle) != nil {
+				if s.checkJob(runCtx, s.db, monitored, handle) != nil || s.checkOwnership(runCtx, s.db, a) != nil {
 					cancel()
 					return
 				}
 			}
 		}
 	}(j)
-	outputs, proofs, err := s.executeGraph(runCtx, j, handle)
+	outputs, proofs, err := s.executeGraph(runCtx, j, handle, a)
 	if err != nil || s.checkJob(runCtx, s.db, j, handle) != nil {
-		return true, ErrDenied
+		return ErrDenied
 	}
 	raw, err := json.Marshal(outputs)
 	if err != nil || len(raw) > 256<<10 {
-		return true, ErrDenied
+		return ErrDenied
 	}
 	j.Outputs, j.Proofs = string(raw), proofs
 	if _, err = s.readGraphOutputs(runCtx, j); err != nil {
-		return true, ErrDenied
+		return ErrDenied
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return true, err
+		return err
 	}
 	defer tx.Rollback()
 	if _, err = tx.ExecContext(ctx, `UPDATE restricted_workflow_jobs SET state=state WHERE id=? AND state='running'`, j.ID); err != nil {
-		return true, err
+		return err
+	}
+	if err = s.checkOwnership(ctx, tx, a); err != nil {
+		return err
 	}
 	if err = s.checkJob(ctx, tx, j, handle); err != nil {
-		return true, err
+		return err
 	}
 	if _, err = s.readGraphOutputs(ctx, j); err != nil {
-		return true, ErrDenied
+		return ErrDenied
 	}
 	updated, err := tx.ExecContext(ctx, `UPDATE restricted_workflow_jobs SET state='completed',outputs_json=?,proofs_json=?,finished_at=? WHERE id=? AND state='running'`, string(raw), proofs, tsformat.Format(time.Now()), j.ID)
 	if err != nil {
-		return true, err
+		return err
 	}
 	if count, err := updated.RowsAffected(); err != nil || count != 1 {
-		return true, ErrDenied
+		return ErrDenied
 	}
 	if err = tx.Commit(); err != nil {
-		return true, err
+		return err
 	}
 	completed = true
 	if (access.Store{DB: s.db}).RecordOutcome(ctx, handle, "completed") != nil {
 		slog.Error("record restricted workflow outcome failed")
 	}
-	return true, nil
+	return nil
 }
-func (s *Service) fail(j job) {
+func (s *Service) failOwned(j job, a dispatch.Assignment) {
 	clean, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	tx, err := s.db.BeginTx(clean, nil)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+	if s.checkOwnership(clean, tx, a) != nil {
+		return
+	}
 	// Only the origin loaded from the private durable job is revoked here.
-	_, _ = s.db.ExecContext(clean, `UPDATE access_attempts SET revoked_at=COALESCE(revoked_at,?) WHERE id=?`, tsformat.Format(time.Now()), j.Origin)
-	_, _ = s.db.ExecContext(clean, `UPDATE restricted_workflow_jobs SET state='failed',finished_at=? WHERE id=? AND state='running'`, tsformat.Format(time.Now()), j.ID)
+	if _, err = tx.ExecContext(clean, `UPDATE access_attempts SET revoked_at=COALESCE(revoked_at,?) WHERE id=?`, tsformat.Format(time.Now()), j.Origin); err != nil {
+		return
+	}
+	if _, err = tx.ExecContext(clean, `UPDATE restricted_workflow_jobs SET state='failed',finished_at=? WHERE id=? AND state='running'`, tsformat.Format(time.Now()), j.ID); err != nil {
+		return
+	}
+	if tx.Commit() != nil {
+		return
+	}
 	if handle, err := encryption.Decrypt(j.Handle); err == nil {
 		if (access.Store{DB: s.db}).RecordOutcome(clean, handle, "failed") != nil {
 			slog.Error("record restricted workflow outcome failed")
@@ -204,7 +232,7 @@ func (s *Service) fail(j job) {
 }
 func (s *Service) Result(ctx context.Context, user, workspace, id string) (Result, error) {
 	var result Result
-	j, err := s.load(ctx, id)
+	j, err := s.loadReceipt(ctx, id)
 	if err != nil || j.Principal != user || j.Workspace != workspace {
 		return result, ErrDenied
 	}
@@ -213,7 +241,11 @@ func (s *Service) Result(ctx context.Context, user, workspace, id string) (Resul
 		return result, ErrDenied
 	}
 	result = Result{ID: j.ID, State: j.State, CreatedAt: j.Created, Outputs: map[string]string{}}
-	if j.State == "completed" {
+	result.State, err = s.receiptState(ctx, j)
+	if err != nil {
+		return Result{}, err
+	}
+	if result.State == "completed" {
 		result.Outputs, err = s.readGraphOutputs(ctx, j)
 		if err != nil {
 			return Result{}, ErrDenied

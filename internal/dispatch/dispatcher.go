@@ -12,6 +12,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/work"
 )
 
+// ErrNoExecutableKinds rejects an unsafe dispatcher configuration before recovery.
+var ErrNoExecutableKinds = errors.New("dispatch: no executable kinds declared; a dispatcher must say " +
+	"what it can run, because claiming work it cannot run destroys it")
+
 // Dispatcher is the single owner of execution.
 type Dispatcher struct {
 	store   *work.Store
@@ -93,8 +97,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	// only the caller knows what its Runtime can run — so this refuses to start
 	// rather than starting something indiscriminate.
 	if len(d.cfg.Kinds) == 0 {
-		return errors.New("dispatch: no executable kinds declared; a dispatcher must say " +
-			"what it can run, because claiming work it cannot run destroys it")
+		return ErrNoExecutableKinds
 	}
 	if err := d.recover(ctx); err != nil {
 		d.logger.Error("dispatch: recovery pass failed; not claiming until it succeeds", "error", err)
@@ -137,6 +140,45 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 		case <-d.hints:
 		}
 	}
+}
+
+// RunOne claims and supervises one attempt, then waits for local supervision.
+// Call only on an idle dispatcher, without a concurrent Run or RunOne. It uses
+// the same authority, lease, cancellation and settlement path as Run.
+func (d *Dispatcher) RunOne(ctx context.Context) (bool, error) {
+	d.flushRunOutcomes(ctx)
+	// Like Run's shutdown flush: what the attempt produced is persisted even
+	// when the caller has cancelled, but within StopGrace.
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.cfg.StopGrace)
+		defer cancel()
+		d.flushRunOutcomes(flushCtx)
+	}()
+	if len(d.cfg.Kinds) == 0 {
+		return false, ErrNoExecutableKinds
+	}
+	if err := d.recover(ctx); err != nil {
+		return false, err
+	}
+	worked, err := d.claimOne(ctx)
+	if err != nil || !worked {
+		return worked, err
+	}
+	d.mu.Lock()
+	var pending []<-chan struct{}
+	for _, live := range d.running {
+		pending = append(pending, live.done)
+	}
+	d.mu.Unlock()
+	for _, done := range pending {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			d.drain()
+			return worked, ctx.Err()
+		}
+	}
+	return worked, nil
 }
 
 // recover runs one lease-recovery pass and then reconciles what it parked.
