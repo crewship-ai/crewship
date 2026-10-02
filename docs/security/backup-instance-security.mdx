@@ -92,6 +92,15 @@ recovery-kit/keys.json        (only with the kit on)
 
 ## The quiet window
 
+Release 1.0 requires one writing server per persistent local database, enforced
+by a process-lifetime OS writer lease before database startup. A second writer
+is refused; network/shared storage is not supported. Stop all old daemons
+before upgrading, because older binaries do not participate in this protocol.
+The quiet window checks the same owner before copying and at the end of the
+copy. Lost ownership aborts the backup without publishing its staged bundle;
+health/readiness report `writer_ownership: lost` and the server stops. See the
+[single-writer decision](../prd/BACKUP-SINGLE-WRITER-DECISION-2026-10-01.md).
+
 A consistent copy needs the database and the files to agree. The server first
 drains running work (agent runs, started work items, routine runs; up to two
 hours, then the run is `skipped`), then holds every write to protected data

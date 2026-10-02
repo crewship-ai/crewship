@@ -82,13 +82,13 @@ crewship admin list-users --local
 
 | Command | Purpose |
 |---|---|
-| `reset-password` | Reset a user's password (interactive prompt or `--password` / `--password-stdin`). Local-only; needs `--local` when a server is named. |
-| `list-users` | List people on the server the CLI targets — the current workspace's members, or every account for an instance administrator — with last activity, signed-in devices and lockout. `--local` lists every user in the instance from the database file. |
+| `reset-password` | Reset a user's password (interactive prompt or `--password` / `--password-stdin`). Local-only; needs `--local` when a server is named. Stop the server first. |
+| `list-users` | List people on the server the CLI targets — the current workspace's members, or every account for an instance administrator — with last activity, signed-in devices and lockout. `--local` lists every user in the instance from the database file; it only reads, so it works while the server runs. |
 | `user sessions/revoke-session/sign-out/unlock` | Per-person actions by email: list signed-in devices and CLI tokens, sign out one device or all of them, lift a sign-in lockout. **HTTP-backed — needs a running server + login.** |
 | `instance …` | Instance administration across every workspace: add people, give or take access, create, hand over and delete workspaces, suspend accounts, reissue setup links, name instance admins, read the instance audit. **HTTP-backed — needs a running server + login as an instance administrator.** `add-admin --local` is the break-glass path. |
-| `promote` | Promote a user to a workspace role (`OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`). Local-only; needs `--local` when a server is named. The server-side equivalent is `crewship workspace member role`. |
-| `invalidate-sessions` | Force-logout every active session for a user (no password change). Local-only; needs `--local` when a server is named. |
-| `sessions list` | Forensic read of `user_sessions` for one user — all rows, including revoked + expired. Local-only; needs `--local` when a server is named. |
+| `promote` | Promote a user to a workspace role (`OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`). Local-only; needs `--local` when a server is named. Stop the server first. The server-side equivalent is `crewship workspace member role`. |
+| `invalidate-sessions` | Force-logout every active session for a user (no password change). Local-only; needs `--local` when a server is named. Stop the server first, or use `crewship admin user sign-out` against the running server. |
+| `sessions list` | Forensic read of `user_sessions` for one user — all rows, including revoked + expired. Local-only; needs `--local` when a server is named. Read-only, so it works while the server runs. |
 | `prune-legacy` | Remove orphaned pre-C1 crew docker resources that block agents from starting. **HTTP-backed — needs a running server + login** (the one exception in this group). |
 | `reap-orphan-containers` | Detect (and with `--apply` reap) crew containers holding a stale internal token after a master rotation. **HTTP-backed — needs a running server + login.** |
 | `health` | Instance vitals: uptime, database liveness, disk headroom on the data volume, live log level, and where the encryption key came from. **HTTP-backed — needs a running server + login.** |
@@ -660,7 +660,8 @@ one; anyone else resets their own password.
 `PUT /api/v1/admin/instance/admins/{userId}`. Names an instance administrator.
 The named admins and `CREWSHIP_OWNER_EMAIL` are the whole list. When nobody
 who could run this can sign in, `--local` writes the database file on the
-host — the one way back once the last admin is gone.
+host — the one way back once the last admin is gone. Stop the server first: a
+running server owns the only database writer, and the command refuses beside it.
 
 | Flag | Required | Description |
 |---|---|---|
@@ -1809,7 +1810,7 @@ crewship admin seed-inbox --local --workspace ws_abc123 --clear
 
 Use it to remove "is it seeded?" preconditions from a test, and to prove a button reaches its endpoint — never as evidence that a decision took effect. That is the `approval-gate-demo` routine's job — `crewship routine run approval-gate-demo` parks a real run on a real gate, and approving it resumes the run.
 
-Seed while the server is running, too: a restart sweeps gates whose pipeline run is missing or terminal (`CancelOrphanedWaitpoints`), which settles the seeded ones out from under you.
+Stop the server before seeding: `seed-inbox` writes the database file, and a running server owns the only writer. Seeded approval gates do not survive the next start — the start-up sweep settles gates whose pipeline run is missing or terminal (`CancelOrphanedWaitpoints`) — so after seeding, the other rows are usable but the gates are already settled.
 </Warning>
 
 ## crewship admin cleanup

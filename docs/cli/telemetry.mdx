@@ -27,6 +27,11 @@ The default-on stance reverts to opt-in for v1.0 GA.
 
 ## `crewship telemetry on`
 
+`on` and `off` change the local database and require the writing server to be
+stopped. They acquire exclusive ownership before initializing or updating it;
+a live server cannot be bypassed by a local consent change. Read-only status
+inspection remains available while the server runs.
+
 Writes `telemetry_opt_in = "1"` to `app_settings` and generates an
 anonymous install ID (random 32-hex) if one doesn't exist yet.
 
