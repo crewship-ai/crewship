@@ -28,7 +28,7 @@ export CREWSHIP_DEFAULT_AGENT=viktor
 # Then everywhere:
 crewship ask "what does the journal contain?"
 crewship ask "summarize this" --with-file plan.md
-git diff | crewship ask "review this change"
+git diff | crewship ask --stdin "review this change"
 ```
 
 Without a default agent on a TTY, `crewship ask` opens a `huh` picker
@@ -40,9 +40,11 @@ the new default.
 Three patterns, in order of locality:
 
 ```bash
-# 1. Auto-stdin (most common): piped data is appended after the prompt
-git diff | crewship ask "review"
-cat error.log | crewship run viktor "what's wrong?"
+# 1. --stdin (most common): piped data is appended after the prompt
+git diff | crewship ask --stdin "review"
+cat error.log | crewship run viktor --stdin "what's wrong?"
+
+# No prompt argument: piped stdin is the prompt
 echo "summarise: ..." | crewship ask
 
 # 2. Explicit @-: prompt itself is on stdin
@@ -52,10 +54,13 @@ crewship ask --prompt @-
 crewship run viktor --prompt @prompts/refactor.txt
 ```
 
-When stdin is auto-detected, the data is appended after the positional
-prompt under a `--- stdin ---` separator and capped at 64 KiB.
-`@-` overrides this — the prompt is read from stdin in full and no
-auto-append happens.
+With `--stdin`, the data is appended after the prompt in a labelled
+`stdin` block and capped at 64 KiB. Without a prompt argument, piped stdin
+is read to EOF and used as the prompt. A prompt given without `--stdin`
+never reads stdin, so an inherited pipe that is never closed (harness
+shell, CI step, cron) cannot hang the command; if stdin is a pipe or a
+file, a one-line `[stdin not read …]` hint goes to stderr. `@-` reads
+the prompt itself from stdin in full.
 
 ## Auto-context flags
 
