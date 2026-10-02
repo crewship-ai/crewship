@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"net/netip"
 	"testing"
 
 	"github.com/moby/moby/api/types/container"
@@ -25,7 +26,7 @@ func TestQuotaServiceRestartOwner(t *testing.T) {
 			svc := quotaTestService()
 			svc.ControllerManaged = tc.managed
 			p := newCovProvider(t, Config{QuotaCatalog: &fakeQuotaCatalog{}}, daemon.ServeHTTP)
-			if _, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", &svc); err != nil {
+			if _, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), netip.Addr{}, &svc); err != nil {
 				t.Fatal(err)
 			}
 			if got := daemon.containerCreates[0].HostConfig.RestartPolicy; got != tc.want {
@@ -44,7 +45,7 @@ func TestQuotaServiceRestartOwner(t *testing.T) {
 			hc := quotaHostConfig()
 			hc.RestartPolicy = tc.want
 			daemon.hostConfigs["existing"] = hc
-			id, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", &svc)
+			id, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), netip.Addr{}, &svc)
 			if err != nil || id != "existing" || daemon.mutatingCalls() != 0 {
 				t.Fatalf("correct restart owner treated as drift: %v id %q calls %d", err, id, daemon.mutatingCalls())
 			}

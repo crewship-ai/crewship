@@ -138,8 +138,11 @@ API puts exec *creation* under `/containers`, so `EXEC: 0` does not stop it.
 
 | SDK method | Engine API | Why we call it |
 | --- | --- | --- |
-| `NetworkCreate` | `POST /networks/create` | Creates the per-crew internal network |
+| `NetworkConnect` | `POST /networks/{id}/connect` | Moves an existing crew service onto the crew's network without recreating it |
+| `NetworkDisconnect` | `POST /networks/{id}/disconnect` | Detaches a moved crew service from its previous network |
+| `NetworkCreate` | `POST /networks/create` | Creates the instance network and, for crews listed in `crew_network_crews`, each crew's own network |
 | `NetworkList` | `GET /networks` | Checks whether it already exists |
+| `NetworkRemove` | `DELETE /networks/{id}` | Removes the network of a deleted crew once its containers are gone |
 | `VolumeCreate` | `POST /volumes/create` | Creates per-agent home and memory volumes |
 | `VolumeInspect` | `GET /volumes/{name}` | Reads a volume's mountpoint and labels |
 | `VolumeList` | `GET /volumes` | Enumerates crew volumes for reconciliation and pruning |

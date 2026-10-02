@@ -68,6 +68,7 @@ input on average).`,
 			prompt, err := cli.BuildPrompt(cmd.Context(), cli.PromptOptions{
 				PromptFlag: promptFlag,
 				AutoStdin:  true,
+				Notice:     os.Stderr,
 			})
 			if err != nil {
 				return err

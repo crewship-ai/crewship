@@ -493,17 +493,23 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// DAG wave's sibling steps on the same crew all hit this in the same few
 	// milliseconds; without it each paid a full host scan under this mutex.
 	if cid, ok := p.warmHit(team.ID); ok {
+		// A fenced crew pays one inspect here: a restart inside the warm TTL
+		// (daemon, restart policy, operator) drops the fence, and the warm
+		// path would otherwise hand the next step an unfenced container.
+		if err := p.ensureEgressFence(ctx, team, cid, ""); err != nil {
+			p.evictWarm(team.ID)
+			p.stopUnfenced(ctx, team, cid, err)
+			return "", err
+		}
 		emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "warm cache hit"})
 		return cid, nil
 	}
 
 	p.logger.Debug("EnsureCrewRuntime", "crew_id", team.ID, "crew_slug", team.Slug)
-	// Ensure network exists (auto-recreate if deleted at runtime)
-	if p.cfg.Network != "" {
-		p.logger.Debug("ensuring network", "network", p.cfg.Network)
-		if err := p.ensureNetwork(ctx, p.cfg.Network); err != nil {
-			return "", fmt.Errorf("ensure network: %w", err)
-		}
+	// Ensure the crew's network exists (auto-recreate if deleted at runtime):
+	// its own when listed (#2240), the instance network otherwise.
+	if _, err := p.ensureCrewNetwork(ctx, team.ID, team.Slug); err != nil {
+		return "", fmt.Errorf("ensure network: %w", err)
 	}
 
 	containerName := p.CrewContainerName(team.ID, team.Slug)
@@ -664,6 +670,14 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		"container_id", resp.ID[:12],
 		"runtime", runtime,
 	)
+
+	// Network-layer egress fence (#1368) before anything runs in the
+	// container: postStart hooks and the agent run as 1001, which the fence
+	// blocks; the sidecar (1002) keeps its route.
+	if err := p.ensureEgressFence(ctx, team, resp.ID, runtimeImage); err != nil {
+		p.stopUnfenced(ctx, team, resp.ID, err)
+		return "", err
+	}
 
 	// Sanity-check the bind-mounted sidecar on any BYOI crew (user-provided
 	// base image, with or without a cached derivative). Runs the binary with
@@ -918,6 +932,40 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				// stopped container is rebuilt, a running one is reported and
 				// left serving. See crew_resource_drift.go for why this is an
 				// observation of the container rather than a second digest.
+				// Network drift (#2240): the crew was listed for, or removed
+				// from, its own network. The build-wide runtime contract
+				// cannot see a per-crew choice, so check it here, with the
+				// same stopped-recreate / running-report rule as resources.
+				// Only crews this feature touches: listed now, or still on their
+				// own network after being delisted. An unlisted crew on the
+				// instance network is never examined, so a runtime that reports
+				// NetworkMode differently (Podman's "bridge") is not churned.
+				haveNet := ""
+				if inspect.HostConfig != nil {
+					haveNet = string(inspect.HostConfig.NetworkMode)
+				}
+				// Same rule for the service host entries: they are fixed at
+				// create time, so a changed service list needs a recreate.
+				hostsDrift := false
+				if p.crewNetworkWanted(team.ID, team.Slug) && inspect.HostConfig != nil {
+					if wantHosts, err := p.serviceExtraHosts(ctx, team); err == nil {
+						hostsDrift = !sameServiceHosts(inspect.HostConfig.ExtraHosts, wantHosts)
+					}
+				}
+				if want := p.crewNetworkFor(team.ID, team.Slug); want != "" && (haveNet != want || hostsDrift) &&
+					(p.crewNetworkWanted(team.ID, team.Slug) || haveNet == p.crewNetworkName(team.ID)) {
+					if crewContainerHoldsNoProcesses(c.State) {
+						p.logger.Info("recreating stopped container (crew network changed)",
+							"container", containerName, "crew_id", team.ID,
+							"from", haveNet, "to", want)
+						p.forceTeardown(ctx, c.ID, team.ID)
+						break // fall through to create new container
+					}
+					p.logger.Warn("crew container is still on its previous network and serving; it moves when next recreated "+
+						"(an idle-TTL stop, or `crewship crew restart-agents <crew>`). Its services stay with it until then.",
+						"container", containerName, "crew_id", team.ID,
+						"network", haveNet, "configured", want)
+				}
 				if drift := crewResourceDrift(team, inspect.HostConfig); drift != "" {
 					if crewContainerHoldsNoProcesses(c.State) {
 						p.logger.Info("recreating stopped container (crew resource limits changed)",
@@ -937,6 +985,13 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					)
 				}
 				if c.State == container.StateRunning {
+					// A restart this provider did not perform (daemon restart,
+					// restart policy, an operator) recreates the namespace and
+					// drops the fence; ensureEgressFence compares StartedAt.
+					if err := p.ensureEgressFence(ctx, team, c.ID, reusedImage); err != nil {
+						p.stopUnfenced(ctx, team, c.ID, err)
+						return "", false, err
+					}
 					p.setWarm(team.ID, c.ID)
 					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
 					return c.ID, true, nil
@@ -986,6 +1041,10 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 
 				if _, err := p.client.ContainerStart(ctx, c.ID, client.ContainerStartOptions{}); err != nil {
 					return "", false, fmt.Errorf("start existing container: %w", err)
+				}
+				if err := p.ensureEgressFence(ctx, team, c.ID, reusedImage); err != nil {
+					p.stopUnfenced(ctx, team, c.ID, err)
+					return "", false, err
 				}
 				// Note: postStartCommand runs ONCE when the container is
 				// freshly created (see the create-path call in
@@ -1223,6 +1282,12 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 // constructs the container.Config / container.HostConfig pair for the crew
 // container create call.
 func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.CrewConfig, containerName, runtimeImage, runtime string, memoryMB int, cpus float64, dirs crewDirs) (*container.Config, *container.HostConfig, error) {
+	// A crew on its own network resolves its services from /etc/hosts
+	// (fixed addresses): under the egress fence the agent has no DNS.
+	svcHosts, err := p.serviceExtraHosts(ctx, team)
+	if err != nil {
+		return nil, nil, fmt.Errorf("service hosts: %w", err)
+	}
 	p.logger.Debug("calling ContainerCreate", "image", runtimeImage, "name", containerName)
 	env := []string{
 		"CREWSHIP_CREW_ID=" + team.ID,
@@ -1265,6 +1330,9 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 	cfg, hostCfg, err := p.assembleCrewSpec(team, runtimeImage, runtime, memoryMB, cpus, dirs, env, imgEnv)
 	if err != nil {
 		return nil, nil, err
+	}
+	if hostCfg != nil {
+		hostCfg.ExtraHosts = append(hostCfg.ExtraHosts, svcHosts...)
 	}
 	// Stamp what this build asked for, so a container created by an older
 	// build can be recognised as such later — the whole of #1642. Written
@@ -1534,7 +1602,7 @@ func (p *Provider) assembleCrewSpec(team provider.CrewConfig, runtimeImage, runt
 			// runtime-aware — see secretsTmpfsSpecFor and secretsTmpfsSpecPodman.
 			"/secrets": secretsTmpfsSpecFor(p.detected.Runtime),
 		},
-		NetworkMode: container.NetworkMode(p.cfg.Network),
+		NetworkMode: container.NetworkMode(p.crewNetworkFor(team.ID, team.Slug)),
 	}
 	return containerCfg, hostConfig, nil
 }
@@ -1592,6 +1660,7 @@ func (p *Provider) forceTeardown(ctx context.Context, containerID, crewID string
 	_, _ = p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout})
 	_, _ = p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
 	p.evictWarm(crewID)
+	p.forgetFenced(containerID)
 }
 
 // waitExecExit polls ContainerExecInspect for execID every 50ms until the
@@ -1630,6 +1699,16 @@ func (p *Provider) runPostStartCommands(ctx context.Context, containerID string,
 			AttachStdout: true,
 			AttachStderr: true,
 		}
+		// Same fence checks as Exec (#1368): a hook — /crew/init.sh is
+		// agent-writable — must not run in a start the fence was not
+		// confirmed for.
+		fence, err := p.guardFencedExec(runCtx, containerID)
+		if err != nil {
+			cancel()
+			p.logger.Warn("postStartCommand refused: egress fence not confirmed",
+				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
+			return
+		}
 		ex, err := p.client.ExecCreate(runCtx, containerID, execCfg)
 		if err != nil {
 			cancel()
@@ -1637,11 +1716,20 @@ func (p *Provider) runPostStartCommands(ctx context.Context, containerID string,
 				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
 			continue
 		}
+		if err := p.fenceBeforeStart(runCtx, fence); err != nil {
+			cancel()
+			p.logger.Warn("postStartCommand refused: container restarted", "container", provider.ShortID(containerID), "error", err)
+			return
+		}
 		if _, err := p.client.ExecStart(runCtx, ex.ID, client.ExecStartOptions{}); err != nil {
 			cancel()
 			p.logger.Warn("postStartCommand exec start failed",
 				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
 			continue
+		}
+		if err := p.fenceAfterStart(runCtx, fence); err != nil {
+			cancel()
+			return
 		}
 		// Poll exit code briefly; cap at ~60s total via runCtx timeout.
 		exitCode, stillRunning, ierr := p.waitExecExit(runCtx, ex.ID, 1200) // 1200 * 50ms = 60s
@@ -1704,6 +1792,7 @@ func buildChownInitCmd(allDirs []string, crewPath string, volumeTargets []string
 
 // StopCrewRuntime gracefully stops a crew container with a 30-second timeout.
 func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) error {
+	p.evictWarmContainer(containerID)
 	timeout := 30
 	if _, err := p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
 		return fmt.Errorf("stop crew runtime %s: %w", provider.ShortID(containerID), err)
@@ -1713,6 +1802,8 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 
 // RemoveCrewRuntime forcefully removes a crew container.
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
+	p.forgetFenced(containerID)
+	p.evictWarmContainer(containerID)
 	if _, err := p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
 		return fmt.Errorf("remove crew runtime %s: %w", provider.ShortID(containerID), err)
 	}

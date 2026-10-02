@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next"
-import { JetBrains_Mono } from "next/font/google"
+import localFont from "next/font/local"
 import { Providers } from "@/components/providers"
 import { HISTORY_NAVIGATION_GUARD_SCRIPT } from "@/lib/navigation-history-guard"
 import { ACCENT_BOOT_SCRIPT } from "@/lib/theme/accents"
@@ -7,10 +7,14 @@ import "./globals.css"
 
 // Harbor typography: the UI runs on the platform's system face (SF on Apple,
 // Segoe UI on Windows — the stack lives in --font-sans in globals.css), so
-// only the mono face is downloaded. It carries eyebrows, ids, chips and code.
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin", "latin-ext"],
-  weight: ["400", "500", "600"],
+// the bundled mono face carries eyebrows, ids, chips and code.
+const jetbrainsMono = localFont({
+  src: [
+    { path: "../public/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2", weight: "400", style: "normal" },
+    { path: "../public/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2", weight: "500", style: "normal" },
+    { path: "../public/fonts/jetbrains-mono/JetBrainsMono-SemiBold.woff2", weight: "600", style: "normal" },
+  ],
+  display: "swap",
   variable: "--font-jetbrains",
 })
 

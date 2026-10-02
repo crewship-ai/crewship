@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
@@ -70,6 +71,52 @@ func (r *cleanupRuntime) Remove(ctx context.Context, id string) error {
 	_, err := r.client.ContainerRemove(ctx, id, client.ContainerRemoveOptions{RemoveVolumes: false, Force: false})
 	return cleanupError(err)
 }
+
+// ListNetworks reports per-crew networks (#2240) with their ownership labels.
+// The daemon filters on the kind label; the controller still selects by the
+// instance and crew labels, never by name.
+func (r *cleanupRuntime) ListNetworks(ctx context.Context) ([]resourcelifecycle.Network, error) {
+	result, err := r.client.NetworkList(ctx, client.NetworkListOptions{
+		Filters: make(client.Filters).Add("label", crewKindLabel+"="+resourcelifecycle.NetworkKind),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := []resourcelifecycle.Network{}
+	for _, n := range result.Items {
+		// The daemon filtered on the kind label; re-check rather than trust
+		// a proxy or an older daemon to have applied the filter.
+		if n.Labels[crewKindLabel] != resourcelifecycle.NetworkKind {
+			continue
+		}
+		out = append(out, resourcelifecycle.Network{ID: n.ID, InstanceID: n.Labels[resourcelifecycle.InstanceLabel], CrewID: n.Labels[crewCrewIDLabel], Kind: n.Labels[crewKindLabel]})
+	}
+	return out, nil
+}
+
+// RemoveNetwork removes one network. A network with containers still attached
+// is reported as ErrNetworkInUse; there is no force.
+func (r *cleanupRuntime) RemoveNetwork(ctx context.Context, id string) error {
+	_, err := r.client.NetworkRemove(ctx, id, client.NetworkRemoveOptions{})
+	if err == nil {
+		return nil
+	}
+	if cerrdefs.IsNotFound(err) {
+		return resourcelifecycle.ErrNotFound
+	}
+	// Docker answers 403 for "has active endpoints", but so does a socket
+	// proxy without NetworkRemove in its allowlist. Only the endpoints
+	// message (or a conflict) is in-use; any other refusal is surfaced.
+	if cerrdefs.IsConflict(err) || strings.Contains(strings.ToLower(err.Error()), "active endpoints") {
+		return resourcelifecycle.ErrNetworkInUse
+	}
+	if cerrdefs.IsPermissionDenied(err) {
+		return fmt.Errorf("%w: %v", resourcelifecycle.ErrNetworkForbidden, err)
+	}
+	return err
+}
+
+var _ resourcelifecycle.NetworkRuntime = (*cleanupRuntime)(nil)
 
 // SetCrewOwnerCheck is startup wiring, before any provider work is dispatched.
 func (p *Provider) SetCrewOwnerCheck(check func(context.Context, string) error) {

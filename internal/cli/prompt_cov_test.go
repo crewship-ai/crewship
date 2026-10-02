@@ -105,10 +105,10 @@ func TestBuildPrompt_GitCommandErrors(t *testing.T) {
 func TestBuildPrompt_AutoStdinReadError(t *testing.T) {
 	boom := errors.New("stdin broken")
 	opts := PromptOptions{
-		Positional:  []string{"hi"},
-		AutoStdin:   true,
-		isStdinPipe: func() bool { return true },
-		readStdin:   func(context.Context, int) ([]byte, error) { return nil, boom },
+		Positional:   []string{"hi"},
+		StdinContext: true,
+		isStdinPipe:  func() bool { return true },
+		readStdin:    func(context.Context, int) ([]byte, error) { return nil, boom },
 	}
 	_, err := BuildPrompt(context.Background(), opts)
 	if err == nil || !strings.Contains(err.Error(), "read stdin") {

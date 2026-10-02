@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -61,7 +62,7 @@ func TestSidecarRequirepass_ValueIsDiscreteArgvToken(t *testing.T) {
 	})
 	defer cleanup()
 
-	id, err := p.ensureSidecar(context.Background(), "ckcrew0001", "crew1", &provider.CrewService{
+	id, err := p.ensureSidecar(context.Background(), "ckcrew0001", "crew1", p.crewNetworkFor("ckcrew0001", "crew1"), netip.Addr{}, &provider.CrewService{
 		Name:    "redis",
 		Image:   "redis:7-alpine",
 		Command: command,

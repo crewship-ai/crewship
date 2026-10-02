@@ -134,7 +134,20 @@ Containers are created with these security measures (`internal/provider/docker/d
   `NODE_USE_ENV_PROXY=1` so Node's built-in `fetch` honours them on Node
   22.21+ and 24+) — it filters only traffic actually routed through it. A raw socket, or a tool pointed past
   the proxy (`curl --noproxy '*'`), reaches the bridge directly: the shared
-  bridge itself carries no network-layer isolation to fall back on.
+  bridge itself carries no network-layer isolation to fall back on. A crew
+  listed in `container.crew_network_crews` gets its own bridge instead
+  (IPv4 only, a `/27` from `container.crew_network_pool`): containers of
+  other crews, on their own networks or on the shared one, cannot reach it,
+  and its `services:` aliases (`postgres`, `redis`) resolve to its own
+  containers. Crews talk to each other through the Crewship API, not over
+  the network. A crew network is internal whenever the instance network is.
+  Port-expose only publishes containers of the requesting crew. Crew
+  networks need crewshipd running on the Docker host itself, with a local
+  daemon: a containerised crewshipd (the production compose file) is not
+  attached to crew networks, so a listed crew there fails to start with
+  `crew networks unsupported here` instead of running unable to reach
+  Crewship. If the instance network does not exist, a crew network is
+  refused rather than created with weaker isolation.
 - **ExtraHosts:** `host.docker.internal:host-gateway` enables container-to-host communication
 - **Named volumes:** `crewship-home-{slug}-{crewID}` and `crewship-tools-{slug}-{crewID}` for persistent home and tools directories (namespaced by crew ID to prevent cross-tenant collisions)
 
@@ -402,11 +415,81 @@ For notify and hooks the boundary is keyed on the crew that **authored** the rou
   *pointed at*, which means the proxy environment is itself the security
   control. Code that deliberately ignores it (`curl --noproxy '*'`, a raw
   socket, a non-cooperating binary) still reaches the network, because there is
-  no network-layer fence yet
+  no network-layer fence for the crew unless it is on the
+  [egress fence pilot](#network-layer-egress-fence-pilot)
   ([#1368](https://github.com/crewship-ai/crewship/issues/1368)). Treat these
   rows as "a well-behaved tool obeys the allowlist", and the four server-side
   rows as the ones that hold against hostile code.
 </Warning>
+
+### Network-layer egress fence (pilot)
+
+The fence closes that gap for crews that opt in. It enforces the outbound path through the proxy; it is not full network isolation, because connections *into* the container from other crews on the shared network are still possible (see the limits below). It is an nftables table installed in the crew container's network namespace that lets out only packets owned by the sidecar's UID (1002). The agent (1001) and root inside the container can still reach the sidecar on `127.0.0.1:9119`, and nothing else: no direct TCP or UDP to the internet, no other container on the crew network, no host port, and no queries to Docker's embedded resolver, which would otherwise forward any name upstream and serve as a DNS tunnel. The sidecar's allowlist then applies to every byte that leaves, because the proxy is the only route out.
+
+Turn it on per crew with `container.egress_fence_crews` (or `CREWSHIP_EGRESS_FENCE_CREWS`, a comma-separated list of crew slugs or ids). It is off for every crew by default.
+
+How it holds:
+
+- **The container never holds `NET_ADMIN`.** A one-shot helper container joins the crew's network namespace with only `NET_ADMIN`, runs the bind-mounted `crewship-sidecar --fence-apply`, and exits. Nothing inside the crew container can remove the rules.
+- **Every start re-installs it.** A container restart recreates the network namespace and drops the fence, so the runtime installs it after each start it performs and checks the container's start time before reusing a running container.
+- **No command runs in an unfenced start.** The container's entrypoint runs nothing of the agent's; agent code arrives only through an exec. Every exec into a fenced container, including the web terminal, the crew's start-up hooks, backup flush hooks, restore scripts and memory imports, first confirms the fence for the container's current start. (Image builds exec only into temporary build containers, never into a crew's.) After a restart outside Crewship (a daemon restart, an operator, a crashed process) the fence is installed again before the exec runs; if the server has not fenced the crew before (for example right after a server restart) the exec is refused until the next crew start. A container the server has fenced stays fenced by its id even if its crew labels are missing or stale. The start is checked again just before the exec runs and once it runs; a restart in between refuses the exec, or stops the crew if it already started — also when the caller gave up in between.
+- **Connections do not outlive it.** Established traffic is accepted only in the reply direction, for connections opened *to* the container. A connection the agent opened itself, including one opened before the fence went in, stops delivering data once it is installed.
+- **Failure is closed.** A listed crew whose fence cannot be installed is stopped, not run unfenced.
+- **The host is untouched.** The rules live only in the crew's namespace; the host firewall and Docker's own rules do not change.
+
+Limits of the pilot:
+
+- It applies to `restricted` crews on the `runc` runtime. A listed crew that is privileged, `free`, or on another runtime is refused: privileged mode removes the UID boundary the fence rests on, and gVisor and Kata carry traffic outside the namespace's netfilter hooks.
+- Tools that resolve hostnames themselves before using the proxy fail, because the agent cannot query DNS. Tools that honour `HTTP_PROXY`/`HTTPS_PROXY` (curl, git, npm, pip, the agent CLIs) let the sidecar resolve and keep working.
+- Turning the pilot off for a crew (removing it from the list) takes effect when its container next starts; until then the rules stay in its namespace. Stop and start the crew (`crewship crew stop <crew>`, then `crewship crew start <crew>`) to apply the change at once.
+- The fence controls traffic leaving the container, and replies to connections opened into it. Inbound reachability from other crews on the shared network is tracked separately in [#2240](https://github.com/crewship-ai/crewship/issues/2240).
+
+#### Supported and refused combinations
+
+| Crew | Runtime | Result |
+|---|---|---|
+| `restricted`, not privileged | `runc` | Fenced |
+| `restricted`, privileged | any | **Refused**: the container is stopped, not run unfenced |
+| `free` | any | **Refused** when listed: there is no allowlist to enforce |
+| `restricted` | `runsc` (gVisor), `kata-runtime`, `sysbox-runc` | **Refused**: their traffic bypasses the namespace's netfilter hooks |
+| `restricted` with declared `services:`, on its own network (`crew_network_crews`) | `runc` | Fenced, with a narrow path to its own services (below) |
+| `restricted` with declared `services:`, on the shared network | any | **Refused**: its services' addresses could be reused by another crew's container |
+| not listed | any | Unchanged behaviour, no fence |
+
+There is no silent fallback. A listed crew either runs fenced or does not run.
+
+#### Reaching the crew's own services under the fence
+
+A fenced crew on its own network reaches its declared `services:` and nothing else directly:
+
+- **Fixed addresses.** On a crew's own `/27` each service has a fixed address (`.4` onward, by the sorted service names); every other container on that network gets an address from the upper half. A service address is never handed to another container, and a recreated service comes back at the same one.
+- **Exact endpoints.** The fence accepts packets to each service's address on its declared ports and the ports its image exposes, by protocol. Not the subnet, not other ports, not the host.
+- **Names without DNS.** The agent cannot query DNS under the fence. Service names are written into the runtime container's `/etc/hosts` when it is created, so `postgres:5432` or `redis:6379` resolve. Adding or renaming a service therefore takes effect when the crew's container is next recreated (after a stop; a running container is not recreated under the agent).
+- **Kept current.** After the crew's services are ensured, the fence is re-checked and re-installed in one atomic swap if their endpoints changed (for example a newly exposed port). This also happens when ensuring the services fails part-way, so the fence always matches the declared services and never keeps the address a moved service left.
+- **Address changes.** Because addresses follow the sorted names, declaring a service can shift the address of an existing one. The shifted service is detached and attached again at its new address; the old address closes in the fence. Until the crew's container is recreated, its `/etc/hosts` still names the old address, where the port is closed: the service is unreachable by name, never reachable through another service.
+- **Failures close the path.** A service that is down, cannot start, or whose move between networks fails is unreachable; the crew stays fenced and gains no other destination.
+
+#### What the fence does not protect: credentials inside the container
+
+The fence decides **where** traffic may go. It does not keep secrets out of the agent's reach. These still reach the agent as readable values, and an agent can use them toward any host on the crew's allowlist:
+
+| What | Where the agent sees it | Why |
+|---|---|---|
+| Claude Code subscription login | `CLAUDE_CODE_OAUTH_TOKEN` | Authenticates inside an HTTPS tunnel the proxy cannot inject into |
+| Codex and other file-based logins | a file under the agent's home | The CLI reads its login only from that file; it holds a short-lived access token, the refresh token stays on the server |
+| API keys for OpenCode, Cursor and Factory providers without a proxy route | the provider's `*_API_KEY` variable | The CLI reaches the provider over an HTTPS tunnel |
+| CLI tokens (for example `GH_TOKEN`) | their environment variable | CLI tools read them only from the environment |
+| `SECRET` credentials when Keeper is disabled | their environment variable | Enable Keeper to serve them on request instead |
+
+Each run logs these exposures, so the gap is visible rather than assumed. API keys for providers with a proxy route (the proxy-injected adapter) are not in the environment. Closing the rest needs credential injection at a gateway outside the container, which is separate work.
+
+#### Operating the pilot
+
+- **Turn on:** add the crew's slug or id to `container.egress_fence_crews` (or `CREWSHIP_EGRESS_FENCE_CREWS`) and restart the server. The fence goes in the next time the crew runs: on a container start, or on the first exec into an already running container.
+- **Changing the crew:** a re-install after an outside restart uses the crew settings of the last install. Making a fenced crew privileged, free or giving it services takes effect when its container is next recreated.
+- **Check:** the server log records `egress fence installed` with the crew id and the install time for every start. Blocked direct connections fail at once (`No route to host`, `Operation not permitted`, or a name-resolution failure); traffic through the proxy is unchanged and appears in the crew's journal as `network.egress`.
+- **When a crew does not start:** the log line `crew requires the egress fence and it is not in place` names the cause (an unsupported combination from the table above, or the install failing). An exec refused with `egress fence not in place for this container start` means the container was restarted outside Crewship and has not been fenced again yet; the next exec into a crew the server has fenced before re-installs it, and after a server restart the next crew start does.
+- **Turn off:** remove the crew from the list, restart the server, then stop and start the crew. The rules live in the container's network namespace and leave with it; removing the crew from the list alone does not remove them from a running container.
 
 Both in-container paths take those variables from one exported source (`orchestrator.SidecarProxyEnv`), and a routine cannot override them: any `*_proxy` variable declared in `script.env` is dropped and logged. The match is on the *shape* rather than an exact list, because CPython lowercases every environment name before looking for a `_proxy` suffix — so `HtTp_PrOxY` would otherwise reach a Python script's proxy configuration, and `.py` is a first-class script interpreter.
 

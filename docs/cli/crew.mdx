@@ -457,6 +457,22 @@ Before v1.x the agents survived their crew and kept holding their slugs, so the
 re-apply answered `409 Agent slug already taken in this workspace` until each
 one was deleted by hand (#1712).
 
+The crew's auto-managed service credentials go with it (#2771). A credential
+that `crewship apply` minted for one of the crew's `services:`, such as
+`REDIS_PASSWORD`, is removed when nothing outside the crew is bound to it, and
+the command names each one it removed:
+
+```
+Crew deleted.
+Removed auto-managed service credentials: REDIS_PASSWORD
+```
+
+User-created credentials are never removed, even when they have the same name.
+An auto-managed credential that another crew's agent or a workspace-wide
+binding still uses is also kept. Orphans left by crews deleted before this
+change are not removed automatically; delete them with
+`crewship credential delete`.
+
 ---
 
 ## `crewship crew status`

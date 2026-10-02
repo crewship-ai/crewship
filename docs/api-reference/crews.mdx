@@ -362,6 +362,16 @@ DELETE /api/v1/crews/{crewId}?workspace_id={workspaceId}
   `{slug}_deleted_{id}` when a new agent claims it, exactly as the crew's is.
 </Note>
 
+<Note>
+  The crew's **auto-managed service credentials** are soft-deleted with it. A
+  credential is removed only when its row proves the crew owns it
+  (`provider=AUTO_MANAGED`, `created_by_actor_type=system`,
+  `provisioned_for_service` of `<crew-slug>/<service>` in this workspace) and
+  no live agent, crew or workspace binding outside the crew references it.
+  User-created and shared credentials are never removed. The names removed
+  are returned in `removed_credentials`.
+</Note>
+
 **Auth:** Session or CLI token + `OWNER` or `ADMIN` role
 
 **Request:** `crewId` is a required path parameter and `workspace_id` selects the workspace. No request body.
@@ -369,7 +379,12 @@ DELETE /api/v1/crews/{crewId}?workspace_id={workspaceId}
 **Response:** `200 OK`
 
 ```json
-{ "success": true }
+{
+  "success": true,
+  "sidecar_teardown": { "status": "removed" },
+  "removed_credentials": ["REDIS_PASSWORD"],
+  "cleanup": { "crew_id": "...", "scope": "containers", "state": "disabled", "complete": false, "remaining": 0, "unattributed": 0 }
+}
 ```
 
 | Status | Condition |

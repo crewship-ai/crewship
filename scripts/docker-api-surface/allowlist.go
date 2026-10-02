@@ -223,6 +223,16 @@ var allowList = []Endpoint{
 		Why: "detects the cgroup version and whether the daemon shares the host filesystem",
 	},
 	{
+		Method: "NetworkConnect", HTTP: "POST /networks/{id}/connect", ProxyVars: []string{"NETWORKS", proxyVarPOST},
+		Tier: TierCore, Packages: []string{"internal/provider/docker"},
+		Why: "moves an existing crew service onto the crew's network without recreating it",
+	},
+	{
+		Method: "NetworkDisconnect", HTTP: "POST /networks/{id}/disconnect", ProxyVars: []string{"NETWORKS", proxyVarPOST},
+		Tier: TierCore, Packages: []string{"internal/provider/docker"},
+		Why: "detaches a moved crew service from its previous network",
+	},
+	{
 		Method: "NetworkCreate", HTTP: "POST /networks/create", ProxyVars: []string{"NETWORKS", proxyVarPOST},
 		Tier: TierCore, Packages: []string{"internal/provider/docker"},
 		Why: "creates the per-crew internal network",
@@ -231,6 +241,11 @@ var allowList = []Endpoint{
 		Method: "NetworkList", HTTP: "GET /networks", ProxyVars: []string{"NETWORKS"},
 		Tier: TierCore, Packages: []string{"internal/provider/docker"},
 		Why: "checks whether the crew network already exists",
+	},
+	{
+		Method: "NetworkRemove", HTTP: "DELETE /networks/{id}", ProxyVars: []string{"NETWORKS", proxyVarPOST},
+		Tier: TierCore, Packages: []string{"internal/provider/docker"},
+		Why: "removes the network of a deleted crew once its containers are gone",
 	},
 	{
 		Method: "Ping", HTTP: "HEAD /_ping (GET on fallback)", ProxyVars: []string{"PING"},

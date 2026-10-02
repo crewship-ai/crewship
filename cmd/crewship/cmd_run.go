@@ -28,8 +28,8 @@ Examples:
   crewship run viktor "Create a REST API"
   crewship run viktor --prompt @task.txt
   crewship run viktor --prompt @-           # read from stdin
-  cat issue.md | crewship run viktor "fix"  # stdin auto-appended as context
-  git diff | crewship run viktor "review" --with-git-status
+  cat issue.md | crewship run viktor --stdin "fix"  # stdin appended as context
+  git diff | crewship run viktor --stdin "review" --with-git-status
   crewship run viktor --interactive
   crewship run viktor --chat <chatId> "follow-up question"`,
 	Args: cobra.MinimumNArgs(1),
@@ -74,6 +74,7 @@ Examples:
 		withFiles, _ := cmd.Flags().GetStringSlice("with-file")
 		withCmds, _ := cmd.Flags().GetStringSlice("with-cmd")
 		paste, _ := cmd.Flags().GetBool("paste")
+		stdinCtx, _ := cmd.Flags().GetBool("stdin")
 
 		var positional []string
 		if len(args) > 1 {
@@ -84,6 +85,8 @@ Examples:
 			Positional:        positional,
 			PromptFlag:        flagPrompt,
 			AutoStdin:         true,
+			StdinContext:      stdinCtx,
+			Notice:            os.Stderr,
 			WithGitDiff:       withGitDiff,
 			WithGitDiffStaged: withGitDiffStaged,
 			WithGitLog:        withGitLog,
@@ -1172,6 +1175,7 @@ func init() {
 	runCmd.Flags().Bool("with-git-status", false, "Append `git status -s` as context")
 	runCmd.Flags().StringSlice("with-file", nil, "Append file content(s) as context (repeatable)")
 	runCmd.Flags().StringSlice("with-cmd", nil, "Append shell command output as context (repeatable)")
+	runCmd.Flags().Bool("stdin", false, "Append piped stdin as context after the prompt (stdin is only read implicitly when no prompt is given)")
 	runCmd.Flags().Bool("paste", false, "Append the system clipboard as context (pbpaste/wl-paste/xclip/xsel)")
 	runCmd.Flags().Bool("dry-run", false, "Print the assembled prompt (with all context) and exit without running")
 	runCmd.Flags().StringArray("project-file-version", nil, "Select an immutable project file version for a restricted native run; repeat up to 16 times")

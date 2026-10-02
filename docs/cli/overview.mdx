@@ -190,7 +190,7 @@ crewship run <agent-slug> [prompt]
 crewship run viktor "Create a REST API"
 crewship run viktor --prompt @task.txt
 crewship run viktor --prompt @-                     # read prompt from stdin
-cat error.log | crewship run viktor "what's wrong?" # auto-append stdin as context
+cat error.log | crewship run viktor --stdin "what's wrong?" # append stdin as context
 crewship run viktor "review" --with-git-diff
 crewship run viktor "explain" --with-file notes.md --with-file plan.md
 crewship run viktor --interactive
@@ -221,7 +221,7 @@ crewship run viktor --chat <chatId> "follow-up question"
 <Tip>
 In interactive mode, press Ctrl+C to cancel the current run. Press Ctrl+D to exit the session.
 
-Stdin is auto-detected when piped — `git diff | crewship run viktor "review"` works without an explicit flag. Piped data is appended after the positional prompt under a `--- stdin ---` separator. Each context block is capped at 64 KiB and labelled.
+Piped stdin is the prompt when no prompt argument is given (`echo hi | crewship run viktor`). Alongside a prompt it is appended as context only with `--stdin` — `git diff | crewship run viktor --stdin "review"` — so a never-closed stdin pipe (harness, CI, cron) cannot hang a command that already has its prompt. Each context block is capped at 64 KiB and labelled.
 </Tip>
 
 #### `crewship run list`
@@ -240,7 +240,7 @@ Low-friction one-shot prompt against a default agent. Inherits the same `--with-
 
 ```bash
 crewship ask "what time is it?"
-git diff | crewship ask "review this change"
+git diff | crewship ask --stdin "review this change"
 crewship ask "summarize" --with-file notes.md
 crewship ask --agent viktor "explain how the journal works"
 crewship ask --prompt @-                              # full prompt from stdin

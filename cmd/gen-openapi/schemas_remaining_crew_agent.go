@@ -189,13 +189,15 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("PUT", "/api/v1/agents/{agentId}/files/save", "RemainingAgentFileSavedV1", object(map[string]any{"path": str(), "saved": boolean(), "message": str()}))
 	addAction("POST", "/api/v1/agents/{agentId}/stop", "RemainingAgentStoppedV1")
 	// Crew DELETE answers its own envelope, not the generic action: the
-	// explicit sidecar teardown outcome plus the container cleanup observation.
+	// explicit sidecar teardown outcome, the auto-managed service credentials
+	// removed with the crew (#2771), and the container cleanup observation.
 	crewDeleted := object(map[string]any{
-		"success":          boolean(),
-		"sidecar_teardown": object(map[string]any{"status": str(), "reason": str()}),
-		"cleanup":          containerCleanupStatusSchema(),
+		"success":             boolean(),
+		"sidecar_teardown":    object(map[string]any{"status": str(), "reason": str()}),
+		"removed_credentials": array(str()),
+		"cleanup":             containerCleanupStatusSchema(),
 	})
-	crewDeleted["required"] = []string{"success", "sidecar_teardown", "cleanup"}
+	crewDeleted["required"] = []string{"success", "sidecar_teardown", "removed_credentials", "cleanup"}
 	add("DELETE", "/api/v1/crews/{crewId}", "RemainingCrewDeletedV1", crewDeleted)
 	addAction("POST", "/api/v1/crews/{crewId}/apply-avatar-style", "RemainingCrewAvatarStyleAppliedV1")
 	add("DELETE", "/api/v1/crews/{crewId}/files/delete", "RemainingCrewFileDeletedV1", object(map[string]any{"path": str(), "deleted": boolean(), "message": str()}))

@@ -2,6 +2,7 @@ package docker
 
 import (
 	"errors"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -47,7 +48,7 @@ func TestQuotaVolumeSurvivesCrewRename(t *testing.T) {
 			daemon.imageConfig = map[string]any{"Volumes": map[string]any{"/data": map[string]any{}}}
 			svc := quotaTestService()
 			p := newCovProvider(t, Config{QuotaCatalog: &fakeQuotaCatalog{}}, daemon.ServeHTTP)
-			_, err := p.ensureSidecar(t.Context(), covCrewID, "new-slug", &svc)
+			_, err := p.ensureSidecar(t.Context(), covCrewID, "new-slug", p.crewNetworkFor(covCrewID, "new-slug"), netip.Addr{}, &svc)
 			if tc.wantErr {
 				if !errors.Is(err, quota.ErrDenied) || daemon.mutatingCalls() != 0 {
 					t.Fatalf("foreign volume identity admitted: %v", err)
@@ -100,7 +101,7 @@ func TestQuotaServiceRenameReplacesOldSlugContainer(t *testing.T) {
 				labels = resourcelifecycle.WithInstanceLabel(labels, tc.label)
 			}
 			daemon.containers = []map[string]any{{"Id": "old", "Names": []string{"/" + name}, "Image": svc.Image, "State": "running", "Labels": labels}}
-			_, err := p.ensureSidecar(t.Context(), covCrewID, "new-slug", &svc)
+			_, err := p.ensureSidecar(t.Context(), covCrewID, "new-slug", p.crewNetworkFor(covCrewID, "new-slug"), netip.Addr{}, &svc)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("ensureSidecar error = %v, wantErr %v", err, tc.wantErr)
 			}

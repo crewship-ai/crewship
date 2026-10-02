@@ -121,8 +121,14 @@ code when relevant. The immediate response is `pending`, not proof of physical
 removal. The crew delete CLI prints the returned cleanup scope and state. Without a configured controller it is `disabled`.
 
 `observed_clear` means no eligible container in the complete final scan for that
-owner. It excludes volumes, host data, images, unlabelled legacy containers and
-future late creates. `unattributed` counts legacy containers for that tombstone
+owner and, for a crew that had its own network (`container.crew_network_crews`,
+#2240), no such network either. The network is removed only after every
+container of the crew is gone; one with containers still attached stays
+`pending` and is never forced. Only networks labelled
+`crewship.kind=crew-network` with this installation's instance id and the
+deleted crew's id are removed; a network is never selected by name. It excludes
+volumes, host data, images, unlabelled legacy containers and future late
+creates. `unattributed` counts legacy containers for that tombstone
 owner in the initial scan. It is not a host inventory or retirement decision.
 An incomplete scan or disconnected Docker is `unknown`; a failed candidate step
 is `error`; a removal backlog is `pending`.

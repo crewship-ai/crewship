@@ -18,13 +18,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/moby/moby/client"
 )
 
@@ -737,7 +737,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// process, which is correct only where it owns the tree.
 	if r.dockerClient != nil {
 		dcl := r.dockerClient
-		mpH.SetContainerWriter(&backup.MobyDockerOps{Client: dcl},
+		mpH.SetContainerWriter(r.backupDockerOps(dcl),
 			func(ctx context.Context, crewID, slug string) (string, error) {
 				suffix := "-team-" + slug + "-" + crewID
 				listed, err := dcl.ContainerList(ctx, client.ContainerListOptions{All: true})
@@ -999,21 +999,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	var peInspector DockerInspector
 	if r.dockerClient != nil {
 		dc := r.dockerClient
-		peInspector = DockerInspectorFunc(func(ctx context.Context, id, network string) (string, error) {
-			inspectResult, err := dc.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
-			if err != nil {
-				return "", err
-			}
-			inspect := inspectResult.Container
-			if inspect.NetworkSettings == nil {
-				return "", errPortExposeNoNetwork
-			}
-			ns, ok := inspect.NetworkSettings.Networks[network]
-			if !ok || ns == nil || !ns.IPAddress.IsValid() {
-				return "", errPortExposeNoNetwork
-			}
-			return ns.IPAddress.String(), nil
-		})
+		peInspector = portExposeInspector{dc: dc}
 	}
 	portExposeH := NewPortExposeHandler(r.db, r.portExposeRegistry, peInspector, AllowAllPolicy{}, r.hub, peCfg, r.logger)
 
@@ -1072,4 +1058,43 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 		portExposeH:    portExposeH,
 		postRunTrigger: postRunTrigger,
 	}
+}
+
+// portExposeInspector resolves port-expose targets with the Docker client.
+type portExposeInspector struct{ dc *client.Client }
+
+// ContainerIP returns the container's address on network, or, for a crew on
+// its own network (#2240), on that crew's network: the one named from the
+// container's own crew label, never another crew's.
+func (i portExposeInspector) ContainerIP(ctx context.Context, id, network string) (string, error) {
+	inspectResult, err := i.dc.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	if err != nil {
+		return "", err
+	}
+	inspect := inspectResult.Container
+	if inspect.NetworkSettings == nil {
+		return "", errPortExposeNoNetwork
+	}
+	ns, ok := inspect.NetworkSettings.Networks[network]
+	if (!ok || ns == nil) && inspect.Config != nil {
+		if crew := inspect.Config.Labels["crewship.crew-id"]; crew != "" {
+			ns, ok = inspect.NetworkSettings.Networks[provider.CrewNetworkName(network, crew)]
+		}
+	}
+	if !ok || ns == nil || !ns.IPAddress.IsValid() {
+		return "", errPortExposeNoNetwork
+	}
+	return ns.IPAddress.String(), nil
+}
+
+// ContainerCrew returns the crew the container is labelled for.
+func (i portExposeInspector) ContainerCrew(ctx context.Context, id string) (string, error) {
+	inspectResult, err := i.dc.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	if err != nil {
+		return "", err
+	}
+	if inspectResult.Container.Config == nil {
+		return "", errPortExposeNoNetwork
+	}
+	return inspectResult.Container.Config.Labels["crewship.crew-id"], nil
 }

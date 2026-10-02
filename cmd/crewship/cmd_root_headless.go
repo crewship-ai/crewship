@@ -19,7 +19,7 @@ import (
 // given, dispatching to the default agent for a one-shot query.
 //
 //	crewship -p "what time is it?"
-//	cat issue.md | crewship -p "summarise"
+//	cat issue.md | crewship -p "summarise" --stdin
 //	crewship -p "review my diff" --with-git-diff
 //
 // Pipe-friendly: stdin is auto-appended (same as `ask`), and exit code
@@ -155,6 +155,10 @@ func runHeadlessAsk(cmd *cobra.Command, prompt string) error {
 			_ = askCmd.Flags().Set("quiet", "true")
 		}
 	}
+	if cmd.Flags().Changed("stdin") {
+		v, _ := cmd.Flags().GetBool("stdin")
+		_ = askCmd.Flags().Set("stdin", strconv.FormatBool(v))
+	}
 	// Default to quiet output in headless mode unless the user explicitly
 	// asked otherwise — `crewship -p` is meant for scripting where the
 	// agent's banner / meta lines are noise.
@@ -232,6 +236,7 @@ func init() {
 	// they are not Persistent.
 	rootCmd.Flags().String("agent", "", "Agent slug or ID (overrides default-agent)")
 	rootCmd.Flags().BoolP("quiet", "q", false, "Only output agent text (no banner)")
+	rootCmd.Flags().Bool("stdin", false, "With -p: append piped stdin as context after the prompt")
 	// Allow arbitrary positional args alongside `-p` so `crewship "say hi"`
 	// (no flag) and `crewship -p "say hi"` both work. Cobra rejects
 	// positional args by default unless ArbitraryArgs / MinimumNArgs is set.

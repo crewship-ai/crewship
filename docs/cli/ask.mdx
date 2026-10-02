@@ -8,7 +8,7 @@ tag: Experimental
 
 # crewship ask
 
-`ask` is the low-friction prompt — type a question, get an answer, no agent slug to remember. The agent resolves from `--agent`, then the `CREWSHIP_DEFAULT_AGENT` env var, then the saved `default-agent` config key, then (in a TTY) an interactive picker. Designed for shell pipelines like `git diff | crewship ask "review this"`. Defined in `cmd/crewship/cmd_ask.go`.
+`ask` is the low-friction prompt — type a question, get an answer, no agent slug to remember. The agent resolves from `--agent`, then the `CREWSHIP_DEFAULT_AGENT` env var, then the saved `default-agent` config key, then (in a TTY) an interactive picker. Designed for shell pipelines like `git diff | crewship ask --stdin "review this"`. Defined in `cmd/crewship/cmd_ask.go`.
 
 ```bash
 crewship ask [prompt] [flags]
@@ -26,6 +26,7 @@ doesn't need a subcommand at all:
 ```bash
 crewship -p "why did the last deploy fail?"   # explicit, always works
 crewship "why did the last deploy fail?"      # bare prompt
+git diff | crewship -p "review" --stdin        # --stdin appends piped context, as on ask
 ```
 
 <Warning>
@@ -65,6 +66,7 @@ crewship "why did the last deploy fail?"      # bare prompt
 | `--with-file <path>` | (unset) | Append a file's contents. Repeatable. |
 | `--with-cmd <shell>` | (unset) | Append the stdout of a shell command. Repeatable. |
 | `--paste` | `false` | Append the system clipboard (`pbpaste` / `wl-paste` / `xclip` / `xsel`). |
+| `--stdin` | `false` | Read stdin to EOF and append it as context after the prompt. Without it, stdin is read only when no prompt is given. |
 | `--dry-run` | `false` | Print the assembled prompt and exit. No auth, no agent, no run. |
 | `--estimate` | `false` | Print token-count + cost estimate and exit. No run. |
 | `--markdown` | `false` | Force markdown ANSI styling. |
@@ -89,11 +91,12 @@ If `default-agent` isn't set and stdin is a TTY, the CLI opens a picker. After c
 ### Pipe stdin as the prompt
 
 ```bash
-git diff | crewship ask "review this change"
-cat issue.md | crewship ask "summarize"
+git diff | crewship ask --stdin "review this change"
+cat issue.md | crewship ask --stdin "summarize"
+echo "what changed in v2?" | crewship ask      # no prompt given: stdin is the prompt
 ```
 
-When stdin is a pipe and a positional prompt is also given, the positional becomes the *instruction* and stdin becomes the *context*.
+With no prompt argument, piped stdin is read to EOF and becomes the prompt. Once a prompt is given (positional or `--prompt`), stdin is **not** read unless you pass `--stdin`: then the positional is the *instruction* and stdin is appended as *context*. Without `--stdin` the CLI never touches stdin, so a harness, CI step or cron job whose stdin is a pipe nobody closes cannot hang it; when stdin is a pipe or a file it prints a one-line `[stdin not read …]` hint on stderr instead.
 
 ### Compose context flags
 
