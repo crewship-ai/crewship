@@ -3,7 +3,6 @@ package docker
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"testing"
 
@@ -75,22 +74,20 @@ func TestEnsureEgressFenceRefusesInapplicable(t *testing.T) {
 	}
 }
 
-// A caller that gives up must not take the crew down: only a real fence
-// failure stops the container (CodeRabbit on #2760).
-func TestFenceFailureStopsCrew(t *testing.T) {
-	for _, tc := range []struct {
-		err  error
-		stop bool
-	}{
-		{context.Canceled, false},
-		{context.DeadlineExceeded, false},
-		{fmt.Errorf("egress fence: inspect crew container: %w", context.Canceled), false},
-		{fmt.Errorf("egress fence: %w", errors.New("helper exited 1")), true},
-		{fmt.Errorf("%w: privileged", errFenceUnsupported), true},
-		{errFenceNotInPlace, true},
-	} {
-		if got := fenceFailureStopsCrew(tc.err); got != tc.stop {
-			t.Fatalf("fenceFailureStopsCrew(%v) = %v, want %v", tc.err, got, tc.stop)
+// A caller that gives up must not take the crew down, but the helper's own
+// timeout must (review of #2760: the decision is on the caller's context,
+// not on the error class).
+func TestStopUnfencedRespectsOnlyTheCallersContext(t *testing.T) {
+	p := &Provider{logger: slog.Default()} // nil client: a stop would panic
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	// Cancelled caller: returns without touching the client.
+	p.stopUnfenced(ctx, provider.CrewConfig{ID: "c"}, "cid", context.Canceled)
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a live caller with a fence failure must reach the stop")
 		}
-	}
+	}()
+	// Live caller, helper deadline: must stop (reaches the nil client).
+	p.stopUnfenced(context.Background(), provider.CrewConfig{ID: "c"}, "cid", context.DeadlineExceeded)
 }

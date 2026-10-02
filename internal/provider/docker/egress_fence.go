@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -86,6 +87,14 @@ func (p *Provider) ensureEgressFence(ctx context.Context, team provider.CrewConf
 	if !p.egressFenceWanted(team) {
 		return nil
 	}
+	return p.installEgressFence(ctx, team, containerID, image)
+}
+
+// installEgressFence installs the fence for team on containerID unless it is
+// already confirmed for the container's current start. It does not ask
+// whether the crew is on the list: the exec guard calls it for a container
+// this provider fenced before, whatever the list or labels say now.
+func (p *Provider) installEgressFence(ctx context.Context, team provider.CrewConfig, containerID, image string) error {
 	if err := p.egressFenceApplicable(team); err != nil {
 		return err
 	}
@@ -116,6 +125,7 @@ func (p *Provider) ensureEgressFence(ctx context.Context, team provider.CrewConf
 		return fmt.Errorf("egress fence: %w", err)
 	}
 	p.fenced.Store(containerID, startedAt)
+	p.fencedCrew.Store(containerID, team.ID)
 	p.fenceTeams.Store(team.ID, team)
 	p.logger.Info("egress fence installed",
 		"crew_id", team.ID,
@@ -131,7 +141,15 @@ func (p *Provider) runFenceHelper(ctx context.Context, team provider.CrewConfig,
 	if p.cfg.SidecarBinaryPath == "" {
 		return "", errors.New("no sidecar binary path configured; the helper runs the bind-mounted crewship-sidecar")
 	}
+	// A fixed name per crew container: a helper orphaned by a cancelled
+	// create (the daemon made it, the reply was lost) is removed here before
+	// the next one, instead of accumulating.
+	helperName := "crewship-fence-" + shortID(containerID)
+	if _, err := p.client.ContainerRemove(ctx, helperName, client.ContainerRemoveOptions{Force: true}); err != nil && !cerrdefs.IsNotFound(err) {
+		p.logger.Debug("stale fence helper not removed", "helper", helperName, "error", err)
+	}
 	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Name: helperName,
 		Config: &container.Config{
 			Image:      image,
 			User:       "0:0",
@@ -243,7 +261,7 @@ const (
 //
 // Free when the pilot list is empty: no inspect, no behaviour change.
 func (p *Provider) guardFencedExec(ctx context.Context, containerID string) (fencedExec, error) {
-	if len(p.cfg.EgressFenceCrews) == 0 {
+	if len(p.cfg.EgressFenceCrews) == 0 && !p.anyFenced() {
 		return fencedExec{}, nil
 	}
 	insp, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
@@ -255,7 +273,13 @@ func (p *Provider) guardFencedExec(ctx context.Context, containerID string) (fen
 		return fencedExec{}, nil
 	}
 	team := provider.CrewConfig{ID: c.Config.Labels[crewCrewIDLabel], Slug: c.Config.Labels[crewCrewLabel]}
-	if !p.egressFenceWanted(team) {
+	// Labels can be missing (pre-label containers) or stale (a renamed
+	// slug); a container this provider has ever fenced stays fenced by id.
+	if crewID, ok := p.fencedCrew.Load(c.ID); ok {
+		if known, ok := p.fenceTeams.Load(crewID); ok {
+			team = known.(provider.CrewConfig)
+		}
+	} else if !p.egressFenceWanted(team) {
 		return fencedExec{}, nil
 	}
 	// Callers pass a container id OR a name (the file-save path uses the
@@ -280,7 +304,7 @@ func (p *Provider) guardFencedExec(ctx context.Context, containerID string) (fen
 		if c.Config != nil {
 			image = c.Config.Image
 		}
-		if err := p.ensureEgressFence(ctx, known, id, image); err != nil {
+		if err := p.installEgressFence(ctx, known, id, image); err != nil {
 			p.stopUnfenced(ctx, known, id, err)
 			return fencedExec{}, err
 		}
@@ -318,14 +342,20 @@ func (p *Provider) fenceAfterStart(ctx context.Context, f fencedExec) error {
 		p.fenceTestHook(fenceStageAfterStart)
 	}
 	if err := p.fenceSameStart(ctx, f); err != nil {
-		p.stopUnfenced(ctx, f.team, f.containerID, err)
+		// The exec may already be running in an unconfirmed start: stop the
+		// crew whatever the reason, including a cancelled caller.
+		p.stopCrewContainer(ctx, f.team, f.containerID, err)
 		return err
 	}
 	return nil
 }
 
 func (p *Provider) fenceSameStart(ctx context.Context, f fencedExec) error {
-	insp, err := p.client.ContainerInspect(ctx, f.containerID, client.ContainerInspectOptions{})
+	// Not the caller's context: a caller that gives up between the exec
+	// starting and this check must not turn "could not check" into "fine".
+	checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	insp, err := p.client.ContainerInspect(checkCtx, f.containerID, client.ContainerInspectOptions{})
 	if err != nil {
 		return fmt.Errorf("egress fence: inspect around exec: %w", err)
 	}
@@ -349,15 +379,22 @@ func containerStartedAt(st *container.State) string {
 // asked for it, and running it unfenced would be the silent downgrade #1368
 // forbids.
 func (p *Provider) stopUnfenced(ctx context.Context, team provider.CrewConfig, containerID string, cause error) {
-	if !fenceFailureStopsCrew(cause) {
+	if ctx.Err() != nil {
 		// The caller's context ended (a cancelled run, a request deadline):
 		// nothing is known to be wrong with the fence, and stopping would kill
 		// every other run on the crew. Still closed: without a confirmed
-		// record for this start, guardFencedExec refuses every exec.
+		// record for this start, guardFencedExec refuses every exec. Decided
+		// on the caller's context, so the helper's own timeout still stops.
 		p.logger.Warn("egress fence check interrupted by the caller; crew left running, execs stay refused until confirmed",
 			"crew_id", team.ID, "container_id", shortID(containerID), "error", cause)
 		return
 	}
+	p.stopCrewContainer(ctx, team, containerID, cause)
+}
+
+// stopCrewContainer stops a crew container whose fence is not confirmed,
+// unconditionally.
+func (p *Provider) stopCrewContainer(ctx context.Context, team provider.CrewConfig, containerID string, cause error) {
 	p.logger.Error("crew requires the egress fence and it is not in place; stopping the crew container",
 		"crew_id", team.ID, "container_id", shortID(containerID), "error", cause)
 	p.fenced.Delete(containerID)
@@ -372,11 +409,24 @@ func (p *Provider) stopUnfenced(ctx context.Context, team provider.CrewConfig, c
 	}
 }
 
-// fenceFailureStopsCrew reports whether err means the fence is actually not
-// in place (helper failed or reported it absent, unsupported crew, a restart
-// raced an exec) rather than that the caller gave up.
-func fenceFailureStopsCrew(err error) bool {
-	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+// anyFenced reports whether this provider has fenced any container still
+// on record.
+func (p *Provider) anyFenced() bool {
+	has := false
+	p.fencedCrew.Range(func(_, _ any) bool { has = true; return false })
+	return has
+}
+
+// forgetFenced drops every record kept for a removed container.
+func (p *Provider) forgetFenced(containerID string) {
+	p.fenced.Range(func(k, _ any) bool {
+		if id := k.(string); id == containerID || strings.HasPrefix(id, containerID) {
+			p.fenced.Delete(k)
+			p.fenceLocks.Delete(k)
+			p.fencedCrew.Delete(k)
+		}
+		return true
+	})
 }
 
 func shortID(id string) string {

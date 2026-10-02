@@ -1657,6 +1657,16 @@ func (p *Provider) runPostStartCommands(ctx context.Context, containerID string,
 			AttachStdout: true,
 			AttachStderr: true,
 		}
+		// Same fence checks as Exec (#1368): a hook — /crew/init.sh is
+		// agent-writable — must not run in a start the fence was not
+		// confirmed for.
+		fence, err := p.guardFencedExec(runCtx, containerID)
+		if err != nil {
+			cancel()
+			p.logger.Warn("postStartCommand refused: egress fence not confirmed",
+				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
+			return
+		}
 		ex, err := p.client.ExecCreate(runCtx, containerID, execCfg)
 		if err != nil {
 			cancel()
@@ -1664,11 +1674,20 @@ func (p *Provider) runPostStartCommands(ctx context.Context, containerID string,
 				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
 			continue
 		}
+		if err := p.fenceBeforeStart(runCtx, fence); err != nil {
+			cancel()
+			p.logger.Warn("postStartCommand refused: container restarted", "container", provider.ShortID(containerID), "error", err)
+			return
+		}
 		if _, err := p.client.ExecStart(runCtx, ex.ID, client.ExecStartOptions{}); err != nil {
 			cancel()
 			p.logger.Warn("postStartCommand exec start failed",
 				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
 			continue
+		}
+		if err := p.fenceAfterStart(runCtx, fence); err != nil {
+			cancel()
+			return
 		}
 		// Poll exit code briefly; cap at ~60s total via runCtx timeout.
 		exitCode, stillRunning, ierr := p.waitExecExit(runCtx, ex.ID, 1200) // 1200 * 50ms = 60s
@@ -1740,6 +1759,7 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 
 // RemoveCrewRuntime forcefully removes a crew container.
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
+	p.forgetFenced(containerID)
 	if _, err := p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
 		return fmt.Errorf("remove crew runtime %s: %w", provider.ShortID(containerID), err)
 	}
