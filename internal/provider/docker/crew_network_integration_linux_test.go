@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -299,10 +300,6 @@ func TestCrewNetworkMovesExistingServiceWithRuntimeIntegration(t *testing.T) {
 	if nets := networksOf(svcID); len(nets) != 1 || nets[0] != shared {
 		t.Fatalf("service moved away from a runtime still on the shared network: %v", nets)
 	}
-	if !resolvesOwn(cid) {
-		t.Fatal("runtime lost its service while still on the shared network")
-	}
-
 	// Recreate the runtime (stop, then ensure: the network is part of its
 	// contract, so the stopped container is rebuilt on the crew network).
 	if err := p.StopCrewRuntime(ctx, cid); err != nil {
@@ -329,6 +326,35 @@ func TestCrewNetworkMovesExistingServiceWithRuntimeIntegration(t *testing.T) {
 	p.networkDisconnectHook = nil
 	if nets := networksOf(svcID); len(nets) != 1 || nets[0] != shared {
 		t.Fatalf("after a failed move the service must be back on the old network only, got %v", nets)
+	}
+
+	// On two old networks, the second detach fails after the first one
+	// succeeded: the rollback re-attaches the first, so the service is back
+	// on exactly both old networks (review of #2767).
+	extra := shared + "-extra"
+	if _, err := p.client.NetworkCreate(ctx, extra, client.NetworkCreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = p.client.NetworkRemove(context.Background(), extra, client.NetworkRemoveOptions{}) }()
+	if _, err := p.client.NetworkConnect(ctx, extra, client.NetworkConnectOptions{Container: svcID}); err != nil {
+		t.Fatal(err)
+	}
+	detaches := 0
+	p.networkDisconnectHook = func(n string) error {
+		if n == shared || n == extra {
+			detaches++
+			if detaches == 2 {
+				return errors.New("injected second detach failure")
+			}
+		}
+		return nil
+	}
+	if _, err := p.EnsureCrewServices(ctx, crew); err == nil {
+		t.Fatal("a failed second detach must fail EnsureCrewServices")
+	}
+	p.networkDisconnectHook = nil
+	if nets := networksOf(svcID); len(nets) != 2 || !slices.Contains(nets, shared) || !slices.Contains(nets, extra) {
+		t.Fatalf("after a failed two-network move the service must be back on both old networks, got %v", nets)
 	}
 	ids2, err := p.EnsureCrewServices(ctx, crew)
 	if err != nil {

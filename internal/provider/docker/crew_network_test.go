@@ -6,6 +6,8 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+
+	"github.com/moby/moby/api/types/network"
 )
 
 func TestCrewNetworkFor(t *testing.T) {
@@ -150,5 +152,59 @@ func TestEvictWarmContainer(t *testing.T) {
 	p.evictWarmContainer("abc123def456"[:12])
 	if _, ok := p.warmHit("crew-a"); ok {
 		t.Fatal("a short container id must evict too")
+	}
+}
+
+// First stage: crew networks only where crewshipd runs on the Docker host
+// itself. In the production compose file crewshipd is a container on the
+// internal instance network behind a socket proxy; it is not attached to
+// crew networks, so a listed crew could not reach it (review of #2767).
+// Refuse there instead of starting crews that cannot work.
+func TestCrewNetworkTopologySupported(t *testing.T) {
+	orig := runningInContainer
+	t.Cleanup(func() { runningInContainer = orig })
+	for _, tc := range []struct {
+		name      string
+		host      string
+		container bool
+		ok        bool
+	}{
+		{"native local socket", "unix:///var/run/docker.sock", false, true},
+		{"default host", "", false, true},
+		{"crewshipd in a container", "unix:///var/run/docker.sock", true, false},
+		{"socket proxy (production compose)", "tcp://docker-socket-proxy:2375", true, false},
+		{"remote daemon", "tcp://10.0.0.5:2376", false, false},
+	} {
+		runningInContainer = func() bool { return tc.container }
+		p := &Provider{detected: DetectResult{Host: tc.host}}
+		err := p.crewNetworkTopologySupported()
+		if (err == nil) != tc.ok {
+			t.Fatalf("%s: err=%v, want ok=%v", tc.name, err, tc.ok)
+		}
+		if err != nil && !errors.Is(err, errCrewNetworkUnsupported) {
+			t.Fatalf("%s: error must wrap errCrewNetworkUnsupported: %v", tc.name, err)
+		}
+	}
+}
+
+// A crew network copies Internal from the instance network; when that
+// network is not on the daemon there is nothing to copy, and guessing
+// "not internal" could make the crew network less isolated (review of #2767).
+func TestInstanceNetworkInternal(t *testing.T) {
+	nets := []network.Summary{
+		{Network: network.Network{Name: "inst", Internal: true}},
+		{Network: network.Network{Name: "other"}},
+	}
+	if internal, err := instanceNetworkInternal(nets, "inst"); err != nil || !internal {
+		t.Fatalf("got %v %v, want internal", internal, err)
+	}
+	if internal, err := instanceNetworkInternal(nets, "other"); err != nil || internal {
+		t.Fatalf("got %v %v, want not internal", internal, err)
+	}
+	if internal, err := instanceNetworkInternal(nets, ""); err != nil || internal {
+		t.Fatalf("no instance network (default bridge): got %v %v, want not internal", internal, err)
+	}
+	if _, err := instanceNetworkInternal(nets, "missing"); err == nil {
+		t.Fatal("a missing instance network must be an error")
 	}
 }

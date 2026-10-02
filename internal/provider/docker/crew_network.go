@@ -53,6 +53,9 @@ var crewNetworkAlloc sync.Mutex
 // overlapping a host route, or exhausted.
 var errCrewNetworkPool = errors.New("crew network pool unusable")
 
+// errCrewNetworkUnsupported: this deployment cannot run crew networks yet.
+var errCrewNetworkUnsupported = errors.New("crew networks unsupported here")
+
 // crewNetworkWanted reports whether the crew is on the per-crew network list.
 func (p *Provider) crewNetworkWanted(id, slug string) bool {
 	for _, c := range p.cfg.CrewNetworkCrews {
@@ -94,6 +97,9 @@ func (p *Provider) ensureCrewNetwork(ctx context.Context, id, slug string) (stri
 
 // ensureCrewNetworkNamed creates (or verifies) crew id's own network.
 func (p *Provider) ensureCrewNetworkNamed(ctx context.Context, id, slug string) (string, error) {
+	if err := p.crewNetworkTopologySupported(); err != nil {
+		return "", err
+	}
 	name := p.crewNetworkName(id)
 	crewNetworkAlloc.Lock()
 	defer crewNetworkAlloc.Unlock()
@@ -103,13 +109,10 @@ func (p *Provider) ensureCrewNetworkNamed(ctx context.Context, id, slug string) 
 		return "", fmt.Errorf("crew network: list networks: %w", err)
 	}
 	// A crew network is never less isolated than the instance network it
-	// replaces: when that one is internal (the production compose file
-	// makes it so), the crew network is internal too.
-	internal := false
-	for _, n := range nets.Items {
-		if n.Name == p.cfg.Network {
-			internal = n.Internal
-		}
+	// replaces: when that one is internal, the crew network is internal too.
+	internal, err := instanceNetworkInternal(nets.Items, p.cfg.Network)
+	if err != nil {
+		return "", err
 	}
 	var used []netip.Prefix
 	for _, n := range nets.Items {
@@ -348,20 +351,16 @@ func (p *Provider) moveServiceNetwork(ctx context.Context, containerID string, s
 		}
 		connected = true
 	}
+	var detached []string
 	for n := range attached {
 		if n == netName {
 			continue
 		}
 		if err := p.networkDisconnect(ctx, n, containerID); err != nil {
-			if connected {
-				// Back to where it was: on the old network only.
-				if rbErr := p.networkDisconnect(context.WithoutCancel(ctx), netName, containerID); rbErr != nil {
-					p.logger.Error("service network move rolled back incompletely; it is on both networks",
-						"service", alias, "old", n, "new", netName, "error", rbErr)
-				}
-			}
+			p.rollbackServiceMove(context.WithoutCancel(ctx), containerID, settings, alias, netName, connected, detached)
 			return fmt.Errorf("detach service %q from network %s: %w", alias, n, err)
 		}
+		detached = append(detached, n)
 	}
 	insp, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {
@@ -372,6 +371,31 @@ func (p *Provider) moveServiceNetwork(ctx context.Context, containerID string, s
 	}
 	p.logger.Info("service moved to the crew's network", "service", alias, "network", netName)
 	return nil
+}
+
+// rollbackServiceMove puts a service back where it was after a move failed
+// part-way: on every old network it was already detached from (with its old
+// aliases and address), and off the new one if this move attached it. What
+// cannot be restored is logged; the move's error is returned either way.
+func (p *Provider) rollbackServiceMove(ctx context.Context, containerID string, settings *container.NetworkSettingsSummary,
+	alias, netName string, connected bool, detached []string) {
+	for _, n := range detached {
+		ep := &network.EndpointSettings{Aliases: []string{alias}}
+		if settings != nil && settings.Networks[n] != nil {
+			old := settings.Networks[n]
+			ep = &network.EndpointSettings{Aliases: old.Aliases, IPAMConfig: old.IPAMConfig}
+		}
+		if _, err := p.client.NetworkConnect(ctx, n, client.NetworkConnectOptions{Container: containerID, EndpointConfig: ep}); err != nil {
+			p.logger.Error("service network move rolled back incompletely; not re-attached to its old network",
+				"service", alias, "old", n, "new", netName, "error", err)
+		}
+	}
+	if connected {
+		if err := p.networkDisconnect(ctx, netName, containerID); err != nil {
+			p.logger.Error("service network move rolled back incompletely; still on the new network",
+				"service", alias, "new", netName, "error", err)
+		}
+	}
 }
 
 // networkDisconnect is the one disconnect call; tests replace it through
@@ -419,4 +443,39 @@ var runningInContainer = func() bool {
 		}
 	}
 	return false
+}
+
+// crewNetworkTopologySupported refuses crew networks unless crewshipd runs on
+// the Docker host itself (first stage). A containerised crewshipd (the
+// production compose file: its own container on the internal instance
+// network, the daemon behind a socket proxy) is not attached to crew
+// networks, so a listed crew could not reach it; a remote daemon puts the
+// crews on another machine. Refusing fails the listed crew's start with a
+// reason instead of starting crews that cannot work.
+func (p *Provider) crewNetworkTopologySupported() error {
+	host := p.detected.Host
+	if host != "" && !strings.HasPrefix(host, "unix://") && !strings.HasPrefix(host, "npipe://") {
+		return fmt.Errorf("%w: the Docker daemon is not local (%s); crew networks need crewshipd on the Docker host", errCrewNetworkUnsupported, host)
+	}
+	if runningInContainer() {
+		return fmt.Errorf("%w: crewshipd runs in a container and is not attached to crew networks; crew networks need crewshipd on the Docker host", errCrewNetworkUnsupported)
+	}
+	return nil
+}
+
+// instanceNetworkInternal reports whether the instance network is internal.
+// A missing instance network is an error: there is nothing to copy the
+// isolation from, and "not internal" is not a safe guess.
+func instanceNetworkInternal(nets []network.Summary, name string) (bool, error) {
+	if name == "" {
+		// No instance network: crews run on Docker's default bridge,
+		// which is never internal.
+		return false, nil
+	}
+	for _, n := range nets {
+		if n.Name == name {
+			return n.Internal, nil
+		}
+	}
+	return false, fmt.Errorf("crew network: instance network %q not found; it must exist before a crew network is created", name)
 }

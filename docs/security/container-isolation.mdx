@@ -141,9 +141,13 @@ Containers are created with these security measures (`internal/provider/docker/d
   and its `services:` aliases (`postgres`, `redis`) resolve to its own
   containers. Crews talk to each other through the Crewship API, not over
   the network. A crew network is internal whenever the instance network is.
-  Port-expose only publishes containers of the requesting crew, and reaches
-  a crew network only when crewshipd runs on the Docker host itself (a
-  containerised crewshipd is not attached to crew networks).
+  Port-expose only publishes containers of the requesting crew. Crew
+  networks need crewshipd running on the Docker host itself, with a local
+  daemon: a containerised crewshipd (the production compose file) is not
+  attached to crew networks, so a listed crew there fails to start with
+  `crew networks unsupported here` instead of running unable to reach
+  Crewship. If the instance network does not exist, a crew network is
+  refused rather than created with weaker isolation.
 - **ExtraHosts:** `host.docker.internal:host-gateway` enables container-to-host communication
 - **Named volumes:** `crewship-home-{slug}-{crewID}` and `crewship-tools-{slug}-{crewID}` for persistent home and tools directories (namespaced by crew ID to prevent cross-tenant collisions)
 
