@@ -71,6 +71,11 @@ func TestEgressFenceIntegration(t *testing.T) {
 	}
 	defer p.Close()
 	defer func() { _, _ = p.client.NetworkRemove(context.Background(), network, client.NetworkRemoveOptions{}) }()
+	// CI runners start without alpine:3; the peer and sink below create
+	// containers from it before EnsureCrewRuntime would pull it.
+	if err := p.pullSidecarImage(ctx, "alpine:3"); err != nil {
+		t.Fatalf("pull alpine:3: %v", err)
+	}
 
 	// Peer listening on the crew network: reachable unless the fence holds.
 	peer, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
