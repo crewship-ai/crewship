@@ -219,6 +219,18 @@ func (p *Provider) setWarm(crewID, containerID string) {
 // dead id.
 func (p *Provider) evictWarm(crewID string) { p.warmCrew.Delete(crewID) }
 
+// evictWarmContainer drops any warm entry pointing at containerID. Stop and
+// remove know only the container: without this, an EnsureCrewRuntime inside
+// the warm TTL after a stop handed back the stopped container unchecked.
+func (p *Provider) evictWarmContainer(containerID string) {
+	p.warmCrew.Range(func(k, v any) bool {
+		if e, ok := v.(warmCrewEntry); ok && (e.id == containerID || strings.HasPrefix(e.id, containerID)) {
+			p.warmCrew.Delete(k)
+		}
+		return true
+	})
+}
+
 // lockForCrew returns the mutex for a given crew, creating it on first
 // use. Cheap: load from sync.Map first, only LoadOrStore if missing.
 func (p *Provider) lockForCrew(crewID string) *sync.Mutex {

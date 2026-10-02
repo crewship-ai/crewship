@@ -32,7 +32,7 @@ func TestQuotaVolumeOwnerFollowsImageUser(t *testing.T) {
 			catalog := &fakeQuotaCatalog{}
 			svc := quotaTestService()
 			p := newCovProvider(t, Config{QuotaCatalog: catalog}, daemon.ServeHTTP)
-			if _, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", &svc); err != nil {
+			if _, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc); err != nil {
 				t.Fatal(err)
 			}
 			if len(catalog.owners) != 1 || catalog.owners[0] != tc.want {
@@ -50,7 +50,7 @@ func TestQuotaServiceRefusesUnclassifiedImageVolumeBeforeAllocation(t *testing.T
 	catalog := &fakeQuotaCatalog{}
 	svc := quotaTestService()
 	p := newCovProvider(t, Config{QuotaCatalog: catalog}, daemon.ServeHTTP)
-	if _, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", &svc); !errors.Is(err, quota.ErrDenied) {
+	if _, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc); !errors.Is(err, quota.ErrDenied) {
 		t.Fatalf("unclassified image volume admitted: %v", err)
 	}
 	if len(catalog.owners) != 0 || daemon.mutatingCalls() != 0 {

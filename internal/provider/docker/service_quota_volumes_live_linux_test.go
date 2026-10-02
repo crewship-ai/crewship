@@ -48,7 +48,7 @@ func TestLivePersistentQuotaService(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	id, err := p.ensureSidecar(ctx, crew, "synthetic", &svc)
+	id, err := p.ensureSidecar(ctx, crew, "synthetic", p.crewNetworkFor(crew, "synthetic"), &svc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestLivePersistentQuotaService(t *testing.T) {
 	if err != nil || !strings.Contains(string(out), "physical-overflow-denied") {
 		t.Fatalf("physical service: %v %s", err, out)
 	}
-	same, err := p.ensureSidecar(ctx, crew, "synthetic", &svc)
+	same, err := p.ensureSidecar(ctx, crew, "synthetic", p.crewNetworkFor(crew, "synthetic"), &svc)
 	if err != nil || same != id {
 		t.Fatalf("idempotent audit: %s %v", same, err)
 	}
@@ -73,7 +73,7 @@ func TestLivePersistentQuotaService(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.cfg.QuotaCatalog = b
-	same, err = p.ensureSidecar(ctx, crew, "synthetic", &svc)
+	same, err = p.ensureSidecar(ctx, crew, "synthetic", p.crewNetworkFor(crew, "synthetic"), &svc)
 	if err != nil || same != id {
 		t.Fatalf("recovered service: %s %v", same, err)
 	}

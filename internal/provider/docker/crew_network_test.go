@@ -54,6 +54,7 @@ func TestCrewNetworkPool(t *testing.T) {
 	}{
 		{"", true}, {"10.231.0.0/16", true}, {"10.231.0.0/27", true},
 		{"10.231.0.0/28", false}, {"fd00::/64", false}, {"nonsense", false},
+		{"0.0.0.0/0", false}, {"10.0.0.0/8", false}, {"10.0.0.0/15", false},
 	} {
 		_, err := (&Provider{cfg: Config{CrewNetworkPool: tc.raw}}).crewNetworkPool()
 		if (err == nil) != tc.ok {
@@ -98,5 +99,50 @@ func TestForeignRouteInPool(t *testing.T) {
 	}
 	if r, bad := foreignRouteInPool(pool, []netip.Prefix{def, ours, lan}, []netip.Prefix{ours}); !bad || r != lan {
 		t.Fatalf("a foreign route inside the pool must be reported, got %v %v", r, bad)
+	}
+}
+
+// The route check only means something when this process sees the Docker
+// host's routing table (Codex review of #2767).
+func TestHostRoutesVisible(t *testing.T) {
+	orig := runningInContainer
+	t.Cleanup(func() { runningInContainer = orig })
+	for _, tc := range []struct {
+		host      string
+		container bool
+		want      bool
+	}{
+		{"unix:///var/run/docker.sock", false, true},
+		{"", false, true},
+		{"unix:///var/run/docker.sock", true, false},
+		{"tcp://10.0.0.5:2376", false, false},
+		{"ssh://docker@host", false, false},
+	} {
+		runningInContainer = func() bool { return tc.container }
+		p := &Provider{detected: DetectResult{Host: tc.host}}
+		if got := p.hostRoutesVisible(); got != tc.want {
+			t.Fatalf("host=%q container=%v: got %v, want %v", tc.host, tc.container, got, tc.want)
+		}
+	}
+}
+
+// Stopping or removing a container must drop its warm entry, or an ensure
+// within the warm TTL hands back the stopped container unchecked (found by
+// the #2767 migration test).
+func TestEvictWarmContainer(t *testing.T) {
+	p := &Provider{}
+	p.setWarm("crew-a", "abc123def456")
+	p.setWarm("crew-b", "zzz")
+	p.evictWarmContainer("abc123def456")
+	if _, ok := p.warmHit("crew-a"); ok {
+		t.Fatal("warm entry of the stopped container survived")
+	}
+	if _, ok := p.warmHit("crew-b"); !ok {
+		t.Fatal("another crew's warm entry was dropped")
+	}
+	p.setWarm("crew-a", "abc123def456")
+	p.evictWarmContainer("abc123def456"[:12])
+	if _, ok := p.warmHit("crew-a"); ok {
+		t.Fatal("a short container id must evict too")
 	}
 }

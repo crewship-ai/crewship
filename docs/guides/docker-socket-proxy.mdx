@@ -138,6 +138,8 @@ API puts exec *creation* under `/containers`, so `EXEC: 0` does not stop it.
 
 | SDK method | Engine API | Why we call it |
 | --- | --- | --- |
+| `NetworkConnect` | `POST /networks/{id}/connect` | Moves an existing crew service onto the crew's network without recreating it |
+| `NetworkDisconnect` | `POST /networks/{id}/disconnect` | Detaches a moved crew service from its previous network |
 | `NetworkCreate` | `POST /networks/create` | Creates the per-crew internal network |
 | `NetworkList` | `GET /networks` | Checks whether it already exists |
 | `NetworkRemove` | `DELETE /networks/{id}` | Removes the network of a deleted crew once its containers are gone |

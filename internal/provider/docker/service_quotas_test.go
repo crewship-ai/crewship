@@ -51,7 +51,7 @@ func TestServiceQuotaActualConfigurationDrift(t *testing.T) {
 			if field != "inspect_failure" {
 				daemon.hostConfigs["existing"] = hc
 			}
-			id, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", &svc)
+			id, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc)
 			if field == "inspect_failure" {
 				if err == nil || len(daemon.containerCreates) != 0 || len(daemon.stopped) != 0 || len(daemon.removed) != 0 {
 					t.Fatalf("inspect failure was reused or mutated: %v", err)
@@ -82,7 +82,7 @@ func TestServiceQuotaCreateBounds(t *testing.T) {
 	daemon.imageConfig = map[string]any{"Volumes": map[string]any{"/data": map[string]any{}}}
 	svc := quotaTestService()
 	p := newCovProvider(t, Config{QuotaCatalog: &fakeQuotaCatalog{}}, daemon.ServeHTTP)
-	if _, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", &svc); err != nil {
+	if _, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc); err != nil {
 		t.Fatal(err)
 	}
 	if len(daemon.containerCreates) != 1 {
