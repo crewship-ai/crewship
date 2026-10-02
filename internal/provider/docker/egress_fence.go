@@ -200,6 +200,8 @@ func (f fencedExec) active() bool { return f.containerID != "" }
 type fenceExecStage string
 
 const (
+	// fenceStageAfterGuard is between the guard and ExecCreate.
+	fenceStageAfterGuard  fenceExecStage = "after-guard"
 	fenceStageBeforeStart fenceExecStage = "before-start"
 	fenceStageAfterStart  fenceExecStage = "after-start"
 )
@@ -237,6 +239,9 @@ func (p *Provider) guardFencedExec(ctx context.Context, containerID string) (fen
 	}
 	startedAt := containerStartedAt(c.State)
 	if prev, ok := p.fenced.Load(containerID); ok && startedAt != "" && prev.(string) == startedAt {
+		if p.fenceTestHook != nil {
+			p.fenceTestHook(fenceStageAfterGuard)
+		}
 		return fencedExec{containerID: containerID, team: team, startedAt: startedAt}, nil
 	}
 	return fencedExec{}, fmt.Errorf("%w (crew %s, container %s); the next crew run re-installs it", errFenceNotInPlace, team.ID, shortID(containerID))

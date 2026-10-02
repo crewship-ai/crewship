@@ -180,7 +180,7 @@ func TestEgressFenceIntegration(t *testing.T) {
 	// Restart racing an exec, at each point between the guard and the
 	// process running. Deterministic: the hook restarts the container at
 	// exactly that stage, once.
-	for _, stage := range []fenceExecStage{fenceStageBeforeStart, fenceStageAfterStart} {
+	for _, stage := range []fenceExecStage{fenceStageAfterGuard, fenceStageBeforeStart, fenceStageAfterStart} {
 		t.Run(string(stage), func(t *testing.T) {
 			if _, err := p.EnsureCrewRuntime(ctx, team); err != nil {
 				t.Fatalf("EnsureCrewRuntime: %v", err)
@@ -206,7 +206,7 @@ func TestEgressFenceIntegration(t *testing.T) {
 				t.Fatalf("an exec raced by a restart must be refused, got %v", err)
 			}
 			switch stage {
-			case fenceStageBeforeStart:
+			case fenceStageAfterGuard, fenceStageBeforeStart:
 				// Refused before it ran: nothing executed in the new start.
 				if code := fenceTestExec(ctx, t, p, cid, "0", []string{"test", "-e", marker}); code == 0 {
 					t.Fatal("the raced exec ran in the unfenced start")
