@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -131,5 +132,22 @@ func TestCrewRuntimePrune_NilPrunerIs503(t *testing.T) {
 	h.Prune(rr, req)
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("nil pruner status = %d; want 503", rr.Code)
+	}
+	// No provider at all: runtimes from an earlier start may exist, so the
+	// caller must not treat this as nothing to do.
+	if !strings.Contains(rr.Body.String(), `"reason":"unavailable"`) {
+		t.Errorf("body = %s, want reason unavailable", rr.Body.String())
+	}
+}
+
+// A provider that cannot prune never made docker runtimes: "unsupported".
+func TestCrewRuntimePrune_ProviderWithoutPrunerIsUnsupported(t *testing.T) {
+	h, userID, wsID := runtimeRig(t, nil)
+	h.providerPresent = true
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/api/v1/admin/prune-crew-runtimes", nil), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Prune(rr, req)
+	if rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), `"reason":"unsupported"`) {
+		t.Errorf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }

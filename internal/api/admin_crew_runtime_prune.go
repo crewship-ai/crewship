@@ -26,10 +26,15 @@ type CrewRuntimeHandler struct {
 	// pruner is nil when the active container provider can't act on docker
 	// runtimes (e.g. a non-docker runtime); the endpoint then 503s.
 	pruner provider.CrewRuntimePruner
+	// providerPresent separates a provider that cannot prune (unsupported:
+	// it never made docker runtimes) from no provider at all (unavailable:
+	// runtimes from an earlier boot may still exist). Nuke may continue past
+	// the first and must stop on the second.
+	providerPresent bool
 }
 
-func NewCrewRuntimeHandler(db *sql.DB, logger *slog.Logger, pruner provider.CrewRuntimePruner) *CrewRuntimeHandler {
-	return &CrewRuntimeHandler{db: db, logger: logger, pruner: pruner}
+func NewCrewRuntimeHandler(db *sql.DB, logger *slog.Logger, pruner provider.CrewRuntimePruner, providerPresent ...bool) *CrewRuntimeHandler {
+	return &CrewRuntimeHandler{db: db, logger: logger, pruner: pruner, providerPresent: len(providerPresent) > 0 && providerPresent[0]}
 }
 
 type crewRuntimePruneResponse struct {
@@ -76,8 +81,13 @@ func (h *CrewRuntimeHandler) Prune(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.pruner == nil {
+		reason := "unavailable"
+		if h.providerPresent {
+			reason = "unsupported"
+		}
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"error": "crew runtime prune unavailable: docker not configured",
+			"error":  "crew runtime prune " + reason + ": no docker runtime provider",
+			"reason": reason,
 		})
 		return
 	}

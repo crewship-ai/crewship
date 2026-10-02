@@ -8,6 +8,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -37,12 +38,14 @@ import (
 // provider.CrewRuntimePruner.
 //
 // The daemon is enumerated ONCE (not per crew). Containers are removed before
-// volumes so docker won't refuse a still-attached volume. Per-resource removal
-// failures are logged and skipped (a volume still "in use" must not wedge the
-// rest); a transport failure listing the daemon is returned WITH whatever was
-// removed so far so the caller can surface the partial result.
+// volumes so docker won't refuse a still-attached volume. A per-resource
+// removal failure does not stop the rest (a volume still "in use" must not
+// wedge them), but it is returned: every failure is joined into the error
+// alongside whatever was removed, so a partial teardown is never reported as
+// a complete one.
 func (p *Provider) PruneCrewRuntimes(ctx context.Context, crews []provider.CrewRef) ([]string, error) {
 	removed := []string{}
+	var failed []error
 	if len(crews) == 0 {
 		return removed, nil
 	}
@@ -99,6 +102,7 @@ func (p *Provider) PruneCrewRuntimes(ctx context.Context, crews []provider.CrewR
 		}
 		if _, rmErr := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); rmErr != nil {
 			p.logger.Warn("crew runtime container remove failed", "container", name, "error", rmErr)
+			failed = append(failed, fmt.Errorf("remove container %s: %w", name, rmErr))
 		} else {
 			removed = append(removed, name)
 		}
@@ -106,7 +110,7 @@ func (p *Provider) PruneCrewRuntimes(ctx context.Context, crews []provider.CrewR
 
 	volList, err := p.client.VolumeList(ctx, volumeListOptions())
 	if err != nil {
-		return removed, fmt.Errorf("list volumes (crew runtime prune): %w", err)
+		return removed, errors.Join(append(failed, fmt.Errorf("list volumes (crew runtime prune): %w", err))...)
 	}
 	for _, vol := range volList.Items {
 		match := targetVolumes[vol.Name] ||
@@ -128,10 +132,11 @@ func (p *Provider) PruneCrewRuntimes(ctx context.Context, crews []provider.CrewR
 		}
 		if _, rmErr := p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); rmErr != nil {
 			p.logger.Warn("crew runtime volume remove failed", "volume", vol.Name, "error", rmErr)
+			failed = append(failed, fmt.Errorf("remove volume %s: %w", vol.Name, rmErr))
 		} else {
 			removed = append(removed, vol.Name)
 		}
 	}
 
-	return removed, nil
+	return removed, errors.Join(failed...)
 }
