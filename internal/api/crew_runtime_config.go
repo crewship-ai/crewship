@@ -249,8 +249,10 @@ func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID
 // EXCEPT for its sidecar services — the services_json column could not be
 // decoded. It is a partial success, not a failure: callers get a usable config
 // alongside it and are expected to start the crew without its sidecars, which
-// is what the chat path has always done with the same column.
-var ErrCrewServicesUnresolved = errors.New("crew sidecar services unresolved")
+// is what the chat path has always done with the same column. It is a
+// crewstart.PartialConfigError so a start after the image gate still proceeds
+// on it, while any other completion failure refuses that start.
+var ErrCrewServicesUnresolved error = crewstart.PartialConfigError("crew sidecar services unresolved")
 
 // CrewConfigCompleter is the DB-backed crewstart.Completer: it answers "what
 // does this crew's container actually look like?" for the callers that hold

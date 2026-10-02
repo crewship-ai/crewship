@@ -3,6 +3,7 @@ package crewstart
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -134,5 +135,56 @@ func TestStartRefusesTheCallersStaleImageWhenTheCompleterFailsAfterTheGate(t *te
 	}
 	if len(f.calls) != 0 {
 		t.Errorf("runtime started from the stale image: %v", f.calls)
+	}
+}
+
+func TestStartRefusesAnUnverifiedConfigAfterTheGateEvenWithoutACallerImage(t *testing.T) {
+	// Without a tag of its own the caller would start the default runtime
+	// image — still not the image the gate just verified.
+	f := &fakeRuntime{}
+	setGate(t, func(context.Context, string) error { return nil })
+	readErr := errors.New("database is locked")
+	completer := CompleterFunc(func(context.Context, provider.CrewConfig) (provider.CrewConfig, error) {
+		return provider.CrewConfig{}, readErr
+	})
+	_, err := New(f, completer, nil).Start(context.Background(), provider.CrewConfig{ID: "c", Slug: "s"})
+	if !errors.Is(err, ErrImageNotReady) || !errors.Is(err, readErr) {
+		t.Fatalf("err = %v, want ErrImageNotReady wrapping the completer error", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("runtime started from an unverified config: %v", f.calls)
+	}
+}
+
+func TestStartAfterTheGateKeepsAPartialCompletionWithItsImage(t *testing.T) {
+	// Undecodable services leave the image, mounts and limits valid: the
+	// crew starts from them, without the services.
+	f := &fakeRuntime{}
+	setGate(t, func(context.Context, string) error { return nil })
+	completer := CompleterFunc(func(_ context.Context, c provider.CrewConfig) (provider.CrewConfig, error) {
+		return provider.CrewConfig{ID: c.ID, Slug: "s", CachedImage: "crewship-cache:new"},
+			fmt.Errorf("%w: decode services_json", PartialConfigError("crew sidecar services unresolved"))
+	})
+	if _, err := New(f, completer, nil).Start(context.Background(), provider.CrewConfig{ID: "c", CachedImage: "crewship-cache:old"}); err != nil {
+		t.Fatalf("a partial completion must not fail the start: %v", err)
+	}
+	if f.runtimeCfg.CachedImage != "crewship-cache:new" {
+		t.Errorf("runtime started from %q, want crewship-cache:new", f.runtimeCfg.CachedImage)
+	}
+}
+
+func TestStartAfterTheGateStartsACrewThatNeedsNoImage(t *testing.T) {
+	// A crew that needs no build and was never provisioned has no cached
+	// image; the completer says so successfully and the default image is right.
+	f := &fakeRuntime{}
+	setGate(t, func(context.Context, string) error { return nil })
+	completer := CompleterFunc(func(_ context.Context, c provider.CrewConfig) (provider.CrewConfig, error) {
+		return provider.CrewConfig{ID: c.ID, Slug: "s"}, nil
+	})
+	if _, err := New(f, completer, nil).Start(context.Background(), provider.CrewConfig{ID: "c"}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if f.runtimeCfg.CachedImage != "" {
+		t.Errorf("CachedImage = %q, want empty (default image)", f.runtimeCfg.CachedImage)
 	}
 }

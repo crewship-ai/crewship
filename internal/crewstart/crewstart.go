@@ -182,24 +182,26 @@ func (s *Starter) StartResolved(ctx context.Context, cfg provider.CrewConfig, no
 	}
 
 	// Before complete: a rebuild rewrites crews.cached_image, which complete
-	// then reads. A caller that resolved its config before Start (the
-	// pipeline) holds the tag from before the rebuild, so once the gate has
-	// run only the completer's tag is trusted: when it cannot supply one,
-	// the caller's unverified tag is refused rather than started.
+	// then reads. Once the gate has run, the completer's answer is the only
+	// trusted image: a caller that resolved its config before Start (the
+	// pipeline) holds the tag from before the rebuild, and a caller without
+	// one would fall back to the default image. So the caller's tag is
+	// dropped, and a completion that failed outright refuses the start; only a
+	// partial one (ErrPartialConfig: the image resolved, the services did not)
+	// still starts.
 	gated, err := waitForImage(ctx, cfg.ID)
 	if err != nil {
 		return "", cfg, err
 	}
-	callerImage := cfg.CachedImage
 	reresolve := gated && s.completer != nil
 	if reresolve {
 		cfg.CachedImage = ""
 	}
 
-	cfg = s.complete(ctx, cfg, notify)
-	if reresolve && cfg.CachedImage == "" && callerImage != "" {
-		return "", cfg, fmt.Errorf("%w: the current image of crew %s could not be read after the image check",
-			ErrImageNotReady, cfg.ID)
+	cfg, err = s.complete(ctx, cfg, notify)
+	if reresolve && err != nil && !errors.Is(err, ErrPartialConfig) {
+		return "", cfg, fmt.Errorf("%w: crew %s config could not be read after the image check: %w",
+			ErrImageNotReady, cfg.ID, err)
 	}
 	if policy, ok := s.completer.(interface {
 		FilterServices(context.Context, provider.CrewConfig) (provider.CrewConfig, error)
@@ -246,9 +248,10 @@ func (s *Starter) StartResolved(ctx context.Context, cfg provider.CrewConfig, no
 }
 
 // complete asks the Completer for the crew's full config and merges it under
-// the caller's. A completion failure is logged and the crew still starts,
-// exactly as it did before this package existed, rather than a DB hiccup taking
-// down every start path at once.
+// the caller's. Without the image gate a completion failure is logged and the
+// crew still starts, exactly as it did before this package existed, rather
+// than a DB hiccup taking down every start path at once. The error is returned
+// so StartResolved can refuse once the gate has run (see there).
 //
 // The merge happens EVEN ON ERROR, and that is load-bearing. A completer is
 // allowed to answer partially — internal/api returns the crew's full config
@@ -258,9 +261,9 @@ func (s *Starter) StartResolved(ctx context.Context, cfg provider.CrewConfig, no
 // the default runtime image. mergeConfig only ever fills fields the caller left
 // empty, so a completer that genuinely failed returns its zero value and
 // contributes nothing.
-func (s *Starter) complete(ctx context.Context, cfg provider.CrewConfig, notify func(Notice)) provider.CrewConfig {
+func (s *Starter) complete(ctx context.Context, cfg provider.CrewConfig, notify func(Notice)) (provider.CrewConfig, error) {
 	if s.completer == nil {
-		return cfg
+		return cfg, nil
 	}
 	resolved, err := s.completer.CompleteCrewConfig(ctx, cfg)
 	if err != nil {
@@ -276,7 +279,7 @@ func (s *Starter) complete(ctx context.Context, cfg provider.CrewConfig, notify 
 			})
 		}
 	}
-	return mergeConfig(cfg, resolved)
+	return mergeConfig(cfg, resolved), err
 }
 
 func emit(notify func(Notice), n Notice) {

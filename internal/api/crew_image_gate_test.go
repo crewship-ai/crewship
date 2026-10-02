@@ -2,9 +2,13 @@ package api
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/crewstart"
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // EnsureCrewImage is the gate crewstart consults on every crew start
@@ -91,5 +95,26 @@ func TestEnsureCrewImageIsANoOpWithoutProvisioning(t *testing.T) {
 	var h *ProvisioningHandler
 	if err := h.EnsureCrewImage(context.Background(), "x"); err != nil {
 		t.Fatalf("nil handler: %v", err)
+	}
+}
+
+// After the image gate, crewstart refuses any completer error that is not
+// marked partial. An undecodable services column must stay partial, or every
+// crew with a broken services_json would stop starting at all.
+func TestCompleterMarksUnresolvedServicesAsAPartialConfig(t *testing.T) {
+	h := newTestProvisioningHandler(t)
+	userID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, userID)
+	crewID := seedCrewRow(t, h.db, "crew-gate-partial", wsID, "P", "gate-partial")
+	if _, err := h.db.Exec(`UPDATE crews SET cached_image = ?, services_json = ? WHERE id = ?`,
+		"crewship-cache:partial", `[{"name":`, crewID); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := NewCrewConfigCompleter(h.db).CompleteCrewConfig(context.Background(), provider.CrewConfig{ID: crewID})
+	if !errors.Is(err, ErrCrewServicesUnresolved) || !errors.Is(err, crewstart.ErrPartialConfig) {
+		t.Fatalf("err = %v, want ErrCrewServicesUnresolved marked crewstart.ErrPartialConfig", err)
+	}
+	if resolved.CachedImage != "crewship-cache:partial" {
+		t.Errorf("CachedImage = %q, want the resolved image alongside the partial error", resolved.CachedImage)
 	}
 }
