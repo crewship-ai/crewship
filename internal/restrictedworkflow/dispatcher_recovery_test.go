@@ -43,7 +43,10 @@ func TestWorkflowDispatcherRecoversAfterInitialRecoveryFailure(t *testing.T) {
 		t.Fatalf("failed recovery claimed private work: %+v %v", item, err)
 	}
 	close(allowDispatch)
-	deadline := time.NewTimer(10 * time.Second)
+	// A bounded liveness check, not a latency benchmark: the same 30 s budget
+	// as the package's other dispatch waits. Race builds share the host with
+	// the full backend suite; 10 s failed CI with the work still running.
+	deadline := time.NewTimer(30 * time.Second)
 	defer deadline.Stop()
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
