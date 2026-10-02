@@ -51,23 +51,73 @@ func TestNukeRuntimes_HitsPrunePost(t *testing.T) {
 	defer s.Close()
 	s.OnPost("/api/v1/admin/prune-crew-runtimes", clitest.JSONResponse(200, map[string]any{"removed": []string{}, "count": 0}))
 
-	if err := nukeRuntimes(context.Background(), covStubClient(s)); err != nil {
-		t.Fatalf("nukeRuntimes: %v", err)
+	if outcome, err := nukeRuntimes(context.Background(), covStubClient(s)); err != nil || outcome != runtimeTeardownDone {
+		t.Fatalf("nukeRuntimes: %v %v", outcome, err)
 	}
 	if n := len(s.CallsFor("POST", "/api/v1/admin/prune-crew-runtimes")); n != 1 {
 		t.Fatalf("POST prune calls = %d; want 1", n)
 	}
 }
 
-// A docker-less server answers 503; nukeRuntimes must treat it as a no-op, not
-// an error (nuke has to work on a box without docker).
-func TestNukeRuntimes_503IsTolerated(t *testing.T) {
-	s := clitest.NewStubServer()
-	defer s.Close()
-	s.OnPost("/api/v1/admin/prune-crew-runtimes", clitest.ErrorResponse(503, "docker not configured"))
+// A20: nuke reports success only when it can vouch for the teardown. No
+// runtime provider (docker may have failed at boot, its runtimes still on the
+// daemon) and a partial teardown are errors; only a provider that never runs
+// docker runtimes is passed over, explicitly.
+func TestNukeRuntimes_OnlyUnsupportedIsPassedOver(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status  int
+		body    map[string]any
+		wantErr bool
+		want    runtimeTeardown
+	}{
+		"unavailable":        {503, map[string]any{"error": "no provider", "reason": "unavailable"}, true, ""},
+		"503 without reason": {503, map[string]any{"error": "docker not configured"}, true, ""},
+		"unsupported":        {503, map[string]any{"error": "apple", "reason": "unsupported"}, false, runtimeTeardownUnsupported},
+		"partial teardown":   {500, map[string]any{"error": "crew runtime prune failed", "removed": []string{"a"}, "count": 1}, true, ""},
+		"complete teardown":  {200, map[string]any{"removed": []string{"a", "b"}, "count": 2}, false, runtimeTeardownDone},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := clitest.NewStubServer()
+			defer s.Close()
+			s.OnPost("/api/v1/admin/prune-crew-runtimes", clitest.JSONResponse(tc.status, tc.body))
+			outcome, err := nukeRuntimes(context.Background(), covStubClient(s))
+			if (err != nil) != tc.wantErr || outcome != tc.want {
+				t.Fatalf("outcome=%q err=%v", outcome, err)
+			}
+		})
+	}
+}
 
-	if err := nukeRuntimes(context.Background(), covStubClient(s)); err != nil {
-		t.Errorf("503 must be tolerated, got %v", err)
+// A20: when the runtime teardown fails, nuke stops before anything else:
+// no escalation, inbox or crew is deleted, so the crews that locate the
+// runtimes stay for a retry, and the command exits non-zero.
+func TestNukeAll_StopsBeforeDeletingWhenRuntimesFail(t *testing.T) {
+	for name, resp := range map[string]struct {
+		status int
+		body   map[string]any
+	}{
+		"unavailable": {503, map[string]any{"reason": "unavailable"}},
+		"partial":     {500, map[string]any{"removed": []string{"x"}, "count": 1}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := clitest.NewStubServer()
+			defer s.Close()
+			covRegisterEmptyNukeStubs(s)
+			s.OnGet("/api/v1/crews", clitest.JSONResponse(200, []map[string]string{{"id": "c1"}}))
+			s.OnDelete("/api/v1/crews/c1", clitest.JSONResponse(200, map[string]bool{"success": true}))
+			s.OnDelete("/api/v1/crews/c1/escalations", clitest.JSONResponse(200, map[string]int{"deleted": 0}))
+			s.OnPost("/api/v1/admin/prune-crew-runtimes", clitest.JSONResponse(resp.status, resp.body))
+
+			err := nukeAll(context.Background(), covStubClient(s))
+			if err == nil || !strings.Contains(err.Error(), "crews are kept") {
+				t.Fatalf("nukeAll err = %v, want a failure that keeps the crews", err)
+			}
+			for _, call := range [][2]string{{"DELETE", "/api/v1/crews/c1"}, {"DELETE", "/api/v1/crews/c1/escalations"}, {"DELETE", "/api/v1/inbox"}} {
+				if n := len(s.CallsFor(call[0], call[1])); n != 0 {
+					t.Errorf("%s %s called %d times after a failed runtime teardown", call[0], call[1], n)
+				}
+			}
+		})
 	}
 }
 
