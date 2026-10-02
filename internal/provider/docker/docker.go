@@ -97,6 +97,8 @@ type Provider struct {
 	// provider did not perform (the orchestrator reuses a cached container id
 	// and does not always pass through EnsureCrewRuntime).
 	fenceTeams sync.Map
+	// fenceLocks serialises fence installs per container id.
+	fenceLocks sync.Map
 	// fenceTestHook, when set, runs at each fenceExecStage. Tests only.
 	fenceTestHook func(fenceExecStage)
 

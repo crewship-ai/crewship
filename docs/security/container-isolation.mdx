@@ -401,7 +401,8 @@ For notify and hooks the boundary is keyed on the crew that **authored** the rou
   *pointed at*, which means the proxy environment is itself the security
   control. Code that deliberately ignores it (`curl --noproxy '*'`, a raw
   socket, a non-cooperating binary) still reaches the network, because there is
-  no network-layer fence yet
+  no network-layer fence for the crew unless it is on the
+  [egress fence pilot](#network-layer-egress-fence-pilot)
   ([#1368](https://github.com/crewship-ai/crewship/issues/1368)). Treat these
   rows as "a well-behaved tool obeys the allowlist", and the four server-side
   rows as the ones that hold against hostile code.

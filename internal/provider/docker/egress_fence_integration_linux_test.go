@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -253,6 +254,48 @@ func TestEgressFenceIntegration(t *testing.T) {
 	if code := fenceTestNetnsRun(ctx, t, p, cid, "alpine:3", sidecarPath, "--fence-check", "--fence-allow-uids", "1002"); code != 0 {
 		t.Fatalf("--fence-check on an intact fence exited %d, want 0", code)
 	}
+	// Two helpers applying at once leave exactly one valid fence, not two
+	// rule sets appended to one chain (CodeRabbit on #2760).
+	var wg sync.WaitGroup
+	codes := make([]int64, 2)
+	for i := range codes {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			codes[i] = fenceTestNetnsRun(ctx, t, p, cid, "alpine:3", sidecarPath, "--fence-apply", "--fence-allow-uids", "1002")
+		}(i)
+	}
+	wg.Wait()
+	if codes[0] != 0 || codes[1] != 0 {
+		t.Fatalf("concurrent applies exited %v, want both 0 (one valid fence)", codes)
+	}
+	if code := fenceTestNetnsRun(ctx, t, p, cid, "alpine:3", sidecarPath, "--fence-check", "--fence-allow-uids", "1002"); code != 0 {
+		t.Fatalf("--fence-check after concurrent applies exited %d, want 0", code)
+	}
+
+	// Concurrent execs after an outside restart: one install, none of them
+	// runs unfenced, and the crew is not stopped.
+	if _, err := p.client.ContainerRestart(ctx, cid, client.ContainerRestartOptions{}); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	execCodes := make([]int, 4)
+	for i := range execCodes {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			execCodes[i] = fenceTestProviderExec(ctx, t, p, cid, "1001:1001", probe)
+		}(i)
+	}
+	wg.Wait()
+	for i, c := range execCodes {
+		if c == 0 {
+			t.Fatalf("concurrent exec %d reached the peer: ran unfenced", i)
+		}
+	}
+	if insp, err := p.client.ContainerInspect(ctx, cid, client.ContainerInspectOptions{}); err != nil || !insp.Container.State.Running {
+		t.Fatalf("concurrent re-fencing stopped the crew: err=%v", err)
+	}
+
 	if code := fenceTestNetnsRun(ctx, t, p, cid, "alpine:3", tamperPath); code != 0 {
 		t.Fatalf("fencetamper exited %d", code)
 	}

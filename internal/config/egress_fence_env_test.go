@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"reflect"
 	"testing"
 )
@@ -19,8 +20,13 @@ func TestEgressFenceCrewsEnv(t *testing.T) {
 		{"empty clears", true, "", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.set {
-				t.Setenv("CREWSHIP_EGRESS_FENCE_CREWS", tc.val)
+			// Setenv registers the restore; the unset case then removes the
+			// variable so an outer environment cannot leak into it.
+			t.Setenv("CREWSHIP_EGRESS_FENCE_CREWS", tc.val)
+			if !tc.set {
+				if err := os.Unsetenv("CREWSHIP_EGRESS_FENCE_CREWS"); err != nil {
+					t.Fatal(err)
+				}
 			}
 			cfg := &Config{}
 			applyEnvOverrides(cfg)
