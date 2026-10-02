@@ -99,7 +99,18 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("PATCH", "/api/v1/crews/{crewId}/missions/{missionId}", "RemainingCrewMissionUpdatedV1", object(map[string]any{"id": str(), "title": str(), "description": str(), "status": str(), "tasks": array(anyObject()), "created_at": str(), "updated_at": str()}))
 	add("PUT", "/api/v1/crews/{crewId}/persona", "RemainingCrewPersonaUpdatedV1", ref("CrewPersonaResponseV1"))
 	add("PUT", "/api/v1/crews/{crewId}/policy", "RemainingCrewPolicyUpdatedV1", ref("CrewPolicyResponseV1"))
-	add("GET", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionStatusV1", object(map[string]any{"crew_id": str(), "status": str(), "phase": str(), "message": str(), "updated_at": str()}))
+	tool := object(map[string]any{"binary": str(), "version": str(), "path": str(), "status": str()})
+	tool["required"] = []string{"binary", "status"}
+	inventory := object(map[string]any{"schema_version": integer(), "status": str(), "image_id": str(), "tools": array(tool)})
+	inventory["nullable"] = true
+	inventory["required"] = []string{"schema_version", "status", "tools"}
+	requestedTool := object(map[string]any{"adapter": str(), "binary": str(), "source": str(), "selector": str(), "exact": boolean()})
+	requestedTool["required"] = []string{"adapter", "binary", "source", "exact"}
+	requestedTools := array(requestedTool)
+	requestedTools["nullable"] = true
+	toolchain := object(map[string]any{"requested": requestedTools, "built": inventory})
+	toolchain["required"] = []string{"requested", "built"}
+	add("GET", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionStatusV1", object(map[string]any{"crew_id": str(), "status": str(), "phase": str(), "message": str(), "updated_at": str(), "toolchain": toolchain}))
 	addAction("POST", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionTriggeredV1")
 	addAction("POST", "/api/v1/crews/{crewId}/rebuild", "RemainingCrewRebuildTriggeredV1")
 	addAction("POST", "/api/v1/crews/{crewId}/restart-agents", "RemainingCrewAgentsRestartedV1")

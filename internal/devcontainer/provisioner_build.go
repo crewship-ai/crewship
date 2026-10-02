@@ -205,6 +205,7 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	// no-op, where the Docker path returns at once (#1779).
 	if prober, ok := p.builder.(ImageProber); ok && !o.forceRebuild {
 		if exists, probeErr := prober.ImageExists(ctx, tag); probeErr == nil && exists {
+			requirements.Toolchain = p.inspectToolchain(ctx, tag, o.requiredBinaries)
 			p.logger.Info("using cached image", "tag", tag)
 			emitEvt(ProvisionEvent{Step: ProvStepCacheHit, Status: ProvStatusCompleted, Tag: tag})
 			emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
@@ -324,6 +325,7 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 		}
 	}
 
+	requirements.Toolchain = p.inspectToolchain(ctx, tag, o.requiredBinaries)
 	p.logger.Info("provisioned image by build",
 		"tag", tag,
 		"features", len(resolvedFeatures),
@@ -372,6 +374,9 @@ func (p *Provisioner) recordProvisionSteps(
 	}
 	if err := p.writeAggregatedContainerEnv(ctx, noContainer, containerEnv, rec.exec); err != nil {
 		return fmt.Errorf("containerEnv: %w", err)
+	}
+	if err := writeToolchainInventory(ctx, noContainer, requiredBinaries, containerEnv, rec.exec); err != nil {
+		return err
 	}
 	if err := p.cleanupCaches(ctx, noContainer, rec.exec); err != nil {
 		return fmt.Errorf("cache cleanup: %w", err)

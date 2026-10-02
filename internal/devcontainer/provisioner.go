@@ -331,7 +331,8 @@ type AggregatedRequirements struct {
 	// AdapterBinaries are the adapter CLIs this image was verified to run
 	// (sorted). The agent handlers compare a new agent's adapter against it
 	// to decide whether the crew must be rebuilt.
-	AdapterBinaries []string `json:"adapterBinaries,omitempty"`
+	AdapterBinaries []string            `json:"adapterBinaries,omitempty"`
+	Toolchain       *ToolchainInventory `json:"toolchain,omitempty"`
 }
 
 // aggregateFeatureRequirements merges runtime requirements across features.
@@ -499,6 +500,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		// silently dropped the privileged flag, the mounts, the env and the
 		// verified adapter CLIs of the build before it.
 		req, feats := p.cacheHitRequirements(ctx, cfg, o)
+		req.Toolchain = p.inspectToolchain(ctx, tag, o.requiredBinaries)
 		return &ProvisionResult{CachedImage: tag, ConfigHash: hash, Requirements: req, Features: feats}, nil
 	}
 
@@ -697,6 +699,10 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// prepending the well-known dirs, so this can never break provisioning.
 	requirements.LoginPath = p.captureLoginPath(ctx, containerID)
 
+	if err := writeToolchainInventory(ctx, containerID, o.requiredBinaries, requirements.ContainerEnv, p.installer.execInContainerAsUser); err != nil {
+		return fail("toolchain_inventory", err)
+	}
+
 	// 8. Clean up caches inside the container.
 	if err := p.cleanupCaches(ctx, containerID, p.installer.execInContainerAsUser); err != nil {
 		p.logger.Warn("cache cleanup failed", "error", err)
@@ -710,7 +716,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// `${containerEnv:X}` references are expanded against the base image's
 	// env here — a committed ENV line is applied to the image config as-is,
 	// with no build-time substitution the way a Dockerfile ENV gets.
-	_, commitErr := p.docker.ContainerCommit(ctx, containerID, client.ContainerCommitOptions{
+	committed, commitErr := p.docker.ContainerCommit(ctx, containerID, client.ContainerCommitOptions{
 		Reference: tag,
 		Changes:   imageEnvChanges(requirements.ContainerEnv, p.containerEnvSnapshot(ctx, containerID)),
 	})
@@ -720,6 +726,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// New crewship-cache:* tag is now present locally — drop cached list.
 	p.invalidateImageListCache()
 
+	requirements.Toolchain = p.inspectToolchain(ctx, committed.ID, o.requiredBinaries)
 	p.logger.Info("provisioned cached image",
 		"tag", tag,
 		"privileged", requirements.Privileged,

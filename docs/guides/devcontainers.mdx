@@ -202,6 +202,16 @@ The agent runs through a non-login `docker exec`, which does not read `/etc/prof
 
 ### Adapter CLIs are installed and verified
 
+Provisioning also records the required agent CLIs' observed versions and paths
+inside the image. `crewship crew provision status <slug>` shows the built
+versions; JSON output separates `toolchain.requested` selectors from
+`toolchain.built` evidence and its immutable image ID. An old image, an
+unsupported version response, or an unavailable inspector is reported as unknown.
+This describes the built image, not a running agent's writable files or a
+compatibility qualification for a particular model/account. Native Apple
+Containers currently bakes the inventory but cannot read it back through this
+inspector; Docker-backed installations can.
+
 Crewship disables Claude Code's background updater with `DISABLE_AUTOUPDATER=1`
 and Codex's startup update check with `check_for_update_on_startup=false`.
 Updates belong to environment provisioning. These settings do not prevent an

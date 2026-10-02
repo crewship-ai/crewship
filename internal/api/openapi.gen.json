@@ -10429,6 +10429,89 @@
           "status": {
             "type": "string"
           },
+          "toolchain": {
+            "properties": {
+              "built": {
+                "nullable": true,
+                "properties": {
+                  "image_id": {
+                    "type": "string"
+                  },
+                  "schema_version": {
+                    "type": "integer"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "tools": {
+                    "items": {
+                      "properties": {
+                        "binary": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "binary",
+                        "status"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "status",
+                  "tools"
+                ],
+                "type": "object"
+              },
+              "requested": {
+                "items": {
+                  "properties": {
+                    "adapter": {
+                      "type": "string"
+                    },
+                    "binary": {
+                      "type": "string"
+                    },
+                    "exact": {
+                      "type": "boolean"
+                    },
+                    "selector": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "adapter",
+                    "binary",
+                    "source",
+                    "exact"
+                  ],
+                  "type": "object"
+                },
+                "nullable": true,
+                "type": "array"
+              }
+            },
+            "required": [
+              "requested",
+              "built"
+            ],
+            "type": "object"
+          },
           "updated_at": {
             "type": "string"
           }

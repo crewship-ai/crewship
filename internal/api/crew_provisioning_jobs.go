@@ -205,12 +205,12 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var devcontainerConfig, cachedImage, cfgHash, slug, resolvedFeatures sql.NullString
+	var devcontainerConfig, cachedImage, cfgHash, slug, resolvedFeatures, miseConfig, requirementsJSON sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT devcontainer_config, cached_image, config_hash, slug, resolved_features
+		`SELECT devcontainer_config, cached_image, config_hash, slug, resolved_features, mise_config, cached_requirements
 		 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		crewID, workspaceID,
-	).Scan(&devcontainerConfig, &cachedImage, &cfgHash, &slug, &resolvedFeatures)
+	).Scan(&devcontainerConfig, &cachedImage, &cfgHash, &slug, &resolvedFeatures, &miseConfig, &requirementsJSON)
 
 	if err == sql.ErrNoRows {
 		replyError(w, http.StatusNotFound, "crew not found")
@@ -241,6 +241,24 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 		"cached_image":                  nullStringPtr(cachedImage),
 		"config_hash":                   nullStringPtr(cfgHash),
 	}
+
+	// Report desired selectors separately from evidence belonging to a built
+	// image. Old requirements retained during rebuild are not the new artifact.
+	var built *devcontainer.ToolchainInventory
+	if cachedImage.Valid && cachedImage.String != "" && requirementsJSON.Valid {
+		var requirements devcontainer.AggregatedRequirements
+		if json.Unmarshal([]byte(requirementsJSON.String), &requirements) == nil {
+			built = requirements.Toolchain
+		}
+	}
+	var requested []devcontainer.ToolchainRequest
+	effective := database.EffectiveCrewDevcontainerConfig(devcontainerConfig.String, devcontainerConfig.Valid)
+	if cfg, err := devcontainer.ParseBytes([]byte(effective)); err == nil {
+		if adapters, err := crewAgentAdapters(r.Context(), h.db, crewID); err == nil {
+			requested, _ = devcontainer.RequestedToolchain(cfg, miseConfig.String, adapters)
+		}
+	}
+	resp["toolchain"] = map[string]any{"requested": requested, "built": built}
 
 	// What the image is actually made of. Null (rather than []) when the crew
 	// was provisioned before provenance was recorded — "we do not know" and
@@ -1421,6 +1439,7 @@ func isEmptyRequirements(r devcontainer.AggregatedRequirements) bool {
 		len(r.SecurityOpt) == 0 &&
 		len(r.PostStartCommands) == 0 &&
 		len(r.AdapterBinaries) == 0 &&
+		r.Toolchain == nil &&
 		r.LoginPath == ""
 }
 
