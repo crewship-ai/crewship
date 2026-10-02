@@ -2,7 +2,7 @@
 
 {/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 
-> **Current custom dashboard implementation:** [Pages Apps v1](../prd/pages-apps-v1.md), including the single-file YAML portability contract.
+> **Current custom dashboard implementation:** [Pages Apps v1](pages-apps.md), including the single-file YAML portability contract.
 
 Historical design status: draft · 2026-08-12 · **Release 1.0 scope** (owner decision, 2026-08-12). This is the original design snapshot, not current implementation status; the [archived handoff](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/pages-apps-handoff.md) records its implementation work. See Pages Apps v1 above for the public implementation contract.
 

@@ -21,10 +21,10 @@ Age alone is not a reason; unreferenced alone is not a reason.
   internal applications (Refine/Puck evaluation). Superseded by
   [`docs/prd/pages-apps-architecture.md`](../prd/pages-apps-architecture.md)
   (implementation architecture) and
-  [`docs/prd/pages-apps-v1.md`](../prd/pages-apps-v1.md) (the shipped v1
+  [`docs/specs/pages-apps.md`](../specs/pages-apps.md) (the shipped v1
   contract); kept for the market research and the decision record.
 - [`pages-apps-v1-history-2026-09-09.md`](pages-apps-v1-history-2026-09-09.md) —
   the implementation chronology of Pages Apps v1 before the #2472 hardening.
   The current contract is
-  [`docs/prd/pages-apps-v1.md`](../prd/pages-apps-v1.md), which links here
+  [`docs/specs/pages-apps.md`](../specs/pages-apps.md), which links here
   for the history.

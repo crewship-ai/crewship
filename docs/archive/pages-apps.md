@@ -1,7 +1,7 @@
 **Pages jako interní aplikace — návrh po ověření kompatibility**
 
 > Historický průzkum z 2026-09-08, nikoli aktuální stav dodávky. Aktuální rozsah,
-> implementaci a YAML přenos určuje [Pages Apps v1](../prd/pages-apps-v1.md), výsledky
+> implementaci a YAML přenos určuje [Pages Apps v1](../specs/pages-apps.md), výsledky
 > testů a překážky nasazení [handoff](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/pages-apps-handoff.md). Starší doporučení
 > Refine/Puck níže nejsou součástí zvoleného v1 stacku.
 

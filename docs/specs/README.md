@@ -32,7 +32,7 @@ public contract here. Superseded a spec? Move it to
   numbers as stable identifiers. Historical design status and market
   analysis are part of the record inside the document, not a claim of current
   implementation. The current custom-dashboard contract is
-  [Pages Apps v1](../prd/pages-apps-v1.md); further separation of the older
+  [Pages Apps v1](pages-apps.md); further separation of the older
   design requires checking its code consumers and preserving section anchors.
 - [`response-shape-contract.md`](response-shape-contract.md) — how generated
   OpenAPI response schemas are graded so that a renamed field cannot pass;
@@ -49,3 +49,10 @@ public contract here. Superseded a spec? Move it to
   issue claims, budget/capacity checks, deduplication and recovery.
 - [`restricted-workflows.md`](restricted-workflows.md) — private routine admission,
   filtered catalog, own receipts, Page polling and bounded delegated execution.
+
+- [`pages-apps.md`](pages-apps.md) — published custom application contract,
+  browser/isolation boundaries and explicit remaining acceptance limits.
+- [`credentials-vault.md`](credentials-vault.md) — credential types, storage
+  shape and mounting conventions, with implementation provenance.
+- [`member-resource-policy.md`](member-resource-policy.md) — administration
+  API/CLI for restricted member resource policies.

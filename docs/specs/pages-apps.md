@@ -8,11 +8,11 @@ same-origin exception and is not evidence of production process isolation.
 This document defines the current product and acceptance criteria. Historical
 P0–P5 implementation notes are in [the archived chronology](../archive/pages-apps-v1-history-2026-09-09.md).
 Current delivery evidence and remaining work are in [the hardening handoff](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/pages-apps-hardening-handoff-2026-09-09.md)
-and [the September 10 validation](pages-apps-validation-2026-09-10.md).
-Latest storage/compiler review: [F1–F4 fixes and main integration](pages-apps-storage-review-response-2026-09-10.md).
-Latest follow-up findings and fixes: [verified response](pages-apps-followup-response-2026-09-10.md).
-The earlier [audit](pages-apps-review-audit-2026-09-09.md) and
-[independent review](pages-apps-independent-review-2026-09-09.md) remain dated evidence,
+and [the September 10 validation](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-apps-validation-2026-09-10.md).
+Latest storage/compiler review: [F1–F4 fixes and main integration](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-apps-storage-review-response-2026-09-10.md).
+Latest follow-up findings and fixes: [verified response](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-apps-followup-response-2026-09-10.md).
+The earlier [audit](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-apps-review-audit-2026-09-09.md) and
+[independent review](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-apps-independent-review-2026-09-09.md) remain dated evidence,
 not a list of defects necessarily still present in the current implementation.
 
 ## Customer outcome

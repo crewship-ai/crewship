@@ -1,14 +1,14 @@
 # Pages editor — návrh v2 po oponentuře a ověření
 
 Stav: návrh k rozhodnutí. **P0 je implementováno** — co bylo postaveno, co
-změřeno a co zůstává otevřené, je v [implementační evidenci](pages-settings-editor-implementation.md).
+změřeno a co zůstává otevřené, je v [implementační evidenci](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-settings-editor-implementation.md).
 Akceptace produktu (§7, měření s pěti lidmi) splněná není a evidence to říká.
-Revize 2 zapracovává [nezávislou oponenturu](pages-settings-editor-independent-review-2026-09-10.md).
+Revize 2 zapracovává [nezávislou oponenturu](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-settings-editor-independent-review-2026-09-10.md).
 Oponentura zůstává beze změny jako nezávislý dokument; její popis v1 je historický.
 Podklad ověření: main `01d4849cd8f61b70b64a290accf52617dbc7fac4`, screenshot
 Operations Lab a cílené regresní testy. Produktové popisky jsou anglické.
 
-[Klikací vizuální prototyp](pages-settings-editor-prototype.html) používá pouze
+[Klikací vizuální prototyp](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-settings-editor-prototype.html) používá pouze
 syntetická data. Ukazuje pracovní plochy a stavy, ne skutečné API nebo autorizaci.
 
 ## 1. Rozhodnutí

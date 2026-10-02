@@ -40,12 +40,14 @@ agents edit the private repository concurrently.
    commit URL. Never rewrite shipped SQL migrations to tidy a comment.
 5. Run the documentation gates and the checks relevant to affected tools.
 
-The first migration removes archived session/instance reports, audit notes and
-the explicitly archived decision-model experiment scripts. Other existing
-proposals remain pending classification; their presence is not evidence that
-they describe the current implementation. Working records previously published
-remain in public Git history. Moving current files does not make old versions
-secret, revoke their licenses or transfer copyright.
+The verified migration batches remove internal session/instance reports,
+research and review records, assistant configuration, visual prototypes and
+retired experiment scripts. Public implementation contracts, reproducible tests
+and required design context remain available. Remaining design documents are
+indexed by their public purpose; their dated status is not proof that every
+proposal is implemented. Working records previously published remain in public
+Git history. Moving current files does not make old versions secret, revoke
+their licenses or transfer copyright.
 
 Generated documentation inventory reports are ignored local build output in
 `docs/prd/reports/`; their generator and CI checks remain public. They do not

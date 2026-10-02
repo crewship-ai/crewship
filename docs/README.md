@@ -11,8 +11,8 @@ any category is one click from here, its contents one more.
 | Architectural decisions | [`docs/decisions/`](decisions/README.md) | Accepted/rejected decisions with their measured evidence and consequences | decided + date |
 | Operational runbooks | [`docs/runbooks/`](runbooks/README.md) | Repeatable release and operations procedures | imperative procedure |
 | Contributor deep-dives | [`docs/development/`](development/README.md) | Long-form explanations moved out of CONTRIBUTING: embed mechanics, toolchain pinning, review protocol, claim process | explanation |
-| UI/UX contracts | [`docs/ux/`](ux/README.md) | UI contracts and existing research awaiting classification | contract + dated research |
-| Existing public proposals | [`docs/prd/`](prd/README.md) | Public design records with a per-document status index; classification remains in progress | "proposes", "draft" |
+| UI/UX contracts | [`docs/ux/`](ux/README.md) | UI contracts and public implementation notes | contract + dated research |
+| Public implementation design references | [`docs/prd/`](prd/README.md) | Retained design and acceptance context used by public source, tests and contributor documentation | "proposes", "draft" |
 | Internal working context | Separate private repository; [access and rules](development/private-context.md) | New internal analyses, business plans, session handoffs and experiments | dated proposal or observation |
 | History | [`docs/archive/`](archive/README.md) | Superseded documents preserved for the record; editing them to match the present is falsifying the record | past tense, superseded-by link |
 | User docs website | `docs/*.mdx`, `docs/docs.json` | Mintlify-published user documentation (guides, API reference, CLI) — a *published surface*, distinct from the repository navigation this file describes | user-facing |

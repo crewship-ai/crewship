@@ -2,7 +2,7 @@
 
 Historical document preserved before issue #2472 hardening. Its progress and test
 claims describe earlier sessions, not current release acceptance. Current contract:
-[Pages Apps v1](../prd/pages-apps-v1.md).
+[Pages Apps v1](../specs/pages-apps.md).
 
 # Pages Apps v1 — dashboardy z kontejnerů
 
@@ -90,7 +90,7 @@ otevřeného testu zacykleného skriptu a podpory jeho zastavení.
 
 ## Aktuální checklist před uzavřením v1 — 2026-09-09
 
-Podklad pro nezávislou validaci: [audit implementace, rozhodnutí a rizik](../prd/pages-apps-review-audit-2026-09-09.md). Obsahuje také konkrétní nesoulad validátorů cest, limit růstu Git historie, kompatibilitu tools profilu a nepřipnutou verzi backendové routine. Tyto nálezy nejsou automaticky opravené ani uzavřené zelenými testy.
+Podklad pro nezávislou validaci: [audit implementace, rozhodnutí a rizik](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-apps-review-audit-2026-09-09.md). Obsahuje také konkrétní nesoulad validátorů cest, limit růstu Git historie, kompatibilitu tools profilu a nepřipnutou verzi backendové routine. Tyto nálezy nejsou automaticky opravené ani uzavřené zelenými testy.
 
 Tento checklist je aktuální stav. Pozdější sekce P1–P5 zachycují historii práce;
 jejich tehdejší poznámky „zbývá“, „testy běží“ a „nenasazeno“ nejsou nový backlog.

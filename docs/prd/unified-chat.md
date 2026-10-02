@@ -10,7 +10,7 @@ its server-side access, identity, retry, inbox and agent-dispatch contracts.
 
 ## Design
 
-[Interactive wireframe](wireframes/chat-unified.html) is the earlier standalone proposal
+[Interactive wireframe](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/wireframes/chat-unified.html) is the earlier standalone proposal
 with sample data, clickable room types, draft switching, mock send and mobile
 layout. It is not a screenshot of a live account or a promise of unimplemented
 permissions. The implementation uses the existing Crewship components.

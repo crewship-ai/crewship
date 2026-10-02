@@ -12,7 +12,7 @@ pro read a write; **(c) ne**, nová složka je výchozí jen pro vlastnickou
 crew a adminy.
 
 Aktuální API a CLI popisují [Pages API](../api-reference/pages.mdx) a
-[page CLI](../cli/page.mdx). [Stav dodávky a ověření](pages-folder-delivery-status-2026-09-14.md)
+[page CLI](../cli/page.mdx). [Stav dodávky a ověření](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-folder-delivery-status-2026-09-14.md)
 odděluje provedené testy od neprovedené živé akceptace dvěma účty a měření s lidmi.
 
 ## 0. Co oponentura upřesnila (všech šest zapracováno)
