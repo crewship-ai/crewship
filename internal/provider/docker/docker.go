@@ -84,10 +84,11 @@ type DetectResult struct {
 // It auto-detects the container runtime (Docker, Podman, Colima, OrbStack, etc.)
 // and manages crew containers with security isolation (non-root, cap-drop ALL).
 type Provider struct {
-	client   *client.Client
-	cfg      Config
-	logger   *slog.Logger
-	detected DetectResult
+	serviceOperation serviceOperationGate
+	client           *client.Client
+	cfg              Config
+	logger           *slog.Logger
+	detected         DetectResult
 
 	// digestResolver short-circuits repeated HEAD requests to the registry
 	// for the runtime image. Shared helper (see internal/dockerutil) so the

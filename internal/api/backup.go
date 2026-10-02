@@ -69,7 +69,8 @@ type BackupHandler struct {
 	// the same root AttachmentHandler writes to. Create collects the blobs
 	// the dump's attachments rows reference; Restore writes them back.
 	// Empty collects/lands none, and the manifest / report say so.
-	attachmentRoot string
+	attachmentRoot   string
+	serviceSnapshots backup.ServiceSnapshotRuntime
 }
 
 // NewBackupHandler constructs a BackupHandler. dockerOps may be nil
@@ -126,7 +127,8 @@ func (h *BackupHandler) SetAttachmentRoot(root string) {
 // hold credentials (~/.aws, ~/.ssh, tool logins) the vault never sealed.
 
 type createRequest struct {
-	Scope string `json:"scope"` // "crew" or "workspace"
+	RecoverServices bool   `json:"recover_services,omitempty" yaml:"recover_services,omitempty"`
+	Scope           string `json:"scope"` // "crew" or "workspace"
 	// ScopeLevel selects which per-crew sections the collector
 	// pulls in: "quick" (workspace + memory), "standard" (default,
 	// adds /home/agent + /opt/crew-tools), or "full" (adds
@@ -295,20 +297,22 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := backup.CreateBackup(ctx, h.db, backup.CreateOptions{
-		Scope:             scope,
-		Level:             level,
-		WorkspaceID:       workspaceID,
-		CrewID:            trimmedCrewID,
-		OutputDir:         outputDir,
-		CrewshipVersion:   h.crewshipVersion,
-		Actor:             backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
-		Passphrase:        passphrase,
-		Recipients:        recipients,
-		CrewContainerName: h.resolveCrewContainerName(),
-		DockerOps:         ops,
-		BlobRoot:          h.memoryBlobRoot,
-		PageProjectsPath:  h.pageProjectsPath,
-		AttachmentRoot:    h.attachmentRoot,
+		Scope:                     scope,
+		Level:                     level,
+		WorkspaceID:               workspaceID,
+		CrewID:                    trimmedCrewID,
+		OutputDir:                 outputDir,
+		CrewshipVersion:           h.crewshipVersion,
+		Actor:                     backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
+		Passphrase:                passphrase,
+		Recipients:                recipients,
+		CrewContainerName:         h.resolveCrewContainerName(),
+		DockerOps:                 ops,
+		BlobRoot:                  h.memoryBlobRoot,
+		PageProjectsPath:          h.pageProjectsPath,
+		AttachmentRoot:            h.attachmentRoot,
+		ServiceSnapshots:          h.serviceSnapshots,
+		RecoverServiceMaintenance: req.RecoverServices,
 	})
 	if err != nil {
 		h.logger.Warn("backup create failed", "error", err, "workspace", workspaceID, "user", user.ID)
@@ -365,8 +369,9 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 // List handles GET /api/v1/admin/backups.
 
 type restoreRequest struct {
-	Path       string `json:"path"`
-	Passphrase string `json:"passphrase,omitempty"`
+	RecoverServices bool   `json:"recover_services,omitempty" yaml:"recover_services,omitempty"`
+	Path            string `json:"path"`
+	Passphrase      string `json:"passphrase,omitempty"`
 	// Identity is one age X25519 secret key (the "AGE-SECRET-KEY-1…"
 	// string the admin printed at create-with-recipient time). When
 	// the bundle was sealed with --recipient, the holder of the
@@ -476,21 +481,23 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := backup.RestoreBackup(ctx, h.db, backup.RestoreOptions{
-		Path:              req.Path,
-		Passphrase:        req.Passphrase,
-		Identities:        identities,
-		AsWorkspace:       req.AsWorkspace,
-		AsCrew:            req.AsCrew,
-		Replace:           req.Replace,
-		DryRun:            req.DryRun,
-		FilesOnly:         req.FilesOnly,
-		ResumeWorkspaceID: workspaceID,
-		Actor:             backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
-		DockerOps:         ops,
-		ContainerFor:      h.resolveCrewContainerName(),
-		BlobRoot:          h.memoryBlobRoot,
-		PageProjectsPath:  h.pageProjectsPath,
-		AttachmentRoot:    h.attachmentRoot,
+		Path:                      req.Path,
+		Passphrase:                req.Passphrase,
+		Identities:                identities,
+		AsWorkspace:               req.AsWorkspace,
+		AsCrew:                    req.AsCrew,
+		Replace:                   req.Replace,
+		DryRun:                    req.DryRun,
+		FilesOnly:                 req.FilesOnly,
+		ResumeWorkspaceID:         workspaceID,
+		Actor:                     backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
+		DockerOps:                 ops,
+		ContainerFor:              h.resolveCrewContainerName(),
+		BlobRoot:                  h.memoryBlobRoot,
+		PageProjectsPath:          h.pageProjectsPath,
+		AttachmentRoot:            h.attachmentRoot,
+		ServiceSnapshots:          h.serviceSnapshots,
+		RecoverServiceMaintenance: req.RecoverServices,
 		Logger: func(msg string) {
 			h.logger.Info("backup restore", "message", msg, "path", req.Path, "workspace_id", workspaceID)
 		},

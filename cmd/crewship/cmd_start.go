@@ -55,6 +55,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/secrets"
 	"github.com/crewship-ai/crewship/internal/server"
+	"github.com/crewship-ai/crewship/internal/servicelifecycle"
 	bundledSkills "github.com/crewship-ai/crewship/internal/skills/bundled"
 	"github.com/crewship-ai/crewship/internal/update"
 	"github.com/crewship-ai/crewship/internal/usermodel"
@@ -378,6 +379,9 @@ var startCmd = &cobra.Command{
 		defer deps.Close()
 		deps.DebugLogs = debugBuffer
 		deps.DB = db.DB
+		if hostDocker, ok := deps.Container.(*docker.Provider); ok {
+			hostDocker.SetServiceOperationGate(servicelifecycle.ServiceOperations(db.DB))
+		}
 		deps.License = lic
 		deps.Admission = admissionCtl
 

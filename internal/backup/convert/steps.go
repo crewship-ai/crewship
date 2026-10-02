@@ -13,7 +13,7 @@ import (
 // backup.FormatVersion. Adding a FormatVersion means adding its step here
 // (see the package doc and internal/backup/format.go).
 func Default() *Registry {
-	r, err := NewRegistry(stepV1toV2, stepV2toV3)
+	r, err := NewRegistry(stepV1toV2, stepV2toV3, stepV3toV4)
 	if err != nil {
 		panic(err) // static table; covered by tests
 	}
@@ -176,4 +176,19 @@ func Describe(r *Report) string {
 		}
 	}
 	return b.String()
+}
+
+// v4 makes standalone quota-service images a required classified section.
+// Existing v3 payload bytes remain unchanged; conversion cannot invent data.
+var stepV3toV4 = Step{
+	From:    3,
+	Summary: "v4 readers understand standalone quota-service snapshots; existing payload bytes are unchanged",
+	Manifest: func(m *backup.Manifest, idx *PayloadIndex, r *StepReport) error {
+		if m.Contents.ServiceSnapshots != 0 {
+			return fmt.Errorf("convert: v3 bundle claims unsupported quota-service snapshots")
+		}
+		r.change("format_version 3 → 4; historical payload preserved unchanged")
+		r.warn("v3 did not capture standalone quota-service images; conversion cannot add them and restore rejects service declarations without their data")
+		return nil
+	},
 }

@@ -68,6 +68,7 @@ crewship backup create --scope=workspace --use-keyring
 | `--use-keyring` | `bool` | `false` | Cache and reuse the passphrase via `~/.crewship/backup-keyring.enc`. |
 | `--recipient` | `string` | | AGE X25519 public key (`age1…`) for asymmetric encryption. |
 | `--output` | `string` | `<data dir>/backups` | Override the output directory on the server. |
+| `--recover-services` | `bool` | `false` | Retry selected interrupted quota service maintenance after prior producer and writer leases expire. |
 
 `--recipient` is mutually exclusive with `--passphrase-file`. `--no-encrypt`
 is refused before anything reaches the server: vault secrets stay sealed, but
@@ -283,6 +284,13 @@ crewship backup restore bundle.tar.zst --use-keyring
 | `--use-keyring` | `bool` | `false` | Read the passphrase from `~/.crewship/backup-keyring.enc` before prompting. |
 | `--replace` | `bool` | `false` | Disaster-recovery path: wipe existing target rows matching the bundle's workspace (by id **or** slug) **before** restore, so the bundle lands with its original IDs after a `nuke` or fresh-instance bootstrap re-took the slug under a new id. Mutually exclusive with `--as-workspace` / `--as-crew`. |
 | `--dry-run` | `bool` | `false` | Verify format / checksum / decrypt, replay the restore tx, then roll back. Writes a `backup.restore.dry_run` audit row. |
+| `--recover-services` | `bool` | `false` | Recover selected interrupted quota service maintenance after prior producer and writer leases expire. |
+
+Quota service restores also support `--recover-services`. Ordinary retries keep
+unknown maintenance fenced. Inspect `backup status` first: a live producer or
+writer lease rejects recovery. Recovery stops exactly owned writers before
+verified image import; a failure never resumes desired service state. The flag
+does not unlock an unrelated live backup.
 
 ### Finishing a renamed restore
 

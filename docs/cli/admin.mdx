@@ -1202,6 +1202,24 @@ crewship admin instance backups environments land
 | `--dry-run` | no | Check each staged environment without loading anything. |
 | `--timeout` | no | How long to wait for the server, 35m by default (loading images takes a while; the server's own limit is 30m). |
 
+### backups services land
+
+`POST /api/v1/admin/instance/backups/services/land`. Verifies the quota-service
+disk images staged by whole-instance recovery, then imports them through the
+new host's configured quota helper. Generations are fresh, source namespaces
+are provenance only, and maintenance release commits with the instance audit.
+Failed imports or audits retain maintenance; do not resume these services by
+bypassing the landing. The CLI waits up to 35 minutes; the server limit is 30.
+
+```bash
+crewship admin instance backups services land --dry-run
+crewship admin instance backups services land
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--dry-run` | no | Verify staged images and current bindings without importing or releasing maintenance. |
+
 ### backups settings get
 
 `GET /api/v1/admin/instance/backups/settings`. The limits (runs at once, CPU
