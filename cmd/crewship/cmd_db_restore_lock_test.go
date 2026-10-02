@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/writerlease"
 )
 
 // stageRestoreFixture builds a data dir holding a live database plus one
@@ -758,5 +760,44 @@ func TestDatabaseInUseProbeErrors(t *testing.T) {
 				t.Errorf("an unreadable database must not be reported as in use")
 			}
 		})
+	}
+}
+
+// A server that owns the writer lease is refused even when the SQLite probe
+// cannot see it — between two of its transactions it holds no SQLite lock at
+// all. The lease is held across the swap, so nothing can start writing between
+// the probe and the rename either.
+func TestRestoreSnapshotRefusesTheWriterLeaseHolder(t *testing.T) {
+	guardCLIState(t)
+	t.Setenv("CREWSHIP_SERVER", "")
+	t.Setenv("CREWSHIP_PROFILE", "")
+	flagServer, flagProfile = "", ""
+	cliCfg = &cli.CLIConfig{}
+	dbPath := stageRestoreFixture(t)
+	pinDeadPort(t)
+
+	origConfirm := dbConfirm
+	t.Cleanup(func() { dbConfirm = origConfirm })
+	dbConfirm = func(string) bool {
+		owner, err := writerlease.Acquire(dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = owner.Close() })
+		return true
+	}
+	restoreSnapshotList, restoreSnapshotYes, restoreSnapshotForce = false, false, false
+	t.Cleanup(func() {
+		restoreSnapshotList, restoreSnapshotYes, restoreSnapshotForce = false, false, false
+	})
+	var err error
+	out := covCaptureAll(t, func() {
+		err = restoreSnapshotCmd.RunE(restoreSnapshotCmd, nil)
+	})
+	if !errors.Is(err, writerlease.ErrHeld) {
+		t.Fatalf("restore beside a writer-lease holder: err=%v\n%s", err, out)
+	}
+	if got := readMarker(t, dbPath); got != "live" {
+		t.Fatalf("marker = %q, want the live database left in place", got)
 	}
 }

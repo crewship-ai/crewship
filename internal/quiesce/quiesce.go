@@ -132,12 +132,13 @@ type Options struct {
 // hard cap or a failed drain return it to open. Nothing is persisted: a
 // crash in any state comes back open.
 type Controller struct {
-	mu       sync.Mutex
-	window   *Window       // non-nil while closing or held
-	released chan struct{} // closed when no window is open
-	writers  int           // writers inside the gate
-	runs     int           // admitted runs not yet done (runs.go)
-	drained  chan struct{} // while closing with writers inside: the window's drained, closed by the last Leave
+	writerOwner func() error
+	mu          sync.Mutex
+	window      *Window       // non-nil while closing or held
+	released    chan struct{} // closed when no window is open
+	writers     int           // writers inside the gate
+	runs        int           // admitted runs not yet done (runs.go)
+	drained     chan struct{} // while closing with writers inside: the window's drained, closed by the last Leave
 }
 
 // New returns a controller with no window open.
@@ -224,6 +225,9 @@ func (c *Controller) WaitReleased(ctx context.Context) error {
 // On every error nothing is held and admission is open again. The returned
 // Window must be released; its Context ends when the hard cap fires.
 func (c *Controller) Begin(ctx context.Context, opts Options) (*Window, error) {
+	if err := c.VerifyWriterOwner(); err != nil {
+		return nil, err
+	}
 	busyWait := opts.BusyWait
 	if busyWait <= 0 {
 		busyWait = DefaultBusyWait
@@ -246,6 +250,9 @@ func (c *Controller) Begin(ctx context.Context, opts Options) (*Window, error) {
 	deadline := time.Now().Add(busyWait)
 	lastWhat := ""
 	for {
+		if err := c.VerifyWriterOwner(); err != nil {
+			return nil, err
+		}
 		n, what, err := c.busyCount(ctx, opts.Busy)
 		if err != nil {
 			return nil, err
@@ -280,6 +287,10 @@ func (c *Controller) Begin(ctx context.Context, opts Options) (*Window, error) {
 				}
 				if aerr == nil {
 					w.addRelease(rel)
+					if err := w.VerifyWriterOwner(); err != nil {
+						w.Release()
+						return nil, err
+					}
 					w.hold(holdCap)
 					return w, nil
 				}
@@ -351,12 +362,13 @@ func (c *Controller) close(opts Options, retryIn time.Duration) (*Window, error)
 	ctx, cancel := context.WithCancel(context.Background())
 	now := time.Now()
 	w := &Window{
-		c:        c,
-		reason:   opts.Reason,
-		started:  now,
-		deadline: now.Add(retryIn),
-		ctx:      ctx,
-		cancel:   cancel,
+		writerOwner: c.writerOwner,
+		c:           c,
+		reason:      opts.Reason,
+		started:     now,
+		deadline:    now.Add(retryIn),
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 	c.window = w
 	c.released = make(chan struct{})
@@ -395,13 +407,14 @@ func (c *Controller) drain(ctx context.Context, w *Window, timeout time.Duration
 
 // Window is one open quiet window.
 type Window struct {
-	c        *Controller
-	reason   string
-	started  time.Time
-	deadline time.Time // guarded by c.mu
-	ctx      context.Context
-	cancel   context.CancelFunc
-	drained  chan struct{} // closed once no writer is inside
+	writerOwner func() error
+	c           *Controller
+	reason      string
+	started     time.Time
+	deadline    time.Time // guarded by c.mu
+	ctx         context.Context
+	cancel      context.CancelFunc
+	drained     chan struct{} // closed once no writer is inside
 
 	mu       sync.Mutex
 	timer    *time.Timer
@@ -444,8 +457,9 @@ func (w *Window) addRelease(f func()) {
 	w.mu.Unlock()
 }
 
-// Context ends when the window is released — by Release, or by the hard cap.
-// The copy runs under it so the cap can stop it.
+// Context ends when release begins — by Release, or by the hard cap.
+// The copy stops before release callbacks reopen writer admission.
+// Use Controller.WaitReleased to wait for those callbacks to finish.
 func (w *Window) Context() context.Context { return w.ctx }
 
 // Expired reports whether the hard cap released the window.

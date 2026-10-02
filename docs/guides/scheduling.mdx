@@ -310,44 +310,40 @@ Failures split by where they happen:
 In every case the cursor advanced at acceptance, so a failure never re-fires
 the accepted occurrence — the next cron tick is the next run.
 
-## Running multiple replicas (leader election)
+## Scheduler leader lease
 
-Crewship runs three scheduling loops in each server process: the **agent cron
-scheduler** (this guide), the **pipeline/routine cron scheduler**, and the
-**recurring-issue dispatcher**. If you run more than one `crewship` replica
-against the same database, every replica would tick — and without coordination
-they would all fire the same due job, double-running scheduled agents and
-double-stamping recurring issues.
+<Warning>
+Release 1.0 supports exactly one writing server per persistent local database.
+An exclusive process-lifetime writer lease refuses a second writing server.
+Enabling scheduler leader election does not permit active replicas or make
+whole-instance backups safe on shared storage. Distributed replicas require a
+separate fencing and backup contract; see the
+[single-writer decision](../prd/BACKUP-SINGLE-WRITER-DECISION-2026-10-01.md).
+Stop all old daemons before upgrading to the enforcing version.
+</Warning>
 
-To make a multi-replica deploy safe, the schedulers use a small **database-backed
-leader election lease**. A single row in the `scheduler_leader` table records the
-current leader and an expiry; each replica renews it on an interval and only
-fires while it holds a non-expired lease. Exactly one replica is leader at a
-time, so each due occurrence fires once. (Per-occurrence idempotency remains as a
-second line of defence.)
+Crewship runs three scheduling loops: the **agent cron scheduler** (this guide),
+the **pipeline/routine cron scheduler**, and the **recurring-issue dispatcher**.
+They share a database-backed leader lease in `scheduler_leader`. A holder
+renews its lease and fires only while it owns the non-expired row.
+Per-occurrence idempotency remains a second line of defence against duplicate
+acceptance.
 
-- **Enabled by default.** A lone replica wins the lease immediately, so
-  single-instance behaviour is unchanged — nothing to configure for a single
-  server.
-- **No extra infrastructure.** The lease lives in the same database the
-  schedulers already use (SQLite or Postgres) — no etcd/consul/redis.
-- **Failover.** The lease TTL is **60 seconds** and the leader renews every
-  **20 seconds**. If the leader crashes or loses the database, a standby steals
-  the expired lease within one TTL and takes over. A clean shutdown releases the
-  lease immediately, so failover is near-instant.
+- **Enabled by default.** A lone server wins a free lease immediately, so
+  ordinary single-server startup requires no configuration.
+- **No extra infrastructure.** The lease lives in the same SQLite database.
+- **Recovery.** The TTL is **60 seconds** and renewal occurs every **20 seconds**.
+  After a crash, the next exclusive writer waits for the old lease to expire
+  unless it has the same configured holder identity. Clean shutdown releases
+  the scheduler lease immediately. This logical scheduler lease is separate
+  from the process-lifetime database writer lease.
 
 ### Configuration
 
 | Env var | Default | Purpose |
 | --- | --- | --- |
-| `CREWSHIP_SCHEDULER_LEADER_ELECTION` | `1` (on) | Set to `0`/`false`/`off` to disable leader election and leave every scheduling loop always-fire (the pre-election behaviour). Only safe with exactly one replica. |
-| `CREWSHIP_REPLICA_ID` | random per process | A stable identity for this replica in the lease row. Handy for logs/debugging; optional. |
-
-<Warning>
-Until you enable leader election (or while it is disabled), run **exactly one**
-scheduler-bearing replica. Two replicas with election disabled will double-fire
-every schedule and recurring issue.
-</Warning>
+| `CREWSHIP_SCHEDULER_LEADER_ELECTION` | `1` (on) | Set to `0`/`false`/`off` to disable scheduler leader election. The exclusive database writer requirement remains enforced. |
+| `CREWSHIP_REPLICA_ID` | random per process | Stable scheduler-holder identity in the lease row; useful for recovery and debugging. It does not authorize another writing process. |
 
 ## What's Next
 

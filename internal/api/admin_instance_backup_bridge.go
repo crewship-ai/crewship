@@ -79,7 +79,8 @@ func (e *instanceExecutor) Run(ctx context.Context, spec backupplan.RunSpec, pro
 	}
 	cfg := e.h.recoveryConfig()
 	res, err := backup.CreateInstanceBackup(ctx, e.db, backup.InstanceOptions{
-		OutputDir: cfg.OutputDir, CrewshipVersion: cfg.CrewshipVersion, Actor: spec.Actor, Level: spec.ScopeLevel(),
+		ServiceSnapshots: cfg.ServiceSnapshots,
+		OutputDir:        cfg.OutputDir, CrewshipVersion: cfg.CrewshipVersion, Actor: spec.Actor, Level: spec.ScopeLevel(),
 		Passphrase: spec.Passphrase, Recipients: spec.Recipients, Paths: cfg.Paths, RecoveryKit: kit,
 		DockerOps: cfg.DockerOps, CrewContainerName: cfg.CrewContainerName,
 		Quiesce: e.h.quiesceController(), HoldCap: spec.HoldCap, BusyWait: instanceDrainWait,
@@ -112,6 +113,12 @@ type backupQuiescer struct {
 
 func (q backupQuiescer) Quiesce(ctx context.Context, spec backupplan.RunSpec, capDur time.Duration) (func(), error) {
 	if spec.Scope != backupplan.ScopeInstance {
+		return func() {}, nil
+	}
+	// The executor captures fenced quota disks before opening the global
+	// writer window. CreateInstanceBackup owns the drain and window in this
+	// case, and still reports its measured hold time through RunResult.
+	if q.h.recoveryConfig().ServiceSnapshots != nil {
 		return func() {}, nil
 	}
 	w, err := q.h.quiesceController().Begin(ctx, quiesce.Options{

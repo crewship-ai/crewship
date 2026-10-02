@@ -55,6 +55,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/secrets"
 	"github.com/crewship-ai/crewship/internal/server"
+	"github.com/crewship-ai/crewship/internal/servicelifecycle"
 	bundledSkills "github.com/crewship-ai/crewship/internal/skills/bundled"
 	"github.com/crewship-ai/crewship/internal/update"
 	"github.com/crewship-ai/crewship/internal/usermodel"
@@ -205,6 +206,9 @@ var startCmd = &cobra.Command{
 			return fmt.Errorf("failed to open database: %w", err)
 		}
 		defer db.Close()
+		if err := quiesce.Default().SetWriterOwner(db.VerifyWriterLease); err != nil {
+			return fmt.Errorf("bind backup writer ownership: %w", err)
+		}
 
 		// Started before the migrations on purpose: a migration run is the
 		// most write-heavy phase of a boot, and with autocheckpoint off it
@@ -347,6 +351,22 @@ var startCmd = &cobra.Command{
 		defer cancel()
 
 		ctx = logging.WithContext(ctx, logger)
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := db.VerifyWriterLease(); err != nil {
+						logger.Error("database writer ownership lost; stopping server", "error", err)
+						cancel()
+						return
+					}
+				}
+			}
+		}()
 
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
@@ -378,8 +398,12 @@ var startCmd = &cobra.Command{
 		defer deps.Close()
 		deps.DebugLogs = debugBuffer
 		deps.DB = db.DB
+		if hostDocker, ok := deps.Container.(*docker.Provider); ok {
+			hostDocker.SetServiceOperationGate(servicelifecycle.ServiceOperations(db.DB))
+		}
 		deps.License = lic
 		deps.Admission = admissionCtl
+		deps.WriterOwnerCheck = db.VerifyWriterLease
 
 		webFS, err := web.FS()
 		if err != nil {
@@ -1463,6 +1487,9 @@ var startCmd = &cobra.Command{
 			return fmt.Errorf("server error: %w", err)
 		}
 
+		if err := db.VerifyWriterLease(); err != nil {
+			return fmt.Errorf("server stopped after losing database ownership: %w", err)
+		}
 		logger.Info("crewship stopped")
 		return nil
 	},

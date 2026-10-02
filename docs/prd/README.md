@@ -37,6 +37,7 @@ document whose status drifts should be updated when noticed, not silently.
 | Document | Status stated in header |
 | --- | --- |
 | [PRD-RELEASE-1-0-QUALITY-AUDIT.md](PRD-RELEASE-1-0-QUALITY-AUDIT.md) | proposed |
+| [BACKUP-SINGLE-WRITER-DECISION-2026-10-01.md](BACKUP-SINGLE-WRITER-DECISION-2026-10-01.md) | accepted single-writer decision; implementation/release verification pending |
 | [RELEASE-1-0-READINESS-2026-08-10.md](RELEASE-1-0-READINESS-2026-08-10.md) | current (baseline `main` @ 69a8ceb9) |
 | [PRD-ISSUES-AND-ROUTINES-2026.md](PRD-ISSUES-AND-ROUTINES-2026.md) | — |
 | [CODEX-WORK-ORDER-RELEASE-1-0.md](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md) | — (work order) |

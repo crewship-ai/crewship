@@ -177,6 +177,8 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("PUT", "/api/v1/admin/instance/backups/settings/recovery-kit", ib.SetRecoveryKit)
 	// openapi: responses 200,400,401,403,404,422,500
 	r.authedInstance("POST", "/api/v1/admin/instance/backups/bundles/check", ib.CheckBundle)
+	// openapi: responses 201,400,401,403,409,413,415,422,500,507
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/bundles/upload", ib.UploadBundle)
 	// openapi: responses 200,400,401,403,404,422,500
 	r.authedInstance("POST", "/api/v1/admin/instance/backups/restore/checks", ib.RestoreChecks)
 	// openapi: responses 201,400,401,403,404,409,500
@@ -185,6 +187,8 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("GET", "/api/v1/admin/instance/backups/drills", ib.ListDrills)
 	// openapi: responses 200,400,401,403,500
 	r.authedInstance("POST", "/api/v1/admin/instance/backups/environments/land", ib.LandEnvironments)
+	// openapi: responses 200,400,401,403,500,503
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/services/land", ib.LandServices)
 	// openapi: responses 200,401,403,500
 	r.authedInstance("GET", "/api/v1/admin/instance/holds", ib.ListHolds)
 	// openapi: responses 200,400,401,403,404,500
@@ -402,6 +406,9 @@ func (r *Router) registerAdminRoutes() {
 		backupDockerOps = &backup.MobyDockerOps{Client: r.dockerClient}
 	}
 	backupH := NewBackupHandler(r.db, r.logger, backupDockerOps, os.Getenv("CREWSHIP_VERSION"))
+	if transport, ok := r.keeperContainer.(backup.ServiceSnapshotRuntime); ok {
+		backupH.serviceSnapshots = transport
+	}
 	// Same content-addressed blob root the memory-versions content
 	// endpoint uses (memContent above) — wiring it here lets
 	// Create/Restore carry memory_versions blobs through the bundle
@@ -438,7 +445,8 @@ func (r *Router) registerAdminRoutes() {
 	svc := backupplan.New(r.db, r.logger)
 	svc.Workspace = &backupplan.WorkspaceExecutor{
 		DB: r.db, DockerOps: backupDockerOps, CrewContainerName: backupH.resolveCrewContainerName(),
-		BlobRoot: r.memoryVersionsBlobRoot, AttachmentRoot: r.storagePath, PageProjectsPath: r.pageProjectsPath,
+		ServiceSnapshots: r.instanceRecoveryConfig().ServiceSnapshots,
+		BlobRoot:         r.memoryVersionsBlobRoot, AttachmentRoot: r.storagePath, PageProjectsPath: r.pageProjectsPath,
 		CrewshipVersion: os.Getenv("CREWSHIP_VERSION"),
 		EnvInline:       backup.EnvironmentInlineDefault(),
 	}

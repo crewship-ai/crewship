@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/writerlease"
 	"github.com/spf13/cobra"
 	sqlite "modernc.org/sqlite"
 )
@@ -236,7 +237,15 @@ server tears the file.`,
 		// probe answered about a moment that has already passed. Unlike
 		// repair-ledger, whose write is one transaction that SQLite serialises
 		// against other connections, a rename has nothing underneath it to
-		// catch this, so the re-probe is the only backstop there is.
+		// catch this, so the re-probe is the backstop for a server that
+		// predates the writer lease. A current server holds that lease for
+		// its whole life, so taking it here, before the re-probe and across
+		// the rename, also closes the gap between the probe and the swap.
+		owner, err := writerlease.Acquire(dbPath)
+		if err != nil {
+			return fmt.Errorf("acquire exclusive restore ownership: %w", err)
+		}
+		defer owner.Close()
 		if err := guard.check(false); err != nil {
 			return err
 		}
