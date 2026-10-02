@@ -147,7 +147,13 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 // the same authority, lease, cancellation and settlement path as Run.
 func (d *Dispatcher) RunOne(ctx context.Context) (bool, error) {
 	d.flushRunOutcomes(ctx)
-	defer d.flushRunOutcomes(ctx)
+	// Like Run's shutdown flush: what the attempt produced is persisted even
+	// when the caller has cancelled, but within StopGrace.
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.cfg.StopGrace)
+		defer cancel()
+		d.flushRunOutcomes(flushCtx)
+	}()
 	if len(d.cfg.Kinds) == 0 {
 		return false, ErrNoExecutableKinds
 	}
