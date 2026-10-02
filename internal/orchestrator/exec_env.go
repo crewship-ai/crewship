@@ -520,6 +520,12 @@ func SidecarProxyEnv() []string {
 		"https_proxy=http://127.0.0.1:9119",
 		"NO_PROXY=127.0.0.1,localhost,::1",
 		"no_proxy=127.0.0.1,localhost,::1",
+		// Node's built-in fetch (undici) ignores the variables above unless
+		// this is set (Node 22.21+ / 24+); without it a Node tool silently
+		// bypassed the crew allowlist (#2763). Compatibility, not the
+		// boundary: the egress fence (#1368) is what enforces it. The
+		// `_proxy` suffix makes it a reserved key a routine cannot override.
+		"NODE_USE_ENV_PROXY=1",
 	}
 }
 
