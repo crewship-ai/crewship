@@ -135,6 +135,12 @@ type ContainerConfig struct {
 	// Volumes and host data stay; the next start recreates the container.
 	// 0 (default) disables it.
 	IdleRuntimeRetentionDays int `yaml:"idle_runtime_retention_days"`
+	// CrewNetworkCrews opts named crews (slug or id) into their own Docker
+	// network (#2240, first stage). Empty = every crew stays on Network.
+	CrewNetworkCrews []string `yaml:"crew_network_crews"`
+	// CrewNetworkPool is the IPv4 range crew networks take small (/27)
+	// subnets from. It must not overlap a host route.
+	CrewNetworkPool string `yaml:"crew_network_pool"`
 	// CacheEviction removes crewship-cache images that no container on the
 	// daemon has used for an hour; the next start rebuilds them. Off by
 	// default.
@@ -511,6 +517,17 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_CONTAINER_PREFIX"); v != "" {
 		cfg.Container.ContainerPrefix = v
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_CREW_NETWORK_CREWS"); ok {
+		cfg.Container.CrewNetworkCrews = nil
+		for _, c := range strings.Split(v, ",") {
+			if c = strings.TrimSpace(c); c != "" {
+				cfg.Container.CrewNetworkCrews = append(cfg.Container.CrewNetworkCrews, c)
+			}
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("CREWSHIP_CREW_NETWORK_POOL")); v != "" {
+		cfg.Container.CrewNetworkPool = v
 	}
 	if v := os.Getenv("CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS"); v != "" {
 		if days, err := strconv.Atoi(v); err == nil && days >= 0 {

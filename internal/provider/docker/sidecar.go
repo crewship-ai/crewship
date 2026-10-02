@@ -325,10 +325,8 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 	// All sidecars share the agent's bridge network so DNS resolves
 	// service names without exposing host ports. ensureNetwork is
 	// the same call EnsureCrewRuntime already makes.
-	if p.cfg.Network != "" {
-		if err := p.ensureNetwork(ctx, p.cfg.Network); err != nil {
-			return nil, fmt.Errorf("ensure network for services: %w", err)
-		}
+	if _, err := p.ensureCrewNetwork(ctx, team.ID, team.Slug); err != nil {
+		return nil, fmt.Errorf("ensure network for services: %w", err)
 	}
 
 	mu := p.lockForCrew(team.ID)
@@ -629,13 +627,16 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 		applyServiceQuotas(hostCfg)
 	}
 
-	// NetworkingConfig wires the sidecar to the crew bridge with a
+	// NetworkingConfig wires the service to the crew's network with a
 	// DNS alias so `redis` resolves inside the agent container.
+	// On a crew's own network (#2240) the bare alias is crew-scoped by
+	// construction; on the shared instance network it is not (two crews'
+	// `postgres` round-robin), which is what moving the crew fixes.
 	var networkCfg *dockernetwork.NetworkingConfig
-	if p.cfg.Network != "" {
+	if netName := p.crewNetworkFor(crewID, crewSlug); netName != "" {
 		networkCfg = &dockernetwork.NetworkingConfig{
 			EndpointsConfig: map[string]*dockernetwork.EndpointSettings{
-				p.cfg.Network: {Aliases: []string{svc.Name}},
+				netName: {Aliases: []string{svc.Name}},
 			},
 		}
 	}

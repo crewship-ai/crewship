@@ -67,6 +67,14 @@ container:
                                 # way; when set, the container entrypoint is forced
                                 # to /usr/local/bin/entrypoint.sh. Empty = autodetect.
                                 # Env override: CREWSHIP_ENTRYPOINT_PATH
+  crew_network_crews: []        # Crews (slug or id) that get their own Docker network
+                                # instead of the shared one: other crews cannot reach
+                                # them and their service aliases are their own. Takes
+                                # effect when the crew's container is next recreated.
+                                # Empty = off. Env override: CREWSHIP_CREW_NETWORK_CREWS
+  crew_network_pool: "10.231.0.0/16"  # IPv4 range crew networks take /27 subnets from;
+                                # must not overlap a host route (LAN, VPN). Env
+                                # override: CREWSHIP_CREW_NETWORK_POOL
   idle_runtime_retention_days: 0  # Remove stopped runtimes of live crews after this
                                 # many days stopped; volumes stay. 0 = off.
                                 # Env override: CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS

@@ -180,4 +180,7 @@
 #                     timing check is now a benchmark pair, and the
 #                     staging-cleanup test injects a regular file in place
 #                     of the store root, which fails for root too.
-149
+# 2026-10-02 (#2240): +1 — TestCrewNetworkIsolationIntegration needs a live
+#                     Docker daemon to create real bridges; SKIP-WAIVER on its
+#                     Docker-unavailable guard, the OS guard is a build tag.
+150
