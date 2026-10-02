@@ -169,12 +169,7 @@ func (o *Orchestrator) stopRecoveredAgentRun(ctx context.Context, state RunState
 			return err
 		}
 		if stopped {
-			state.Status, state.LastActivity = "cancelled", time.Now()
-			data, err := json.Marshal(state)
-			if err != nil {
-				return err
-			}
-			return o.state.Set(ctx, "agent_runs", state.ID, data)
+			return o.persistStoppedRun(ctx, state)
 		}
 		select {
 		case <-ctx.Done():
@@ -212,4 +207,19 @@ func (o *Orchestrator) stopAgentInvocation(ctx context.Context, c *agentRunContr
 		case <-tick.C:
 		}
 	}
+}
+
+// persistStoppedRun acknowledges cancellation only when its durable state write
+// succeeds. Both explicit stops and deleted-agent cleanup retain retry evidence
+// if storage is unavailable after the provider has confirmed runtime absence.
+func (o *Orchestrator) persistStoppedRun(ctx context.Context, state RunState) error {
+	state.Status, state.LastActivity = "cancelled", time.Now()
+	data, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	if err := o.state.Set(ctx, "agent_runs", state.ID, data); err != nil {
+		return fmt.Errorf("persist cancellation for run %s: %w", state.ID, err)
+	}
+	return nil
 }
