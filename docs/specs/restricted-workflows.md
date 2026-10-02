@@ -56,7 +56,7 @@ The restricted Pages UI uses this directory and the existing declared action end
 
 Restricted Page catalog actions expose `intent_hash`, binding the exact declared action, publication and complete frozen execution graph/provider slots. Restricted Page dispatch requires `expected_intent_hash`; missing hashes return 400 and changed intent is denied before admission. Trusted dispatch retains its existing payload contract. UI retries preserve the same hash, body and idempotency key.
 
-Admission receipts use `SCHEDULED` or replayed `DEDUPED`; both require private-result polling. Live result states are lowercase `pending`, `running`, `completed`, `failed` or `needs_reconciliation`. Forms remain active through admission and running states, and stop polling only on terminal results or authorization failure.
+Admission receipts use `SCHEDULED` or replayed `DEDUPED`; both require private-result polling. Live result states are lowercase `pending`, `running`, `completed`, `failed`, `canceled` or `needs_reconciliation`. Forms remain active through admission and running states, and stop polling only on terminal results or authorization failure.
 
 ## Common dispatch ownership
 

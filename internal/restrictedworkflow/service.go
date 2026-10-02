@@ -87,15 +87,14 @@ func (s *Service) Start(ctx context.Context) error {
 		return ErrDenied
 	}
 	writer, ok := quiesce.Enter(ctx)
-	if !ok {
-		return ErrDenied
-	}
-	defer writer.Leave()
-	if _, err := s.ledger.RecoverExpiredLeases(writer.Context()); err != nil {
-		return err
-	}
-	if err := s.runtime.FlushRunOutcomes(writer.Context()); err != nil {
-		return err
+	if ok {
+		defer writer.Leave()
+		if _, err := s.ledger.RecoverExpiredLeases(writer.Context()); err != nil {
+			return err
+		}
+		if err := s.runtime.FlushRunOutcomes(writer.Context()); err != nil {
+			return err
+		}
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel

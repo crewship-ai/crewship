@@ -4,6 +4,7 @@ package restrictedworkflow
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -114,4 +115,54 @@ func TestPrivateWorkflowQuiesceAfterClaimPreservesAuthorityAndRetries(t *testing
 	if err != nil || result.State != "completed" || len(result.Outputs) != 2 {
 		t.Fatalf("deferred private workflow did not complete: %+v %v", result, err)
 	}
+}
+
+func TestPrivateWorkflowStartsBehindBackupWindowAndResumes(t *testing.T) {
+	s, _ := fixture(t)
+	receipt := admitFixtureJob(t, s)
+	window, err := quiesce.Default().Begin(t.Context(), quiesce.Options{HoldCap: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { window.Release() })
+	if err := s.Start(t.Context()); err != nil {
+		t.Fatalf("quiet window must defer recovery, not refuse service startup: %v", err)
+	}
+	defer s.Close()
+	item, err := s.ledger.Get(t.Context(), receipt.ID)
+	if err != nil || item.State != work.StateQueued || item.Attempts != 0 || item.Generation != 0 {
+		t.Fatalf("startup claimed work behind quiet window: %+v %v", item, err)
+	}
+	window.Release()
+	deadline := time.After(30 * time.Second)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		result, err := s.Result(t.Context(), "h1", "w", receipt.ID)
+		if err == nil && result.State == "completed" && len(result.Outputs) == 2 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("startup deferred work did not resume after release: %+v %v", result, err)
+		case <-tick.C:
+		}
+	}
+}
+
+func TestPrivateWorkflowStartupRecoveryErrorReleasesWriter(t *testing.T) {
+	s, _ := fixture(t)
+	if err := s.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(t.Context()); err == nil || errors.Is(err, ErrDenied) {
+		t.Fatalf("startup must propagate the recovery error: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	window, err := quiesce.Default().Begin(ctx, quiesce.Options{HoldCap: time.Minute})
+	if err != nil {
+		t.Fatalf("startup error leaked its writer: %v", err)
+	}
+	window.Release()
 }
