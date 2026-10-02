@@ -163,7 +163,7 @@ func runMemoryShow(cmd *cobra.Command, args []string) error {
 		return memoryShowOverAPI(cmd, workspaceID, path, sha)
 	}
 
-	db, err := openGatedLocalDB(cmd, "crewship memory show --local", "")
+	db, err := openReadOnlyLocalDB(cmd, "crewship memory show --local", "")
 	if err != nil {
 		return err
 	}
@@ -348,7 +348,7 @@ func memoryVersionEntries(cmd *cobra.Command, workspaceID, path string, limit in
 		limit = 1000
 	}
 	if localOnlyFlag(cmd) {
-		db, err := openGatedLocalDB(cmd, "crewship memory log --local", "")
+		db, err := openReadOnlyLocalDB(cmd, "crewship memory log --local", "")
 		if err != nil {
 			return nil, err
 		}

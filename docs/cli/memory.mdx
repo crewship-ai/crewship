@@ -376,7 +376,8 @@ canonical file onto **this machine's** disk from a blob in **this machine's**
 content-addressed store, so there is nothing a remote server could do with the
 request. When `--server` / `CREWSHIP_SERVER` / `--profile` names a server it
 refuses rather than restore from another instance's history; `--local` is how
-you say you mean this host.
+you say you mean this host. Stop the server first: the command writes the
+database file, and a running server owns the only writer.
 
 | Flag | Default | Description |
 |---|---|---|

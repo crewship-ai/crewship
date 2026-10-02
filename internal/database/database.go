@@ -36,6 +36,7 @@ type DB struct {
 type Option func(*openOptions)
 
 type openOptions struct {
+	queryOnly       bool
 	managedWAL      bool
 	exclusiveWriter bool
 	synchronous     string
@@ -103,6 +104,11 @@ func WithSynchronous(mode string) Option {
 // WithExclusiveWriter is for offline mutating operations. Managed-WAL server
 // handles take the same lifetime ownership automatically.
 func WithExclusiveWriter() Option { return func(o *openOptions) { o.exclusiveWriter = true } }
+
+// WithQueryOnly is for offline commands that only read. They take no writer
+// ownership, so they work beside a running server, and SQLite refuses any
+// write through the handle (PRAGMA query_only).
+func WithQueryOnly() Option { return func(o *openOptions) { o.queryOnly = true } }
 
 // VerifyWriterLease is the backup's source-ownership guard.
 func (d *DB) VerifyWriterLease() error { return d.writerLease.Verify() }
@@ -239,6 +245,12 @@ func Open(databaseURL string, opts ...Option) (*DB, error) {
 		"&_pragma=temp_store(MEMORY)" +
 		"&_pragma=mmap_size(268435456)" +
 		"&_txlock=immediate"
+	if o.queryOnly {
+		if o.exclusiveWriter {
+			return nil, fmt.Errorf("open sqlite: a query-only handle cannot own the writer")
+		}
+		dsn += "&_pragma=query_only(ON)"
+	}
 	if o.managedWAL {
 		// See WithManagedWAL and the measurements at the top of
 		// checkpoint.go. Must be in the DSN: wal_autocheckpoint is

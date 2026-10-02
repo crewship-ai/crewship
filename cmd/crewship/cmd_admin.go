@@ -236,7 +236,7 @@ func runAdminSessionsList(cmd *cobra.Command, _ []string) error {
 	// an attacker wants, and the audience for this command already has shell
 	// access to the host. So it stays local — and refuses when the CLI names a
 	// server, rather than reporting some other instance's sessions.
-	db, err := openGatedLocalDB(cmd, "crewship admin sessions list", "")
+	db, err := openReadOnlyLocalDB(cmd, "crewship admin sessions list", "")
 	if err != nil {
 		return err
 	}
@@ -842,7 +842,7 @@ func runAdminListUsers(cmd *cobra.Command, _ []string) error {
 func runAdminListUsersLocal(cmd *cobra.Command) error {
 	lockedOnly, _ := cmd.Flags().GetBool("locked-only")
 
-	db, err := openGatedLocalDB(cmd, "crewship admin list-users --local", "")
+	db, err := openReadOnlyLocalDB(cmd, "crewship admin list-users --local", "")
 	if err != nil {
 		return err
 	}

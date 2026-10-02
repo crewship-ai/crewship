@@ -255,3 +255,18 @@ func openGatedLocalDB(cmd *cobra.Command, what, alternative string) (*database.D
 	}
 	return database.Open(target.DSN, database.WithExclusiveWriter())
 }
+
+// openReadOnlyLocalDB is openGatedLocalDB for the commands that only read. It
+// takes no writer ownership, so it works while the server runs — the moment an
+// operator usually needs it — and the handle refuses writes.
+func openReadOnlyLocalDB(cmd *cobra.Command, what, alternative string) (*database.DB, error) {
+	target, err := requireLocalDB(cmd, what, alternative)
+	if err != nil {
+		return nil, err
+	}
+	if err := target.mustExist(fmt.Sprintf(
+		"database not found at %s — set DATABASE_URL or run `crewship init` first", target.Path)); err != nil {
+		return nil, err
+	}
+	return database.Open(target.DSN, database.WithQueryOnly())
+}
