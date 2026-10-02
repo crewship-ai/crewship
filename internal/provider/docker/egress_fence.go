@@ -65,6 +65,13 @@ func (p *Provider) egressFenceApplicable(team provider.CrewConfig) error {
 	if team.Privileged {
 		return fmt.Errorf("%w: privileged crew (the 1001/1002 UID boundary the fence rests on does not hold)", errFenceUnsupported)
 	}
+	if len(team.Services) > 0 {
+		// The fence lets only the sidecar's UID leave the namespace, so the
+		// agent could not reach its own crew's postgres/redis. A narrow path
+		// to them needs the crew's own network (#2240) to bound it; until
+		// then refuse rather than run with a silently unreachable database.
+		return fmt.Errorf("%w: crew declares services, which the agent could not reach under the fence until the per-crew network path exists (#2240)", errFenceUnsupported)
+	}
 	if rt := p.ociRuntime(); rt != "runc" {
 		return fmt.Errorf("%w: runtime %q (the fence is verified on runc only)", errFenceUnsupported, rt)
 	}

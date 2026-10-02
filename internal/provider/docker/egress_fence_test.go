@@ -41,6 +41,7 @@ func TestEgressFenceApplicable(t *testing.T) {
 		{"free has nothing to fence", "runc", provider.CrewConfig{NetworkMode: "free"}, false},
 		{"privileged breaks the uid boundary", "runc", provider.CrewConfig{NetworkMode: "restricted", Privileged: true}, false},
 		{"gvisor netstack bypasses the namespace", "runsc", provider.CrewConfig{NetworkMode: "restricted"}, false},
+		{"declared services would be unreachable", "runc", provider.CrewConfig{NetworkMode: "restricted", Services: []provider.CrewService{{Name: "pg"}}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CREWSHIP_RUNTIME", tc.runtime)

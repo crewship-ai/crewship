@@ -438,6 +438,7 @@ Limits of the pilot:
 | `restricted`, privileged | any | **Refused**: the container is stopped, not run unfenced |
 | `free` | any | **Refused** when listed: there is no allowlist to enforce |
 | `restricted` | `runsc` (gVisor), `kata-runtime`, `sysbox-runc` | **Refused**: their traffic bypasses the namespace's netfilter hooks |
+| `restricted` with declared `services:` | any | **Refused** for now: the agent could not reach its own services through the fence; a narrow path to them comes with per-crew networks |
 | not listed | any | Unchanged behaviour, no fence |
 
 There is no silent fallback. A listed crew either runs fenced or does not run.
