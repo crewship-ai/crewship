@@ -361,7 +361,7 @@ func TestEgressFenceIntegration(t *testing.T) {
 
 	// Regression for failed runs that replaced the original container: the
 	// deferred cleanup must remove the successor, not just the initial ID.
-	if err := p.RemoveCrewRuntime(ctx, cid); err != nil {
+	if _, err := p.client.ContainerRemove(ctx, cid, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}); err != nil {
 		t.Fatalf("remove original fixture runtime: %v", err)
 	}
 	replacement, err := p.EnsureCrewRuntime(ctx, team)
@@ -380,7 +380,6 @@ func TestEgressFenceIntegration(t *testing.T) {
 			t.Errorf("fixture volume %s survived cleanup: %v", name, err)
 		}
 	}
-
 }
 
 // fenceTestNetnsRun runs bin (bind-mounted) in a one-shot container joined to
