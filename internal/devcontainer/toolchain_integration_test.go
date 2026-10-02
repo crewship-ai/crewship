@@ -22,7 +22,7 @@ func TestToolchainInventory_RealImageAndCache(t *testing.T) {
 	}
 	defer docker.Close()
 	if _, err := docker.ImageInspect(ctx, "alpine:3"); err != nil {
-		t.Skip("requires Docker with local alpine:3")
+		t.Fatalf("integration test requires Docker with local alpine:3: %v", err)
 	}
 	created, err := docker.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config:     &container.Config{Image: "alpine:3", Cmd: []string{"sleep", "infinity"}},
