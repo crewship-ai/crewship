@@ -18,6 +18,8 @@ import (
 // scheduling identity enters the shared ledger; it owns all claims and leases.
 const workflowDomain = "restricted_workflow"
 
+var errWorkflowWriterUnavailable = errors.New("private workflow writer unavailable")
+
 func workflowDispatchConfig() dispatch.Config {
 	return dispatch.Config{Owner: "restricted-workflow-dispatcher", Limits: work.SerialAgentLimits(),
 		Kinds:        []work.Kind{{Source: work.SourceManual, DomainKind: workflowDomain}},
@@ -158,7 +160,7 @@ func (r *workflowRuntime) Run(ctx context.Context, a dispatch.Assignment, starte
 	}()
 	wr, ok := quiesce.Enter(ctx)
 	if !ok {
-		return errors.New("private workflow writer unavailable")
+		return errWorkflowWriterUnavailable
 	}
 	leave = wr.Leave
 	return r.service.executeAssignment(wr.Context(), a, func() {
@@ -173,6 +175,10 @@ func (r *workflowRuntime) Classify(_ dispatch.Assignment, err error) dispatch.Ou
 	var uncertain workflowReconciliationRequired
 	if errors.As(err, &uncertain) {
 		return dispatch.OutcomeUnclear
+	}
+	if errors.Is(err, errWorkflowWriterUnavailable) {
+		// Quiesce refused admission before execution; no graph effects need replay.
+		return dispatch.OutcomeRetryable
 	}
 	// Failure can retain paid requests or external effects. Terminal failure
 	// releases capacity, without scheduling a retry or claiming those effects

@@ -4,11 +4,14 @@ package restrictedworkflow
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 func TestPrivateWorkflowRespectsBackupAndRecoveryHolds(t *testing.T) {
@@ -51,5 +54,64 @@ func TestPrivateWorkflowRespectsBackupAndRecoveryHolds(t *testing.T) {
 				t.Fatalf("dispatch after release: worked=%v error=%v starts=%d", worked, err, starts)
 			}
 		})
+	}
+}
+
+// Open a window after the common dispatcher claims work, before runtime admission.
+// The second attempt uses the same runtime without opening another window.
+type quiesceBeforeWorkflowRun struct {
+	*workflowRuntime
+	once sync.Once
+}
+
+func (r *quiesceBeforeWorkflowRun) Run(ctx context.Context, a dispatch.Assignment, started func()) error {
+	var window *quiesce.Window
+	var err error
+	r.once.Do(func() {
+		window, err = quiesce.Default().Begin(ctx, quiesce.Options{HoldCap: time.Minute})
+	})
+	if err != nil {
+		return err
+	}
+	if window != nil {
+		defer window.Release()
+	}
+	return r.workflowRuntime.Run(ctx, a, started)
+}
+
+func TestPrivateWorkflowQuiesceAfterClaimPreservesAuthorityAndRetries(t *testing.T) {
+	s, runner := fixture(t)
+	receipt := admitFixtureJob(t, s)
+	starts := 0
+	base := runner.StartSession
+	runner.StartSession = func(ctx context.Context, handle string) (restricteddispatch.TextSession, error) {
+		starts++
+		return base(ctx, handle)
+	}
+	runtime := &quiesceBeforeWorkflowRun{workflowRuntime: s.runtime}
+	s.dispatcher = dispatch.New(s.ledger, runtime, runtime, workflowDispatchConfig(), nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	if worked, err := s.DispatchNext(ctx); !worked || err == nil || starts != 0 {
+		t.Fatalf("pre-execution refusal: worked=%v error=%v starts=%d", worked, err, starts)
+	}
+	item, err := s.ledger.Get(ctx, receipt.ID)
+	if err != nil || item.State != work.StateRetryWait {
+		t.Fatalf("unstarted workflow lost instead of deferred: %+v %v", item, err)
+	}
+	result, err := s.Result(ctx, "h1", "w", receipt.ID)
+	if err != nil || result.State != "pending" || len(result.Outputs) != 0 {
+		t.Fatalf("quiesce refusal revoked private authority: %+v %v", result, err)
+	}
+	// Advance eligibility without sleeping through the production retry backoff.
+	if _, err := s.db.ExecContext(ctx, `UPDATE work_items SET eligible_at='2000-01-01T00:00:00Z' WHERE id=?`, receipt.ID); err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := s.DispatchNext(ctx); !worked || err != nil || starts != 2 {
+		t.Fatalf("dispatch after release: worked=%v error=%v starts=%d", worked, err, starts)
+	}
+	result, err = s.Result(ctx, "h1", "w", receipt.ID)
+	if err != nil || result.State != "completed" || len(result.Outputs) != 2 {
+		t.Fatalf("deferred private workflow did not complete: %+v %v", result, err)
 	}
 }
