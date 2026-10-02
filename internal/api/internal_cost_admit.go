@@ -18,7 +18,11 @@ func (r *Router) handleSidecarCostAdmit(w http.ResponseWriter, req *http.Request
 		return
 	}
 	var body struct {
-		Agent      string `json:"agent_id"`
+		Agent string `json:"agent_id"`
+		// Crew is the identity of the crew-level sidecar a routine script
+		// step runs against (#2761): it has no agent. Accepted only when the
+		// caller's internal token is bound to that same crew.
+		Crew       string `json:"crew_id"`
 		Credential string `json:"credential_id"`
 		Provider   string `json:"provider"`
 	}
@@ -30,19 +34,41 @@ func (r *Router) handleSidecarCostAdmit(w http.ResponseWriter, req *http.Request
 		return
 	}
 	var extra any
-	if dec.Decode(&extra) != io.EOF || body.Agent == "" || body.Provider == "" {
-		replyError(w, http.StatusBadRequest, "agent_id and provider required")
+	if dec.Decode(&extra) != io.EOF || body.Provider == "" || (body.Agent == "") == (body.Crew == "") {
+		replyError(w, http.StatusBadRequest, "provider and exactly one of agent_id or crew_id required")
 		return
 	}
 	var crew string
-	err := r.db.QueryRowContext(req.Context(), `SELECT a.crew_id FROM agents a JOIN crews c ON c.id=a.crew_id AND c.workspace_id=a.workspace_id WHERE a.id=? AND a.workspace_id=? AND a.deleted_at IS NULL AND c.deleted_at IS NULL`, body.Agent, ws).Scan(&crew)
-	if err != nil {
-		replyError(w, http.StatusForbidden, "agent scope unavailable")
-		return
-	}
-	if bound := InternalTokenCrewFromContext(req.Context()); bound != "" && bound != crew {
-		replyError(w, http.StatusForbidden, "agent scope mismatch")
-		return
+	var err error
+	if body.Crew != "" {
+		// Crew-scoped caller (#2761). The identity comes from the token, not
+		// the body: an unbound token, or one bound to another crew, cannot
+		// claim it. A crew-level sidecar delivers no credentials, so naming
+		// one is refused rather than checked. The budget rule below applies
+		// unchanged, with no agent scope.
+		if bound := InternalTokenCrewFromContext(req.Context()); bound == "" || bound != body.Crew {
+			replyError(w, http.StatusForbidden, "crew scope mismatch")
+			return
+		}
+		if body.Credential != "" {
+			replyError(w, http.StatusForbidden, "a crew-scoped caller holds no credential")
+			return
+		}
+		err = r.db.QueryRowContext(req.Context(), `SELECT id FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, body.Crew, ws).Scan(&crew)
+		if err != nil {
+			replyError(w, http.StatusForbidden, "crew scope unavailable")
+			return
+		}
+	} else {
+		err = r.db.QueryRowContext(req.Context(), `SELECT a.crew_id FROM agents a JOIN crews c ON c.id=a.crew_id AND c.workspace_id=a.workspace_id WHERE a.id=? AND a.workspace_id=? AND a.deleted_at IS NULL AND c.deleted_at IS NULL`, body.Agent, ws).Scan(&crew)
+		if err != nil {
+			replyError(w, http.StatusForbidden, "agent scope unavailable")
+			return
+		}
+		if bound := InternalTokenCrewFromContext(req.Context()); bound != "" && bound != crew {
+			replyError(w, http.StatusForbidden, "agent scope mismatch")
+			return
+		}
 	}
 	kind := ""
 	if body.Credential != "" {

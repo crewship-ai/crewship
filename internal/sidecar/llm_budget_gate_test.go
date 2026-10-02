@@ -93,3 +93,33 @@ func TestBudgetGateOpaqueTunnelBeforeDial(t *testing.T) {
 		t.Fatalf("code %d", rr.Code)
 	}
 }
+
+// #2761: the crew-level sidecar a routine script step uses has no agent. It
+// must still ask the host — under the crew identity its token is bound to —
+// instead of refusing every HTTPS tunnel before the question is asked.
+func TestManagedBudgetAdmissionCrewOnlyIdentity(t *testing.T) {
+	var got map[string]string
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if json.NewDecoder(r.Body).Decode(&got) != nil {
+			t.Error("bad body")
+		}
+		w.Write([]byte(`{"allowed":true}`))
+	}))
+	defer host.Close()
+	s := &Server{ipc: &IPCConfig{BaseURL: host.URL, Token: "token", WorkspaceID: "w", CrewID: "crew-1", CrewOnly: true}}
+	if err := s.buildLLMAdmission()(context.Background(), "", "", "OPAQUE_TUNNEL"); err != nil {
+		t.Fatalf("crew-only sidecar refused before asking the host: %v", err)
+	}
+	if len(got) != 3 || got["crew_id"] != "crew-1" || got["credential_id"] != "" || got["provider"] != "OPAQUE_TUNNEL" {
+		t.Fatalf("crew identity not bound: %v", got)
+	}
+	if _, ok := got["agent_id"]; ok {
+		t.Fatal("a crew-only sidecar must not claim an agent")
+	}
+
+	// Not crew-only (an agent sidecar that lost its agent id) stays closed.
+	s = &Server{ipc: &IPCConfig{BaseURL: host.URL, Token: "token", WorkspaceID: "w", CrewID: "crew-1"}}
+	if s.buildLLMAdmission()(context.Background(), "", "", "OPAQUE_TUNNEL") == nil {
+		t.Fatal("an agent sidecar without an agent id must not fall back to the crew")
+	}
+}
