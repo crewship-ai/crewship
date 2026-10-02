@@ -732,8 +732,8 @@ peer's token can replay it and be attributed to that peer. The HMAC journal
 protects the integrity of the resulting record, but it cannot repair actor
 authenticity that was never established. Distinct per-agent OS principals are
 the prerequisite for the attested-identity design tracked in
-`docs/prd/agent-identity-signing.md`; container-per-agent was explicitly
-rejected in `docs/prd/agent-isolation-findings-2026-08-01.md` in favour of an
+[historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/agent-identity-signing.md); container-per-agent was explicitly
+rejected in [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/agent-isolation-findings-2026-08-01.md) in favour of an
 incremental per-agent UID path inside the shared crew container.
 
 #### Where the memory refusal is enforced (CRE-153)

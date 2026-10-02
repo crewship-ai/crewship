@@ -2,7 +2,7 @@
 
 Implemented scope: manual previews in Chat → Files, using the existing agent
 and crew file trees and authenticated download endpoints. This is the first
-increment of `chat-artifact-preview-analysis-2026-09-08.md`.
+increment of [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/chat-artifact-preview-analysis-2026-09-08.md).
 
 ## User flow
 

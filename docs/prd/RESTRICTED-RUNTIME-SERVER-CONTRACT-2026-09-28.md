@@ -15,7 +15,7 @@ Application authorization and release integration remain in
 Status: the user authorized implementation from this contract on 2026-09-28
 following the contract review in PR #2710. The isolated offline prototype is
 now implemented in `internal/restrictedruntime`; see the [implementation and
-acceptance report](RESTRICTED-RUNTIME-DEV2-EVIDENCE-2026-09-28.md). This records
+acceptance report](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/RESTRICTED-RUNTIME-DEV2-EVIDENCE-2026-09-28.md). This records
 permission to proceed, not a claim that production server adapters or A2/B
 integration have been accepted. The common authorization workstream remains
 separate.

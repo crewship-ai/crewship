@@ -22,8 +22,8 @@ jeho role. Migrace upravuje také dříve uložená systémová upozornění tě
 přihlášení, včetně historie; ostatní zprávy ani jejich stav nemění.
 
 **Status:** analýza k odsouhlasení · **Datum:** 2026-09-06
-**Navazuje na:** `CREDENTIALS-VAULT.md` (typy, mount), `PRD-CREDENTIALS-V2-2026.md`
-(P2 fanout, P3 bindings), `PRD-MODEL-SCOPED-CREDENTIALS-2026.md` (model policy na
+**Navazuje na:** `CREDENTIALS-VAULT.md` (typy, mount), [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/PRD-CREDENTIALS-V2-2026.md)
+(P2 fanout, P3 bindings), [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/PRD-MODEL-SCOPED-CREDENTIALS-2026.md) (model policy na
 credentialu)
 **Cíl v jedné větě:** člověk se do providera (Anthropic, OpenAI/Codex, Google, Cursor,
 Factory, …) přihlásí **jednou**, přihlášení leží v Credentials na záložce **Providers**,

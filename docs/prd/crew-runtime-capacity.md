@@ -1,12 +1,12 @@
 # Design — Crew runtime: container configuration, capacity, and wake cost
 
-Status: draft · 2026-08-01 · Companion to `agent-identity-signing.md` (isolation) and
+Status: draft · 2026-08-01 · Companion to [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/agent-identity-signing.md) (isolation) and
 `agent-memory-on-wake.md` (context delivery)
 
 > **Scope note.** This document is about the *crew container as an operational object*:
 > how it is configured, what it costs while idle, what limits it, and what a wake
 > actually pays for. It is deliberately independent of the container-per-agent decision
-> locked in `agent-identity-signing.md` — every defect below is present whether an agent
+> locked in [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/agent-identity-signing.md) — every defect below is present whether an agent
 > shares a container with its crew or gets its own, and several get *worse* under
 > container-per-agent because the per-container costs multiply.
 >

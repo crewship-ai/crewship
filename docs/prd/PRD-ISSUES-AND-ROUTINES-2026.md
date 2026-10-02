@@ -945,7 +945,7 @@ Two further rules:
 
 **Read this before planning anything.** A release-scope audit established what 1.0 means in this repository, and it is not what rev 1 assumed.
 
-`docs/prd/PRD-RELEASE-1-0-QUALITY-AUDIT.md` sets the bar as eight conditions about *proof*, not features — among them: "Every documented API route matches the registered route, HTTP method, parameters, authorization requirements, response shape, and error behavior"; "Critical security, credential, persistence, backup, restore, orchestration, and migration paths have behavior-level tests"; "Documentation distinguishes stable, early, experimental, deprecated, and roadmap behavior consistently". Its non-goals explicitly exclude "Expanding the product surface during this audit unless a missing behavior is required to make an existing documented workflow functional." The GitHub 1.0 milestone delegates its own definition to that document and carries four open issues (#2183, #1785, #1783, #1781). The work order's standard is quoted directly: *"An honest 70% is worth more than a confident 100% that is wrong."*
+[historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/PRD-RELEASE-1-0-QUALITY-AUDIT.md) sets the bar as eight conditions about *proof*, not features — among them: "Every documented API route matches the registered route, HTTP method, parameters, authorization requirements, response shape, and error behavior"; "Critical security, credential, persistence, backup, restore, orchestration, and migration paths have behavior-level tests"; "Documentation distinguishes stable, early, experimental, deprecated, and roadmap behavior consistently". Its non-goals explicitly exclude "Expanding the product surface during this audit unless a missing behavior is required to make an existing documented workflow functional." The GitHub 1.0 milestone delegates its own definition to that document and carries four open issues (#2183, #1785, #1783, #1781). The work order's standard is quoted directly: *"An honest 70% is worth more than a confident 100% that is wrong."*
 
 So the split is:
 
@@ -956,7 +956,7 @@ If 1.0 is genuinely meant to include Track B, that is a decision to *redefine 1.
 
 ### Track A — the 1.0 truth cut
 
-**A0 · Truth audit** (§7). Docs only. Now also re-measures the release-readiness numbers, since `RELEASE-1-0-READINESS-2026-08-10.md` is 283 commits stale and disclaims its own currency.
+**A0 · Truth audit** (§7). Docs only. Now also re-measures the release-readiness numbers, since [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/RELEASE-1-0-READINESS-2026-08-10.md) is 283 commits stale and disclaims its own currency.
 
 **A1 · Stop actually stops (Tier 1), and terminal states hold.** *(merged #2295)*
 Cooperative cancellation per §10.3 Tier 1: `cancel_requested_at`, checked before any exec starts and again when the run reports back, and terminal-state guards on `mission_tasks` and `assignments`. **As built there is no mid-execution poll** — a run already inside its exec finishes that exec and is then recorded `CANCELLED`, and the mission engine schedules nothing further (proven for a live RUNNING run, `mission_tasks_stop_midflight_test.go`). That matches the promise exactly; do not describe it as more. `assignments` becomes reachable in `CANCELLED` (F9). The old stop route keeps its path and gains real behaviour. A late *failure* report on a stopped run now also reads as cancelled on every user-facing surface (broadcast, mission comment, activity), not only in `status`. UI label: "Stopping — will finish the current step".
@@ -1201,8 +1201,8 @@ Backwards compatibility: old `assignments` rows keep NULL `mission_id`/`session_
 | `docs/specs/response-shape-contract.md` | Binding on every new response type (§7 step 9). |
 | `docs/prd/agent-memory-on-wake.md`, `memory-retrieval-layer.md` | Reconcile, do not absorb: §11 consumes memory, it does not redesign it. |
 | `docs/guides/routines.mdx`, `docs/cli/routine.mdx` | Two documented behaviours are wrong (F26) — fixed in A5. |
-| `docs/prd/PRD-RELEASE-1-0-QUALITY-AUDIT.md` | **Defines 1.0.** Track A is scoped to its eight conditions; Track B is out of scope for 1.0 by its own non-goals. |
-| `docs/prd/RELEASE-1-0-READINESS-2026-08-10.md` | 283 commits stale and self-disclaiming. A0 re-measures before any number from it is cited. |
+| [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/PRD-RELEASE-1-0-QUALITY-AUDIT.md) | **Defines 1.0.** Track A is scoped to its eight conditions; Track B is out of scope for 1.0 by its own non-goals. |
+| [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/RELEASE-1-0-READINESS-2026-08-10.md) | 283 commits stale and self-disclaiming. A0 re-measures before any number from it is cited. |
 | `docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md` | Its "blocking" tier (#1781, #1783, #1785, plus the tracker's #2183) is the real 1.0 critical path. Track A must not displace it. |
 | `RELEASING.md` | Still documents `v0.1.0-beta.1` while `package.json` says `1.0.0-rc.1`. Not this PRD's defect; worth an issue. |
 | #2370 B13, the `DONE`/`COMPLETED` decision | Resolved in §3.1 ("Resolved in B13"); decision recorded as D20 below. |

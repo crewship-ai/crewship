@@ -234,7 +234,7 @@ bearer token is re-derived deterministically from `ENCRYPTION_KEY`.
 
 > **Security note, out of scope here but worth an issue:** that token has **no expiry and
 > no revocation list**. Once derived it is valid forever unless `ENCRYPTION_KEY` changes.
-> See `agent-identity-signing.md`, which replaces it with kernel-attested identity.
+> See [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/agent-identity-signing.md), which replaces it with kernel-attested identity.
 
 ---
 

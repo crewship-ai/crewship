@@ -216,3 +216,8 @@ __pycache__/
 !/docs/prd/reports/README.md
 !/docs/prd/reports/codex-review-work-regressions-2026-09-11.go.txt
 /public/design/
+
+# Worktrees may place build output on separate storage through symlinks.
+# Match the root entries themselves as well as ordinary directories.
+/.next
+/out
