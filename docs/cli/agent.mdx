@@ -415,6 +415,12 @@ the crew's runtime is reachable.
 
 ---
 
+After a server restart, persisted runtime identities remain visible until their
+processes can be confirmed stopped. Recovery protects the specific live run,
+not unrelated older traces of the same agent. Runs owned by the durable work
+queue keep that queue's settlement and reconciliation rules; restarting the
+server does not turn an unknown work outcome into cancellation.
+
 ## `crewship agent logs`
 
 Show agent container logs. An alias for the top-level [`crewship logs`](/cli/logs) — same implementation, same output, and `--tail` is the same knob `crewship logs --lines` turns. Reach for `crewship logs` when you want `--follow`.
