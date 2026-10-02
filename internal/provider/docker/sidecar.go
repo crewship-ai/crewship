@@ -415,6 +415,22 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 		return nil, err
 	}
 
+	// A fenced crew reaches its services only through exact endpoints in
+	// its fence; follow any address change now (#1368 + #2240). Also on an
+	// error part-way: the fence then still matches the declared set, never
+	// an address a moved service left behind.
+	defer func() {
+		if ferr := p.refreshFenceServices(ctx, team); ferr != nil && retErr == nil {
+			retErr = fmt.Errorf("egress fence after services: %w", ferr)
+		}
+	}()
+	// Addresses follow the sorted service names, so declaring a service
+	// shifts the others: free every fixed address another service holds
+	// before any service claims its own.
+	if err := p.releaseServiceAddrs(ctx, team.ID, svcNet, fixedAddrs); err != nil {
+		return nil, err
+	}
+
 	ids = make(map[string]string, len(team.Services))
 	for i := range team.Services {
 		svc := &team.Services[i]
@@ -442,11 +458,6 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 		if err := p.waitSidecarHealthy(waitCtx, ids[svc.Name]); err != nil {
 			return ids, fmt.Errorf("sidecar %q not healthy: %w", svc.Name, err)
 		}
-	}
-	// A fenced crew reaches its services only through exact endpoints in
-	// its fence; follow any address change now (#1368 + #2240).
-	if err := p.refreshFenceServices(ctx, team); err != nil {
-		return ids, fmt.Errorf("egress fence after services: %w", err)
 	}
 	return ids, nil
 }

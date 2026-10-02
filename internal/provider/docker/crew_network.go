@@ -639,3 +639,50 @@ func endpointAt(ep *network.EndpointSettings, addr netip.Addr) bool {
 	}
 	return !ep.IPAddress.IsValid() && ep.IPAMConfig != nil && ep.IPAMConfig.IPv4Address == addr
 }
+
+// releaseServiceAddrs detaches from netName every service of crewID that
+// holds another declared service's fixed address. Fixed addresses follow the
+// sorted service names, so a newly declared service can take an address an
+// existing one holds; ensureSidecar then attaches each service at its own.
+// A detached service is unreachable until it is attached again — closed,
+// never wider.
+func (p *Provider) releaseServiceAddrs(ctx context.Context, crewID, netName string, fixed map[string]netip.Addr) error {
+	if len(fixed) == 0 {
+		return nil
+	}
+	owner := make(map[netip.Addr]string, len(fixed))
+	for name, a := range fixed {
+		owner[a] = name
+	}
+	list, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
+	if err != nil {
+		return fmt.Errorf("list services: %w", err)
+	}
+	for _, c := range list.Items {
+		name, ok := matchCrewService(c.Labels, crewID)
+		if !ok {
+			continue
+		}
+		insp, err := p.client.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			return fmt.Errorf("inspect service %q: %w", name, err)
+		}
+		ns := insp.Container.NetworkSettings
+		if ns == nil || ns.Networks[netName] == nil {
+			continue
+		}
+		ep := ns.Networks[netName]
+		held := ep.IPAddress
+		if !held.IsValid() && ep.IPAMConfig != nil {
+			held = ep.IPAMConfig.IPv4Address
+		}
+		if o, taken := owner[held]; !taken || o == name {
+			continue
+		}
+		if err := p.networkDisconnect(ctx, netName, c.ID); err != nil {
+			return fmt.Errorf("free address %s held by service %q: %w", held, name, err)
+		}
+		p.logger.Info("service released another service's fixed address", "service", name, "address", held.String(), "network", netName)
+	}
+	return nil
+}

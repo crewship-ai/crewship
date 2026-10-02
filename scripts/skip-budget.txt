@@ -199,4 +199,7 @@
 #                     same line; the count is the sum of their waivers above.
 # 2026-10-02 (#1368+#2240): +1 — TestEgressFenceOwnServicesIntegration fences a
 #                     real crew with a real service; SKIP-WAIVER on the Docker guard.
-155
+# 2026-10-02 (#1368+#2240): +1 — fenceSvcHarness (address change, unavailable
+#                     service, failed network move) needs real bridges and
+#                     nftables; SKIP-WAIVER on the Docker guard.
+156

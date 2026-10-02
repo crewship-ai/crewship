@@ -464,8 +464,10 @@ A fenced crew on its own network reaches its declared `services:` and nothing el
 
 - **Fixed addresses.** On a crew's own `/27` each service has a fixed address (`.4` onward, by the sorted service names); every other container on that network gets an address from the upper half. A service address is never handed to another container, and a recreated service comes back at the same one.
 - **Exact endpoints.** The fence accepts packets to each service's address on its declared ports and the ports its image exposes, by protocol. Not the subnet, not other ports, not the host.
-- **Names without DNS.** The agent cannot query DNS under the fence. Service names are written into the runtime container's `/etc/hosts` when it is created, so `postgres:5432` or `redis:6379` resolve. Adding or renaming a service therefore takes effect when the crew's container is next recreated.
-- **Kept current.** After the crew's services are ensured, the fence is re-checked and re-installed in one atomic swap if their endpoints changed (for example a newly exposed port).
+- **Names without DNS.** The agent cannot query DNS under the fence. Service names are written into the runtime container's `/etc/hosts` when it is created, so `postgres:5432` or `redis:6379` resolve. Adding or renaming a service therefore takes effect when the crew's container is next recreated (after a stop; a running container is not recreated under the agent).
+- **Kept current.** After the crew's services are ensured, the fence is re-checked and re-installed in one atomic swap if their endpoints changed (for example a newly exposed port). This also happens when ensuring the services fails part-way, so the fence always matches the declared services and never keeps the address a moved service left.
+- **Address changes.** Because addresses follow the sorted names, declaring a service can shift the address of an existing one. The shifted service is detached and attached again at its new address; the old address closes in the fence. Until the crew's container is recreated, its `/etc/hosts` still names the old address, where the port is closed: the service is unreachable by name, never reachable through another service.
+- **Failures close the path.** A service that is down, cannot start, or whose move between networks fails is unreachable; the crew stays fenced and gains no other destination.
 
 #### What the fence does not protect: credentials inside the container
 
