@@ -17,7 +17,7 @@
 //	    ip daddr 127.0.0.11 meta skuid <allowed> accept   # Docker DNS: sidecar only
 //	    ip daddr 127.0.0.11 reject                        # agent DNS = tunnel primitive
 //	    oifname "lo" accept                               # agent ↔ sidecar on 127.0.0.1:9119
-//	    ct state established,related accept               # replies to inbound connections
+//	    ct direction reply ct state established,related accept  # replies to inbound connections only
 //	    meta skuid <allowed> accept                       # sidecar egress (allowlist on top)
 //	    reject with icmpx admin-prohibited                # fail fast instead of timing out
 //
@@ -32,9 +32,13 @@
 package egressfence
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
+	"strings"
 )
 
 // TableName is the nftables table the fence owns. Apply replaces only this
@@ -75,16 +79,40 @@ func (s Spec) Validate() error {
 	return nil
 }
 
+// markerVersion changes whenever the rule shape changes, so a namespace
+// fenced by an older binary reads as not-valid and is re-applied.
+const markerVersion = "v2"
+
+// marker is the user data Apply stores on rule i and Check expects back. It
+// binds each rule to the rule shape version and to this spec's UIDs, so a
+// table with the right name and rule count but different content (another
+// version, other UIDs, edited rules) does not pass as this fence.
+func (s Spec) marker(i int) string {
+	uids := make([]string, len(s.AllowUIDs))
+	for j, u := range s.AllowUIDs {
+		uids[j] = strconv.FormatUint(uint64(u), 10)
+	}
+	sum := sha256.Sum256([]byte(markerVersion + "|" + strings.Join(uids, ",")))
+	return fmt.Sprintf("crewship-fence/%s/%d/%s", markerVersion, i, hex.EncodeToString(sum[:6]))
+}
+
 // State is what Check found in the namespace.
 type State struct {
 	Present bool
 	Rules   int
+	// Valid means the installed table is exactly the fence for the checked
+	// spec (hook, policy, rule count and per-rule markers).
+	Valid bool
 }
 
 // String renders a State for logs.
 func (s State) String() string {
-	if !s.Present {
+	switch {
+	case !s.Present:
 		return "absent"
+	case !s.Valid:
+		return fmt.Sprintf("present but not valid (%d rules)", s.Rules)
+	default:
+		return fmt.Sprintf("present (%d rules)", s.Rules)
 	}
-	return fmt.Sprintf("present (%d rules)", s.Rules)
 }

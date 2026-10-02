@@ -1764,6 +1764,9 @@ func (p *Provider) RemoveCrewVolumes(ctx context.Context, id, slug string) error
 // Exec runs a command inside a container via Docker exec. Returns a reader
 // for the combined stdout/stderr stream.
 func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	if err := p.guardFencedExec(ctx, cfg.ContainerID); err != nil {
+		return nil, err
+	}
 	execCfg := client.ExecCreateOptions{
 		Cmd:          cfg.Cmd,
 		Env:          cfg.Env,
@@ -1891,6 +1894,9 @@ const execRunningExitCode = -1
 // ExecInteractive creates an interactive TTY exec session with bidirectional I/O.
 // Unlike Exec(), this supports stdin and returns a raw connection for terminal use.
 func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.InteractiveExecConfig) (*provider.InteractiveExecResult, error) {
+	if err := p.guardFencedExec(ctx, cfg.ContainerID); err != nil {
+		return nil, err
+	}
 	execCfg := client.ExecCreateOptions{
 		Cmd:          cfg.Cmd,
 		Env:          cfg.Env,
