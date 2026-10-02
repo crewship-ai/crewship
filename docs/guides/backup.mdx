@@ -918,6 +918,27 @@ restore.
 See [Instance-Scope Backup Security](/security/backup-instance-security) for
 the threat model and crypto chain.
 
+### Upload an encrypted archive
+
+In **Recovery → Upload a backup**, choose a `.tar.zst` archive from another
+machine. The upload shows progress, can be cancelled, and accepts up to 64 GiB
+when sufficient disk space is available. The server validates the encrypted
+AGE envelope and payload checksum without receiving a private key. Uploading
+does not restore data or prove that its contents can be recovered.
+
+From the CLI, with an instance-admin token and no selected workspace:
+
+```bash
+crewship admin instance backups upload ./backup.tar.zst
+```
+
+The raw API is `POST /api/v1/admin/instance/backups/bundles/upload` with
+`Content-Type: application/octet-stream`. It returns the catalog path, scope,
+format and checksum proof. Re-uploading identical bytes preserves existing
+proof. Catalog changes and their instance audit record are one transaction.
+Older archives requiring conversion are marked explicitly. After upload,
+select the corresponding scope, check the contents and perform a test restore.
+
 ### Persistent quota-service disks
 
 Format v4 includes standalone quota-service disks, in addition to crew container

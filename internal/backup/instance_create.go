@@ -695,9 +695,10 @@ func cleanupStaleStaging(outDir string) {
 	}
 }
 
-// SweepInstanceStaging removes what an interrupted instance backup left in
-// outDir: its staging directories (the consistent copy) and a half-written
-// crewship-instance-all-….partial bundle, when older than maxAge. The backup
+// SweepInstanceStaging removes what an interrupted instance backup or backup
+// upload left in outDir: staging directories (the consistent copy, or the
+// sealed upload) and a half-written crewship-instance-all-….partial bundle,
+// when older than maxAge. The backup
 // service calls it at boot with maxAge 0 — no run is active then, so
 // anything left is an orphan. Returns how many entries it removed.
 func SweepInstanceStaging(outDir string, maxAge time.Duration) int {
@@ -710,7 +711,7 @@ func SweepInstanceStaging(outDir string, maxAge time.Duration) int {
 	removed := 0
 	for _, e := range entries {
 		name := e.Name()
-		staging := e.IsDir() && strings.HasPrefix(name, instanceStagingGlob)
+		staging := e.IsDir() && (strings.HasPrefix(name, instanceStagingGlob) || strings.HasPrefix(name, uploadStagingPrefix))
 		partial := !e.IsDir() && strings.HasPrefix(name, partialPrefix) && strings.HasSuffix(name, ".partial")
 		if !staging && !partial {
 			continue

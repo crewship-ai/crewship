@@ -177,6 +177,8 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("PUT", "/api/v1/admin/instance/backups/settings/recovery-kit", ib.SetRecoveryKit)
 	// openapi: responses 200,400,401,403,404,422,500
 	r.authedInstance("POST", "/api/v1/admin/instance/backups/bundles/check", ib.CheckBundle)
+	// openapi: responses 201,400,401,403,409,413,415,422,500,507
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/bundles/upload", ib.UploadBundle)
 	// openapi: responses 200,400,401,403,404,422,500
 	r.authedInstance("POST", "/api/v1/admin/instance/backups/restore/checks", ib.RestoreChecks)
 	// openapi: responses 201,400,401,403,404,409,500
