@@ -4,7 +4,9 @@ package api
 // Owns createAgentRequest type. Extracted from agents.go.
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -229,6 +231,20 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A slug another agent of this crew used (deleted, renamed or moved away)
+	// still names that agent's memory and output; taking it would inherit them.
+	if req.CrewID != nil && *req.CrewID != "" {
+		reserved, err := slugReservedFor(r.Context(), h.db, *req.CrewID, req.Slug, "")
+		if err != nil {
+			replyInternalError(w, h.logger, "check agent slug reservation", err)
+			return
+		}
+		if reserved {
+			replyError(w, http.StatusConflict, slugReservedMessage(req.Slug))
+			return
+		}
+	}
+
 	// Free slug from soft-deleted agents so the UNIQUE constraint doesn't block re-creation.
 	if _, err := h.db.ExecContext(r.Context(),
 		"UPDATE agents SET slug = slug || '_deleted_' || id WHERE workspace_id = ? AND slug = ? AND deleted_at IS NOT NULL",
@@ -344,3 +360,24 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // Get returns a single agent by ID with full details including crew info and counts.
 // GET /api/v1/agents/{agentId}
+
+// slugReservedFor reports whether (crew, slug) is reserved for an agent other
+// than agentID. Agent durable data is keyed by slug inside the crew, so a
+// reserved slug would hand its previous holder's memory and output to whoever
+// takes it. The agent_slug_reservations triggers enforce the same rule for
+// every insert path; this check only turns it into a clear 409.
+func slugReservedFor(ctx context.Context, db *sql.DB, crewID, slug, agentID string) (bool, error) {
+	var holder string
+	err := db.QueryRowContext(ctx, `SELECT agent_id FROM agent_slug_reservations WHERE crew_id = ? AND slug = ?`, crewID, slug).Scan(&holder)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return holder != agentID, nil
+}
+
+func slugReservedMessage(slug string) string {
+	return fmt.Sprintf("Slug %q was used by another agent in this crew, and that agent's memory and output are still stored under it. Choose a different slug.", slug)
+}

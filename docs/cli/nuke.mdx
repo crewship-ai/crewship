@@ -50,6 +50,22 @@ two kinds of orphan behind:
 run **before** the crew rows are deleted, since they need the crews to still
 exist.
 
+## When the runtime teardown fails
+
+`nuke all` tears down the docker runtimes **first**, and stops if it cannot
+vouch for that teardown — before deleting anything else:
+
+| Server answer | `nuke all` / `nuke runtimes` |
+|---|---|
+| Every container and volume removed | continues / succeeds |
+| The provider does not run docker runtimes (`reason: unsupported`, e.g. Apple Containers) | says so and continues — there is nothing to tear down |
+| No runtime provider at all (`reason: unavailable`, e.g. docker failed at server start) | exits non-zero; runtimes from an earlier start may still exist |
+| Some resources could not be removed (HTTP 500 with the partial `removed` list) | exits non-zero |
+
+On a failure no escalation, inbox item or crew is deleted, so the crews that
+locate the runtimes stay in place: fix the cause (start docker, free the volume)
+and run the nuke again. There is no flag to skip this check.
+
 ## Confirmation
 
 The two full-DB wipes — `nuke all` and `nuke data` — use the typed-slug gate:

@@ -73,6 +73,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"service_runtime_intents":  IntentInclude,        // Durable user-requested service state.
 	"agents":                   IntentInclude,
 	"agent_skills":             IntentInclude,
+	"agent_slug_reservations":  IntentInclude, // restored crew data under a slug stays out of reach of a new agent
 	"crew_members":             IntentInclude,
 	"chats":                    IntentInclude,
 	"agent_mcp_bindings":       IntentInclude,
