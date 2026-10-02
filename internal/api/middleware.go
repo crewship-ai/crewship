@@ -215,6 +215,10 @@ const maxAPIBodyBytes int64 = 16 << 20 // 16 MiB
 func BodyCap(max int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if bodyCapExempt(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			if r.ContentLength > max {
 				writeProblem(w, r, http.StatusRequestEntityTooLarge,
 					"Request body too large")
@@ -226,6 +230,13 @@ func BodyCap(max int64) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// bodyCapExempt names the streaming routes that enforce their own, larger
+// limit while reading — never buffering — the body. The encrypted backup
+// upload accepts archives up to 64 GiB.
+func bodyCapExempt(r *http.Request) bool {
+	return r.Method == http.MethodPost && r.URL.Path == instanceBackupUploadPath
 }
 
 // AuthMiddleware provides HTTP middleware for JWT and CLI token authentication.

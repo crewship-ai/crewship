@@ -1207,7 +1207,8 @@ crewship admin instance backups environments land
 `POST /api/v1/admin/instance/backups/bundles/upload`. Streams an encrypted local
 archive, up to 64 GiB, with an instance-admin token and no selected workspace.
 No private key is sent. The returned path is catalogued with checksum proof;
-contents checks and a test restore are separate. Ctrl+C cancels the request.
+contents checks and a test restore are separate. The command sets no overall
+timeout, so a slow link can take as long as it needs; Ctrl+C cancels the request.
 Legacy archives needing conversion are marked explicitly.
 
 ```bash

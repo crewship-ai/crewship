@@ -2030,12 +2030,15 @@ parameter is accepted. One upload per server process is admitted at a time.
 Proof level 1 confirms the encrypted payload checksum, not decryptability or
 successful recovery. Duplicate bytes preserve the catalog's existing proof.
 Publication, catalog and audit either commit together or the owned file is
-removed. Interrupted uploads remove staging. No restore is started.
+removed. Interrupted uploads remove staging; staging left by a crash or restart is
+removed on the next start. The upload is not bound by the server's request read
+timeout, but one that sends nothing for 2 minutes ends as interrupted. No restore
+is started.
 
 | Status | Condition |
 |---|---|
 | `201` | Validated encrypted archive catalogued and audited. |
-| `400` | Interrupted upload. |
+| `400` | Interrupted upload, or no bytes received for 2 minutes. |
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
 | `409` | Another upload is in progress. |

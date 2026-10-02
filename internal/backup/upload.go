@@ -103,7 +103,7 @@ func ImportUploadedBundle(ctx context.Context, db *sql.DB, src io.Reader, opts U
 	} else if err = checkSpace(1); err != nil {
 		return nil, err
 	}
-	staging, err := os.MkdirTemp(directory, ".upload-")
+	staging, err := os.MkdirTemp(directory, uploadStagingPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +133,9 @@ func ImportUploadedBundle(ctx context.Context, db *sql.DB, src io.Reader, opts U
 	if err != nil {
 		return nil, err
 	}
-	manifest, validateErr := validateUploadedBundle(ctx, reader, opts.MaxBytes)
+	// The payload is AGE ciphertext and does not compress, so the expanded
+	// archive is bounded by what was received plus the small text entries.
+	manifest, validateErr := validateUploadedBundle(ctx, reader, count+uploadTextSlackBytes)
 	if validateErr == nil {
 		_, validateErr = io.Copy(io.Discard, uploadContextReader{ctx, reader})
 	}
@@ -176,6 +178,13 @@ func ImportUploadedBundle(ctx context.Context, db *sql.DB, src io.Reader, opts U
 		return nil, err
 	}
 	defer root.Close()
+	// Hash an existing duplicate before the catalog transaction: its upsert
+	// holds the SQLite writer, and every other write would wait out a re-hash
+	// of a multi-gigabyte file.
+	verified, err := verifyExistingUpload(ctx, root, finalName, count, digest.Sum(nil))
+	if err != nil {
+		return nil, err
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -209,23 +218,15 @@ func ImportUploadedBundle(ctx context.Context, db *sql.DB, src io.Reader, opts U
 		if statErr != nil || !info.Mode().IsRegular() || info.Size() != count {
 			return nil, ErrUploadInvalid
 		}
-		existing, openErr := root.Open(finalName)
-		if openErr != nil {
-			return nil, openErr
-		}
-		info, statErr = existing.Stat()
-		if statErr != nil || !info.Mode().IsRegular() || info.Size() != count {
-			existing.Close()
-			return nil, ErrUploadInvalid
-		}
-		hash := sha256.New()
-		_, hashErr := io.Copy(hash, uploadContextReader{ctx, existing})
-		closeErr = existing.Close()
-		if err = errors.Join(hashErr, closeErr); err != nil {
-			return nil, err
-		}
-		if !bytes.Equal(hash.Sum(nil), digest.Sum(nil)) {
-			return nil, ErrUploadInvalid
+		// Only a file published after the check above, by a concurrent
+		// upload of the same bytes, is hashed under the transaction.
+		if verified == nil || !os.SameFile(verified, info) || !verified.ModTime().Equal(info.ModTime()) {
+			if verified, err = verifyExistingUpload(ctx, root, finalName, count, digest.Sum(nil)); err != nil {
+				return nil, err
+			}
+			if verified == nil {
+				return nil, ErrUploadInvalid
+			}
 		}
 		result.Duplicate = true
 	} else {
@@ -258,6 +259,46 @@ func ImportUploadedBundle(ctx context.Context, db *sql.DB, src io.Reader, opts U
 	}
 	committed = true
 	return result, nil
+}
+
+// uploadStagingPrefix names an upload's staging directory. A crash leaves it
+// behind; SweepInstanceStaging removes it on the next start.
+const uploadStagingPrefix = ".upload-"
+
+// uploadTextSlackBytes bounds the manifest and restore notes that may expand
+// beyond the received bytes when the archive is decompressed.
+const uploadTextSlackBytes = maxBackupManifestBytes + 64<<10
+
+// verifyExistingUpload returns the file already published under name when it
+// holds exactly the uploaded bytes, nil when no file exists, and
+// ErrUploadInvalid for anything else under that name.
+func verifyExistingUpload(ctx context.Context, root *os.Root, name string, size int64, sum []byte) (os.FileInfo, error) {
+	info, err := root.Lstat(name)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil || !info.Mode().IsRegular() || info.Size() != size {
+		return nil, ErrUploadInvalid
+	}
+	existing, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := existing.Stat()
+	if err != nil || !os.SameFile(info, opened) || opened.Size() != size {
+		existing.Close()
+		return nil, ErrUploadInvalid
+	}
+	hash := sha256.New()
+	_, hashErr := io.Copy(hash, uploadContextReader{ctx, existing})
+	closeErr := existing.Close()
+	if err = errors.Join(hashErr, closeErr); err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(hash.Sum(nil), sum) {
+		return nil, ErrUploadInvalid
+	}
+	return opened, nil
 }
 
 type uploadContextReader struct {

@@ -199,8 +199,9 @@ func TestSweepInstanceStaging(t *testing.T) {
 	mk("crewship-instance-all-20260930T010203Z.tar.zst.partial", false)
 	mk("crewship-instance-all-20260930T010203Z.tar.zst", false)
 	mk("crewship-workspace-lab-20260930T010203Z.tar.zst.partial", false)
-	if n := backup.SweepInstanceStaging(dir, 0); n != 2 {
-		t.Fatalf("removed %d, want 2", n)
+	mk(".upload-1234567", true) // an upload interrupted by a crash
+	if n := backup.SweepInstanceStaging(dir, 0); n != 3 {
+		t.Fatalf("removed %d, want 3", n)
 	}
 	left, _ := os.ReadDir(dir)
 	var names []string

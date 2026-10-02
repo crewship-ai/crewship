@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -57,8 +56,11 @@ No workspace selection or decryption identity is required.`,
 		}
 		request.Header.Set("Content-Type", "application/octet-stream")
 		request.ContentLength = info.Size()
+		// No whole-request timeout: a 64 GiB archive over a slow link takes
+		// hours, and expiring would cancel the server's work. The server ends
+		// an upload that stops making progress; Ctrl-C cancels it here.
 		transport := *client.HTTPClient
-		transport.Timeout = 2 * time.Hour
+		transport.Timeout = 0
 		response, err := transport.Do(request)
 		if err != nil {
 			return err
