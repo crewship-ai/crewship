@@ -83,7 +83,7 @@ func TestLegacyServiceContainerSurvivesQuotaUpgrade(t *testing.T) {
 			daemon.containers = []map[string]any{{"Id": "legacy", "Names": []string{"/" + p.sidecarContainerName(covCrewID, "alpha", svc.Name)}, "Image": svc.Image, "State": "running",
 				"Labels": sidecarContainerLabels(covCrewID, "alpha", svc.Name, preQuotaSpecHash(&svc))}}
 			daemon.hostConfigs["legacy"] = preQuotaHostConfig(tc.mounts)
-			id, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", &svc)
+			id, err := p.ensureSidecar(t.Context(), covCrewID, "alpha", p.crewNetworkFor(covCrewID, "alpha"), &svc)
 			if err != nil {
 				t.Fatal(err)
 			}

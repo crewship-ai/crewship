@@ -916,6 +916,23 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				// stopped container is rebuilt, a running one is reported and
 				// left serving. See crew_resource_drift.go for why this is an
 				// observation of the container rather than a second digest.
+				// Network drift (#2240): the crew was listed for, or removed
+				// from, its own network. The build-wide runtime contract
+				// cannot see a per-crew choice, so check it here, with the
+				// same stopped-recreate / running-report rule as resources.
+				if want := p.crewNetworkFor(team.ID, team.Slug); want != "" && inspect.HostConfig != nil && string(inspect.HostConfig.NetworkMode) != want {
+					if crewContainerHoldsNoProcesses(c.State) {
+						p.logger.Info("recreating stopped container (crew network changed)",
+							"container", containerName, "crew_id", team.ID,
+							"from", string(inspect.HostConfig.NetworkMode), "to", want)
+						p.forceTeardown(ctx, c.ID, team.ID)
+						break // fall through to create new container
+					}
+					p.logger.Warn("crew container is still on its previous network and serving; it moves when next recreated "+
+						"(an idle-TTL stop, or `crewship crew restart-agents <crew>`). Its services stay with it until then.",
+						"container", containerName, "crew_id", team.ID,
+						"network", string(inspect.HostConfig.NetworkMode), "configured", want)
+				}
 				if drift := crewResourceDrift(team, inspect.HostConfig); drift != "" {
 					if crewContainerHoldsNoProcesses(c.State) {
 						p.logger.Info("recreating stopped container (crew resource limits changed)",
@@ -1702,6 +1719,7 @@ func buildChownInitCmd(allDirs []string, crewPath string, volumeTargets []string
 
 // StopCrewRuntime gracefully stops a crew container with a 30-second timeout.
 func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) error {
+	p.evictWarmContainer(containerID)
 	timeout := 30
 	if _, err := p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
 		return fmt.Errorf("stop crew runtime %s: %w", provider.ShortID(containerID), err)
@@ -1711,6 +1729,7 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 
 // RemoveCrewRuntime forcefully removes a crew container.
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
+	p.evictWarmContainer(containerID)
 	if _, err := p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
 		return fmt.Errorf("remove crew runtime %s: %w", provider.ShortID(containerID), err)
 	}

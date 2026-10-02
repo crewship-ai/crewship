@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/moby/moby/api/types/container"
 	"net/netip"
 	"os"
 	"strings"
@@ -25,8 +26,9 @@ import (
 // A crew listed in Config.CrewNetworkCrews gets its own bridge instead; its
 // services join it under their bare names. Crews not listed are unchanged.
 //
-// Addressing: Docker's default address pools hold roughly 31 bridges per
-// daemon and every crewship instance already takes a /16, so a crew network
+// Addressing: Docker's DEFAULT address pools (not a hard Docker limit) hold
+// roughly 31 bridges per daemon and every crewship instance already takes a
+// /16, so a crew network
 // gets an explicit /27 from CrewNetworkPool. The free subnet is chosen against
 // EVERY network on the daemon (other instances share it) and the host's IPv4
 // routes. IPv6 is off on crew networks.
@@ -34,6 +36,9 @@ import (
 const (
 	defaultCrewNetworkPool = "10.231.0.0/16"
 	crewNetworkPrefixBits  = 27
+	// crewNetworkPoolMinBits caps the pool at a /16: 2048 crew subnets, and
+	// a bounded candidate list (a /0 would be 134 million).
+	crewNetworkPoolMinBits = 16
 	crewNetworkKind        = resourcelifecycle.NetworkKind
 	crewKindLabelValueNet  = crewNetworkKind
 )
@@ -87,6 +92,11 @@ func (p *Provider) ensureCrewNetwork(ctx context.Context, id, slug string) (stri
 		}
 		return p.cfg.Network, p.ensureNetwork(ctx, p.cfg.Network)
 	}
+	return p.ensureCrewNetworkNamed(ctx, id, slug)
+}
+
+// ensureCrewNetworkNamed creates (or verifies) crew id's own network.
+func (p *Provider) ensureCrewNetworkNamed(ctx context.Context, id, slug string) (string, error) {
 	name := p.crewNetworkName(id)
 	crewNetworkAlloc.Lock()
 	defer crewNetworkAlloc.Unlock()
@@ -113,12 +123,21 @@ func (p *Provider) ensureCrewNetwork(ctx context.Context, id, slug string) (stri
 	if err != nil {
 		return "", err
 	}
-	routes, err := hostIPv4Routes()
-	if err != nil {
-		return "", fmt.Errorf("crew network: read host routes: %w", err)
-	}
-	if r, bad := foreignRouteInPool(pool, routes, used); bad {
-		return "", fmt.Errorf("%w: %s overlaps host route %s; set container.crew_network_pool", errCrewNetworkPool, pool, r)
+	// The route check reads THIS process's routing table, which is the
+	// daemon host's only when crewshipd runs natively next to a local
+	// daemon. Inside a container, or against a remote daemon, it would miss
+	// the host's LAN/VPN routes: require an explicit pool there instead of
+	// trusting a check that cannot see.
+	if p.hostRoutesVisible() {
+		routes, err := hostIPv4Routes()
+		if err != nil {
+			return "", fmt.Errorf("crew network: read host routes: %w", err)
+		}
+		if r, bad := foreignRouteInPool(pool, routes, used); bad {
+			return "", fmt.Errorf("%w: %s overlaps host route %s; set container.crew_network_pool", errCrewNetworkPool, pool, r)
+		}
+	} else if p.cfg.CrewNetworkPool == "" {
+		return "", fmt.Errorf("%w: crewship cannot see the Docker host's routes (it runs in a container or against a remote daemon); set container.crew_network_pool to a range free on that host", errCrewNetworkPool)
 	}
 	enableIPv6 := false
 	for _, subnet := range candidateSubnets(pool, crewNetworkPrefixBits) {
@@ -161,8 +180,8 @@ func (p *Provider) crewNetworkPool() (netip.Prefix, error) {
 		raw = defaultCrewNetworkPool
 	}
 	pool, err := netip.ParsePrefix(raw)
-	if err != nil || !pool.Addr().Is4() || pool.Bits() > crewNetworkPrefixBits {
-		return netip.Prefix{}, fmt.Errorf("%w: %q is not an IPv4 prefix of /%d or larger", errCrewNetworkPool, raw, crewNetworkPrefixBits)
+	if err != nil || !pool.Addr().Is4() || pool.Bits() > crewNetworkPrefixBits || pool.Bits() < crewNetworkPoolMinBits {
+		return netip.Prefix{}, fmt.Errorf("%w: %q must be an IPv4 prefix between /%d and /%d", errCrewNetworkPool, raw, crewNetworkPoolMinBits, crewNetworkPrefixBits)
 	}
 	return pool.Masked(), nil
 }
@@ -262,4 +281,83 @@ func parseProcNetRoute(sc *bufio.Scanner) ([]netip.Prefix, error) {
 		out = append(out, netip.PrefixFrom(addr, ones).Masked())
 	}
 	return out, sc.Err()
+}
+
+// serviceNetworkFor is the network a crew's services must be on: the one its
+// runtime container actually uses when that container exists, otherwise the
+// one crewNetworkFor names. It makes sure that network exists.
+func (p *Provider) serviceNetworkFor(ctx context.Context, id, slug string) (string, error) {
+	cid, _, err := p.FindCrewContainer(ctx, id, slug)
+	if err != nil {
+		return "", err
+	}
+	if cid != "" {
+		insp, err := p.client.ContainerInspect(ctx, cid, client.ContainerInspectOptions{})
+		if err != nil {
+			return "", fmt.Errorf("inspect crew runtime network: %w", err)
+		}
+		if hc := insp.Container.HostConfig; hc != nil && hc.NetworkMode != "" && hc.NetworkMode.IsUserDefined() {
+			name := string(hc.NetworkMode)
+			if name == p.cfg.Network {
+				return name, p.ensureNetwork(ctx, name)
+			}
+			if name == p.crewNetworkName(id) {
+				return p.ensureCrewNetworkNamed(ctx, id, slug)
+			}
+		}
+	}
+	return p.ensureCrewNetwork(ctx, id, slug)
+}
+
+// moveServiceNetwork attaches a service container to netName under its
+// service alias and detaches it from every other network, without recreating
+// it. Connect first, so the service is never on no network.
+func (p *Provider) moveServiceNetwork(ctx context.Context, containerID string, settings *container.NetworkSettingsSummary, netName, alias string) error {
+	attached := map[string]bool{}
+	if settings != nil {
+		for n := range settings.Networks {
+			attached[n] = true
+		}
+	}
+	if attached[netName] && len(attached) == 1 {
+		return nil
+	}
+	if !attached[netName] {
+		if _, err := p.client.NetworkConnect(ctx, netName, client.NetworkConnectOptions{
+			Container:      containerID,
+			EndpointConfig: &network.EndpointSettings{Aliases: []string{alias}},
+		}); err != nil {
+			return fmt.Errorf("move service %q to network %s: %w", alias, netName, err)
+		}
+	}
+	for n := range attached {
+		if n == netName {
+			continue
+		}
+		if _, err := p.client.NetworkDisconnect(ctx, n, client.NetworkDisconnectOptions{Container: containerID}); err != nil {
+			return fmt.Errorf("detach service %q from network %s: %w", alias, n, err)
+		}
+	}
+	p.logger.Info("service moved to the crew's network", "service", alias, "network", netName)
+	return nil
+}
+
+// hostRoutesVisible reports whether this process's routing table is the
+// Docker host's: a local daemon socket and not running inside a container.
+func (p *Provider) hostRoutesVisible() bool {
+	host := p.detected.Host
+	if host != "" && !strings.HasPrefix(host, "unix://") && !strings.HasPrefix(host, "npipe://") {
+		return false
+	}
+	return !runningInContainer()
+}
+
+// runningInContainer is a variable so tests can pin it.
+var runningInContainer = func() bool {
+	for _, f := range []string{"/.dockerenv", "/run/.containerenv"} {
+		if _, err := os.Stat(f); err == nil {
+			return true
+		}
+	}
+	return false
 }

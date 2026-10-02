@@ -57,6 +57,9 @@ func TestCrewNetworkIsolationIntegration(t *testing.T) {
 		t.Skipf("Docker not available: %v", err)
 	}
 	defer p.Close()
+	if err := p.pullSidecarImage(ctx, "alpine:3"); err != nil {
+		t.Fatalf("pull alpine:3: %v", err)
+	}
 	// Registered first so it runs last: the shared network can only go once
 	// every container on it has been removed by the deferred crew teardowns.
 	defer func() { _, _ = p.client.NetworkRemove(context.Background(), shared, client.NetworkRemoveOptions{}) }()
@@ -212,5 +215,117 @@ func TestCleanupRuntimeCrewNetworkIntegration(t *testing.T) {
 	}
 	if err := rt.RemoveNetwork(ctx, found.ID); !errors.Is(err, resourcelifecycle.ErrNotFound) {
 		t.Fatalf("removing it again: %v, want ErrNotFound", err)
+	}
+}
+
+// Codex review of #2767: a crew listed for its own network after its
+// services exist must not end up split from its database. While the runtime
+// still runs on the shared network the service stays there; once the
+// runtime is recreated on the crew network the service is moved LIVE (same
+// container, so image-declared anonymous volumes and data survive).
+func TestCrewNetworkMovesExistingServiceWithRuntimeIntegration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	tmp, err := os.MkdirTemp("", "crewship-crewnet-mv-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmp)
+	sidecarPath := filepath.Join(tmp, "crewship-sidecar")
+	entrypointPath := filepath.Join(tmp, "entrypoint.sh")
+	if err := os.WriteFile(sidecarPath, []byte("\x7fELF placeholder - never exec'd by this test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nexec sleep infinity\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shared := "crewnet-mv-" + time.Now().Format("150405")
+	base := Config{
+		RuntimeImage: "alpine:3", DefaultRuntime: "runc", Network: shared, OutputBasePath: tmp,
+		SidecarBinaryPath: sidecarPath, EntrypointPath: entrypointPath, CrewNetworkPool: "10.239.250.0/24",
+	}
+	p, err := New(ctx, base, nil)
+	if err != nil {
+		// SKIP-WAIVER(#2240): needs a live Docker daemon to move a real
+		// container between real bridges.
+		t.Skipf("Docker not available: %v", err)
+	}
+	defer p.Close()
+	defer func() { _, _ = p.client.NetworkRemove(context.Background(), shared, client.NetworkRemoveOptions{}) }()
+	if err := p.pullSidecarImage(ctx, "alpine:3"); err != nil {
+		t.Fatalf("pull alpine:3: %v", err)
+	}
+	crew := provider.CrewConfig{ID: "crewnet-mv-001", Slug: "mover", MemoryMB: 128, CPUs: 0.25,
+		Services: []provider.CrewService{{Name: "pg", Image: "alpine:3", Command: []string{"nc", "-lk", "-p", "5432", "-e", "echo", "mine"}}}}
+	defer func() {
+		bg := context.Background()
+		_ = p.RemoveCrewServices(bg, crew.ID, crew.Slug)
+		if cid, _, _ := p.FindCrewContainer(bg, crew.ID, crew.Slug); cid != "" {
+			_ = p.RemoveCrewRuntime(bg, cid)
+		}
+		_, _ = p.client.NetworkRemove(bg, p.crewNetworkName(crew.ID), client.NetworkRemoveOptions{})
+	}()
+	cid, err := p.EnsureCrewRuntime(ctx, crew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, err := p.EnsureCrewServices(ctx, crew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svcID := ids["pg"]
+	networksOf := func(id string) []string {
+		insp, err := p.client.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for n := range insp.Container.NetworkSettings.Networks {
+			out = append(out, n)
+		}
+		return out
+	}
+	resolvesOwn := func(runtime string) bool {
+		out, _ := crewNetExec(ctx, t, p, runtime, false, "sh", "-c", "nc -w 2 pg 5432 </dev/null")
+		return strings.TrimSpace(out) == "mine"
+	}
+
+	// Now listed. The runtime still runs on the shared network: the service
+	// must stay with it.
+	p.cfg.CrewNetworkCrews = []string{"mover"}
+	if _, err := p.EnsureCrewServices(ctx, crew); err != nil {
+		t.Fatal(err)
+	}
+	if nets := networksOf(svcID); len(nets) != 1 || nets[0] != shared {
+		t.Fatalf("service moved away from a runtime still on the shared network: %v", nets)
+	}
+	if !resolvesOwn(cid) {
+		t.Fatal("runtime lost its service while still on the shared network")
+	}
+
+	// Recreate the runtime (stop, then ensure: the network is part of its
+	// contract, so the stopped container is rebuilt on the crew network).
+	if err := p.StopCrewRuntime(ctx, cid); err != nil {
+		t.Fatal(err)
+	}
+	cid2, err := p.EnsureCrewRuntime(ctx, crew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids2, err := p.EnsureCrewServices(ctx, crew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids2["pg"] != svcID {
+		t.Fatalf("service was recreated (%s -> %s); it must be moved live to keep its data", svcID, ids2["pg"])
+	}
+	if nets := networksOf(svcID); len(nets) != 1 || nets[0] != p.crewNetworkName(crew.ID) {
+		t.Fatalf("service networks after the move: %v, want only %s", nets, p.crewNetworkName(crew.ID))
+	}
+	if nets := networksOf(cid2); len(nets) != 1 || nets[0] != p.crewNetworkName(crew.ID) {
+		t.Fatalf("runtime networks after recreate: %v", nets)
+	}
+	if !resolvesOwn(cid2) {
+		t.Fatal("recreated runtime does not reach its moved service")
 	}
 }
