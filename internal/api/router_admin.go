@@ -564,7 +564,7 @@ func (r *Router) registerAdminRoutes() {
 			runtimePruner = rp
 		}
 	}
-	crewRuntimeH := NewCrewRuntimeHandler(r.db, r.logger, runtimePruner)
+	crewRuntimeH := NewCrewRuntimeHandler(r.db, r.logger, runtimePruner, r.keeperContainer != nil)
 	r.authedAdminWrite("POST", "/api/v1/admin/prune-crew-runtimes", crewRuntimeH.Prune)
 
 	// #1385: reap crew containers orphaned by an internal-token master rotation

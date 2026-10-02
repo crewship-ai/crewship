@@ -166,7 +166,9 @@ var nukeRuntimesCmd = &cobra.Command{
 	Long: `Tear down the live id-scoped docker containers and volumes (agent home,
 crew shared, sidecar) of every crew in the active workspace. Cached devcontainer
 images (crewship-cache:<hash>) are NOT removed, so a reseed reuses them instead
-of rebuilding. A docker-less server reports nothing to do.`,
+of rebuilding. Fails (non-zero) when the server has no runtime provider or
+could not remove every resource; a provider that never runs docker runtimes is
+reported as having nothing to do.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -177,8 +179,13 @@ of rebuilding. A docker-less server reports nothing to do.`,
 		if err := nukeGate(cmd, "every crew's docker container(s)+volumes (agent home, crew shared)"); err != nil {
 			return err
 		}
-		if err := nukeRuntimes(cmd.Context(), newAPIClient()); err != nil {
+		outcome, err := nukeRuntimes(cmd.Context(), newAPIClient())
+		if err != nil {
 			return err
+		}
+		if outcome == runtimeTeardownUnsupported {
+			cli.PrintWarning("No docker runtimes to tear down on this provider")
+			return nil
 		}
 		cli.PrintSuccess("Crew docker runtimes torn down")
 		return nil
