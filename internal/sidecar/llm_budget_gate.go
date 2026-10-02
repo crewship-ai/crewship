@@ -35,14 +35,28 @@ func (s *Server) buildLLMAdmission() func(context.Context, string, string, strin
 		if actor == "" {
 			actor = s.ipc.AgentID
 		}
-		if actor == "" {
+		var body []byte
+		var err error
+		switch {
+		case actor != "":
+			body, err = json.Marshal(struct {
+				Agent      string `json:"agent_id"`
+				Credential string `json:"credential_id"`
+				Provider   string `json:"provider"`
+			}{actor, credential, provider})
+		case s.ipc.CrewOnly && s.ipc.CrewID != "":
+			// The crew-level sidecar of a routine script step (#2761) has no
+			// agent; it asks under the crew its token is bound to. Only a
+			// sidecar started crew-only may do this: an agent sidecar that
+			// lost its agent id stays closed rather than borrowing the crew.
+			body, err = json.Marshal(struct {
+				Crew       string `json:"crew_id"`
+				Credential string `json:"credential_id"`
+				Provider   string `json:"provider"`
+			}{s.ipc.CrewID, credential, provider})
+		default:
 			return errLLMBudgetAdmission
 		}
-		body, err := json.Marshal(struct {
-			Agent      string `json:"agent_id"`
-			Credential string `json:"credential_id"`
-			Provider   string `json:"provider"`
-		}{actor, credential, provider})
 		if err != nil {
 			return errLLMBudgetAdmission
 		}
