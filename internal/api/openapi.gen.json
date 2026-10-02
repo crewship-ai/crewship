@@ -9492,16 +9492,36 @@
       },
       "RemainingAgentDeletedV1": {
         "properties": {
-          "message": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
+          "runs": {
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "pending": {
+                "type": "integer"
+              },
+              "state": {
+                "type": "string"
+              },
+              "stopped": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "state",
+              "stopped",
+              "pending"
+            ],
+            "type": "object"
           },
           "success": {
             "type": "boolean"
           }
         },
+        "required": [
+          "success",
+          "runs"
+        ],
         "type": "object"
       },
       "RemainingAgentFileSavedV1": {

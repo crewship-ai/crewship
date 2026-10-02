@@ -44,6 +44,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	crews.SetContainer(r.keeperContainer)
 	crews.containerCleanup = r.containerCleanup
 	agents := NewAgentHandler(r.db, r.logger)
+	agents.runStopper = r.agentRunStopper
 	r.agentHandler = agents
 	if r.hub != nil {
 		agents.SetHub(r.hub)
