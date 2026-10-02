@@ -128,16 +128,16 @@ func (p *Provider) ensureCrewNetworkNamed(ctx context.Context, id, slug string) 
 	// daemon. Inside a container, or against a remote daemon, it would miss
 	// the host's LAN/VPN routes: require an explicit pool there instead of
 	// trusting a check that cannot see.
-	if p.hostRoutesVisible() {
-		routes, err := hostIPv4Routes()
-		if err != nil {
-			return "", fmt.Errorf("crew network: read host routes: %w", err)
-		}
+	routes, err := hostIPv4Routes()
+	if err != nil {
+		return "", fmt.Errorf("crew network: read host routes: %w", err)
+	}
+	if p.hostRoutesVisible(routes, used) {
 		if r, bad := foreignRouteInPool(pool, routes, used); bad {
 			return "", fmt.Errorf("%w: %s overlaps host route %s; set container.crew_network_pool", errCrewNetworkPool, pool, r)
 		}
 	} else if p.cfg.CrewNetworkPool == "" {
-		return "", fmt.Errorf("%w: crewship cannot see the Docker host's routes (it runs in a container or against a remote daemon); set container.crew_network_pool to a range free on that host", errCrewNetworkPool)
+		return "", fmt.Errorf("%w: crewship cannot prove it sees the Docker host's routes (a container, a remote daemon, Docker Desktop's VM); set container.crew_network_pool to a range you know is free on that host", errCrewNetworkPool)
 	}
 	enableIPv6 := false
 	for _, subnet := range candidateSubnets(pool, crewNetworkPrefixBits) {
@@ -311,7 +311,12 @@ func (p *Provider) serviceNetworkFor(ctx context.Context, id, slug string) (stri
 
 // moveServiceNetwork attaches a service container to netName under its
 // service alias and detaches it from every other network, without recreating
-// it. Connect first, so the service is never on no network.
+// it (recreating orphans image-declared anonymous volumes). Connect first so
+// the service is never on no network. If a detach fails the connect is rolled
+// back, and the result is verified, so EnsureCrewServices either returns with
+// the service on exactly netName or returns an error and the crew's work
+// does not start on an unconfirmed topology. Open client connections to the
+// service (a database session) do not survive the move; clients reconnect.
 func (p *Provider) moveServiceNetwork(ctx context.Context, containerID string, settings *container.NetworkSettingsSummary, netName, alias string) error {
 	attached := map[string]bool{}
 	if settings != nil {
@@ -322,6 +327,7 @@ func (p *Provider) moveServiceNetwork(ctx context.Context, containerID string, s
 	if attached[netName] && len(attached) == 1 {
 		return nil
 	}
+	connected := false
 	if !attached[netName] {
 		if _, err := p.client.NetworkConnect(ctx, netName, client.NetworkConnectOptions{
 			Container:      containerID,
@@ -329,27 +335,69 @@ func (p *Provider) moveServiceNetwork(ctx context.Context, containerID string, s
 		}); err != nil {
 			return fmt.Errorf("move service %q to network %s: %w", alias, netName, err)
 		}
+		connected = true
 	}
 	for n := range attached {
 		if n == netName {
 			continue
 		}
-		if _, err := p.client.NetworkDisconnect(ctx, n, client.NetworkDisconnectOptions{Container: containerID}); err != nil {
+		if err := p.networkDisconnect(ctx, n, containerID); err != nil {
+			if connected {
+				// Back to where it was: on the old network only.
+				if rbErr := p.networkDisconnect(context.WithoutCancel(ctx), netName, containerID); rbErr != nil {
+					p.logger.Error("service network move rolled back incompletely; it is on both networks",
+						"service", alias, "old", n, "new", netName, "error", rbErr)
+				}
+			}
 			return fmt.Errorf("detach service %q from network %s: %w", alias, n, err)
 		}
+	}
+	insp, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
+	if err != nil {
+		return fmt.Errorf("verify service %q network: %w", alias, err)
+	}
+	if ns := insp.Container.NetworkSettings; ns == nil || len(ns.Networks) != 1 || ns.Networks[netName] == nil {
+		return fmt.Errorf("service %q is not on exactly network %s after the move", alias, netName)
 	}
 	p.logger.Info("service moved to the crew's network", "service", alias, "network", netName)
 	return nil
 }
 
-// hostRoutesVisible reports whether this process's routing table is the
-// Docker host's: a local daemon socket and not running inside a container.
-func (p *Provider) hostRoutesVisible() bool {
+// networkDisconnect is the one disconnect call; tests replace it through
+// networkDisconnectHook to inject a failure.
+func (p *Provider) networkDisconnect(ctx context.Context, netName, containerID string) error {
+	if p.networkDisconnectHook != nil {
+		if err := p.networkDisconnectHook(netName); err != nil {
+			return err
+		}
+	}
+	_, err := p.client.NetworkDisconnect(ctx, netName, client.NetworkDisconnectOptions{Container: containerID})
+	return err
+}
+
+// hostRoutesVisible reports whether this process provably sees the Docker
+// host's routing table. A local socket alone does not prove it (Docker
+// Desktop runs the daemon in a VM; a containerised crewship has its own
+// namespace), so the proof is that the daemon's own bridge subnets appear as
+// routes here: a process sharing the daemon host's network namespace sees
+// a route for every bridge the daemon created. Without that proof, an
+// explicit pool is required.
+func (p *Provider) hostRoutesVisible(routes, dockerSubnets []netip.Prefix) bool {
 	host := p.detected.Host
 	if host != "" && !strings.HasPrefix(host, "unix://") && !strings.HasPrefix(host, "npipe://") {
 		return false
 	}
-	return !runningInContainer()
+	if runningInContainer() {
+		return false
+	}
+	for _, d := range dockerSubnets {
+		for _, r := range routes {
+			if r == d {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // runningInContainer is a variable so tests can pin it.

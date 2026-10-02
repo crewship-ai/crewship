@@ -112,6 +112,10 @@ type Provider struct {
 	// fenceTestHook, when set, runs at each fenceExecStage. Tests only.
 	fenceTestHook func(fenceExecStage)
 
+	// networkDisconnectHook, when set, can fail a service network detach.
+	// Tests only.
+	networkDisconnectHook func(netName string) error
+
 	serviceOperation serviceOperationGate
 	client           *client.Client
 	cfg              Config

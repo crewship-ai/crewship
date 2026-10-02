@@ -102,26 +102,32 @@ func TestForeignRouteInPool(t *testing.T) {
 	}
 }
 
-// The route check only means something when this process sees the Docker
-// host's routing table (Codex review of #2767).
+// The route check only means something when this process provably sees the
+// Docker host's routing table: the daemon's bridges must show up as routes
+// (Codex review of #2767: a local socket alone, e.g. Docker Desktop, does not
+// prove it).
 func TestHostRoutesVisible(t *testing.T) {
 	orig := runningInContainer
 	t.Cleanup(func() { runningInContainer = orig })
+	bridge := netip.MustParsePrefix("172.20.0.0/16")
+	withBridge := []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), bridge}
+	noBridge := []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("192.168.1.0/24")}
 	for _, tc := range []struct {
+		name      string
 		host      string
 		container bool
+		routes    []netip.Prefix
 		want      bool
 	}{
-		{"unix:///var/run/docker.sock", false, true},
-		{"", false, true},
-		{"unix:///var/run/docker.sock", true, false},
-		{"tcp://10.0.0.5:2376", false, false},
-		{"ssh://docker@host", false, false},
+		{"native, bridge routes visible", "unix:///var/run/docker.sock", false, withBridge, true},
+		{"local socket but daemon in a VM (Docker Desktop)", "unix:///var/run/docker.sock", false, noBridge, false},
+		{"inside a container", "unix:///var/run/docker.sock", true, withBridge, false},
+		{"remote daemon", "tcp://10.0.0.5:2376", false, withBridge, false},
 	} {
 		runningInContainer = func() bool { return tc.container }
 		p := &Provider{detected: DetectResult{Host: tc.host}}
-		if got := p.hostRoutesVisible(); got != tc.want {
-			t.Fatalf("host=%q container=%v: got %v, want %v", tc.host, tc.container, got, tc.want)
+		if got := p.hostRoutesVisible(tc.routes, []netip.Prefix{bridge}); got != tc.want {
+			t.Fatalf("%s: got %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }
