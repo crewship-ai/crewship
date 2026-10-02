@@ -266,6 +266,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Restricted workflow dispatch retries failed initial recovery with bounded backoff instead of remaining stopped until a server restart.
 - Production builds use bundled JetBrains Mono fonts, avoiding Google font query failures during static export.
 - Sidecar: observe SSE usage per event so long streams retain their final token totals; bound individual events and omit billing observations when an oversized event makes usage incomplete. (#2621)
 - OpenCode: report missing managed-provider grants before launching the CLI; restart the credential sidecar as its owning UID and reject failed stops instead of accepting stale credentials. (#2621)

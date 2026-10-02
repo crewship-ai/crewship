@@ -12,6 +12,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/work"
 )
 
+// ErrNoExecutableKinds rejects an unsafe dispatcher configuration before recovery.
+var ErrNoExecutableKinds = errors.New("dispatch: no executable kinds declared; a dispatcher must say " +
+	"what it can run, because claiming work it cannot run destroys it")
+
 // Dispatcher is the single owner of execution.
 type Dispatcher struct {
 	store   *work.Store
@@ -93,8 +97,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	// only the caller knows what its Runtime can run — so this refuses to start
 	// rather than starting something indiscriminate.
 	if len(d.cfg.Kinds) == 0 {
-		return errors.New("dispatch: no executable kinds declared; a dispatcher must say " +
-			"what it can run, because claiming work it cannot run destroys it")
+		return ErrNoExecutableKinds
 	}
 	if err := d.recover(ctx); err != nil {
 		d.logger.Error("dispatch: recovery pass failed; not claiming until it succeeds", "error", err)
@@ -146,7 +149,7 @@ func (d *Dispatcher) RunOne(ctx context.Context) (bool, error) {
 	d.flushRunOutcomes(ctx)
 	defer d.flushRunOutcomes(ctx)
 	if len(d.cfg.Kinds) == 0 {
-		return false, errors.New("dispatch: no executable kinds declared")
+		return false, ErrNoExecutableKinds
 	}
 	if err := d.recover(ctx); err != nil {
 		return false, err

@@ -65,6 +65,10 @@ identity together. Domain IDs and private authority remain host-selected.
 Shared agent/server capacity uses the existing serial-agent limits. Wake hints
 are post-commit optimizations with a two-second recovery poll; there is no
 private 250ms idle claim loop. Recovery also follows the shared lease sweep.
+If initial dispatcher recovery fails, unclaimed receipts remain pending while
+recovery retries with exponential backoff capped at 30 seconds. Cancellation
+interrupts that wait; an unsafe empty-kind configuration is not retried. Work
+is not claimed before the dispatcher's recovery pass succeeds.
 
 Every graph authority root binds to a common run ID and generation. Current
 lease, generation and state fence descendants at authority resolution, graph

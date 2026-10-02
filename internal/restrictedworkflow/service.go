@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -101,12 +102,34 @@ func (s *Service) Start(ctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		if err := s.dispatcher.Run(runCtx); err != nil {
-			slog.Error("restricted workflow dispatcher stopped", "error", err)
-		}
+		runWorkflowDispatcher(runCtx, s.dispatcher.Run)
 	}()
 	return nil
 }
+
+func runWorkflowDispatcher(ctx context.Context, run func(context.Context) error) {
+	backoff := time.Second
+	for ctx.Err() == nil {
+		err := run(ctx)
+		if err == nil || ctx.Err() != nil {
+			return
+		}
+		if errors.Is(err, dispatch.ErrNoExecutableKinds) {
+			slog.Error("restricted workflow dispatcher stopped", "error", err)
+			return
+		}
+		slog.Error("restricted workflow recovery failed; retrying", "error", err, "backoff", backoff)
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		backoff = min(2*backoff, 30*time.Second)
+	}
+}
+
 func (s *Service) Close() error {
 	s.lifecycle.Lock()
 	defer s.lifecycle.Unlock()
