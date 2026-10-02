@@ -150,6 +150,23 @@ func TestEgressFenceOwnServicesIntegration(t *testing.T) {
 	if out, _ := agent("nc -w 2 kv 6379 </dev/null"); strings.TrimSpace(out) != "kv" {
 		t.Fatalf("agent must reach the recreated service, got %q", out)
 	}
+
+	// Found live on dev2: a crew stop stops its services, and the next
+	// start found the STOPPED service "not at its address" (a stopped
+	// container has no live IP) and refused to start the crew.
+	if err := p.StopCrewServices(ctx, team.ID, team.Slug); err != nil {
+		t.Fatal(err)
+	}
+	ids3, err := p.EnsureCrewServices(ctx, team)
+	if err != nil {
+		t.Fatalf("EnsureCrewServices after a stop: %v", err)
+	}
+	if got := svcIP(ids3["kv"]); got != oldIP {
+		t.Fatalf("restarted service at %s, want %s", got, oldIP)
+	}
+	if out, _ := agent("nc -w 2 kv 6379 </dev/null"); strings.TrimSpace(out) != "kv" {
+		t.Fatalf("agent must reach the restarted service, got %q", out)
+	}
 }
 
 // crewNetExecUser runs a shell command as user in a container and returns

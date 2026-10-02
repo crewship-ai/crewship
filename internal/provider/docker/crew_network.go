@@ -342,7 +342,7 @@ func (p *Provider) moveServiceNetwork(ctx context.Context, containerID string, s
 			attached[n] = true
 			// On the target network but not at its fixed address: detach
 			// and attach again at the right one (same container, data kept).
-			if n == netName && fixed.IsValid() && ep != nil && ep.IPAddress != fixed {
+			if n == netName && fixed.IsValid() && ep != nil && !endpointAt(ep, fixed) {
 				if err := p.networkDisconnect(ctx, n, containerID); err != nil {
 					return fmt.Errorf("re-address service %q: %w", alias, err)
 				}
@@ -379,7 +379,7 @@ func (p *Provider) moveServiceNetwork(ctx context.Context, containerID string, s
 		return fmt.Errorf("verify service %q network: %w", alias, err)
 	}
 	if ns := insp.Container.NetworkSettings; ns == nil || len(ns.Networks) != 1 || ns.Networks[netName] == nil ||
-		(fixed.IsValid() && ns.Networks[netName].IPAddress != fixed) {
+		(fixed.IsValid() && !endpointAt(ns.Networks[netName], fixed)) {
 		return fmt.Errorf("service %q is not on exactly network %s at its address after the move", alias, netName)
 	}
 	p.logger.Info("service moved to the crew's network", "service", alias, "network", netName)
@@ -625,4 +625,17 @@ func sameServiceHosts(have, want []string) bool {
 		}
 	}
 	return true
+}
+
+// endpointAt reports whether an endpoint is (or, for a stopped container,
+// will be) at addr. A stopped container has no live address; its configured
+// one (IPAMConfig) is what it gets on start, so that is what counts.
+func endpointAt(ep *network.EndpointSettings, addr netip.Addr) bool {
+	if ep == nil {
+		return false
+	}
+	if ep.IPAddress == addr {
+		return true
+	}
+	return !ep.IPAddress.IsValid() && ep.IPAMConfig != nil && ep.IPAMConfig.IPv4Address == addr
 }
