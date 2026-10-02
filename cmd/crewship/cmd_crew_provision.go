@@ -52,6 +52,9 @@ func toolchainDetailRows(status *provisionToolchain) [][]string {
 		imageID = "not recorded"
 	}
 	rows := [][]string{{"Toolchain image ID", imageID}}
+	if status.Built.Qualification != nil {
+		rows = append(rows, []string{"Offline CLI qualification", status.Built.Qualification.Status})
+	}
 	for _, tool := range status.Built.Tools {
 		version := "unknown (" + tool.Status + ")"
 		if tool.Status == "observed" && tool.Version != "" {
