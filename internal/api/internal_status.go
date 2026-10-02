@@ -525,6 +525,13 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusConflict, fmt.Sprintf("agent with slug '%s' already exists", body.Slug))
 		return
 	}
+	if reserved, err := slugReservedFor(r.Context(), h.db, body.CrewID, body.Slug, ""); err != nil {
+		replyInternalError(w, h.logger, "check agent slug reservation", err)
+		return
+	} else if reserved {
+		replyError(w, http.StatusConflict, slugReservedMessage(body.Slug))
+		return
+	}
 
 	agentID := generateCUID()
 	// #1072/#1029: encrypt the webhook secret at rest (fail-open without a key).
