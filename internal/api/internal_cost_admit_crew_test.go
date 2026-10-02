@@ -41,7 +41,11 @@ func TestBudgetAdmissionCrewScopedScriptIdentity(t *testing.T) {
 	}{
 		{"own crew, uncapped", token, crewTunnel, 200},
 		{"crew identity must match the token's crew", token, `{"crew_id":"` + other + `","credential_id":"","provider":"OPAQUE_TUNNEL"}`, 403},
-		{"an unbound token cannot claim a crew", bindTestMaster, crewTunnel, 403},
+		// A workspace-bound token passes the first check and reaches the
+		// crew-binding branch; the master token stops earlier, so it is not
+		// the case that proves the crew identity comes from the token.
+		{"a workspace-bound token cannot claim a crew", internaltoken.DeriveWorkspaceToken(bindTestMaster, ws), crewTunnel, 403},
+		{"the master token is refused before identity is considered", bindTestMaster, crewTunnel, 403},
 		{"a crew-scoped caller holds no credential", token, `{"crew_id":"` + crew + `","credential_id":"budget-key","provider":"OPENAI"}`, 403},
 		{"agent and crew together is ambiguous", token, `{"agent_id":"x","crew_id":"` + crew + `","credential_id":"","provider":"OPAQUE_TUNNEL"}`, 400},
 		{"neither agent nor crew", token, `{"credential_id":"","provider":"OPAQUE_TUNNEL"}`, 400},
