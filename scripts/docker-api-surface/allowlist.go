@@ -149,8 +149,8 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "CopyFromContainer", HTTP: "GET /containers/{id}/archive", ProxyVars: []string{"CONTAINERS"},
-		Tier: TierCore, Packages: []string{"internal/backup"},
-		Why: "streams crew content out for a backup",
+		Tier: TierCore, Packages: []string{"internal/backup", "internal/devcontainer"},
+		Why: "streams crew backups and bounded built-toolchain inventory from stopped inspection containers",
 	},
 	{
 		Method: "CopyToContainer", HTTP: "HEAD + PUT /containers/{id}/archive", ProxyVars: []string{"CONTAINERS", proxyVarPOST},

@@ -107,7 +107,7 @@ or a listed endpoint nobody calls.
 | `ContainerUnpause` | `POST /containers/{id}/unpause` | Resumes it afterwards |
 | `ContainerUpdate` | `POST /containers/{id}/update` | Applies managed service resource bounds before startup and recovery |
 | `CopyToContainer` | `HEAD` + `PUT /containers/{id}/archive` | Writes devcontainer features, restored backups, the sidecar binary |
-| `CopyFromContainer` | `GET /containers/{id}/archive` | Streams crew content out for a backup |
+| `CopyFromContainer` | `GET /containers/{id}/archive` | Streams crew backups and bounded built-toolchain inventory from stopped inspection containers |
 | `ExecCreate` | `POST /containers/{id}/exec` | Creates the exec session an agent turn runs in |
 
 `ExecCreate` is in this table rather than the next one on purpose: the Engine
