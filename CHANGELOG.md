@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Fixed
+- **Node's built-in `fetch` now goes through the crew proxy.** Node ignores `HTTP_PROXY`/`HTTPS_PROXY` for `fetch` unless `NODE_USE_ENV_PROXY=1` is set, so a Node tool in a restricted crew reached the network directly, past the allowlist. Agents and script steps now get the variable (Node 22.21+ and 24+; crew images ship 22.23); loopback stays direct. Older Node still ignores it. (#2763)
 - **Crew overviews showed "No runs in the last 7 days" for crews that were running.** `run.started` journal entries from chat, sidecar, assignment and peer-query runs never recorded the crew, and crew-scoped run insights read recorded ownership, so they counted nothing. New runs now record the agent's crew at run time; earlier runs stay unattributed because the journal is append-only.
 - **Deleting an agent left its runs running.** `DELETE /api/v1/agents/{id}` only marked the row deleted: live runs kept going (their tmux sessions even survive a server restart) and a run accepted just before the delete still started after minutes of provisioning. The delete now stops that agent's runs and only those, reports `runs` (`none`, `stopped`, `pending`), and a background pass keeps stopping runs of deleted agents found in persisted run state after a restart. Every run is also checked right before its process is created, so no entry point can start a deleted agent. Memory, chats and attachments are kept.
 ### Fixed
