@@ -401,6 +401,10 @@ type RunState struct {
 	AgentSlug    string    `json:"agent_slug,omitempty"`
 	LastActivity time.Time `json:"last_activity"`
 	CredentialID string    `json:"credential_id,omitempty"`
+	// StopJournalPending is a durable outbox for confirmed stops without a
+	// process-local completion owner. The server drains it without overriding
+	// work-owned outcomes or already terminal journal entries.
+	StopJournalPending bool `json:"stop_journal_pending,omitempty"`
 }
 
 // AgentEvent is a streaming event emitted during an agent run, such as text

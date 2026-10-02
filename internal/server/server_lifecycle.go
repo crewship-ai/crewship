@@ -102,6 +102,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// Recover orphaned RUNNING runs from previous crashes/restarts.
 	// Without this, agents whose runs were interrupted stay RUNNING forever.
 	if s.db != nil {
+		if err := s.flushRecoveredStops(ctx); err != nil {
+			s.logger.Warn("recover confirmed stop history", "error", err)
+		}
 		s.recoverOrphanedRuns(ctx)
 	}
 
@@ -252,6 +255,9 @@ func (s *Server) Start(ctx context.Context) error {
 			for {
 				if res := s.orchestrator.StopDeletedAgentRuns(ctx, "", lookup); res.Stopped > 0 || res.Pending > 0 {
 					s.logger.Info("deleted agent runs", "stopped", res.Stopped, "pending", res.Pending, "error", errors.Join(res.Errors...))
+				}
+				if err := s.flushRecoveredStops(ctx); err != nil {
+					s.logger.Warn("confirmed stop history pending retry", "error", err)
 				}
 				select {
 				case <-ctx.Done():
@@ -1048,7 +1054,7 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 				s.logger.Error("decode recovered runtime identity", "error", err)
 				return
 			}
-			if run.Status == "running" && run.AgentID != "" {
+			if (run.Status == "running" || (run.Status == "cancelled" && run.StopJournalPending)) && run.AgentID != "" {
 				protectedAgents[run.AgentID] = true
 				if run.ID == "" || run.ID == run.AgentID {
 					// Before per-run identities, runtime records used the agent key and

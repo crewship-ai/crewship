@@ -174,6 +174,13 @@ func TestRecoveryLeavesWorkOwnedRunToDispatcher(t *testing.T) {
 		t.Fatal("no claim")
 	}
 	seedRecoveryTrace(t, s, attempt.RunID, "a")
+	seedStoppedOutbox(t, s, attempt.RunID)
+	if err := s.flushRecoveredStops(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !pendingStop(t, s, attempt.RunID) {
+		t.Fatal("unconfirmed work outcome acknowledged")
+	}
 	s.recoverOrphanedRuns(t.Context())
 	if n := recoveryTerminalCount(t, s, attempt.RunID); n != 0 {
 		t.Fatalf("generic recovery bypassed work outcome: %d terminals", n)

@@ -420,6 +420,9 @@ processes can be confirmed stopped. Recovery protects the specific live run,
 not unrelated older traces of the same agent. Runs owned by the durable work
 queue keep that queue's settlement and reconciliation rules; restarting the
 server does not turn an unknown work outcome into cancellation.
+Confirmed recovered stops retain a durable history update until it succeeds.
+A transient journal failure is retried in the background, including after
+another restart, without executing the agent again.
 
 ## `crewship agent logs`
 

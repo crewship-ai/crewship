@@ -19,6 +19,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change:** Restricted routine, Page and assigned-issue runs now use the shared work ledger and dispatcher. Interrupted runs with uncertain effects show “Needs review” and require reconciliation before outputs are released or new work repeats; legacy running jobs are adopted into this state.
 
 ### Fixed
+- Confirmed stops recovered after restart now retain a durable journal retry until history and agent state are recorded; retries preserve existing outcomes and leave work-owned settlement to the dispatcher.
 - Agent runtime diagnostics now find runs by their durable run IDs, prefer an active invocation, and report unavailable state instead of inventing an idle result.
 - Restart recovery preserves the exact live run while closing older orphan traces, and leaves work-owned outcomes to the durable dispatcher. Legacy agent-keyed runtime records remain conservatively protected.
 - Runtime reconciliation uses the latest container inspection rather than an older list snapshot, avoiding stopped-container reuse or removal of a newly running container.
