@@ -91,6 +91,10 @@ type DetectResult struct {
 // It auto-detects the container runtime (Docker, Podman, Colima, OrbStack, etc.)
 // and manages crew containers with security isolation (non-root, cap-drop ALL).
 type Provider struct {
+	// networkDisconnectHook, when set, can fail a service network detach.
+	// Tests only.
+	networkDisconnectHook func(netName string) error
+
 	client   *client.Client
 	cfg      Config
 	logger   *slog.Logger

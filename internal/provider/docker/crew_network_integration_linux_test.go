@@ -312,6 +312,24 @@ func TestCrewNetworkMovesExistingServiceWithRuntimeIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A detach that fails mid-move: the ensure errors (so the crew's work
+	// does not start on an unconfirmed topology) and the service is rolled
+	// back onto the old network only, not left on both.
+	failed := false
+	p.networkDisconnectHook = func(n string) error {
+		if n == shared && !failed {
+			failed = true
+			return errors.New("injected detach failure")
+		}
+		return nil
+	}
+	if _, err := p.EnsureCrewServices(ctx, crew); err == nil {
+		t.Fatal("a failed detach must fail EnsureCrewServices")
+	}
+	p.networkDisconnectHook = nil
+	if nets := networksOf(svcID); len(nets) != 1 || nets[0] != shared {
+		t.Fatalf("after a failed move the service must be back on the old network only, got %v", nets)
+	}
 	ids2, err := p.EnsureCrewServices(ctx, crew)
 	if err != nil {
 		t.Fatal(err)
