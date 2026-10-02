@@ -52,10 +52,11 @@ func TestEgressFenceIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	network := "egresspilot-it-" + time.Now().Format("150405")
+	network := networkTestID("egresspilot-it")
 	t.Setenv("CREWSHIP_RUNTIME", "runc")
 	var p *Provider
 	p, err = New(ctx, Config{
+		ContainerPrefix:   network,
 		RuntimeImage:      "alpine:3",
 		DefaultRuntime:    "runc",
 		Network:           network,

@@ -83,26 +83,11 @@ binary has no UI (every UI route → `503` + an explanatory page); run
 
 ## Before you merge: confirm the review happened
 
-Wait ~2–5 min after `gh pr create` for CodeRabbit, and never merge before it
-posts — merging first kills the run ("Review failed — PR is closed") and the
-findings are gone. **A green CodeRabbit check does not mean it reviewed**: when
-rate-limited it posts a notice instead and the status still reads `pass`
-(description `Review rate limited`, not `Review completed`). Check the posted
-bodies, not the check:
-
-```bash
-scripts/review-status.sh              # reviewed / throttled / failed / pending / absent per open PR
-scripts/review-status.sh 1568 --checks   # one PR, plus its skipped-but-green checks
-scripts/review-status.sh --retrigger 2227        # re-review ONE pr — the normal case
-scripts/review-status.sh --retrigger --dry-run   # the queue, spaced by the limit, posting nothing
-scripts/review-status.sh --retrigger --all       # every unreviewed PR — spends a slot on each
-```
-
-Exit 3 = at least one PR is not reviewed. Same trap, other producers: a check
-that concluded `skipped` or `neutral` is green without having run; CodeQL
-findings can live only in a run's annotations; and a re-trigger fired too early
-answers "✅ Action performed — Review finished." while submitting no review at
-all. Details and the re-trigger policy: [docs/development/coderabbit-review-process.md](docs/development/coderabbit-review-process.md).
+CodeRabbit was retired on 2026-10-02. Do not wait for its status or request
+bot reviews. Review the final diff and document concrete findings, fixes and
+validation in the PR. Keep required CI checks green; skipped checks are not
+execution evidence. A self-review must be labelled as such, not presented as
+an independent review. See [CONTRIBUTING.md](CONTRIBUTING.md#review-before-merge).
 
 ## Architecture map (`internal/`)
 
