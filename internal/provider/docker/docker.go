@@ -99,6 +99,10 @@ type Provider struct {
 	fenceTeams sync.Map
 	// fenceLocks serialises fence installs per container id.
 	fenceLocks sync.Map
+	// fencedCrew maps a container id this provider has fenced to its crew
+	// id, so the exec guard keeps treating it as fenced when its labels are
+	// missing or stale.
+	fencedCrew sync.Map
 	// fenceTestHook, when set, runs at each fenceExecStage. Tests only.
 	fenceTestHook func(fenceExecStage)
 

@@ -248,6 +248,20 @@ func TestEgressFenceIntegration(t *testing.T) {
 	}
 	assertExit("after races", "1001", probe, false)
 
+	// Review of #2760: once fenced, a container stays fenced by id even when
+	// its crew no longer matches the list by label (missing or stale labels,
+	// simulated here by emptying the list). An outside restart must still be
+	// re-fenced before a provider exec runs.
+	listed := p.cfg.EgressFenceCrews
+	p.cfg.EgressFenceCrews = nil
+	if _, err := p.client.ContainerRestart(ctx, cid, client.ContainerRestartOptions{}); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if code := fenceTestProviderExec(ctx, t, p, cid, "1001:1001", probe); code == 0 {
+		t.Fatal("a fenced container whose crew no longer matches by label ran an exec unfenced after a restart")
+	}
+	p.cfg.EgressFenceCrews = listed
+
 	// Check reads rule contents, not just markers: an in-place edit that
 	// keeps every marker (final reject -> accept) must read as not valid.
 	tamperPath := filepath.Join(tmp, "fencetamper")
