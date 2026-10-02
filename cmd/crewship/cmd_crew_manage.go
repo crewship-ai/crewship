@@ -451,6 +451,7 @@ var crewDeleteCmd = &cobra.Command{
 				Status string `json:"status" yaml:"status"`
 				Reason string `json:"reason" yaml:"reason"`
 			} `json:"sidecar_teardown" yaml:"sidecar_teardown"`
+			RemovedCredentials []string `json:"removed_credentials" yaml:"removed_credentials"`
 		}
 		// Read defensively: the crew is ALREADY deleted at this point, so a body
 		// this build cannot parse (an older server answering 204, a proxy
@@ -465,6 +466,9 @@ var crewDeleteCmd = &cobra.Command{
 		}
 
 		cli.PrintSuccess("Crew deleted.")
+		if len(deleted.RemovedCredentials) > 0 {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Removed auto-managed service credentials: %s\n", strings.Join(deleted.RemovedCredentials, ", "))
+		}
 		if deleted.Cleanup != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Runtime cleanup (%s): %s. Inspect with crewship admin cleanup or local doctor cleanup.\n", deleted.Cleanup.Scope, deleted.Cleanup.State)
 		}

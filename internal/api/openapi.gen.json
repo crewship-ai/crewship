@@ -10049,6 +10049,12 @@
             ],
             "type": "object"
           },
+          "removed_credentials": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "sidecar_teardown": {
             "properties": {
               "reason": {
@@ -10067,6 +10073,7 @@
         "required": [
           "success",
           "sidecar_teardown",
+          "removed_credentials",
           "cleanup"
         ],
         "type": "object"
