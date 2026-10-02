@@ -743,3 +743,13 @@ type CrewImageFreshness interface {
 	// crew that is already current transfers nothing.
 	RefreshCrewImage(ctx context.Context, team CrewConfig) (*CrewImageRefresh, error)
 }
+
+// CrewNetworkName is the name of crew crewID's own Docker network (#2240) on
+// the instance whose shared network is base. One definition, used by the
+// Docker provider that creates it and by port-expose that resolves into it.
+func CrewNetworkName(base, crewID string) string {
+	if base == "" {
+		base = "crewship"
+	}
+	return base + "-crew-" + crewID
+}

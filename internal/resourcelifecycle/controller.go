@@ -40,6 +40,40 @@ type Runtime interface {
 	Remove(context.Context, string) error // MUST preserve all volumes.
 	Close() error
 }
+
+// NetworkKind labels a per-crew Docker network (#2240).
+const NetworkKind = "crew-network"
+
+// ErrNetworkInUse is returned by RemoveNetwork while containers are still
+// attached. The controller treats it as pending, never as a reason to force.
+var ErrNetworkInUse = errors.New("network has active endpoints")
+
+// ErrNetworkForbidden is any other refusal to remove a network, typically a
+// socket proxy whose allowlist lacks NetworkRemove. Reported as a visible
+// error code, never as an endless pending.
+var ErrNetworkForbidden = errors.New("network removal forbidden")
+
+// Network is a per-crew network as the runtime reports it: its id and the
+// ownership labels, nothing else.
+type Network struct {
+	ID         string
+	InstanceID string
+	CrewID     string
+	Kind       string
+}
+
+// NetworkRuntime is an optional Runtime extension: a runtime that creates
+// per-crew networks also lets the controller remove those of deleted crews.
+// A runtime without it (Apple) is unaffected.
+type NetworkRuntime interface {
+	ListNetworks(context.Context) ([]Network, error)
+	RemoveNetwork(context.Context, string) error // ErrNotFound, ErrNetworkInUse
+}
+
+func eligibleNetwork(n Network, instance string) bool {
+	return n.ID != "" && n.InstanceID == instance && n.CrewID != "" && n.Kind == NetworkKind
+}
+
 type Status struct {
 	CrewID       string `json:"crew_id" yaml:"crew_id"`
 	Scope        string `json:"scope" yaml:"scope"`
@@ -59,6 +93,9 @@ type Controller struct {
 	lastScanFailed atomic.Bool
 	// BootAt marks persisted observations stale until this process scans.
 	BootAt time.Time
+	// yieldHook replaces quiesce.Yield in the network pass. Tests only: it
+	// lets a test interrupt the pass while the tick's context is still live.
+	yieldHook func(context.Context) error
 }
 
 func (c *Controller) Run(ctx context.Context) {
@@ -366,6 +403,22 @@ func (c *Controller) Tick(ctx context.Context) {
 			states[x.CrewID] = s
 		}
 	}
+	// Per-crew networks (#2240) go after the containers: a deleted crew's
+	// network is removed only once this fresh inventory shows none of its
+	// containers left, and is counted in Remaining until it is gone, so the
+	// crew is not reported clear while its network still exists.
+	if nr, ok := rt.(NetworkRuntime); ok {
+		switch c.cleanNetworks(ctx, nr, states, cap-attempts) {
+		case networksInventoryFailed:
+			failAll("network_inventory_failed")
+			return
+		case networksYielded:
+			// Interrupted inside a backup window: the recount did not run, so
+			// no state may be derived from Remaining. Like the container loop,
+			// write nothing; a quiesce is not a scan failure.
+			return
+		}
+	}
 	// Write only what changed. Every soft-deleted crew ever is an owner here,
 	// so rewriting all of them each tick would be a steady write load that
 	// grows with every reseed. A clean tombstone with no row needs none.
@@ -429,6 +482,80 @@ func (c *Controller) Tick(ctx context.Context) {
 		return
 	}
 	c.lastScanFailed.Store(false)
+}
+
+type networksOutcome int
+
+const (
+	networksDone networksOutcome = iota
+	networksInventoryFailed
+	networksYielded
+)
+
+// cleanNetworks removes networks of deleted crews whose containers are all
+// gone, then recounts what is left from a fresh listing into Remaining. Only
+// a networksDone outcome may be followed by status writes.
+//
+// A crew with no row in states (a hard-deleted crews row, not a tombstone)
+// never has its network removed: without the tombstone there is no positive
+// proof of deletion. That is deliberate; do not widen it.
+func (c *Controller) cleanNetworks(ctx context.Context, nr NetworkRuntime, states map[string]Status, budget int) networksOutcome {
+	listCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	nets, err := nr.ListNetworks(listCtx)
+	cancel()
+	if err != nil {
+		return networksInventoryFailed
+	}
+	sort.Slice(nets, func(i, j int) bool { return nets[i].ID < nets[j].ID })
+	yield := quiesce.Yield
+	if c.yieldHook != nil {
+		yield = c.yieldHook
+	}
+	for _, n := range nets {
+		if err := yield(ctx); err != nil {
+			return networksYielded
+		}
+		s, ok := states[n.CrewID]
+		if !ok || !eligibleNetwork(n, c.InstanceID) || s.Remaining > 0 || budget <= 0 {
+			continue
+		}
+		budget--
+		stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		deleted, ownerErr := c.deleted(stepCtx, n.CrewID)
+		code := ""
+		switch {
+		case ownerErr != nil:
+			code = "owner_check_failed"
+		case deleted:
+			err := nr.RemoveNetwork(stepCtx, n.ID)
+			switch {
+			case err == nil, errors.Is(err, ErrNotFound), errors.Is(err, ErrNetworkInUse):
+			case errors.Is(err, ErrNetworkForbidden):
+				code = "network_remove_forbidden"
+			default:
+				code = "network_remove_failed"
+			}
+		}
+		cancel()
+		if code != "" {
+			s.State = "error"
+			s.Error = code
+			states[n.CrewID] = s
+		}
+	}
+	listCtx, cancel = context.WithTimeout(ctx, 30*time.Second)
+	left, err := nr.ListNetworks(listCtx)
+	cancel()
+	if err != nil {
+		return networksInventoryFailed
+	}
+	for _, n := range left {
+		if s, ok := states[n.CrewID]; ok && eligibleNetwork(n, c.InstanceID) {
+			s.Remaining++
+			states[n.CrewID] = s
+		}
+	}
+	return networksDone
 }
 
 // Bound individual snapshots without truncating ownership evidence. Control

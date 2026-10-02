@@ -325,10 +325,13 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 	// All sidecars share the agent's bridge network so DNS resolves
 	// service names without exposing host ports. ensureNetwork is
 	// the same call EnsureCrewRuntime already makes.
-	if p.cfg.Network != "" {
-		if err := p.ensureNetwork(ctx, p.cfg.Network); err != nil {
-			return nil, fmt.Errorf("ensure network for services: %w", err)
-		}
+	// Services join the network the crew's runtime container is ACTUALLY on
+	// (#2240): a crew listed for its own network while its runtime still
+	// runs on the shared one keeps its services there until the runtime is
+	// recreated, so the crew and its database are never split.
+	svcNet, err := p.serviceNetworkFor(ctx, team.ID, team.Slug)
+	if err != nil {
+		return nil, fmt.Errorf("ensure network for services: %w", err)
 	}
 
 	// Registry IO is preparation, not a service mutation. Keep it outside the
@@ -400,7 +403,7 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 	ids = make(map[string]string, len(team.Services))
 	for i := range team.Services {
 		svc := &team.Services[i]
-		id, err := p.ensurePreparedSidecar(ctx, team.ID, team.Slug, svc, true)
+		id, err := p.ensurePreparedSidecar(ctx, team.ID, team.Slug, svcNet, svc, true)
 		if err != nil {
 			return ids, fmt.Errorf("sidecar %q: %w", svc.Name, err)
 		}
@@ -433,11 +436,11 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 // (image, command, env, ports, volumes, healthcheck) triggers a
 // stop + remove + recreate so apply is true sync for sidecars,
 // not just "fresh creates work."
-func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, svc *provider.CrewService) (string, error) {
-	return p.ensurePreparedSidecar(ctx, crewID, crewSlug, svc, false)
+func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug, netName string, svc *provider.CrewService) (string, error) {
+	return p.ensurePreparedSidecar(ctx, crewID, crewSlug, netName, svc, false)
 }
 
-func (p *Provider) ensurePreparedSidecar(ctx context.Context, crewID, crewSlug string, svc *provider.CrewService, imagePrepared bool) (string, error) {
+func (p *Provider) ensurePreparedSidecar(ctx context.Context, crewID, crewSlug, netName string, svc *provider.CrewService, imagePrepared bool) (string, error) {
 	quotaMounts, err := p.quotaServiceVolumes(ctx, crewID, crewSlug, svc)
 	if err != nil {
 		return "", fmt.Errorf("service quota catalog: %w", err)
@@ -531,6 +534,14 @@ func (p *Provider) ensurePreparedSidecar(ctx context.Context, crewID, crewSlug s
 			policy := container.RestartPolicy{Name: container.RestartPolicyDisabled}
 			if _, err := p.client.ContainerUpdate(ctx, c.ID, client.ContainerUpdateOptions{RestartPolicy: &policy}); err != nil {
 				return "", fmt.Errorf("hand service restarts to the controller: %w", err)
+			}
+		}
+		if drift == "" && netName != "" {
+			// On the wrong network (the crew was listed for, or removed
+			// from, its own network): move it live. Recreating would orphan
+			// image-declared anonymous volumes — an empty database.
+			if err := p.moveServiceNetwork(ctx, c.ID, c.NetworkSettings, netName, svc.Name); err != nil {
+				return "", err
 			}
 		}
 		if drift != "" {
@@ -687,13 +698,16 @@ func (p *Provider) ensurePreparedSidecar(ctx context.Context, crewID, crewSlug s
 		applyServiceQuotas(hostCfg)
 	}
 
-	// NetworkingConfig wires the sidecar to the crew bridge with a
+	// NetworkingConfig wires the service to the crew's network with a
 	// DNS alias so `redis` resolves inside the agent container.
+	// On a crew's own network (#2240) the bare alias is crew-scoped by
+	// construction; on the shared instance network it is not (two crews'
+	// `postgres` round-robin), which is what moving the crew fixes.
 	var networkCfg *dockernetwork.NetworkingConfig
-	if p.cfg.Network != "" {
+	if netName != "" {
 		networkCfg = &dockernetwork.NetworkingConfig{
 			EndpointsConfig: map[string]*dockernetwork.EndpointSettings{
-				p.cfg.Network: {Aliases: []string{svc.Name}},
+				netName: {Aliases: []string{svc.Name}},
 			},
 		}
 	}

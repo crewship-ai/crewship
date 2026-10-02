@@ -82,7 +82,8 @@ services:
       # /images -- ImagePull, ImageInspect, ImageList, ImageRemove, ImageTag,
       # and ImageSave/ImageLoad for complete-environment backups.
       IMAGES: 1
-      # /networks -- NetworkCreate, NetworkList (per-crew network).
+      # /networks -- NetworkCreate, NetworkList, NetworkRemove, NetworkConnect,
+      # NetworkDisconnect (per-crew network).
       NETWORKS: 1
       # /volumes -- VolumeCreate, VolumeInspect, VolumeList, VolumeRemove.
       VOLUMES: 1

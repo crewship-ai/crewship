@@ -506,12 +506,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 
 	p.logger.Debug("EnsureCrewRuntime", "crew_id", team.ID, "crew_slug", team.Slug)
-	// Ensure network exists (auto-recreate if deleted at runtime)
-	if p.cfg.Network != "" {
-		p.logger.Debug("ensuring network", "network", p.cfg.Network)
-		if err := p.ensureNetwork(ctx, p.cfg.Network); err != nil {
-			return "", fmt.Errorf("ensure network: %w", err)
-		}
+	// Ensure the crew's network exists (auto-recreate if deleted at runtime):
+	// its own when listed (#2240), the instance network otherwise.
+	if _, err := p.ensureCrewNetwork(ctx, team.ID, team.Slug); err != nil {
+		return "", fmt.Errorf("ensure network: %w", err)
 	}
 
 	containerName := p.CrewContainerName(team.ID, team.Slug)
@@ -934,6 +932,32 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				// stopped container is rebuilt, a running one is reported and
 				// left serving. See crew_resource_drift.go for why this is an
 				// observation of the container rather than a second digest.
+				// Network drift (#2240): the crew was listed for, or removed
+				// from, its own network. The build-wide runtime contract
+				// cannot see a per-crew choice, so check it here, with the
+				// same stopped-recreate / running-report rule as resources.
+				// Only crews this feature touches: listed now, or still on their
+				// own network after being delisted. An unlisted crew on the
+				// instance network is never examined, so a runtime that reports
+				// NetworkMode differently (Podman's "bridge") is not churned.
+				haveNet := ""
+				if inspect.HostConfig != nil {
+					haveNet = string(inspect.HostConfig.NetworkMode)
+				}
+				if want := p.crewNetworkFor(team.ID, team.Slug); want != "" && haveNet != want &&
+					(p.crewNetworkWanted(team.ID, team.Slug) || haveNet == p.crewNetworkName(team.ID)) {
+					if crewContainerHoldsNoProcesses(c.State) {
+						p.logger.Info("recreating stopped container (crew network changed)",
+							"container", containerName, "crew_id", team.ID,
+							"from", haveNet, "to", want)
+						p.forceTeardown(ctx, c.ID, team.ID)
+						break // fall through to create new container
+					}
+					p.logger.Warn("crew container is still on its previous network and serving; it moves when next recreated "+
+						"(an idle-TTL stop, or `crewship crew restart-agents <crew>`). Its services stay with it until then.",
+						"container", containerName, "crew_id", team.ID,
+						"network", haveNet, "configured", want)
+				}
 				if drift := crewResourceDrift(team, inspect.HostConfig); drift != "" {
 					if crewContainerHoldsNoProcesses(c.State) {
 						p.logger.Info("recreating stopped container (crew resource limits changed)",
@@ -1561,7 +1585,7 @@ func (p *Provider) assembleCrewSpec(team provider.CrewConfig, runtimeImage, runt
 			// runtime-aware — see secretsTmpfsSpecFor and secretsTmpfsSpecPodman.
 			"/secrets": secretsTmpfsSpecFor(p.detected.Runtime),
 		},
-		NetworkMode: container.NetworkMode(p.cfg.Network),
+		NetworkMode: container.NetworkMode(p.crewNetworkFor(team.ID, team.Slug)),
 	}
 	return containerCfg, hostConfig, nil
 }
@@ -1751,6 +1775,7 @@ func buildChownInitCmd(allDirs []string, crewPath string, volumeTargets []string
 
 // StopCrewRuntime gracefully stops a crew container with a 30-second timeout.
 func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) error {
+	p.evictWarmContainer(containerID)
 	timeout := 30
 	if _, err := p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
 		return fmt.Errorf("stop crew runtime %s: %w", provider.ShortID(containerID), err)
@@ -1761,6 +1786,7 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 // RemoveCrewRuntime forcefully removes a crew container.
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
 	p.forgetFenced(containerID)
+	p.evictWarmContainer(containerID)
 	if _, err := p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
 		return fmt.Errorf("remove crew runtime %s: %w", provider.ShortID(containerID), err)
 	}

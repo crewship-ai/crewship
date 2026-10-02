@@ -1622,6 +1622,8 @@ func dockerProviderConfig(cfg *config.Config, gate provider.AdmissionGate) docke
 		RuntimeImage:      cfg.Container.RuntimeImage,
 		DefaultRuntime:    cfg.Container.DefaultRuntime,
 		EgressFenceCrews:  cfg.Container.EgressFenceCrews,
+		CrewNetworkCrews:  cfg.Container.CrewNetworkCrews,
+		CrewNetworkPool:   cfg.Container.CrewNetworkPool,
 		Network:           cfg.Container.Network,
 		InstanceID:        cfg.Container.InstanceID,
 		OutputBasePath:    cfg.Storage.BasePath,

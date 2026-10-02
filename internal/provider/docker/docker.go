@@ -70,6 +70,12 @@ type Config struct {
 	// EgressFenceCrews lists crews (slug or id) that get the network-layer
 	// egress fence (#1368, pilot). Empty disables it everywhere.
 	EgressFenceCrews []string
+	// CrewNetworkCrews lists crews (slug or id) that get their own network
+	// (#2240, first stage). Empty keeps every crew on Network.
+	CrewNetworkCrews []string
+	// CrewNetworkPool is the IPv4 range crew-network subnets come from;
+	// empty means defaultCrewNetworkPool.
+	CrewNetworkPool string
 }
 
 // DetectResult contains info about the detected container runtime.
@@ -105,6 +111,10 @@ type Provider struct {
 	fencedCrew sync.Map
 	// fenceTestHook, when set, runs at each fenceExecStage. Tests only.
 	fenceTestHook func(fenceExecStage)
+
+	// networkDisconnectHook, when set, can fail a service network detach.
+	// Tests only.
+	networkDisconnectHook func(netName string) error
 
 	serviceOperation serviceOperationGate
 	client           *client.Client
@@ -212,6 +222,18 @@ func (p *Provider) setWarm(crewID, containerID string) {
 // container down so a follow-up call re-reconciles instead of trusting a
 // dead id.
 func (p *Provider) evictWarm(crewID string) { p.warmCrew.Delete(crewID) }
+
+// evictWarmContainer drops any warm entry pointing at containerID. Stop and
+// remove know only the container: without this, an EnsureCrewRuntime inside
+// the warm TTL after a stop handed back the stopped container unchecked.
+func (p *Provider) evictWarmContainer(containerID string) {
+	p.warmCrew.Range(func(k, v any) bool {
+		if e, ok := v.(warmCrewEntry); ok && (e.id == containerID || strings.HasPrefix(e.id, containerID)) {
+			p.warmCrew.Delete(k)
+		}
+		return true
+	})
+}
 
 // lockForCrew returns the mutex for a given crew, creating it on first
 // use. Cheap: load from sync.Map first, only LoadOrStore if missing.

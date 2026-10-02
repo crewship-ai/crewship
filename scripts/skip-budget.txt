@@ -184,4 +184,17 @@
 #                     daemon to install nftables rules in a real network
 #                     namespace; SKIP-WAIVER on the one Docker-unavailable
 #                     guard, the OS guard is a build tag instead.
-150
+# 2026-10-02 (#2240): +1 — TestCrewNetworkIsolationIntegration needs a live
+#                     Docker daemon to create real bridges; SKIP-WAIVER on its
+#                     Docker-unavailable guard, the OS guard is a build tag.
+# 2026-10-02 (#2240): +1 — TestCleanupRuntimeCrewNetworkIntegration removes
+#                     real bridges and needs a live daemon; SKIP-WAIVER on the
+#                     Docker-unavailable guard.
+# 2026-10-02 (#2240): +1 — TestCrewNetworkMovesExistingServiceWithRuntimeIntegration
+#                     moves a real container between real bridges; SKIP-WAIVER
+#                     on the Docker-unavailable guard.
+# 2026-10-02 (#2240): +1 — TestCrewNetworkInheritsInternalIntegration creates
+#                     real internal bridges; SKIP-WAIVER on the Docker guard.
+# 2026-10-02: 154 after rebasing #2240 onto #1368 — both branches bumped the
+#                     same line; the count is the sum of their waivers above.
+154
