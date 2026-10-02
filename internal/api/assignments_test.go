@@ -367,14 +367,19 @@ func TestRunAssignment_CreatesAgentRunRecord(t *testing.T) {
 	_ = jw.Flush(context.Background())
 
 	// Verify run.started + run.failed journal entries exist with the target agent.
-	var traceID, agentID, entryType string
+	var traceID, agentID, entryType, crewID string
 	var startedPayload string
 	err := db.QueryRowContext(context.Background(),
-		`SELECT trace_id, agent_id, entry_type, payload FROM journal_entries
+		`SELECT trace_id, agent_id, entry_type, payload, COALESCE(crew_id, '') FROM journal_entries
 		 WHERE agent_id = ? AND entry_type = 'run.started'`, "worker1",
-	).Scan(&traceID, &agentID, &entryType, &startedPayload)
+	).Scan(&traceID, &agentID, &entryType, &startedPayload, &crewID)
 	if err != nil {
 		t.Fatalf("expected run.started journal entry for worker1, got error: %v", err)
+	}
+	// Crew-scoped run insights count only runs whose run.started records
+	// the crew; without it every crew overview showed zero runs.
+	if crewID != "crew1" {
+		t.Errorf("run.started crew_id = %q, want crew1", crewID)
 	}
 	if agentID != "worker1" {
 		t.Errorf("expected agent_id=worker1, got %s", agentID)

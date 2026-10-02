@@ -49,14 +49,14 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	}
 	// Bind the agent to the authenticated crew before journaling or changing
 	// status. The workspace in the body is not an authorization boundary.
-	query := "SELECT workspace_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL"
+	query := "SELECT workspace_id, COALESCE(crew_id, '') FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL"
 	args := []any{body.AgentID, body.WorkspaceID}
 	if crew := InternalTokenCrewFromContext(r.Context()); crew != "" {
 		query += " AND crew_id = ?"
 		args = append(args, crew)
 	}
-	var agentWorkspaceID string
-	switch err := h.db.QueryRowContext(r.Context(), query, args...).Scan(&agentWorkspaceID); {
+	var agentWorkspaceID, agentCrewID string
+	switch err := h.db.QueryRowContext(r.Context(), query, args...).Scan(&agentWorkspaceID, &agentCrewID); {
 	case err == sql.ErrNoRows:
 		replyError(w, http.StatusNotFound, "Agent not found in workspace")
 		return
@@ -102,13 +102,16 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := synchronous.EmitSync(r.Context(), journal.Entry{
 			WorkspaceID: body.WorkspaceID,
-			AgentID:     body.AgentID,
-			Type:        journal.EntryRunStarted,
-			Severity:    journal.SeverityInfo,
-			ActorType:   journal.ActorSidecar,
-			Summary:     fmt.Sprintf("run %s started", shortRunID(body.ID)),
-			Payload:     payload,
-			TraceID:     body.ID,
+			// The agent's crew at run time: crew-scoped run insights read
+			// recorded ownership, so a run without it belongs to no crew.
+			CrewID:    agentCrewID,
+			AgentID:   body.AgentID,
+			Type:      journal.EntryRunStarted,
+			Severity:  journal.SeverityInfo,
+			ActorType: journal.ActorSidecar,
+			Summary:   fmt.Sprintf("run %s started", shortRunID(body.ID)),
+			Payload:   payload,
+			TraceID:   body.ID,
 		}); err != nil {
 			replyInternalError(w, h.logger, "create run: emit run.started", err)
 			return

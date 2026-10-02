@@ -269,6 +269,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	runID := generateCUID()
 	if _, err := h.journal.Emit(r.Context(), journal.Entry{
 		WorkspaceID: body.WorkspaceID,
+		CrewID:      body.CrewID, // target was resolved within this crew
 		AgentID:     target.ID,
 		Type:        journal.EntryRunStarted,
 		Severity:    journal.SeverityInfo,
