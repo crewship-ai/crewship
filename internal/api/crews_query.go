@@ -275,6 +275,18 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	teardown := h.removeCrewSidecars(r.Context(), crewID, crewSlug)
 
+	// The sidecars' auto-managed credentials go with them (#2771) — only the
+	// rows provably minted for this crew and used by nothing else; see
+	// crew_delete_auto_credentials.go. The crew is already deleted, so a
+	// failure here is logged rather than turned into an error response.
+	removedCreds, credErr := removeCrewAutoCredentials(r.Context(), h.db, h.logger, workspaceID, crewID, crewSlug, clientIP(r))
+	if credErr != nil {
+		h.logger.Warn("crew delete: auto-managed credential cleanup incomplete", "crew_id", crewID, "error", credErr)
+	}
+	if removedCreds == nil {
+		removedCreds = []string{}
+	}
+
 	auditFromRequest(r, h.db, "crew.delete", "CREW", crewID, nil)
 
 	// The teardown outcome travels with the response. The operator answered a
@@ -283,9 +295,10 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// support — they have to hear it from the command they ran, not from
 	// a server log they will never read.
 	writeJSON(w, http.StatusOK, map[string]any{
-		"success":          true,
-		"sidecar_teardown": teardown,
-		"cleanup":          h.containerCleanup.Pending(r.Context(), workspaceID, crewID),
+		"success":             true,
+		"sidecar_teardown":    teardown,
+		"removed_credentials": removedCreds,
+		"cleanup":             h.containerCleanup.Pending(r.Context(), workspaceID, crewID),
 	})
 
 	h.broadcastCrewEvent("crew.deleted", workspaceID, map[string]string{"id": crewID})
