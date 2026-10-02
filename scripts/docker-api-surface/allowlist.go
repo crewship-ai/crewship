@@ -233,6 +233,11 @@ var allowList = []Endpoint{
 		Why: "checks whether the crew network already exists",
 	},
 	{
+		Method: "NetworkRemove", HTTP: "DELETE /networks/{id}", ProxyVars: []string{"NETWORKS", proxyVarPOST},
+		Tier: TierCore, Packages: []string{"internal/provider/docker"},
+		Why: "removes the network of a deleted crew once its containers are gone",
+	},
+	{
 		Method: "Ping", HTTP: "HEAD /_ping (GET on fallback)", ProxyVars: []string{"PING"},
 		Tier: TierCore, Packages: []string{"internal/provider/docker"},
 		Why: "daemon reachability probe during socket detection",

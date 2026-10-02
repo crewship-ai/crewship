@@ -40,6 +40,35 @@ type Runtime interface {
 	Remove(context.Context, string) error // MUST preserve all volumes.
 	Close() error
 }
+
+// NetworkKind labels a per-crew Docker network (#2240).
+const NetworkKind = "crew-network"
+
+// ErrNetworkInUse is returned by RemoveNetwork while containers are still
+// attached. The controller treats it as pending, never as a reason to force.
+var ErrNetworkInUse = errors.New("network has active endpoints")
+
+// Network is a per-crew network as the runtime reports it: its id and the
+// ownership labels, nothing else.
+type Network struct {
+	ID         string
+	InstanceID string
+	CrewID     string
+	Kind       string
+}
+
+// NetworkRuntime is an optional Runtime extension: a runtime that creates
+// per-crew networks also lets the controller remove those of deleted crews.
+// A runtime without it (Apple) is unaffected.
+type NetworkRuntime interface {
+	ListNetworks(context.Context) ([]Network, error)
+	RemoveNetwork(context.Context, string) error // ErrNotFound, ErrNetworkInUse
+}
+
+func eligibleNetwork(n Network, instance string) bool {
+	return n.ID != "" && n.InstanceID == instance && n.CrewID != "" && n.Kind == NetworkKind
+}
+
 type Status struct {
 	CrewID       string `json:"crew_id" yaml:"crew_id"`
 	Scope        string `json:"scope" yaml:"scope"`
@@ -366,6 +395,16 @@ func (c *Controller) Tick(ctx context.Context) {
 			states[x.CrewID] = s
 		}
 	}
+	// Per-crew networks (#2240) go after the containers: a deleted crew's
+	// network is removed only once this fresh inventory shows none of its
+	// containers left, and is counted in Remaining until it is gone, so the
+	// crew is not reported clear while its network still exists.
+	if nr, ok := rt.(NetworkRuntime); ok {
+		if !c.cleanNetworks(ctx, nr, states, cap-attempts) {
+			failAll("network_inventory_failed")
+			return
+		}
+	}
 	// Write only what changed. Every soft-deleted crew ever is an owner here,
 	// so rewriting all of them each tick would be a steady write load that
 	// grows with every reseed. A clean tombstone with no row needs none.
@@ -429,6 +468,59 @@ func (c *Controller) Tick(ctx context.Context) {
 		return
 	}
 	c.lastScanFailed.Store(false)
+}
+
+// cleanNetworks removes networks of deleted crews whose containers are all
+// gone, then counts what is left from a fresh listing. It returns false when
+// the network inventory could not be read (the scan is then incomplete).
+func (c *Controller) cleanNetworks(ctx context.Context, nr NetworkRuntime, states map[string]Status, budget int) bool {
+	listCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	nets, err := nr.ListNetworks(listCtx)
+	cancel()
+	if err != nil {
+		return false
+	}
+	sort.Slice(nets, func(i, j int) bool { return nets[i].ID < nets[j].ID })
+	for _, n := range nets {
+		if err := quiesce.Yield(ctx); err != nil {
+			return true
+		}
+		s, ok := states[n.CrewID]
+		if !ok || !eligibleNetwork(n, c.InstanceID) || s.Remaining > 0 || budget <= 0 {
+			continue
+		}
+		budget--
+		stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		deleted, ownerErr := c.deleted(stepCtx, n.CrewID)
+		code := ""
+		switch {
+		case ownerErr != nil:
+			code = "owner_check_failed"
+		case deleted:
+			if err := nr.RemoveNetwork(stepCtx, n.ID); err != nil && !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrNetworkInUse) {
+				code = "network_remove_failed"
+			}
+		}
+		cancel()
+		if code != "" {
+			s.State = "error"
+			s.Error = code
+			states[n.CrewID] = s
+		}
+	}
+	listCtx, cancel = context.WithTimeout(ctx, 30*time.Second)
+	left, err := nr.ListNetworks(listCtx)
+	cancel()
+	if err != nil {
+		return false
+	}
+	for _, n := range left {
+		if s, ok := states[n.CrewID]; ok && eligibleNetwork(n, c.InstanceID) {
+			s.Remaining++
+			states[n.CrewID] = s
+		}
+	}
+	return true
 }
 
 // Bound individual snapshots without truncating ownership evidence. Control

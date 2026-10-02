@@ -5,6 +5,7 @@ package docker
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,9 +13,11 @@ import (
 	"time"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
 // TestCrewNetworkIsolationIntegration is #2240's acceptance against a real
@@ -150,4 +153,64 @@ func crewNetExec(ctx context.Context, t *testing.T, p *Provider, cid string, det
 	_, _ = stdcopy.StdCopy(&out, &errb, att.Reader)
 	code, _, _ := p.waitExecExit(ctx, ex.ID, 50)
 	return out.String(), code
+}
+
+// The cleanup runtime's side of #2240 against a real daemon: a crew network
+// reports its ownership labels, refuses removal as in-use while a container
+// is attached (never forced), and goes once the container is gone.
+func TestCleanupRuntimeCrewNetworkIntegration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	p, err := New(ctx, Config{RuntimeImage: "alpine:3", Network: "", InstanceID: "inst-it", CrewNetworkCrews: []string{"rm-crew"}, CrewNetworkPool: "10.239.249.0/24"}, nil)
+	if err != nil {
+		// SKIP-WAIVER(#2240): needs a live Docker daemon to create and remove
+		// real bridges; same guard as TestResilienceNetworkRecreate.
+		t.Skipf("Docker not available: %v", err)
+	}
+	defer p.Close()
+	name, err := p.ensureCrewNetwork(ctx, "rm-crew-001", "rm-crew")
+	if err != nil {
+		t.Fatalf("ensureCrewNetwork: %v", err)
+	}
+	defer func() { _, _ = p.client.NetworkRemove(context.Background(), name, client.NetworkRemoveOptions{}) }()
+	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:     &container.Config{Image: "alpine:3", Cmd: []string{"sleep", "60"}},
+		HostConfig: &container.HostConfig{NetworkMode: container.NetworkMode(name)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = p.client.ContainerRemove(context.Background(), created.ID, client.ContainerRemoveOptions{Force: true})
+	}()
+	if _, err := p.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &cleanupRuntime{client: p.client}
+	nets, err := rt.ListNetworks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found resourcelifecycle.Network
+	for _, n := range nets {
+		if n.CrewID == "rm-crew-001" {
+			found = n
+		}
+	}
+	if found.ID == "" || found.InstanceID != "inst-it" || found.Kind != resourcelifecycle.NetworkKind {
+		t.Fatalf("crew network not reported with its ownership labels: %+v", found)
+	}
+	if err := rt.RemoveNetwork(ctx, found.ID); !errors.Is(err, resourcelifecycle.ErrNetworkInUse) {
+		t.Fatalf("removing a network with an attached container: %v, want ErrNetworkInUse", err)
+	}
+	if _, err := p.client.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.RemoveNetwork(ctx, found.ID); err != nil {
+		t.Fatalf("removing the emptied network: %v", err)
+	}
+	if err := rt.RemoveNetwork(ctx, found.ID); !errors.Is(err, resourcelifecycle.ErrNotFound) {
+		t.Fatalf("removing it again: %v, want ErrNotFound", err)
+	}
 }

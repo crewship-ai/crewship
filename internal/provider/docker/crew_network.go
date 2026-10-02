@@ -34,7 +34,7 @@ import (
 const (
 	defaultCrewNetworkPool = "10.231.0.0/16"
 	crewNetworkPrefixBits  = 27
-	crewNetworkKind        = "crew-network"
+	crewNetworkKind        = resourcelifecycle.NetworkKind
 	crewKindLabelValueNet  = crewNetworkKind
 )
 
