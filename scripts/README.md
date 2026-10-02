@@ -14,6 +14,7 @@ it is safe against a shared development instance.
 | Fast pre-push checks | `bash scripts/verify.sh quick` | CI helper tests, toolchain/build-path checks and workflow lint; not the full test suite |
 | Backend pre-push checks | `bash scripts/verify.sh go` | Quick checks plus the Go test wrapper and `go vet` |
 | Full pre-push entrypoint | `bash scripts/verify.sh full` | Adds frontend lint, types, coverage and static export build |
+| Whole frontend coverage audit | `pnpm test:coverage:full` | Measures handwritten application routes, components, hooks, libraries and stores; writes `coverage/full-frontend/` and fails when any measured file has less than 90% lines or branches. This broader audit is separate from the historical shared-module CI gate and currently reports outstanding coverage debt. |
 | Documentation inventory | `make docs-inventory:strict` | Checks documented API/CLI references and writes ignored inventory reports |
 | Browser tests | See [e2e/README.md](../e2e/README.md) | Selects the appropriate suite and target instance |
 

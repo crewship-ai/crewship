@@ -19,6 +19,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change:** Restricted routine, Page and assigned-issue runs now use the shared work ledger and dispatcher. Interrupted runs with uncertain effects show “Needs review” and require reconciliation before outputs are released or new work repeats; legacy running jobs are adopted into this state.
 
 ### Fixed
+
+- Keep the skills browser scoped to the current workspace and Installed lens across imports; rebuild active search results after catalog changes and show crew-assignment network failures in the dialog.
+- Isolate Docker network integration-test installations and subnet leases so concurrent runs cannot adopt or remove each other’s containers.
+- Workflow graphs omit dependency and permission edges whose source or target is absent from the displayed graph.
+- Notification channel settings and delivery logs clear loading and errors when their workspace is removed. Responses still decoding and completed channel mutations from an older workspace cannot replace or refresh the newly selected workspace's data.
 - Pipeline lists, run feeds and webhook settings settle loading when their workspace is cleared; old webhook refreshes and aborted run requests cannot interfere with a newly selected workspace.
 - The quota helper checks its backend and server identity before binding a namespace, avoiding a nil-backend panic and catalog changes on rejected startup.
 - Value previews keep their configured length limit when strings include display quotes or JSON serialization falls back to text.
