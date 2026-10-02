@@ -44,6 +44,7 @@ import (
 // InstanceRecoveryConfig is what the instance backup needs from the router:
 // where the file stores are and how to reach crew containers.
 type InstanceRecoveryConfig struct {
+	ServiceSnapshots  backup.ServiceSnapshotRuntime
 	Paths             backup.InstancePaths
 	OutputDir         string // "" = the default backups directory
 	DataDir           string // for free-space checks
@@ -729,6 +730,7 @@ func (r *Router) instanceRecoveryConfig() InstanceRecoveryConfig {
 	}
 	if r.keeperContainer != nil {
 		cfg.CrewContainerName = r.keeperContainer.CrewContainerName
+		cfg.ServiceSnapshots, _ = r.keeperContainer.(backup.ServiceSnapshotRuntime)
 	}
 	return cfg
 }

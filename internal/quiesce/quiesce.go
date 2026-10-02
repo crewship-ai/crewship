@@ -457,8 +457,9 @@ func (w *Window) addRelease(f func()) {
 	w.mu.Unlock()
 }
 
-// Context ends when the window is released — by Release, or by the hard cap.
-// The copy runs under it so the cap can stop it.
+// Context ends when release begins — by Release, or by the hard cap.
+// The copy stops before release callbacks reopen writer admission.
+// Use Controller.WaitReleased to wait for those callbacks to finish.
 func (w *Window) Context() context.Context { return w.ctx }
 
 // Expired reports whether the hard cap released the window.

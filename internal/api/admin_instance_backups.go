@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/backup"
@@ -30,8 +31,9 @@ import (
 )
 
 type InstanceBackupsHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	uploadBusy atomic.Bool
+	db         *sql.DB
+	logger     *slog.Logger
 
 	// Whole-instance backup and recovery (admin_instance_backups_recovery.go).
 	recoveryMu sync.RWMutex

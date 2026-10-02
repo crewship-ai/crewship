@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/pages"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/servicelifecycle"
 )
 
 // RestoreOptions collects the parameters for RestoreBackup.
@@ -106,7 +108,9 @@ type RestoreOptions struct {
 	// EnvironmentStore is an extra place complete-environment layers are
 	// read from, after the bundle's inline blobs and the store beside the
 	// bundle file (e.g. layers an off-site download fetched elsewhere).
-	EnvironmentStore *EnvironmentStore
+	EnvironmentStore          *EnvironmentStore
+	ServiceSnapshots          ServiceSnapshotRuntime
+	RecoverServiceMaintenance bool
 }
 
 // RestoreResult summarises what was restored.
@@ -454,11 +458,26 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// Large per-crew sections live in temp files owned by the returned
 	// ExtractedPayload — Close must fire on every exit path to clean
 	// them up.
-	extracted, err := ExtractPayload(ctx, effectivePayload)
+	extracted, err := ExtractPayload(ctx, effectivePayload, filepath.Dir(opts.Path))
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = extracted.Close() }()
+	servicePlan, err := extracted.prepareServiceRestorePlan(ctx, manifest.Contents.ServiceSnapshots)
+	if err != nil {
+		return nil, err
+	}
+	serviceDatabaseCommitted := false
+	defer func() {
+		if retErr != nil && !serviceDatabaseCommitted {
+			if cleanupErr := servicePlan.removeUncommittedImports(ctx, opts.ServiceSnapshots); cleanupErr != nil {
+				retErr = errors.Join(retErr, cleanupErr)
+			}
+		}
+	}()
+	if len(servicePlan.items) > 0 && !opts.FilesOnly && (opts.ServiceSnapshots == nil || opts.ServiceSnapshots.QuotaSnapshotNamespace() == "") {
+		return nil, fmt.Errorf("backup: quota service restore requires verified image import transport")
+	}
 
 	// Drain any trailer bytes the AGE reader may hold back, then
 	// verify checksum. Mismatch means corruption or tampering and
@@ -968,6 +987,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		warnRowCountMismatches(opts.Logger, "payload row counts", payloadMismatches)
 	}
 
+	if !opts.FilesOnly {
+		if err := servicePlan.selectGenerations(); err != nil {
+			return nil, err
+		}
+	}
+
 	// Dry-run short-circuit: all validation already ran (manifest
 	// parse, checksum verify, payload extract, schema-skew). Nothing
 	// left mutates state, so return early with a synthetic success
@@ -1096,6 +1121,29 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}, nil
 	}
 
+	restoreCtx, cancelRestore := context.WithCancel(ctx)
+	defer cancelRestore()
+	ctx = restoreCtx
+	leaseCtx, stopServiceLease := context.WithCancel(ctx)
+	defer stopServiceLease()
+	restoreKeeper := &serviceFenceKeeper{db: db}
+	go restoreKeeper.run(leaseCtx, cancelRestore)
+	if err := servicePlan.fenceExistingTargets(ctx, db, opts.ServiceSnapshots, opts.Replace, opts.RecoverServiceMaintenance, manifest.Scope, restoreKeeper.add); err != nil {
+		return nil, err
+	}
+	defer func() {
+		if retErr != nil {
+			return
+		}
+		for _, fence := range servicePlan.fences {
+			if err := servicelifecycle.EndBackupFence(context.WithoutCancel(ctx), db, fence.crew, fence.token); err != nil {
+				result = nil
+				retErr = err
+				return
+			}
+		}
+	}()
+
 	var stats RestoreStats
 	// Set inside the ReconcileUsersByEmail preInsertStep below, to however
 	// many bundle users it aligned onto a matching target id by email —
@@ -1167,6 +1215,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			}
 			return nil
 		})
+		var commitTx *sql.Tx
 		hooks := &RestoreDumpHooks{
 			// Provenance for the DR resume (#1716), written only for a
 			// rewritten restore — that is the only case that creates a
@@ -1174,12 +1223,19 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			// later. Inside the tx, so a rolled back restore leaves no
 			// claim behind.
 			PostInsert: func(ctx context.Context, tx *sql.Tx) error {
+				if err := servicePlan.insertFences(ctx, tx); err != nil {
+					return err
+				}
+				commitTx = tx
 				if !skipDocker {
 					return nil
 				}
 				return recordForkOrigin(ctx, tx, opts, manifest, extracted.DBDump, bundleCrewSlugs)
 			},
 			PreCommit: func(ctx context.Context) error {
+				if err := servicePlan.importImages(ctx, opts.ServiceSnapshots); err != nil {
+					return err
+				}
 				if err := pageApply(ctx); err != nil {
 					return err
 				}
@@ -1189,9 +1245,18 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				if err := attachmentsRestore(ctx, false); err != nil {
 					return err
 				}
-				return dockerRestore(ctx)
+				if err := dockerRestore(ctx); err != nil {
+					return err
+				}
+				return servicePlan.renewCommitFences(ctx, commitTx)
 			},
 			PreInsert: func(ctx context.Context, tx *sql.Tx) error {
+				// The writer transaction now excludes all cross-process
+				// admissions. Publish renewed target leases just before commit.
+				stopServiceLease()
+				if err := servicePlan.dropOldFences(ctx, tx); err != nil {
+					return err
+				}
 				for _, step := range preInsertSteps {
 					if err := step(ctx, tx); err != nil {
 						return err
@@ -1204,6 +1269,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		if err != nil {
 			return nil, err
 		}
+		serviceDatabaseCommitted = true
 		stats = s
 		warnSecurityLevelClamps(opts.Logger, stats.SecurityLevelClamps, stats.SecurityLevelClamped, false)
 		warnDroppedColumns(opts.Logger, stats.DroppedColumns, stats.ColumnsDropped, false)

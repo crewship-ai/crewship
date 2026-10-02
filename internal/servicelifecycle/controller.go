@@ -53,7 +53,7 @@ func (c *Controller) Reconcile(ctx context.Context) {
 	rows, err := c.DB.QueryContext(ctx, `SELECT i.id,i.crew_id,c.workspace_id,c.slug,i.service_name,
  CASE WHEN c.deleted_at IS NOT NULL THEN 'stopped' ELSE i.desired_state END,i.version
  FROM service_runtime_intents i JOIN crews c ON c.id=i.crew_id
- WHERE i.next_attempt_at<=? AND i.lease_until<=? ORDER BY i.next_attempt_at,i.id LIMIT 100`, now, now)
+ WHERE NOT EXISTS(SELECT 1 FROM service_backup_fences f WHERE f.crew_id=i.crew_id) AND i.next_attempt_at<=? AND i.lease_until<=? ORDER BY i.next_attempt_at,i.id LIMIT 100`, now, now)
 	if err != nil {
 		slog.WarnContext(ctx, "service intent query failed")
 		return
@@ -97,7 +97,7 @@ func (c *Controller) reconcileOne(ctx context.Context, j intent) {
 	owner := hex.EncodeToString(nonce[:])
 	now := time.Now()
 	res, err := c.DB.ExecContext(ctx, `UPDATE service_runtime_intents SET lease_owner=?,lease_until=?
- WHERE id=? AND version=? AND lease_until<=? AND next_attempt_at<=?`, owner, tsformat.Format(now.Add(2*time.Minute)), j.id, j.version, tsformat.Format(now), tsformat.Format(now))
+ WHERE id=? AND version=? AND lease_until<=? AND next_attempt_at<=? AND NOT EXISTS(SELECT 1 FROM service_backup_fences f WHERE f.crew_id=service_runtime_intents.crew_id)`, owner, tsformat.Format(now.Add(2*time.Minute)), j.id, j.version, tsformat.Format(now), tsformat.Format(now))
 	if err != nil {
 		slog.WarnContext(ctx, "service intent lease claim failed", "intent_id", j.id, "crew_id", j.crew)
 		return

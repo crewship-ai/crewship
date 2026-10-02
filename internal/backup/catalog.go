@@ -111,6 +111,10 @@ func UpsertCatalogEntry(ctx context.Context, db *sql.DB, e CatalogEntry) error {
 	if db == nil {
 		return nil
 	}
+	return upsertCatalogEntry(ctx, db, e)
+}
+
+func upsertCatalogEntry(ctx context.Context, db catalogExecer, e CatalogEntry) error {
 	if e.ID == "" {
 		id, err := newCatalogID()
 		if err != nil {

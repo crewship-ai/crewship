@@ -67,14 +67,17 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"workspace_conversation_outbox":        IntentInclude,
 
 	// === Core entities (round-trip) =========================
-	"crews":                   IntentInclude,
-	"service_runtime_intents": IntentInclude, // Durable user-requested service state.
-	"agents":                  IntentInclude,
-	"agent_skills":            IntentInclude,
-	"crew_members":            IntentInclude,
-	"chats":                   IntentInclude,
-	"agent_mcp_bindings":      IntentInclude,
-	"journal_entries":         IntentInclude,
+	"crews":                    IntentInclude,
+	"service_operation_leases": IntentExcludeRuntime, // host provider admissions cannot be restored
+	"service_backup_fences":    IntentExcludeRuntime, // host maintenance fences cannot be transplanted
+	"service_runtime_intents":  IntentInclude,        // Durable user-requested service state.
+	"agents":                   IntentInclude,
+	"agent_skills":             IntentInclude,
+	"agent_slug_reservations":  IntentInclude, // restored crew data under a slug stays out of reach of a new agent
+	"crew_members":             IntentInclude,
+	"chats":                    IntentInclude,
+	"agent_mcp_bindings":       IntentInclude,
+	"journal_entries":          IntentInclude,
 	// journal_entry_priorities (v166) is the append-only ledger of operator
 	// pin/permanent edits. It rides with journal_entries: without it a restored
 	// bundle's live `priority` values would have no ledger to reconcile against,

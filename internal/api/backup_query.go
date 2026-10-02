@@ -12,6 +12,15 @@ import (
 	"github.com/crewship-ai/crewship/internal/backup"
 )
 
+type backupStatusResponse struct {
+	ServiceMaintenance []backup.ServiceMaintenance `json:"service_maintenance" yaml:"service_maintenance"`
+	Held               bool                        `json:"held" yaml:"held"`
+	WorkspaceID        string                      `json:"workspace_id,omitempty" yaml:"workspace_id,omitempty"`
+	AcquiredBy         string                      `json:"acquired_by,omitempty" yaml:"acquired_by,omitempty"`
+	AcquiredAt         string                      `json:"acquired_at,omitempty" yaml:"acquired_at,omitempty"`
+	ExpiresAt          string                      `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
+}
+
 func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	workspaceID := WorkspaceIDFromContext(ctx)
@@ -162,16 +171,15 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type statusResp struct {
-		Held        bool   `json:"held"`
-		WorkspaceID string `json:"workspace_id,omitempty"`
-		AcquiredBy  string `json:"acquired_by,omitempty"`
-		AcquiredAt  string `json:"acquired_at,omitempty"`
-		ExpiresAt   string `json:"expires_at,omitempty"`
-	}
-
-	var out statusResp
+	var out backupStatusResponse
 	out.WorkspaceID = workspaceID
+	maintenance, err := backup.ServiceMaintenanceStatus(ctx, h.db, workspaceID)
+	if err != nil {
+		h.logger.Error("backup service maintenance status", "workspace_id", workspaceID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to query service maintenance status")
+		return
+	}
+	out.ServiceMaintenance = maintenance
 	held, err := backup.IsLockHeld(ctx, h.db, workspaceID, time.Now())
 	if err != nil {
 		h.logger.Error("backup lock status", "workspace_id", workspaceID, "error", err)
