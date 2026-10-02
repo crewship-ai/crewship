@@ -41,7 +41,21 @@ func main() {
 	showVersion := flag.Bool("version", false, "print version info and exit")
 	healthCheck := flag.Bool("health-check", false,
 		"probe a already-running sidecar's /health endpoint and exit 0 (healthy) or 1")
+	fenceApply := flag.Bool("fence-apply", false,
+		"install the L3 egress fence in the current network namespace and exit (needs CAP_NET_ADMIN)")
+	fenceCheck := flag.Bool("fence-check", false,
+		"report whether the L3 egress fence is installed in the current network namespace; exit 0 if present, 3 if absent")
+	fenceAllowUIDs := flag.String("fence-allow-uids", "1002",
+		"comma-separated socket owner UIDs allowed through the fence (the sidecar's)")
 	flag.Parse()
+
+	// --fence-apply / --fence-check run in a short-lived helper container that
+	// joins the crew container's network namespace with CAP_NET_ADMIN, so the
+	// crew container itself never holds NET_ADMIN (#1368). The binary is the
+	// same bind-mounted sidecar, so the helper needs nothing from the image.
+	if *fenceApply || *fenceCheck {
+		os.Exit(runFence(*fenceApply, *fenceAllowUIDs, os.Stdout, os.Stderr))
+	}
 
 	// --version is used by the Crewship container runtime as a sanity check
 	// after bind-mounting the sidecar binary into BYOI containers: running

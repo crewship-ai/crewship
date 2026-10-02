@@ -67,6 +67,11 @@ container:
                                 # way; when set, the container entrypoint is forced
                                 # to /usr/local/bin/entrypoint.sh. Empty = autodetect.
                                 # Env override: CREWSHIP_ENTRYPOINT_PATH
+  egress_fence_crews: []        # Pilot: crews (slug or id) that get the network-layer
+                                # egress fence. Restricted, non-privileged crews on
+                                # runc only; a listed crew that cannot be fenced
+                                # does not start. Empty = off.
+                                # Env override: CREWSHIP_EGRESS_FENCE_CREWS (comma list)
   idle_runtime_retention_days: 0  # Remove stopped runtimes of live crews after this
                                 # many days stopped; volumes stay. 0 = off.
                                 # Env override: CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS

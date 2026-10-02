@@ -407,6 +407,25 @@ For notify and hooks the boundary is keyed on the crew that **authored** the rou
   rows as the ones that hold against hostile code.
 </Warning>
 
+### Network-layer egress fence (pilot)
+
+The fence closes that gap for crews that opt in. It is an nftables table installed in the crew container's network namespace that lets out only packets owned by the sidecar's UID (1002). The agent (1001) and root inside the container can still reach the sidecar on `127.0.0.1:9119`, and nothing else: no direct TCP or UDP to the internet, no other container on the crew network, no host port, and no queries to Docker's embedded resolver, which would otherwise forward any name upstream and serve as a DNS tunnel. The sidecar's allowlist then applies to every byte that leaves, because the proxy is the only route out.
+
+Turn it on per crew with `container.egress_fence_crews` (or `CREWSHIP_EGRESS_FENCE_CREWS`, a comma-separated list of crew slugs or ids). It is off for every crew by default.
+
+How it holds:
+
+- **The container never holds `NET_ADMIN`.** A one-shot helper container joins the crew's network namespace with only `NET_ADMIN`, runs the bind-mounted `crewship-sidecar --fence-apply`, and exits. Nothing inside the crew container can remove the rules.
+- **Every start re-installs it.** A container restart recreates the network namespace and drops the fence, so the runtime installs it after each start it performs and checks the container's start time before reusing a running container.
+- **Failure is closed.** A listed crew whose fence cannot be installed is stopped, not run unfenced.
+- **The host is untouched.** The rules live only in the crew's namespace; the host firewall and Docker's own rules do not change.
+
+Limits of the pilot:
+
+- It applies to `restricted` crews on the `runc` runtime. A listed crew that is privileged, `free`, or on another runtime is refused: privileged mode removes the UID boundary the fence rests on, and gVisor and Kata carry traffic outside the namespace's netfilter hooks.
+- Tools that resolve hostnames themselves before using the proxy fail, because the agent cannot query DNS. Tools that honour `HTTP_PROXY`/`HTTPS_PROXY` (curl, git, npm, pip, the agent CLIs) let the sidecar resolve and keep working.
+- The fence controls traffic leaving the container. Inbound reachability from other crews on the shared network is tracked separately in [#2240](https://github.com/crewship-ai/crewship/issues/2240).
+
 Both in-container paths take those variables from one exported source (`orchestrator.SidecarProxyEnv`), and a routine cannot override them: any `*_proxy` variable declared in `script.env` is dropped and logged. The match is on the *shape* rather than an exact list, because CPython lowercases every environment name before looking for a `_proxy` suffix — so `HtTp_PrOxY` would otherwise reach a Python script's proxy configuration, and `.py` is a first-class script interpreter.
 
 <Note>

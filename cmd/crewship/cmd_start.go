@@ -1594,6 +1594,7 @@ func dockerProviderConfig(cfg *config.Config, gate provider.AdmissionGate) docke
 		QuotaCatalog:      catalog,
 		RuntimeImage:      cfg.Container.RuntimeImage,
 		DefaultRuntime:    cfg.Container.DefaultRuntime,
+		EgressFenceCrews:  cfg.Container.EgressFenceCrews,
 		Network:           cfg.Container.Network,
 		InstanceID:        cfg.Container.InstanceID,
 		OutputBasePath:    cfg.Storage.BasePath,

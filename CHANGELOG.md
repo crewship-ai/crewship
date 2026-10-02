@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Restricted crews can opt into a network-layer egress fence (pilot).** With `container.egress_fence_crews` set, a listed crew's container only lets the sidecar's traffic out, so a process that ignores the proxy can no longer reach the internet, the host, other containers or Docker's resolver. Off by default; restricted, non-privileged runc crews only. (#1368)
 - **Crew overviews showed "No runs in the last 7 days" for crews that were running.** `run.started` journal entries from chat, sidecar, assignment and peer-query runs never recorded the crew, and crew-scoped run insights read recorded ownership, so they counted nothing. New runs now record the agent's crew at run time; earlier runs stay unattributed because the journal is append-only.
 - **Deleting an agent left its runs running.** `DELETE /api/v1/agents/{id}` only marked the row deleted: live runs kept going (their tmux sessions even survive a server restart) and a run accepted just before the delete still started after minutes of provisioning. The delete now stops that agent's runs and only those, reports `runs` (`none`, `stopped`, `pending`), and a background pass keeps stopping runs of deleted agents found in persisted run state after a restart. Every run is also checked right before its process is created, so no entry point can start a deleted agent. Memory, chats and attachments are kept.
 ### Fixed
