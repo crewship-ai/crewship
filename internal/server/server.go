@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -534,6 +535,11 @@ func (s *Server) mountAPIRouter(
 	orch.SetUserModelReader(func(ctx context.Context, workspaceID, userID string) (string, error) {
 		return memory.ReadIndexedUserModel(ctx, deps.DB, cfg.Storage.BasePath, workspaceID, userID)
 	})
+	// Every entry point checks the agent when it accepts work, but a run can
+	// spend minutes in provisioning; an agent deleted meanwhile must not start.
+	orch.SetAgentLiveness(func(ctx context.Context, agentID string) error {
+		return agentMayRun(ctx, deps.DB, agentID)
+	})
 	// Episodic embedder resolution. Injection (tests/fakes) wins;
 	// otherwise build an Ollama embedder when Keeper Ollama is
 	// actually configured. Gating on Keeper.Enabled — not just a
@@ -848,6 +854,13 @@ func (s *Server) mountAPIRouter(
 			gatekeeper.WithCallTimeout(time.Duration(eff.TimeoutMS.Value)*time.Millisecond)), nil
 	})
 	opts = append(opts, goapi.WithContainerCleanup(s.containerCleanup))
+	if s.orchestrator != nil && s.db != nil {
+		orch, lookup := s.orchestrator, deletedAgentLookup(s.db)
+		opts = append(opts, goapi.WithAgentRunStopper(func(ctx context.Context, agentID string) (int, int, error) {
+			res := orch.StopDeletedAgentRuns(ctx, agentID, lookup)
+			return res.Stopped, res.Pending, errors.Join(res.Errors...)
+		}))
+	}
 	opts = append(opts, goapi.WithKeeperGatekeeper(gk))
 	opts = append(opts, goapi.WithGovModelStatus(govResolver))
 	// Same object, concretely typed, so the admin judge routes can probe a hosted
@@ -1537,3 +1550,36 @@ func (s *Server) RegisterImageFreshnessRoutine(sched *scheduler.Scheduler) {
 }
 
 // Start launches the HTTP server, IPC listener, WebSocket hub, scheduler,
+
+// errAgentDeleted refuses process creation for a deleted agent.
+var errAgentDeleted = errors.New("agent was deleted; no new process may start")
+
+// agentMayRun is the creation-boundary liveness check. A missing row or a
+// failed read refuses too: starting a process is the irreversible step.
+func agentMayRun(ctx context.Context, db *sql.DB, agentID string) error {
+	var deleted sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT deleted_at FROM agents WHERE id = ?`, agentID).Scan(&deleted); err != nil {
+		return fmt.Errorf("agent liveness: %w", err)
+	}
+	if deleted.Valid {
+		return errAgentDeleted
+	}
+	return nil
+}
+
+// deletedAgentLookup tells the orchestrator which persisted runs belong to
+// agents that may no longer run. A hard-deleted row counts as deleted.
+func deletedAgentLookup(db *sql.DB) orchestrator.DeletedAgentLookup {
+	return func(ctx context.Context, agentID string) (bool, string, error) {
+		var deleted sql.NullString
+		var slug string
+		err := db.QueryRowContext(ctx, `SELECT deleted_at, slug FROM agents WHERE id = ?`, agentID).Scan(&deleted, &slug)
+		if errors.Is(err, sql.ErrNoRows) {
+			return true, "", nil
+		}
+		if err != nil {
+			return false, "", err
+		}
+		return deleted.Valid, slug, nil
+	}
+}

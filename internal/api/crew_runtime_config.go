@@ -249,8 +249,10 @@ func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID
 // EXCEPT for its sidecar services — the services_json column could not be
 // decoded. It is a partial success, not a failure: callers get a usable config
 // alongside it and are expected to start the crew without its sidecars, which
-// is what the chat path has always done with the same column.
-var ErrCrewServicesUnresolved = errors.New("crew sidecar services unresolved")
+// is what the chat path has always done with the same column. It is a
+// crewstart.PartialConfigError so a start after the image gate still proceeds
+// on it, while any other completion failure refuses that start.
+var ErrCrewServicesUnresolved error = crewstart.PartialConfigError("crew sidecar services unresolved")
 
 // CrewConfigCompleter is the DB-backed crewstart.Completer: it answers "what
 // does this crew's container actually look like?" for the callers that hold
@@ -477,4 +479,35 @@ func ResolveManagedService(ctx context.Context, db *sql.DB, crewID, wsID, name s
 		return provider.CrewConfig{ID: crewID, Slug: slug, Services: services}, nil
 	}
 	return provider.CrewConfig{}, fmt.Errorf("service no longer declared")
+}
+
+// EnsureCrewImage is EnsureProvisioned for callers that know only the crew:
+// the image gate every crewstart.Start consults (wired in cmd_start), so a
+// routine step, a scheduled run or a webhook waits for a missing or evicted
+// image the way a dispatch does instead of failing on it. It returns the
+// crew's image as it stands after that wait — a rebuild may have changed the
+// tag — or "" when the crew has none. A crew that does not exist or was
+// deleted has nothing to provision against; the start decides what that means.
+func (h *ProvisioningHandler) EnsureCrewImage(ctx context.Context, crewID string) (string, error) {
+	if h == nil || h.provisioner == nil {
+		return "", nil
+	}
+	var workspaceID string
+	err := h.db.QueryRowContext(ctx,
+		`SELECT workspace_id FROM crews WHERE id = ? AND deleted_at IS NULL`, crewID).Scan(&workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("load crew for image gate: %w", err)
+	}
+	if err := h.EnsureProvisioned(ctx, crewID, workspaceID, 0); err != nil {
+		return "", err
+	}
+	var image sql.NullString
+	if err := h.db.QueryRowContext(ctx,
+		`SELECT cached_image FROM crews WHERE id = ? AND deleted_at IS NULL`, crewID).Scan(&image); err != nil {
+		return "", fmt.Errorf("read crew image after image gate: %w", err)
+	}
+	return image.String, nil
 }

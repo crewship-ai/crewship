@@ -114,6 +114,12 @@ func crewImageReady(ctx context.Context, db *sql.DB, crewID, workspaceID string,
 	effectiveCfg := database.EffectiveCrewDevcontainerConfig(devcontainerCfg.String, devcontainerCfg.Valid)
 	needsBuild = crewNeedsProvision(effectiveCfg, miseCfg.String) || len(devcontainer.RequiredAdapterCLIs(adapters)) > 0
 	if !needsBuild {
+		// A provisioned image is used whenever cached_image is set (the
+		// completer passes it to the runtime), so one that has since been
+		// evicted must be rebuilt even for a config that needs no build.
+		if cachedImage.String != "" && imagePresent != nil && !imagePresent(cachedImage.String) {
+			return true, false, "cached image " + cachedImage.String + " is not present locally", nil
+		}
 		return false, true, "no build needed", nil
 	}
 	if !cachedImage.Valid || cachedImage.String == "" {

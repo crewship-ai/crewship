@@ -28,6 +28,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/crashreport"
+	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
@@ -551,6 +552,11 @@ var startCmd = &cobra.Command{
 				// above, so a resumed message takes the identical
 				// persist/run/error-classify path a live send does.
 				ph.SetChatResumer(bridge)
+				// Every crew start waits for a missing or evicted image —
+				// not only chat, dispatch and `crew start`, which waited
+				// already, but routines, schedules, webhooks and the
+				// terminal, which failed on it.
+				crewstart.SetImageGate(ph.EnsureCrewImage)
 			}
 		}
 

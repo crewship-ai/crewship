@@ -167,6 +167,11 @@ func TestCrewImageReady(t *testing.T) {
 		{"image from before verification", `{"image":"debian"}`, []string{"CLAUDE_CODE"}, "crewship-cache:a", `{"loginPath":"/usr/bin"}`, present, true, false},
 		{"image gone from the daemon", `{"image":"debian"}`, []string{"CLAUDE_CODE"}, "crewship-cache:a", `{"adapterBinaries":["claude"]}`, absent, true, false},
 		{"NULL config defaults to the claude-code image and still needs verification", "", []string{"CLAUDE_CODE"}, "crewship-cache:a", "", present, true, false},
+		// A crew that needs no build may still have been provisioned (`crew
+		// provision`); the runtime then starts from cached_image and fails
+		// when it is gone — a script-only crew whose image was evicted.
+		{"no build needed but its provisioned image is gone", `{"image":"debian"}`, nil, "crewship-cache:a", "", absent, true, false},
+		{"no build needed and its provisioned image is present", `{"image":"debian"}`, nil, "crewship-cache:a", "", present, false, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
