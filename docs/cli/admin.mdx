@@ -1796,9 +1796,10 @@ crewship admin cleanup --format json
 
 The response includes `scope=containers`, controller state and per-crew `items`
 for this installation (instance admins) or the selected workspace (workspace
-admins), with observation time, completeness, remaining eligible containers, legacy
-unattributed count and fixed error codes. `observed_clear` describes the last
-complete eligible-container scan, not volumes, host data or future creates.
+admins), with observation time, completeness, remaining eligible containers (and
+per-crew networks, when the crew had one), legacy unattributed count and fixed
+error codes. `observed_clear` describes the last complete eligible-container and
+crew-network scan, not volumes, host data or future creates.
 Stale observations read as `unknown`.
 
 If the crew's workspace is deleted or the server is unavailable, use

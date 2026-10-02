@@ -183,4 +183,7 @@
 # 2026-10-02 (#2240): +1 — TestCrewNetworkIsolationIntegration needs a live
 #                     Docker daemon to create real bridges; SKIP-WAIVER on its
 #                     Docker-unavailable guard, the OS guard is a build tag.
-150
+# 2026-10-02 (#2240): +1 — TestCleanupRuntimeCrewNetworkIntegration removes
+#                     real bridges and needs a live daemon; SKIP-WAIVER on the
+#                     Docker-unavailable guard.
+151

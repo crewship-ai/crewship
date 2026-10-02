@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
@@ -70,6 +71,42 @@ func (r *cleanupRuntime) Remove(ctx context.Context, id string) error {
 	_, err := r.client.ContainerRemove(ctx, id, client.ContainerRemoveOptions{RemoveVolumes: false, Force: false})
 	return cleanupError(err)
 }
+
+// ListNetworks reports per-crew networks (#2240) with their ownership labels.
+// Every network on the daemon is listed; the controller selects by labels,
+// never by name.
+func (r *cleanupRuntime) ListNetworks(ctx context.Context) ([]resourcelifecycle.Network, error) {
+	result, err := r.client.NetworkList(ctx, client.NetworkListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	out := []resourcelifecycle.Network{}
+	for _, n := range result.Items {
+		if n.Labels[crewKindLabel] != resourcelifecycle.NetworkKind {
+			continue
+		}
+		out = append(out, resourcelifecycle.Network{ID: n.ID, InstanceID: n.Labels[resourcelifecycle.InstanceLabel], CrewID: n.Labels[crewCrewIDLabel], Kind: n.Labels[crewKindLabel]})
+	}
+	return out, nil
+}
+
+// RemoveNetwork removes one network. A network with containers still attached
+// is reported as ErrNetworkInUse; there is no force.
+func (r *cleanupRuntime) RemoveNetwork(ctx context.Context, id string) error {
+	_, err := r.client.NetworkRemove(ctx, id, client.NetworkRemoveOptions{})
+	if err == nil {
+		return nil
+	}
+	if cerrdefs.IsNotFound(err) {
+		return resourcelifecycle.ErrNotFound
+	}
+	if cerrdefs.IsConflict(err) || cerrdefs.IsPermissionDenied(err) || strings.Contains(strings.ToLower(err.Error()), "active endpoints") {
+		return resourcelifecycle.ErrNetworkInUse
+	}
+	return err
+}
+
+var _ resourcelifecycle.NetworkRuntime = (*cleanupRuntime)(nil)
 
 // SetCrewOwnerCheck is startup wiring, before any provider work is dispatched.
 func (p *Provider) SetCrewOwnerCheck(check func(context.Context, string) error) {
