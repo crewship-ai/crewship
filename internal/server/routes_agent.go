@@ -26,19 +26,40 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := s.state.Get(r.Context(), "agent_runs", id)
-	if err != nil || data == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"agent_id": id, "status": "idle"})
+	states, err := s.state.List(r.Context(), "agent_runs")
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime status unavailable"})
 		return
 	}
-
-	if !json.Valid(data) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"agent_id": id, "status": "idle"})
+	// Runs are keyed by run ID, not agent ID. Prefer a still-running run even
+	// when another invocation finished more recently; break ties deterministically.
+	var selected *orchestrator.RunState
+	for _, raw := range states {
+		var run orchestrator.RunState
+		if err := json.Unmarshal(raw, &run); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime status unavailable"})
+			return
+		}
+		if run.AgentID != id {
+			continue
+		}
+		newer := selected == nil
+		if selected != nil {
+			if (run.Status == "running") != (selected.Status == "running") {
+				newer = run.Status == "running"
+			} else {
+				newer = run.StartedAt.After(selected.StartedAt) || (run.StartedAt.Equal(selected.StartedAt) && run.ID > selected.ID)
+			}
+		}
+		if newer {
+			selected = &run
+		}
+	}
+	if selected == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"agent_id": id, "status": "idle"})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	writeJSON(w, http.StatusOK, selected)
 }
 
 type agentStartRequest struct {

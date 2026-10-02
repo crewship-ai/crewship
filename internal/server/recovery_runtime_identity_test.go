@@ -2,8 +2,10 @@ package server
 
 import (
 	"encoding/json"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
@@ -52,5 +54,38 @@ func TestRecoveryPreservesDurableRunningAgent(t *testing.T) {
 	}
 	if status != "IDLE" {
 		t.Fatalf("journal-only orphan was not recovered: %s", status)
+	}
+}
+
+func TestAgentStatusFindsRunIdentityAndPrefersActive(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	state, err := bbolt.New(filepath.Join(t.TempDir(), "runtime.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.Close()
+	s.state = state
+	for _, run := range []orchestrator.RunState{
+		{ID: "run-active", AgentID: "a", Status: "running", StartedAt: time.Now().Add(-time.Hour)},
+		{ID: "run-newer", AgentID: "a", Status: "completed", StartedAt: time.Now()},
+		{ID: "run-other", AgentID: "b", Status: "running", StartedAt: time.Now()},
+	} {
+		raw, err := json.Marshal(run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := state.Set(t.Context(), "agent_runs", run.ID, raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := httptest.NewRequest("GET", "/agents/a/status", nil)
+	out := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(out, req)
+	var got orchestrator.RunState
+	if err := json.Unmarshal(out.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if out.Code != 200 || got.ID != "run-active" || got.Status != "running" {
+		t.Fatalf("active run hidden: %d %s", out.Code, out.Body.String())
 	}
 }
