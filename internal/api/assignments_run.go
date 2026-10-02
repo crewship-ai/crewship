@@ -734,6 +734,7 @@ func (h *AssignmentHandler) runAssignment(
 	}
 	if _, err := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: body.WorkspaceID,
+		CrewID:      body.CrewID, // target was resolved within this crew
 		AgentID:     target.ID,
 		MissionID:   missionID,
 		Type:        journal.EntryRunStarted,

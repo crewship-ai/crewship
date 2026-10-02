@@ -477,6 +477,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	runState := RunState{
 		ID:          req.RunID,
 		AgentID:     req.AgentID,
+		AgentSlug:   req.AgentSlug,
 		ChatID:      req.ChatID,
 		Status:      "running",
 		StartedAt:   time.Now(),

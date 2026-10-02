@@ -21,6 +21,9 @@ type ScheduleUpdater interface {
 
 type AgentHandler struct {
 	db *sql.DB
+	// runStopper stops a deleted agent's live runs (server-wired). Nil in
+	// tests and headless boots: the server's periodic pass still stops them.
+	runStopper AgentRunStopper
 	// provisioner rebuilds a crew whose image is not verified for a new
 	// agent's adapter CLI (agents_adapter_rebuild.go). Nil = skip.
 	provisioner     agentProvisionEnqueuer

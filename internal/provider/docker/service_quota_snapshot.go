@@ -16,6 +16,9 @@ import (
 // QuotaSnapshotNamespace is host configuration; it is never accepted from a
 // bundle as a destination selector.
 func (p *Provider) QuotaSnapshotNamespace() string {
+	if p.cfg.InstanceID == "" {
+		return ""
+	}
 	if catalog, ok := p.cfg.QuotaCatalog.(interface{ SnapshotNamespace() string }); ok {
 		return catalog.SnapshotNamespace()
 	}
@@ -35,7 +38,12 @@ func (p *Provider) ExportQuotaVolume(ctx context.Context, key quota.Key, size in
 	}
 	mu := p.lockForCrew(key.Crew)
 	mu.Lock()
-	defer mu.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			mu.Unlock()
+		}
+	}()
 	result, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return err
@@ -71,6 +79,8 @@ func (p *Provider) ExportQuotaVolume(ctx context.Context, key quota.Key, size in
 	if err = catalog.Release(ctx, key, name); err != nil {
 		return err
 	}
+	mu.Unlock()
+	locked = false
 	return catalog.Export(ctx, key, size, dst)
 }
 
@@ -82,9 +92,6 @@ func (p *Provider) ImportQuotaVolume(ctx context.Context, key quota.Key, size in
 	if !ok {
 		return quota.ErrUnavailable
 	}
-	mu := p.lockForCrew(key.Crew)
-	mu.Lock()
-	defer mu.Unlock()
 	_, err := catalog.Import(ctx, key, size, src)
 	return err
 }

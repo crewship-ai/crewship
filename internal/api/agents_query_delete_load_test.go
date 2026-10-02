@@ -1,7 +1,10 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -140,12 +143,15 @@ func TestAgentDelete_HappyPath_SoftDeletesAndReturnsSuccess(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("delete = %d body=%s, want 200", rr.Code, rr.Body.String())
 	}
-	var body map[string]bool
+	var body struct {
+		Success bool             `json:"success"`
+		Runs    agentRunsOutcome `json:"runs"`
+	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
 	}
-	if !body["success"] {
-		t.Errorf("response = %v, want success:true", body)
+	if !body.Success {
+		t.Errorf("response = %+v, want success:true", body)
 	}
 
 	// Row must still exist (soft-delete invariant) with deleted_at set
@@ -379,5 +385,71 @@ func TestAgentLoad_TokensUsedCoalescesToTokenCount(t *testing.T) {
 	}
 	if !found {
 		t.Error("ag-coa missing from result")
+	}
+}
+
+// A08: deleting one agent stops that agent's runs and nobody else's, after
+// deleted_at is committed (so no entry point admits it meanwhile).
+func TestAgentDelete_StopsOnlyThatAgentsRuns(t *testing.T) {
+	h, userID, wsID := newAgentHandlerForQueryTest(t)
+	seedAgentForStatus(t, h, "ag-gone", wsID, "", "RUNNING", false)
+	seedAgentForStatus(t, h, "ag-stays", wsID, "", "RUNNING", false)
+	var asked []string
+	h.runStopper = func(_ context.Context, agentID string) (int, int, error) {
+		asked = append(asked, agentID)
+		var deletedAt sql.NullString
+		if err := h.db.QueryRow(`SELECT deleted_at FROM agents WHERE id = ?`, agentID).Scan(&deletedAt); err != nil || !deletedAt.Valid {
+			t.Errorf("runs stopped before deleted_at was committed (err=%v)", err)
+		}
+		return 2, 0, nil
+	}
+	req := httptest.NewRequest("DELETE", "/api/v1/agents/ag-gone", nil)
+	req.SetPathValue("agentId", "ag-gone")
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Delete(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("delete = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(asked) != 1 || asked[0] != "ag-gone" {
+		t.Fatalf("stopper asked for %v, want only ag-gone", asked)
+	}
+	var body struct {
+		Runs agentRunsOutcome `json:"runs"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Runs.State != "stopped" || body.Runs.Stopped != 2 {
+		t.Fatalf("runs = %+v", body.Runs)
+	}
+	var other sql.NullString
+	if err := h.db.QueryRow(`SELECT deleted_at FROM agents WHERE id = 'ag-stays'`).Scan(&other); err != nil || other.Valid {
+		t.Fatalf("the other agent was touched: %v %v", other, err)
+	}
+}
+
+// A stop that cannot be confirmed is reported as pending, never as done.
+func TestAgentDelete_UnconfirmedStopIsPending(t *testing.T) {
+	for name, stopper := range map[string]AgentRunStopper{
+		"unconfirmed": func(context.Context, string) (int, int, error) { return 0, 1, errors.New("probe failed") },
+		"no stopper":  nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, userID, wsID := newAgentHandlerForQueryTest(t)
+			seedAgentForStatus(t, h, "ag-x", wsID, "", "RUNNING", false)
+			h.runStopper = stopper
+			req := httptest.NewRequest("DELETE", "/api/v1/agents/ag-x", nil)
+			req.SetPathValue("agentId", "ag-x")
+			req = withWorkspaceUser(req, userID, wsID, "OWNER")
+			rr := httptest.NewRecorder()
+			h.Delete(rr, req)
+			var body struct {
+				Runs agentRunsOutcome `json:"runs"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil || body.Runs.State != "pending" {
+				t.Fatalf("runs = %+v err=%v body=%s", body.Runs, err, rr.Body.String())
+			}
+		})
 	}
 }

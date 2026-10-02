@@ -124,7 +124,7 @@ func LandRecoveredServices(ctx context.Context, db *sql.DB, dataDir string, runt
 		importErr := runtime.ImportQuotaVolume(ctx, item.target, item.source.Bytes, io.LimitReader(image, item.source.Bytes))
 		closeErr := image.Close()
 		if closeErr != nil {
-			return 0, closeErr
+			return 0, errors.Join(importErr, closeErr)
 		}
 		if importErr != nil {
 			if err := ctx.Err(); err != nil {

@@ -285,6 +285,8 @@ jobs:
         run: bash scripts/test-harness-pr-subset-test.sh
       - name: claim-issue.sh (claim parsing + clone detection)
         run: bash scripts/claim-issue-test.sh
+      - name: throwaway-server.sh (teardown removes only what the server owns)
+        run: bash scripts/throwaway-server-test.sh
       - name: check-release-artifacts.sh (argument parsing + channel + content selection)
         run: bash scripts/check-release-artifacts-test.sh
       - name: gen-frontend-licenses.mjs (scoped walk, dedup, hard failures)

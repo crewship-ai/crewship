@@ -64,6 +64,15 @@ pnpm build              # confirm static export still builds (cross-cutting chan
 Multi-instance: a clone named `crewship_N` auto-offsets all ports/data/sockets,
 so parallel agents/worktrees run conflict-free (see `dev.sh`).
 
+**Throwaway servers** (a second, disposable instance for a test or a
+screenshot pass): start them only with
+`scripts/throwaway-server.sh run NAME --binary /tmp/crewship-N-dev -- CMD`
+(or `start`/`stop`). It gives the server its own data directory, port,
+container prefix and installation identity, and on exit removes exactly the
+containers and volumes that server created before deleting its data. A server
+started by hand and its data directory deleted leaves containers no
+installation can find again.
+
 **`web/out` embed:** `web/embed.go` embeds the Next.js export, so `web/out/`
 must exist for *any* Go build to compile. It is tracked-by-one-file
 (`web/out/.placeholder.html`) so `go build ./...` works in a fresh worktree

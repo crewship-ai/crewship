@@ -103,9 +103,11 @@ daemon uses it — any installation, any state — continuously for one hour
 (tracked per installation in `resource_retention_images`; any use restarts the
 hour), it is older than one day, and no `crewship-provision-*` build container
 exists anywhere on the daemon. A database reference from a crew does not keep
-an image: the next `crew start`, chat run or dispatch rebuilds a missing cache
-image, verified for `crew start` and chat runs (about 35–40 s with the base
-image present). Removal uses `Force=false`; Docker refusing it keeps the image
+an image: every crew start waits for a missing cache image to be rebuilt —
+`crew start`, chat, dispatch, routine and pipeline steps, scheduled runs,
+webhooks and the terminal all pass the same image gate in `crewstart` (about
+35–40 s with the base image present). A failed rebuild fails the start with
+`crew image not ready` instead of starting from another image. Removal uses `Force=false`; Docker refusing it keeps the image
 and restarts its hour. Base images, `crewship-feat:*` images and BuildKit
 cache are out of scope. Because tags are configuration hashes shared through
 the daemon, eviction by one installation can make another rebuild on its next
