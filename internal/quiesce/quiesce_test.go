@@ -89,6 +89,13 @@ func TestHoldCapReleasesAndEndsTheCopy(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("the hold cap never ended the window's context")
 	}
+	// Cancellation ends the copy before asynchronous guard release completes.
+	// Await the release contract instead of relying on goroutine scheduling.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := c.WaitReleased(ctx); err != nil {
+		t.Fatal("the cancelled copy never released its guards:", err)
+	}
 	if !w.Expired() || c.Holding() {
 		t.Fatalf("expired=%v holding=%v", w.Expired(), c.Holding())
 	}
