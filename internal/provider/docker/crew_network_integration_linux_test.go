@@ -94,12 +94,12 @@ func TestCrewNetworkIsolationIntegration(t *testing.T) {
 		}
 	}
 	ip := map[string]string{}
-	for slug, cid := range ids {
-		got, err := p.ContainerIP(ctx, cid, shared)
+	for _, c := range crews {
+		got, err := p.ContainerIP(ctx, ids[c.Slug], p.crewNetworkFor(c.ID, c.Slug))
 		if err != nil {
-			t.Fatalf("ContainerIP %s via the instance network name: %v", slug, err)
+			t.Fatalf("ContainerIP %s on its network: %v", c.Slug, err)
 		}
-		ip[slug] = got
+		ip[c.Slug] = got
 	}
 	for _, slug := range []string{"net-a", "net-b"} {
 		if !strings.HasPrefix(ip[slug], "10.239.248.") {
@@ -345,5 +345,38 @@ func TestCrewNetworkMovesExistingServiceWithRuntimeIntegration(t *testing.T) {
 	}
 	if !resolvesOwn(cid2) {
 		t.Fatal("recreated runtime does not reach its moved service")
+	}
+}
+
+// Codex/agent review of #2767: a crew network is never less isolated than the
+// instance network. The production compose file makes that one internal; a
+// crew network created next to it must be internal too.
+func TestCrewNetworkInheritsInternalIntegration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	shared := "crewnet-int-" + time.Now().Format("150405")
+	p, err := New(ctx, Config{RuntimeImage: "alpine:3", Network: "", InstanceID: "inst-int", CrewNetworkCrews: []string{"int-crew"}, CrewNetworkPool: "10.239.251.0/24"}, nil)
+	if err != nil {
+		// SKIP-WAIVER(#2240): needs a live Docker daemon to create real
+		// bridges.
+		t.Skipf("Docker not available: %v", err)
+	}
+	defer p.Close()
+	if _, err := p.client.NetworkCreate(ctx, shared, client.NetworkCreateOptions{Driver: "bridge", Internal: true}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = p.client.NetworkRemove(context.Background(), shared, client.NetworkRemoveOptions{}) }()
+	p.cfg.Network = shared
+	name, err := p.ensureCrewNetwork(ctx, "int-crew-001", "int-crew")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = p.client.NetworkRemove(context.Background(), name, client.NetworkRemoveOptions{}) }()
+	insp, err := p.client.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !insp.Network.Internal {
+		t.Fatal("crew network next to an internal instance network must be internal")
 	}
 }

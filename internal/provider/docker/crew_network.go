@@ -16,6 +16,7 @@ import (
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
@@ -66,11 +67,7 @@ func (p *Provider) crewNetworkWanted(id, slug string) bool {
 // instance network name is the prefix, so two instances on one daemon never
 // share a name.
 func (p *Provider) crewNetworkName(id string) string {
-	base := p.cfg.Network
-	if base == "" {
-		base = "crewship"
-	}
-	return base + "-crew-" + id
+	return provider.CrewNetworkName(p.cfg.Network, id)
 }
 
 // crewNetworkFor is THE network a crew's runtime and service containers join:
@@ -105,11 +102,24 @@ func (p *Provider) ensureCrewNetworkNamed(ctx context.Context, id, slug string) 
 	if err != nil {
 		return "", fmt.Errorf("crew network: list networks: %w", err)
 	}
+	// A crew network is never less isolated than the instance network it
+	// replaces: when that one is internal (the production compose file
+	// makes it so), the crew network is internal too.
+	internal := false
+	for _, n := range nets.Items {
+		if n.Name == p.cfg.Network {
+			internal = n.Internal
+		}
+	}
 	var used []netip.Prefix
 	for _, n := range nets.Items {
 		if n.Name == name {
-			if n.Labels[crewKindLabel] != crewKindLabelValueNet || n.Labels[crewCrewIDLabel] != id {
-				return "", fmt.Errorf("crew network: %q exists but is not crewship's network for crew %s", name, id)
+			if n.Labels[crewKindLabel] != crewKindLabelValueNet || n.Labels[crewCrewIDLabel] != id ||
+				n.Labels[resourcelifecycle.InstanceLabel] != p.cfg.InstanceID {
+				return "", fmt.Errorf("crew network: %q exists but is not this installation's network for crew %s", name, id)
+			}
+			if internal && !n.Internal {
+				return "", fmt.Errorf("crew network: %q is not internal while the instance network is; remove it so it can be recreated", name)
 			}
 			return name, nil
 		}
@@ -147,6 +157,7 @@ func (p *Provider) ensureCrewNetworkNamed(ctx context.Context, id, slug string) 
 		gw := subnet.Addr().Next()
 		_, err := p.client.NetworkCreate(ctx, name, client.NetworkCreateOptions{
 			Driver:     "bridge",
+			Internal:   internal,
 			EnableIPv6: &enableIPv6,
 			IPAM: &network.IPAM{
 				Driver: "default",
