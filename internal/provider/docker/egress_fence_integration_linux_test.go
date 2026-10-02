@@ -5,6 +5,7 @@ package docker
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -153,12 +154,6 @@ func TestEgressFenceIntegration(t *testing.T) {
 	}
 	assertExit("restarted, before ensure", "1001", probe, true)
 
-	// Every provider exec path refuses the unfenced start (the raw client
-	// above is the operator's docker socket, which is root-equivalent anyway).
-	if _, err := p.Exec(ctx, provider.ExecConfig{ContainerID: cid, Cmd: []string{"true"}, User: "1001:1001"}); !errors.Is(err, errFenceNotInPlace) {
-		t.Fatalf("Exec into an unfenced start must be refused, got %v", err)
-	}
-
 	// A connection the agent opens while unfenced must not keep flowing once
 	// the fence is in: established is accepted only in the reply direction.
 	// Measured at the receiver, because TCP retransmits a rejected segment for
@@ -177,6 +172,13 @@ func TestEgressFenceIntegration(t *testing.T) {
 		t.Fatal("setup: the unfenced long connection should be delivering data to the sink")
 	}
 
+	// A provider exec into the unfenced start (the orchestrator's cached-
+	// container path, the terminal) re-installs the fence BEFORE the command
+	// runs — never runs it unfenced. The raw client above is the operator's
+	// docker socket, which is root-equivalent anyway.
+	if code := fenceTestProviderExec(ctx, t, p, cid, "1001:1001", probe); code == 0 {
+		t.Fatal("a provider exec after an outside restart reached the peer: it ran unfenced")
+	}
 	if _, err := p.EnsureCrewRuntime(ctx, team); err != nil {
 		t.Fatalf("EnsureCrewRuntime after restart: %v", err)
 	}
@@ -290,6 +292,23 @@ func fenceTestNetnsRun(ctx context.Context, t *testing.T, p *Provider, cid, imag
 		t.Fatalf("wait netns runner: %v", err)
 	}
 	return -1
+}
+
+// fenceTestProviderExec runs cmd through Provider.Exec (the guarded path)
+// and returns its exit code.
+func fenceTestProviderExec(ctx context.Context, t *testing.T, p *Provider, cid, user string, cmd []string) int {
+	t.Helper()
+	res, err := p.Exec(ctx, provider.ExecConfig{ContainerID: cid, Cmd: cmd, User: user})
+	if err != nil {
+		t.Fatalf("provider exec %v: %v", cmd, err)
+	}
+	_, _ = io.Copy(io.Discard, res.Reader)
+	_ = res.Reader.Close()
+	code, running, err := p.waitExecExit(ctx, res.ExecID, 100)
+	if err != nil || running {
+		t.Fatalf("provider exec %v did not finish: running=%v err=%v", cmd, running, err)
+	}
+	return code
 }
 
 func fenceTestExec(ctx context.Context, t *testing.T, p *Provider, cid, user string, cmd []string) int {
