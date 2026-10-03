@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"filippo.io/age"
 
@@ -143,10 +144,21 @@ func TestAcceptance_BackupCommandsReadAnInstanceBundle(t *testing.T) {
 	if len(got) == 0 || string(got) != string(want) {
 		t.Fatalf("download: %d bytes, the bundle has %d", len(got), len(want))
 	}
-	var audited int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM instance_audit_logs WHERE action = 'instance.backup_downloaded'`).Scan(&audited)
-	if audited != 1 {
-		t.Fatalf("instance audit entries for the download = %d, want 1", audited)
+	// The client can receive all Content-Length bytes before the handler's
+	// post-copy audit transaction commits. Wait for that server-side work.
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		var audited int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM instance_audit_logs WHERE action = 'instance.backup_downloaded'`).Scan(&audited); err != nil {
+			t.Fatalf("read instance download audit: %v", err)
+		}
+		if audited == 1 {
+			break
+		}
+		if audited > 1 || time.Now().After(deadline) {
+			t.Fatalf("instance audit entries for the download = %d, want 1", audited)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 
 	// Not in the catalog: still a 404 on both routes.
