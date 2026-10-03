@@ -205,7 +205,8 @@ func TestRestrictedRouteTableSnapshot(t *testing.T) {
 }
 
 // TestRestrictedAllowlistPatternsAreRegistered catches typos and dead
-// entries: every allowlisted pattern must be a real registration, and a
+// entries: restrictedRoutes must equal the golden list, and every
+// allowlisted pattern must be a real registration, and a
 // request shaped like it must resolve on the mux to exactly that pattern
 // string (the value restrictedRequest switches on).
 func TestRestrictedAllowlistPatternsAreRegistered(t *testing.T) {
@@ -214,6 +215,28 @@ func TestRestrictedAllowlistPatternsAreRegistered(t *testing.T) {
 	for _, p := range registeredPatterns(f.router) {
 		registered[p] = true
 	}
+	// The declared table must be exactly the golden list, and only the
+	// grant-checked entries may carry a check.
+	golden := map[string]bool{}
+	for _, p := range restrictedAllowedPatterns {
+		golden[p] = true
+	}
+	checked := map[string]bool{}
+	for _, p := range restrictedAgentCheckedPatterns {
+		checked[p] = true
+	}
+	for p, rule := range restrictedRoutes {
+		if !golden[p] {
+			t.Errorf("restrictedRoutes entry %q is missing from the golden list", p)
+		}
+		if (rule.check != nil) != checked[p] {
+			t.Errorf("restrictedRoutes entry %q: has check=%v, want %v", p, rule.check != nil, checked[p])
+		}
+	}
+	if len(restrictedRoutes) != len(restrictedAllowedPatterns) {
+		t.Errorf("restrictedRoutes has %d entries, golden list %d", len(restrictedRoutes), len(restrictedAllowedPatterns))
+	}
+
 	for _, p := range restrictedAllowedPatterns {
 		if !registered[p] {
 			t.Errorf("allowlisted pattern %q is not registered on the mux", p)
