@@ -850,3 +850,20 @@ and host mise configuration are not inherited. Input is limited to 4 MiB;
 native bundles retain the limits above, and resolver diagnostics are bounded.
 Resolution does not install the resulting toolchain, prove a real provider
 login, schedule an update or activate a revision.
+
+### Applying a reviewed native lock proposal
+
+`crewship crew provision lock-apply mise.json proposal.json` prints updated mise
+JSON only if the current selectors and previous complete lock match the plan,
+and the proposed lock still matches its digest. Redirect to a **new** output
+file, then review and apply that configuration through your ordinary manifest
+or crew API workflow. The command is local and offline; it does not install
+software, start a build or replace a running environment.
+
+Environment and policy fields come from the current configuration, not from
+the resolver. Unknown JSON fields are preserved. A changed selector or old
+lock requires a new plan. Hashes prevent accidentally applying a stale or
+corrupted proposal; they do not authenticate its author or independently prove
+native resolution. The normal locked build remains responsible for checking
+that lock against the selectors. Provisioning can also require the separate
+image-bound offline AI CLI checks described above.

@@ -3,9 +3,10 @@ package devcontainer
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/moby/moby/api/pkg/stdcopy"
 	"strings"
 	"testing"
+
+	"github.com/moby/moby/api/pkg/stdcopy"
 )
 
 func TestMiseNativeResolutionPlan(t *testing.T) {

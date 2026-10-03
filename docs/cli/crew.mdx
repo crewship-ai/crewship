@@ -912,6 +912,28 @@ Supply the proposed lock through the ordinary manifest/build path. See
 
 ---
 
+### `crewship crew provision lock-apply`
+
+Apply a reviewed `lock-resolve` proposal to the unchanged local mise inputs.
+The command checks selectors, the previous complete lock and the proposed
+bundle digest before emitting updated JSON. It preserves current environment,
+policy and unknown JSON fields. It needs no Docker or Crewship server and
+neither modifies input files nor installs or activates an environment.
+
+```bash
+crewship crew provision lock-resolve mise.json --image sha256:<local-image-id> --bump > proposal.json
+# Review proposal.json, including its complete native lock bundle.
+crewship crew provision lock-apply mise.json proposal.json > mise.updated.json
+```
+
+Use a separate output file; shell redirection to either input truncates that
+input before Crewship starts. Review the resulting configuration and send it
+through the ordinary manifest/API build flow. Hashes detect stale inputs and
+accidental corruption, **not** a malicious plan author. Native locked install
+and any required CLI startup checks still run during provisioning.
+
+---
+
 ## `crewship crew rebuild`
 
 Force a new build without reusing the build cache. The previous selected image remains available until the new build succeeds. An input mise lock still pins dependencies; update the lock explicitly to change those versions. This command does not replace a running container. Streams live progress unless `--no-watch` is passed.

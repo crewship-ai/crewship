@@ -39,7 +39,13 @@ func TestMiseResolveRealExactAndFloatingSelectors(t *testing.T) {
 	if !exact.LockChanged || exact.LockSHA256 == "" || exact.PreviousLockSHA256 != "" || len(exact.Tools) != 1 || !exact.Tools[0].VersionChanged {
 		t.Fatalf("initial resolution lacks a bound proposal: %+v", exact)
 	}
-	cfg.Lock = exact.Lock
+	cfg, err = ApplyMiseResolution(cfg, exact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Env["PRIVATE_TOKEN"] != "SYNTHETIC_DO_NOT_DELIVER" {
+		t.Fatal("apply discarded current environment")
+	}
 	pinned, err := ResolveMiseLock(ctx, docker, inspected.ID, cfg, true)
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +68,13 @@ func TestMiseResolveRealExactAndFloatingSelectors(t *testing.T) {
 	}
 	if !floating.LockChanged || floating.SelectorsSHA256 == exact.SelectorsSHA256 || len(floating.Tools) != 1 || !floating.Tools[0].VersionChanged {
 		t.Fatalf("floating proposal missed update: %+v", floating)
+	}
+	if _, err := ApplyMiseResolution(cfg, floating); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Tools["node"] = "22.0.0"
+	if _, err := ApplyMiseResolution(cfg, floating); err == nil {
+		t.Fatal("floating proposal applied after restoring exact selector")
 	}
 	lock := floating.Lock.Files["mise.lock"]
 	if !strings.Contains(lock, `specifiers = ["22"]`) || strings.Contains(lock, `version = "22.0.0"`) || !strings.Contains(lock, "checksum = ") {

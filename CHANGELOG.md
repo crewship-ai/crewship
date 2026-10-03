@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- `crew provision lock-apply` validates a reviewed native update proposal against unchanged selectors and lock inputs, preserving other configuration fields and emitting updated JSON without deployment.
+
 - Managed environment definitions can require image-bound offline AI CLI checks before publishing a replacement; failed or unavailable checks preserve the selected image.
 
 - Agent run state and execution events retain the actual container source image ID when available, independently of later environment updates.
