@@ -513,7 +513,7 @@ the structural fault behind all three, not three separate mistakes.
 
 ### 7.4 What this means for release 1.0
 
-The release-1.0 quality bar (`docs/prd/PRD-RELEASE-1-0-QUALITY-AUDIT.md`) has
+The release-1.0 quality bar ([historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/PRD-RELEASE-1-0-QUALITY-AUDIT.md)) has
 eight conditions and **not one of them is about UI↔CLI parity**. Nothing in
 §4 is a release blocker by that document's own definition, whatever the
 `blocker` column says — that column grades reachability, not release risk, and

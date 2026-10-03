@@ -352,7 +352,7 @@ export function PageView({
         <div className="ml-auto flex shrink-0 items-center gap-3">
           {/* Every producer that has never pushed, named and linked — the
               overview said "1 never produced" and this bar said nothing about
-              WHO was meant to fill it (docs/ux/PLAN.md D1). */}
+              WHO was meant to fill it (see docs/ux/README.md, empty states). */}
           {silentProducers.length > 0 && (
             <span className="type-page-meta inline-flex min-w-0 items-center gap-1.5 text-warn" data-testid="page-silent-producers">
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" aria-hidden />

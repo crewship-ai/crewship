@@ -15,11 +15,29 @@ This is the **agent-facing capability manifest**: read it once to learn the whol
 ```bash
 # Human view: indented tree of names + one-liners
 crewship commands
+crewship commands routine run
 
 # Machine view: full manifest
 crewship commands --format json | jq '.commands[].path'
 crewship commands --format json | jq '.commands[] | select(.path=="routine") .commands[].path'
 ```
+
+Pass a canonical command path (separate words or one quoted argument) to
+return only that subtree, retaining the global flags. Unknown paths exit 3.
+
+```bash
+crewship commands routine run --format json
+```
+
+Each command includes `runnable`, optional `example`, and `inherited_flags`.
+Global flags appear once in `global_flags`; `inherited_flags` contains only
+options inherited from intermediate command groups.
+Local flags include `required: true` when Cobra marks them individually required,
+and `deprecated` when applicable. Conditional flag groups are still described by
+command help; `required` is not a complete input schema. Defaults come from the
+flag definitions, never the current flag values or stored credentials.
+
+For API operations and request/response schemas, see [API](/cli/api).
 
 ## Manifest shape
 

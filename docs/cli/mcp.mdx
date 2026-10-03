@@ -17,10 +17,17 @@ crewship agent mcp <agent-slug> [flags]
 ```
 
 <Note>
-  Every subcommand requires `crewship login`. Registry browse/search don't
+  API management subcommands require `crewship login`. Registry browse/search don't
   require a workspace (registry data is workspace-agnostic and the CLI strips
   the `workspace_id` header before sending). Everything else does.
 </Note>
+
+## Local MCP server
+
+`crewship mcp serve` exposes the embedded API catalog and guarded HTTP requests to
+AI clients over stdio. Discovery works offline; execution uses the active CLI
+identity. See [AI clients](/cli/ai) for connection commands, all server flags, the
+bundled skill and mutation policy.
 
 ## Subcommands
 

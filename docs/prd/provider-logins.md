@@ -22,8 +22,8 @@ jeho role. Migrace upravuje také dříve uložená systémová upozornění tě
 přihlášení, včetně historie; ostatní zprávy ani jejich stav nemění.
 
 **Status:** analýza k odsouhlasení · **Datum:** 2026-09-06
-**Navazuje na:** `CREDENTIALS-VAULT.md` (typy, mount), `PRD-CREDENTIALS-V2-2026.md`
-(P2 fanout, P3 bindings), `PRD-MODEL-SCOPED-CREDENTIALS-2026.md` (model policy na
+**Navazuje na:** `CREDENTIALS-VAULT.md` (typy, mount), [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/PRD-CREDENTIALS-V2-2026.md)
+(P2 fanout, P3 bindings), [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/PRD-MODEL-SCOPED-CREDENTIALS-2026.md) (model policy na
 credentialu)
 **Cíl v jedné větě:** člověk se do providera (Anthropic, OpenAI/Codex, Google, Cursor,
 Factory, …) přihlásí **jednou**, přihlášení leží v Credentials na záložce **Providers**,
@@ -47,19 +47,19 @@ crewship-dev 2026-09-06; tvrzení o kódu jsou ověřená na `a0d9d6f3` s `file:
    změny.
 2. **Broker, ne brána.** Server vlastní přihlášení a obnovuje ho; kontejner dostane
    *odvozeninu* (env proměnnou nebo vyrenderovaný soubor) bez čehokoli, co by uměl
-   rotovat. To je model, ke kterému nezávisle došly oba prozkoumané agentní runtimy (§4). Jednotná
-   OpenAI-kompatibilní brána typu CLI-to-API proxy (§4.1) se **nestaví** jako hlavní cesta —
+   rotovat. Jednotná
+   OpenAI-kompatibilní brána typu CLI-to-API proxy se **nestaví** jako hlavní cesta —
    zabila by nativní CLI (harness, sandbox, MCP), na kterých Crewship stojí.
 3. **Rotující materiál nikdy neopustí server.** Refresh token je `SEALED`: nedá se
    odkrýt, nedoručuje se, neexportuje se. Do kontejneru jde jen access token
-   s expirací. Ověřeno, že Codex takový `auth.json` přijme (§3.2).
+   s expirací. Podporovaný formát ověřuje příslušný adaptér.
 4. **Fan-out = přiřazení, ne kopírování.** Čtyři Anthropic předplatná = čtyři
    provider loginy; kterému agentovi patří které, říká existující
    `credential_bindings` (WORKSPACE / CREW / AGENT + slot). Víc loginů na stejném
    scope = **pool** s prioritou, round-robinem a cooldownem — primitiva už existují
    (§2.1).
-5. **Pořadí:** Codex první (je rozbitý a je jediný, který jde ověřit naživo), na něm
-   vznikne abstrakce doručení, pak se na ni přepnou ostatní adaptéry (§7).
+5. **Kompatibilita:** každý adaptér ověřuje konkrétní formát doručení a obnovy;
+   společná abstrakce nesmí zakrývat nepodporovaný provider flow.
 
 ---
 
@@ -72,7 +72,7 @@ Dnešní Credentials míchá dvě věci s různým životním cyklem:
 | | Secret (GitHub PAT, DB DSN, SSH klíč) | Provider login (Claude Max, ChatGPT Plus, Cursor Pro) |
 |---|---|---|
 | Co to je | hodnota, kterou tool přečte | seat, kterým se platí za tokeny |
-| Kdo ho vlastní | workspace | **konkrétní člověk** (ToS obou velkých providerů, §3.4) |
+| Kdo ho vlastní | workspace | **konkrétní člověk** (explicitní vlastník provider bindingu) |
 | Expirace | zřídka, ručně | **pravidelně** (Claude token ~1 rok, Codex 10 dní, Gemini 1 h) |
 | Obnova | rotace = nová hodnota | **refresh flow** s rotujícím refresh tokenem |
 | Kvóta | žádná | 5h okno + týdenní okno, per seat |
@@ -110,8 +110,8 @@ Refresh tokeny u OAuth providerů **rotují**: každá obnova vrátí nový refr
 a starý zneplatní. Deset kontejnerů s kopií jednoho `auth.json` je deset klientů,
 které obnovují nezávisle; kdo obnoví poslední, ostatním přihlášení rozbije. Pro
 jednu instanci CLI se to neprojeví nikdy — proto to devět z deseti návodů radí.
-Pro orchestrátor je to systémová vada, a přesně kvůli ní runtime B (§4.2) odmítá sdílet
-stav s Codex CLI.
+Orchestrátor proto musí obnovu serializovat a nesmí neřízeně sdílet rotující
+stav mezi nezávislými klienty.
 
 ---
 
@@ -150,131 +150,15 @@ provider login se vejde jen do „Token", kde se ztratí všechno, co ho odlišu
 
 ## 3. Rešerše providerů — jak se přihlašuje které CLI
 
-### 3.1 Tabulka
-
-| CLI (adaptér) | Předplatné / OAuth | Headless credential | **Tvar doručení** | Expirace / obnova |
-|---|---|---|---|---|
-| **Claude Code** (`CLAUDE_CODE`) | `claude setup-token` → `sk-ant-oat01-…` | `ANTHROPIC_API_KEY` | **env** `CLAUDE_CODE_OAUTH_TOKEN` | dlouhodobý token, bez refresh flow → jen hlídat expiraci |
-| **Codex** (`CODEX_CLI`) | `codex login`, `codex login --device-auth` | `CODEX_API_KEY` (oficiálně pro CI), `OPENAI_API_KEY` fallback | **soubor** `$CODEX_HOME/auth.json` | access 240 h, refresh token **rotuje**; `POST auth.openai.com/oauth/token`, veřejný client_id |
-| **Gemini CLI** (`GEMINI_CLI`) | Google OAuth login | `GEMINI_API_KEY` / `GOOGLE_API_KEY`, service account `GOOGLE_APPLICATION_CREDENTIALS` | **soubor** `~/.gemini/oauth_creds.json` (OAuth) nebo env | access ~1 h, standardní Google refresh |
-| **Cursor** (`CURSOR_CLI`) | `cursor-agent login` | `CURSOR_API_KEY` | **env** | klíč, bez expirace |
-| **Factory Droid** (`FACTORY_DROID`) | browser OAuth | `FACTORY_API_KEY` (`fk-…`) | **env** | klíč |
-| **OpenCode** (`OPENCODE`) | `opencode auth login` | `OPENCODE_<PROVIDER>_APIKEY`, provider env vars | **soubor** `~/.local/share/opencode/auth.json` nebo env | dle providera uvnitř |
-| **GitHub Copilot CLI** (nový) | device flow (natvrdo) | `COPILOT_GITHUB_TOKEN` → `GH_TOKEN` → `GITHUB_TOKEN` | **env**, fallback `~/.copilot/config.json` | PAT |
-| **Grok Build** (xAI, nový) | SuperGrok / X Premium+ | headless + ACP | env | — |
-| **Groq Code CLI** (nový) | — | `GROQ_API_KEY` | env | klíč |
-| **Perplexity `pplx`** | — | `PERPLEXITY_API_KEY` | — | **není coding agent** — search CLI *pro* agenty; patří mezi tools/MCP, ne mezi `cli_adapter` |
-
-Existují tedy jen **tři tvary**: (A) token v env, (B) soubor v HOME daného CLI,
-(C) jen interaktivně. Jedna deklarace na adaptér — *kam* a *v jakém tvaru* — pokryje
-všechny.
-
-### 3.2 Codex — naměřená fakta, na kterých návrh stojí
-
-- `auth.json` vyžaduje **všechna** pole: `auth_mode`, `tokens.{id_token,
-  access_token, refresh_token, account_id}`, `last_refresh`. Bez `id_token` i bez
-  `refresh_token` Codex soubor odmítne.
-- **`refresh_token` může být placeholder.** S `"rt.crewship-managed-no-refresh"`
-  Codex hlásí `Logged in using ChatGPT` a autentizuje (běh došel až na chybu kvóty
-  účtu, tj. za auth). Codex refresh token použije až při blížící se expiraci
-  access tokenu → kontejner bez reálného refresh tokenu **nemůže rotovat**.
-- Access token: 240 h; `id_token` expiruje po 1 h a Codexu to nevadí. Plán je
-  v claimu `https://api.openai.com/auth.chatgpt_plan_type` (`plus`, `pro`, …).
-- **Precedence:** `CODEX_API_KEY` **přebije** `auth.json`; `OPENAI_API_KEY` ho
-  **nepřebije**. Dummy `CODEX_API_KEY` by rozbil subscription mód; dummy
-  `OPENAI_API_KEY` (dnešní) je neškodný.
-- `OPENAI_BASE_URL` neexistuje (B1); vestavěný `openai` provider nejde přepsat (B2).
-  Subscription provoz jde na `chatgpt.com/backend-api/codex` a base URL ignoruje
-  úplně — sidecar ho vidí jen jako CONNECT tunel (stejně jako Claude OAuth), tedy
-  bez meteringu → `flat_rate`.
-- `codex login --with-access-token` **není** ChatGPT cesta — chce enterprise
-  *agent-identity JWT* a ChatGPT token odmítne.
-- Centrální refresh je proveditelný veřejnými prostředky: token endpoint
-  `https://auth.openai.com/oauth/token`, `grant_type=refresh_token`, client_id
-  `app_EMoamEEZ73f0CkXaXp7hrann` (z claimu tokenu), scope
-  `openid profile email offline_access`.
-
-### 3.3 Claude Code, Gemini, ostatní — co je jiné
-
-- **Claude Code** je nejjednodušší případ: jeden dlouhodobý token v env, žádný
-  refresh flow. Chybí jen expirace (hlídat `EXPIRING` v Overview) a vlastník.
-- **Gemini** má klasické Google OAuth s hodinovým access tokenem — refresh
-  centrálně je nutnost, ne volba; soubor `oauth_creds.json` se renderuje stejně
-  jako Codex `auth.json`.
-- **Cursor a Factory** nemají endpoint override (známé residuum #1030): klíč musí
-  do env a sidecar nemetruje. Nic nového; login je tu prostě klíč s vlastníkem.
-- **Copilot CLI** má device flow natvrdo pro interaktivní cestu, ale headless bere
-  PAT z env — pro nás tvar A.
-
-### 3.4 Podmínky providerů — proč login patří člověku
-
-- **Anthropic Team/Enterprise:** *„Each team member has their own usage allocation;
-  if one person hits their limit, it does not affect anyone else."* Seat je per
-  osoba, přihlášení je OAuth konkrétního účtu. Rozhodnutí z 2026-08-19 (self-hosted
-  Crewship, uživatel vkládá vlastní token, nic nebrokerujeme) platí; nepřenáší se na
-  hosted variantu.
-- **OpenAI ChatGPT Business:** seaty Standard/Premium per osoba (Premium 5× usage,
-  bez 5h limitu); *„Sharing your account credentials or making your account
-  available to anyone else is prohibited"* (shrnutí help centra; článek samotný
-  vrátil 403, znění neověřeno doslovně).
-- **Důsledek pro model:** provider login má `owner` (uživatel Crewshipu) a Crewship
-  ho rozprostírá **na agenty toho člověka / té firmy na vlastní infrastruktuře**,
-  nikdy nepooluje seaty *mezi lidmi* jako službu. Pool „čtyři předplatná firmy" je
-  čtyři seaty čtyř lidí, každý přiřazený svým agentům — což je přesně to, co
-  bindings vyjádří. Round-robin pool přes seaty více lidí je technicky totéž, ale je
-  to rozhodnutí operátora, které UI musí pojmenovat, ne udělat potichu.
-
----
+CLI adapters differ in authentication format, renewal and supported delivery.
+The public binding must identify the provider/account and preserve its scope;
+validate refresh against a synthetic endpoint before claiming support.
+Internal account experiments are retained in private context.
 
 ## 4. Jak to řeší ostatní
 
-### 4.1 CLI-to-API proxy (brána)
-
-Jeden Go proces, `auth-dir` s **jedním souborem na účet**
-(`codex_oauth_<email>.json`, `claude_oauth_<org-uuid>.json`, …), hot-reload
-adresáře. `auth.Manager`: kontrola každých 5 s, až 16 souběžných refreshů,
-5 min backoff po chybě, 1 min „pending" backoff, když už refresh běží — tj.
-**single-flight per účet**, přesně proti race z §1.3. Výběr účtu: round-robin
-(default) nebo fill-first; na 429 cooldown s exponenciálním backoffem do 30 min a
-retry s dalším credentialem; `attributes.priority` (vyšší první), `prefix` pro
-cílení účtu přes jméno modelu (`personal/gemini-2.5-pro`).
-
-**Co převzít:** semantiku refresh manageru (proaktivně před expirací, single-flight,
-backoffy), pool s prioritou + cooldownem (máme, §2.1), per-účet soubor jako
-*server-side* uložení. **Co nepřevzít:** samotnou bránu — klient té proxy je
-OpenAI SDK, ne Claude Code / Codex s jejich harness, sandboxem a MCP. Pro naše
-agenty by to byl krok zpět; pro Keeperovy aux sloty to de facto máme
-(`internal/llm` registr + `TokenPool` v `internal/llmproxy/provider.go:65`).
-
-### 4.2 Agentní runtime B (broker)
-
-Vlastní store `~/.hermes/auth.json`, import z `~/.codex/auth.json` nebo device code
-(vlastní `auth add` příkaz). Doslova z jejich dokumentace: *„the split is deliberate, not a bug:
-[we] will not share OAuth state with Codex CLI to avoid token-refresh races."*
-Codex používá jako runtime proti ChatGPT předplatnému bez API klíče.
-
-### 4.3 Agentní runtime C (broker + app-server)
-
-`codex-cli` backend zrušen ve prospěch Codex **app-serveru**; per-agent cache
-`~/.openclaw/agents/<agentId>/agent/auth.json` spravovaná platformou; zkopírovaný
-Codex `auth.json` se musí **naimportovat** do store, ne použít.
-
-### 4.4 Vibe Kanban, Conductor, Sculptor, Multica (jedna instance)
-
-Orchestrují paralelní běhy Claude Code / Codex / Cursor / Gemini, ale **dědí
-přihlášení hostitele** — jeden uživatel, jeden stroj, jeden login na providera.
-Žádný z nich nemodeluje více seatů jednoho providera ani přiřazení seatu agentovi.
-To je mezera, kterou tenhle PRD zaplňuje; není odkud opsat, jen odkud si potvrdit
-směr (§4.1–4.3).
-
-### 4.5 Kam se trh sbíhá: perzistentní session místo procesu
-
-Codex `app-server`, Cursor a Grok Build **ACP** (JSON-RPC přes stdio), OpenCode
-`serve`. Pro auth to nic nemění (login je stejný), pro orchestraci je to
-samostatný, větší track — nepatří do tohohle PRD, ale delivery spec v §5.2 ho
-nesmí vyloučit (proto je HOME agenta a ne workdir).
-
----
+Comparative product research is retained in private context. The public
+contract is the provider binding, delivery, refresh and API shape below.
 
 ## 5. Cílový model
 
@@ -291,7 +175,7 @@ v `credential_fields`:
 | `account_id` | ❌ | Codex `chatgpt_account_id`; Anthropic org; Google sub |
 | `plan` | ❌ | `plus` / `pro` / `max` / `team` — z claimu nebo z probe |
 | `expires_at` | ❌ | expirace access tokenu; řídí refresh i badge EXPIRING |
-| `owner_user_id` | ❌ | kdo se přihlásil (§3.4) |
+| `owner_user_id` | ❌ | kdo se přihlásil (§5.1) |
 | `auth_mode` | ❌ | `subscription` \| `api_key` — API klíč **také** patří na záložku Providers (je to způsob, jak agent platí), jen s `auth_mode=api_key` a bez refreshe |
 
 `credpolicy`: `PROVIDER_LOGIN → Delivery: per-adapter (env nebo file), KeeperGated:
@@ -352,7 +236,7 @@ Rozšířit `CredentialMonitor` (`internal/llmproxy/monitor.go`) z validace na
 | Anthropic | žádný refresh flow; **validace** + `EXPIRING` 30 dní předem + notifikace vlastníkovi | denně |
 | Cursor / Factory / Copilot / Groq | validace probe | denně |
 
-Pravidla převzatá z té proxy (§4.1) a nutná kvůli §1.3:
+Pravidla obnovy vyplývající z §1.3:
 
 - **Single-flight per login** (řádkový zámek / `refresh_in_progress_until`): dva
   starty běhů ve stejnou vteřinu nesmí spustit dva refreshe — rotace by druhý
@@ -379,7 +263,7 @@ Pravidla převzatá z té proxy (§4.1) a nutná kvůli §1.3:
   `auth.json` při startu; proxy cesta (API klíč) umí per request. Kvóta seatu
   (5h/týdenní okno) se čte z 429 a z hlaviček tam, kde je vidět (`usage.go:289`),
   a ukládá k loginu → Providers tab ukazuje „u limitu do 11:55".
-- Pool přes seaty **různých vlastníků** je opt-in s explicitním textem (§3.4).
+- Pool přes seaty **různých vlastníků** je opt-in s explicitním souhlasem vlastníků.
 
 ### 5.5 Účtování
 
@@ -492,39 +376,9 @@ adaptéru na `CODEX_CLI` s Anthropic loginem → validace při uložení, ne 401
 
 ## 7. Práce — fáze
 
-Každá fáze je samostatně mergeovatelná, s testy napřed (Go table-driven, Vitest,
-Playwright pro wizard), docs ve stejné PR, CLI příkaz pro každý endpoint.
-
-**P-A · Codex funguje (oprava + subscription)** — začíná se tu, protože je rozbitý
-a jde ověřit naživo.
-1. B1/B2: `CODEX_CLI` API-klíčová cesta přes vlastní `model_provider` na sidecar
-   (rozšířit `resolveRoutedProvider` i na default OpenAI), `CODEX_API_KEY`
-   místo `OPENAI_BASE_URL`; test, že request dorazí do sidecaru.
-2. B3: OAuth detekce podle `(type, provider)`, ne jen typu.
-3. `PROVIDER_LOGIN` typ + `credential_fields` části + `credpolicy` řádek + validátor.
-4. `AuthDelivery` na `CLIAdapter`; Codex renderer `auth.json` s placeholder
-   refresh tokenem; `CODEX_HOME`; `credSecretPaths` větev; test, že refresh token
-   není nikde v boot payloadu ani v souboru.
-5. Codex refresh strategie v monitoru, single-flight, backoff, `NEEDS_RELOGIN`.
-6. B5/B6: plán z claimu, GPT-6-Astra do katalogu, pin `0.153.2`, `docs/guides/cli/codex.mdx`.
-7. Import `auth.json` přes API + `crewship credential create --type PROVIDER_LOGIN --from-file`.
-8. Živý test na dev3 s ChatGPT loginem (kvóta účtu se resetuje 2026-09-07 11:55).
-
-**P-B · Providers záložka + karta v dialogu** (§6.1, §6.2), Paymaster per login.
-
-**P-C · Ostatní adaptéry na `AuthDelivery`** — Claude/Cursor/Factory (env, beze
-změny chování, jen deklarace), Gemini `oauth_creds.json` + Google refresh, OpenCode
-`auth.json`.
-
-**P-D · Pool a kvóty** — 429 → cooldown pro souborové loginy, čtení kvótových
-oken k loginu, „at limit" v UI, opt-in pool přes vlastníky.
-
-**P-E · Device-code onboarding** pro Codex (a Copilot), po ověření endpointu.
-
-**P-F · Nové adaptéry** Copilot CLI, Grok Build, Groq — už jen řádek
-`AuthDelivery` + parser streamu.
-
----
+Internal work allocation, delivery phases and real-account verification
+records are retained privately. Changes must preserve the public API in §10
+and state provider-specific validation limits.
 
 ## 8. Otevřené otázky
 
@@ -543,19 +397,9 @@ oken k loginu, „at limit" v UI, opt-in pool přes vlastníky.
 
 ## 9. Reference
 
-- Codex CLI auth — learn.chatgpt.com/docs/cli/auth (redirect z developers.openai.com/codex/cli/auth)
-- Codex env vars (`CODEX_HOME`, `CODEX_API_KEY`) — codex.danielvaughan.com, 2026-06-03
-- Codex release notes 2026-09 — GPT-6-Astra doporučený model od 2026-09-03
-- CLI-to-API proxy (§4.1) — help.router-for.me, *Authentication* (auth-dir, refresh manager, RR/fill-first, cooldown, priority, prefix)
-- Agentní runtime B (§4.2) — hermes-agent.nousresearch.com/docs/integrations/providers; issue #9283 (import `~/.codex/auth.json`)
-- Agentní runtime C (§4.3) — docs.openclaw.ai/gateway/cli-backends; concepts/oauth
-- Anthropic — support.claude.com „Use Claude Code with your Team or Enterprise plan"; „What is the Team plan?"
-- OpenAI — help.openai.com „Using Codex with your ChatGPT plan" (403 při fetchi; shrnutí), „ChatGPT Business models and limits", „Managing billing and seats"
-- Cursor headless — cursor.com/docs/cli/headless · Gemini auth — geminicli.com/docs/get-started/authentication · OpenCode — opencode.ai/docs/cli, issue #5423 · Copilot CLI — docs.github.com authenticate-copilot-cli · Factory — docs.factory.ai/droid-cli/cli-reference · Perplexity — docs.perplexity.ai/docs/cli/overview · Grok Build — github.com/xai-org/grok-build
-- Orchestrátory jedné instance — vibekanban.com, Conductor, Sculptor, Multica (awesome-agent-orchestrators)
-- Interní: `codex-auth-is-a-file-not-a-token` (memory), PRD-CREDENTIALS-V2 §1.2 (fanout), §1.5 V2 (HOME na svazku), PRD-MODEL-SCOPED §2 (CONNECT tunel nevynutitelný)
-
----
+Public references: [credentials vault](../specs/credentials-vault.md) and
+[credential guide](../guides/credentials.mdx). Internal research bibliographies
+are not required to use or build the product.
 
 ## 10. API kontrakt v1 (závazný pro paralelní implementaci)
 

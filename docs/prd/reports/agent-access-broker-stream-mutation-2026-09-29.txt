@@ -1,8 +1,0 @@
-Go source overlay removed only brokerAuthorized from the per-frame stream gate.
-Expected failure; working source was never modified by this mutation.
-
---- FAIL: TestActualTLSStreamRevocationBeforeNextChunk (0.08s)
-    broker_stream_test.go:138: revoked stream delivered data: kind=stream_end output="data: authorized\n\ndata: REVOKED_CANARY\n\n"
-FAIL
-FAIL	github.com/crewship-ai/crewship/internal/restrictedruntime	0.091s
-FAIL

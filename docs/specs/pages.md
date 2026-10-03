@@ -1,48 +1,19 @@
-# PRD — Pages
+# Pages — panel implementation reference
 
 {/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 
-> **Current custom dashboard implementation:** [Pages Apps v1](../prd/pages-apps-v1.md), including the single-file YAML portability contract.
-
-Historical design status: draft · 2026-08-12 · **Release 1.0 scope** (owner decision, 2026-08-12). This is the original design snapshot, not current implementation status; the [archived handoff](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/pages-apps-handoff.md) records its implementation work. See Pages Apps v1 above for the public implementation contract.
-
-> **Follow-up proposal (2026-09-08):** [Pages as internal applications](../archive/pages-apps.md)
-> covers custom React applications, framework compatibility, customer workflows,
-> and the integration gates beyond this original panel-oriented design. It is a
-> proposal, not a claim that these additions have shipped.
-> The subsequent [implementation architecture](../prd/pages-apps-architecture.md) defines
-> the React/TypeScript/Vite project lifecycle, SDK boundary, runtime isolation,
-> build workers, publication consistency, and measurable production gates.
-
-> **The requirement being specified.** *"Every user, and every agent acting for a user, can
-> compose a page out of panels. A panel's data is produced by a routine or by a script running
-> inside a crew container. Panels carry per-crew ownership, so one page renders differently for
-> different viewers. Pages reach the rest of Crewship — issues, inbox, routines, journal,
-> notifications, integrations — and stay lightweight enough to scale."*
->
-> Repo `file:line` references verified against `main` @ `0f8a24ff` on 2026-08-12. External
-> claims carry a source. Re-verify both before implementing.
-
----
+Status: public technical extract of the 2026-08-12 design. Numbered sections
+are preserved for implementation references; a retained proposal is not proof
+that every feature shipped. The current custom-application contract is
+[Pages Apps](pages-apps.md), with [architecture context](../prd/pages-apps-architecture.md).
+Internal research, work allocation and session evidence are maintained in
+[private context](../development/private-context.md).
 
 ## 0. Verdict
 
-**Build it, but not as a dashboard product.** The charts are the least defensible part of this
-idea. Two things in it are defensible, and the design should be organised around them:
-
-1. **The panel is a sensor, not a display.** A cheap script pushes a typed payload; a threshold
-   on that payload wakes an agent, which writes its analysis back onto the same page. Nobody in
-   the surveyed market ships this. It is also the only part that pays for itself in tokens.
-2. **Permissions are per panel, not per page.** Grafana, Looker, Tableau, Power BI, Metabase and
-   Superset all stop access control at the dashboard boundary — verified, not assumed (§2.3).
-   A page that renders a different set of panels per viewer is a genuine gap in the category.
-
-**And one correction to the record.** An earlier draft of this argument claimed the push model —
-"the page has no datasource; a script pushes a ready payload" — was unusual. That was wrong. It
-is a known sub-genre with a name, a lineage, and a documented reason it lost (§2.1). The design
-must answer that reason explicitly or it will fail the same way. §5 is that answer.
-
----
+Pages combine typed producer payloads, freshness metadata and per-panel
+authorization. Producers own data access; the page itself holds no data-source
+credentials. The sections below define the technical boundaries and tests.
 
 ## 1. What a Page is
 
@@ -70,181 +41,35 @@ that must not survive into the implementation.
 
 ---
 
-## 2. What the market actually does
+## 2. Design constraints
 
-Six research passes. The findings that changed the design are here; the rest is in §16.
+### 2.1 Producer payloads and history
 
-### 2.1 Push-to-panel is not novel — it is a genre that lost
+A pushed panel payload is a current view, not a replacement for an event or
+metrics store. History and correlation belong to the systems defined in §5.
 
-Every observability product surveyed keeps the query as the load-bearing abstraction. Push exists
-everywhere, but always lands at **metric or event granularity into a store**, and the panel still
-queries that store at render time:
+### 2.2 Portable format
 
-| Product | Push mechanism | Granularity |
-|---|---|---|
-| Grafana | Live push (`/api/live/push/:streamId`, InfluxDB line protocol only), Pushgateway | metric / channel |
-| Datadog | `POST /api/v1/check_run`, custom metrics, `POST /api/v2/series` {/* docs-inventory: ignore — Datadog's API, not Crewship's */} | check / metric |
-| New Relic | Event API; NerdGraph `dashboardUpdateWidgetsInPage` | event; **whole widget** |
-| Elastic / Kibana | index a doc, then Canvas/Lens queries it; Vega can fetch a URL | document |
-| Splunk / Honeycomb / SigNoz | HEC / Events API / OTel | event |
-| VictoriaMetrics | `remote_write`, **with Prometheus staleness markers** | metric |
+Keep a declarative, versioned definition and validate it at the boundary.
+The format and its runtime payload are separate layers (§6).
 
-The closest single exception is New Relic's **markdown widget + `dashboardUpdateWidgetsInPage`**:
-a named widget, no query, content pushed in. But it is text only and it is a GraphQL mutation.
+### 2.3 Panel-level authorization
 
-The exact pattern — *CLI pushes a typed JSON blob keyed by widget id, dashboard holds zero
-connection state* — is **Dashing / Smashing** (Shopify, ~2013, `POST /widgets/{id}` with
-`{"auth_token": …, "value": …}`), and, still maintained and commercial, **Geckoboard's Push
-Datasets API** (declare a typed schema once via `PUT /datasets/:id`, then push rows; the widget
-has no connection of its own; limits 5 000 rows/dataset, 500 rows/request, 60 req/min).
+Filter each panel by its owning crew and the current viewer's authority.
+Preserve sealed placeholders rather than reflowing the grid: layout must not
+silently change the identity or position of authorized panels. See §7.
 
-**Why it lost.** A push-only panel holds one snapshot. It therefore cannot change its own time
-range, cannot alert on history, and cannot correlate with another panel — the sender has to
-re-implement all three. Grafana's model does those three things for free. Dashing is effectively
-dead; that is evidence, not an accident.
+### 2.4 Untrusted agent-authored content
 
-**Implication for this design:** §5 must state where history, alerting and correlation live, and
-they must not live in the panel.
+Use closed, validated panel schemas. Treat model output as untrusted input;
+never execute arbitrary markup, components or operations from a payload.
+Actions require server-side authority, explicit declarations and output
+filtering. The detailed security requirements are in §8 and §8b.
 
-### 2.2 The format question is already answered — by the repo and by the market
+### 2.5 Rendering
 
-**Perses** (CNCF sandbox, 2024) made exactly this bet: dashboards as `apiVersion` / `kind` /
-`metadata` / `spec` YAML, validated by CUE schemas per plugin kind, with optional Go and CUE
-builder SDKs on top. Grafana is moving the same way from the other direction — Schema v2 models
-dashboard elements as Kubernetes kinds, and the official Foundation SDK exists because Grafana's
-own raw JSON is not something anyone wants to hand-author. Rill, Lightdash and Cube.js are YAML.
-Metabase and Superset emit YAML on export specifically because it version-controls better. All
-four home-lab dashboards (homepage, Glance, Dashy, Homer) converged on flat YAML independently.
-
-Nobody defends hand-written dashboard JSON as an authoring format.
-
-The recurring complaint about the Kubernetes envelope is boilerplate — which is why every
-ecosystem that adopts it eventually adds a generator (Helm, Tanka, Grafonnet, Foundation SDK,
-Perses' CUE SDK). Worth knowing; not a v1 problem.
-
-**Crewship already has this system.** `internal/manifest` parses `apiVersion: crewship/v1`
-(`internal/manifest/schema.go:33`) across 20 kinds (`schema.go:45-66`), with per-kind
-Validate/Plan/Export and a dependency rank table. A Page is the 21st kind, not a new framework.
-
-### 2.3 Per-panel permissions are rare, and the two ways to build them are not equal
-
-Verified absent in Grafana (community moderator, verbatim: *"I don't believe you can lock down
-access on a per-panel basis. Only at the dashboard level"*), Looker, Tableau, Power BI, Metabase
-and Superset. All six deliberately stop at the dashboard and push finer granularity down into the
-**data** layer (row/column security) rather than the **rendering** layer.
-
-Two products do render per-viewer panel sets, by opposite mechanisms:
-
-- **Salesforce Lightning App Builder — Visibility Rules.** Each component carries a boolean
-  condition (user field, Custom Permission, profile, record field). The most mature example.
-  Notably it still cannot condition on Permission Sets — a long-open request — which is what
-  happens when visibility rules are an expression language instead of an ACL.
-- **Directus Insights.** No panel-ACL UI at all: panels are rows in `directus_panels`, and the
-  ordinary collection-permission system is applied to *that table*. Permission logic stays in one
-  place and stays auditable.
-
-Retool, Appsmith and Budibase achieve per-component hiding only by writing
-`{{ current_user.groups.includes(…) }}` into each component's `Hidden` property. That is cheap to
-build and it is the documented road to permission sprawl — rules scattered across component
-properties, discovered at audit time.
-
-**Implication:** take the Directus shape. A panel's visibility is a property of the panel row
-(`owner_crew_id`) resolved by the ordinary membership check, never an expression a page author
-writes.
-
-One failure mode to design against explicitly: Grafana's most common permission complaint is a
-dashboard that *opens* but whose panels fail inside it, because dashboard permission and data
-source permission are independent layers. A panel the viewer cannot see must never render as an
-error.
-
-**But silent reflow is probably also wrong.** Six mature BI products independently chose to stop
-at the dashboard boundary, and the research did not surface their reason. The likeliest one is a
-usability argument, not a technical one: **a page whose content differs per viewer is hard to
-talk about.** "Look at the panel in the top right" fails; a screenshot in a ticket misleads;
-two people reading "the same" page are not reading the same page. That cost is real and it is why
-the category avoids this.
-
-Design answer: **hidden, not invisible.** A panel the viewer may not see leaves a sealed
-placeholder in its grid slot — "Hidden · crew Účetní" — so the page has the same shape for
-everyone and the difference is legible. Leaking the *existence* of a panel and its owning crew is
-a much smaller disclosure than the confusion of a silently different page. Where even existence is
-sensitive, the page author can move the panel to a separate page.
-
-### 2.4 Agent-authored UI: the constrained-schema principle, and two real incidents
-
-**Adaptive Cards** state the principle this design needs, verbatim: *"There is no 'code behind'
-with Adaptive Cards… Card authors cannot embed custom/arbitrary code with their payloads, and as
-a result an Adaptive Card host never needs to run third party code."* Plus: *"Card authors own
-the content, host apps own the look and feel."* Slack Block Kit is the same bet. OpenAI's Apps
-SDK goes further — the widget code is developer-authored ahead of time and the model supplies
-only data.
-
-Two incidents define the hard limits:
-
-- **CamoLeak / CVE-2025-59145** (CVSS 9.6, Oct 2025). A hidden injection in a GitHub PR comment
-  made Copilot Chat find secrets in a private repo, encode them, and exfiltrate them one
-  character at a time through markdown **image** URLs proxied by GitHub's own trusted Camo
-  image proxy — which is exactly why CSP did not stop it. Fixed by disabling image rendering.
-- **Slack AI** (Aug 2024). An attacker posting only in a public channel got Slack AI to render a
-  link that, when a victim clicked it, exfiltrated private-channel content via the query string.
-
-Both are the same shape as a Pages narrative panel: untrusted data → agent → rendered content a
-different human trusts. Rules in §8.
-
-The closest existing product to "agent creates a persistent, shared, permissioned data page" is
-**Databricks AI/BI Genie**, which re-runs every query under the *viewer's* Unity Catalog identity
-rather than the author's. The combination this PRD describes — agent-authored, persistent,
-per-panel permissioned, with narrative plus actions — does not exist in one product today.
-
-### 2.4b The pattern has a name, and the prior art says "stay closed"
-
-What this PRD describes is **server-driven UI** (SDUI): the server sends a validated spec plus
-data, the client renders it from a closed component vocabulary. Using the established name
-connects the design to real prior art. Two data points, in tension, and both matter:
-
-- **Airbnb's Ghost Platform** — a closed core set of section types plus a declared extension
-  mechanism. Structurally the same shape as this PRD.
-- **Spotify's HubFramework** — deprecated January 2019. The published postmortem is the sharpest
-  argument for the closed set: it *"went fully generic too early: a small set of primitive
-  components that could be composed into anything. Maximum flexibility, minimum readability."*
-
-There is no open standard schema for web SDUI to adopt. DivKit (Yandex, Apache-2.0) is the only
-mature open-source SDUI renderer, but it is a general layout engine (`DivContainer`, `DivText`,
-composed arbitrarily) — the exact generality Spotify's postmortem warns against.
-
-### 2.4c Adopt vs build — checked, and closer than assumed
-
-Every embeddable renderer was evaluated as a dependency, not as a product:
-
-| Candidate | Blocker |
-|---|---|
-| **Perses React packages** (`@perses-dev/*`, Apache-2.0, `0.55.0-beta.1`) | The only real candidate. Embeds without a server (working reference app, static plugin imports, no module federation). But peer deps declare `react: ^17 \|\| ^18` — **not 19**; forces `@mui/material ^6.1.10` + Emotion against our Tailwind v4 + shadcn; 22 direct deps including ECharts, CodeMirror and drag-and-drop built for a dashboard *editor*, not a 5-type *reader*; open CSS-conflict issue `perses/perses#894` |
-| **Grafana Scenes** (`@grafana/scenes@8.13.6`) | Not standalone. Peers on `@grafana/ui` (11.5 MB unpacked), `@grafana/data`, `@grafana/runtime`; the Grafana team state it "relies on the Grafana runtime" and needs a Grafana backend to query and a plugin host to load from. A hosted product wearing a library's name. |
-| **Adaptive Cards React** (`adaptivecards-react@1.1.1`) | Last published 2022-09-20. Theming is a `HostConfig` JSON object, not our tokens; the aesthetic is Teams cards. |
-| **JSONForms / RJSF / uniforms** | Write renderers. No display primitives — no metric tile, no status pill, no sparkline. Only JSONForms declares React 19. |
-| **Superset / Metabase embedding SDKs** | Both mount an iframe against a live backend and fetch the bundle from it. Incompatible with static export; Metabase's is Pro-gated. |
-| **Tremor** (`@tremor/react@3.18.7`) | React 18 peer; v4 beta un-promoted since Dec 2024; acquired by Vercel, roadmap unclear. Worth raiding for component ideas, not importing. |
-
-**Verdict: build.** Nothing on offer is simultaneously a real library (not a hosted product),
-React-19-clean, Tailwind-native, and scoped to a closed display vocabulary. The gap between what
-exists and what is specified is exactly the size of the feature — the signature of a case where
-adopting costs more than it saves. Honest caveat: on React 18 with an MUI-based frontend,
-embedding Perses would be a defensible call. It is our stack, not Perses, that decides this.
-
-### 2.5 Rendering costs nothing new
-
-Measured: recharts 3.10.1 is 151 KB gzip; `motion` is 45 KB gzip; react-grid-layout is 22.8 KB
-gzip. All three are avoidable here. Layout is declared in YAML, not dragged — and dashboards do
-not drag on phones anywhere, they reflow to one column. Panels that are numbers, pills, tables
-and text need no chart engine; hand-written SVG is established practice for exactly this class.
-
-There is also a static-export argument: `output: "export"` means recharts' `ResponsiveContainer`
-measures with a client-side `ResizeObserver`, so a chart panel is blank until hydration. Hand SVG
-paints in the initial HTML.
-
-**Budget: ~0 KB of new dependency weight** (§9).
-
----
+Use the existing shared UI components. Keep data access and credentials in
+the producer/server boundary, not in browser panel renderers.
 
 ## 3. The vocabulary — five panel schemas, closed
 
@@ -353,7 +178,7 @@ Pages takes the monitor behaviour, not the Pushgateway behaviour:
 
 ## 5. Where history, alerting and correlation live
 
-This is the section that answers §2.1 — the reason the Dashing genre lost.
+This section defines the history boundary described in §2.1.
 
 **They do not live in the panel.** They live where Crewship already keeps them:
 
@@ -482,8 +307,7 @@ read and write to others.
    serialised in its place is a sealed placeholder** — the panel id, its grid slot and its owning
    crew's display name, and nothing else. It is never rendered as an error.
 
-   ⚠ **An earlier draft of this rule said "the grid reflows", which contradicts §2.3.** Corrected
-   2026-08-12 after a conformance audit caught it. §2.3 argues the case at length and wins: a page
+   Preserve the stable layout required by §2.3: a page
    that silently changes shape per viewer cannot be talked about, and "look at the panel top right"
    stops meaning anything. Reflow is wrong; the placeholder holds the slot. Leaking the existence
    of a panel and its owning crew is a far smaller disclosure than the confusion of a silently
@@ -651,7 +475,7 @@ third-party site in 1.0 (that is a `frame-ancestors` decision that deserves its 
 
 ## 8. Agent-authored pages — the security rules
 
-Each rule maps to evidence in §2.4. These are requirements, not guidance.
+The untrusted-content boundary in §2.4 motivates these requirements.
 
 1. **The agent fills a schema; it never emits markup, HTML, CSS or code.** `narrative.v1` accepts
    typed blocks, not a markdown blob. (Adaptive Cards: "no code behind"; host owns look and feel.)
@@ -1294,101 +1118,46 @@ an ambiguity here becomes a client and a server that both pass their own tests.
     irregularly must send a `series.v1` panel instead. Even spacing is only honest if the producer
     guarantees it, so the schema states it rather than implying it.
 
-The staging below is deliberately harsher than the first draft. §13 lists ten obstacles; a v1
-that takes all of them at once is not the "lightweight" thing this feature was asked to be. Each
-stage must be independently shippable and independently useful.
+## 12. Implementation reference groups
 
-### v0 — the smallest thing that is real
+The original v0/v1/v1.1 labels below are retained because source comments and
+regression tests use them. They group technical contracts; they are not a
+release schedule or a fresh implementation-status claim.
 
-The only genuine invention here is **a named, typed, permissioned blob a producer can write and a
-page can render.** Everything else is layering. v0 ships that and nothing else.
+### v0 — typed producer payloads
 
-- Tables `pages`, `page_panels`, `page_panel_data`. `owner_user_id` xor `owner_crew_id`.
-- **Three schemas: `metric.v1`, `status.v1`, `table.v1`.** No charts — therefore no recharts, no
-  static-export hydration gap, and the palette bug (§3) is off the critical path.
-- Page definition is YAML **posted to the API** (`crewship page create --file`), *not* a manifest
-  kind. Same document shape; the 11-list manifest integration is deferred.
-- Producer push via CLI and sidecar; provenance attached server-side.
-- `sla`, three freshness states, degraded stale rendering.
-- Per-panel crew filtering with sealed placeholders (§2.3); `page.create` capability.
-- Sharing: **owner + `shared` boolean**, the SavedView precedent. No grant table yet.
-- CLI parity for every endpoint; docs in the same PR.
+Named pages contain typed panels with producer provenance, freshness states
+and per-panel authorization. Definition and payload validation are separate;
+unauthorized panels retain sealed placeholders.
 
-### v1 — actions, which is what the surface is for
+### v1 — actions and declarative installation
 
-- `PageAction` vocabulary (§8b.1); the index-not-slug dispatch endpoint (§8b.2).
-- 202 dispatch with `Idempotency-Key` + `debounce_key`; 429 as "already running" (§8b.3).
-- One tested action executor; confirm via `AlertDialog`; progress via `PipelineRunActivity`.
-- Parameter collection from a server-declared field schema, `SlashActionModal` pattern.
-- `page_grants` — the first per-object ACL in the codebase (§7.2), owner/admin issued.
-- Owner-departure transfer to crew + admin notification (§7.1 rule 1b).
-- `on_failure` → issue on the owning crew.
-- `narrative.v1`, text only, no actions.
-- Bounded payload ring; `page_retention_days`.
-- `kind: Page` in the manifest; `crewship apply` / `--dry-run`.
+Actions use the closed vocabulary in §8b, server-authorized index dispatch,
+idempotency and explicit confirmation. `kind: Page` participates in declarative
+installation; grants and payload retention obey the boundaries in §7 and §10.
 
-### v1.1 — the sensor, which is the actual differentiator
+### v1.1 — producer refresh and wake gates
 
-- `wake:` gates compiling to `automations` rows.
-- `narrative.v1` actions, with the full §8 rule set and the governed `page.write` verb (§11).
-- `refresh: on:wake`, `on:panels-changed`.
+`wake:` gates and `refresh:` declarations connect producers to authorized
+routine dispatch and panel updates. Preserve refresh configuration through
+parsing, API storage and client round trips; never bypass producer permissions.
 
-### v1.1b — reach beyond the workspace
+### v1.1b — controlled sharing
 
-- Public pages: `/p/{token}`, per-panel opt-in, expiry, optional password (§7.3).
-- Print stylesheet (§10b.8).
-- In-app CodeMirror YAML editor with schema linting, reusing the routines editor (§10b.1).
-- Page templates from the built-in catalog (§10b.2).
+Public page access remains per-panel opt-in with token/expiry/password rules
+from §7.3. Authoring and portability retain their separate authority checks.
 
-### v1.2 — reach
+### v1.2 — extended panel and producer interfaces
 
-- `series.v1` (bar first, then line/area), after the `--chart-1..5` palette fix has landed.
-- `embed.v1` — the sandboxed escape hatch (§3.1).
-- Inbound panel webhooks (§10b.5c); Dashboard strip (§10b.5d).
-- Export/import bundles for the marketplace (§10b.2); `crewship export` support.
-
-### Non-goals
-
-- Ad-hoc time-range selection (§5).
-- A query language, datasource plugins, or credentials in the page layer.
-- User-supplied components, JSX, HTML, or CSS.
-- Drag-to-arrange on touch devices.
-- A general platform ACL (§7.2).
-
----
+Series rendering, sandboxed embeds and inbound panel webhooks retain their
+schema, sandbox and producer-authorization boundaries. Their original group
+label does not authorize arbitrary browser code or data-source access.
 
 ## 12b. Parallelism — which slices can run at once
 
-Pages is release-1.0 scope (owner decision, 2026-08-12) and will be built by several agents at
-the same time. Slices only parallelise where they do not share a file. The collision points are
-few and specific.
-
-**Serialised — everything waits on this.** Slice 1 (migrations + `pages`/`page_panels`/
-`page_panel_data` + the three payload schemas). Nothing else can start until the table shapes and
-the payload JSON schemas are merged, because every other slice reads them.
-
-**After slice 1, these run in parallel — disjoint files:**
-
-| Track | Owns | Touches nobody else's files |
-|---|---|---|
-| **A · API + CLI** | `internal/api/pages_*.go`, `cmd/crewship/cmd_page.go`, `internal/apidocs/` | shares only `rbac_routes.go` + the route-roles golden — **serialise the registration commit** |
-| **B · Read UI** | `app/(dashboard)/pages/`, `components/features/pages/` | consumes the kit read-only |
-| **C · Panel registry + the three panels** | `components/features/pages/panels/` | pure components, the easiest track to hand an agent |
-| **D · Permissions** | crew filter + placeholder + invariant tests | needs A's handlers — start after A's first merge |
-| **E · Actions** | action endpoint, executor, `useApiMutation` | needs A; the endpoint is new, no collision |
-
-**Known shared files — every agent must be told about these three:**
-
-1. `internal/api/rbac_routes.go` + `internal/api/testdata/route-roles.txt` — the golden is
-   regenerated wholesale (`go test ./internal/api -run TestMutationRouteRolesMatchManifest
-   -update-route-roles`). Two agents regenerating it concurrently will conflict every time. One
-   route-registration commit, done once.
-2. `components/layout/app-sidebar.tsx` — one line, one agent.
-3. `app/globals.css` — the palette fix (§3) is its own PR and must not be bundled into a slice.
-
-**Prerequisite work that is not Pages and can start immediately, in parallel with slice 1:**
-`useApiMutation` (§8b.5) and the `--chart-1..5` palette fix (§3). Both are independently useful
-and both unblock later tracks.
+Schema and payload contracts precede consumers. API registration, permission
+checks, rendering and producer integration must agree on the same shape.
+Work allocation and release sequencing belong to private working context.
 
 ## 13. Obstacles, ranked
 
@@ -1492,27 +1261,7 @@ Repo rule: red test → fix → green, and it must fail on current `main`.
 
 ## 16. Sources
 
-Push model: Grafana Live and Pushgateway docs; Datadog service-check and dashboard APIs; New
-Relic NerdGraph `dashboardUpdateWidgetsInPage`; Kibana Canvas/Lens/Vega; Geckoboard Datasets API;
-Dashing/Smashing; Uptime Kuma, Healthchecks.io, Gatus, Cronitor, Better Stack heartbeats;
-VictoriaMetrics staleness markers.
-
-Format: Perses dashboard API and CUE plugin schemas; Grafana JSON model, Schema v2, Foundation
-SDK, Grafonnet, grafana-operator; Rill, Lightdash, Evidence.dev, Observable Framework, Cube.js;
-Metabase and Superset serialization; homepage, Glance, Dashy, Homer.
-
-Permissions: Grafana community thread on per-panel permissions; Grafana data source permission
-docs; Salesforce Lightning Visibility Rules and the Permission Sets IdeaExchange request; Directus
-`directus_panels` discussion; Retool, Appsmith, Budibase, ToolJet, Windmill, Airtable Interfaces,
-Notion, Coda; Looker `access_filter`/`access_grant`; Metabase row-and-column security; Power BI
-RLS role asymmetry.
-
-Agent-authored UI: Adaptive Cards design principles; Slack Block Kit and request signing; OpenAI
-Apps SDK security and privacy; MCP Apps sandbox proxy; CVE-2025-59145 (CamoLeak); Slack AI
-exfiltration (PromptArmor); OWASP LLM Top 10 2025; Simon Willison on the lethal trifecta and
-markdown exfiltration; Anthropic on containing Claude; LangGraph human-in-the-loop; Databricks
-AI/BI Genie.
-
-Rendering: bundlephobia measurements for recharts 3.10.1, motion, react-grid-layout, visx,
-ECharts, uPlot, Observable Plot, Nivo; recharts React 19 `ResponsiveContainer` issues; Perses
-plugin registry; Grafana Scenes; react-jsonschema-form registry pattern.
+Public implementation references: `internal/pages/`, `internal/api/pages_*.go`,
+`cmd/crewship/cmd_page.go` and `components/features/pages/`.
+Market research and its bibliography are retained in private context; they
+are not required to build, test or use the product.
