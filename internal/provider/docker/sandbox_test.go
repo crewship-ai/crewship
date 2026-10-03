@@ -101,6 +101,8 @@ func TestOfflineSandboxAuditRejectsWeakenedConfiguration(t *testing.T) {
 		name   string
 		mutate func(*container.InspectResponse)
 	}{
+		{"inherited healthcheck", func(c *container.InspectResponse) { c.Config.Healthcheck = nil }},
+		{"active healthcheck", func(c *container.InspectResponse) { c.Config.Healthcheck.Test = []string{"CMD", "true"} }},
 		{"host network", func(c *container.InspectResponse) { c.HostConfig.NetworkMode = "host" }},
 		{"capability", func(c *container.InspectResponse) { c.HostConfig.CapAdd = []string{"NET_ADMIN"} }},
 		{"missing no-new-privileges", func(c *container.InspectResponse) { c.HostConfig.SecurityOpt = nil }},
@@ -114,7 +116,7 @@ func TestOfflineSandboxAuditRejectsWeakenedConfiguration(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			pids := int64(64)
-			c := container.InspectResponse{HostConfig: &container.HostConfig{NetworkMode: "none", IpcMode: "private", CgroupnsMode: "private", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Resources: container.Resources{Memory: 128 << 20, MemorySwap: 128 << 20, NanoCPUs: 1e9, PidsLimit: &pids}, Tmpfs: map[string]string{"/home/agent": "rw,nosuid,nodev,size=67108864,uid=1001,gid=1001,mode=0700", "/tmp": "rw,nosuid,nodev,noexec,size=16777216,mode=1777"}}, Config: &container.Config{User: "1002:1002"}}
+			c := container.InspectResponse{HostConfig: &container.HostConfig{NetworkMode: "none", IpcMode: "private", CgroupnsMode: "private", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Resources: container.Resources{Memory: 128 << 20, MemorySwap: 128 << 20, NanoCPUs: 1e9, PidsLimit: &pids}, Tmpfs: map[string]string{"/home/agent": "rw,nosuid,nodev,size=67108864,uid=1001,gid=1001,mode=0700", "/tmp": "rw,nosuid,nodev,noexec,size=16777216,mode=1777"}}, Config: &container.Config{User: "1002:1002", Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}}}
 			if err := auditOfflineSandbox(c); err != nil {
 				t.Fatal("valid fixture rejected", err)
 			}

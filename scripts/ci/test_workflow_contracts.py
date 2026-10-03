@@ -30,6 +30,15 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('merge_group:', ci)
         self.assertNotIn('paths-ignore:', ci)
 
+    def test_managed_environment_lane_is_required_and_credential_free(self):
+        ci = self.text('ci.yml')
+        lane = self.job(ci, 'managed-environments')
+        self.assertIn("if: needs.changes.outputs.go == 'true'", lane)
+        self.assertIn('python3 scripts/ci/managed-environments.py', lane)
+        self.assertIn('docker pull alpine@sha256:', lane)
+        self.assertNotIn('secrets.', lane)
+        self.assertIn('managed-environments', self.job(ci, 'result'))
+
     def test_browser_jobs_share_real_build_and_keep_independent_db(self):
         ci = self.text('ci.yml')
         for key in ('playwright-pr', 'onboarding-journey'):

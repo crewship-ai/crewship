@@ -100,20 +100,22 @@ its mount references in `resource_cleanup_mounts`, and removes it with
 running container Docker refuses to remove. Named volumes, anonymous volumes
 and the host data behind them stay. The next start recreates the runtime.
 
-**Cache images.** A `crewship-cache:*` image is evicted when no container on the
-daemon uses it — any installation, any state — continuously for one hour
-(tracked per installation in `resource_retention_images`; any use restarts the
-hour), it is older than one day, and no `crewship-provision-*` build container
-exists anywhere on the daemon. A database reference from a crew does not keep
-an image: every crew start waits for a missing cache image to be rebuilt —
-`crew start`, chat, dispatch, routine and pipeline steps, scheduled runs,
-webhooks and the terminal all pass the same image gate in `crewstart` (about
-35–40 s with the base image present). A failed rebuild fails the start with
-`crew image not ready` instead of starting from another image. Removal uses `Force=false`; Docker refusing it keeps the image
-and restarts its hour. Base images, `crewship-feat:*` images and BuildKit
-cache are out of scope. Because tags are configuration hashes shared through
-the daemon, eviction by one installation can make another rebuild on its next
-start.
+**Cache images.** A `crewship-cache:*` image is eligible only when no container
+on the daemon uses it (any installation, any state) and no live crew in this
+installation's database selects it through `cached_image`. Selection is checked
+across all workspaces by image ID and legacy tag aliases. Unknown database
+references stop eviction. Either use resets the continuous one-hour unused
+window in `resource_retention_images`; the image must also be older than one
+day, with no `crewship-provision-*` build container anywhere on the daemon.
+
+Immediately before removal, the current database selections are checked again.
+Removal addresses the inspected image ID, never a mutable tag, with `Force=false`;
+Docker refusing it keeps the artifact and restarts its hour. The checks are not
+a transaction spanning database publication and Docker operations. Another
+installation's database is not visible, so a shared daemon still requires a
+coordinated retention policy. Historical environment revisions do not retain
+image bytes; this is neither an archive nor a rollback guarantee. Base images,
+`crewship-feat:*` images and BuildKit cache are out of scope.
 
 ## Observations
 

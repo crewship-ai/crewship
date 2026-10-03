@@ -92,7 +92,8 @@ container:
                                 # many days stopped; volumes stay. 0 = off.
                                 # Env override: CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS
   cache_eviction: false         # Evict crewship-cache images no container on the
-                                # daemon has used for an hour. Env override:
+                                # daemon has used for an hour; live crew selections
+                                # in this installation stay. Env override:
                                 # CREWSHIP_CACHE_EVICTION
 
 # Note: Crewship injects the sidecar binary and entrypoint script into the

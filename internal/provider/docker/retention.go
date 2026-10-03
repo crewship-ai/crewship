@@ -9,6 +9,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
@@ -109,8 +110,11 @@ func (p *Provider) ListCacheImages(ctx context.Context) ([]resourcelifecycle.Cac
 	return out, nil
 }
 
-func (p *Provider) RemoveImage(ctx context.Context, ref string) error {
+func (p *Provider) RemoveImage(ctx context.Context, imageID string) error {
+	if !dockerutil.IsLocalImageID(imageID) {
+		return fmt.Errorf("cache eviction requires an immutable local image ID")
+	}
 	// Force=false: Docker refuses an image any container still uses.
-	_, err := p.client.ImageRemove(ctx, ref, client.ImageRemoveOptions{Force: false, PruneChildren: true})
+	_, err := p.client.ImageRemove(ctx, imageID, client.ImageRemoveOptions{Force: false, PruneChildren: true})
 	return err
 }
