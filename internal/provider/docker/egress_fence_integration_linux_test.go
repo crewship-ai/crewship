@@ -212,6 +212,7 @@ func TestEgressFenceIntegration(t *testing.T) {
 		t.Fatal("a connection opened before the fence kept delivering data after it")
 	}
 	if _, err := p.Exec(ctx, provider.ExecConfig{ContainerID: cid, Cmd: []string{"true"}, User: "1001:1001"}); err != nil {
+		fenceLogContainerState(t, p, cid)
 		t.Fatalf("Exec after re-fence: %v", err)
 	}
 	assertExit("re-fenced", "1001", probe, false)
@@ -435,6 +436,7 @@ func fenceTestExec(ctx context.Context, t *testing.T, p *Provider, cid, user str
 	t.Helper()
 	ex, err := p.client.ExecCreate(ctx, cid, client.ExecCreateOptions{Cmd: cmd, User: user})
 	if err != nil {
+		fenceLogContainerState(t, p, cid)
 		t.Fatalf("exec create %v: %v", cmd, err)
 	}
 	if _, err := p.client.ExecStart(ctx, ex.ID, client.ExecStartOptions{}); err != nil {
@@ -445,4 +447,18 @@ func fenceTestExec(ctx context.Context, t *testing.T, p *Provider, cid, user str
 		t.Fatalf("exec %v did not finish: running=%v err=%v", cmd, running, err)
 	}
 	return code
+}
+
+// Preserve the evidence before deferred cleanup removes the failed fixture.
+// State contains lifecycle/exit information, not credentials or container env.
+func fenceLogContainerState(t *testing.T, p *Provider, cid string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	inspection, err := p.client.ContainerInspect(ctx, cid, client.ContainerInspectOptions{})
+	if err != nil {
+		t.Logf("failed fixture inspect: %v", err)
+		return
+	}
+	t.Logf("failed fixture %s state: %+v", shortID(cid), inspection.Container.State)
 }

@@ -425,10 +425,20 @@ func buildDocument(routes []route) map[string]any {
 				}
 			}
 		}
+		summary, description, readOnly := operationMetadata(rt)
 		op := map[string]any{
+			"summary": summary, "description": description, "x-crewship-read-only": readOnly,
 			"operationId": operationID(rt.method, rt.path),
 			"tags":        []string{tagFor(rt.path)},
 			"responses":   responses,
+		}
+		if strings.Contains(rt.path, "/pipelines") || strings.Contains(rt.path, "/pipeline-") {
+			op["tags"] = []string{tagFor(rt.path), "routines"}
+		}
+		if strings.Contains(rt.path, "/missions/") || strings.HasSuffix(rt.path, "/missions") {
+			if tagFor(rt.path) != "missions" {
+				op["tags"] = []string{tagFor(rt.path), "missions"}
+			}
 		}
 		if rt.method == "GET" && rt.path == "/api/v1/shared-chats/{shareId}/messages" {
 			op["security"] = []map[string][]string{{"chatShareBearer": {}}}

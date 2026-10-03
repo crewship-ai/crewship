@@ -1,7 +1,8 @@
 # Workspace conversations
 
-Date: 2026-09-06. Status: first implementation validated locally; Dev2 API/schema observed deployed on 2026-09-07. Not a corporate production-readiness claim.
-Baseline: main `56969d7e`. Owner direction in the Dev2 session explicitly advances
+Date: 2026-09-06. Public implementation/design reference; internal execution
+and deployment records are retained privately. This is not new acceptance evidence.
+Baseline: main `56969d7e`. The conversation model extends
 `chat-as-a-primary-surface.md` §7 beyond that document's original no-new-model scope.
 
 ## Product contract
@@ -110,8 +111,8 @@ are not part of this first runnable group surface.
 
 ## Phase 2 — human direct messages (2026-09-07)
 
-Implemented, validated and deployed to Dev2; see
-[verification and deployment report](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/chat-direct-messages-2026-09-07.md).
+This section describes the direct-message contract; instance deployment
+evidence is retained in private context.
 
 Open a direct message by selecting another current workspace member. The server
 returns the same conversation for that unordered pair within the workspace,

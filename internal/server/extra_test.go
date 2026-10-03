@@ -201,6 +201,7 @@ func TestCombinedHandler_RoutesAPIPathsToMux(t *testing.T) {
 	t.Cleanup(s.StopBackground)
 	s.startedAt = time.Now()
 	s.spaHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Test-Handler", "spa")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("SPA"))
 	})
@@ -210,7 +211,7 @@ func TestCombinedHandler_RoutesAPIPathsToMux(t *testing.T) {
 	// API path should NOT hit SPA.
 	rec := httptest.NewRecorder()
 	combined.ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
-	if strings.Contains(rec.Body.String(), "SPA") {
+	if rec.Header().Get("X-Test-Handler") == "spa" {
 		t.Errorf("/healthz routed to SPA: %s", rec.Body.String())
 	}
 
@@ -221,12 +222,13 @@ func TestCombinedHandler_RoutesAPIPathsToMux(t *testing.T) {
 		t.Errorf("expected SPA, got %q", rec2.Body.String())
 	}
 
-	// /openapi.json must NOT hit SPA either — pre-fix, the SPA catch-all
+	// Match the fallback handler marker, not prose: valid schema descriptions
+	// can mention "SPA". /openapi.json must NOT hit SPA either — pre-fix, the SPA catch-all
 	// answered every unmatched path (including this one) with its index.html:
 	// a 200 that looked like a working endpoint but carried no real schema.
 	rec3 := httptest.NewRecorder()
 	combined.ServeHTTP(rec3, httptest.NewRequest("GET", "/openapi.json", nil))
-	if strings.Contains(rec3.Body.String(), "SPA") {
+	if rec3.Header().Get("X-Test-Handler") == "spa" {
 		t.Errorf("/openapi.json routed to SPA: %s", rec3.Body.String())
 	}
 }
