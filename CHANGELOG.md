@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Foreach body steps now receive the same retry, failure-policy, output-validation and lifecycle-hook checks as top-level routine steps, rejecting invalid definitions before they run.
+
 - Routine definition tag batches commit atomically; rejected batches leave existing labels intact, and adding an existing label remains idempotent at the tag limit.
 
 - Crew journal summary actions reset on crew/workspace changes and suppress notifications or refreshes from abandoned requests.
