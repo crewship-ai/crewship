@@ -291,7 +291,6 @@ func pathParams(p string) []string {
 }
 
 func buildDocument(routes []route) map[string]any {
-	handlerProse := handlerDescriptions()
 	paths := map[string]any{}
 	components := responseComponents()
 	schemas := components["schemas"].(map[string]any)
@@ -427,15 +426,6 @@ func buildDocument(routes []route) map[string]any {
 			}
 		}
 		summary, description, readOnly := operationMetadata(rt)
-		if strings.Contains(description, "Inspect the parameters and request/response") {
-			_, targets, _ := resolveHandlerRefs(rt.call, readSource(rt.source))
-			for _, target := range targets {
-				if prose := handlerProse[target]; prose != "" {
-					description = prose + "\n\n" + description
-					break
-				}
-			}
-		}
 		op := map[string]any{
 			"summary": summary, "description": description, "x-crewship-read-only": readOnly,
 			"operationId": operationID(rt.method, rt.path),

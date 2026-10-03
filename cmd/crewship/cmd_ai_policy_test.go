@@ -27,6 +27,9 @@ func TestAISearchIntentRanking(t *testing.T) {
 		{"launch pipeline", "POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run"},
 		{"new crew", "POST", "/api/v1/crews"},
 		{"search conversations", "POST", "/api/v1/conversations/search"},
+		{"get user avatar", "GET", "/api/v1/users/{id}/avatar"},
+		{"create chat share", "POST", "/api/v1/agents/{agentId}/chats/{chatId}/shares"},
+		{"server health", "GET", "/api/health"},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
 			ops, err := doc.operations(tc.query, "")
@@ -45,6 +48,14 @@ func TestAISearchIntentRanking(t *testing.T) {
 	for _, op := range ops {
 		if op.Summary == "" || op.Description == "" {
 			t.Errorf("missing prose: %s", op.ID)
+		}
+		if strings.Join(strings.Fields(op.Summary), " ") != op.Summary {
+			t.Errorf("unclean summary: %s: %q", op.ID, op.Summary)
+		}
+		for _, internal := range []string{"Inspect the parameters and request/response", "CrewFileSave", "Put is PUT"} {
+			if strings.Contains(op.Description, internal) {
+				t.Errorf("non-public prose: %s: %q", op.ID, internal)
+			}
 		}
 	}
 }
