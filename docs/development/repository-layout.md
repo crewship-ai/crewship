@@ -55,7 +55,7 @@ alone is not a reason to delete an executable test.
 | `packaging/`, `.goreleaser.yml` | OS packages, service integration and release artifacts |
 | `docs/` | Public user documentation, contracts, decisions and contributor guidance; [map](../README.md) |
 | Root Markdown files | Project entrypoints and policies: README, contribution, release, security, governance and licensing |
-| Local `.claude/`, `.codex/`, `internal-docs/` | Ignored workstation configuration and optional private-context aliases; never product source or published build inputs |
+| Local `CLAUDE.md`, `CODEX.md`, `GEMINI.md`, `.claude/`, `.codex/`, `.cursor/`, `.github/copilot-instructions.md`, `internal-docs/` | Ignored assistant instructions, workstation configuration and optional private-context aliases; shared public contributor rules live in `AGENTS.md`; never product source or published build inputs |
 
 Internal plans, handoffs, private experiments and instance audit evidence live
 in [optional private context](private-context.md). Public builds and tests must
