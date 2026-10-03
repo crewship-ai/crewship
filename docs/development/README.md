@@ -22,6 +22,6 @@ rule's full text in both places.
 - [`house-rules-background.md`](house-rules-background.md) — the reasoning and incident history behind the house rules.
 - [`frontend-data-fetching.md`](frontend-data-fetching.md) — React Query conventions: keys, transport, realtime freshness, tests.
 - [`changelog-guard.md`](changelog-guard.md) — the Changelog Guard's exact comparison, history and label mechanics.
-- [`coderabbit-review-process.md`](coderabbit-review-process.md) — the full review protocol: throttling, tie-breakers, re-trigger etiquette.
+- [`coderabbit-review-process.md`](coderabbit-review-process.md) — historical bot review protocol; current review requirements are in CONTRIBUTING.md.
 - [`claiming-issues.md`](claiming-issues.md) — the claim convention and its failure modes.
 - [`test-fixture-types.md`](test-fixture-types.md) — typing test mocks and fixtures so renames fail in `pnpm test:types`.
