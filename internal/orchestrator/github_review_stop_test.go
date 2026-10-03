@@ -26,7 +26,7 @@ func (c reviewContainer) ContainerStatus(context.Context, string) (*provider.Con
 	return &provider.ContainerStatus{State: c.state}, c.inspectErr
 }
 func TestReviewStopMissingOrStoppedContainer(t *testing.T) {
-	for _, state := range []string{"missing", "stopped", "running", "creating", "unreachable"} {
+	for _, state := range []string{"missing", "stopped", "error", "running", "creating", "unreachable", "", "unknown"} {
 		t.Run(state, func(t *testing.T) {
 			store := newMemState()
 			run := RunState{ID: "review-stop", AgentID: "a", AgentSlug: "a", ContainerID: "c", Status: "running"}
@@ -41,7 +41,7 @@ func TestReviewStopMissingOrStoppedContainer(t *testing.T) {
 			}
 			o := New(c, store, slog.Default())
 			err := o.StopAgent(t.Context(), "a")
-			if state == "stopped" || state == "missing" {
+			if state == "stopped" || state == "missing" || state == "error" {
 				raw, readErr := store.Get(t.Context(), "agent_runs", run.ID)
 				var persisted RunState
 				if readErr != nil {
@@ -87,5 +87,26 @@ func TestReviewStopFindsOwnerRegisteredDuringStateList(t *testing.T) {
 	}
 	if err := req.ExecGate(context.Background()); err == nil {
 		t.Fatal("STOPPED returned with live creation gate")
+	}
+}
+
+func TestReviewMissingContainerIdentityRemainsExplicitlyUnverified(t *testing.T) {
+	store := newMemState()
+	run := RunState{ID: "legacy", AgentID: "a", Status: "running"}
+	raw, _ := json.Marshal(run)
+	if err := store.Set(t.Context(), "agent_runs", run.ID, raw); err != nil {
+		t.Fatal(err)
+	}
+	o := New(reviewContainer{state: "stopped"}, store, slog.Default())
+	absent, err := o.ReconcileRecoveredRun(t.Context(), run)
+	if absent || err == nil {
+		t.Fatalf("missing identity accepted: %v %v", absent, err)
+	}
+	after, err := store.Get(t.Context(), "agent_runs", run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(raw) {
+		t.Fatal("unknown runtime was cancelled")
 	}
 }
