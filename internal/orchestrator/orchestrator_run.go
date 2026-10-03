@@ -474,14 +474,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// paths reuse the CALLER's chat id — so two live runs of one agent shared
 	// this row and each terminal status overwrote the other's. RunState keeps
 	// ChatID as its own field, so nothing is lost by the change.
+	req.runtimeImageID = o.observeRunImage(ctx, req.ContainerID)
 	runState := RunState{
-		ID:          req.RunID,
-		AgentID:     req.AgentID,
-		AgentSlug:   req.AgentSlug,
-		ChatID:      req.ChatID,
-		Status:      "running",
-		StartedAt:   time.Now(),
-		ContainerID: req.ContainerID,
+		RuntimeImageID: req.runtimeImageID,
+		ID:             req.RunID,
+		AgentID:        req.AgentID,
+		AgentSlug:      req.AgentSlug,
+		ChatID:         req.ChatID,
+		Status:         "running",
+		StartedAt:      time.Now(),
+		ContainerID:    req.ContainerID,
 	}
 
 	cred := o.selectCredential(req.Credentials)

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Agent run state and execution events retain the actual container source image ID when available, independently of later environment updates.
+
 - Mise lock resolution now reports proposed native tool versions and deterministic selector/bundle hashes, distinguishing version changes from other lock changes.
 
 - Managed runs disable Gemini/OpenCode automatic update controls; missing Gemini system settings now fail preflight before launching the CLI.

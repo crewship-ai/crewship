@@ -222,6 +222,9 @@ type ContainerStatus struct {
 	ID     string
 	State  string // "creating", "running", "idle", "stopped", "error"
 	Uptime string
+	// ImageID is the immutable source image observed on this container, never
+	// its configured tag. Empty when the provider cannot report that evidence.
+	ImageID string
 	// RuntimeContract reports whether this container was created with the
 	// container configuration the running build applies today: "current",
 	// "stale", or "" when the provider has no opinion.

@@ -726,6 +726,14 @@ leaves existing work intact. A freshly inspected stopped container can be
 removed without force and recreated. Selecting the same immutable artifact by
 ID does not require a restart even if the container was created using a tag.
 
+Legacy agent runs inspect their actual container at admission and retain its
+immutable source image ID as `runtime_image_id` in run state and `exec.command`
+events. The lookup has a two-second timeout; unavailable evidence is omitted,
+never inferred from the crew's currently selected image. This identifies the
+container's source, not subsequent filesystem changes, the executed CLI's
+version, or a unique environment definition revision. Restricted attempts have
+their own frozen-input evidence; this field does not change their contract.
+
 Finish existing work and explicitly stop/restart the crew to apply a pending
 image. This also applies to a warm idle container: this check does not infer
 whether its processes are doing useful work. Automatic draining and activation
