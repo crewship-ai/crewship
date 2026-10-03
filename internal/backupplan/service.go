@@ -1189,6 +1189,9 @@ func (b DBBusy) Busy(ctx context.Context, ids []string) (bool, string, error) {
 	runFilter := strings.ReplaceAll(filter, "c.workspace_id", "workspace_id")
 	var runs int
 	if err := b.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM pipeline_runs WHERE status = 'running'`+runFilter, args...).Scan(&runs); err != nil {
+		if !strings.Contains(err.Error(), "no such table: pipeline_runs") {
+			return false, "", err
+		}
 		runs = 0 // tolerate a schema without routine runs
 	}
 	if agents == 0 && runs == 0 {
