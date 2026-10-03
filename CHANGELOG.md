@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Credential entry resets when the workspace or dialog changes, ignores obsolete key validation and save responses, preserves the default environment name on reopening, and encodes workspace queries.
+
 - Enforce Page build output limits on actual subprocess pipes; prevent an inherited buffer fast path from bypassing cancellation and retaining unbounded worker output.
 
 - Keep integration catalogs and workspace summaries current when searches or workspace selections change; ignore obsolete API-key saves and encode scoped identifiers. Add recovery coverage for dispatch, off-site backups and conversation writes.
