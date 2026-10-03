@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Editing an environment during a build could fail waiting messages.** Superseded builds retry the current definition within the original job budget; obsolete CLI qualification cannot prevent that retry, and unchanged definitions still enforce their required checks.
+
 - Runtime editing preserves existing TOML and unsupported mise shapes instead of erasing tool pins; rejected raw edits no longer partially apply other settings.
 
 - Crew runtime settings show requested and built AI CLI versions with image-bound startup-check status, explicit unknown evidence, and refresh after build events.
