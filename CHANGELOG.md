@@ -44,7 +44,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - `crew provision lock-resolve` creates or updates complete native mise lock bundles in a disposable Docker builder, preserving exact pins and reporting the resolver image/platform/version.
 
 - Managed mise builds accept complete native lock bundles, enforce locked reinstall, and preserve lock inputs through manifest and visual tool edits; `crew provision lock-pack` packages local lock files.
-- Image changes no longer implicitly remove a running Docker crew container. New-image starts report a pending update until an explicit stop/restart; stopped replacement uses non-force removal and warm cache checks image selection.
+- **New environment images wait for current work and activate when the runtime is confirmed idle.** Managed Docker admission reserves the container through preparation and execution; image activation and idle expiry share that reservation. Recovered runs, external occupants and background processes prevent automatic replacement. Unknown occupancy requires an explicit stop; crash-loop recovery remains available.
 
 - Environment provisioning records immutable build history and refuses to publish a build after its definition changes. Inspect the latest records with `crewship crew provision revisions`.
 - Built AI CLI toolchains receive an offline startup/version qualification through a runtime-neutral sandbox port; results distinguish unavailable and failed checks from authenticated provider tests.

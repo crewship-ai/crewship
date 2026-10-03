@@ -3,7 +3,8 @@
 
 Run from the repository root with Go, Docker and local alpine:3. Creates only
 unique disposable test resources and cleans them up. No provider credentials,
-paid requests, host mounts, registry resolution or global prune. CI prepares
+paid requests, production mounts, registry resolution or global prune. The
+activation fixture mounts only its temporary directories and test executable. CI prepares
 its pinned Alpine fixture separately; local use never pulls or retags images.
 """
 import json
@@ -17,6 +18,8 @@ TESTS = {
         'TestSandboxRuntimeRealDocker',
         'TestSandboxDisablesImageHealthcheckRealDocker',
         'TestCacheEvictionRealDockerRetag',
+        'TestImageChange_RealHeartbeatSurvivesNewImageAdmission',
+        'TestImageChange_RealIdleVerifierProtectsDetachedWork',
     },
     'internal/toolchain': {'TestQualificationThroughDockerRuntime'},
     'internal/devcontainer': {'TestProvisionImmutableArtifact_RealRebuild'},

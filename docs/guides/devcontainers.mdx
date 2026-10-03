@@ -301,7 +301,7 @@ Binaries the build installs on the agent's behalf that mise does not carry (the 
 
 Provisioning is **asynchronous**. The CLI command returns immediately after the backend enqueues a job; you then poll for status. Five triggers can put a crew into provisioning state:
 
-0. **Proactive auto-provision on config save** — when a crew is **created** (`POST /api/v1/crews`, `crewship apply`, `crewship crew create`) or its **devcontainer / mise / runtime-image config changes** (`PATCH /api/v1/crews/{crewId}`), the handler immediately kicks off the build in the background (`CrewHandler.maybeAutoProvision`). This is the primary path: by the time anyone dispatches an issue the image is usually already cached, so operators never touch a "Build now" button. Editing the config invalidates the old cache selection and prepares an updated image. A running container is not implicitly replaced to apply an image change; finish current work and explicitly stop/restart the crew before using the new image.
+0. **Proactive auto-provision on config save** — when a crew is **created** (`POST /api/v1/crews`, `crewship apply`, `crewship crew create`) or its **devcontainer / mise / runtime-image config changes** (`PATCH /api/v1/crews/{crewId}`), the handler immediately kicks off the build in the background (`CrewHandler.maybeAutoProvision`). This is the primary path: by the time anyone dispatches an issue the image is usually already cached, so operators never touch a "Build now" button. Editing the config invalidates the old cache selection and prepares an updated image. Managed Docker starts wait for current reservations and replace the container only after confirming it is idle. Unresolved occupancy leaves the update pending; an explicit stop/restart remains available after finishing existing work.
 1. **Explicit CLI/API trigger** — `crewship crew provision <slug>` or `POST /api/v1/crews/{crewId}/provision`.
 2. **Crew rebuild** — `crewship crew rebuild <slug>` bypasses the provisioned-image cache and installation-layer caches. It re-runs provisioning, so floating tool selectors can resolve newer versions; explicit versions in the configuration are retained. A rejected request (already provisioning or rate limited) leaves the current cache marker intact. This builds an image; it does not itself replace an already running container.
 3. **Auto-provision on first chat** *(PR #230)* — when an operator opens a chat with an agent in a crew that has a config but no cached image, the chat handler calls `ProvisioningHandler.EnqueueForCrew` directly. The chat surface renders an inline `CrewProvisioningCard` with the live progress checklist; once provisioning succeeds, the agent's first message starts on the freshly cached image.
@@ -739,11 +739,15 @@ crew references by image ID. The separate opt-in
 [idle cache eviction policy](/specs/container-cleanup#idle-retention) also keeps
 images selected by live crews in this installation, including legacy tag aliases. Revision history does not retain image bytes or guarantee rollback. External
 `docker image prune`, forced admin deletion and disk loss also remain outside
-this protection. A start requesting a different image returns `image update pending` while the
-current container is running, paused, restarting or its state is unknown. It
-leaves existing work intact. A freshly inspected stopped container can be
-removed without force and recreated. Selecting the same immutable artifact by
-ID does not require a restart even if the container was created using a tag.
+this protection. A bare provider start requesting a different image returns
+`image update pending` while the current container is running, paused or its
+state is unknown. Managed starts reserve the runtime through preparation and
+execution; an image change waits for existing reservations, then verifies
+installation ownership and controller/runtime occupancy before stopping the
+old instance. A freshly inspected stopped container can be removed without
+force and recreated. Selecting the same immutable artifact by ID does not
+require a restart even if the container was created using a tag. A runtime
+confirmed to be in restart backoff retains the separate crash-recovery path.
 
 The orphan sweeper also recognizes published image IDs recorded in revision
 history after a rebuild removes their last tag. With cache auto-deletion enabled,
@@ -761,12 +765,20 @@ container's source, not subsequent filesystem changes, the executed CLI's
 version, or a unique environment definition revision. Restricted attempts have
 their own frozen-input evidence; this field does not change their contract.
 
-Finish existing work and explicitly stop/restart the crew to apply a pending
-image. This also applies to a warm idle container: this check does not infer
-whether its processes are doing useful work. Automatic draining and activation
-between runs are not implemented. Explicit operator restart remains disruptive;
-this image-change guard does not replace the separate security migration and
-resource-deletion policies.
+Automatic activation requires no local holds, local or unresolved recovered
+invocations, external exposures, or additional workload processes. A bounded
+kernel process census recognizes the standard sleep/init entrypoint and the
+trusted sidecar UID. Missing state, incomplete observations and custom resident
+process trees keep the update pending. Idle expiry uses the same reservation
+exclusion. Terminal sessions retain the existing runtime rather than selecting
+a pending image, and prevent its replacement while connected.
+
+This is controller-local coordination for managed runtime users, not a guarantee
+against an operator concurrently using Docker directly or replacing the daemon.
+Providers without managed admission do not gain automatic activation. Explicit
+operator restart remains disruptive; finish existing work before using it to
+resolve a pending update. No scheduled updater or crash-safe output replay is
+implied by this activation path.
 
 ### Supplying a native mise lock
 
@@ -802,7 +814,7 @@ checksum does not gain one from Crewship, and support varies by backend. The
 bundle does not lock the base image, OS packages, features, build hooks or the
 mise executable itself. It is dependency input, separate from observed CLI
 versions and from qualification of real model/auth combinations. This slice
-adds no scheduled updates or automatic runtime activation.
+adds no scheduled updates; runtime activation is governed separately above.
 
 ### Offline CLI qualification
 

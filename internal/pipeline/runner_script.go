@@ -348,7 +348,9 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 		}
 		cfg = resolved
 	}
-	containerID, cfg, err := r.startCrew(ctx, cfg, req.WorkspaceID)
+	runtimeUse, cfg, err := r.startCrewUse(ctx, cfg, req.WorkspaceID)
+	defer runtimeUse.Release()
+	containerID := runtimeUse.ContainerID()
 	if err != nil {
 		return ScriptRunResult{}, fmt.Errorf("script runner: ensure container: %w", err)
 	}

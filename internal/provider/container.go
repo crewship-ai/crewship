@@ -16,6 +16,17 @@ import (
 // deleting it; stop/restart is an explicit operator action until drain exists.
 var ErrRuntimeImageUpdatePending = errors.New("image update pending: wait for current work to finish, then explicitly stop or restart the crew")
 
+// RuntimeImageUpdatePendingError identifies the runtime that needs activation.
+// Identity is evidence for an admission controller, never permission to stop it.
+type RuntimeImageUpdatePendingError struct {
+	ContainerID    string
+	CurrentImageID string
+	DesiredImage   string
+}
+
+func (e *RuntimeImageUpdatePendingError) Error() string { return ErrRuntimeImageUpdatePending.Error() }
+func (e *RuntimeImageUpdatePendingError) Unwrap() error { return ErrRuntimeImageUpdatePending }
+
 // CrewRef identifies a crew by its globally-unique id and workspace slug. The
 // legacy-resource detector/pruner take a list so they can both TARGET the
 // slug-only legacy names and PROTECT the live id-scoped names (a slug equal to

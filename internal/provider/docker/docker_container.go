@@ -790,13 +790,53 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				if callerSpecifiedImage {
 					warmImage = desiredImage
 				}
+				// Restart backoff is its own state and it is neither
+				// "running" nor startable (#1636). A crew container gained a
+				// RestartPolicy in #1630, which made `restarting` reachable
+				// for the first time; the code below only asked "is it
+				// running?" and fell through to ContainerStart for everything
+				// else. The daemon answers a start during backoff with 304 Not
+				// Modified — State.Running is true the whole time — and the
+				// moby Go client turns 304 into a nil error, so this function
+				// returned (id, true, nil), logged "restarted stopped
+				// container" and setWarm()'d it. Every agent exec for the rest
+				// of the warm-TTL window then failed with "container is
+				// restarting" while the provider reported the crew ready.
+				//
+				// Tear down rather than wait for backoff to settle. Waiting
+				// looks cheaper but returns a container that is at best about
+				// to die again: PID 1 is `exec sleep infinity`, which never
+				// exits on its own, so a container in backoff has had PID 1
+				// killed (OOM, host reboot, an external docker kill). Moby
+				// resets the on-failure retry count once a container has run
+				// for 10 s, so a crew that crashes every ~15 s crash-loops
+				// forever with short `restarting` windows in between — waiting
+				// there succeeds within ~100 ms and hands the caller a runtime
+				// that dies mid-exec. Recreating is deterministic, costs one
+				// container create, and loses nothing: /workspace, /output and
+				// /crew are host binds and /home/agent and /opt/crew-tools are
+				// named volumes, so only the container's own ephemeral layer
+				// and tmpfs go — which a daemon-driven restart wipes anyway.
+				//
+				// Checked on the inspect, not only on the host-wide list: that
+				// list is a snapshot and a container that entered backoff
+				// between the list and this inspect still reads "running"
+				// there.
+				if inspect.State != nil && inspect.State.Restarting {
+					p.logger.Info("recreating container (in restart backoff)",
+						"container", containerName,
+						"restart_count", inspect.RestartCount,
+					)
+					p.forceTeardown(ctx, c.ID, team.ID)
+					break // fall through to create new container
+				}
 				// A new desired image must not destroy work in the existing
 				// runtime. Only a freshly confirmed inactive container may be
 				// replaced. Docker's non-force removal also closes a start race.
 				if callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && inspect.Image != desiredImage {
 					state := inspect.State
 					if state == nil || state.Running || state.Paused || state.Restarting || (state.Status != "exited" && state.Status != "created") {
-						return "", false, provider.ErrRuntimeImageUpdatePending
+						return "", false, &provider.RuntimeImageUpdatePendingError{ContainerID: c.ID, CurrentImageID: inspect.Image, DesiredImage: desiredImage}
 					}
 					if _, err := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: true}); err != nil {
 						if cerrdefs.IsConflict(err) {
@@ -854,47 +894,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				}
 				if needsRecreate {
 					p.logger.Info("recreating container (missing required mounts)", "container", containerName)
-					p.forceTeardown(ctx, c.ID, team.ID)
-					break // fall through to create new container
-				}
-				// Restart backoff is its own state and it is neither
-				// "running" nor startable (#1636). A crew container gained a
-				// RestartPolicy in #1630, which made `restarting` reachable
-				// for the first time; the code below only asked "is it
-				// running?" and fell through to ContainerStart for everything
-				// else. The daemon answers a start during backoff with 304 Not
-				// Modified — State.Running is true the whole time — and the
-				// moby Go client turns 304 into a nil error, so this function
-				// returned (id, true, nil), logged "restarted stopped
-				// container" and setWarm()'d it. Every agent exec for the rest
-				// of the warm-TTL window then failed with "container is
-				// restarting" while the provider reported the crew ready.
-				//
-				// Tear down rather than wait for backoff to settle. Waiting
-				// looks cheaper but returns a container that is at best about
-				// to die again: PID 1 is `exec sleep infinity`, which never
-				// exits on its own, so a container in backoff has had PID 1
-				// killed (OOM, host reboot, an external docker kill). Moby
-				// resets the on-failure retry count once a container has run
-				// for 10 s, so a crew that crashes every ~15 s crash-loops
-				// forever with short `restarting` windows in between — waiting
-				// there succeeds within ~100 ms and hands the caller a runtime
-				// that dies mid-exec. Recreating is deterministic, costs one
-				// container create, and loses nothing: /workspace, /output and
-				// /crew are host binds and /home/agent and /opt/crew-tools are
-				// named volumes, so only the container's own ephemeral layer
-				// and tmpfs go — which a daemon-driven restart wipes anyway.
-				//
-				// Checked on the inspect, not only on the host-wide list: that
-				// list is a snapshot and a container that entered backoff
-				// between the list and this inspect still reads "running"
-				// there.
-				if c.State == container.StateRestarting || (inspect.State != nil && inspect.State.Restarting) {
-					p.logger.Info("recreating container (in restart backoff)",
-						"container", containerName,
-						"restart_count", inspect.RestartCount,
-					)
-					p.forceTeardown(ctx, c.ID, team.ID)
+					if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+						return "", false, err
+					}
 					break // fall through to create new container
 				}
 				// Runtime-contract drift (#1642). Everything above asks
@@ -933,7 +935,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 							"container_contract", runtimeContractOf(inspect.Config),
 							"build_contract", want,
 						)
-						p.forceTeardown(ctx, c.ID, team.ID)
+						if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+							return "", false, err
+						}
 						break // fall through to create new container
 					}
 					p.logger.Warn("crew container predates the current runtime configuration and is still serving; "+
@@ -982,7 +986,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						p.logger.Info("recreating stopped container (crew network changed)",
 							"container", containerName, "crew_id", team.ID,
 							"from", haveNet, "to", want)
-						p.forceTeardown(ctx, c.ID, team.ID)
+						if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+							return "", false, err
+						}
 						break // fall through to create new container
 					}
 					p.logger.Warn("crew container is still on its previous network and serving; it moves when next recreated "+
@@ -997,7 +1003,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 							"crew_id", team.ID,
 							"drift", drift,
 						)
-						p.forceTeardown(ctx, c.ID, team.ID)
+						if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+							return "", false, err
+						}
 						break // fall through to create new container
 					}
 					p.logger.Warn("crew container was created with different resource limits and is still serving; "+
@@ -1049,7 +1057,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				}
 				if bindsMissing {
 					p.logger.Info("bind-mount dirs missing, recreating container", "container", containerName)
-					p.forceTeardown(ctx, c.ID, team.ID)
+					if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+						return "", false, err
+					}
 					break // fall through to create new container
 				}
 				// Admission control (#1668). Starting a stopped container puts

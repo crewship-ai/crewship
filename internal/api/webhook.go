@@ -828,7 +828,9 @@ func (h *WebhookHandler) runWebhookAgent(
 		h.logger.Warn("webhook: crew services unresolved, starting without them",
 			"agent_id", agentID, "crew_id", info.CrewID, "error", whCfgErr)
 	}
-	containerID, err := crewstart.New(h.container, NewCrewConfigCompleter(h.db), h.logger).Start(ctx, whCfg)
+	runtimeUse, _, err := crewstart.New(h.container, NewCrewConfigCompleter(h.db), h.logger).StartUse(ctx, whCfg, nil)
+	defer runtimeUse.Release()
+	containerID := runtimeUse.ContainerID()
 	if err != nil {
 		if releaseSlot != nil {
 			releaseSlot()
@@ -964,6 +966,7 @@ func (h *WebhookHandler) runWebhookAgent(
 		// it the orchestrator would derive this run's tmux session and /tmp
 		// files from the agent slug alone, and the eight concurrent webhook
 		// runs this handler explicitly allows would overwrite each other.
+		req.RuntimeUse = runtimeUse
 		req.RunID = runID
 		// Externally-triggered runs are forced to restricted egress regardless
 		// of the crew's own mode: the payload comes from outside, so it must

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // Independent audit: eventual runtime death must also release the credential HOME registry.
@@ -18,10 +20,22 @@ func TestDetachedHold_HoldCleansRunHome(t *testing.T) {
 	o.SetDetachedExecMonitoring(time.Millisecond, time.Millisecond)
 	req := covRunReq()
 	req.RunID = "audit-detached-cleanup"
+	var runtimeGate provider.RuntimeUseGate
+	runtimeRelease, err := runtimeGate.Use(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.RuntimeUse = provider.NewRuntimeUse(req.CrewID, req.ContainerID, runtimeRelease)
+	defer req.RuntimeUse.Release()
 	req.Credentials = []Credential{{Type: "SECRET", EnvVarName: "AUDIT_TEST_TOKEN", PlainValue: "audit-test-secret"}}
 	defer releaseRunHome(req.ContainerID, req.AgentSlug, req.RunID)
 	if err := o.RunAgent(context.Background(), req, nil); !errors.Is(err, ErrDetachedStillRunning) {
 		t.Fatal(err)
+	}
+	req.RuntimeUse.Release()
+	if unlock, ok := runtimeGate.TryExclusive(); ok {
+		unlock()
+		t.Fatal("detached process lost its runtime when the caller returned")
 	}
 	if o.secretsHoldCount(req.ContainerID, req.AgentSlug, req.RunID) != 1 {
 		t.Fatal("live runtime lost its secret hold")
@@ -52,6 +66,11 @@ func TestDetachedHold_HoldCleansRunHome(t *testing.T) {
 		t.Fatalf("confirmed termination did not release agent reservation: %v", err)
 	}
 	release()
+	if unlock, ok := runtimeGate.TryExclusive(); !ok {
+		t.Fatal("confirmed detached termination retained runtime reservation")
+	} else {
+		unlock()
+	}
 	if _, _, found := runHomeLocation(req.RunID); found {
 		t.Fatal("ended detached run remains in credential-refresh HOME registry")
 	}

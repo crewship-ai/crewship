@@ -139,6 +139,12 @@ type Provider struct {
 	// run in parallel.
 	crewLocks sync.Map // crew_id (string) → *sync.Mutex
 
+	// Runtime users outlive EnsureCrewRuntime; image activation requires their
+	// exclusive counterpart. The idle verifier covers recovered/external work.
+	runtimeUses         sync.Map // crew id -> *provider.RuntimeUseGate
+	runtimeIdleMu       sync.RWMutex
+	runtimeIdleVerifier func(context.Context, string, string) error
+
 	// migrationLocks serializes the pre-C1 legacy-resource migration by
 	// *legacy slug*, not crew id. The legacy resources reconciled in
 	// migrateLegacyCrewResources ("<prefix>-{team,home,tools}-<slug>") are
