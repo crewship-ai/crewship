@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Native restricted execution refuses a missing authority database instead of panicking before worker admission.
+
 - Account-group management stays idle and hides cached metadata when no workspace is selected.
 
 - User preferences finish loading after refused or empty server responses while retaining the locally cached value.
