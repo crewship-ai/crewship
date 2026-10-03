@@ -24,7 +24,9 @@ whose database has no stable location (in-memory, including
 `mode=memory` URIs). The database location is the resolved path of the
 database file itself, so a symlink to a live database is the same database and
 meets its lock. Re-keying is a compare-and-swap on the nonce: several starts of
-the same copy settle on one identity.
+the same copy settle on one identity. The nonce owner is published atomically
+as a complete file. An empty or malformed owner record is an error, never
+evidence of another database location and never permission to re-key.
 Do not copy the `installations` directory to another installation sharing a
 daemon. New runtime
 and service containers explicitly set the instance label, including an empty
