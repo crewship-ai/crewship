@@ -856,6 +856,28 @@ observed version. An overlapping devcontainer feature does not hide an explicit
 mise pin. Floating selectors remain the responsibility of native locked install;
 this check does not implement another dependency resolver.
 
+### Python tools need a prepared resolver and builder
+
+The resolver image must contain the native backend's prerequisites as well as
+mise. For Python package graphs, prepare a compatible Python interpreter and
+`uv` in that trusted image; the build image must also provide the interpreter
+mise selects. Crewship's resolver does not install these prerequisites or
+silently relax a locked installation. See the upstream
+[PyPI backend requirements](https://mise.jdx.dev/dev-tools/backends/pypi.html).
+
+In a live Ansible check, an image without uv produced only a top-level version
+record; the subsequent `mise install --locked` correctly rejected its missing
+Python graph. Adding uv without a sufficiently recent interpreter also failed.
+Treat resolution as a proposal, then verify installation and the actual tool
+before selecting the resulting environment. The Ansible distribution version
+and the `ansible-core` version printed by `ansible --version` are different
+identities.
+
+An explicit `--bump` can refresh dependency metadata even when an exact
+package version stays unchanged. Review `lock_changed` and the complete bundle,
+not only the top-level version diff. A normal resolution without `--bump`
+reuses the existing native lock; no update scheduler is introduced here.
+
 ### Applying a reviewed native lock proposal
 
 `crewship crew provision lock-apply mise.json proposal.json` prints updated mise
