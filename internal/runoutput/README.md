@@ -83,3 +83,23 @@ Remaining integration: capability qualification for the bound helper binary;
 controller detach versus explicit stop; replay into normal event handling with
 durable acknowledgement; work-ledger authority; protected writer identity; and
 retention. The default tmux/FIFO path remains unchanged until those gates pass.
+
+## Known default-transport failure
+
+The existing tmux/FIFO transport still loses its workload when its output
+reader disappears (#2845). Preserve the expected-red reproducer explicitly:
+
+```sh
+go test ./internal/orchestrator -tags runoutputrepro -run '^TestTmuxRunContinuesAfterOutputReaderLoss$' -count=1 -v -timeout 1m
+```
+
+Run on Linux with tmux installed. The test uses a private tmux socket and
+synthetic output; it creates no live agent run. Missing tmux is an error.
+The observed failure is an unfinished workload and retained exit 141 (SIGPIPE).
+The build tag keeps this known-failing reproducer out of the default passing
+suite without reporting it as skipped coverage or raising the skip budget.
+Do not count it as durable-transport acceptance or remove its failure evidence.
+The separate `TestDetachedLaunchSurvivesReaderAndRejectsDuplicate` integration
+test remains required and must execute successfully in managed-environment CI.
+Production still selects the existing default transport; this foundation does
+not fix #2845 or enable durable output for production dispatch.

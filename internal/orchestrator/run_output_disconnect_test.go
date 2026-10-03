@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && runoutputrepro
 
 package orchestrator
 
@@ -33,15 +33,13 @@ func (c localOutputFixture) Exec(ctx context.Context, cfg provider.ExecConfig) (
 	return &provider.ExecResult{ExecID: "fixture", Reader: io.NopCloser(strings.NewReader(string(out)))}, nil
 }
 
-// This is reader-loss acceptance for the generated wrapper, not a Docker or
-// whole-controller crash test. Use a private tmux socket and synthetic output.
+// This expected-red reproducer records the default transport defect in #2845.
+// It is explicitly opt-in, not passing durable-transport acceptance. Use a
+// private tmux socket and synthetic output; no Docker or live controller.
 func TestTmuxRunContinuesAfterOutputReaderLoss(t *testing.T) {
-	if os.Getenv("CREWSHIP_TEST_RUN_REPLAY") != "1" {
-		t.Skip("opt-in local tmux reader-loss fixture")
-	}
 	tmux, err := exec.LookPath("tmux")
 	if err != nil {
-		t.Skip("tmux unavailable")
+		t.Fatal("runoutputrepro requires tmux on PATH")
 	}
 	dir := t.TempDir()
 	socket := filepath.Join(dir, "tmux.sock")
