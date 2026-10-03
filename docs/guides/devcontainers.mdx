@@ -872,3 +872,15 @@ corrupted proposal; they do not authenticate its author or independently prove
 native resolution. The normal locked build remains responsible for checking
 that lock against the selectors. Provisioning can also require the separate
 image-bound offline AI CLI checks described above.
+
+### Viewing built CLI versions
+
+Crew settings → Runtime shows requested AI CLI selectors alongside versions
+recorded in the selected build. Startup-check status belongs to that same image;
+older or unavailable evidence remains unknown. These observations do not claim
+that an already-running environment has switched image or that its writable
+files are unchanged. Provider sign-in is a separate check.
+
+The panel refreshes after this crew's build completes or fails and after a
+realtime reconnect. Use its refresh button if live updates are unavailable.
+Viewers can inspect versions without permission to modify the environment.
