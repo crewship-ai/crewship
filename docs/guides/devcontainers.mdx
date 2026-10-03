@@ -708,8 +708,11 @@ and leaves the previous selection intact. A successful empty build clears the
 previous artifact's runtime requirements and feature evidence.
 
 A completed build verifies that the crew definition and required agent adapters
-still match the inputs it built. If they changed or the crew was deleted,
-Crewship refuses to publish the stale result; rebuild the current definition.
+still match the inputs it built. If they changed, Crewship refuses to publish the stale result and retries the
+current definition within the same job, retaining pending messages. Retries share
+the original 30-minute budget and stop after eight superseded attempts; ongoing
+edits or a deleted crew produce a terminal failure without replacing the previous
+selection.
 The check and publication are one database transaction.
 
 This history is provenance metadata. It neither preserves Docker images from

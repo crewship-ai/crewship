@@ -34,15 +34,16 @@ import (
 const provisionLogTailCap = 50
 
 type ProvisionJob struct {
-	CrewID       string
-	Status       string // "pending", "running", "completed", "failed"
-	StartedAt    time.Time
-	CompletedAt  *time.Time
-	Error        string
-	CachedImage  string
-	ConfigHash   string
-	adapters     []string // adapter snapshot used by this build; guarded by mu
-	forceRebuild bool     // immutable after admission
+	CrewID          string
+	Status          string // "pending", "running", "completed", "failed"
+	StartedAt       time.Time
+	CompletedAt     *time.Time
+	Error           string
+	CachedImage     string
+	ConfigHash      string
+	adapters        []string             // adapter snapshot used by this build; guarded by mu
+	forceRebuild    bool                 // immutable after admission
+	builtDefinition *provisionDefinition // successful final attempt; guarded by mu
 
 	Step      int       // 1-based current milestone
 	Total     int       // total milestones; 0 until the first progress event
@@ -1099,6 +1100,34 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		}
 	}()
 
+	// Keep the same admitted job, pending messages and rate-limit slot while
+	// converging on edits coalesced during a build. Never publish a stale image
+	// or turn its supersession into a terminal chat failure. Both the original
+	// wall-clock budget and an attempt bound apply to continual configuration churn.
+	for attempt := 0; attempt < 8; attempt++ {
+		if err := ctx.Err(); err != nil {
+			h.markJobFailed(job, workspaceID, err)
+			return
+		}
+		if !h.runProvisioningAttempt(ctx, crewID, workspaceID, cfgJSON, miseJSON, runtimeImg, job) {
+			return
+		}
+		var cfg, mise, image sql.NullString
+		if err := h.db.QueryRowContext(ctx, `SELECT devcontainer_config,mise_config,runtime_image FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, crewID, workspaceID).Scan(&cfg, &mise, &image); err != nil {
+			h.markJobFailed(job, workspaceID, fmt.Errorf("reload changed environment definition: %w", err))
+			return
+		}
+		cfgJSON = database.EffectiveCrewDevcontainerConfig(cfg.String, cfg.Valid)
+		miseJSON, runtimeImg = mise.String, image.String
+		h.logger.Info("environment changed during build; preparing current definition", "crew_id", crewID)
+	}
+	h.markJobFailed(job, workspaceID, errors.New("environment definition kept changing during build; retry after editing has settled"))
+}
+
+// runProvisioningAttempt returns true only when successful build work was
+// superseded by a definition edit. That leaves the job running and its pending
+// messages attached; actual build/publication errors remain terminal.
+func (h *ProvisioningHandler) runProvisioningAttempt(ctx context.Context, crewID, workspaceID, cfgJSON, miseJSON, runtimeImg string, job *ProvisionJob) (superseded bool) {
 	h.mu.Lock()
 	job.Status = "running"
 	h.mu.Unlock()
@@ -1278,6 +1307,9 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	updateCtx, updateCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer updateCancel()
 	if _, err := h.saveProvisionResult(updateCtx, crewID, workspaceID, expectedDefinition, result); err != nil {
+		if errors.Is(err, errBuildDefinitionChanged) {
+			return true
+		}
 		h.markJobFailed(job, workspaceID, fmt.Errorf("save environment revision: %w", err))
 		return
 	}
@@ -1288,6 +1320,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	job.CompletedAt = &now
 	job.CachedImage = result.CachedImage
 	job.ConfigHash = result.ConfigHash
+	job.builtDefinition = &expectedDefinition
 	pending := job.Pending
 	job.Pending = nil
 	h.mu.Unlock()
@@ -1317,6 +1350,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		},
 		Refs: map[string]any{"crew_id": crewID},
 	})
+	return false
 }
 
 // markJobFailed records a failure on the job, logs it, and broadcasts a
@@ -1405,6 +1439,9 @@ func (h *ProvisioningHandler) prepareLatestCrew(crewID, workspaceID, builtConfig
 	h.mu.RLock()
 	completed := job.Status == "completed"
 	builtAdapters := append([]string(nil), job.adapters...)
+	if job.builtDefinition != nil {
+		builtConfig, builtMise, builtImage = job.builtDefinition.Config, job.builtDefinition.Mise, job.builtDefinition.Runtime
+	}
 	h.mu.RUnlock()
 	if !completed {
 		return
