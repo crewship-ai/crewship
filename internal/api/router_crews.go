@@ -10,6 +10,7 @@ package api
 // chatbridge auto-provision).
 
 import (
+	"github.com/crewship-ai/crewship/internal/provider"
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/config"
@@ -581,6 +582,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Stash the handler on the router so cmd_start can wire it into chatbridge
 	// for the auto-provision-on-first-message UX without a second instance.
 	provisioning := NewProvisioningHandler(r.db, r.logger, r.catalogFetcher, r.runtimeFetcher, r.dockerClient, r.imageBuilder, r.featureCacheDir, r.hub)
+	if sandbox, ok := r.activeContainer().(provider.SandboxRuntime); ok {
+		provisioning.sandboxRuntime = sandbox
+	}
 	r.provisioning = provisioning
 	// Proactive provisioning: building the devcontainer image starts the moment
 	// a crew is created or its config changes (CrewHandler.maybeAutoProvision),

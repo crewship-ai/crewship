@@ -10520,6 +10520,40 @@
                   "image_id": {
                     "type": "string"
                   },
+                  "qualification": {
+                    "properties": {
+                      "image_id": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "tools": {
+                        "items": {
+                          "properties": {
+                            "binary": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "binary",
+                            "status"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "status",
+                      "image_id",
+                      "tools"
+                    ],
+                    "type": "object"
+                  },
                   "schema_version": {
                     "type": "integer"
                   },

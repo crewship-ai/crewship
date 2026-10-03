@@ -101,7 +101,11 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("PUT", "/api/v1/crews/{crewId}/policy", "RemainingCrewPolicyUpdatedV1", ref("CrewPolicyResponseV1"))
 	tool := object(map[string]any{"binary": str(), "version": str(), "path": str(), "status": str()})
 	tool["required"] = []string{"binary", "status"}
-	inventory := object(map[string]any{"schema_version": integer(), "status": str(), "image_id": str(), "tools": array(tool)})
+	probe := object(map[string]any{"binary": str(), "status": str()})
+	probe["required"] = []string{"binary", "status"}
+	qualification := object(map[string]any{"status": str(), "image_id": str(), "tools": array(probe)})
+	qualification["required"] = []string{"status", "image_id", "tools"}
+	inventory := object(map[string]any{"schema_version": integer(), "status": str(), "image_id": str(), "tools": array(tool), "qualification": qualification})
 	inventory["nullable"] = true
 	inventory["required"] = []string{"schema_version", "status", "tools"}
 	requestedTool := object(map[string]any{"adapter": str(), "binary": str(), "source": str(), "selector": str(), "exact": boolean()})

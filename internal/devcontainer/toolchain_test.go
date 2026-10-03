@@ -67,7 +67,7 @@ func TestToolchainInventoryRejectsMalformedEvidence(t *testing.T) {
 
 func TestToolchainVersionDoesNotMistakeErrorTextForVersion(t *testing.T) {
 	for _, raw := range []string{"error: HTTP 401; need version 2.1.0", "EXAMPLE_SECRET=2.1.0", "", "2026-10-02 crashed"} {
-		if got := observedToolVersion("claude", raw); got != "" {
+		if got := ObservedToolVersion("claude", raw); got != "" {
 			t.Fatalf("unrecognized output became version %q", got)
 		}
 	}

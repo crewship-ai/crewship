@@ -742,3 +742,22 @@ bundle does not lock the base image, OS packages, features, build hooks or the
 mise executable itself. It is dependency input, separate from observed CLI
 versions and from qualification of real model/auth combinations. This slice
 adds no scheduled updates or automatic runtime activation.
+### Offline CLI qualification
+
+On Docker, provisioning also checks the recorded CLI binaries in a disposable
+instance pinned to the built image ID. The instance runs as UID 1001 with no
+external network, no persistent mounts, a read-only root filesystem and bounded
+CPU, memory, process count, output and execution time. Its temporary home is
+removed after the check. Crewship supplies no provider credentials. The
+qualification requests a 90-second lifetime; the initial backend accepts at
+most two minutes and uses a separate UID 1002 for its lifetime keeper. This
+temporary profile is not a durable agent-run backend.
+
+`toolchain.built.qualification` reports the image ID, per-tool result and overall
+status. `passed` means that the recorded binaries started and reported the same
+versions in this offline profile. It does **not** verify provider login, model
+compatibility, streaming, or isolation of ordinary crew runs. A failed or
+unavailable check is reported without replacing an active environment or
+silently relaxing the qualification profile. Older images and unsupported
+backends can report `unavailable`. The initial runtime port refuses persistent
+mounts and RAM suspension explicitly.

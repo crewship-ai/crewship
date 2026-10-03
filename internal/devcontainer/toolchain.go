@@ -14,11 +14,23 @@ const toolchainArchiveLimit = 128 << 10
 
 // ToolchainInventory describes observations from an image, never the mutable
 // filesystem of a running agent. Unavailable evidence is not a resolved version.
+type ToolchainQualification struct {
+	Status  string           `json:"status" yaml:"status"`
+	ImageID string           `json:"image_id" yaml:"image_id"`
+	Tools   []ToolchainProbe `json:"tools" yaml:"tools"`
+}
+
+type ToolchainProbe struct {
+	Binary string `json:"binary" yaml:"binary"`
+	Status string `json:"status" yaml:"status"`
+}
+
 type ToolchainInventory struct {
-	SchemaVersion int             `json:"schema_version" yaml:"schema_version"`
-	Status        string          `json:"status" yaml:"status"`
-	ImageID       string          `json:"image_id,omitempty" yaml:"image_id,omitempty"`
-	Tools         []ToolchainTool `json:"tools" yaml:"tools"`
+	Qualification *ToolchainQualification `json:"qualification,omitempty" yaml:"qualification,omitempty"`
+	SchemaVersion int                     `json:"schema_version" yaml:"schema_version"`
+	Status        string                  `json:"status" yaml:"status"`
+	ImageID       string                  `json:"image_id,omitempty" yaml:"image_id,omitempty"`
+	Tools         []ToolchainTool         `json:"tools" yaml:"tools"`
 }
 
 type ToolchainTool struct {
@@ -30,9 +42,9 @@ type ToolchainTool struct {
 
 var toolVersionPattern = regexp.MustCompile(`^v?([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)$`)
 
-// Accept known --version shapes only. Arbitrary stdout, diagnostics and URLs
+// ObservedToolVersion accepts known --version shapes only. Arbitrary stdout, diagnostics and URLs
 // must not become status API fields or leak into a stored inventory.
-func observedToolVersion(binary, output string) string {
+func ObservedToolVersion(binary, output string) string {
 	line := strings.TrimSpace(output)
 	if len(line) > 128 || strings.ContainsAny(line, "\r\n") {
 		return ""
@@ -122,7 +134,7 @@ func parseToolchainArchive(r io.Reader, bins []string) (*ToolchainInventory, err
 			tool.Status = "probe_failed"
 			continue
 		}
-		tool.Version = observedToolVersion(tool.Binary, files[tool.Binary+".version"])
+		tool.Version = ObservedToolVersion(tool.Binary, files[tool.Binary+".version"])
 		if tool.Version == "" {
 			tool.Status = "unrecognized_version"
 			continue

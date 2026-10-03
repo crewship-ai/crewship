@@ -12,6 +12,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Managed mise builds accept complete native lock bundles, enforce locked reinstall, and preserve lock inputs through manifest and visual tool edits; `crew provision lock-pack` packages local lock files.
 
 - Environment provisioning records immutable build history and refuses to publish a build after its definition changes. Inspect the latest records with `crewship crew provision revisions`.
+- Built AI CLI toolchains receive an offline startup/version qualification through a runtime-neutral sandbox port; results distinguish unavailable and failed checks from authenticated provider tests.
 
 - **Provisioning status now distinguishes requested CLI selectors from observed versions.** New builds record bounded CLI version/path observations in the image. Docker inspections use the immutable image ID without starting the image; old or unreadable evidence stays unknown. The CLI status command shows built versions. This does not claim that a running, modified environment still matches its image.
 

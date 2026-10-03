@@ -23,6 +23,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
+	"github.com/crewship-ai/crewship/internal/toolchain"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -1255,6 +1256,11 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	if err != nil {
 		h.markJobFailed(job, workspaceID, fmt.Errorf("provision: %w", err))
 		return
+	}
+
+	if inventory := result.Requirements.Toolchain; inventory != nil {
+		qualification := toolchain.Qualify(ctx, h.sandboxRuntime, inventory, result.Requirements.LoginPath)
+		inventory.Qualification = &qualification
 	}
 
 	// #1032 (visibility mitigation): a privileged crew runs its container with
