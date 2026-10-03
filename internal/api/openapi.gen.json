@@ -83164,6 +83164,7 @@
     },
     "/api/v1/crews/{crewId}/provision/revisions": {
       "get": {
+        "description": "List crew provision revisions (GET /api/v1/crews/{crewId}/provision/revisions).",
         "operationId": "get_api_v1_crews_crewId_provision_revisions",
         "parameters": [
           {
@@ -83297,9 +83298,11 @@
             "secureSessionCookie": []
           }
         ],
+        "summary": "List crew provision revisions",
         "tags": [
           "crews"
-        ]
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/crews/{crewId}/rebuild": {
