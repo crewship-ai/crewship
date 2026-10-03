@@ -19,12 +19,12 @@ import (
 // never launches or resumes a workload and never infers completion from PID
 // absence. The caller must load the location from authorized durable state.
 func (o *Orchestrator) ReadRetainedRunResult(ctx context.Context, run RunState) (runoutput.Snapshot, error) {
-	if run.Output == nil || run.Output.Version != 1 || !ValidRunID(run.ID) || run.ContainerID == "" || o.container == nil {
-		return runoutput.Snapshot{}, errors.New("retained run location unavailable")
+	if err := ctx.Err(); err != nil {
+		return runoutput.Snapshot{}, err
 	}
-	dir := run.Output.Directory
-	if !path.IsAbs(dir) || path.Clean(dir) != dir || strings.ContainsRune(dir, 0) || path.Base(dir) != "output" || path.Base(path.Dir(dir)) != run.ID {
-		return runoutput.Snapshot{}, errors.New("retained run location does not match identity")
+	dir, err := o.retainedRunDirectory(run)
+	if err != nil {
+		return runoutput.Snapshot{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
@@ -65,12 +65,21 @@ func (o *Orchestrator) ReadRetainedRunResult(ctx context.Context, run RunState) 
 	if err = snapshot.Validate(); err != nil {
 		return runoutput.Snapshot{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return runoutput.Snapshot{}, err
+	}
 	return snapshot, nil
 }
 
 // RecordRetainedRunResult preserves completion evidence without publishing a
 // successful run or acknowledging output which has not yet been projected.
 func (o *Orchestrator) RecordRetainedRunResult(ctx context.Context, key string, expected RunState, snapshot runoutput.Snapshot) (RunState, error) {
+	if key != expected.ID || !ValidRunID(expected.ID) {
+		return expected, errors.New("retained result key does not match run identity")
+	}
+	if err := ctx.Err(); err != nil {
+		return expected, err
+	}
 	if err := snapshot.Validate(); err != nil {
 		return expected, err
 	}
@@ -94,6 +103,9 @@ func (o *Orchestrator) RecordRetainedRunResult(ctx context.Context, key string, 
 		return expected, nil
 	}
 	if prior := current.Output.RetainedResult; prior != nil {
+		if err := prior.Validate(); err != nil {
+			return expected, err
+		}
 		if prior.Sequence != snapshot.Sequence || prior.Result == nil || *prior.Result != *snapshot.Result {
 			return expected, errors.New("retained terminal result changed")
 		}
@@ -109,4 +121,15 @@ func (o *Orchestrator) RecordRetainedRunResult(ctx context.Context, key string, 
 		return expected, err
 	}
 	return current, nil
+}
+
+func (o *Orchestrator) retainedRunDirectory(run RunState) (string, error) {
+	if run.Output == nil || run.Output.Version != 1 || !ValidRunID(run.ID) || run.ContainerID == "" || o.container == nil {
+		return "", errors.New("retained run location unavailable")
+	}
+	dir := run.Output.Directory
+	if !path.IsAbs(dir) || path.Clean(dir) != dir || strings.ContainsRune(dir, 0) || path.Base(dir) != "output" || path.Base(path.Dir(dir)) != run.ID {
+		return "", errors.New("retained run location does not match identity")
+	}
+	return dir, nil
 }

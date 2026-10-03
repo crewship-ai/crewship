@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -76,5 +77,52 @@ func TestRetainedResultRecordedWithoutCompletingUnreplayedRun(t *testing.T) {
 	snapshot.Result = &runoutput.Result{ExitCode: 0, Reason: "exited"}
 	if _, err = o.RecordRetainedRunResult(t.Context(), run.ID, run, snapshot); err == nil {
 		t.Fatal("terminal result rewritten")
+	}
+}
+
+func TestRetainedResultCancelledProbeDoesNotExecute(t *testing.T) {
+	p := &retainedResultProvider{}
+	o := &Orchestrator{container: p}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	run := RunState{ID: "run-1", ContainerID: "container", Output: &RunOutputState{Version: 1, Directory: "/runs/run-1/output"}}
+	if _, err := o.ReadRetainedRunResult(ctx, run); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled probe: %v", err)
+	}
+	if len(p.calls) != 0 {
+		t.Fatal("cancelled recovery created an exec")
+	}
+}
+
+func TestRetainedResultRejectsMismatchedStateKeyAndCorruptPrior(t *testing.T) {
+	for _, scenario := range []string{"wrong-key", "corrupt-prior"} {
+		t.Run(scenario, func(t *testing.T) {
+			state := newMemState()
+			o := &Orchestrator{state: state}
+			snapshot := runoutput.Snapshot{Version: 1, Sequence: 3, Complete: true, Result: &runoutput.Result{ExitCode: 0, Reason: "exited"}}
+			run := RunState{ID: "run-1", Status: "running", Output: &RunOutputState{Version: 1, Directory: "/runs/run-1/output"}}
+			key := run.ID
+			if scenario == "wrong-key" {
+				key = "other-run"
+			} else {
+				prior := snapshot
+				prior.Version = 2
+				run.Output.RetainedResult = &prior
+			}
+			before, err := json.Marshal(run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = state.Set(t.Context(), "agent_runs", key, before); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = o.RecordRetainedRunResult(t.Context(), key, run, snapshot); err == nil {
+				t.Fatal("invalid recovered state accepted")
+			}
+			after, err := state.Get(t.Context(), "agent_runs", key)
+			if err != nil || string(after) != string(before) {
+				t.Fatal("invalid record mutated")
+			}
+		})
 	}
 }
