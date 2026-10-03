@@ -16,7 +16,10 @@ func TestRecordRecoveredAbsencePreservesNewOwnership(t *testing.T) {
 			current := expected
 			switch scenario {
 			case "local-owner":
-				_, finish := o.trackAgentRun(t.Context(), &AgentRunRequest{RunID: "run", AgentID: "a"})
+				_, finish, trackErr := o.trackAgentRun(t.Context(), &AgentRunRequest{RunID: "run", AgentID: "a"})
+				if trackErr != nil {
+					t.Fatal(trackErr)
+				}
 				defer finish()
 			case "replaced":
 				current.StartedAt = current.StartedAt.Add(time.Second)

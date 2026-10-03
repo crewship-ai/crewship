@@ -1,6 +1,7 @@
 package runoutput
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -12,6 +13,20 @@ import (
 type Result struct {
 	ExitCode int
 	Reason   string
+}
+
+// Command carries execution inputs captured at admission. Env must be the
+// complete environment, rather than a delta applied to an old tmux server.
+type Command struct {
+	Args  []string `json:"args"`
+	Env   []string `json:"env"`
+	Dir   string   `json:"dir"`
+	Stdin []byte   `json:"stdin,omitempty"`
+}
+
+type LaunchInput struct {
+	Command  Command   `json:"command"`
+	Deadline time.Time `json:"deadline"`
 }
 
 type streamWriter struct {
@@ -39,6 +54,11 @@ func (w streamWriter) Write(data []byte) (int, error) {
 // claimed before command creation; retrying the same directory never relaunches
 // it. ctx is the execution's own deadline/stop signal, not a reader connection.
 func Capture(ctx context.Context, dir string, args []string, limit int64) (Result, error) {
+	return CaptureCommand(ctx, dir, Command{Args: args}, limit)
+}
+
+func CaptureCommand(ctx context.Context, dir string, command Command, limit int64) (Result, error) {
+	args := command.Args
 	result := Result{ExitCode: -1, Reason: "start_error"}
 	if len(args) == 0 || args[0] == "" {
 		return result, errors.New("missing run command")
@@ -46,6 +66,8 @@ func Capture(ctx context.Context, dir string, args []string, limit int64) (Resul
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, args[0], args[1:]...)
+	cmd.Env = command.Env
+	cmd.Dir = command.Dir
 	if err := configureProcess(cmd); err != nil {
 		return result, err
 	}
@@ -58,7 +80,7 @@ func Capture(ctx context.Context, dir string, args []string, limit int64) (Resul
 	var outputErr error
 	cmd.Stdout = streamWriter{store, "stdout", cancel, &mu, &outputErr}
 	cmd.Stderr = streamWriter{store, "stderr", cancel, &mu, &outputErr}
-	cmd.Stdin = nil
+	cmd.Stdin = bytes.NewReader(command.Stdin)
 	cmd.WaitDelay = 2 * time.Second
 	err = cmd.Run()
 	if cmd.ProcessState != nil {

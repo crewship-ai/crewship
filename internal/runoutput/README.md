@@ -55,8 +55,22 @@ not establish that boundary. Retained raw output can contain whatever the CLI
 prints; it must not become a new unauthenticated read API or bypass the existing
 scrubbing and workspace authorization when integrated.
 
-Remaining integration: capability negotiation for the bound helper binary;
-persistent per-run paths and launch identity; independent execution deadlines
-versus controller contexts; replay into normal event handling with durable
-acknowledgement; work-ledger authority; protected writer identity; and retention.
-Until these are complete, the existing tmux reader-loss regression remains open.
+An experimental orchestrator path (`AgentRunRequest.DurableOutputDir`) now
+prepares `run-launch`, which exclusively claims the run directory before writing
+inputs and starts `run-execute` in a detached tmux session. The admitted client
+environment, cwd, stdin and original deadline travel with this launch. The
+secret-bearing input file is consumed before the workload starts. No production
+dispatcher enables this field and it is not exposed in YAML or the public API.
+The tmux conformance test requires `-tags integration` and an installed tmux;
+the managed-environment CI lane requires it to actually execute and pass.
+
+RunState retains output location, protocol version, adapter and deadline.
+Persistence failure refuses launch; duplicate local ownership and an existing
+durable run identity refuse admission. Recovery currently preserves these runs
+instead of declaring cancellation solely from process absence. Preserving an
+unresolved run is not successful recovery.
+
+Remaining integration: capability qualification for the bound helper binary;
+controller detach versus explicit stop; replay into normal event handling with
+durable acknowledgement; work-ledger authority; protected writer identity; and
+retention. The default tmux/FIFO path remains unchanged until those gates pass.

@@ -30,7 +30,10 @@ func TestStopAgentDoesNotTreatConcurrentLiveAdmissionAsRecovered(t *testing.T) {
 	o := New(c, state, slog.Default())
 	req := AgentRunRequest{AgentID: "a", AgentSlug: "a", ContainerID: "fixture", RunID: NewRunID()}
 	state.admit = func() {
-		_, finish := o.trackAgentRun(t.Context(), &req)
+		_, finish, trackErr := o.trackAgentRun(t.Context(), &req)
+		if trackErr != nil {
+			t.Fatal(trackErr)
+		}
 		t.Cleanup(finish)
 		raw, err := json.Marshal(RunState{ID: req.RunID, AgentID: req.AgentID, AgentSlug: req.AgentSlug, ContainerID: req.ContainerID, Status: "running"})
 		if err != nil {

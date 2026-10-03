@@ -33,6 +33,12 @@ func (s *Server) reconcileRecoveredRuntimeAtBoot(ctx context.Context, key string
 }
 
 func (s *Server) recoveredRuntimeAbsent(ctx context.Context, run orchestrator.RunState) bool {
+	if run.Output != nil {
+		// Capture may have completed while the controller was absent. Its
+		// retained terminal result must be replayed before any absence-based
+		// fallback. Unknown versions/locations also stay unresolved.
+		return false
+	}
 	if run.Status != "running" || run.ID == "" || run.ID == run.AgentID || run.ContainerID == "" || run.AgentSlug == "" || s.container == nil || s.orchestrator == nil || ctx.Err() != nil {
 		return false
 	}

@@ -94,8 +94,14 @@ type AgentRunRequest struct {
 	MissionID   string // mission this run belongs to; threaded into every journal emit so Cartographer checkpoints can anchor on per-mission journal cursors.
 	WorkspaceID string
 	ContainerID string
-	CLIAdapter  string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID
-	LLMModel    string // optional model override (e.g. claude-haiku-4-5-20251001)
+	// DurableOutputDir enables the experimental detached capture transport for
+	// this run. It must be an absolute, provisioned, instance-local persistent
+	// parent directory. No production dispatch enables this until replay and
+	// recovery ownership are wired. It is not accepted from user YAML/API.
+	DurableOutputDir string
+	durableDeadline  time.Time
+	CLIAdapter       string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID
+	LLMModel         string // optional model override (e.g. claude-haiku-4-5-20251001)
 	// LLMProvider is the agent's configured provider (ANTHROPIC, OPENAI,
 	// GOOGLE, OLLAMA, …). Used by the OPENCODE adapter to qualify a bare
 	// model name into OpenCode's required "provider/model" form (#1007);
@@ -390,6 +396,9 @@ func (c Credential) loginMode() string {
 // RunState tracks the runtime state of an active agent run, persisted in the
 // state provider for crash recovery.
 type RunState struct {
+	// Non-nil marks a replay-capable transport. Process absence alone must not
+	// terminalize it before its retained output/result has been reconciled.
+	Output *RunOutputState `json:"output,omitempty"`
 	// WorkspaceID preserves the original history scope even without run.started.
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	// RuntimeImageID is source-image evidence, not the mutable filesystem or
@@ -414,6 +423,13 @@ type RunState struct {
 	StopJournalPending bool `json:"stop_journal_pending,omitempty"`
 	// StopOrigin distinguishes detected absence from an explicit user stop.
 	StopOrigin string `json:"stop_origin,omitempty"`
+}
+
+type RunOutputState struct {
+	Version   int       `json:"version"`
+	Directory string    `json:"directory"`
+	Deadline  time.Time `json:"deadline"`
+	Adapter   string    `json:"adapter"`
 }
 
 // AgentEvent is a streaming event emitted during an agent run, such as text

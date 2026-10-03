@@ -23,7 +23,7 @@ func (o *Orchestrator) RecordRecoveredAbsence(ctx context.Context, key string, e
 	if err = json.Unmarshal(raw, &current); err != nil {
 		return false, err
 	}
-	if current.Status != "running" || !SameRecoveredIdentity(current, expected) {
+	if current.Status != "running" || current.Output != nil || !SameRecoveredIdentity(current, expected) {
 		return false, nil
 	}
 	current.Status, current.LastActivity = "cancelled", time.Now()
@@ -41,7 +41,14 @@ func (o *Orchestrator) RecordRecoveredAbsence(ctx context.Context, key string, e
 // SameRecoveredIdentity prevents an old probe from acting on a replaced record.
 func SameRecoveredIdentity(a, b RunState) bool {
 	return a.ID == b.ID && a.WorkspaceID == b.WorkspaceID && a.AgentID == b.AgentID && a.ContainerID == b.ContainerID &&
-		a.AgentSlug == b.AgentSlug && a.StartedAt.Equal(b.StartedAt)
+		a.AgentSlug == b.AgentSlug && a.StartedAt.Equal(b.StartedAt) && sameRunOutput(a.Output, b.Output)
+}
+
+func sameRunOutput(a, b *RunOutputState) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Version == b.Version && a.Directory == b.Directory && a.Adapter == b.Adapter && a.Deadline.Equal(b.Deadline)
 }
 
 // ReconcileAgentActivity keeps admission registration stable while the caller

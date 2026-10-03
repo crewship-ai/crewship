@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Run required synthetic Docker fixtures; missing/skipped tests are failures.
+"""Run required synthetic runtime fixtures; missing/skipped tests are failures.
 
-Run from the repository root with Go, Docker and local alpine:3. Creates only
+Run from the repository root with Go, tmux, Docker and local alpine:3. Creates only
 unique disposable test resources and cleans them up. No provider credentials,
 paid requests, host mounts, registry resolution or global prune. CI prepares
 its pinned Alpine fixture separately; local use never pulls or retags images.
@@ -13,6 +13,7 @@ import sys
 
 PREFIX = 'github.com/crewship-ai/crewship/'
 TESTS = {
+    'cmd/crewship-sidecar': {'TestDetachedLaunchSurvivesReaderAndRejectsDuplicate'},
     'internal/provider/docker': {
         'TestSandboxRuntimeRealDocker',
         'TestSandboxDisablesImageHealthcheckRealDocker',
@@ -71,7 +72,7 @@ def main():
     for error in errors:
         print('ERROR: ' + error, file=sys.stderr)
     if not errors:
-        print(f'All {len(REQUIRED)} required managed-environment Docker fixtures passed.')
+        print(f'All {len(REQUIRED)} required managed-environment fixtures passed.')
     return bool(errors)
 
 

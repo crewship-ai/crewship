@@ -43,6 +43,7 @@ func TestRecoveryChecksPersistedRuntimeLiveness(t *testing.T) {
 		err             error
 		terminal        bool
 		state, identity string
+		output          bool
 	}{
 		{name: "gone", answer: "ABSENT", terminal: true},
 		{name: "alive", answer: "PRESENT"},
@@ -50,6 +51,8 @@ func TestRecoveryChecksPersistedRuntimeLiveness(t *testing.T) {
 		{name: "stopped-container", state: "stopped", err: errors.New("must not exec a stopped container"), terminal: true},
 		{name: "unknown-container-state", state: "creating", answer: "ABSENT"},
 		{name: "different-container", identity: "replacement-runtime", answer: "ABSENT"},
+		{name: "retained-output-running-container", answer: "ABSENT", output: true},
+		{name: "retained-output-stopped-container", state: "stopped", output: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTestServerWithDeps(t)
@@ -59,7 +62,11 @@ func TestRecoveryChecksPersistedRuntimeLiveness(t *testing.T) {
 			mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
 			mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
 			seedRecoveryTrace(t, s, "recovered-run", "a")
-			raw, err := json.Marshal(orchestrator.RunState{ID: "recovered-run", AgentID: "a", AgentSlug: "a", ContainerID: "runtime", Status: "running"})
+			persisted := orchestrator.RunState{ID: "recovered-run", AgentID: "a", AgentSlug: "a", ContainerID: "runtime", Status: "running"}
+			if tc.output {
+				persisted.Output = &orchestrator.RunOutputState{Version: 1, Directory: "/persistent/recovered-run/output"}
+			}
+			raw, err := json.Marshal(persisted)
 			if err != nil {
 				t.Fatal(err)
 			}

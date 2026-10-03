@@ -38,6 +38,12 @@ type sidecarInput struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "run-launch" || os.Args[1] == "run-execute") {
+		ctx, stop := signal.NotifyContext(context.Background(), runoutput.ExecutionSignals()...)
+		code := runLaunchCommand(ctx, os.Args[1], os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
+		stop()
+		os.Exit(code)
+	}
 	if len(os.Args) > 1 && (os.Args[1] == "run-capture" || os.Args[1] == "run-read") {
 		ctx, stop := signal.NotifyContext(context.Background(), runoutput.ExecutionSignals()...)
 		code := runOutputCommand(ctx, os.Args[1], os.Args[2:], os.Stdout, os.Stderr)
