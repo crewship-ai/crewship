@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Concurrent starts can no longer fork installation identities by observing a partially written nonce owner; owner publication is atomic and malformed records fail without re-keying.
+
 - **AI operation discovery now ranks multiword searches** — generated API prose and ranked token search replace whole-query substring matching. Public descriptions omit internal handler comments; resource reads, nested creates and named actions receive clearer labels. MCP splits read/write tools, classifies audited POST reads, restricts admin writes and supports tag filters and optional client human approval. Workspace path selectors can no longer override the configured workspace.
 
 - **AI clients can connect directly to the Crewship binary.** Bundled `mcp serve` exposes paginated API discovery, focused schemas, a built-in Agent Skill and guarded JSON requests. `ai connect` registers Codex/Claude Code, `ai config` emits credential-free client snippets, and `ai skill` exports the embedded guide. Mutations require startup opt-in plus per-call acknowledgment; identity, redirect and size guards are shared with the CLI.
@@ -24,6 +26,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Upload encrypted recovery archives through Admin › Backups › Recovery or `crewship admin instance backups upload`, with cancellation, checksum validation, disk-space checks and atomic catalog/audit recording.
 
 ### Changed
+
+- **Required Go race checks run in smaller parallel groups.** The API suite is split into four complete test partitions and the remaining race-tested packages into two balanced groups. Every partition remains required, with coverage evidence, distinct timing artifacts and the existing timeout and aggregate budget checks (#2886).
 
 - Public documentation now separates product contracts from internal working records and prototypes. Start at `docs/README.md` for guides, specifications and decisions; contributor instructions remain in `AGENTS.md`. Assistant-specific workstation files are ignored and rejected by the tracked-path CI guard. Public builds need no private context checkout. (#2778)
 

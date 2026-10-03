@@ -76,6 +76,9 @@ func loadIdentity(ctx context.Context, dir string, db *sql.DB, locator string) (
 		if err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}
+		if err == nil && !validHex(strings.TrimSpace(string(owner))) {
+			return nil, fmt.Errorf("invalid installation owner record")
+		}
 		if err == nil && strings.TrimSpace(string(owner)) != locator {
 			if testHookBeforeRekey != nil {
 				testHookBeforeRekey()
@@ -170,17 +173,47 @@ func DatabaseLocation(databaseURL string) (string, error) {
 // claimLocation records which database location owns a nonce, or confirms it.
 // Called under the nonce lock, so the check-then-write cannot race a peer.
 func claimLocation(path, locator string) error {
-	owner, err := os.ReadFile(path)
-	if err == nil {
-		if strings.TrimSpace(string(owner)) != locator {
+	check := func() error {
+		owner, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		ownerLocator := strings.TrimSpace(string(owner))
+		if !validHex(ownerLocator) {
+			return fmt.Errorf("invalid installation owner record")
+		}
+		if ownerLocator != locator {
 			return errLocationClaimed
 		}
 		return nil
 	}
-	if !os.IsNotExist(err) {
+	if err := check(); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return os.WriteFile(path, []byte(locator+"\n"), 0o600)
+	// Readers check the owner before taking its nonce lock. Publish complete
+	// bytes atomically: an in-place creation exposes an empty owner, which a
+	// concurrent starter could mistake for another location and re-key again.
+	f, err := os.CreateTemp(filepath.Dir(path), ".instance-owner-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err = f.WriteString(locator + "\n"); err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if err = os.Link(f.Name(), path); err != nil && !os.IsExist(err) {
+		return err
+	}
+	return check()
 }
 
 func databaseNonce(ctx context.Context, db *sql.DB) (string, error) {
