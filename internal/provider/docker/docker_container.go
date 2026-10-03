@@ -796,7 +796,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				if callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && inspect.Image != desiredImage {
 					state := inspect.State
 					if state == nil || state.Running || state.Paused || state.Restarting || (state.Status != "exited" && state.Status != "created") {
-						return "", false, provider.ErrRuntimeImageUpdatePending
+						return "", false, &provider.RuntimeImageUpdatePendingError{ContainerID: c.ID, CurrentImageID: inspect.Image, DesiredImage: desiredImage}
 					}
 					if _, err := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: true}); err != nil {
 						if cerrdefs.IsConflict(err) {
@@ -854,7 +854,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				}
 				if needsRecreate {
 					p.logger.Info("recreating container (missing required mounts)", "container", containerName)
-					p.forceTeardown(ctx, c.ID, team.ID)
+					if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+						return "", false, err
+					}
 					break // fall through to create new container
 				}
 				// Restart backoff is its own state and it is neither
@@ -894,7 +896,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						"container", containerName,
 						"restart_count", inspect.RestartCount,
 					)
-					p.forceTeardown(ctx, c.ID, team.ID)
+					if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+						return "", false, err
+					}
 					break // fall through to create new container
 				}
 				// Runtime-contract drift (#1642). Everything above asks
@@ -933,7 +937,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 							"container_contract", runtimeContractOf(inspect.Config),
 							"build_contract", want,
 						)
-						p.forceTeardown(ctx, c.ID, team.ID)
+						if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+							return "", false, err
+						}
 						break // fall through to create new container
 					}
 					p.logger.Warn("crew container predates the current runtime configuration and is still serving; "+
@@ -982,7 +988,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						p.logger.Info("recreating stopped container (crew network changed)",
 							"container", containerName, "crew_id", team.ID,
 							"from", haveNet, "to", want)
-						p.forceTeardown(ctx, c.ID, team.ID)
+						if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+							return "", false, err
+						}
 						break // fall through to create new container
 					}
 					p.logger.Warn("crew container is still on its previous network and serving; it moves when next recreated "+
@@ -997,7 +1005,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 							"crew_id", team.ID,
 							"drift", drift,
 						)
-						p.forceTeardown(ctx, c.ID, team.ID)
+						if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+							return "", false, err
+						}
 						break // fall through to create new container
 					}
 					p.logger.Warn("crew container was created with different resource limits and is still serving; "+
@@ -1049,7 +1059,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				}
 				if bindsMissing {
 					p.logger.Info("bind-mount dirs missing, recreating container", "container", containerName)
-					p.forceTeardown(ctx, c.ID, team.ID)
+					if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+						return "", false, err
+					}
 					break // fall through to create new container
 				}
 				// Admission control (#1668). Starting a stopped container puts

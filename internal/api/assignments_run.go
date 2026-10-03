@@ -942,7 +942,9 @@ func (h *AssignmentHandler) runAssignment(
 	if h.provisioner != nil {
 		crewCfg.ProvisionSink = h.provisioner.RuntimeProvisionSink(ctx, body.CrewID, body.WorkspaceID)
 	}
-	containerID, err = h.orch.GetOrCreateContainerCfg(ctx, crewCfg, body.WorkspaceID)
+	runtimeUse, err := h.orch.AcquireContainerCfg(ctx, crewCfg, body.WorkspaceID)
+	defer runtimeUse.Release()
+	containerID = runtimeUse.ContainerID()
 	if err != nil {
 		h.logger.Error("get container for assignment", "error", err, "assignment_id", assignmentID)
 		releaseLock()
@@ -996,6 +998,7 @@ func (h *AssignmentHandler) runAssignment(
 	}
 
 	req, buildErr := h.buildAssignmentRunRequest(ctx, body, target, containerID, agentRole, runID, skipSidecar)
+	req.RuntimeUse = runtimeUse
 	if buildErr != nil {
 		// Fail closed: the single builder could not assemble the request (no
 		// resolver / resolve failure). Surface it as an assignment failure

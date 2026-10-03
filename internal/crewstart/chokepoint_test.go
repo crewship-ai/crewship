@@ -28,6 +28,7 @@ import (
 var allowedDirect = map[string]string{
 	"internal/provider/container.go":               "the interface declaration itself",
 	"internal/provider/docker/docker_container.go": "the docker implementation",
+	"internal/provider/docker/runtime_use.go":      "the docker reservation implementation rechecks its own runtime under the lifecycle gate; callers still resolve config and services through Starter",
 	"internal/provider/apple/apple_runtime.go":     "the apple-container implementation",
 	"internal/crewstart/crewstart.go":              "the chokepoint",
 	"internal/orchestrator/preflight_batch.go": "a pure ContainerProvider delegation wrapper — it forwards the call, " +

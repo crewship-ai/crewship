@@ -919,3 +919,21 @@ offering controls that would discard it. Edit that configuration through your
 Crew manifest or CLI; the raw runtime editor keeps unsupported source read-only.
 Supported JSON edits preserve other fields, including environment, lock and
 CLI-check policy. A rejected raw edit applies neither configuration document.
+
+
+## Runtime reservations and pending image activation
+
+Execution entrypoints reserve a concrete container through preparation and use.
+Agent invocations retain their own handle, including detached executions that
+outlive the caller; scripts and terminal connections hold it for their lifetime.
+Managed reconciliation does not force-remove a running container. Synchronous
+peer queries refuse to wait behind a lifecycle change that needs their parent
+to finish, rather than deadlocking the parent and child.
+
+A reservation is not an authorization grant or proof that a recovered container
+is empty. Docker activation additionally requires installation ownership and an
+authoritative idle verifier. That verifier is not wired yet, so this foundation
+does not enable automatic between-run image activation. Pending image changes
+remain pending rather than stopping unverified work. Legacy lifecycle callers,
+TTL integration, recovered occupancy and positive activation/rollback acceptance
+still require completion before this can be released as automatic updating.

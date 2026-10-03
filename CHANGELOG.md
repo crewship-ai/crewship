@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Agent runs, scripts and terminals retain the concrete container they started using.** Shared runtime reservations cover preparation, execution and detached work, preventing managed reconciliation from force-replacing an active container. Automatic activation of a new image remains unavailable until an authoritative idle verifier is wired.
+
+
 - Runtime editing preserves existing TOML and unsupported mise shapes instead of erasing tool pins; rejected raw edits no longer partially apply other settings.
 
 - Crew runtime settings show requested and built AI CLI versions with image-bound startup-check status, explicit unknown evidence, and refresh after build events.

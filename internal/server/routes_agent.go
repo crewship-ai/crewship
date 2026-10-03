@@ -107,18 +107,20 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	// Resource limits come from the request (an agent run may size its own
 	// container); the crew's provisioned image and declared sidecars are filled
 	// in by the starter, which is what this route never looked up (#1717/#1708).
-	containerID, err := s.startCrew(r.Context(), provider.CrewConfig{
+	runtimeUse, _, err := s.crewStarter().StartUse(r.Context(), provider.CrewConfig{
 		ID:       req.CrewID,
 		Slug:     req.CrewSlug,
 		MemoryMB: memoryMB,
 		CPUs:     cpus,
-	})
+	}, nil)
 	if err != nil {
+		runtimeUse.Release()
 		s.logger.Error("failed to ensure team runtime", "crew_id", req.CrewID, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to start container"})
 		return
 	}
 
+	containerID := runtimeUse.ContainerID()
 	// Start file watcher for this crew's output directory (idempotent).
 	s.ensureFileWatcher(req.CrewID)
 
@@ -137,6 +139,7 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	runID := orchestrator.NewRunID()
 
 	runReq := orchestrator.AgentRunRequest{
+		RuntimeUse:     runtimeUse,
 		AgentID:        agentID,
 		AgentSlug:      req.AgentSlug,
 		RunID:          runID,
@@ -159,6 +162,7 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
+		defer runtimeUse.Release()
 		timeout := time.Duration(req.TimeoutSecs) * time.Second
 		if timeout <= 0 {
 			timeout = 30 * time.Minute

@@ -69,10 +69,21 @@ func TestImageChange_RealHeartbeatSurvivesNewImageAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := heartbeat()
+	use, err := p.RetainCrewRuntimeUse(ctx, crew.ID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer use.Release()
 	for i := 0; i < 3; i++ {
 		if _, err := p.EnsureCrewRuntime(ctx, crew); !errors.Is(err, provider.ErrRuntimeImageUpdatePending) {
 			t.Fatalf("new-image admission %v", err)
 		}
+	}
+	waitCtx, stopWaiting := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer stopWaiting()
+	if next, err := p.AcquireCrewRuntimeUse(waitCtx, crew); !errors.Is(err, context.DeadlineExceeded) {
+		next.Release()
+		t.Fatalf("activation bypassed a live reservation: %v", err)
 	}
 	time.Sleep(300 * time.Millisecond)
 	after, err := cli.ContainerInspect(ctx, created.ID, client.ContainerInspectOptions{})
@@ -82,6 +93,7 @@ func TestImageChange_RealHeartbeatSurvivesNewImageAdmission(t *testing.T) {
 	if !after.Container.State.Running || after.Container.State.Pid != before.Container.State.Pid || heartbeat() <= first {
 		t.Fatal("image selection interrupted existing work")
 	}
+	use.Release()
 	// Explicitly stop this owned fixture. Only then may reconciliation remove it.
 	timeout := 0
 	if _, err := cli.ContainerStop(ctx, created.ID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {

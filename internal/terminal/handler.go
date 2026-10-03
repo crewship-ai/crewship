@@ -348,19 +348,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Ensure container is running (start if needed).
 	containerName := h.container.CrewContainerName(init.CrewID, actualSlug)
 	status, err := h.container.ContainerStatus(r.Context(), containerName)
-	if err != nil || status.State != "running" {
-		h.logger.Info("terminal: starting container", "crew_slug", actualSlug)
-		h.writeInfo(ws, "Starting container...")
+	{
+		if err != nil || status == nil || status.State != "running" {
+			h.logger.Info("terminal: starting container", "crew_slug", actualSlug)
+			h.writeInfo(ws, "Starting container...")
+		}
 		// {id, slug} was the whole config this passed, which is why the
 		// terminal — the surface an operator opens specifically to look at a
 		// crew's environment — came up in the bare default image with none of
 		// the crew's provisioned toolchain, and without the crew's declared
 		// sidecars (#1717/#1708). The starter resolves both from the crews row.
-		_, err := crewstart.New(h.container, api.NewCrewConfigCompleter(h.db), h.logger).
-			Start(r.Context(), provider.CrewConfig{
+		use, _, err := crewstart.New(h.container, api.NewCrewConfigCompleter(h.db), h.logger).
+			StartUse(r.Context(), provider.CrewConfig{
 				ID:   init.CrewID,
 				Slug: actualSlug,
-			})
+			}, nil)
+		defer use.Release()
+		if use != nil {
+			containerName = use.ContainerID()
+		}
 		switch {
 		case errors.Is(err, crewstart.ErrSidecarStart):
 			// The one caller that proceeds anyway. Everywhere else a crew

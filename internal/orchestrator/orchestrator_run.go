@@ -424,8 +424,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		releaseAgent()
 		return fmt.Errorf("acquire run slot: %w", slotErr)
 	}
-	// A detached hold owns both reservations until confirmed termination.
-	releaseRunSlot := func() { releaseServer(); releaseAgent() }
+	// A detached hold owns capacity AND the concrete runtime until confirmed
+	// termination. Retain an existing handle instead of reacquiring a reader:
+	// a queued activation may be waiting for the caller's own reservation.
+	runtimeUse, useErr := o.retainRuntimeUse(ctx, req)
+	if useErr != nil {
+		releaseServer()
+		releaseAgent()
+		return fmt.Errorf("reserve run runtime: %w", useErr)
+	}
+	releaseRunSlot := func() { runtimeUse.Release(); releaseServer(); releaseAgent() }
 	// slotTransferredToHold is set when a detached exec whose stop could not
 	// be confirmed hands the slot to a detached hold (#2626): the watcher
 	// owns the release from there, because capacity must stay occupied for

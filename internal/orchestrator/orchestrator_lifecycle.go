@@ -70,6 +70,23 @@ func (o *Orchestrator) GetOrCreateContainerCfg(ctx context.Context, cfg provider
 	return containerID, nil
 }
 
+// AcquireContainerCfg keeps the resolved runtime reserved from preparation
+// through execution. The caller must release every non-nil handle, including
+// on partial sidecar startup, and pass it to AgentRunRequest.RuntimeUse.
+func (o *Orchestrator) AcquireContainerCfg(ctx context.Context, cfg provider.CrewConfig, workspaceID string) (*provider.RuntimeUse, error) {
+	use, _, err := o.crewStarter().StartUse(ctx, cfg, nil)
+	if err != nil {
+		return use, fmt.Errorf("reserve crew runtime for crew %s (workspace %s): %w", cfg.ID, workspaceID, err)
+	}
+	o.mu.RLock()
+	reg := o.statsRegister
+	o.mu.RUnlock()
+	if reg != nil && workspaceID != "" {
+		reg(use.ContainerID(), cfg.ID, workspaceID)
+	}
+	return use, nil
+}
+
 // RunAgentForAssignment runs a sub-agent as part of a mission assignment.
 // It skips conversation history injection (each task gets a clean context via the mission brief).
 // SkipSidecar is respected from the caller — regular AGENT tasks skip sidecar,
