@@ -597,11 +597,42 @@ Two further rules:
 
 ---
 
-## 17. Work packages — two tracks, because 1.0 does not mean this
+## 17. Technical reference identifiers
 
-Internal release tracks and work allocation are preserved in private context.
-Public acceptance criteria are in §18–§19. Track identifiers in the retained
-design are historical references, not a release promise.
+Source comments and regression tests retain the original A/B identifiers.
+This table maps those identifiers to public behaviour; it does not restore
+internal work allocation, release sequencing or instance execution evidence.
+Use §18–§19 for scenarios/measurement and current specifications for supported
+behaviour. A label alone does not establish that its original proposal shipped.
+
+| Reference | Technical scope |
+| --- | --- |
+| A0 | Baseline verification before schema or contract changes. |
+| A1 | Cooperative cancellation (Tier 1) and terminal-state guards. |
+| A2 | Every run is attributable to its issue. |
+| A3 | Triggers cannot be saved in a state where they can never fire. |
+| A4 | Trigger failure is visible for all three trigger kinds. |
+| A5 | API/CLI documentation agrees with supported handler behaviour. |
+| A6 | Realtime user interfaces reflect committed state changes. |
+| A7 | Inbox read state is per user. |
+| A8 | The golden-scenario harness exists from the start. |
+| A9 | Close the exclusivity gap the codebase already knows about |
+| A10 | Owner and delegate are separate columns |
+| B1 | Event log and session foundations. |
+| B2 | Delivery and the wake loop. |
+| B3 | One active turn per session. |
+| B4 | Session leases and recovery after lost heartbeats. |
+| B5 | Checkpoints and the context pack. |
+| B6 | Outcome contract. |
+| B7 | Verified process termination (Tier 2). |
+| B8 | Atomic routine authoring. |
+| B9 | The reliability editor. |
+| B10 | Attention contract. |
+| B11 | The board, and the parent/child rule. |
+| B12 | Instrumentation. |
+| B13 | The `DONE`/`COMPLETED` decision. |
+| B14 | A peer agent's GO cannot satisfy a waitpoint. |
+| B15 | Acting on a NEEDS_HUMAN card resumes the run. |
 
 ## 18. Golden end-to-end scenarios
 

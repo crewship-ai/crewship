@@ -1118,12 +1118,40 @@ an ambiguity here becomes a client and a server that both pass their own tests.
     irregularly must send a `series.v1` panel instead. Even spacing is only honest if the producer
     guarantees it, so the schema states it rather than implying it.
 
-## 12. Implementation scope
+## 12. Implementation reference groups
 
-This reference specifies technical behaviour, not a delivery schedule.
-Current supported application behaviour and acceptance limits are recorded in
-[Pages Apps](pages-apps.md); the panel contracts above retain their source
-section numbers.
+The original v0/v1/v1.1 labels below are retained because source comments and
+regression tests use them. They group technical contracts; they are not a
+release schedule or a fresh implementation-status claim.
+
+### v0 — typed producer payloads
+
+Named pages contain typed panels with producer provenance, freshness states
+and per-panel authorization. Definition and payload validation are separate;
+unauthorized panels retain sealed placeholders.
+
+### v1 — actions and declarative installation
+
+Actions use the closed vocabulary in §8b, server-authorized index dispatch,
+idempotency and explicit confirmation. `kind: Page` participates in declarative
+installation; grants and payload retention obey the boundaries in §7 and §10.
+
+### v1.1 — producer refresh and wake gates
+
+`wake:` gates and `refresh:` declarations connect producers to authorized
+routine dispatch and panel updates. Preserve refresh configuration through
+parsing, API storage and client round trips; never bypass producer permissions.
+
+### v1.1b — controlled sharing
+
+Public page access remains per-panel opt-in with token/expiry/password rules
+from §7.3. Authoring and portability retain their separate authority checks.
+
+### v1.2 — extended panel and producer interfaces
+
+Series rendering, sandboxed embeds and inbound panel webhooks retain their
+schema, sandbox and producer-authorization boundaries. Their original group
+label does not authorize arbitrary browser code or data-source access.
 
 ## 12b. Parallelism — which slices can run at once
 
