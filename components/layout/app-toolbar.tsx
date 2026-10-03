@@ -27,6 +27,7 @@ import { useEngineStatus } from "@/hooks/use-engine-status"
 import { useCrewsStatus } from "@/hooks/use-crews-status"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useAccessMode, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -105,7 +106,12 @@ function InboxUnreadBadge({ workspaceId }: { workspaceId: string | null }) {
 // back — chat — has the breadcrumb below pointing exactly there.
 export function AppToolbar() {
   const pathname = usePathname()
-  const { workspaceId, workspace, role: workspaceRole } = useWorkspace()
+  const { workspace, role: workspaceRole } = useWorkspace()
+  // Engine, crews, provisioning, inbox and runs are not on the restricted
+  // allowlist. Their hooks idle on a null workspace, and their widgets are not
+  // rendered unless the session is trusted.
+  const trusted = useAccessMode() === "trusted"
+  const workspaceId = useTrustedWorkspaceId()
   const { status: engineStatus } = useEngineStatus(workspaceId)
   const crewsStatus = useCrewsStatus(workspaceId)
   const provisioning = useProvisioningStatus(workspaceId)
@@ -242,10 +248,12 @@ export function AppToolbar() {
           *
           * The provisioning badge stays separate and stays to the LEFT, so the
           * status pill never reflows when a build appears. */}
-        <div className="hidden lg:flex items-center gap-1.5 mr-1">
-          <ProvisioningBadge provisioning={provisioning} workspaceId={workspaceId} />
-          <SystemStatusPill engineStatus={engineStatus} wsStatus={wsStatus} crews={crewsStatus} />
-        </div>
+        {trusted && (
+          <div className="hidden lg:flex items-center gap-1.5 mr-1">
+            <ProvisioningBadge provisioning={provisioning} workspaceId={workspaceId} />
+            <SystemStatusPill engineStatus={engineStatus} wsStatus={wsStatus} crews={crewsStatus} />
+          </div>
+        )}
 
         {/* Desktop: search button. Same pill geometry as the System / Crews
             status pills it sits beside, and the same .type-meta register as
@@ -287,10 +295,12 @@ export function AppToolbar() {
           * realtime) are banners — UpdateBanner / RuntimeBanner /
           * RealtimeStatusBanner — because a notice nobody can afford to miss
           * does not belong behind a closed dropdown. */}
-        <div className="hidden md:flex items-center gap-0.5">
-          <ActivityBell />
-          <InboxBell />
-        </div>
+        {trusted && (
+          <div className="hidden md:flex items-center gap-0.5">
+            <ActivityBell />
+            <InboxBell />
+          </div>
+        )}
 
 
         {/* Personal settings live in the profile menu on every screen size. */}

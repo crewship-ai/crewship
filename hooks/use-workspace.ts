@@ -27,6 +27,9 @@ interface UseWorkspaceReturn {
    *  null when unknown (older backend / not loaded yet). */
   capabilities: string[] | null
   loading: boolean
+  /** The last load failed and no list is held: what the caller may reach is
+   *  unknown. `useAccessMode` reads this as "still loading" (fail closed). */
+  error: boolean
   setWorkspaceId: (id: string) => void
   refresh: () => Promise<void>
 }
@@ -37,9 +40,10 @@ interface Snapshot {
   workspaces: WorkspaceData[]
   currentId: string | null
   loading: boolean
+  error: boolean
 }
 
-const INITIAL: Snapshot = { workspaces: [], currentId: null, loading: true }
+const INITIAL: Snapshot = { workspaces: [], currentId: null, loading: true, error: false }
 let snapshot: Snapshot = INITIAL
 let fetched = false
 let inflight: Promise<void> | null = null
@@ -76,6 +80,18 @@ function persistId(id: string | null) {
   }
 }
 
+// A failed re-read keeps the list it already has: the session is the same
+// session, and wiping the list would read as "no memberships" (and so as a
+// trusted session) on a single 5xx. Only a cold load with nothing to keep
+// settles on an empty, errored snapshot.
+function failLoad() {
+  if (snapshot.workspaces.length > 0) {
+    if (snapshot.loading) setSnapshot({ ...snapshot, loading: false })
+    return
+  }
+  setSnapshot({ workspaces: [], currentId: null, loading: false, error: true })
+}
+
 function loadWorkspaces(): Promise<void> {
   if (inflight) return inflight
   // Background settings refresh must not unmount active Pages/forms.
@@ -84,7 +100,7 @@ function loadWorkspaces(): Promise<void> {
     try {
       const res = await apiFetch("/api/v1/workspaces")
       if (!res.ok) {
-        setSnapshot({ workspaces: [], currentId: null, loading: false })
+        failLoad()
         return
       }
       const data = (await res.json()) as WorkspaceData[]
@@ -94,9 +110,19 @@ function loadWorkspaces(): Promise<void> {
       const next = persistedValid ? persisted! : list[0]?.id ?? null
       if (next && !persistedValid) persistId(next)
       if (!next) persistId(null)
-      setSnapshot({ workspaces: list, currentId: next, loading: false })
+      // A periodic re-check (useAccessModeWatcher) usually returns exactly
+      // what is held. Keeping the old snapshot then keeps every consumer's
+      // `workspace` / `workspaces` identity stable, so nothing re-fetches
+      // because a list was re-read.
+      if (
+        !snapshot.loading &&
+        !snapshot.error &&
+        snapshot.currentId === next &&
+        JSON.stringify(snapshot.workspaces) === JSON.stringify(list)
+      ) return
+      setSnapshot({ workspaces: list, currentId: next, loading: false, error: false })
     } catch {
-      setSnapshot({ workspaces: [], currentId: null, loading: false })
+      failLoad()
     } finally {
       fetched = true
       inflight = null
@@ -180,6 +206,7 @@ export function useWorkspace(): UseWorkspaceReturn {
     role: workspace?.currentUserRole ?? null,
     capabilities: workspace?.currentUserCapabilities ?? null,
     loading: state.loading,
+    error: state.error,
     setWorkspaceId,
     refresh,
   }
