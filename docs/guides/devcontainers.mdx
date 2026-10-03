@@ -214,9 +214,17 @@ inspector; Docker-backed installations can.
 
 Crewship disables Claude Code's background updater with `DISABLE_AUTOUPDATER=1`
 and Codex's startup update check with `check_for_update_on_startup=false`.
-Updates belong to environment provisioning. These settings do not prevent an
-agent with shell access from installing another executable in writable storage;
-they are version-management settings, not an isolation boundary.
+OpenCode receives `OPENCODE_DISABLE_AUTOUPDATE=1`. Gemini receives per-run system
+settings that disable automatic updates and update notifications, including the
+older inverted setting names. Failure to write those settings stops preflight.
+The Gemini and OpenCode controls were checked against
+[Gemini v0.62.0](https://github.com/google-gemini/gemini-cli/blob/v0.62.0/packages/cli/src/utils/handleAutoUpdate.ts)
+and [OpenCode v1.18.34](https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/cli/upgrade.ts).
+Their current automatic updater call sites are interactive; these settings also
+cover interactive descendants inheriting the run environment. They do not stop
+an agent with a shell from deliberately installing or running another binary.
+Equivalent controls for Cursor and Droid have not been qualified.
+Updates belong to environment provisioning.
 
 An agent on `CLAUDE_CODE` needs `claude` in the image; `CODEX_CLI` needs `codex`, `GEMINI_CLI` `gemini`, `OPENCODE` `opencode`, `CURSOR_CLI` `cursor-agent`, `FACTORY_DROID` `droid`. Nobody has to remember that: every build reads the crew's agents and adds what is missing — a mise tool for each CLI no declared feature already provides (`claude`, `codex`, `gemini-cli`, `opencode`, `cursor-agent`), an install command for `droid`. Your own choices are kept: a pinned `claude` version in the mise config, or the `claude-code` feature, is used as-is.
 

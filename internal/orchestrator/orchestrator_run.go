@@ -1837,6 +1837,11 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 
 	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)
 
+	if err := setupManagedToolchainSettings(ctx, batch, req, o.logger); err != nil {
+		o.failRun(ctx, req, runID, "error")
+		return nil, "", fmt.Errorf("prepare managed toolchain settings: %w", err)
+	}
+
 	// Write non-secret Claude config (skip onboarding). Credentials are
 	// also available as files in /secrets/{agent-slug}/ for CLI tools.
 	if err := setupClaudeConfig(ctx, batch, req.ContainerID, req.AgentSlug, req.RunID, o.logger); err != nil {
@@ -1881,6 +1886,13 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	unlockSecrets()
 	if flushErr != nil {
 		o.logger.Warn("preflight steps failed", "error", flushErr, "agent_id", req.AgentID)
+	}
+
+	if req.CLIAdapter == "GEMINI_CLI" && batch.stepFailed("file:"+managedGeminiSettingsFile) {
+		// An earlier read probe may already have flushed this step. Its
+		// recorded failure still matters even when the last flush succeeded.
+		o.failRun(ctx, req, runID, "error")
+		return nil, "", fmt.Errorf("prepare managed toolchain settings: Gemini system settings were not written")
 	}
 
 	if fileCreds && (batch.stepFailed(preflightStepAgentDirs) || batch.stepFailed(preflightStepCredentials)) {
