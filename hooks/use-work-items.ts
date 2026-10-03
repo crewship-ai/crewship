@@ -631,6 +631,10 @@ export interface ReplayAvailability {
   reason: string
 }
 
+/** Mirrors internal/api/work_items.go replayAvailability for restricted workflow work. */
+export const RESTRICTED_WORKFLOW_REPLAY_REASON =
+  "Private workflow replay requires a new authorized routine or Page admission."
+
 /**
  * Whether the replay button should exist at all, decided BEFORE it is offered.
  *
@@ -643,9 +647,14 @@ export interface ReplayAvailability {
  * we can no longer replay it" a distinguishable answer from "we never saw it".
  */
 export function replayAvailability(
-  item: Pick<WorkItem, "state" | "source" | "source_ref">,
+  item: Pick<WorkItem, "state" | "source" | "source_ref" | "domain_kind">,
   delivery: { delivery: WebhookDelivery | null; loading: boolean; notFound: boolean },
 ): ReplayAvailability {
+  // Restricted workflow work is never replayable from the ledger, whatever its
+  // state or source; the server refuses it with this exact sentence.
+  if (item.domain_kind === "restricted_workflow") {
+    return { state: "unavailable", reason: RESTRICTED_WORKFLOW_REPLAY_REASON }
+  }
   if (!isTerminalWorkState(item.state)) {
     return {
       state: "unavailable",

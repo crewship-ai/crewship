@@ -79,7 +79,8 @@ Test five bounded previews, corrupted/unavailable storage, per-user/workspace
 preferences, denied autoplay, DND/volume/off, human versus agent/system authors,
 read cursor/mute, unauthorized API responses, initial/reconnect history, aborted
 workspace changes, burst grouping and one cue across tabs. Exercise normal demo
-account login and actual human messages on Dev2; distinguish instrumented browser
+account login and synthetic human messages in an isolated fixture; distinguish instrumented browser
 playback verification from subjective physical listening.
 
-Deployment and evidence: [Dev2 verification, 2026-09-08](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/notification-sounds-dev2-2026-09-08.md).
+Internal execution and deployment records are retained in private context;
+this design does not assert fresh acceptance.

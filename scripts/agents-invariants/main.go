@@ -21,6 +21,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -42,6 +43,7 @@ func main() {
 		noSqlite3DriverName,
 		noNpmOrYarnLockfile,
 		sidecarAndAgentUIDsUnchanged,
+		noPrivateWorkingFiles,
 	} {
 		found = append(found, check(root)...)
 	}
@@ -52,7 +54,7 @@ func main() {
 		}
 		os.Exit(1)
 	}
-	fmt.Println("agents-invariants: 4 checkable NEVER DO entries hold")
+	fmt.Println("agents-invariants: 5 checkable NEVER DO entries hold")
 }
 
 // "Never add API routes under app/ — static export silently drops them."
@@ -169,4 +171,36 @@ func goFiles(root string) []string {
 		return nil
 	})
 	return out
+}
+
+// Inspect the Git index, not the filesystem: ignored workstation files are
+// allowed locally, including symlinked private context outside the checkout.
+func noPrivateWorkingFiles(root string) []violation {
+	cmd := exec.Command("git", "ls-files", "--cached", "-z")
+	cmd.Dir = root
+	output, err := cmd.Output()
+	if err != nil {
+		return []violation{{rule: "private working files stay outside the public index", detail: "cannot inspect tracked paths: " + err.Error()}}
+	}
+	var out []violation
+	for _, path := range strings.Split(string(output), "\x00") {
+		if privateWorkingPath(path) {
+			out = append(out, violation{rule: "private working files stay outside the public index", detail: path})
+		}
+	}
+	return out
+}
+
+func privateWorkingPath(path string) bool {
+	for _, prefix := range []string{"CLAUDE.md", "CODEX.md", "GEMINI.md", ".github/copilot-instructions.md", ".claude", ".codex", ".cursor", "internal-docs", "audit", "audit-final", "mockups", "public/design"} {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	if strings.HasPrefix(path, "docs/prd/reports/") {
+		// Required public regression source; all execution output stays local.
+		return path != "docs/prd/reports/README.md" &&
+			path != "docs/prd/reports/codex-review-work-regressions-2026-09-11.go.txt"
+	}
+	return false
 }
