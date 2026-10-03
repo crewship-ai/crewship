@@ -252,6 +252,11 @@ func (o *Orchestrator) persistStoppedRunWithOrigin(ctx context.Context, state Ru
 		return fmt.Errorf("state provider cannot atomically persist stopped run")
 	}
 	return atomic.Update(ctx, "agent_runs", state.ID, func(raw []byte) ([]byte, error) {
+		// A concurrent cleanup may already have removed this identity.
+		// Preserve absence rather than recreating the row or reporting failure.
+		if raw == nil {
+			return nil, nil
+		}
 		var current RunState
 		if err := json.Unmarshal(raw, &current); err != nil {
 			return nil, fmt.Errorf("decode stopped run %s: %w", state.ID, err)
