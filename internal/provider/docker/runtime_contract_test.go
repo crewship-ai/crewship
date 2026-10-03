@@ -430,7 +430,7 @@ func TestEnsureCrewRuntime_PausedContainerWithOldContractIsNotTornDown(t *testin
 		listBody: covExistingList(string(container.StatePaused)),
 		// Paused containers report Running: true in an inspect — the freezer
 		// does not change the daemon's notion of running — so the fixture says
-		// so too, and the state that decides is the one on the list entry.
+		// so too; the fake daemon supplies matching inspect Status/Paused fields.
 		inspectBody: covLabelledInspect(covRuntimeRef, true, map[string]string{"crewship.kind": "crew"}),
 	}
 	p := f.provider(t, cfg)
