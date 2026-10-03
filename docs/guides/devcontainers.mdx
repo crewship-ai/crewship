@@ -745,6 +745,14 @@ leaves existing work intact. A freshly inspected stopped container can be
 removed without force and recreated. Selecting the same immutable artifact by
 ID does not require a restart even if the container was created using a tag.
 
+The orphan sweeper also recognizes published image IDs recorded in revision
+history after a rebuild removes their last tag. With cache auto-deletion enabled,
+the existing age floor and live-crew reference checks apply to those artifacts
+too; removal remains non-force. Unrecognized images without tags are left alone.
+An unpublished build, or an artifact whose history was removed with its crew,
+cannot be identified this way. Revision history is not a promise to retain an
+old image for rollback.
+
 Legacy agent runs inspect their actual container at admission and retain its
 immutable source image ID as `runtime_image_id` in run state and `exec.command`
 events. The lookup has a two-second timeout; unavailable evidence is omitted,

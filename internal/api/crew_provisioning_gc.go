@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/moby/moby/client"
 )
 
@@ -166,22 +167,34 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 	//    workspaces (no workspace filter — an image referenced by another
 	//    tenant's crew must never be deleted).
 	rows, err := h.db.QueryContext(ctx,
-		`SELECT DISTINCT cached_image FROM crews
+		`SELECT DISTINCT cached_image, 1 FROM crews
 		 WHERE cached_image IS NOT NULL AND cached_image != ''
-		       AND deleted_at IS NULL`)
+		       AND deleted_at IS NULL
+		 UNION ALL
+		 SELECT image_id, 0 FROM environment_revisions`)
 	if err != nil {
 		h.logger.Warn("orphan cache-image GC: query failed", "error", err)
 		return
 	}
 	defer rows.Close()
 	referenced := make(map[string]struct{})
+	// Published revisions identify artifacts even after a same-definition
+	// rebuild moves the tag. History records provenance, not a retention pin:
+	// only current crew selections keep the bytes alive. Unknown dangling
+	// images remain outside this collector's ownership.
+	knownArtifacts := make(map[string]struct{})
 	for rows.Next() {
 		var tag string
-		if err := rows.Scan(&tag); err != nil {
+		var selected bool
+		if err := rows.Scan(&tag, &selected); err != nil {
 			h.logger.Warn("orphan cache-image GC: scan failed", "error", err)
 			return
 		}
-		referenced[tag] = struct{}{}
+		if selected {
+			referenced[tag] = struct{}{}
+		} else if dockerutil.IsLocalImageID(tag) {
+			knownArtifacts[tag] = struct{}{}
+		}
 	}
 	// Critical: if iteration died mid-stream, `referenced` is incomplete and
 	// using it to decide orphans could delete a still-live cache image.
@@ -213,7 +226,7 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 			continue
 		}
 		_, inUse := referenced[img.ID]
-		managed := false
+		_, managed := knownArtifacts[img.ID]
 		for _, tag := range img.RepoTags {
 			if _, ok := referenced[tag]; ok {
 				inUse = true
