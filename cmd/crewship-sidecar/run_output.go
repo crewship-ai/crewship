@@ -25,7 +25,7 @@ func runOutputCommand(ctx context.Context, mode string, args []string, out, diag
 	if mode == "run-capture" {
 		argsFile = fs.String("args-file", "", "NUL-separated command arguments (bounded to 1 MiB)")
 		limit = fs.Int64("max-bytes", runoutput.DefaultLimit, "maximum committed output bytes, including terminal reserve")
-	} else {
+	} else if mode == "run-read" {
 		after = fs.Uint64("after", 0, "last durably projected record sequence")
 		raw = fs.Bool("raw", false, "emit command bytes instead of record envelopes")
 	}
@@ -38,6 +38,20 @@ func runOutputCommand(ctx context.Context, mode string, args []string, out, diag
 	}
 	ctx, cancel := context.WithTimeout(ctx, *timeout)
 	defer cancel()
+	if mode == "run-result" {
+		if fs.NArg() != 0 {
+			return 125
+		}
+		snapshot, err := runoutput.Inspect(ctx, *dir)
+		if err != nil {
+			fmt.Fprintln(diagnostics, "retained result is unavailable or invalid")
+			return 125
+		}
+		if err = json.NewEncoder(out).Encode(snapshot); err != nil {
+			return 125
+		}
+		return 0
+	}
 	if mode == "run-capture" {
 		command := fs.Args()
 		if *argsFile != "" {

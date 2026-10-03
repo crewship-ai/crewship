@@ -44,7 +44,7 @@ func main() {
 		stop()
 		os.Exit(code)
 	}
-	if len(os.Args) > 1 && (os.Args[1] == "run-capture" || os.Args[1] == "run-read") {
+	if len(os.Args) > 1 && (os.Args[1] == "run-capture" || os.Args[1] == "run-read" || os.Args[1] == "run-result") {
 		ctx, stop := signal.NotifyContext(context.Background(), runoutput.ExecutionSignals()...)
 		code := runOutputCommand(ctx, os.Args[1], os.Args[2:], os.Stdout, os.Stderr)
 		stop()

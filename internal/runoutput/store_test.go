@@ -5,11 +5,45 @@ package runoutput
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestInvalidCheckpointDoesNotPublishTerminal(t *testing.T) {
+	dir, s := testStore(t, DefaultLimit)
+	if err := s.Finish(0, "exited"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "checkpoint.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cp checkpoint
+	if err = json.Unmarshal(data, &cp); err != nil {
+		t.Fatal(err)
+	}
+	cp.Sequence++ // Metadata claims a missing committed record.
+	data, err = json.Marshal(cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(dir, "checkpoint.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	published := false
+	_, done, err := ReadCommitted(dir, 0, func(record Record) error {
+		if record.Kind == "exit" {
+			published = true
+		}
+		return nil
+	})
+	if err == nil || done || published {
+		t.Fatalf("invalid terminal escaped: done=%v published=%v err=%v", done, published, err)
+	}
+}
 
 func testStore(t *testing.T, limit int64) (string, *Store) {
 	t.Helper()

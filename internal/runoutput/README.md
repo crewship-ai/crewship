@@ -10,6 +10,7 @@ modes. Neither mode starts the credential proxy:
 ```sh
 crewship-sidecar run-capture --dir /persistent/run-identity --timeout 30m -- command arg
 crewship-sidecar run-read --dir /persistent/run-identity --after 12
+crewship-sidecar run-result --dir /persistent/run-identity
 ```
 
 `run-capture` also accepts `--args-file` with bounded NUL-separated argv instead
@@ -43,6 +44,11 @@ reserved for a terminal record. Reaching the output limit cancels the command's
 process group and records `output_limit`; storage/commit failures are errors and
 do not fabricate completion. There is no acknowledgement-driven truncation yet.
 
+`run-result` validates the committed log and returns only its sequence and
+terminal result, without exposing command output. Its own exit code indicates
+probe success; the returned result contains the captured command's exit code.
+A terminal record is not delivered until checkpoint validation completes.
+
 Capture requires a Unix runtime. Linux containers on macOS/Windows hosts are the
 intended execution location; this is not evidence of tested Docker Desktop
 support. Unit/race tests and the isolated subprocess experiment do not establish
@@ -66,9 +72,12 @@ the managed-environment CI lane requires it to actually execute and pass.
 
 RunState retains output location, protocol version, adapter and deadline.
 Persistence failure refuses launch; duplicate local ownership and an existing
-durable run identity refuse admission. Recovery currently preserves these runs
-instead of declaring cancellation solely from process absence. Preserving an
-unresolved run is not successful recovery.
+durable run identity refuse admission. Startup and periodic recovery probe the
+retained result and preserve it in RunState. They do not infer cancellation
+solely from process absence, or publish completion before output replay. Probe
+failure leaves the outcome unresolved, including when a stopped container's
+volume cannot yet be read through the exec provider. Retained result evidence
+is not acknowledgement of history projection or successful recovery.
 
 Remaining integration: capability qualification for the bound helper binary;
 controller detach versus explicit stop; replay into normal event handling with

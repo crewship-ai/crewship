@@ -11,8 +11,8 @@ import (
 )
 
 type Result struct {
-	ExitCode int
-	Reason   string
+	ExitCode int    `json:"exit_code"`
+	Reason   string `json:"reason"`
 }
 
 // Command carries execution inputs captured at admission. Env must be the

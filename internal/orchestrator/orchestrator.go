@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/providerlogin"
+	"github.com/crewship-ai/crewship/internal/runoutput"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
@@ -430,6 +431,9 @@ type RunOutputState struct {
 	Directory string    `json:"directory"`
 	Deadline  time.Time `json:"deadline"`
 	Adapter   string    `json:"adapter"`
+	// RetainedResult is observed terminal evidence, not acknowledgement of
+	// output projection. Status cannot become successful until replay commits.
+	RetainedResult *runoutput.Snapshot `json:"retained_result,omitempty"`
 }
 
 // AgentEvent is a streaming event emitted during an agent run, such as text

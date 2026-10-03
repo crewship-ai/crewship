@@ -14,6 +14,9 @@ import (
 // inspected container or exact run probe can establish absence; unavailable
 // providers, legacy locations and work-owned outcomes remain untouched.
 func (s *Server) reconcileRecoveredRuntimeAtBoot(ctx context.Context, key string, run orchestrator.RunState) orchestrator.RunState {
+	if run.Output != nil {
+		return s.captureRecoveredRunResult(ctx, key, run)
+	}
 	if !s.recoveredRuntimeAbsent(ctx, run) {
 		return run
 	}
@@ -30,6 +33,22 @@ func (s *Server) reconcileRecoveredRuntimeAtBoot(ctx context.Context, key string
 	// Existing journal recovery handles this trace, preserving its retry on
 	// publication failure. Absence does not establish a successful exit code.
 	return ended
+}
+
+func (s *Server) captureRecoveredRunResult(ctx context.Context, key string, run orchestrator.RunState) orchestrator.RunState {
+	if run.Status != "running" || run.Output == nil || run.Output.RetainedResult != nil || s.orchestrator == nil {
+		return run
+	}
+	snapshot, err := s.orchestrator.ReadRetainedRunResult(ctx, run)
+	if err != nil || !snapshot.Complete {
+		return run
+	}
+	updated, err := s.orchestrator.RecordRetainedRunResult(ctx, key, run, snapshot)
+	if err != nil {
+		s.logger.Warn("preserve recovered run result", "run_id", run.ID, "error", err)
+		return run
+	}
+	return updated
 }
 
 func (s *Server) recoveredRuntimeAbsent(ctx context.Context, run orchestrator.RunState) bool {
@@ -96,6 +115,10 @@ func (s *Server) reconcileRecoveredRuntimes(ctx context.Context) {
 		}
 		if current.Status != "running" || !orchestrator.SameRecoveredIdentity(current, expected) {
 			delete(s.recoveredRuntimes, key)
+			continue
+		}
+		if current.Output != nil {
+			s.captureRecoveredRunResult(ctx, key, current)
 			continue
 		}
 		if !s.recoveredRuntimeAbsent(ctx, current) {

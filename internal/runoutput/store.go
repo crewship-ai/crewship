@@ -223,6 +223,7 @@ func readCommitted(dir string, after uint64, cursor *readCursor, visit func(Reco
 	seq := cursor.sequence
 	last := after
 	terminal := cursor.terminal
+	var pendingTerminal *Record
 	for {
 		line, err := reader.ReadSlice('\n')
 		if err == io.EOF && len(line) == 0 {
@@ -257,16 +258,28 @@ func readCommitted(dir string, after uint64, cursor *readCursor, visit func(Reco
 			return last, false, errors.New("unknown run output record")
 		}
 		if seq > after {
-			if err = visit(record); err != nil {
-				return last, false, err
+			if record.Kind == "exit" {
+				pendingTerminal = &record
+			} else {
+				if err = visit(record); err != nil {
+					return last, false, err
+				}
+				last = seq
 			}
-			last = seq
 		}
 		cursor.sequence, cursor.terminal = seq, terminal
 		cursor.offset += int64(len(line))
 	}
 	if seq != cp.Sequence || terminal != cp.Terminal {
 		return last, false, errors.New("run output checkpoint mismatch")
+	}
+	// A terminal result is meaningful only after the entire committed prefix
+	// agrees with its checkpoint. Do not expose completion before validation.
+	if pendingTerminal != nil {
+		if err = visit(*pendingTerminal); err != nil {
+			return last, false, err
+		}
+		last = pendingTerminal.Sequence
 	}
 	return last, terminal, nil
 }
