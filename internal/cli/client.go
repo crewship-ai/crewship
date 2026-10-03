@@ -337,6 +337,19 @@ func (c *Client) applyAuth(req *http.Request) error {
 	return nil
 }
 
+// ResolveWorkspaceIDStrict resolves the configured workspace without the legacy
+// transport-failure fallback to a slug. Security boundaries must fail closed.
+func (c *Client) ResolveWorkspaceIDStrict(ctx context.Context) (string, error) {
+	id, err := c.resolveWorkspaceID(ctx)
+	if err != nil {
+		return "", err
+	}
+	if id == "" || !looksLikeCUID(id) {
+		return "", fmt.Errorf("cannot resolve configured workspace to an ID")
+	}
+	return id, nil
+}
+
 // GetWorkspaceID returns the resolved workspace ID (CUID).
 // If WorkspaceID looks like a slug (not a CUID), it resolves it.
 func (c *Client) GetWorkspaceID() string {

@@ -10,9 +10,9 @@ binary contains this guide and the API contract; no separate package is needed.
 
 ## Find only what the task needs
 
-With MCP, use `crewship_search` with a short noun or path fragment. Results are
+With MCP, use `crewship_search` with intent words such as `list agents`, `create crew`, or `start routine`. Results are
 paginated; use `next_offset` if needed. Read `crewship_schema` for the selected
-`operation_id`, then call `crewship_request`. Supply actual IDs in `path_params`,
+`operation_id`, then call `crewship_read` or `crewship_write`. Supply actual IDs in `path_params`,
 JSON in `body`, and repeated `name=value` strings in `query` or `headers`.
 
 With a shell:
@@ -33,14 +33,21 @@ missing required fields, IDs, routes, or capabilities. Discover them.
 
 CLI identity comes from the configured profile/login or environment. Use the
 user's selected server/workspace. MCP fixes these at process startup; tool
-arguments cannot change identity. Ask for missing credentials rather than
+arguments cannot change identity. Workspace path parameters are pinned to the
+launch workspace; omit `workspaceId` to let the server resolve it. Resource IDs
+and JSON bodies still rely on server authorization; this is not a general
+workspace isolation guarantee. Ask for missing credentials rather than
 printing tokens or copying them into instructions or generated client configs.
 
 CLI mutations require `--yes`; MCP mutations require the operator's startup
 `--allow-write` and per-call `confirm_write=true`. These switches acknowledge a
-mutation, not user authorization. Existing authorization carries forward; do not
+mutation by the model, not approval by a human. Existing authorization carries forward; do not
 ask for the same permission again. Server permissions and approval gates still
 apply. Do not change them to get an operation through.
+
+Use `--write-tags` to narrow mutations; admin writes need explicit `admin`.
+`--require-approval` requests human confirmation through client MCP elicitation
+and fails closed if unavailable. `confirm_write` alone is not human approval.
 
 Use `--dry-run` or `dry_run=true` when a request preview is useful. It checks
 request metadata offline, not server permissions or the body against OpenAPI.

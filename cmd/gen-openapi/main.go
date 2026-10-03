@@ -291,6 +291,7 @@ func pathParams(p string) []string {
 }
 
 func buildDocument(routes []route) map[string]any {
+	handlerProse := handlerDescriptions()
 	paths := map[string]any{}
 	components := responseComponents()
 	schemas := components["schemas"].(map[string]any)
@@ -425,10 +426,29 @@ func buildDocument(routes []route) map[string]any {
 				}
 			}
 		}
+		summary, description, readOnly := operationMetadata(rt)
+		if strings.Contains(description, "Inspect the parameters and request/response") {
+			_, targets, _ := resolveHandlerRefs(rt.call, readSource(rt.source))
+			for _, target := range targets {
+				if prose := handlerProse[target]; prose != "" {
+					description = prose + "\n\n" + description
+					break
+				}
+			}
+		}
 		op := map[string]any{
+			"summary": summary, "description": description, "x-crewship-read-only": readOnly,
 			"operationId": operationID(rt.method, rt.path),
 			"tags":        []string{tagFor(rt.path)},
 			"responses":   responses,
+		}
+		if strings.Contains(rt.path, "/pipelines") || strings.Contains(rt.path, "/pipeline-") {
+			op["tags"] = []string{tagFor(rt.path), "routines"}
+		}
+		if strings.Contains(rt.path, "/missions/") || strings.HasSuffix(rt.path, "/missions") {
+			if tagFor(rt.path) != "missions" {
+				op["tags"] = []string{tagFor(rt.path), "missions"}
+			}
 		}
 		if rt.method == "GET" && rt.path == "/api/v1/shared-chats/{shareId}/messages" {
 			op["security"] = []map[string][]string{{"chatShareBearer": {}}}

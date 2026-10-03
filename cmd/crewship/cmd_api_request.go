@@ -12,6 +12,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -209,9 +210,9 @@ func executeAPIRequest(cmd *cobra.Command, args []string, baseClient *cli.Client
 			headerNames = append(headerNames, name)
 		}
 		sort.Strings(headerNames)
-		return emit(map[string]any{"method": method, "server": server.String(), "path": u.EscapedPath(), "query_keys": keys, "header_names": headerNames, "workspace": client.WorkspaceID, "authentication": authentication, "has_body": input != "", "content_type": contentType, "requires_yes": apiRequiresYes(method), "dry_run": true})
+		return emit(map[string]any{"method": method, "server": server.String(), "path": u.EscapedPath(), "query_keys": keys, "header_names": headerNames, "workspace": client.WorkspaceID, "authentication": authentication, "has_body": input != "", "content_type": contentType, "requires_yes": apiRequestRequiresYes(method, u.Path), "dry_run": true})
 	}
-	if apiRequiresYes(method) && !yes {
+	if apiRequestRequiresYes(method, strings.SplitN(path, "?", 2)[0]) && !yes {
 		return apiValidation("mutating requests require --yes; inspect with --dry-run first")
 	}
 	if !anonymous {
@@ -340,4 +341,29 @@ func validatedAPIServer(raw string) (*url.URL, error) {
 		return nil, apiValidation("server must be an HTTP(S) URL without credentials, query, or fragment")
 	}
 	return server, nil
+}
+
+// Only audited static POST reads are exempt from the conservative HTTP-method
+// fallback. Unknown endpoints remain mutations, even if their name says search.
+var apiReadOperations = sync.OnceValue(func() map[string]bool {
+	reads := map[string]bool{}
+	doc, err := loadAPIDocument()
+	if err != nil {
+		return reads
+	}
+	for path, methods := range doc.Paths {
+		for method, raw := range methods {
+			var metadata struct {
+				ReadOnly bool `json:"x-crewship-read-only" yaml:"x-crewship-read-only"`
+			}
+			if json.Unmarshal(raw, &metadata) == nil && metadata.ReadOnly {
+				reads[strings.ToUpper(method)+" "+path] = true
+			}
+		}
+	}
+	return reads
+})
+
+func apiRequestRequiresYes(method, path string) bool {
+	return apiRequiresYes(method) && !apiReadOperations()[method+" "+path]
 }

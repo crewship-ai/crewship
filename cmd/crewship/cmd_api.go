@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -21,6 +22,7 @@ type apiOperation struct {
 	Method      string   `json:"method" yaml:"method"`
 	Path        string   `json:"path" yaml:"path"`
 	Summary     string   `json:"summary,omitempty" yaml:"summary,omitempty"`
+	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
 	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
 	RequiresYes bool     `json:"requires_yes" yaml:"requires_yes"`
 }
@@ -61,26 +63,96 @@ func (d *apiDocument) operations(search, method string) ([]apiOperation, error) 
 				continue
 			}
 			var op struct {
-				ID      string   `json:"operationId" yaml:"operationId"`
-				Summary string   `json:"summary" yaml:"summary"`
-				Tags    []string `json:"tags" yaml:"tags"`
+				ID          string   `json:"operationId" yaml:"operationId"`
+				Summary     string   `json:"summary" yaml:"summary"`
+				Tags        []string `json:"tags" yaml:"tags"`
+				Description string   `json:"description" yaml:"description"`
+				ReadOnly    bool     `json:"x-crewship-read-only" yaml:"x-crewship-read-only"`
 			}
 			if err := json.Unmarshal(raw, &op); err != nil {
 				return nil, err
 			}
-			if !strings.Contains(strings.ToLower(path+" "+op.ID+" "+op.Summary+" "+strings.Join(op.Tags, " ")), strings.ToLower(search)) {
+			entry := apiOperation{ID: op.ID, Method: verb, Path: path, Summary: op.Summary, Description: op.Description, Tags: op.Tags, RequiresYes: apiRequiresYes(verb) && !op.ReadOnly}
+			if apiSearchScore(entry, search) < 0 {
 				continue
 			}
-			ops = append(ops, apiOperation{op.ID, verb, path, op.Summary, op.Tags, apiRequiresYes(verb)})
+			ops = append(ops, entry)
 		}
 	}
 	sort.Slice(ops, func(i, j int) bool {
+		a, b := apiSearchScore(ops[i], search), apiSearchScore(ops[j], search)
+		if a != b {
+			return a > b
+		}
 		if ops[i].Path == ops[j].Path {
 			return ops[i].Method < ops[j].Method
 		}
 		return ops[i].Path < ops[j].Path
 	})
 	return ops, nil
+}
+
+// Whole-token matching avoids run matching runtime. Every query token must
+// match; weighted fields rank intent/summary above path and long descriptions.
+// Normalization is intentionally small and deterministic, not fuzzy guessing.
+func apiSearchTokens(text string) []string {
+	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+	for i, word := range words {
+		switch word {
+		case "agents", "crews", "routines", "missions", "runs", "workspaces", "conversations":
+			word = strings.TrimSuffix(word, "s")
+		case "pipelines", "pipeline":
+			word = "routine"
+		case "start", "execute", "launch":
+			word = "run"
+		case "add", "new":
+			word = "create"
+		case "show", "read", "fetch":
+			word = "get"
+		case "remove":
+			word = "delete"
+		}
+		words[i] = word
+	}
+	return words
+}
+
+func apiSearchScore(op apiOperation, query string) int {
+	terms := apiSearchTokens(query)
+	if len(terms) == 0 {
+		return 0
+	}
+	fields := []struct {
+		text   string
+		weight int
+	}{{op.Summary, 12}, {strings.Join(op.Tags, " "), 6}, {op.Path + " " + op.ID, 4}, {op.Description, 1}}
+	score := 0
+	for _, term := range terms {
+		best := 0
+		for _, field := range fields {
+			for _, token := range apiSearchTokens(field.text) {
+				if token == term && field.weight > best {
+					best = field.weight
+				}
+			}
+		}
+		if best == 0 {
+			return -1
+		}
+		score += best
+	}
+	// Prefer the requested action, not a passive list of similarly named runs.
+	summary := apiSearchTokens(op.Summary)
+	if len(summary) > 0 {
+		for _, term := range terms {
+			if term == summary[0] {
+				score += 8
+				break
+			}
+		}
+	}
+	// Prefer the shortest focused operation when word evidence is otherwise tied.
+	return score*1000 - len(op.Path)
 }
 
 // A selected schema remains a standalone OpenAPI document. Include only the

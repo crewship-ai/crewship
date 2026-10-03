@@ -30,7 +30,10 @@ client. Restart/reload the client and inspect its MCP status after registration.
 Install Crewship at its permanent location before connecting it; reconnect if
 that location changes. Discovery and the bundled guide also work without login.
 
-The default connection executes read methods only. To enable mutations:
+The default connection executes catalog-classified reads only, including six
+audited POST reads: conversation and memory search, automation preview, backup
+content preview and restore checks, and OAuth metadata discovery. Reads can
+contact configured providers and still require server permissions. To enable mutations:
 
 ```bash
 crewship ai connect codex --allow-write
@@ -53,10 +56,25 @@ never copies a token into the client config. The MCP process reads Crewship's
 normal credentials at startup; restart it after changing login or profiles.
 Environment-only credentials must be available to that process too.
 
+Administrators can narrow writes with `--allow-write --write-tags routines,missions`.
+Tags match exactly and unknown tags are rejected by the server. With no tag filter,
+non-admin writes are enabled; `admin` must always be listed explicitly. This is
+not a full authorization system: server permissions still apply.
+
+`--require-approval` requests human confirmation through MCP form elicitation
+before each real write. The client is trusted to present the form to a human;
+this is not proof against a malicious client. Approval continuations expire after
+five minutes and are single-use, session-bound and tied to the exact arguments.
+Unsupported clients, cancellation and rejection fail
+closed. Without it, `confirm_write` is only the model's acknowledgment. Tool
+annotations help clients apply separate approval policies but are not enforcement.
+
 ## crewship ai connect
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
+| `--write-tags` | (unset) | Restrict mutations to exact catalog tags; admin requires explicit inclusion. |
+| `--require-approval` | `false` | Require human approval through MCP elicitation. |
 | `--allow-write` | `false` | Enable explicitly confirmed mutations in the registered server. |
 | `--dry-run` | `false` | Print registration arguments without executing the client. |
 
@@ -85,6 +103,8 @@ CLI's global output-format preference.
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
+| `--write-tags` | (unset) | Restrict mutations to exact catalog tags; admin requires explicit inclusion. |
+| `--require-approval` | `false` | Require human approval through MCP elicitation. |
 | `--allow-write` | `false` | Include the mutation opt-in in the launch arguments. |
 
 The selected profile and workspace are carried into the launch arguments.
@@ -138,6 +158,8 @@ the session.
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
+| `--write-tags` | (unset) | Restrict mutations to exact catalog tags; admin requires explicit inclusion. |
+| `--require-approval` | `false` | Require human approval through MCP elicitation. |
 | `--allow-write` | `false` | Allow mutations with per-call `confirm_write=true`. |
 | `--timeout` | `30s` | Overall timeout for each API call; must be positive. |
 | `--max-response-bytes` | `1048576` | API response cap, from 1 to 10485760 bytes. |
@@ -147,9 +169,10 @@ the session.
 | Tool | Purpose |
 | --- | --- |
 | `crewship_guide` | Read the bundled skill and current write policy. |
-| `crewship_search` | Search operation IDs, paths, summaries and tags. Defaults to 20 results, maximum 100; follow `next_offset`. |
+| `crewship_search` | Rank whole-token matches across summaries, descriptions, paths, IDs and tags; supports common action synonyms. Defaults to 20 results, maximum 100; follow `next_offset`. |
 | `crewship_schema` | Read one operation's OpenAPI contract with referenced schemas. |
-| `crewship_request` | Execute that operation using JSON arguments and the fixed CLI identity. |
+| `crewship_read` | Execute only catalog-classified reads; annotated read-only. |
+| `crewship_write` | Execute only mutations; conservatively annotated potentially destructive. |
 
 Discovery is offline and follows the embedded OpenAPI contract. It is not a claim
 that a different server version exposes identical behavior. Every generated
@@ -187,3 +210,19 @@ adapter intentionally exposes JSON HTTP operations, not local shell execution.
 - [Cursor MCP configuration](https://cursor.com/docs/mcp)
 - [VS Code MCP configuration](https://code.visualstudio.com/docs/agent-customization/mcp-servers)
 - [Gemini CLI MCP configuration](https://geminicli.com/docs/tools/mcp-server/)
+
+### Scope and remaining limits
+
+MCP pins the server, identity and workspace selectors. `{workspaceId}` is filled
+from the launch workspace; a conflicting value is rejected. Such routes require
+an explicit configured workspace. Omit that parameter when using a workspace
+slug; real calls resolve it under a deadline and fail closed on resolution errors.
+Dry-run remains offline and uses the configured selector. This does not validate
+workspace membership of every resource ID or JSON body: server authorization is
+still responsible for that. Global endpoints retain their global scope.
+
+The catalog is embedded, credentials are loaded at startup, and registration
+uses the current executable path. Live-server schema refresh, credential refresh,
+stable upgrade paths, client lifecycle commands and high-level run/wait tools are
+not implemented here. Client registration tests are not model task evaluations;
+no model success-rate or token-saving claim is made.

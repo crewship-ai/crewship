@@ -47,6 +47,17 @@ func aiLaunch(cmd *cobra.Command) (string, []string, error) {
 	if write {
 		args = append(args, "--allow-write")
 	}
+	tags, _ := cmd.Flags().GetStringSlice("write-tags")
+	if len(tags) > 0 {
+		args = append(args, "--write-tags", strings.Join(tags, ","))
+	}
+	approval, _ := cmd.Flags().GetBool("require-approval")
+	if approval {
+		args = append(args, "--require-approval")
+	}
+	if len(tags) > 0 && !write {
+		return "", nil, apiValidation("--write-tags requires --allow-write")
+	}
 	return executable, args, nil
 }
 
@@ -172,6 +183,8 @@ is needed for the adapter. Crewship API calls still require Crewship login.`}
 		_, err = fmt.Fprint(cmd.OutOrStdout(), data)
 		return err
 	}}
+	config.Flags().StringSlice("write-tags", nil, "Limit writes to exact catalog tags; admin must be explicitly listed")
+	config.Flags().Bool("require-approval", false, "Require MCP client human approval for writes")
 	config.Flags().Bool("allow-write", false, "Include opt-in mutation support in the generated MCP configuration")
 	connect := &cobra.Command{Use: "connect <codex|claude>", Short: "Register this binary with an installed AI client's native MCP command", Args: apiArgs(cobra.ExactArgs(1)), ValidArgs: []string{"codex", "claude"}, Long: `Register the crewship MCP server using the installed client's own configuration
 command. Claude Code uses user scope; Codex uses its normal MCP configuration.
@@ -200,6 +213,8 @@ without running the client or changing files.`, RunE: func(cmd *cobra.Command, a
 		child.Stderr = cmd.ErrOrStderr()
 		return child.Run()
 	}}
+	connect.Flags().StringSlice("write-tags", nil, "Limit writes to exact catalog tags; admin must be explicitly listed")
+	connect.Flags().Bool("require-approval", false, "Require MCP client human approval for writes")
 	connect.Flags().Bool("allow-write", false, "Enable explicitly confirmed mutations in the registered MCP server")
 	connect.Flags().Bool("dry-run", false, "Print the client registration command without executing it")
 	root.AddCommand(skill, config, connect)

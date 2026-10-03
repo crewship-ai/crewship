@@ -70,7 +70,7 @@ func TestAPICatalogCoversEmbeddedContract(t *testing.T) {
 		if len(value["paths"].(map[string]any)) != 1 {
 			t.Fatalf("selection included unrelated paths: %s", op.ID)
 		}
-		if op.RequiresYes != (op.Method != "GET" && op.Method != "HEAD" && op.Method != "OPTIONS") {
+		if op.RequiresYes != apiRequestRequiresYes(op.Method, op.Path) {
 			t.Fatalf("mutation policy: %+v", op)
 		}
 	}

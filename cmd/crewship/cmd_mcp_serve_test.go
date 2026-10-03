@@ -93,8 +93,8 @@ func TestCLIMCPWireDiscoveryAndJSONBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 4 {
-		t.Fatalf("expected compact 4-tool surface, got %d", len(tools.Tools))
+	if len(tools.Tools) != 5 {
+		t.Fatalf("expected compact 5-tool surface, got %d", len(tools.Tools))
 	}
 	raw, _ := json.Marshal(tools)
 	if len(raw) > 12000 {
@@ -114,7 +114,7 @@ func TestCLIMCPWireDiscoveryAndJSONBody(t *testing.T) {
 	if calls.Load() != 0 {
 		t.Fatal("discovery made network requests")
 	}
-	result, err = session.CallTool(ctx, &mcp.CallToolParams{Name: "crewship_request", Arguments: json.RawMessage(fmt.Sprintf(`{"operation_id":%q,"confirm_write":true,"body":{"number":9007199254740993}}`, id))})
+	result, err = session.CallTool(ctx, &mcp.CallToolParams{Name: "crewship_write", Arguments: json.RawMessage(fmt.Sprintf(`{"operation_id":%q,"confirm_write":true,"body":{"number":9007199254740993}}`, id))})
 	if err != nil || result.IsError {
 		t.Fatalf("request: %+v %v content=%+v", result, err, result.Content[0].(*mcp.TextContent).Text)
 	}
@@ -190,7 +190,7 @@ func TestCLIMCPGuardsAndErrors(t *testing.T) {
 		t.Fatal("invalid inputs reached server")
 	}
 	session := testMCPSession(t, s)
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "crewship_request", Arguments: map[string]any{"operation_id": id}})
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "crewship_read", Arguments: map[string]any{"operation_id": id}})
 	if err != nil || !result.IsError {
 		t.Fatalf("%+v %v", result, err)
 	}
@@ -257,7 +257,7 @@ func TestCLIMCPWireRejectsIdentityAndFileArguments(t *testing.T) {
 	session := testMCPSession(t, s)
 	id := mcpOpID(t, s, "GET", "/api/v1/agents")
 	for _, extra := range []string{`"server":"https://example.com"`, `"input":"/etc/passwd"`, `"output":"/tmp/file"`, `"confirm_write":"true"`, `"path_params":{"id":3}`, `"query":"workspace_id=other"`} {
-		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "crewship_request", Arguments: json.RawMessage(fmt.Sprintf(`{"operation_id":%q,%s}`, id, extra))})
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "crewship_read", Arguments: json.RawMessage(fmt.Sprintf(`{"operation_id":%q,%s}`, id, extra))})
 		if err != nil || !result.IsError {
 			t.Fatalf("accepted %s: %+v %v", extra, result, err)
 		}
@@ -313,7 +313,7 @@ func TestCLIMCPBinaryStdio(t *testing.T) {
 	}
 	defer session.Close()
 	tools, err := session.ListTools(ctx, nil)
-	if err != nil || len(tools.Tools) != 4 {
+	if err != nil || len(tools.Tools) != 5 {
 		t.Fatalf("tools: %+v %v", tools, err)
 	}
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "crewship_guide", Arguments: map[string]any{}})
