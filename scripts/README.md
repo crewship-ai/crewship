@@ -55,7 +55,7 @@ commands. They may publish or remove release/package artifacts.
 | [go-toolchain-pin.sh](go-toolchain-pin.sh), [pr-image-build-paths.sh](pr-image-build-paths.sh) | Toolchain version and CI image-path consistency |
 | [no-root-binaries.sh](no-root-binaries.sh), [skip-budget.sh](skip-budget.sh) | Root build-output guard and test-skip budget (`skip-budget.txt`) |
 | [typecheck-tests.mjs](typecheck-tests.mjs) | Test fixture type checking via `pnpm test:types` |
-| [check-control-accessibility.tsx](check-control-accessibility.tsx) | Renders controls in Chromium and writes measurements/screenshots under `/tmp`; requires browser dependencies |
+| [check-control-accessibility.tsx](check-control-accessibility.tsx) | Renders controls in Chromium and writes measurements/screenshots into a fresh private directory under the OS temporary directory (printed on stderr and retained for inspection); requires browser dependencies |
 | [cli-command-smoke.sh](cli-command-smoke.sh), [cli-exit-code-contract.sh](cli-exit-code-contract.sh) | Built CLI parser/help and exit-code contracts |
 | [test-harness-integrity.sh](test-harness-integrity.sh) | Checks the acceptance harness itself |
 

@@ -312,9 +312,21 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 | `runtime_image` | string | Custom runtime image (empty string clears; existence validated) |
 | `devcontainer_config` | string | Raw devcontainer.json (empty string clears; max 100 KB) |
 | `mise_config` | string | Mise JSON/TOML (empty string clears; 10 KiB configuration, separately bounded native lock) |
-| `services_json` | string | Sidecar services JSON (empty/whitespace clears; max 64 KB). When the stored configuration is one that reads back redacted, the only accepted value is the unchanged plaintext; anything else — including the redaction sentinel a client read and echoed back, or an empty string — is `409` and leaves the services and their credentials untouched |
+| `services_json` | string | Sidecar services JSON (empty/whitespace clears; max 64 KB). When the stored configuration is one that reads back redacted, every submitted replacement — including identical plaintext, the redaction sentinel, or an empty string — is `409` and leaves the services and their credentials untouched. Omit this field when updating other crew settings; such patches can be retried safely without resubmitting private configuration |
 
 **Response:** `200 OK` -- updated crew object.
+
+<Note>
+  **Replacing private service settings:** there is currently no supported
+  in-place replacement or clearing operation for a configuration withheld on
+  read. Omit `services_json` to update other crew settings. Creating a replacement
+  crew allows a new service configuration, including runtime credential
+  references (`env_refs`), but does not migrate the existing crew's resources.
+  Deleting the old crew also deletes its missions, mission tasks and memberships,
+  soft-deletes its agents, and may remove its auto-managed credentials; review
+  [Delete Crew](#delete-crew) before choosing that path. Safe in-place replacement
+  is tracked in [#2843](https://github.com/crewship-ai/crewship/issues/2843).
+</Note>
 
 <Note>
   Changing `network_mode`, `allowed_domains`, or `services_json` triggers a container restart so the docker provider picks up the new policy / sidecar set on the next agent run. Changing `runtime_image`, `devcontainer_config`, or `mise_config` invalidates `cached_image` + `config_hash` to force a rebuild.
@@ -341,7 +353,7 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 | `400` | Invalid field values (name/slug length, slug format, `network_mode`, domain entry, `container_ttl_hours` negative, `max_ephemeral_agents` outside 0-100, MCP JSON missing `mcpServers`, escalation thresholds out of range, oversize or invalid `devcontainer_config`/`mise_config`/`services_json`, `runtime_image` not found) |
 | `403` | Insufficient role |
 | `404` | Crew not found |
-| `409` | Slug already taken; or `services_json` differs from a stored configuration that is redacted on read (`Private service settings cannot be replaced through crew updates`) — edit such services through the manifest they were applied from |
+| `409` | Slug already taken; or `services_json` is submitted for a stored configuration that is redacted on read (`Private service settings cannot be replaced through crew updates`) |
 
 ---
 
