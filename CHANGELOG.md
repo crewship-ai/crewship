@@ -20,6 +20,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Crew journal summary actions reset on crew/workspace changes and suppress notifications or refreshes from abandoned requests.
+
+- Runtime availability ignores superseded checks; graph agent cards support keyboard activation, routine cards hide unknown step progress, and graph edges refresh changed handles and arrow markers.
+
 - Integration workspace changes close old confirmation dialogs, clear selection and form state, and suppress notifications from abandoned connection actions.
 
 - Crew policy controls discard abandoned reads and drafts, stop a policy save from continuing into quota writes after selection changes, and disable pending saves when edit access is removed. Unreadable optional quota metadata falls back without hiding the loaded policy.
