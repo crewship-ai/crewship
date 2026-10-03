@@ -887,9 +887,32 @@ crewship crew provision status <slug-or-id> --watch
 
 ---
 
+
+### `crewship crew provision lock-resolve`
+
+Resolve a local mise JSON/TOML file in a disposable Docker builder. This command
+requires a trusted local Linux image and registry network access. It changes no
+Crewship server state and does not install or activate the returned bundle.
+
+```bash
+crewship crew provision lock-resolve mise.json --image sha256:<local-image-id>
+crewship crew provision lock-resolve mise.json --image sha256:<local-image-id> --bump
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--image` | `string` | required | Immutable local Docker image ID containing mise and the documented resolver utilities. |
+| `--bump` | `bool` | `false` | Update an existing input lock within its selectors; exact version pins remain exact. |
+
+Output JSON contains `lock`, `resolver_image_id`, `platform` and `mise_version`.
+Supply the proposed lock through the ordinary manifest/build path. See
+[resolver limits and trust requirements](/guides/devcontainers#resolving-or-updating-a-lock-with-crewship).
+
+---
+
 ## `crewship crew rebuild`
 
-Invalidate the crew's cached devcontainer image and re-provision. Use after changing `crewship crew config` values — `provision` alone will reuse the cached layer keyed by the old config hash. Streams live progress unless `--no-watch` is passed.
+Force a new build without reusing the build cache. The previous selected image remains available until the new build succeeds. An input mise lock still pins dependencies; update the lock explicitly to change those versions. This command does not replace a running container. Streams live progress unless `--no-watch` is passed.
 
 ```bash
 crewship crew rebuild <slug-or-id>
