@@ -1,18 +1,17 @@
 # Design — Crew runtime: container configuration, capacity, and wake cost
 
-Status: draft · 2026-08-01 · Companion to `agent-identity-signing.md` (isolation) and
+Status: draft · 2026-08-01 · Companion to [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/agent-identity-signing.md) (isolation) and
 `agent-memory-on-wake.md` (context delivery)
 
 > **Scope note.** This document is about the *crew container as an operational object*:
 > how it is configured, what it costs while idle, what limits it, and what a wake
 > actually pays for. It is deliberately independent of the container-per-agent decision
-> locked in `agent-identity-signing.md` — every defect below is present whether an agent
+> locked in [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/agent-identity-signing.md) — every defect below is present whether an agent
 > shares a container with its crew or gets its own, and several get *worse* under
 > container-per-agent because the per-container costs multiply.
 >
 > All `file:line` references verified against `fix/aux-reach-probes-the-slots-endpoint`
-> on 2026-08-01. Live measurements taken against dev1 (`localhost:8081`) the
-> same day via the CLI. Re-verify before implementing.
+> on 2026-08-01. Internal instance measurements are retained privately. Re-verify before implementing.
 
 ---
 
@@ -96,14 +95,8 @@ that populates `Sgids` is reachable only when `groupArg == nil` — i.e. only fo
 implicit form `"1001"`. Our `"1001:1001"` sets `groupArg != nil`, making that branch
 unreachable.
 
-Verified live on dev1:
-
-```
-$ id
-uid=1001(agent) gid=1001(agent) groups=1001(agent)
-```
-
-One group. No supplementary groups have ever been delivered.
+Use a synthetic process fixture to verify effective UID/GID and supplementary
+groups; configuration alone does not prove the resulting process identity.
 
 **Fix.** Set `GroupAdd: []string{"<crew-gid>", "1002"}` on the crew container. This is a
 one-line change that works today, needs no `/etc/group` edits, and is a prerequisite for
@@ -118,15 +111,10 @@ permits the bare-uid form today, so this is reachable on a BYOI image.
 
 ## 2. Idle crews are never stopped
 
-### 2.1 Live evidence
+### 2.1 Lifecycle verification
 
-On dev1, 2026-08-01, all three crew containers were running with **zero runs in history**:
-
-| Crew | Running since |
-|---|---|
-| ops | 2026-07-27 (5 days) |
-| quality | 2026-07-30 |
-| engineering | 2026-07-30 |
+Verify idle runtime shutdown with owned synthetic crews and observed process
+state. Internal container inventories are retained in private context.
 
 ### 2.2 Why
 
@@ -212,14 +200,10 @@ stopping idle crews.
 
 ## 4. Wake cost is an exec fan-out problem, not a container-start problem
 
-### 4.1 Measured
+### 4.1 Measurement boundary
 
-Live on dev1, agent idle 5 days, container warm:
-
-| | Time to answer |
-|---|---|
-| First wake | **6.5 s** |
-| Immediately again | **4.8 s** |
+Separate container start, command preflight and provider response latency.
+Internal workstation timings are not a product performance guarantee.
 
 ### 4.2 Where it goes
 
@@ -261,32 +245,9 @@ Correcting two figures that are easy to overstate: **`Memory: 4096` is a ceiling
 reservation**, and **`tmpfs size=500m` is a ceiling, not an allocation** — tmpfs pages are
 charged only when written.
 
-Marginal cost of one idle container, from measurement:
-
-| Component | Cost |
-|---|---|
-| containerd shim, **private** RSS | **1–5 MB** (Datadog, `smaps`, six live shims) |
-| containerd daemon, marginal | ~0.3–1 MB (single published datapoint) |
-| kernel memcg, 2–3 cgroups | ~45–65 KB at 8 cores; scales with host CPU count |
-| veth pair | ~25 KB at 8 CPUs; scales with `num_possible_cpus()` |
-| our sidecar process + `sleep infinity` | tens of MB (not measured) |
-
-> **Do not cite "10–15 MB per shim."** That is `ps` RSS, which charges the shared Go binary
-> text to every process. Marginal is 1–5 MB.
-
-**50 idle crews ≈ 1–2.5 GB.** That is affordable. The real costs are elsewhere:
-
-1. **Polling.** The listening-port scanner runs **one `docker exec` per tracked container
-   every 15 s** (`listening_port_scanner.go:22`), plus a healthcheck exec per container per
-   30 s. At 50 crews that is ~5 execs/s. One `docker exec` forks ~15 processes, so this is
-   **~75 forks/s purely to ask "are you alive."** At ~85 ms of daemon wall-clock per exec
-   that is **~42 % of dockerd's serialized exec capacity spent polling idle crews** — and
-   moby PR #43480 measured that with ~50 health-checked containers the
-   `Tasks/Start` RPC "could take upwards of a full second." Same fleet size as our target.
-2. **`/tmp` grows unbounded.** `sidecar.log` is appended with `2>>` (`exec_sidecar.go:839`)
-   with no rotation, on a tmpfs whose pages are charged to the crew's memory cgroup. A slow
-   leak that eventually OOM-kills the crew and presents as an agent bug.
-3. **Zombies** against `PidsLimit: 200` (§1.2 #2).
+Measure resident process memory, cgroup usage, network resources and disk
+separately. Internal measurements and capacity estimates are kept privately;
+configuration ceilings do not establish observed consumption.
 
 ### 5.1 Host ceiling, in the order it arrives
 

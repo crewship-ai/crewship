@@ -303,10 +303,8 @@ New **Asks** section on the agent canvas's Configuration tab
 
 ### 5.6 When an upload fails
 
-Observed on dev2: two files, both refused by the server
-(`create parent dir: … permission denied`), one toast on screen naming one of
-them, and two chips that read exactly like two attached documents. The user
-believed one had landed. Neither had.
+A failed upload must not appear as an attached document. If multiple uploads
+fail, report each outcome and never pass an unpersisted path to an agent.
 
 The rules, in the order they matter:
 
@@ -876,44 +874,12 @@ driving the camera input; rejection leaves the blob in place.
 | M4 | Seeds in recipes, YAML export/import | Yes — packs travel |
 | M5 | Telemetry, polish, delete the hardcoded fallback | Cleanup |
 
-## 15. Chat UI review (requested alongside the feature)
+## 15. Chat UI acceptance
 
-Observations from the running dev3 UI and the code behind it, worst first:
-
-1. **Two chip systems that never meet.** `defaultSuggestions` renders only when
-   `turns.length === 0`; `FollowUps` renders only after an assistant turn. So a
-   user mid-conversation with a *pending* turn sees neither, and the two lists
-   come from the same pack but look like different features. One rail,
-   one component, surface-filtered.
-2. **The cold start is 800px of nothing.** The robot icon sits at optical
-   centre, the chips sit at the bottom, and the eye has to travel the whole
-   viewport to connect "Start a conversation" with the thing that starts one.
-   Move the empty state down to sit directly above the rail.
-3. **The session id is the only thing in the top-right.** `cmsqmyc6` in mono,
-   full contrast, no label, next to a *New session* button. It is debug output
-   holding prime real estate. Demote to the session menu, or label it.
-4. **`Untitled session` never becomes titled.** First user message should title
-   the session; an eight-item sidebar of *Untitled session* is unnavigable.
-5. **The paperclip is the only affordance in a 100px-tall composer.** No hint of
-   what is droppable, no size cap shown until rejection, no camera on mobile.
-6. **The right rail's three icons carry no labels and no tooltips** in the
-   screenshot state. Files / activity / participants are not guessable glyphs.
-7. **`Connected` + `UI` chips are stacked adjacencies with different meanings**
-   (transport health, session origin). They read as one control.
-8. **The chips do not say what will happen.** Two of the four ("Show me your
-   skills", "Run a quick task") imply a UI action and deliver a text message.
-   Fixed by §5.1's visual distinction between question and form chips.
-
-Items 1, 2, 5 and 8 are inside this feature's scope. 3, 4, 6, 7 are separate
-tickets and should not be smuggled in.
-
-**Where they got to.** 4 (`Untitled session`) and 6 (the unlabelled rail icons)
-were fixed on `feat/chat-primary-surface` — sessions name themselves from the
-first message, and the rail's three icons read tooltip, drawer name and panel
-heading from one map, with `aria-keyshortcuts` for the shortcut the tooltip
-draws. 5 gained the camera and a named size cap on rejection. 8 is fixed as
-described. 1, 2, 3 and 7 are open, and 1 is the one worth doing next: the two
-rails still come from the same pack and still look like different features.
+Keep suggestion controls consistent across empty and active conversations.
+Give the empty state a visible starting action, distinguish attachment state
+from successful delivery, and keep debug identifiers subordinate to user
+content. Internal instance observations and screenshots are retained privately.
 
 ## 16. Open questions
 

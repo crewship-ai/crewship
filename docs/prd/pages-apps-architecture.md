@@ -1,8 +1,8 @@
 # Pages Apps: implementační architektura
 
-> **Implementační PRD první dodávky:** [Pages Apps v1](pages-apps-v1.md), včetně jednoho YAML exportu a přesného stavu implementace. Tento dokument zachovává širší architektonický kontext.
+> **Implementační PRD první dodávky:** [Pages Apps v1](../specs/pages-apps.md), včetně jednoho YAML exportu a přesného stavu implementace. Tento dokument zachovává širší architektonický kontext.
 
-Stav: návrh k implementaci, 2026-09-08. Vychází ze zadání plně vlastních Pages tvořených agenty v chatu. Tento dokument sjednocuje cílovou architekturu; [průzkum a předchozí experiment](../archive/pages-apps.md) zůstává dokladem pouze tam uvedených ověření. Žádné níže navržené API, tabulky ani balíčky SDK tímto dokumentem nevznikají.
+Stav: návrh k implementaci, 2026-09-08. Vychází ze zadání plně vlastních Pages tvořených agenty v chatu. Tento dokument sjednocuje cílovou architekturu; interní průzkum a experimentální protokoly jsou zachované v soukromém kontextu. Žádné níže navržené API, tabulky ani balíčky SDK tímto dokumentem nevznikají.
 
 ## Aktuálně potvrzený produktový rozsah
 
@@ -19,7 +19,7 @@ Stav: návrh k implementaci, 2026-09-08. Vychází ze zadání plně vlastních 
 - Zachovat izolaci custom JavaScriptu, build sandbox, Git, preview/publish/rollback a serverové oddělení práv producenta, čtenáře, editora a operátora. Příjemce Page nikdy nedostane data cizí crew pouze kvůli sdílení stránky.
 - První pilot: vlastní MySQL health dashboard a Ansible job přehled s jednou povolenou akcí. Ověřit souběh dvou uživatelů, výpadek producenta, push bez oprávnění, zastaralá data, změnu kódu a návrat publikace. Žádný nový aplikační databázový produkt, trvalý frontendový Node server ani obecná CI platforma.
 
-Zdroje existujícího základu: [sidecar producer](../../internal/sidecar/pages.go), [snapshot/realtime klient](../../hooks/use-pages.ts), [serverová autorizace](../../internal/api/pages_authz.go), [akce](../../internal/api/pages_actions.go). Integrace custom runtime s tímto základem je k 2026-09-09 implementovaná v rozsahu [v1](pages-apps-v1.md); širší návrhy níže tím nejsou prohlášeny za dokončené. Stav nasazení a testů určuje [handoff](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/pages-apps-handoff.md).
+Zdroje existujícího základu: [sidecar producer](../../internal/sidecar/pages.go), [snapshot/realtime klient](../../hooks/use-pages.ts), [serverová autorizace](../../internal/api/pages_authz.go), [akce](../../internal/api/pages_actions.go). Integrace custom runtime s tímto základem je k 2026-09-09 implementovaná v rozsahu [v1](../specs/pages-apps.md); širší návrhy níže tím nejsou prohlášeny za dokončené. Stav nasazení a testů určuje [handoff](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/pages-apps-handoff.md).
 
 **Druhá architektonická revize:** §14–18 zpřesňují závazné podmínky RBAC, izolace backendových operací, údržby a licencování. Zejména možnost spustit existující routine sama neprokazuje omezení oprávnění jejího procesu. Produkční gate z §13 vyžaduje i tyto podmínky.
 
@@ -48,7 +48,8 @@ V první podporované verzi je aplikace statický frontend. Python či shell skr
 
 ## 2. Co již existuje a co musíme doplnit
 
-Základ ověřen v checkoutu `005470ed7157ea2504c77484617ace97b1daeb4c`; přihlášené Pages na dev2 nebyly prohlédnuty. Toto není audit jejich konkrétního obsahu ani důkaz shody nasazeného buildu.
+Historický zdrojový základ: `005470ed7157ea2504c77484617ace97b1daeb4c`.
+Tato návrhová tabulka není novým ověřením nasazení.
 
 | Existující část | Využití / mezera |
 |---|---|
