@@ -3,7 +3,7 @@
 **Status:** proposed  
 **Owner:** Crewship maintainers  
 **Created:** 2026-08-04  
-**Companion:** `docs/prd/PRD-RELEASE-1-0-QUALITY-AUDIT.md`
+**Companion:** [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/PRD-RELEASE-1-0-QUALITY-AUDIT.md)
 
 ## Decision
 

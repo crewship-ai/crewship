@@ -3,7 +3,7 @@
 **Status:** Design draft, no implementation. Captured 2026-05-17.
 **Problem:** Concurrent agent dispatch into a single crew container overwhelms its memory budget; Docker OOM-kills the container (`exit 137`) and every in-flight run on it crashes.
 **Pattern:** "Queue if no memory, run when free" — not "raise the limit and pray".
-**Why now:** Observed live on dev1 (15 issues → 4 crews → 11/15 FAILED with `exit 137`, see PR #389). Memory bump in #389 raises the floor; admission control is the actual fix.
+**Motivation:** concurrent dispatch can exceed crew memory limits; admission control must bound concurrency instead of relying only on larger limits.
 
 ---
 
