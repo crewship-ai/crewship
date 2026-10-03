@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -166,23 +167,45 @@ func TestRestoreAcceptanceMissingMemoryDirectories(t *testing.T) {
 }
 
 func TestRestoreAcceptanceUnlinkFirstAllowsReadonlyFile(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root bypasses the DAC permission boundary exercised here")
-	}
 	root := t.TempDir()
+	uid := os.Getuid()
+	var credential *syscall.Credential
+	if uid == 0 {
+		// Root bypasses DAC. Run only the probe shell as an unprivileged
+		// identity, in an exclusively owned fixture with a traversable parent.
+		var err error
+		root, err = os.MkdirTemp("/tmp", "crewship-restore-preflight-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := os.RemoveAll(root); err != nil {
+				t.Error(err)
+			}
+		})
+		uid = 65534
+		credential = &syscall.Credential{Uid: uint32(uid), Gid: uint32(uid)}
+		if err := os.Chown(root, uid, uid); err != nil {
+			t.Fatal(err)
+		}
+	}
 	target := filepath.Join(root, "fact.txt")
 	if err := os.WriteFile(target, []byte("old"), 0444); err != nil {
 		t.Fatal(err)
 	}
 	ops := &acceptanceRestoreOps{execAs: func(ctx context.Context, _ string, args []string) (int, []byte, error) {
-		out, err := exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
+		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+		if credential != nil {
+			cmd.SysProcAttr = &syscall.SysProcAttr{Credential: credential}
+		}
+		out, err := cmd.CombinedOutput()
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
 			return exit.ExitCode(), out, nil
 		}
 		return 0, out, err
 	}}
-	spec := ExtractSpec{Dest: root, User: strconv.Itoa(os.Getuid()), UnlinkFirst: true}
+	spec := ExtractSpec{Dest: root, User: strconv.Itoa(uid), UnlinkFirst: true}
 	if err := probeWritable(context.Background(), ops, "owned-fixture", "alpha", spec, map[string]bool{".": true}, map[string]bool{"fact.txt": true}); err != nil {
 		t.Fatalf("a readonly file can be unlinked through its writable parent: %v", err)
 	}
