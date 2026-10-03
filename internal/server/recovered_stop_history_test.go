@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -154,5 +155,40 @@ func TestRecoveredStopHistoryPreservesRecordedCompletion(t *testing.T) {
 	}
 	if status != "IDLE" {
 		t.Fatalf("normal completion changed to %s", status)
+	}
+}
+
+// Pending manual IPC runs without a journal start must not repeatedly consume
+// the batch budget while actionable stops wait behind them.
+func TestRecoveredStopHistoryMakesBoundedProgressPastUnresolvedRuns(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+	for i := 0; i < 100; i++ {
+		seedStoppedOutbox(t, s, fmt.Sprintf("absent-%03d", i))
+	}
+	for i := 0; i < 101; i++ {
+		id := fmt.Sprintf("ready-%03d", i)
+		seedRecoveryTrace(t, s, id, "a")
+		seedStoppedOutbox(t, s, id)
+	}
+	// Three batches of 100 cover every one of these 201 pending runs,
+	// even when unresolved entries retain their durable pending marker.
+	for i := 0; i < 3; i++ {
+		if err := s.flushRecoveredStops(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	remaining := 0
+	for i := 0; i < 101; i++ {
+		if pendingStop(t, s, fmt.Sprintf("ready-%03d", i)) {
+			remaining++
+		}
+	}
+	if remaining != 0 {
+		t.Fatalf("%d actionable stops starved behind unresolved entries", remaining)
+	}
+	if !pendingStop(t, s, "absent-000") {
+		t.Fatal("invented history for unresolved manual run")
 	}
 }

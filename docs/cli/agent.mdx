@@ -422,7 +422,9 @@ queue keep that queue's settlement and reconciliation rules; restarting the
 server does not turn an unknown work outcome into cancellation.
 Confirmed recovered stops retain a durable history update until it succeeds.
 A transient journal failure is retried in the background, including after
-another restart, without executing the agent again.
+another restart, without executing the agent again. Recovery advances through
+bounded batches, so a pending trace without a known outcome does not repeatedly
+delay later confirmed stops.
 
 ## `crewship agent logs`
 

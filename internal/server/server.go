@@ -54,6 +54,9 @@ import (
 type Server struct {
 	containerCleanup *resourcelifecycle.Controller
 
+	recoveredStopsMu     sync.Mutex
+	recoveredStopsCursor string
+
 	httpServer    *http.Server
 	ipcServer     *http.Server
 	mux           *http.ServeMux

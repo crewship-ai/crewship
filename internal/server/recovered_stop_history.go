@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -19,15 +20,36 @@ func (s *Server) flushRecoveredStops(ctx context.Context) error {
 	if s.state == nil || s.db == nil || s.journalWriter == nil {
 		return nil
 	}
+	// Explicit stops and periodic recovery can overlap. One drain owns the
+	// cursor; another caller can leave its durable marker for the next tick.
+	if !s.recoveredStopsMu.TryLock() {
+		return nil
+	}
+	defer s.recoveredStopsMu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	states, err := s.state.List(ctx, "agent_runs")
 	if err != nil {
 		return err
 	}
+	// Resume after the last visited key, wrapping at the end. Unresolved IPC
+	// or work-owned stops keep their markers but cannot consume the first
+	// batch forever. Provider List returns a map, so its order is not a cursor.
+	keys := make([]string, 0, len(states))
+	for key := range states {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	start := sort.Search(len(keys), func(i int) bool { return keys[i] > s.recoveredStopsCursor })
 	var failures []error
 	processed := 0
-	for _, raw := range states {
+	for offset := 0; offset < len(keys) && processed < 100; offset++ {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(failures, err)...)
+		}
+		key := keys[(start+offset)%len(keys)]
+		s.recoveredStopsCursor = key
+		raw := states[key]
 		var run orchestrator.RunState
 		if err := json.Unmarshal(raw, &run); err != nil {
 			failures = append(failures, err)
@@ -43,9 +65,6 @@ func (s *Server) flushRecoveredStops(ctx context.Context) error {
 			failures = append(failures, fmt.Errorf("project confirmed stop %s: %w", run.ID, err))
 		}
 		processed++
-		if processed >= 100 {
-			break
-		}
 	}
 	return errors.Join(failures...)
 }
