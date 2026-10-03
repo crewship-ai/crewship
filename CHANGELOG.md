@@ -9,6 +9,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **AI operation discovery now ranks multiword searches** — generated API prose and ranked token search replace whole-query substring matching. Public descriptions omit internal handler comments; resource reads, nested creates and named actions receive clearer labels. MCP splits read/write tools, classifies audited POST reads, restricts admin writes and supports tag filters and optional client human approval. Workspace path selectors can no longer override the configured workspace.
+
+- **AI clients can connect directly to the Crewship binary.** Bundled `mcp serve` exposes paginated API discovery, focused schemas, a built-in Agent Skill and guarded JSON requests. `ai connect` registers Codex/Claude Code, `ai config` emits credential-free client snippets, and `ai skill` exports the embedded guide. Mutations require startup opt-in plus per-call acknowledgment; identity, redirect and size guards are shared with the CLI.
+
+- **CLI agents can discover API operations and inspect their inputs without scraping help.** `api operations` searches the embedded OpenAPI catalog, `api schema` returns focused schemas, and `api request` calls HTTP endpoints through the active profile with explicit mutation consent, offline previews, bounded input/output, and atomic downloads. `commands <path>` narrows discovery and includes required flags, inherited options, and runnable status. (#2836)
+- ⚠️ **Behaviour change:** CLI HTTP redirects must remain on the original server origin, including scheme and port. Configure a moved server explicitly; generic `api request` refuses all redirects.
+
 - **A crew started immediately after stopping could receive a stopped Docker container.** Runtime reconciliation now uses the newer inspect state for reuse and configuration drift decisions, rather than the older container-list snapshot. This also prevents a stale stopped listing from triggering configuration-based removal of a running crew. (#2855)
 
 ### Added

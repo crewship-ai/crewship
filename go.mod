@@ -16,6 +16,7 @@ require (
 	github.com/getsentry/sentry-go v0.49.0
 	github.com/go-jose/go-jose/v4 v4.1.5
 	github.com/google/go-containerregistry v0.22.1
+	github.com/google/jsonschema-go v0.4.3
 	github.com/google/nftables v0.3.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
@@ -25,6 +26,7 @@ require (
 	github.com/mattn/go-isatty v0.0.24
 	github.com/moby/moby/api v1.56.0
 	github.com/moby/moby/client v0.6.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/nicholas-fedor/shoutrrr v0.21.1
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/robfig/cron/v3 v3.0.1
@@ -111,8 +113,11 @@ require (
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
+	github.com/segmentio/asm v1.1.3 // indirect
+	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0 // indirect
