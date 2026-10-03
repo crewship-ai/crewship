@@ -20,6 +20,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- The repository UID invariant checks the actual runtime package paths, so a checkout directory containing `sidecar` or `provider` cannot make unrelated UID literals satisfy the check.
+
+- Page application reads wait for both a workspace and a Page selection instead of requesting an incomplete URL; incomplete crew owner references retain a visible fallback label.
+
 - Page actions reject non-finite numeric inputs and defaults; project recovery refuses checkpoint pins that do not identify an existing Git commit.
 
 - MCP credential creation clears secret input when its workspace or environment variable changes, cancels abandoned requests and ignores late results after closing the picker.
