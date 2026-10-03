@@ -410,6 +410,8 @@ type RunState struct {
 	// process-local completion owner. The server drains it without overriding
 	// work-owned outcomes or already terminal journal entries.
 	StopJournalPending bool `json:"stop_journal_pending,omitempty"`
+	// StopOrigin distinguishes detected absence from an explicit user stop.
+	StopOrigin string `json:"stop_origin,omitempty"`
 }
 
 // AgentEvent is a streaming event emitted during an agent run, such as text
@@ -482,7 +484,8 @@ type ContainerBusyProbe func(ctx context.Context, crewID, containerID string) bo
 type StatsRegisterFunc func(containerID, crewID, workspaceID string)
 
 type Orchestrator struct {
-	agentRuns              sync.Map // run id -> *agentRunControl; independent of credential HOME cleanup
+	runRecoveryMu          sync.Mutex // serializes recovered publication with local admission
+	agentRuns              sync.Map   // run id -> *agentRunControl; independent of credential HOME cleanup
 	userModelReader        func(context.Context, string, string) (string, error)
 	personalizationAllowed func(context.Context, string, string) (bool, error)
 	// agentLive refuses process creation for an agent that may no longer run

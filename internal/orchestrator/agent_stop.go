@@ -71,8 +71,16 @@ func (o *Orchestrator) trackAgentRun(ctx context.Context, req *AgentRunRequest) 
 		return nil
 	}
 
+	o.runRecoveryMu.Lock()
 	o.agentRuns.Store(req.RunID, c)
-	return ctx, func() { cancel(); close(c.done); o.agentRuns.Delete(req.RunID) }
+	o.runRecoveryMu.Unlock()
+	return ctx, func() {
+		cancel()
+		close(c.done)
+		o.runRecoveryMu.Lock()
+		o.agentRuns.Delete(req.RunID)
+		o.runRecoveryMu.Unlock()
+	}
 }
 
 // StopAgent stops current invocations and durable running records recovered
@@ -220,6 +228,8 @@ func (o *Orchestrator) stopAgentInvocation(ctx context.Context, c *agentRunContr
 // succeeds. Both explicit stops and deleted-agent cleanup retain retry evidence
 // if storage is unavailable after the provider has confirmed runtime absence.
 func (o *Orchestrator) persistStoppedRun(ctx context.Context, state RunState) error {
+	o.runRecoveryMu.Lock()
+	defer o.runRecoveryMu.Unlock()
 	raw, err := o.state.Get(ctx, "agent_runs", state.ID)
 	if err != nil {
 		return fmt.Errorf("read stopped run %s: %w", state.ID, err)

@@ -148,9 +148,13 @@ run. This does not establish a successful exit or recreate its lost output.
 Live processes and unverified identities remain protected. An unavailable
 runtime, an unknown container state, incomplete legacy identity or an exhausted
 startup probe budget does not prove that work ended. Attempts owned by the
-durable work dispatcher keep their own recovery authority. These checks happen
-at startup; continuous reconciliation of surviving recovered processes is not
-provided by this check.
+durable work dispatcher keep their own recovery authority. Surviving identities captured at startup are checked again by the background
+recovery loop (every 30 seconds, with a five-second probe budget per pass).
+Unknown runtimes are retried; new admissions and replaced identities are not
+treated as recovered work. Once absence is confirmed, a durable outbox retries
+the terminal history update. The result records an unknown outcome after
+recovery, rather than claiming success or a user-requested stop. The interval is
+not a recovery deadline: provider failures and a large backlog can delay it.
 
 ## Related
 

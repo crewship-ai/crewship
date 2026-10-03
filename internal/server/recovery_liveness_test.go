@@ -85,3 +85,68 @@ func TestRecoveryChecksPersistedRuntimeLiveness(t *testing.T) {
 		})
 	}
 }
+
+func TestRecoveryFollowsSurvivorWithoutTouchingNewRuns(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	c := &recoveredProbeContainer{mockContainer: &mockContainer{}, answer: "PRESENT"}
+	s.container = c
+	s.orchestrator = orchestrator.New(c, s.state, s.logger)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+	put := func(id string) {
+		t.Helper()
+		seedRecoveryTrace(t, s, id, "a")
+		raw, err := json.Marshal(orchestrator.RunState{ID: id, AgentID: "a", AgentSlug: "a", ContainerID: "runtime", Status: "running"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = s.state.Set(t.Context(), "agent_runs", id, raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("survivor")
+	s.recoverOrphanedRuns(t.Context())
+	put("new-admission")
+	c.err = errors.New("temporarily unavailable")
+	s.reconcileRecoveredRuntimes(t.Context())
+	if got := recoveryTerminalCount(t, s, "survivor"); got != 0 {
+		t.Fatalf("unknown runtime cancelled: %d", got)
+	}
+	c.err = nil
+	c.answer = "ABSENT"
+	s.reconcileRecoveredRuntimes(t.Context())
+	if err := s.flushRecoveredStops(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := recoveryTerminalCount(t, s, "survivor"); got != 1 {
+		t.Fatalf("survivor terminal count=%d, want 1", got)
+	}
+	if got := recoveryTerminalCount(t, s, "new-admission"); got != 0 {
+		t.Fatalf("new admission was cancelled: %d", got)
+	}
+	var status string
+	if err := s.db.QueryRow(`SELECT status FROM agents WHERE id='a'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "RUNNING" {
+		t.Fatalf("new admission agent status=%s", status)
+	}
+	if pendingStop(t, s, "survivor") {
+		t.Fatal("terminal publication left its outbox pending")
+	}
+	var reason string
+	if err := s.db.QueryRow(`SELECT json_extract(payload,'$.reason') FROM journal_entries WHERE id='recovered-stop:survivor'`).Scan(&reason); err != nil {
+		t.Fatal(err)
+	}
+	if reason != "recovered_runtime_absent" {
+		t.Fatalf("wrong recovery reason %q", reason)
+	}
+	// A repeated probe must not duplicate the terminal event.
+	s.reconcileRecoveredRuntimes(t.Context())
+	if err := s.flushRecoveredStops(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := recoveryTerminalCount(t, s, "survivor"); got != 1 {
+		t.Fatalf("duplicate terminal: %d", got)
+	}
+}

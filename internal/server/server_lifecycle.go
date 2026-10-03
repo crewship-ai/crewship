@@ -256,6 +256,7 @@ func (s *Server) Start(ctx context.Context) error {
 				if res := s.orchestrator.StopDeletedAgentRuns(ctx, "", lookup); res.Stopped > 0 || res.Pending > 0 {
 					s.logger.Info("deleted agent runs", "stopped", res.Stopped, "pending", res.Pending, "error", errors.Join(res.Errors...))
 				}
+				s.reconcileRecoveredRuntimes(ctx)
 				if err := s.flushRecoveredStops(ctx); err != nil {
 					s.logger.Warn("confirmed stop history pending retry", "error", err)
 				}
@@ -1058,6 +1059,14 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 				return
 			}
 			run = s.reconcileRecoveredRuntimeAtBoot(probeCtx, key, run)
+			if run.Status == "running" && run.ID != "" && run.ID != run.AgentID && key == run.ID {
+				s.recoveredRuntimesMu.Lock()
+				if s.recoveredRuntimes == nil {
+					s.recoveredRuntimes = make(map[string]orchestrator.RunState)
+				}
+				s.recoveredRuntimes[key] = run
+				s.recoveredRuntimesMu.Unlock()
+			}
 			if (run.Status == "running" || (run.Status == "cancelled" && run.StopJournalPending)) && run.AgentID != "" {
 				protectedAgents[run.AgentID] = true
 				if run.ID == "" || run.ID == run.AgentID {

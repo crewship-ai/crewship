@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Runs that survive a server restart no longer rely on the startup probe alone.** Background recovery follows only the original recovered identities, preserves new admissions and unknown runtime states, and retries terminal history publication after confirmed process absence. It does not infer a successful exit from missing processes.
+
+
 - **An interrupted container run could remain RUNNING after a server restart.** Startup now checks eligible persisted runtime identities and reconciles confirmed absence, while preserving live or unverified work and dispatcher-owned outcomes.
 
 - **Repeated environment rebuilds left untagged images outside cache cleanup.** The orphan sweeper now recognizes published artifacts from revision history while preserving images selected by live crews and unknown untagged images. The existing opt-in deletion policy and age floor still apply.
