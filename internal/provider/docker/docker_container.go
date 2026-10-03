@@ -9,20 +9,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/memory"
 	"os"
 	goruntime "runtime"
 	"strings"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/devcontainer"
-	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
-	"github.com/crewship-ai/crewship/internal/safepath"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	dockernetwork "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
+	"github.com/crewship-ai/crewship/internal/safepath"
 )
 
 // FindCrewContainer is a non-mutating lookup for an existing crew
@@ -492,7 +494,11 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// migration, and (the expensive part) the host-wide container lookup. A
 	// DAG wave's sibling steps on the same crew all hit this in the same few
 	// milliseconds; without it each paid a full host scan under this mutex.
-	if cid, ok := p.warmHit(team.ID); ok {
+	requestedImage := team.CachedImage
+	if requestedImage == "" {
+		requestedImage = team.Image
+	}
+	if cid, ok := p.warmHit(team.ID, requestedImage); ok {
 		// A fenced crew pays one inspect here: a restart inside the warm TTL
 		// (daemon, restart policy, operator) drops the fence, and the warm
 		// path would otherwise hand the next step an unfenced container.
@@ -722,7 +728,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	hooks = append(hooks, team.PostStartCommands...)
 	p.runPostStartCommands(ctx, resp.ID, hooks)
 
-	p.setWarm(team.ID, resp.ID)
+	p.setWarm(team.ID, resp.ID, runtimeImage)
 	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage, Digest: runtimeDigest})
 	return resp.ID, nil
 }
@@ -771,19 +777,28 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				if inspect.Config != nil && inspect.Config.Image != "" {
 					reusedImage = inspect.Config.Image
 				}
-				// Image-drift check before the mount checks: if a
-				// re-provision produced a new image tag, the running
-				// container is stale by definition (its filesystem
-				// reflects the OLD provisioned image). Tear it down
-				// and fall through to create-new with the new tag.
+				warmImage := reusedImage
+				if callerSpecifiedImage {
+					warmImage = desiredImage
+				}
+				// A new desired image must not destroy work in the existing
+				// runtime. Only a freshly confirmed inactive container may be
+				// replaced. Docker's non-force removal also closes a start race.
 				if callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && inspect.Image != desiredImage {
-					p.logger.Info("recreating container (image drift)",
-						"container", containerName,
-						"running_image", inspect.Config.Image,
-						"desired_image", desiredImage,
-					)
-					p.forceTeardown(ctx, c.ID, team.ID)
-					break // fall through to create new container
+					state := inspect.State
+					if state == nil || state.Running || state.Paused || state.Restarting || (state.Status != "exited" && state.Status != "created") {
+						return "", false, provider.ErrRuntimeImageUpdatePending
+					}
+					if _, err := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: true}); err != nil {
+						if cerrdefs.IsConflict(err) {
+							return "", false, fmt.Errorf("%w: runtime changed while removing stopped container", provider.ErrRuntimeImageUpdatePending)
+						}
+						return "", false, fmt.Errorf("remove stopped runtime for image update: %w", err)
+					}
+					p.evictWarm(team.ID)
+					p.forgetFenced(c.ID)
+					p.logger.Info("recreating stopped container (image drift)", "container", containerName, "previous_image", inspect.Config.Image, "desired_image", desiredImage)
+					break
 				}
 				// Check required mounts: /crew, /home/agent (volume), /opt/crew-tools (volume).
 				requiredMounts := map[string]bool{"/crew": false, "/home/agent": false, "/opt/crew-tools": false}
@@ -992,7 +1007,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						p.stopUnfenced(ctx, team, c.ID, err)
 						return "", false, err
 					}
-					p.setWarm(team.ID, c.ID)
+					p.setWarm(team.ID, c.ID, warmImage)
 					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
 					return c.ID, true, nil
 				}
@@ -1060,7 +1075,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				// template authors actually want. If a future use case needs
 				// ephemeral hooks that re-run on each restart, add a
 				// per-feature opt-in flag rather than flipping this default.
-				p.setWarm(team.ID, c.ID)
+				p.setWarm(team.ID, c.ID, warmImage)
 				emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "restarted stopped container", Tag: reusedImage})
 				return c.ID, true, nil
 			}
