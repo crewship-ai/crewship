@@ -4,8 +4,8 @@ This package captures a command's output and terminal result independently of
 any reader. It is a foundation for controller reattachment, not a released
 replacement for the orchestrator's tmux/FIFO execution path.
 
-The existing distributed `crewship-sidecar` binary has two separate process
-modes. Neither mode starts the credential proxy:
+The existing distributed `crewship-sidecar` binary provides separate process
+modes for this transport. These modes do not start the credential proxy:
 
 ```sh
 crewship-sidecar run-capture --dir /persistent/run-identity --timeout 30m -- command arg
