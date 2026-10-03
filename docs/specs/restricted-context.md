@@ -14,6 +14,49 @@ requires a private conversation. Notes and derived outputs cannot outlive their
 source authority. These APIs return bounded current projections, not a full
 historical export or an automatic summarization service.
 
+## Web app for a restricted session
+
+Restriction is a property of the account, not of one workspace: as soon as one
+membership has `access_mode='restricted'`, the allowlist in
+`internal/api/restricted_access.go` applies to every authenticated request the
+account makes, whichever workspace it names, and anything else answers 404.
+The web app follows the same rule (#2861):
+
+- **Access mode.** The app derives one mode for the session from
+  `GET /api/v1/workspaces`: `restricted` if any row carries
+  `currentUserAccessMode: "restricted"` (only the restricted directory
+  projection carries the field), otherwise `trusted`. Until the list has
+  arrived the mode is `loading`, and the dashboard renders nothing but a
+  spinner, so no request outside the allowlist is sent before the mode is
+  known. If the first load fails the app shows a retry instead of guessing.
+- **Shell.** A restricted session gets the app frame without the calls the
+  allowlist refuses: no realtime socket (no `/ws-token`), no inbox count or
+  inbox and activity bells, no engine/crews/provisioning status, no active
+  routine runs, no journal lookup, no runtime or update banner, no version or
+  edition label, and no data lists in the command palette. Realtime reports
+  the terminal status `unavailable`, which shows no "Reconnecting…" banner and
+  never retries. A 404 from `/ws-token` is treated the same way for any
+  session (terminal, not an outage, and not a logout).
+- **Mixed membership.** A member restricted in workspace A and trusted in B
+  sees the restricted screens in B as well: `/routines` shows private
+  routines and `/pages` (and `/pages/<slug>`) shows declared Page actions.
+- **Access changes while open.** The app re-reads the workspace list every
+  60 seconds while the tab is visible and when it becomes visible again; an
+  unchanged answer changes nothing. Turning restricted closes the socket and
+  stops the shell feeds; turning trusted again reconnects.
+- **Updates without WebSocket.** Restricted screens refresh through
+  allowlisted endpoints only. A restricted chat streams its own reply over the
+  `restricted-run` response and checks `GET /chats/{id}/messages` every
+  10 seconds while visible (paused while its own reply streams) to show
+  messages another participant or another tab wrote; conversation files and
+  memory reload when the transcript changes. Private routine and Page action
+  results poll their run until it finishes. Account security (sessions, CLI
+  tokens, password) loads on open and after each change.
+
+Navigation still lists every product area; filtering it to the surfaces a
+restricted session can open, and a "not available" page for direct URLs,
+follow separately.
+
 ## Wire objects
 
 A context entry contains `id`, `created_at`, `kind`, `role`, `content`, and

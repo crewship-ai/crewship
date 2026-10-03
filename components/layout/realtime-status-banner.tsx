@@ -8,6 +8,10 @@ import { useRealtime } from "@/hooks/use-realtime"
 /**
  * Shows a banner when WebSocket is disconnected for more than 3 seconds.
  * Auto-hides with a brief "Reconnected" flash when connection is restored.
+ *
+ * Renders nothing for "unavailable": a restricted session has no realtime by
+ * design (the allowlist refuses /ws-token), so there is nothing to reconnect
+ * and a banner saying otherwise would be permanent and false.
  */
 export function RealtimeStatusBanner() {
   const { status } = useRealtime()
@@ -42,7 +46,7 @@ export function RealtimeStatusBanner() {
     setVisible(false)
   }, [status, wasDisconnected])
 
-  if (!visible) return null
+  if (!visible || status === "unavailable") return null
 
   if (showReconnected) {
     return (
