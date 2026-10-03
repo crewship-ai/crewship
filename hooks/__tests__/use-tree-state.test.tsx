@@ -162,3 +162,90 @@ describe("useTreeState", () => {
     expect(signal.aborted).toBe(true)
   })
 })
+
+describe("tree scope and refreshed entry boundaries", () => {
+  it.each(["missing", "resolving"])("clears all previous file state when workspace is %s", async (kind) => {
+    const folder = deferred<Response>()
+    fetchMock.mockResolvedValueOnce(response([file("src", true)]))
+      .mockReturnValueOnce(folder.promise)
+    const { result, rerender } = renderHook((args: UseTreeStateArgs) => useTreeState(args), { initialProps: scope })
+    await waitFor(() => expect(result.current.tree).toHaveLength(1))
+    act(() => {
+      result.current.setSelectedPath("/workspace/src")
+      result.current.toggleFolder("/workspace/src")
+    })
+    const signal = fetchMock.mock.calls[1][1]!.signal!
+    rerender({ ...scope, workspaceId: null, wsLoading: kind === "resolving" })
+    expect(signal.aborted).toBe(true)
+    expect(result.current).toMatchObject({
+      tree: [], basePrefix: "", selectedPath: null,
+      loading: kind === "resolving", error: kind === "missing" ? "No workspace selected" : null,
+    })
+    expect(result.current.expandedPaths.size).toBe(0)
+    expect(result.current.loadingDirs.size).toBe(0)
+    act(() => result.current.refresh())
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await act(async () => { folder.resolve(response([file("old.txt", false, "/workspace/src/")])) })
+    expect(result.current.tree).toEqual([])
+  })
+
+  it("replaces a loaded directory with a file after refresh", async () => {
+    fetchMock.mockResolvedValueOnce(response([file("entry", true)]))
+      .mockResolvedValueOnce(response([file("child.txt", false, "/workspace/entry/")]))
+      .mockResolvedValueOnce(response([{ ...file("entry"), size: 99 }]))
+    const { result } = renderHook(() => useTreeState(scope))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    act(() => result.current.toggleFolder("/workspace/entry"))
+    await waitFor(() => expect(findNode(result.current.tree, "/workspace/entry/child.txt")).toBeDefined())
+    act(() => result.current.refresh())
+    await waitFor(() => expect(result.current.tree[0]?.size).toBe(99))
+    expect(result.current.tree[0]).toMatchObject({ is_dir: false, children: [], childrenLoaded: true })
+    expect(findNode(result.current.tree, "/workspace/entry/child.txt")).toBeUndefined()
+  })
+
+  it("clears the path prefix after the last root disappears", async () => {
+    fetchMock.mockResolvedValueOnce(response([file("last.txt")])).mockResolvedValueOnce(response([]))
+    const { result } = renderHook(() => useTreeState(scope))
+    await waitFor(() => expect(result.current.basePrefix).toBe("/workspace/"))
+    act(() => result.current.refresh())
+    await waitFor(() => expect(result.current.tree).toEqual([]))
+    expect(result.current.basePrefix).toBe("")
+  })
+})
+
+describe("tree request cancellation", () => {
+  it("does not turn a root abort into a connection error", async () => {
+    fetchMock.mockRejectedValueOnce(new DOMException("cancelled", "AbortError"))
+    const { result } = renderHook(() => useTreeState(scope))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current).toMatchObject({ error: null, tree: [] })
+  })
+
+  it("clears a cancelled folder spinner and allows another expansion", async () => {
+    fetchMock.mockResolvedValueOnce(response([file("src", true)]))
+      .mockRejectedValueOnce(new DOMException("cancelled", "AbortError"))
+      .mockResolvedValueOnce(response([]))
+    const { result } = renderHook(() => useTreeState(scope))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    act(() => result.current.toggleFolder("/workspace/src"))
+    await waitFor(() => expect(result.current.loadingDirs.size).toBe(0))
+    expect(result.current.error).toBeNull()
+    act(() => result.current.toggleFolder("/workspace/src"))
+    act(() => result.current.toggleFolder("/workspace/src"))
+    await waitFor(() => expect(result.current.tree[0].childrenLoaded).toBe(true))
+    expect(result.current.tree[0].children).toEqual([])
+  })
+
+  it("ignores a failed obsolete folder request after scope clearing", async () => {
+    let reject!: (reason: Error) => void
+    const pending = new Promise<Response>((_, r) => { reject = r })
+    fetchMock.mockResolvedValueOnce(response([file("src", true)])).mockReturnValueOnce(pending)
+    const { result, rerender } = renderHook((args: UseTreeStateArgs) => useTreeState(args), { initialProps: scope })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    act(() => result.current.toggleFolder("/workspace/src"))
+    rerender({ ...scope, agentId: null })
+    await act(async () => { reject(new Error("old request disconnected")) })
+    expect(result.current).toMatchObject({ tree: [], error: null, loading: false })
+    expect(result.current.loadingDirs.size).toBe(0)
+  })
+})

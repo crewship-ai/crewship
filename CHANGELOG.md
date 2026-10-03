@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- File trees clear stale contents, selection and loading indicators when workspace selection is cleared or resolving. Refresh correctly replaces a directory with a file and clears the path prefix when the listing becomes empty.
+
 - Notification channel reads reject malformed stored configuration and filters instead of silently treating unreadable category restrictions as permission to deliver every category. Valid legacy empty filters retain their existing defaults.
 
 - Account signup recovers from network and unreadable error responses, keeps entered values for retry, and announces refusals accessibly. Password reset treats a null refusal body as a server refusal instead of a network failure.
