@@ -766,9 +766,10 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				inspect := inspectResult.Container
 				// The list is an older snapshot. A stop/start between list and
 				// inspect must not reuse a stopped runtime or tear down a live one.
-				if inspect.State != nil && inspect.State.Status != "" {
-					c.State = inspect.State.Status
+				if inspect.State == nil || inspect.State.Status == "" {
+					return "", false, fmt.Errorf("%w: inspect existing container %s: missing state", provider.ErrRuntimeImageUpdatePending, containerName)
 				}
+				c.State = inspect.State.Status
 				// Applies with an empty local identity too (cleanup disabled): the
 				// drift paths below tear down with RemoveVolumes, so adopting a
 				// container another installation labelled would destroy its
