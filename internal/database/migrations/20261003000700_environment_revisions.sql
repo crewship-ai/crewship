@@ -12,5 +12,6 @@ CREATE TABLE environment_revisions (
  UNIQUE(workspace_id, crew_id, definition_hash, image_id)
 );
 CREATE INDEX environment_revisions_crew ON environment_revisions(workspace_id,crew_id,created_at DESC,id DESC);
+CREATE INDEX environment_revisions_crew_fk ON environment_revisions(crew_id);
 CREATE TRIGGER environment_revision_immutable BEFORE UPDATE ON environment_revisions
 BEGIN SELECT RAISE(ABORT,'environment revision is immutable'); END;
