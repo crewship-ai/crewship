@@ -58,6 +58,7 @@ crewship api request GET /api/v1/agents --query limit=20 --format json
 crewship api request POST /api/v1/agents --input agent.json --dry-run
 crewship api request POST /api/v1/agents --input agent.json --yes
 crewship api request GET /openapi.json --output server-openapi.json
+crewship api request GET /api/health --anonymous
 ```
 
 | Flag | Meaning |
@@ -69,6 +70,7 @@ crewship api request GET /openapi.json --output server-openapi.json
 | `--content-type` | Body media type; defaults to `application/json`. JSON must contain exactly one valid value. |
 | `--output file` | Save the raw response, including binary downloads, atomically with owner-only permissions. An existing file is replaced only after success. |
 | `--include` | Wrap successful output in `{status, headers, body}` to inspect response metadata such as `ETag`. Empty responses have `body: null`. Cannot be combined with `--output`. |
+| `--anonymous` | Omit the configured token and workspace for public endpoints, such as health checks, public shares, or signed webhook receivers. Explicit query parameters are still sent. |
 | `--yes` | Required for POST, PUT, PATCH, and DELETE. No interactive prompt. |
 | `--dry-run` | Print method, server, path, query names, configured workspace, and body presence. No network, file reads, or stdin reads. Query values, header values, and body contents are omitted. |
 | `--idempotency-key` | Send `Idempotency-Key` to an endpoint that supports it. Requests are never automatically retried. |

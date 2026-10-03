@@ -451,3 +451,26 @@ func TestAPIRequestResponseMetadata(t *testing.T) {
 		t.Fatalf("conflicting flags: %q %v", out, err)
 	}
 }
+
+func TestAPIRequestAnonymousOmitsConfiguredIdentity(t *testing.T) {
+	calls := 0
+	setupAPIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Header.Get("Authorization") != "" || r.URL.Query().Has("workspace_id") {
+			t.Errorf("anonymous request carried configured identity: %s", r.URL)
+		}
+		io.WriteString(w, `{"ok":true}`)
+	})
+	// The token belongs to another origin. Anonymous mode must not carry it or
+	// resolve the configured workspace against the public destination.
+	cliCfg.Server = "https://different.invalid"
+	out, err := executeAPITest(t, "request", "GET", "/api/health", "--anonymous")
+	if err != nil || calls != 1 || !strings.Contains(out, `"ok": true`) {
+		t.Fatalf("anonymous: calls=%d out=%q err=%v", calls, out, err)
+	}
+	cliCfg = nil
+	out, err = executeAPITest(t, "request", "GET", "/api/health", "--anonymous")
+	if err != nil || calls != 2 {
+		t.Fatalf("no config: calls=%d out=%q err=%v", calls, out, err)
+	}
+}

@@ -103,6 +103,7 @@ Server authorization, approval gates, and scope restrictions remain in force.`}
 	cmd.Flags().String("content-type", "application/json", "Request body media type")
 	cmd.Flags().String("output", "", "Save raw response atomically to a file instead of stdout")
 	cmd.Flags().Bool("include", false, "Wrap JSON output with HTTP status and response headers (e.g. ETag)")
+	cmd.Flags().Bool("anonymous", false, "Omit configured credentials and workspace for public API endpoints")
 	cmd.Flags().String("idempotency-key", "", "Idempotency-Key for endpoints that support it; no automatic retries")
 	cmd.Flags().Bool("yes", false, "Explicitly allow a mutating HTTP method")
 	cmd.Flags().Bool("dry-run", false, "Show request metadata without network access or reading input")
@@ -131,6 +132,7 @@ func runAPIRequest(cmd *cobra.Command, args []string) error {
 	input, _ := cmd.Flags().GetString("input")
 	output, _ := cmd.Flags().GetString("output")
 	include, _ := cmd.Flags().GetBool("include")
+	anonymous, _ := cmd.Flags().GetBool("anonymous")
 	if include && output != "" {
 		return apiValidation("--include and --output cannot be combined")
 	}
@@ -165,6 +167,13 @@ func runAPIRequest(cmd *cobra.Command, args []string) error {
 		return apiValidation("unsupported output format")
 	}
 	client := newAPIClient().WithContext(cmd.Context()).WithTimeout(timeout)
+	authentication := "configured"
+	if anonymous {
+		client.Token = ""
+		client.TokenHost = ""
+		client.WorkspaceID = ""
+		authentication = "anonymous"
+	}
 	server, err := url.Parse(client.BaseURL)
 	if err != nil || (server.Scheme != "http" && server.Scheme != "https") || server.Host == "" || server.User != nil || server.RawQuery != "" || server.Fragment != "" {
 		return apiValidation("server must be an HTTP(S) URL without credentials, query, or fragment")
@@ -182,13 +191,15 @@ func runAPIRequest(cmd *cobra.Command, args []string) error {
 			headerNames = append(headerNames, name)
 		}
 		sort.Strings(headerNames)
-		return apiStructuredOutput(cmd, map[string]any{"method": method, "server": server.String(), "path": u.EscapedPath(), "query_keys": keys, "header_names": headerNames, "workspace": client.WorkspaceID, "has_body": input != "", "content_type": contentType, "requires_yes": apiRequiresYes(method), "dry_run": true})
+		return apiStructuredOutput(cmd, map[string]any{"method": method, "server": server.String(), "path": u.EscapedPath(), "query_keys": keys, "header_names": headerNames, "workspace": client.WorkspaceID, "authentication": authentication, "has_body": input != "", "content_type": contentType, "requires_yes": apiRequiresYes(method), "dry_run": true})
 	}
 	if apiRequiresYes(method) && !yes {
 		return apiValidation("mutating requests require --yes; inspect with --dry-run first")
 	}
-	if err := requireAuth(); err != nil {
-		return err
+	if !anonymous {
+		if err := requireAuth(); err != nil {
+			return err
+		}
 	}
 	data, err := readAPIInput(cmd, input, contentType, inputLimit)
 	if err != nil {
