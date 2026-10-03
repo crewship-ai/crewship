@@ -16,6 +16,53 @@ func linkOrFail(t *testing.T, target, link string) {
 	}
 }
 
+func TestSecureDirFSRefusesSymlinkedParentOnDirectReads(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "AGENT.md"), []byte("other crew private memory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linkOrFail(t, outside, filepath.Join(root, "daily"))
+	source := SecureDirFS(root)
+	if f, err := source.Open("daily/AGENT.md"); err == nil {
+		f.Close()
+		t.Error("Open escaped through parent symlink")
+	}
+	if _, err := fs.ReadFile(source, "daily/AGENT.md"); err == nil {
+		t.Error("ReadFile escaped through parent symlink")
+	}
+	if _, err := fs.ReadDir(source, "daily"); err == nil {
+		t.Error("ReadDir escaped through parent symlink")
+	}
+}
+
+func TestSecureDirFSRefusesParentReplacedAfterListing(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "daily"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "daily", "note.md"), []byte("own memory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "note.md"), []byte("other crew memory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := SecureDirFS(root)
+	entries, err := fs.ReadDir(source, "daily")
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("initial listing: %v %v", entries, err)
+	}
+	if err := os.Rename(filepath.Join(root, "daily"), filepath.Join(root, "original")); err != nil {
+		t.Fatal(err)
+	}
+	linkOrFail(t, outside, filepath.Join(root, "daily"))
+	if _, err := fs.ReadFile(source, "daily/"+entries[0].Name()); err == nil {
+		t.Fatal("listed path escaped after its parent was replaced")
+	}
+	if own, err := fs.ReadFile(source, "original/note.md"); err != nil || string(own) != "own memory" {
+		t.Fatalf("confined regular file no longer readable: %q %v", own, err)
+	}
+}
+
 // os.DirFS follows symlinks. Reading an agent's memory through it hands
 // back whatever the agent pointed a .md at — another crew's memory, or
 // any file the server process can read — inside a response the operator
