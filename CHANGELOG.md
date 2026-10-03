@@ -20,6 +20,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Composio trigger lists and enable dialogs clear on workspace changes, ignore superseded reads and abandoned creation responses, and report active-subscription read failures instead of claiming no subscriptions exist.
+
+- Recipe installation clears credentials, account labels and reveal state when closed or switched to another workspace/recipe; abandoned previews and installations cannot update the new selection or redirect it. Credential inputs and reveal controls have accessible labels.
+
 - Workflow template galleries clear previous workspace data and drafts, ignore abandoned requests, distinguish loading failures from empty catalogs and report creation/deletion network errors.
 
 - Integration marketplace search ignores superseded responses, keeps the current request's loading state, resets stale totals on failure and includes uncategorised servers in their facet.
