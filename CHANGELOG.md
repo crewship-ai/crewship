@@ -16,6 +16,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- Live chat demo scripts now require `--state-dir` or `CREWSHIP_CHAT_DEMO_DIR` for private credentials, outside the checkout. The fleet-watch example requires `CREWSHIP_FLEET_ROOT` instead of assuming a workstation checkout path. Existing demos can reuse their state by selecting its current directory.
+
 - Public documentation now separates product contracts from internal working records and prototypes. Start at `docs/README.md` for guides, specifications and decisions; contributor instructions remain in `AGENTS.md`. Assistant-specific workstation files are ignored and rejected by the tracked-path CI guard. Public builds need no private context checkout. (#2778)
 
 - ⚠️ **Behaviour change:** Restricted routine, Page and assigned-issue runs now use the shared work ledger and dispatcher. Interrupted runs with uncertain effects show “Needs review” and require reconciliation before outputs are released or new work repeats; legacy running jobs are adopted into this state.
