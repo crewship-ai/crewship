@@ -77,7 +77,7 @@ for p in /proc/[0-9]*; do
     [ -n "$uid" ] && [ -n "$pid" ] && [ -n "$parent" ] && [ -n "$name" ] || exit 1
     printf '%s %s %s %s\n' "$uid" "$pid" "$parent" "$name"
 done
-printf 'CREWSHIP_IDLE_CENSUS_END\n'
+printf 'crewship-idle-census-end\n'
 `}})
 	if err != nil {
 		return errors.New("cannot inspect runtime processes")
@@ -108,7 +108,7 @@ printf 'CREWSHIP_IDLE_CENSUS_END\n'
 // including detached CLI sessions and background shell jobs after recovery.
 func idleProcessTree(output string) error {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
-	if len(lines) < 3 || lines[len(lines)-1] != "CREWSHIP_IDLE_CENSUS_END" {
+	if len(lines) < 3 || lines[len(lines)-1] != "crewship-idle-census-end" {
 		return errors.New("empty process census")
 	}
 	own, err := strconv.Atoi(strings.TrimSpace(lines[0]))

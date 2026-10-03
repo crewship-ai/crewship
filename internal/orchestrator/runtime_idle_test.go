@@ -56,7 +56,7 @@ func TestVerifyRuntimeIdlePreservesUnresolvedWork(t *testing.T) {
 			if tc.record != "" {
 				_ = state.Set(t.Context(), "agent_runs", "run", []byte(tc.record))
 			}
-			o := New(idleProbeContainer{output: idleCensus + tc.extra + "CREWSHIP_IDLE_CENSUS_END\n", running: tc.probeRunning, code: tc.code}, state, quietLifecycleLogger())
+			o := New(idleProbeContainer{output: idleCensus + tc.extra + "crewship-idle-census-end\n", running: tc.probeRunning, code: tc.code}, state, quietLifecycleLogger())
 			if tc.held {
 				o.crews["crew"] = &crewState{containerID: "runtime", holds: 1}
 			}
@@ -71,7 +71,7 @@ func TestVerifyRuntimeIdlePreservesUnresolvedWork(t *testing.T) {
 	}
 }
 func TestVerifyRuntimeIdleUnknownStateFailsClosed(t *testing.T) {
-	o := New(idleProbeContainer{output: idleCensus + "CREWSHIP_IDLE_CENSUS_END\n"}, stopReviewState{list: func(context.Context) (map[string][]byte, error) { return nil, errors.New("offline") }}, quietLifecycleLogger())
+	o := New(idleProbeContainer{output: idleCensus + "crewship-idle-census-end\n"}, stopReviewState{list: func(context.Context) (map[string][]byte, error) { return nil, errors.New("offline") }}, quietLifecycleLogger())
 	if err := o.VerifyRuntimeIdle(t.Context(), "crew", "runtime"); err == nil {
 		t.Fatal("state failure permitted replacement")
 	}
@@ -81,7 +81,7 @@ func TestIdleProcessTreeRejectsIncompleteAndUnknownBaselines(t *testing.T) {
 		t.Fatal("truncated census accepted without completion marker")
 	}
 	for _, data := range []string{"", "30\n", "30\n1001 30 0 sh\n", strings.Replace(idleCensus, "1001 30 0 sh\n", "", 1), strings.Replace(idleCensus, "1 0 docker-init", "1 0 custom-init", 1), idleCensus + "1001 7 1 sleep\n"} {
-		if err := idleProcessTree(data + "CREWSHIP_IDLE_CENSUS_END\n"); err == nil {
+		if err := idleProcessTree(data + "crewship-idle-census-end\n"); err == nil {
 			t.Fatalf("accepted incomplete census %q", data)
 		}
 	}
