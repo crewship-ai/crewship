@@ -1,3 +1,5 @@
+//go:build unix
+
 package runoutput
 
 import (
@@ -6,15 +8,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
 func testStore(t *testing.T, limit int64) (string, *Store) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("directory fsync requires Unix runtime")
-	}
 	dir := filepath.Join(t.TempDir(), "run")
 	store, err := Create(dir, limit)
 	if err != nil {
