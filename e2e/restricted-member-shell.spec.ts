@@ -31,7 +31,11 @@ for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 })
     const forbidden: string[] = []
     const sockets: string[] = []
-    page.on("websocket", (ws) => sockets.push(ws.url()))
+    // Next's dev-server HMR socket (/_next/…) exists only under `next dev`;
+    // the assertion is about the application's realtime socket.
+    page.on("websocket", (ws) => {
+      if (!new URL(ws.url()).pathname.startsWith("/_next/")) sockets.push(ws.url())
+    })
 
     await page.route("**/api/**", async (route) => {
       const request = route.request()
