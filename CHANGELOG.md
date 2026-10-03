@@ -20,6 +20,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Empty routine lookups cannot select a demo pack whose optional probe is absent. CLI HTTP test logs return independent header and body snapshots so assertions cannot corrupt later observations.
+
+- Mission controls require complete workspace/crew/mission selection, cancel abandoned requests and ignore stale completions or errors after a selection change.
+
+- The activity feed’s Done filter includes canonical `DONE` missions alongside legacy `COMPLETED` events, with success styling for both.
+
+- Issue-board refresh timers are cancelled when workspace callbacks or crew filters change, preventing queued events from refreshing a former selection.
+
 - Dashboard realtime refresh timers are cancelled when the selected workspace changes, preventing a queued event from refreshing the former workspace.
 
 - Composio trigger lists and enable dialogs clear on workspace changes, ignore superseded reads and abandoned creation responses, and report active-subscription read failures instead of claiming no subscriptions exist.
