@@ -312,7 +312,7 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 | `runtime_image` | string | Custom runtime image (empty string clears; existence validated) |
 | `devcontainer_config` | string | Raw devcontainer.json (empty string clears; max 100 KB) |
 | `mise_config` | string | Raw mise config TOML (empty string clears; max 10 KB) |
-| `services_json` | string | Sidecar services JSON (empty/whitespace clears; max 64 KB). When the stored configuration is one that reads back redacted, the only accepted value is the unchanged plaintext; anything else — including the redaction sentinel a client read and echoed back, or an empty string — is `409` and leaves the services and their credentials untouched |
+| `services_json` | string | Sidecar services JSON (empty/whitespace clears; max 64 KB). When the stored configuration is one that reads back redacted, every submitted replacement — including identical plaintext, the redaction sentinel, or an empty string — is `409` and leaves the services and their credentials untouched. Omit this field when updating other crew settings; such patches can be retried safely without resubmitting private configuration |
 
 **Response:** `200 OK` -- updated crew object.
 
@@ -341,7 +341,7 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 | `400` | Invalid field values (name/slug length, slug format, `network_mode`, domain entry, `container_ttl_hours` negative, `max_ephemeral_agents` outside 0-100, MCP JSON missing `mcpServers`, escalation thresholds out of range, oversize or invalid `devcontainer_config`/`mise_config`/`services_json`, `runtime_image` not found) |
 | `403` | Insufficient role |
 | `404` | Crew not found |
-| `409` | Slug already taken; or `services_json` differs from a stored configuration that is redacted on read (`Private service settings cannot be replaced through crew updates`) — edit such services through the manifest they were applied from |
+| `409` | Slug already taken; or `services_json` is submitted for a stored configuration that is redacted on read (`Private service settings cannot be replaced through crew updates`) |
 
 ---
 
