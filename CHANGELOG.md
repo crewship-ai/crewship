@@ -22,6 +22,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Explicit crew rebuilds could keep stale agent CLIs.** Rebuild now bypasses the provisioned-image and installation-layer caches while retaining configured version pins. Claude background updates and Codex startup update checks are disabled for Crewship-managed runs; rejected concurrent rebuilds preserve the existing cache.
 
+- Concurrent starts can no longer fork installation identities by observing a partially written nonce owner; owner publication is atomic and malformed records fail without re-keying.
 
 ### Added
 - Agent runtime diagnostics now find runs by their durable run IDs, prefer an active invocation, and report unavailable state instead of inventing an idle result.
