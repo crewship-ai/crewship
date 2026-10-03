@@ -169,6 +169,13 @@ func runAPIRequest(cmd *cobra.Command, args []string) error {
 	client := newAPIClient().WithContext(cmd.Context()).WithTimeout(timeout)
 	authentication := "configured"
 	if anonymous {
+		// Omitting authentication must not also omit the target-selection guard.
+		// An unknown profile otherwise falls back to the default server.
+		if name := cli.ActiveProfileName(flagProfile, cliCfg); name != "" {
+			if cliCfg == nil || cliCfg.Servers[name] == nil || strings.TrimSpace(cliCfg.Servers[name].Server) == "" {
+				return apiValidation("selected profile is not configured; configure the profile before making requests")
+			}
+		}
 		client.Token = ""
 		client.TokenHost = ""
 		client.WorkspaceID = ""

@@ -473,4 +473,9 @@ func TestAPIRequestAnonymousOmitsConfiguredIdentity(t *testing.T) {
 	if err != nil || calls != 2 {
 		t.Fatalf("no config: calls=%d out=%q err=%v", calls, out, err)
 	}
+	flagProfile = "missing-profile"
+	out, err = executeAPITest(t, "request", "GET", "/api/health", "--anonymous")
+	if cli.ExitCodeFor(err) != cli.ExitValidation || calls != 2 || out != "" {
+		t.Fatalf("unknown profile fell back to another target: calls=%d out=%q err=%v", calls, out, err)
+	}
 }
