@@ -28,6 +28,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
 import { apiFetch } from "@/lib/api-fetch"
+import { stopAgent } from "@/lib/agent-stop"
 import { entityHref } from "@/lib/entity-links"
 
 import {
@@ -213,14 +214,15 @@ export function AgentCanvas({
 
   const handleStop = useCallback(async () => {
     if (!agent) return
-    try {
-      const res = await apiFetch(`/api/v1/agents/${agent.id}/stop`, { method: "POST" })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      toast.success("Stop requested")
-      void fetchAgent()
-    } catch (err) {
-      toast.error(`Could not stop: ${err instanceof Error ? err.message : err}`)
+    // The route needs the workspace (RequireWorkspace); the old call sent
+    // none. stopAgent never throws and words the 502s (#2864).
+    const result = await stopAgent(agent.id, agent.workspace_id)
+    if (result.ok) {
+      toast.success("Agent stopped")
+    } else {
+      toast.error(`Could not stop ${agent.name}`, { description: result.message })
     }
+    void fetchAgent()
   }, [agent, fetchAgent])
 
   // Approve a pending ephemeral hire straight from the agent page (same
