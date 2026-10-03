@@ -73,8 +73,16 @@ func (o *Orchestrator) trackAgentRun(ctx context.Context, req *AgentRunRequest) 
 		return nil
 	}
 
+	o.runRecoveryMu.Lock()
 	o.agentRuns.Store(req.RunID, c)
-	return ctx, func() { cancel(); close(c.done); o.agentRuns.Delete(req.RunID) }
+	o.runRecoveryMu.Unlock()
+	return ctx, func() {
+		cancel()
+		close(c.done)
+		o.runRecoveryMu.Lock()
+		o.agentRuns.Delete(req.RunID)
+		o.runRecoveryMu.Unlock()
+	}
 }
 
 // StopAgent stops current invocations and durable running records recovered

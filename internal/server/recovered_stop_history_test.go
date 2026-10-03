@@ -288,3 +288,53 @@ func TestRecoveredStopHistoryExpiredBudgetPreservesPendingWork(t *testing.T) {
 func (failedStopAcknowledgement) Update(context.Context, string, string, func([]byte) ([]byte, error)) error {
 	return errors.New("state acknowledgement unavailable")
 }
+
+// A new invocation may publish its durable record after the outbox scan but
+// before the old stop projects the agent status, without a journal start yet.
+type admitAfterStopScan struct {
+	provider.StateProvider
+	admit func()
+}
+
+func (s *admitAfterStopScan) List(ctx context.Context, bucket string) (map[string][]byte, error) {
+	records, err := s.StateProvider.List(ctx, bucket)
+	if err == nil && bucket == "agent_runs" && s.admit != nil {
+		admit := s.admit
+		s.admit = nil
+		admit()
+	}
+	return records, err
+}
+func (s *admitAfterStopScan) Update(ctx context.Context, bucket, key string, fn func([]byte) ([]byte, error)) error {
+	return s.StateProvider.(provider.AtomicStateProvider).Update(ctx, bucket, key, fn)
+}
+func TestRecoveredStopHistoryPreservesRunAdmittedAfterScan(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+	seedRecoveryTrace(t, s, "stopped", "a")
+	seedStoppedOutbox(t, s, "stopped")
+	state := s.state
+	s.state = &admitAfterStopScan{StateProvider: state, admit: func() {
+		raw, err := json.Marshal(orchestrator.RunState{ID: "new", AgentID: "a", Status: "running"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := state.Set(t.Context(), "agent_runs", "new", raw); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	if err := s.flushRecoveredStops(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := s.db.QueryRow(`SELECT status FROM agents WHERE id='a'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "RUNNING" {
+		t.Fatalf("new invocation hidden by old stop: agent status=%s", status)
+	}
+	if pendingStop(t, s, "stopped") {
+		t.Fatal("old stop not acknowledged")
+	}
+}

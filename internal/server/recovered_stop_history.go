@@ -44,7 +44,6 @@ func (s *Server) flushRecoveredStopsBatch(ctx context.Context) error {
 	// projections retain their markers without starving the next batch.
 	// Provider List returns a map, so its order is not a cursor.
 	keys := make([]string, 0, len(states))
-	durableRunning := map[string]bool{}
 	for key, raw := range states {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -54,14 +53,10 @@ func (s *Server) flushRecoveredStopsBatch(ctx context.Context) error {
 		if err := json.Unmarshal(raw, &run); err != nil {
 			// Corruption with a readable owner only protects that agent.
 			if owner := orchestrator.RuntimeRecordAgent(raw); owner != "" {
-				durableRunning[owner] = true
 				continue
 			}
 			// Without an owner, absence cannot safely be projected.
 			return fmt.Errorf("inspect runtime ownership for stop projection: %w", err)
-		}
-		if run.Status == "running" && run.AgentID != "" {
-			durableRunning[run.AgentID] = true
 		}
 	}
 	sort.Strings(keys)
@@ -86,7 +81,7 @@ func (s *Server) flushRecoveredStopsBatch(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return errors.Join(append(failures, err)...)
 		}
-		if err := s.projectRecoveredStop(ctx, run, durableRunning[run.AgentID]); err != nil {
+		if err := s.projectRecoveredStop(ctx, run); err != nil {
 			failures = append(failures, fmt.Errorf("project confirmed stop %s: %w", run.ID, err))
 		}
 		processed++
@@ -94,7 +89,7 @@ func (s *Server) flushRecoveredStopsBatch(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
-func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunState, durableRunning bool) error {
+func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunState) error {
 	origin, reason, summary, idleStatus := "agent_stop", "confirmed_runtime_stop", "run cancelled after confirmed runtime stop", "STOPPED"
 	if run.StopOrigin == "recovered_absence" {
 		origin, reason, summary, idleStatus = "recovered_absence", "server_restart", "runtime absent after server restart; outcome unverified", "IDLE"
@@ -134,18 +129,49 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
 		recoveredTerminal = true
 	}
 	if recoveredTerminal {
-		// A manual IPC run or delayed start event may have durable runtime
-		// ownership without a journal start. Either source protects RUNNING;
-		// an old stop does not establish absence of the agent's other runs.
-		if _, err := s.db.ExecContext(ctx, `UPDATE agents SET status=CASE WHEN ? OR EXISTS (
+		apply := func(locallyActive bool) error {
+			// Direct IPC runs may have no journal start. Their durable runtime
+			// records must also keep the agent RUNNING. Admission registration
+			// stays locked through the SQL projection when an orchestrator exists.
+			states, err := s.state.List(ctx, "agent_runs")
+			if err != nil {
+				return err
+			}
+			for _, raw := range states {
+				var other orchestrator.RunState
+				if err = json.Unmarshal(raw, &other); err != nil {
+					owner := orchestrator.RuntimeRecordAgent(raw)
+					if owner == "" {
+						return err
+					}
+					if owner == run.AgentID {
+						locallyActive = true
+					}
+					continue
+				}
+				if other.AgentID == run.AgentID && other.Status == "running" {
+					locallyActive = true
+				}
+			}
+			_, err = s.db.ExecContext(ctx, `UPDATE agents SET status=CASE WHEN ? OR EXISTS (
  SELECT 1 FROM journal_entries started WHERE started.workspace_id=? AND started.agent_id=? AND started.entry_type='run.started'
  AND NOT EXISTS (SELECT 1 FROM journal_entries done WHERE done.workspace_id=started.workspace_id AND done.trace_id=started.trace_id
    AND done.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout'))
- ) THEN 'RUNNING' ELSE ? END, updated_at=? WHERE id=? AND workspace_id=? AND deleted_at IS NULL`,
-			durableRunning, workspace, run.AgentID, idleStatus, time.Now().UTC().Format(time.RFC3339), run.AgentID, workspace); err != nil {
+ ) THEN 'RUNNING' ELSE ? END, updated_at=? WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, locallyActive,
+				workspace, run.AgentID, idleStatus, time.Now().UTC().Format(time.RFC3339), run.AgentID, workspace)
+			return err
+		}
+		var err error
+		if s.orchestrator != nil {
+			err = s.orchestrator.ReconcileAgentActivity(run.AgentID, apply)
+		} else {
+			err = apply(false)
+		}
+		if err != nil {
 			return err
 		}
 	}
+
 	return s.ackRecoveredStop(ctx, run.ID)
 }
 

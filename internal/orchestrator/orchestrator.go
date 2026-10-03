@@ -478,7 +478,8 @@ type ContainerBusyProbe func(ctx context.Context, crewID, containerID string) bo
 type StatsRegisterFunc func(containerID, crewID, workspaceID string)
 
 type Orchestrator struct {
-	agentRuns              sync.Map // run id -> *agentRunControl; independent of credential HOME cleanup
+	runRecoveryMu          sync.Mutex // serializes activity projection with local admission
+	agentRuns              sync.Map   // run id -> *agentRunControl; independent of credential HOME cleanup
 	userModelReader        func(context.Context, string, string) (string, error)
 	personalizationAllowed func(context.Context, string, string) (bool, error)
 	// agentLive refuses process creation for an agent that may no longer run
