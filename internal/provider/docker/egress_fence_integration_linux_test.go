@@ -42,7 +42,12 @@ func TestEgressFenceIntegration(t *testing.T) {
 	}
 	defer os.RemoveAll(tmp)
 	sidecarPath := filepath.Join(tmp, "crewship-sidecar")
-	build := exec.CommandContext(ctx, "go", "build", "-o", sidecarPath, "github.com/crewship-ai/crewship/cmd/crewship-sidecar")
+	buildArgs := []string{"build", "-o", sidecarPath}
+	if os.Getenv("CREWSHIP_TEST_SIDECAR_COVERAGE_DIR") != "" {
+		buildArgs = append(buildArgs, "-cover", "-coverpkg=github.com/crewship-ai/crewship/cmd/crewship-sidecar,github.com/crewship-ai/crewship/internal/egressfence")
+	}
+	buildArgs = append(buildArgs, "github.com/crewship-ai/crewship/cmd/crewship-sidecar")
+	build := exec.CommandContext(ctx, "go", buildArgs...)
 	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("cannot build crewship-sidecar: %v\n%s", err, out)
@@ -347,13 +352,25 @@ func TestEgressFenceIntegration(t *testing.T) {
 // cid's network namespace with NET_ADMIN, and returns its exit code.
 func fenceTestNetnsRun(ctx context.Context, t *testing.T, p *Provider, cid, image, bin string, args ...string) int64 {
 	t.Helper()
+	config := &container.Config{Image: image, User: "0:0", Entrypoint: []string{"/x"}, Cmd: args}
+	mounts := []mount.Mount{{Type: mount.TypeBind, Source: bin, Target: "/x", ReadOnly: true}}
+	// Opt-in coverage for the real kernel path. The helper runs in this
+	// fixture's namespace; its counters go to the caller's owned directory,
+	// separate from the crew's data and from the host's network namespace.
+	if coverageDir := os.Getenv("CREWSHIP_TEST_SIDECAR_COVERAGE_DIR"); coverageDir != "" {
+		if !filepath.IsAbs(coverageDir) {
+			t.Fatal("CREWSHIP_TEST_SIDECAR_COVERAGE_DIR must be absolute")
+		}
+		config.Env = append(config.Env, "GOCOVERDIR=/crewship-test-coverage")
+		mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: coverageDir, Target: "/crewship-test-coverage"})
+	}
 	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Config: &container.Config{Image: image, User: "0:0", Entrypoint: []string{"/x"}, Cmd: args},
+		Config: config,
 		HostConfig: &container.HostConfig{
 			NetworkMode: container.NetworkMode("container:" + cid),
 			CapDrop:     []string{"ALL"},
 			CapAdd:      []string{"NET_ADMIN"},
-			Mounts:      []mount.Mount{{Type: mount.TypeBind, Source: bin, Target: "/x", ReadOnly: true}},
+			Mounts:      mounts,
 		},
 	})
 	if err != nil {
