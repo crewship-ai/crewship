@@ -70,7 +70,7 @@ func (p *Provider) CreateSandbox(ctx context.Context, spec provider.SandboxSpec)
 	pids := spec.PIDs
 	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name:       fmt.Sprintf("crewship-sandbox-%x-%s", sha256.Sum256([]byte(p.cfg.InstanceID)), spec.ID),
-		Config:     &container.Config{Image: spec.ImageID, User: "1002:1002", Entrypoint: []string{"/bin/sleep"}, Cmd: []string{strconv.FormatInt(int64((spec.Lifetime+time.Second-1)/time.Second), 10)}, Env: env, WorkingDir: "/tmp", Labels: map[string]string{resourcelifecycle.InstanceLabel: p.cfg.InstanceID, sandboxInstanceLabel: spec.ID, sandboxKindLabel: "offline-v1"}},
+		Config:     &container.Config{Image: spec.ImageID, User: "1002:1002", Entrypoint: []string{"/bin/sleep"}, Cmd: []string{strconv.FormatInt(int64((spec.Lifetime+time.Second-1)/time.Second), 10)}, Env: env, WorkingDir: "/tmp", Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}, Labels: map[string]string{resourcelifecycle.InstanceLabel: p.cfg.InstanceID, sandboxInstanceLabel: spec.ID, sandboxKindLabel: "offline-v1"}},
 		HostConfig: &container.HostConfig{NetworkMode: "none", IpcMode: "private", CgroupnsMode: "private", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Init: &init, Resources: container.Resources{Memory: spec.MemoryBytes, MemorySwap: spec.MemoryBytes, NanoCPUs: spec.NanoCPUs, PidsLimit: &pids}, Tmpfs: map[string]string{"/home/agent": "rw,nosuid,nodev,size=67108864,uid=1001,gid=1001,mode=0700", "/tmp": "rw,nosuid,nodev,noexec,size=16777216,mode=1777"}},
 	})
 	if err != nil {
@@ -191,7 +191,7 @@ func (p *Provider) ExecSandbox(ctx context.Context, ref provider.SandboxRef, spe
 // Docker and the host remain trusted; this is not a defense against host admin.
 func auditOfflineSandbox(c container.InspectResponse) error {
 	h := c.HostConfig
-	if c.Config == nil || h == nil || c.Config.User != "1002:1002" || h.Privileged || !h.ReadonlyRootfs || h.NetworkMode != "none" || h.IpcMode != "private" || h.PidMode != "" || h.UTSMode != "" || h.CgroupnsMode != "private" || len(h.CapAdd) != 0 || !slices.Contains(h.CapDrop, "ALL") || !slices.Contains(h.SecurityOpt, "no-new-privileges:true") || len(h.Binds) != 0 || len(h.Mounts) != 0 || len(c.Mounts) != 0 || len(h.Devices) != 0 || len(h.DeviceRequests) != 0 || len(h.VolumesFrom) != 0 {
+	if c.Config == nil || h == nil || c.Config.User != "1002:1002" || c.Config.Healthcheck == nil || !slices.Equal(c.Config.Healthcheck.Test, []string{"NONE"}) || h.Privileged || !h.ReadonlyRootfs || h.NetworkMode != "none" || h.IpcMode != "private" || h.PidMode != "" || h.UTSMode != "" || h.CgroupnsMode != "private" || len(h.CapAdd) != 0 || !slices.Contains(h.CapDrop, "ALL") || !slices.Contains(h.SecurityOpt, "no-new-privileges:true") || len(h.Binds) != 0 || len(h.Mounts) != 0 || len(c.Mounts) != 0 || len(h.Devices) != 0 || len(h.DeviceRequests) != 0 || len(h.VolumesFrom) != 0 {
 		return provider.ErrSandboxDenied
 	}
 	if h.Memory < 32<<20 || h.Memory > 4<<30 || h.MemorySwap != h.Memory || h.NanoCPUs < 100_000_000 || h.NanoCPUs > 4_000_000_000 || h.PidsLimit == nil || *h.PidsLimit < 8 || *h.PidsLimit > 512 {

@@ -803,7 +803,8 @@ CPU, memory, process count, output and execution time. Its temporary home is
 removed after the check. Crewship supplies no provider credentials. The
 qualification requests a 90-second lifetime; the initial backend accepts at
 most two minutes and uses a separate UID 1002 for its lifetime keeper. This
-temporary profile is not a durable agent-run backend.
+temporary profile disables inherited image healthchecks and is not a durable
+agent-run backend.
 
 `toolchain.built.qualification` reports the image ID, per-tool result and overall
 status. `passed` means that the recorded binaries started and reported the same
