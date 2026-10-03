@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Secret replacement discards drafts and obsolete completions when its workspace, credential or dialog changes. Revealed values report clipboard success only after the browser confirms it, with recoverable errors and no stale copy status after hiding.
+
 - Chat questionnaires clear when the agent or workspace changes; failed optional requests cannot leave the previous agent’s forms visible.
 
 - Backup conversion releases its rewrite stream when sealing fails, so encryption errors cannot strand the converter or its temporary output. Unknown CLI adapter names use the neutral brand without reading inherited object properties.
