@@ -39,8 +39,8 @@ continue through the text editor.
 Component coverage includes bounded reads, signatures, load/retry/cleanup and
 PDF controls. Integration coverage exercises agent and crew routes, transcript
 entry, list return, workspace reset and cancelled unsaved-edit navigation.
-Live Dev2 evidence and final build/check results are recorded in the associated
-report after verification.
+Internal execution records are kept in private context; record the tested
+source revision and distinguish component tests from live acceptance.
 
 ## Chat Artifacts preview increment (September 2026)
 
@@ -56,8 +56,7 @@ frame. CSV/TSV opens as a table. Managers can switch those text formats to the
 existing source editor and save through the agent-scoped file route; readers
 cannot enter edit mode. Editing pauses live follow so incoming revisions do
 not overwrite the working copy. Native XLSX/DOCX editing is not implemented;
-XLSX remains download-only. The Dev2 examples `demo-copy-site-plan.csv` and
-`demo-copy-site-brief.md` were uploaded via the CLI as labelled sample data.
+XLSX remains download-only. Use labelled synthetic sample files for verification.
 
 Creating an empty folder from Files needs its own agent-scoped API operation.
 The current save route writes files and creates parent directories as a side

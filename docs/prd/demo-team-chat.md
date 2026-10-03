@@ -58,7 +58,7 @@ Verify six actual memberships and exact roles, decodable distinct portraits,
 authenticated messages from all six people, fixed direct pairs and repeatability.
 Verify protected state permissions, concurrent invocation exclusion, no account
 takeover, old-server refusal, role drift failure and absence of plaintext secrets
-in command output. On Dev2, compare allowed and denied operations using harmless
+in command output. In an isolated fixture, compare allowed and denied operations using harmless
 validation/nonexistent-resource probes; inspect actual portraits in a browser.
 
 Internal execution and deployment records are retained in private context;

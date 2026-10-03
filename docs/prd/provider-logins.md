@@ -47,19 +47,19 @@ crewship-dev 2026-09-06; tvrzení o kódu jsou ověřená na `a0d9d6f3` s `file:
    změny.
 2. **Broker, ne brána.** Server vlastní přihlášení a obnovuje ho; kontejner dostane
    *odvozeninu* (env proměnnou nebo vyrenderovaný soubor) bez čehokoli, co by uměl
-   rotovat. To je model, ke kterému nezávisle došly oba prozkoumané agentní runtimy (§4). Jednotná
-   OpenAI-kompatibilní brána typu CLI-to-API proxy (§4.1) se **nestaví** jako hlavní cesta —
+   rotovat. Jednotná
+   OpenAI-kompatibilní brána typu CLI-to-API proxy se **nestaví** jako hlavní cesta —
    zabila by nativní CLI (harness, sandbox, MCP), na kterých Crewship stojí.
 3. **Rotující materiál nikdy neopustí server.** Refresh token je `SEALED`: nedá se
    odkrýt, nedoručuje se, neexportuje se. Do kontejneru jde jen access token
-   s expirací. Ověřeno, že Codex takový `auth.json` přijme (§3.2).
+   s expirací. Podporovaný formát ověřuje příslušný adaptér.
 4. **Fan-out = přiřazení, ne kopírování.** Čtyři Anthropic předplatná = čtyři
    provider loginy; kterému agentovi patří které, říká existující
    `credential_bindings` (WORKSPACE / CREW / AGENT + slot). Víc loginů na stejném
    scope = **pool** s prioritou, round-robinem a cooldownem — primitiva už existují
    (§2.1).
-5. **Pořadí:** Codex první (je rozbitý a je jediný, který jde ověřit naživo), na něm
-   vznikne abstrakce doručení, pak se na ni přepnou ostatní adaptéry (§7).
+5. **Kompatibilita:** každý adaptér ověřuje konkrétní formát doručení a obnovy;
+   společná abstrakce nesmí zakrývat nepodporovaný provider flow.
 
 ---
 
@@ -72,7 +72,7 @@ Dnešní Credentials míchá dvě věci s různým životním cyklem:
 | | Secret (GitHub PAT, DB DSN, SSH klíč) | Provider login (Claude Max, ChatGPT Plus, Cursor Pro) |
 |---|---|---|
 | Co to je | hodnota, kterou tool přečte | seat, kterým se platí za tokeny |
-| Kdo ho vlastní | workspace | **konkrétní člověk** (ToS obou velkých providerů, §3.4) |
+| Kdo ho vlastní | workspace | **konkrétní člověk** (explicitní vlastník provider bindingu) |
 | Expirace | zřídka, ručně | **pravidelně** (Claude token ~1 rok, Codex 10 dní, Gemini 1 h) |
 | Obnova | rotace = nová hodnota | **refresh flow** s rotujícím refresh tokenem |
 | Kvóta | žádná | 5h okno + týdenní okno, per seat |
@@ -110,8 +110,8 @@ Refresh tokeny u OAuth providerů **rotují**: každá obnova vrátí nový refr
 a starý zneplatní. Deset kontejnerů s kopií jednoho `auth.json` je deset klientů,
 které obnovují nezávisle; kdo obnoví poslední, ostatním přihlášení rozbije. Pro
 jednu instanci CLI se to neprojeví nikdy — proto to devět z deseti návodů radí.
-Pro orchestrátor je to systémová vada, a přesně kvůli ní runtime B (§4.2) odmítá sdílet
-stav s Codex CLI.
+Orchestrátor proto musí obnovu serializovat a nesmí neřízeně sdílet rotující
+stav mezi nezávislými klienty.
 
 ---
 
@@ -175,7 +175,7 @@ v `credential_fields`:
 | `account_id` | ❌ | Codex `chatgpt_account_id`; Anthropic org; Google sub |
 | `plan` | ❌ | `plus` / `pro` / `max` / `team` — z claimu nebo z probe |
 | `expires_at` | ❌ | expirace access tokenu; řídí refresh i badge EXPIRING |
-| `owner_user_id` | ❌ | kdo se přihlásil (§3.4) |
+| `owner_user_id` | ❌ | kdo se přihlásil (§5.1) |
 | `auth_mode` | ❌ | `subscription` \| `api_key` — API klíč **také** patří na záložku Providers (je to způsob, jak agent platí), jen s `auth_mode=api_key` a bez refreshe |
 
 `credpolicy`: `PROVIDER_LOGIN → Delivery: per-adapter (env nebo file), KeeperGated:
@@ -236,7 +236,7 @@ Rozšířit `CredentialMonitor` (`internal/llmproxy/monitor.go`) z validace na
 | Anthropic | žádný refresh flow; **validace** + `EXPIRING` 30 dní předem + notifikace vlastníkovi | denně |
 | Cursor / Factory / Copilot / Groq | validace probe | denně |
 
-Pravidla převzatá z té proxy (§4.1) a nutná kvůli §1.3:
+Pravidla obnovy vyplývající z §1.3:
 
 - **Single-flight per login** (řádkový zámek / `refresh_in_progress_until`): dva
   starty běhů ve stejnou vteřinu nesmí spustit dva refreshe — rotace by druhý
@@ -263,7 +263,7 @@ Pravidla převzatá z té proxy (§4.1) a nutná kvůli §1.3:
   `auth.json` při startu; proxy cesta (API klíč) umí per request. Kvóta seatu
   (5h/týdenní okno) se čte z 429 a z hlaviček tam, kde je vidět (`usage.go:289`),
   a ukládá k loginu → Providers tab ukazuje „u limitu do 11:55".
-- Pool přes seaty **různých vlastníků** je opt-in s explicitním textem (§3.4).
+- Pool přes seaty **různých vlastníků** je opt-in s explicitním souhlasem vlastníků.
 
 ### 5.5 Účtování
 

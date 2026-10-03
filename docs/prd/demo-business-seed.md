@@ -72,7 +72,3 @@ deadlines; Jordan is precise and tactful; Casey is curious and experimental;
 Morgan is steady under pressure; Riley explains measurements patiently; Taylor
 questions evidence; Jamie is a constructive skeptic. All retain the same
 honesty, credential handling and structured-output requirements.
-
-Dev1 verification: all nine installed personas matched their source templates;
-Sam and Jordan answered live with the expected distinct priorities. Browser
-checks rendered Issues, Routines, Pages and Crews without JavaScript errors.

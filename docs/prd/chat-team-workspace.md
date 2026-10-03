@@ -69,7 +69,7 @@ Verify avatars/fallbacks, grouped messages, Markdown and mobile layout in a
 browser; existing drafts, ACLs and old links must keep working. Verify activity
 enable/disable, no historical flood, workspace/privacy boundaries, replay and
 restore behavior, and absence of model jobs from system messages. Test a real
-agent's answer against a known issue state on Dev2, and compare a real issue or
+agent's answer against a known synthetic issue state, and compare a real issue or
 routine event against its channel post. Record what ran separately from this
 contract; passing these checks is not a corporate capacity or retention SLA.
 

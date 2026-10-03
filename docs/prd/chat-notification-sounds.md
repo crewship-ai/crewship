@@ -79,7 +79,7 @@ Test five bounded previews, corrupted/unavailable storage, per-user/workspace
 preferences, denied autoplay, DND/volume/off, human versus agent/system authors,
 read cursor/mute, unauthorized API responses, initial/reconnect history, aborted
 workspace changes, burst grouping and one cue across tabs. Exercise normal demo
-account login and actual human messages on Dev2; distinguish instrumented browser
+account login and synthetic human messages in an isolated fixture; distinguish instrumented browser
 playback verification from subjective physical listening.
 
 Internal execution and deployment records are retained in private context;

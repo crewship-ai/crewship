@@ -70,9 +70,8 @@ Record the measured test results and live deployment separately from this
 contract. Do not infer that one isolated browser fixture read the user's live
 session or exercised paid model execution.
 
-Measured results and Dev2 deployment: [2026-09-07 report](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/chat-unification-2026-09-07.md).
 
-CLI parity and real multi-user Dev2 acceptance: [Chat CLI](../../e2e/chat-cli-live.md).
+CLI parity and multi-user acceptance procedure: [Chat CLI](../../e2e/chat-cli-live.md).
 Workspace rooms live under `crewship chat room`; existing agent sessions retain
 their commands. The CLI exercises the same workspace permissions, read cursors,
 idempotency keys and structured agent mentions as the shared Chat interface.
