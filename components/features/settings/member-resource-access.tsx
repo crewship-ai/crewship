@@ -55,14 +55,13 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role }: {
   const [resourceId, setResourceId] = useState("")
   const [operation, setOperation] = useState("chat")
   const [conflict, setConflict] = useState(false)
-  const directory = useQuery({
-    queryKey: ["resource-access-directory", workspaceId, kind], enabled: mode === "restricted", retry: false,
-    queryFn: async ({ signal }) => {
-      const response = await apiFetch(`/api/v1/${kind === "agent" ? "agents" : "projects"}?workspace_id=${encodeURIComponent(workspaceId)}`, { signal })
-      if (!response.ok) throw new Error("Resources unavailable")
-      return directorySchema.parse(await response.json())
-    },
-  })
+  // Both directories load so every grant resolves its name by its own kind,
+  // not by whichever kind the add-grant selector currently shows (#2863).
+  const directories = {
+    agent: useResourceDirectory(workspaceId, "agent", mode === "restricted"),
+    project: useResourceDirectory(workspaceId, "project", mode === "restricted"),
+  }
+  const directory = directories[kind]
   const save = useMutation({
     mutationFn: async () => {
       const response = await apiFetch(url, { method: "PUT", headers: { "Content-Type": "application/json" },
@@ -96,7 +95,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role }: {
       : "Only listed operations are allowed. Role and conversation privacy checks still apply. Some agent features may be unavailable in restricted mode."}</p>
     {mode === "restricted" && <>
       <ul className="space-y-1" aria-label="Resource grants">{rights.map((right, index) => <li key={`${right.kind}:${right.id}:${right.operation}`} className="flex flex-wrap items-center gap-2">
-        <span>{right.kind}: {directory.data?.find(resource => kind === right.kind && resource.id === right.id)?.name ?? right.id} · {right.operation}</span>
+        <span>{right.kind}: {directories[right.kind].data?.find(resource => resource.id === right.id)?.name ?? right.id} · {right.operation}</span>
         <Button size="sm" variant="ghost" className="coarse:h-12" disabled={save.isPending || conflict} onClick={() => setRights(rights.filter((_, row) => row !== index))}
           aria-label={`Remove ${right.kind} ${right.id} ${right.operation}`}>Remove</Button>
       </li>)}</ul>
@@ -121,4 +120,15 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role }: {
       <Button size="sm" variant="outline" className="coarse:h-12" disabled={save.isPending} onClick={() => void queryClient.invalidateQueries({ queryKey })}>Reload current policy</Button>
     </div>
   </div>
+}
+
+function useResourceDirectory(workspaceId: string, kind: Right["kind"], enabled: boolean) {
+  return useQuery({
+    queryKey: ["resource-access-directory", workspaceId, kind], enabled, retry: false,
+    queryFn: async ({ signal }) => {
+      const response = await apiFetch(`/api/v1/${kind === "agent" ? "agents" : "projects"}?workspace_id=${encodeURIComponent(workspaceId)}`, { signal })
+      if (!response.ok) throw new Error("Resources unavailable")
+      return directorySchema.parse(await response.json())
+    },
+  })
 }

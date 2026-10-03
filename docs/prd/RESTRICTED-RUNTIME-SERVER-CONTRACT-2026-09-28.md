@@ -1,48 +1,19 @@
-# Restricted runtime: server contract and dev2 acceptance
+# Restricted runtime: public server contract
 
-Aktuální stav a zbývající release brány: [finální předání](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/RESTRICTED-RUNTIME-FINAL-HANDOFF-2026-09-28.md).
-Níže je původní záznam; omezení při pádu Manageru již překonává nezávislý lease dohled.
-
-Follow-up: the user subsequently authorized dev2 deployment and CLI validation;
-see the [deployment report](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/RESTRICTED-RUNTIME-DEV2-DEPLOYMENT-2026-09-28.md).
-The original prototype-only observations below retain their original scope.
-
-Date: 2026-09-28. Follow-up: [#2709](https://github.com/crewship-ai/crewship/issues/2709).
-Application authorization and release integration remain in
-[#2711](https://github.com/crewship-ai/crewship/issues/2711) (companion PR #2704), tracking
-[#2703](https://github.com/crewship-ai/crewship/issues/2703).
-
-Status: the user authorized implementation from this contract on 2026-09-28
-following the contract review in PR #2710. The isolated offline prototype is
-now implemented in `internal/restrictedruntime`; see the [implementation and
-acceptance report](RESTRICTED-RUNTIME-DEV2-EVIDENCE-2026-09-28.md). This records
-permission to proceed, not a claim that production server adapters or A2/B
-integration have been accepted. The common authorization workstream remains
-separate.
+Status: technical design extract dated 2026-09-28, not new deployment or
+production acceptance evidence. The independent controller-expiry design
+supersedes the original manager-death limitation. Current application
+boundaries are in [restricted context](../specs/restricted-context.md) and
+[restricted workflows](../specs/restricted-workflows.md).
 
 ## Source and ownership boundary
 
-The isolated dev2 worktree branches from main `8dc421fdb`, under
-`crewship_2/.claude/worktrees/restricted-runtime-dev2`, branch
-`feat/restricted-runtime-dev2`. The parent checkout and running dev2 are not
-this build. No live deployment or shared daemon/host restart is authorized
-by this prototype task. All experiments use owned disposable resources and
-synthetic data. Do not run the worktree's dev launcher against a shared slot.
-
-Read-only input from crewship_1 at `1c039b597`:
-
-- [Runtime research](https://github.com/crewship-ai/crewship/blob/1c039b597/docs/prd/RESEARCH-AGENT-ACCESS-RUNTIME-HEARTBEAT-2026-09-27.md).
-- [Release implementation tracker](https://github.com/crewship-ai/crewship/blob/1c039b597/docs/prd/AGENT-ACCESS-RELEASE-1-IMPLEMENTATION-2026-09-27.md).
-- [A2/B acceptance matrix](https://github.com/crewship-ai/crewship/blob/1c039b597/docs/prd/AGENT-ACCESS-A2-B-TEST-MATRIX-2026-09-27.md).
-
-This work owns runtime planning, process/mount/network isolation, direct
-credential delivery, lifecycle of a run, test harness and measurements.
-The application workstream owns the common grant store, API/WS authorization,
-Settings, authorized memory selection and all production entrypoint adapters.
-Both must use the contract below; neither gate alone completes A2/B.
-The managed-service controller already present in the companion branch
-(`internal/servicelifecycle/controller.go`) remains the service owner. It is
-not present in this main-based worktree and must not be recreated here.
+Runtime planning, process/mount/network isolation and run lifecycle belong
+to the runtime boundary. Application authorization owns the common grant
+store, API/WS checks, scoped memory selection and production entrypoints.
+Managed-service lifecycle is separate. Neither boundary alone proves the
+full application acceptance matrix. Internal worktree ownership, deployment
+instructions and evidence logs are retained in private context.
 
 ## Current code map, not a live exploit claim
 
@@ -235,8 +206,7 @@ Publishing/sharing a private output requires separate application authority.
 
 ## Required executable acceptance
 
-The evidence report records the implemented subset and outstanding integration
-gates for each row. Tests use real UID-1001 shells/processes and synthetic
+Each row is a required scenario, not a claim that it has been accepted. Tests use real UID-1001 shells/processes and synthetic
 canaries for H1/A and H2/A concurrently in the same workspace. Include another
 agent and workspace as additional controls. Denial must leave the target
 unchanged; errors, skipped Docker tests and empty output are not a pass.
@@ -265,25 +235,9 @@ explicit separate gate.
 
 ## Delivery and integration checkpoints
 
-1. Application owner reviews this contract: identity/data-scope mapping,
-   origin adapters, narrowing delegation, revocation ordering and bounded
-   runtime stop, stream delivery and recovery ownership. Record agreed
-   revision and any differences here before substantial implementation.
-2. Implement the independent Docker harness and private runtime package
-   without modifying common grants, public API authorization or Settings.
-   Pin dependencies on the companion service/credential work explicitly.
-3. Run unit tests, actual-process negative tests, timings and the required
-   Go verification loop. Test failure or missing enforcement keeps restricted
-   mode unavailable. No "best effort" fallback to crew mode.
-4. Integrate server adapters and execute the complete A2/B matrix on dev2
-   within the separate deployment authorization boundary. Preserve internal
-   shared mode only for explicitly trusted crews; unknown/missing mode on a
-   restricted request is an error. Existing legacy crews require an explicit
-   compatibility classification, not silent widening of new client runs.
-
-Open integration/release gates (see the evidence report for prototype results):
-production agreement on server adapters; complete R1–R10 application evidence; production memory/prompt/output adapters; network broker
-enforcement; termination timing and failure reconciliation; disk quota;
-upstream revocation support per provider; isolated host reboot; stronger
-sandboxing if the threat model includes kernel exploits. No release claim
-or completion of #2709 follows from this document alone.
+Integration requires agreement on identity/data scope, adapter admission,
+narrowing delegation, revocation order, verified termination, output audience
+and recovery ownership. Exercise R1–R10 with isolated fixtures and preserve
+explicit failure states; never silently fall back to shared crew execution.
+Host reboot, network enforcement, disk quota and upstream credential revocation
+need their own evidence. This design alone does not establish release readiness.

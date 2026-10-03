@@ -1,5 +1,0 @@
---- FAIL: TestRunStreamReauthorizesBeforeEveryDelivery (6.71s)
-    run_stream_authority_test.go:53: post-revocation content delivered
-FAIL
-FAIL	github.com/crewship-ai/crewship/internal/api	6.742s
-FAIL

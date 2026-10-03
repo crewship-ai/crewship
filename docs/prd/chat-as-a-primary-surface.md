@@ -23,30 +23,11 @@ long-term direction and is **deliberately not in 1.0** — see §3.2.
 
 ---
 
-## 0. The question that outranks this document
+## 0. Adoption and evidence boundary
 
-On `crewship-dev3` the routines page reads: **38 routines · 0 runs · never
-invoked 38 · nothing scheduled · nothing ran in the last 7 days.**
-
-If that is the state of the *product* and not just of a freshly seeded dev
-clone, then the most expensive problem in Crewship is that the core loop never
-starts — and improving chat is polishing the entrance to a building nobody has
-walked through.
-
-**Step 0, before any work below:** check invocation counts on a real workspace.
-
-```
-export CREWSHIP_SERVER=http://localhost:8082
-/tmp/crewship-2-dev routine list --json | jq '[.[] | {slug, invocation_count}]'
-```
-
-- **If routines do run in real use** → this PRD proceeds as written.
-- **If they do not** → this PRD is paused after Step 3 (the bug fixes), and the
-  effort moves to activation. Nothing in Steps 1–3 is wasted either way; they
-  are repairs.
-
-This is not a formality. It is the one finding that could invalidate the rest,
-so it is answered first.
+Validate the core workflow with representative synthetic scenarios before
+claiming that navigation changes improve adoption. Internal workspace usage
+counts and task-prioritization discussions are retained in private context.
 
 ## 1. The problem
 
