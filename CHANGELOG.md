@@ -20,6 +20,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Account-group management stays idle and hides cached metadata when no workspace is selected.
+
+- User preferences finish loading after refused or empty server responses while retaining the locally cached value.
+
 - File trees clear stale contents, selection and loading indicators when workspace selection is cleared or resolving. Refresh correctly replaces a directory with a file and clears the path prefix when the listing becomes empty.
 
 - Notification channel reads reject malformed stored configuration and filters instead of silently treating unreadable category restrictions as permission to deliver every category. Valid legacy empty filters retain their existing defaults.
