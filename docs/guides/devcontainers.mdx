@@ -706,9 +706,13 @@ so they do not move tags retained by older crew records. Existing records are no
 rewritten. Native Apple builds still return tags because that provider does not
 yet expose equivalent image inspection through this interface.
 
-Cache inventory and ordinary cache deletion/GC recognize references by image ID.
-This is not retention against external `docker image prune`, forced admin deletion
-or disk loss. A start requesting a different image returns `image update pending` while the
+The provisioning API's cache inventory, deletion and orphan sweeper recognize
+crew references by image ID. The separate opt-in
+[idle cache eviction policy](/specs/container-cleanup#idle-retention) can still
+evict an unused image even when a crew references it; a later start must rebuild
+it. Revision history does not retain image bytes or guarantee rollback. External
+`docker image prune`, forced admin deletion and disk loss also remain outside
+this protection. A start requesting a different image returns `image update pending` while the
 current container is running, paused, restarting or its state is unknown. It
 leaves existing work intact. A freshly inspected stopped container can be
 removed without force and recreated. Selecting the same immutable artifact by
