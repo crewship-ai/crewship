@@ -162,11 +162,17 @@ each catalogue. The difference is what you can say about the version.
 
 | | `spec.devcontainer.features` | `spec.mise.tools` |
 |---|---|---|
-| runs | as root, at image build | as the agent, after the build |
+| runs | as root, at image build | as the agent, during environment build |
 | can | anything — packages, services, `postCreateCommand` | one thing: this tool at this version |
-| version | whatever the feature's tag ships | **exactly what you pin** |
-| cached | yes, as an image layer | no, runs on every provision |
+| version | whatever the feature's tag ships | Exact pins or native mise selectors; a lock records resolved dependency inputs |
+| cached | yes, as an image layer | yes, in the environment image; an explicit rebuild bypasses the provisioning cache |
 | capped | no | 20 tools |
+
+These are build-time properties. A value such as `22` is a floating selector,
+not a full version pin; a locked rebuild retains the native locked resolution.
+Image observations do not prove which executable a later name-based invocation
+selects from a writable home. See [managed tool versions](/guides/devcontainers)
+for resolution, required offline checks and their runtime limits.
 
 **Pin with mise when a version matters** — `node = "22.11.0"`, not just
 "Node". **Use a feature for everything else**: it is faster, because the
