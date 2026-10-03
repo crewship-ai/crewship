@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Routine definition tag batches commit atomically; rejected batches leave existing labels intact, and adding an existing label remains idempotent at the tag limit.
+
 - Crew journal summary actions reset on crew/workspace changes and suppress notifications or refreshes from abandoned requests.
 
 - Runtime availability ignores superseded checks; graph agent cards support keyboard activation, routine cards hide unknown step progress, and graph edges refresh changed handles and arrow markers.
