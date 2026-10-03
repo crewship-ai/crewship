@@ -17,6 +17,10 @@ import (
 // inspected container or exact run probe can establish absence; unavailable
 // providers, legacy locations and work-owned outcomes remain untouched.
 func (s *Server) reconcileRecoveredRuntimeAtBoot(ctx context.Context, key string, run orchestrator.RunState) orchestrator.RunState {
+	if run.Status == "running" && run.ContainerID == "" {
+		s.logger.Warn("recovered runtime has no recorded container identity; absence requires operator verification", "run_id", run.ID)
+		return run
+	}
 	if !s.recoveredRuntimeAbsent(ctx, run) {
 		return run
 	}

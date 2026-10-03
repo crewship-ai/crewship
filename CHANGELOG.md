@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Recovery and explicit stop now share atomic runtime updates: an OOM-killed or missing container can leave RUNNING, concurrent completion is preserved, and a stop also closes the controls of runs discovered during ownership inspection.
+
 - **Confirmed stops from direct agent starts no longer wait forever for a missing start event.** Recovery retains the run's workspace, publishes the confirmed terminal event without inventing a start, and preserves dispatcher-owned outcomes and conflicting or unknown tenant identities.
 
 
