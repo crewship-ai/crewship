@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- MCP credential creation clears secret input when its workspace or environment variable changes, cancels abandoned requests and ignores late results after closing the picker.
+
 - Guaranteed memory-tool writes require a caller-supplied operation identifier, preserving retry deduplication instead of silently inventing a fresh identifier on each attempt.
 
 - Backend connection status and uptime reset when switching or clearing the selected workspace, so an earlier workspace cannot appear connected during the new workspace's first check.
