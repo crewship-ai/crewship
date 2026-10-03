@@ -20,6 +20,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- API mutations reject malformed or imprecise `Retry-After` values instead of treating them as valid retry delays.
+
+- Work-ledger retention reports expired payloads and reclaimed bytes only after their transaction commits, preserving completed-batch counts when a later batch rolls back.
+
 - Secret replacement discards drafts and obsolete completions when its workspace, credential or dialog changes. Revealed values report clipboard success only after the browser confirms it, with recoverable errors and no stale copy status after hiding.
 
 - Chat questionnaires clear when the agent or workspace changes; failed optional requests cannot leave the previous agent’s forms visible.
