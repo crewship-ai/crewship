@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Run output can be retained by an independent helper process.** Internal capture/read modes preserve sequenced output and a terminal result, refuse duplicate launches and enforce an explicit output limit. Controller reattachment and replacement of the existing tmux stream are not enabled yet.
+
+
 - **Confirmed stops from direct agent starts no longer wait forever for a missing start event.** Recovery retains the run's workspace, publishes the confirmed terminal event without inventing a start, and preserves dispatcher-owned outcomes and conflicting or unknown tenant identities.
 
 
