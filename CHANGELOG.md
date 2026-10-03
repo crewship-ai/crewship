@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Integration workspace changes close old confirmation dialogs, clear selection and form state, and suppress notifications from abandoned connection actions.
+
 - Crew policy controls discard abandoned reads and drafts, stop a policy save from continuing into quota writes after selection changes, and disable pending saves when edit access is removed. Unreadable optional quota metadata falls back without hiding the loaded policy.
 
 - Task and mission details retain their selected tab when the same entity refreshes; mission logs include completed tasks even when no start timestamp was recorded.
