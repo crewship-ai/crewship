@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
+import { registerNavigationGuard } from "@/hooks/use-navigation-guard"
 
 const mockFetch = vi.fn()
 vi.stubGlobal("fetch", mockFetch)
@@ -44,6 +45,49 @@ describe("useWorkspace", () => {
     const { result } = renderHook(() => useWorkspacePagesTheme("ws-a"))
     expect(result.current).toBeUndefined()
     expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it("does not rewrite persistence when reselecting the active workspace", async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => [WS_A, WS_B] })
+    const { result } = renderHook(() => useWorkspace())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    vi.mocked(window.localStorage.setItem).mockClear()
+    act(() => result.current.setWorkspaceId("ws-a"))
+    expect(result.current.workspaceId).toBe("ws-a")
+    expect(window.localStorage.setItem).not.toHaveBeenCalled()
+  })
+
+  it("retains the workspace until an unsaved-edit guard allows its retry", async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => [WS_A, WS_B] })
+    const { result } = renderHook(() => useWorkspace())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    let retry!: () => void
+    const unregister = registerNavigationGuard((resume) => { retry = resume; return false })
+    try {
+      act(() => result.current.setWorkspaceId("ws-b"))
+      expect(result.current.workspaceId).toBe("ws-a")
+      expect(storage.get("crewship.workspaceId")).toBe("ws-a")
+      unregister()
+      act(() => retry())
+      expect(result.current.workspaceId).toBe("ws-b")
+      expect(storage.get("crewship.workspaceId")).toBe("ws-b")
+    } finally { unregister() }
+  })
+
+  it("reads updated settings after the initial workspace request has finished", async () => {
+    let resolve!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    mockFetch.mockReturnValueOnce(new Promise(done => { resolve = done }))
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ ...WS_A, name: "Updated" }] })
+    const { result } = renderHook(() => useWorkspace())
+    let refreshed!: Promise<void>
+    act(() => { refreshed = refreshWorkspaceSettings() })
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      resolve({ ok: true, json: async () => [WS_A] })
+      await refreshed
+    })
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(result.current.workspace?.name).toBe("Updated")
   })
 
   it("coalesces palette events and reads again after an older request", async () => {

@@ -193,8 +193,11 @@ describe("managed integration lifecycle", () => {
   inventory.users = [{ user_id: "bob", connected_accounts: [account("b", "slack", "bob")] }, { user_id: "alice", connected_accounts: [account("a", "gmail")] }]
   const status = vi.fn(); render(<ComposioIntegrations onStatus={status} />)
   await screen.findByRole("region", { name: "Catalog content" })
-  expect(latest(status).users.map(u => u.id)).toEqual(["alice", "bob"])
-  expect(latest(status).toolkits.map(t => t.slug)).toEqual(["gmail", "slack"])
+  await waitFor(() => {
+   expect(latest(status).users.map(u => u.id)).toEqual(["alice", "bob"])
+   expect(latest(status).toolkits.map(t => t.slug)).toEqual(["gmail", "slack"])
+   expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled()
+  })
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
   await waitFor(() => expect(state.fetch.mock.calls.filter(([url]) => String(url).includes("/inventory")).length).toBe(2))
  })
