@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Connector access editing refuses to save when existing grants cannot be read, encodes resource identifiers, and ignores stale tool, summary and save responses after the selected agent or workspace changes. A missing workspace no longer leaves the connector summary loading indefinitely.
+
 - Runtime reconciliation uses the latest inspected container state, so a stale running-list entry cannot return a stopped crew as ready, and a stale stopped-list entry cannot trigger replacement of a now-live crew.
 
 - The shared agent context panel encodes agent, crew and workspace identifiers when loading context.
