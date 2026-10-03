@@ -19,7 +19,7 @@ import (
 func TestMiseLock_RealInstallRejectsTamperingAndMissingVersion(t *testing.T) {
 	image := os.Getenv("CREWSHIP_MISE_TEST_IMAGE")
 	if image == "" {
-		t.Skip("set CREWSHIP_MISE_TEST_IMAGE to an image containing mise")
+		t.Fatal("set CREWSHIP_MISE_TEST_IMAGE for this explicit live gate")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()

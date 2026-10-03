@@ -99,8 +99,8 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "ContainerInspect", HTTP: "GET /containers/{id}/json", ProxyVars: []string{"CONTAINERS"},
-		Tier: TierCore, Packages: []string{"internal/api", "internal/backup", "internal/provider/docker"},
-		Why: "state, mounts and network reads for running crews",
+		Tier: TierCore, Packages: []string{"internal/api", "internal/backup", "internal/devcontainer", "internal/provider/docker"},
+		Why: "state, mounts and network reads for running crews; effective configuration audit for disposable lock builders",
 	},
 	{
 		Method: "ContainerList", HTTP: "GET /containers/json", ProxyVars: []string{"CONTAINERS"},

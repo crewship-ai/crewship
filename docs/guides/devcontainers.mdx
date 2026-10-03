@@ -777,3 +777,33 @@ silently relaxing the qualification profile. Older images and unsupported
 backends can report `unavailable`. The initial runtime port refuses persistent
 mounts and RAM suspension explicitly.
 
+
+### Resolving or updating a lock with Crewship
+
+`crewship crew provision lock-resolve mise.json --image sha256:<local-image-id>`
+resolves a mise JSON/TOML tool configuration in a disposable Docker builder.
+Supply a trusted, already-present Linux image containing `/usr/local/bin/mise`,
+`/usr/bin/env`, `/bin/sleep` and `/bin/tar`. No image is pulled automatically.
+The resolver selects `linux-x64` or `linux-arm64` from that image's architecture;
+it does not infer the target from the CLI host's operating system.
+
+The JSON result contains `lock`, `resolver_image_id`, `platform` and
+`mise_version`. Apply its `lock` through `spec.mise.lock` and the ordinary build
+path. For an update, include the previous `lock` alongside `tools` in the input
+JSON and pass `--bump`. Mise updates within each selector; an exact version
+remains exact. The result is a proposal, with no running-crew or server changes.
+
+This is trusted build work with Docker bridge networking for registries. It
+uses a read-only root, no persistent or host mounts, UID 1001 for resolution,
+dropped capabilities, bounded memory/CPU/processes, a private 256 MiB temporary
+filesystem and a five-minute operation deadline. A separate UID-1002 keeper
+exits after six minutes if the client disappears; stopped-container cleanup
+still depends on the client or provisioning cleanup. The image, its tool
+backends and the Docker host remain trusted. This is not the restricted agent
+network policy or hostile-image execution.
+
+Configuration environment values are excluded; private registry credentials
+and host mise configuration are not inherited. Input is limited to 4 MiB;
+native bundles retain the limits above, and resolver diagnostics are bounded.
+Resolution does not install the resulting toolchain, prove a real provider
+login, schedule an update or activate a revision.

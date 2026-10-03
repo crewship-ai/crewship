@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- `crew provision lock-resolve` creates or updates complete native mise lock bundles in a disposable Docker builder, preserving exact pins and reporting the resolver image/platform/version.
+
 - Managed mise builds accept complete native lock bundles, enforce locked reinstall, and preserve lock inputs through manifest and visual tool edits; `crew provision lock-pack` packages local lock files.
 - Image changes no longer implicitly remove a running Docker crew container. New-image starts report a pending update until an explicit stop/restart; stopped replacement uses non-force removal and warm cache checks image selection.
 
