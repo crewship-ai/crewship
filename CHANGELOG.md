@@ -20,6 +20,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Crew group headers expose their collapse state and support activation with Enter and Space.
+
+- Run registry compaction uses exclusive temporary files, preventing pre-existing staging symlinks from overwriting unrelated files.
+
 - Foreach body steps now receive the same retry, failure-policy, output-validation and lifecycle-hook checks as top-level routine steps, rejecting invalid definitions before they run.
 
 - Routine definition tag batches commit atomically; rejected batches leave existing labels intact, and adding an existing label remains idempotent at the tag limit.
