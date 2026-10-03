@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"reflect"
@@ -160,6 +161,12 @@ func mcpOperationPath(template string, params map[string]string) (string, error)
 func (s *cliMCP) request(ctx context.Context, in mcpRequestInput) (any, error) {
 	ctx, cancelCall := context.WithTimeout(ctx, s.timeout)
 	defer cancelCall()
+	// Workspace resolution is an HTTP preflight too. Apply the same redirect
+	// policy before resolving a slug, not only inside the eventual API call.
+	requestClient := s.client.WithContext(ctx).WithTimeout(s.timeout)
+	httpClient := *requestClient.HTTPClient
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	requestClient.HTTPClient = &httpClient
 	op, err := s.operation(in.OperationID)
 	if err != nil {
 		return nil, err
@@ -194,7 +201,7 @@ func (s *cliMCP) request(ctx context.Context, in mcpRequestInput) (any, error) {
 			}
 			resolveCtx, cancel := context.WithTimeout(ctx, s.timeout)
 			defer cancel()
-			workspace, err = s.client.ResolveWorkspaceIDStrict(resolveCtx)
+			workspace, err = requestClient.ResolveWorkspaceIDStrict(resolveCtx)
 			if err != nil {
 				return nil, err
 			}
@@ -236,7 +243,7 @@ func (s *cliMCP) request(ctx context.Context, in mcpRequestInput) (any, error) {
 		}
 	}
 	var result any
-	err = executeAPIRequest(cmd, []string{op.Method, path}, s.client, s.authenticate, func(v any) error { result = v; return nil })
+	err = executeAPIRequest(cmd, []string{op.Method, path}, requestClient, s.authenticate, func(v any) error { result = v; return nil })
 	return result, err
 }
 

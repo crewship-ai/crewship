@@ -261,3 +261,19 @@ func TestMCPWorkspaceResolutionFailureDoesNotReachTarget(t *testing.T) {
 		t.Fatalf("resolution must fail closed: %v, calls=%d", err, calls.Load())
 	}
 }
+
+func TestMCPWorkspacePreflightRefusesRedirect(t *testing.T) {
+	s, calls := testCLIMCP(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workspaces" {
+			t.Error("workspace preflight followed a redirect")
+		}
+		w.Header().Set("Location", "/redirected")
+		w.WriteHeader(http.StatusFound)
+	})
+	s.client.WorkspaceID = "mcp-preflight-redirect"
+	id := mcpOpID(t, s, "GET", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}")
+	_, err := s.request(context.Background(), mcpRequestInput{OperationID: id, PathParams: map[string]string{"slug": "demo"}})
+	if err == nil || calls.Load() != 1 {
+		t.Fatalf("redirected preflight: err=%v calls=%d", err, calls.Load())
+	}
+}
