@@ -36,6 +36,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Mission timelines retain agent counts when collapsed, announce expansion state and make task timing/usage tooltips reachable from the keyboard.
 
+- Database snapshot restore creates exclusive staging and rollback files, preventing a pre-existing staging symlink from redirecting writes and preserving earlier rollback copies from the same second.
+
 - Empty routine lookups cannot select a demo pack whose optional probe is absent. CLI HTTP test logs return independent header and body snapshots so assertions cannot corrupt later observations.
 
 - Mission controls require complete workspace/crew/mission selection, cancel abandoned requests and ignore stale completions or errors after a selection change.
