@@ -135,6 +135,7 @@ func TestBuildEnvVarsSidecar_UnroutedOpenCodeUnchanged(t *testing.T) {
 		"CREWSHIP_CHAT_ID=chat-1",
 		"CREWSHIP_CREW_SHARED=/crew/shared",
 		"XDG_DATA_HOME=/crew/runs/coder/run-1/.local/share",
+		"OPENCODE_DISABLE_AUTOUPDATE=1",
 		"HTTP_PROXY=http://127.0.0.1:9119",
 		"HTTPS_PROXY=http://127.0.0.1:9119",
 		"http_proxy=http://127.0.0.1:9119",

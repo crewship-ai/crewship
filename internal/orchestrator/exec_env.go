@@ -38,7 +38,10 @@ func baseAgentEnv(req AgentRunRequest) []string {
 		"CREWSHIP_CREW_SHARED=/crew/shared",
 	}
 	if req.CLIAdapter == "OPENCODE" {
-		env = append(env, "XDG_DATA_HOME="+agentHomeDir(req.AgentSlug, req.RunID)+"/.local/share")
+		env = append(env, "XDG_DATA_HOME="+agentHomeDir(req.AgentSlug, req.RunID)+"/.local/share", "OPENCODE_DISABLE_AUTOUPDATE=1")
+	}
+	if req.CLIAdapter == "GEMINI_CLI" {
+		env = append(env, "GEMINI_CLI_SYSTEM_SETTINGS_PATH="+agentHomeDir(req.AgentSlug, req.RunID)+"/"+managedGeminiSettingsFile)
 	}
 	return env
 }

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Managed runs disable Gemini/OpenCode automatic update controls; missing Gemini system settings now fail preflight before launching the CLI.
+
 - Crew create/update accept bounded native mise lock bundles without expanding the 10 KiB non-lock configuration budget; large escaped locks are no longer truncated by the request reader.
 
 - `crew provision lock-resolve` creates or updates complete native mise lock bundles in a disposable Docker builder, preserving exact pins and reporting the resolver image/platform/version.
