@@ -7,7 +7,7 @@ Status: draft · 2026-08-01 · Companion to `crew-runtime-capacity.md`
 > human user. It must be able to pick up a routine or an issue with that context."*
 >
 > All `file:line` references verified against `fix/aux-reach-probes-the-slots-endpoint` on
-> 2026-08-01. Live behaviour probed against dev1 the same day. Re-verify before
+> 2026-08-01. This is a historical source reference. Re-verify before
 > implementing.
 
 ---
@@ -29,22 +29,9 @@ What fails is what the agent is *shown* at wake, and what it is *told* to go loo
 
 ## 1. Live evidence
 
-Asked an agent on dev1 to report its own prompt contents. Agent has `memory: on`.
-
-> **(a)** `NONE` — no `OPERATOR MODEL` or `PEER CONTEXT` block.
-> **(b)** `NOTHING` — no information about the human user: no name, no preferences.
-> **(c)** No `AGENT MEMORY` block. Session context does carry
-> `[MEMORY NUDGE] You have 177 new journal entries since your last memory update`.
-
-The nudge fires; the memory does not arrive.
-
-**Honest limit of this test:** the missing `[AGENT MEMORY]` block cannot be distinguished
-from "this agent never wrote any memory" — `[PERSONA]` *was* present, and it travels the
-same assembly path, so assembly ran and had nothing to show. That is itself the finding:
-**memory appears only if the agent previously wrote some, and nothing in the wake path
-ensures it ever does.** (a) and (b) are unambiguous.
-
----
+Internal prompt observations are retained privately. Public validation should
+use synthetic memory and user profiles to check what reaches each authorized
+wake path; an empty prompt alone does not identify the failing stage.
 
 ## 2. What is actually assembled
 

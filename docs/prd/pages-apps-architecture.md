@@ -2,7 +2,7 @@
 
 > **Implementační PRD první dodávky:** [Pages Apps v1](../specs/pages-apps.md), včetně jednoho YAML exportu a přesného stavu implementace. Tento dokument zachovává širší architektonický kontext.
 
-Stav: návrh k implementaci, 2026-09-08. Vychází ze zadání plně vlastních Pages tvořených agenty v chatu. Tento dokument sjednocuje cílovou architekturu; [průzkum a předchozí experiment](../archive/pages-apps.md) zůstává dokladem pouze tam uvedených ověření. Žádné níže navržené API, tabulky ani balíčky SDK tímto dokumentem nevznikají.
+Stav: návrh k implementaci, 2026-09-08. Vychází ze zadání plně vlastních Pages tvořených agenty v chatu. Tento dokument sjednocuje cílovou architekturu; interní průzkum a experimentální protokoly jsou zachované v soukromém kontextu. Žádné níže navržené API, tabulky ani balíčky SDK tímto dokumentem nevznikají.
 
 ## Aktuálně potvrzený produktový rozsah
 
@@ -48,7 +48,8 @@ V první podporované verzi je aplikace statický frontend. Python či shell skr
 
 ## 2. Co již existuje a co musíme doplnit
 
-Základ ověřen v checkoutu `005470ed7157ea2504c77484617ace97b1daeb4c`; přihlášené Pages na dev2 nebyly prohlédnuty. Toto není audit jejich konkrétního obsahu ani důkaz shody nasazeného buildu.
+Historický zdrojový základ: `005470ed7157ea2504c77484617ace97b1daeb4c`.
+Tato návrhová tabulka není novým ověřením nasazení.
 
 | Existující část | Využití / mezera |
 |---|---|

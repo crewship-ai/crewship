@@ -1,9 +1,9 @@
 # Specs — current contracts
 
 **Purpose.** Current contracts and implementation references. New specifications
-describe shipped behaviour. The retained Pages reference also contains an
-explicitly labelled historical design; its presence here does not certify that
-every original proposal shipped.
+describe shipped behaviour. The Pages reference retains technical design sections; its presence here
+does not certify that every original proposal shipped. Internal research and
+execution diaries are maintained in private context.
 
 `go run ./scripts/docs-inventory -strict` scans supported executable-looking
 contexts for commands, flags, public routes and manifest kinds, subject to its

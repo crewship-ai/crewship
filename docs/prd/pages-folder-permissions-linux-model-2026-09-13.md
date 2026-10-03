@@ -49,7 +49,7 @@ které adresář nepřebije (§7.1/2 v `pages.md`).
 Složky bez oprávnění (PR #2531, #2529), `reach` (#2526), efektivní přístup
 jen ke čtení (#2530), stránkové granty s ověřením vydavatele při použití
 (`loadPageGrantRecordsIn`), pravidlo o panelech (`canSeePanel`), kontrola
-úplného dokumentu pro `write` (#2502). Původně šlo o kombinaci větví na dev3; tyto části i §3–§6 jsou nyní
+úplného dokumentu pro `write` (#2502). Tyto části i §3–§6 jsou podle uvedeného historického stavu
 sloučené do main. Návrhová SQL níže popisuje model; autoritativní migrační
 soubory jsou v `internal/database/migrations/`.
 

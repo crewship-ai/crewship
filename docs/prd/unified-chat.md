@@ -103,4 +103,5 @@ locks its inputs until resolution and does not navigate after cancellation.
 Membership and workspace checks apply again on each retry. This is a new room,
 not an in-place broadening of access to an existing private conversation.
 
-Current implementation and acceptance: [sidebar/continuation report](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/chat-navigation-dev2-2026-09-07.md).
+Internal execution and deployment records are retained in private context;
+this design does not assert fresh acceptance.

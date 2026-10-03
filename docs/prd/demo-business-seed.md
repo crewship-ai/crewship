@@ -40,61 +40,11 @@ delivery, credential-request interactions and multi-agent delegation need their
 own explicitly configured acceptance scenarios. The four default stories must
 remain useful with local fixtures and without third-party accounts.
 
-## Dev1 verification, 2026-09-25
+## Verification boundary
 
-- Complete disposable-workspace acceptance: **36 PASS / 0 FAIL**, including
-  all four check/resolve flows, Page provenance, approval, DONE Issues and outbox
-  receipts. The later verifier also checks assignment and Issue comments.
-- CLI factory reset removed SQLite and runtime data; a fresh install and a
-  non-destructive re-seed both completed. Final workspace: 3 crews, 9 agents,
-  5 Issues (all TODO), 6 Pages, 5 matching folders, 15 routines.
-- Final workspace check-only acceptance: **24 PASS / 0 FAIL**. No customer action
-  was approved in the final workspace; Sales was exercised with Keep open.
-- Browser: check action reached completion; reload and repeat of the resolution
-  action reused the same pending approval; Keep open preserved TODO. All six
-  Page apps rendered. Sales at 390px viewport had no horizontal content overflow.
-- Real live samples arrived at five-second intervals; Stop halted publication.
-- Codex drafts succeeded for Sales, Finance, Marketing and Shipping. Taylor
-  actually called the `harbor-goods.read_demo_records` MCP tool and returned
-  `3, L-103`. A structured-result parser regression found by that test was fixed
-  so MCP envelopes are tool events, not raw assistant prose.
-- `.env.local` checksum was unchanged. Real provider authentication and the
-  one-panel callback files remain outside Git. Gitleaks found no staged leaks.
-
-The developer's Codex subscription login was exercised successfully, but the
-previous handoff reported a refresh-token 401. Working current access is not
-proof that a copied subscription login will refresh indefinitely. Customers
-supply their own provider credentials; the basic stories work without them.
-
-## Critical acceptance follow-up
-
-The audit found that the four AI drafts published correct Page data but their
-final Page-write acknowledgement contained no structured run outcome. Technical
-`completed` therefore coexisted with outcome `FAILED`. Draft routines now report
-their result only after saving and publishing the draft. Missing saved work
-fails; a completed case returns `NO_CHANGE` without invoking the model.
-
-- A separate disposable workspace on dev1 exercised **all 15 routines**. Every
-  routine had a persisted `completed` / `SUCCEEDED` run with no error message.
-- The strengthened full verifier passed **48 checks**, including authoritative
-  outcomes, Page provenance, Issue ownership/assignment/comments, Inbox decisions,
-  DONE transitions and local receipts containing the original source finding.
-- All **9 agents** answered the real provider smoke test successfully.
-- Drafts were read for meaning, not just length: the audience is now explicit
-  per story (customer, carrier or internal marketing diagnosis); shipping
-  evidence includes EUR. Explicit draft delimiters keep agent progress commentary
-  out of Pages and approval text; malformed drafts fail instead of being saved.
-  Generated proposals are still human-reviewed text.
-- The monitor advanced timestamps, stopped publishing, and the completed Finance
-  draft path skipped the agent and reported `NO_CHANGE`.
-- API/database suites passed with temporary test data in RAM after disk-backed
-  runs timed out. The CLI/seeddata suites also passed.
-
-The customer lesson is **check → understand the finding → optionally draft →
-decide → inspect the receipt**. Finance completion records a reminder, not a
-payment. Shipping completion records claim evidence, not a paid refund.
-Marketing simulates local delivery; it does not prove a production email route.
-These distinctions must stay visible when extending the catalogue.
+Exercise the acceptance scenarios with an owned disposable workspace and
+synthetic users. Internal instance checks and account observations are retained
+in private context. A seeded demo is not evidence of production readiness.
 
 ## Visual identity and agent voices
 

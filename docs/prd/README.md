@@ -37,14 +37,14 @@ Current boundaries: [restricted workflows](../specs/restricted-workflows.md) and
 
 | Document | Context and limits |
 | --- | --- |
-| [PRD-ISSUES-AND-ROUTINES-2026.md](PRD-ISSUES-AND-ROUTINES-2026.md) | Issue/routine work loop and acceptance tracks; distinguish local branch evidence from merged delivery. |
+| [PRD-ISSUES-AND-ROUTINES-2026.md](PRD-ISSUES-AND-ROUTINES-2026.md) | Issue/routine work loop, state machines and acceptance criteria; internal audits and planning are private. |
 | [issues-human-agent-work-contract-2026-09-07.md](issues-human-agent-work-contract-2026-09-07.md) | Human/agent work handoff and its implementation/test plan. |
-| [QUEUE-MECHANISM-2026.md](QUEUE-MECHANISM-2026.md) | Original per-crew memory admission proposal; its draft header is historical. |
+| [QUEUE-MECHANISM-2026.md](QUEUE-MECHANISM-2026.md) | Per-crew memory admission proposal; internal incident measurements are private. |
 | [WEBHOOKS-AGENT-PARALLELISM-MEMORY-1-0-2026-09-10.md](WEBHOOKS-AGENT-PARALLELISM-MEMORY-1-0-2026-09-10.md) | Design context for webhook dispatch, parallelism and memory. |
 | [WEBHOOKS-AGENT-PARALLELISM-IMPLEMENTATION-1-0.md](WEBHOOKS-AGENT-PARALLELISM-IMPLEMENTATION-1-0.md) | Implementation boundaries for the durable dispatch design. |
 | [SPIKE-RIVER-SQLITE-1-0.md](SPIKE-RIVER-SQLITE-1-0.md) | Reproduction protocol for the rejected queue alternative; links the ADR and retained harness. |
 | [ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08.md](ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08.md) | Routine authoring and operator experience; includes separate human acceptance limits. |
-| [ROUTINES-CLARITY-PRD-2026-09-15.md](ROUTINES-CLARITY-PRD-2026-09-15.md) | Routine inputs, working rules and diagnostics, with dated local verification. |
+| [ROUTINES-CLARITY-PRD-2026-09-15.md](ROUTINES-CLARITY-PRD-2026-09-15.md) | Routine inputs, working rules and diagnostics, with explicit acceptance criteria. |
 | [ROUTINES-DURABILITY-QUICKWINS.md](ROUTINES-DURABILITY-QUICKWINS.md) | Historical durability and observability changes shipped through PR #455. |
 
 ## Runtime and authority
@@ -57,7 +57,7 @@ Start with [restricted context](../specs/restricted-context.md), [member policy]
 | [RESTRICTED-HTTP-BROKER-CONTRACT-2026-09-28.md](RESTRICTED-HTTP-BROKER-CONTRACT-2026-09-28.md) | Fixed-operation broker prototype; explicitly does not enable production entrypoints. |
 | [RESTRICTED-RESPONSES-ADAPTER-2026-09-29.md](RESTRICTED-RESPONSES-ADAPTER-2026-09-29.md) | Provider transport boundary and its limits; not application execution acceptance. |
 | [RESTRICTED-RUNTIME-CONTROLLER-EXPIRY-2026-09-28.md](RESTRICTED-RUNTIME-CONTROLLER-EXPIRY-2026-09-28.md) | Independent expiry after controller death and its original integration scope. |
-| [RESTRICTED-RUNTIME-SERVER-CONTRACT-2026-09-28.md](RESTRICTED-RUNTIME-SERVER-CONTRACT-2026-09-28.md) | Original server/acceptance record; later lease supervision supersedes the stated manager-death limitation. |
+| [RESTRICTED-RUNTIME-SERVER-CONTRACT-2026-09-28.md](RESTRICTED-RUNTIME-SERVER-CONTRACT-2026-09-28.md) | Public server/acceptance design; internal deployment records are private. |
 | [crew-runtime-capacity.md](crew-runtime-capacity.md) | Runtime capacity constraints and the design referenced by source/tests. |
 | [PRD-SLASH-CAPABILITIES-2026.md](PRD-SLASH-CAPABILITIES-2026.md) | Slash-command and per-user capability model referenced by source/tests. |
 | [keeper-configuration.md](keeper-configuration.md) | Keeper configuration proposal and rationale referenced by implementation. |
@@ -84,7 +84,7 @@ Start with the [chat guide](../guides/chat-sessions.mdx) and [UI/UX contract](..
 | Document | Context and limits |
 | --- | --- |
 | [chat-as-a-primary-surface.md](chat-as-a-primary-surface.md) | Original navigation and mobile chat proposal; later conversation design extends its scope. |
-| [workspace-conversations.md](workspace-conversations.md) | Workspace conversation model with dated local/development evidence. |
+| [workspace-conversations.md](workspace-conversations.md) | Workspace conversation model and its stated acceptance limits. |
 | [unified-chat.md](unified-chat.md) | Shared conversation surface for agent sessions, human DMs and mixed groups. |
 | [chat-team-workspace.md](chat-team-workspace.md) | Team workspace chat interaction design. |
 | [chat-files-preview-v1.md](chat-files-preview-v1.md) | File preview interaction and implementation design. |
@@ -100,7 +100,7 @@ Start with the [memory guide](../guides/agent-memory.mdx); [restricted context](
 | --- | --- |
 | [MISSION-OUTCOMES-TO-MEMORY.md](MISSION-OUTCOMES-TO-MEMORY.md) | Historical outcome-to-memory design referenced by shipped schema migrations. |
 | [agent-memory-on-wake.md](agent-memory-on-wake.md) | Recall at agent wake and its surrounding memory design. |
-| [memory-retrieval-layer.md](memory-retrieval-layer.md) | Retrieval/storage proposal referenced by the public implementation. |
+| [memory-retrieval-layer.md](memory-retrieval-layer.md) | Retrieval/storage design and implementation choices; private corpora and benchmark research are excluded. |
 | [crewship-guide.md](crewship-guide.md) | Persistent product-specialist design and the scope of its implemented foundation. |
 | [conversational-onboarding.md](conversational-onboarding.md) | Original conversational onboarding design; its header is historical. |
 

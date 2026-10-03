@@ -1,27 +1,10 @@
 # Routines: srozumitelná obsluha a spolehlivé autorování
 
-> Integrační opravy #2631 jsou sloučené a ověřené na DEV1. [Datovaný závěrečný stav, testy a zbývající přejímka](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/routines-closeout-2026-09-22.md) uvádí přesný commit nasazení a hranice důkazů. §11 zůstává NOT VERIFIED; technické testy nejsou lidská přejímka.
-
-**Navigace ve stavu k 18. září:** Tento PRD drží původní rozsah R1–R10 a lidskou přejímku §11. Navazující změny mají vlastní zadání a důkazy:
-
-- [Vstupy, pravidla práce a řešení problémů](ROUTINES-CLARITY-PRD-2026-09-15.md): [PR #2556](https://github.com/crewship-ai/crewship/pull/2556), issue #2555.
-- [Operator console, Edit a New routine](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/routines-operator-console-2026-09-15.md): [PR #2562](https://github.com/crewship-ai/crewship/pull/2562), issue #2560. [Integrační ověření DEV1 z 16. září](https://github.com/crewship-ai/crewship/pull/2562#issuecomment-5696159682) zaznamenává nasazenou větev, browser důkazy a stav merge v okamžiku ověření.
-- Opravy #2553 uzavírá [protokol po mergi](https://github.com/crewship-ai/crewship/pull/2553#issuecomment-5672592832). Novější merge, CI a identitu nasazení uvádějí validační protokoly v navazujících PR; starší důkazy nejsou nové přeměření serveru.
-- Integrační PR [#2617](https://github.com/crewship-ai/crewship/pull/2617) (CLI audit #2594–#2611 + #2616, opravy assignee-type a nullable backup schémat) je od 18. září sloučen; [validace 18. září](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/routines-validation-2026-09-18.md) potvrzuje merge ancestry, DEV1 identitu i denní živé průchody R1–R10 a opravuje defekt #2573 (kaskáda mazání rutiny na plány, PR [#2620](https://github.com/crewship-ai/crewship/pull/2620)).
-
-**Úvod níže je historický stav z 12. září. Lidská přejímka §11 zůstává otevřená; technické testy ani merge ji neuzavírají.**
-
-Datum zadání: 2026-09-08. Aktualizace stavu: 2026-09-12.
-Toto je živý dokument rozsahu, akceptace a důkazů Routines. Historická předání
-zůstávají archivem. Kód A–D a opravy N1–N4 byly sloučeny a nasazeny na dev1;
-P8 dokládá `f7a43cd22`, doplnění P8b přesně `7d470200a`.
-**Technické uzavření bylo předčasné:** oponentura 12. září reprodukovala
-obchvat rollbackem, opětovným zapnutím plánu a rozpor deadline v journalu;
-požaduje také opravy publikace, oddělení živých editorů a času/spouštění.
-Rozsah následných oprav uvádí [odpověď na oponenturu](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/routines-opponent-2026-09-12.md);
-aktuální merge a CI jsou v [PR #2514](https://github.com/crewship-ai/crewship/pull/2514),
-přesná identita nasazení ve [veřejném protokolu](https://github.com/crewship-ai/crewship/issues/2473#issuecomment-5646862404).
-Lidská přejímka §11 zůstává otevřená; sloučení ani testy ji nenahrazují.
+Stav: veřejný návrhový a akceptační kontrakt z 2026-09-08. Interní rešerše,
+pracovní předání a protokoly vývojových instancí jsou uložené v soukromém
+kontextu. Tento výtah netvrdí novou přejímku; technické testy nenahrazují
+lidskou přejímku v §11. Navazující veřejný kontrakt:
+[vstupy, pravidla práce a diagnostika](ROUTINES-CLARITY-PRD-2026-09-15.md).
 
 ## 1. Rozhodnutí a problém
 
@@ -31,27 +14,15 @@ co vzniklo a co může udělat dál. Autor potřebuje recept sestavit a ověřit
 Tyto dvě činnosti mají sdílet data, grafiku a názvy kroků, ale nepotřebují stejný
 objem ovládacích prvků. **Doporučení: jednoduchá obsluha a samostatný režim Edit.**
 
-Dosavadní úpravy byly opakovaně uživatelem odmítnuty jako nepřehledné. Úspěšné
-testy nejsou akceptace UX. Další fáze nemá přidávat další karty a vysvětlující
-odstavce. Musí zkrátit cestu od otázky klienta k odpovědi nebo konkrétní akci.
-
-Tento PRD určuje nový cílový UX a pořadí práce; nenahrazuje technické kontrakty
-v [předání Routines](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/HANDOFF-2026-09-08-ROUTINES-WORKSPACE.md) ani
-[předání Issues](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/HANDOFF-2026-09-08-ISSUES-EXECUTION.md). Starší wireframy nejsou
-závazné tam, kde odporují tomuto návrhu. Nový commit `42aa533b3` již část směru
-realizuje; nejprve ho posoudit a využít, ne začít od starých screenshotů.
+Úspěšné technické testy nejsou akceptace UX. Návrh má zkrátit cestu od
+otázky uživatele k odpovědi nebo konkrétní akci.
 
 ## 2. Podklady a míra jistoty
 
-[Konkurenční výzkum](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/ux/routines-competitive-review-2026-09-08.md) obsahuje
-oficiální zdroje, omezení edic a konkrétní lokální soubory. Zkoumány Windmill,
-n8n, Dify, Make, Trigger.dev, LangSmith a AWX. Neproběhlo přihlášené testování
-konkurence, uživatelská studie ani výkonnostní benchmark.
-
-Převzaté principy: formulář místo konfigurace pro obsluhu; oddělení draftu od
-publikované verze; práce se zachycenými daty při opravě; lidské rozhodnutí jako
-plnohodnotný krok; měření kvality nad opakovatelnými příklady. Jde o naši syntézu,
-nikoli prokázané procentuální zlepšení Crewship.
+Veřejně zachované principy: formulář pro obsluhu, oddělení draftu od
+publikované verze, práce se zachycenými daty, explicitní lidské rozhodnutí
+a opakovatelné ověření. Interní porovnávání produktů není součástí tohoto
+kontraktu; návrh nedokládá změřené zlepšení použitelnosti.
 
 ## 3. Pevné hranice
 
@@ -181,12 +152,9 @@ kvůli uložení. Změna živé verze je explicitní akce s oprávněním, ne ka
 
 ### 5.5 Kalendář a verze
 
-**Vstupní preset R7 ověřen na dev1 (2026-09-10):** souhrn je vidět u
-opakovaného i jednorázového plánu v detailu a kalendáři. Změna přes Edit inputs
-se promítla do obou míst; ověřeny prázdné vstupy, dlouhý text a detail při 390 px.
-Důkazy: [protokol R7](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/r7-preset-visibility-2026-09-10.md). Toto splňuje
-část §5.5 o viditelnosti presetu; nenahrazuje přejímku DST/§9 ani uživatelovo
-potvrzení Edit/Test/Run.
+Vstupní preset musí být čitelný v detailu i kalendáři, včetně prázdných
+hodnot a mobilního zobrazení. Ověření presetu nenahrazuje DST ani lidskou
+přejímku Edit/Test/Run.
 
 Schedule obsahuje společný seznam jednorázových startů i opakování a příslušnou
 kalendářní projekci. Prázdný stav „No schedules“ nesmí nastat při existujícím
@@ -323,22 +291,9 @@ uvést pouze interní walkthrough a ponechat validaci použitelnosti jako neově
 
 ## 10. Realizační pořadí a hotovo
 
-1. **Inventura:** porovnat aktuální HEAD s tímto PRD, zapsat existuje/chybí/nejisté
-   pro každý P0; doložit draft/publish, test effects a API state mapping.
-2. **Konkrétní prototyp:** jeden společný shell a 5 výše uvedených úloh, včetně
-   chyby/čekání a Edit. Existující barvy a ikony. Ne pět dalších vizuálních stylů.
-3. **První vertikální změna:** Recipe → Run → Run detail → problémový krok → Edit
-   draft → Test → Publish; historie a snapshoty zůstávají pravdivé.
-4. **Dokončení P0:** kalendář, oprávnění, společná rozhodnutí, zátěž dat a regrese
-   Issues. Každý PR obsahuje ověřitelný uživatelský výsledek a cílené testy.
-5. **P1 samostatně:** rich human forms; fixture/debug/recovery; eval porovnání.
-
-Před migrací agent předloží konkrétní delta schema a kompatibilitu ve svém
-implementačním plánu. Před nasazením provede předepsané repo kontroly; nasadí pouze
-dev1, ověří v browseru a doplní přesné odkazy, scénáře, výsledky i neověřená místa.
-Neslučovat PR bez skutečného review. Hotovo neznamená jen zelené testy: P0 musí
-mít prokázanou funkčnost a UX musí být samostatně vyhodnocené, nikoli domněle přijaté.
-
+Změny mají zachovat kompatibilitu, explicitní stavy a měřitelné akceptační
+podmínky §9 a §11. Interní rozdělení práce a pořadí dodávek patří do
+soukromého kontextu.
 
 ## 11. Release 1.0: pozorovatelná přejímka a hranice
 
@@ -363,323 +318,3 @@ Runtime validuje vstupy před spuštěním dítěte; schema-aware návrhy jsou o
 Zachované hooky, DAG, retry, foreach, guardrails, eval a execution tiers se
 nepřepisují. Jediná změna kontraktu kroku pro čitelnost je nepovinné `name`;
 identita, reference `needs` i cesty zaznamenaných běhů nadále používají `id`.
-
-## 12. Důkazy oprav a stav přejímky (10. září)
-
-| PR | Sloučení | CI a review |
-| --- | --- | --- |
-| [A #2474](https://github.com/crewship-ai/crewship/pull/2474) | `4581b38f1706` | CI 34460894622 prošlo. Skutečné CodeRabbit review a vypořádaná vlákna; závěrečná dokumentace ručně. |
-| [B #2476](https://github.com/crewship-ai/crewship/pull/2476) | `fa222ad2e1e5` | CI 34473215882 prošlo. Skutečné review, pět oprav potvrzeno; závěrečná změna CI ručně při vyčerpané kvótě. |
-| [C #2478](https://github.com/crewship-ai/crewship/pull/2478) | `6ce5afd45089` | CI 34476869288 prošlo. Skutečné review, opravy potvrzeny; finální integrační delta ručně dle §3 work orderu. |
-| [D #2482](https://github.com/crewship-ai/crewship/pull/2482) | `6a9857f5da45` | CI 34481621297 prošlo. Skutečné review, všech 16 vláken potvrzeno a vyřešeno; konečný celý head nebyl znovu strojově přečten kvůli limitu. Ruční pokrytí a retrigger jsou doložené v PR. |
-
-Opravy zahrnují N1–N15 a kontraktní T1–T5: skutečné HTTP bajty publikace,
-plochou odpověď rozhodnutí, všechny asynchronní starty, upgrade starší DB a
-připnuté i zrušené jednorázové starty. Test reálného chunked HTTP navíc dokládá
-zachování vstupů a verze bez Content-Length. Publikace neposuzuje důkaz podle
-jinak escapované reprezentace JSON.
-
-Pro D prošly lokálně všechny Go balíky a vet. Část běhu bylo nutné zopakovat
-v soukromé cache po smazání sdílených build souborů jiným procesem; nešlo o
-selhání asercí. Údaj 707 testů / 80 souborů v dřívější evidenci znamená cílený
-frontendový výběr, nikoli celý frontend repozitáře.
-
-Čitelnost: kontrola čisté funkce nad zmrazenými 81 kroky má nula neznámých typů
-po doplnění pěti větví. To **nenahrazuje ověření všech 81 názvů v živém UI**.
-Původní vzorek obsahuje 27 rutin, 25 popisů a nula vlastních názvů kroků.
-Původní jedno interní měření prvního zobrazení: 470 ms, 32 API požadavků,
-158 433 přenesených API bajtů. Není to uživatelská studie ani benchmark.
-
-- [x] Nasazení čitelnosti na dev1 a nové měření stejným postupem (§14).
-- [x] Pět přihlášených úloh z §9 interním browser walkthrough (§14); nejde o uživatelskou studii.
-- [x] Restart čekajícího rozhodnutí a rozpracovaného kontrolovaného běhu;
-      běžný reload nedokazuje recovery po náhlém ukončení ani exactly-once účinky.
-      Doloženo 11. 9. dvěma `kill -9` na izolované instanci nad jedním během
-      (`run_cmtwp7vt700033e66cfc6`): obnovené rozhodnutí na témže tokenu,
-      rozpracovaný krok proveden znovu (`att=1 interrupted` → `att=2 completed`),
-      přijatá v1 přežila publikaci v2. Exactly-once se **netvrdí**: at-least-once
-      je změřeno recorderem na 1× dokončený a 2× rozpracovaný krok.
-- [x] Souběh startů, editorů a rozhodnutí nad skutečným serverem (§14).
-      11. 9. doplněno o timeout vs. opožděnou odpověď (409) a o čtyři souběhy
-      dvou opačných odpovědí (vždy jedno 200 a jedno 409).
-- [ ] Uživatel bez výkladu vysvětlil pět rutin a potvrdil Edit/Test.
-      Zadání pěti úloh s odkazy přímo na dev1 je připravené v
-      [routines-human-gate-2026-09-11](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/routines-human-gate-2026-09-11.md).
-
-Závěrečný bod smí potvrdit pouze uživatel. Žádné interní měření, screenshot,
-review ani zelené CI není náhradou tohoto potvrzení.
-
-## 12b. Technická přejímka §9 — 11. září
-
-Protokol s run IDs, přesným rozsahem každého scénáře a seznamem toho, co
-zůstává NEOVĚŘENO: [routines-acceptance-2026-09-11](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/routines-acceptance-2026-09-11.md).
-Doplněny byly náhlý pád a obnova, nejistý externí účinek, timeout a souběh
-rozhodnutí, serverová izolace oprávnění, neprovedená větev / foreach /
-skutečné pokusy, dva editoři a DST na skutečné dispatch cestě (dosud byla
-doložena jen projekce kalendáře).
-
-Protokol obsahuje **závěrečnou tabulku všech 16 řádků §9** se stavem
-PASS / NEOVĚŘENO, přesným rozsahem každého důkazu a zbývajícími omezeními,
-plus samostatný seznam toho, co doložené není. Vrstvy se v ní nezaměňují:
-serverový test, browser fault injection, skutečné živé ověření a lidské
-porozumění jsou rozlišené.
-
-Čtyři nálezy N1–N4 jsou sloučené a jejich kombinace je nasazená na dev1.
-Závěrečný průchod P8 v protokolu dokládá identitu binárky, skutečné odložené
-běhy, validaci plánů a browser chyby/Retry. **Tím se neuzavírá lidská brána
-§11 ani nepřijímá celé PRD.** Rozsah review a testů je uveden v protokolu.
-
-| Nález | Co bylo špatně | Kde je oprava |
-|---|---|---|
-| N1 | Běh zrušený jinak než tlačítkem Cancel (odpojený klient, timeout proxy, deadline klienta, řádné vypnutí) se zapisoval jako `failed` s důvodem `context canceled`, razil error fingerprint, posílal failure notifikaci a pouštěl `on_failure` hook — zatímco journal tentýž okamžik označoval `CANCELLED` | [PR #2494](https://github.com/crewship-ai/crewship/pull/2494) — sloučeno `57fa31552` |
-| N2 | Kontrola kompatibility presetů běžela jen na cestě draft→publish, takže přímé `routine save` (dveře CLI a agentů) rozbilo živý plán tiše | [#2495](https://github.com/crewship-ai/crewship/issues/2495) → [PR #2497](https://github.com/crewship-ai/crewship/pull/2497) — sloučeno `7437bd33a` |
-| N3 | Preset plánu se neověřoval ve chvíli, kdy se plán zakládá nebo edituje, takže plán mohl vzniknout s hodnotami, které jeho rutina odmítá | [#2496](https://github.com/crewship-ai/crewship/issues/2496) → [PR #2498](https://github.com/crewship-ai/crewship/pull/2498) sloučeno `adb0f4620`; oponentura našla dvě díry v úpravě plánu (odepnutí, přepnutí verze bez vstupů) → [PR #2503](https://github.com/crewship-ai/crewship/pull/2503) — sloučeno `34b4d6602` |
-| N4 | Běh odložený přes `--delay` nebyl připnutý, takže publikace během jeho čekání ve frontě změnila, co odpálil — přesně případ, který §9 řádek 4 pojmenovává | [#2500](https://github.com/crewship-ai/crewship/issues/2500) → [PR #2501](https://github.com/crewship-ai/crewship/pull/2501) — sloučeno `f7a43cd22` |
-
-N3 byl původně zapsán jako „server nevaliduje typované vstupy běhu“. **To bylo
-nesprávné a protokol tu opravu nese:** `ValidateFormInputs` existuje a je na
-cestě běhu zapojený dvakrát. Sonda prošla proto, že `hasInputForm` považuje
-vstup s deklarovaným typem, ale bez `widget`, za legacy. Tato hranice
-zůstává vědomě nezměněna — má ji většina existujících rutin a její zpřísnění
-je samostatné rozhodnutí o legacy kontraktu.
-
-## 13. Historický podklad pro oponenturu — před živou přejímkou
-
-Tento oddíl zachovává stav před nasazením; aktuální výsledky jsou v §14.
-
-**Stav: opravy jsou integrované, čitelnost je připravená v PR, produktová
-přejímka není hotová.** Předmětem oponentury je
-[PR #2485](https://github.com/crewship-ai/crewship/pull/2485), aplikační head
-`71725f860724647bdb1dc20e290fa66bc7f13b2d`. Tato část je podklad k revizi,
-nikoli tvrzení o dokončeném nasazení nebo přijatém UX.
-
-### Co se podařilo
-
-Opravy byly rozděleny a sloučeny v předepsaném pořadí: A draft/publish,
-B vzorová testovací data, C lidská rozhodnutí, D běhy/plány/porovnání.
-Všechny čtyři PR prošly CI. Zásadní opravy chrání bajty publikačního důkazu,
-asynchronní a idempotentní start, uložené vstupy, připnutou verzi běhu,
-souběžné drafty a rozhodnutí a integritu zachycených výsledků. Doplněné
-T1–T5 pokrývají skutečné HTTP bajty, tvar odpovědi rozhodnutí, všechny start
-cesty, upgrade starší databáze a zrušené jednorázové starty. Mapa skutečného
-CodeRabbit pokrytí a ručních dodatků při kvótě je v §12 a příslušných PR.
-
-Následná čitelnost v #2485 používá data, která už aplikace měla: viditelné
-popisy a počet kroků v hlavním seznamu, lidské názvy kroků a činnost jako
-fallback. Přidává pouze nepovinné `Step.Name` a `step_count` v odpovědi API;
-engine se nepřepisuje. Editor je jeden dokument s panelem kroku Edit/Test.
-Publikace zůstává explicitní, porovnání publikovaných verzí je ve Versions.
-Chyba a identifikace selhaného kroku jsou nahoře; důležitý krok se otevře i
-za limitem prvních 12. Prázdné sekce se sbalí, duplicitní spodní dok zmizí.
-Vzorky, publikační review, rozhodovací formuláře ani porovnání nebyly odstraněny.
-
-### Jak silné jsou důkazy
-
-- Úplný lokální Go běh: **138 testovaných balíků prošlo**, dalších 10 nemá
-  testy. API 1 215,677 s, databáze 1 014,954 s, pipeline 15,369 s. Vet prošel.
-- Úplný frontendový běh před posledním drobným dodatkem: **8 441 testů v 710
-  souborech prošlo**. Dodatek zachovává ID kroku při nedostupném historickém
-  receptu a dokončuje slovník; jeho nový test a všech 314 testů komponent
-  Routines prošly, stejně jako typy a lint dotčených souborů. Aktuální CI
-  celého PR ještě není dokončené.
-- Produkční frontendové sestavení prošlo. Celý lint měl nula chyb a 30
-  upozornění mimo změněný kód Routines. Strict docs inventory, parita schémat,
-  migrační lint a agent invariants prošly.
-- Funkce pro názvy pokrývá zmrazený vzorek všech **81 kroků / 27 rutin** bez
-  neznámého typu. **Živé zobrazení všech 81 kroků zatím ověřeno není.**
-- Na dev1 je zachycena původní chyba publikace: uložení 200, test 200,
-  publikace 422 `save_token invalid (expired, malformed, or signed for a different definition/user)`. Samotný status příčinu nedokazuje. Pozitivní průchod opraveným nasazením
-  ještě nebyl proveden. Přípravné skripty nejsou důkaz jeho úspěchu.
-- #2485 zatím nemá dokončené nezávislé CodeRabbit review: první pokus skončil
-  oznámením o kvótě. Vlastní revize autora tuto skutečnost nenahrazuje.
-
-### Co netvrdíme
-
-Dev1 zatím nebyl přepnut na tuto implementaci. Původní pracovní kopie je
-zachovaná; integrační postup musí zachovat i nesouvisející WIP. Neproběhla
-nová přihlášená přejímka pěti úloh, restartu a souběhu. Nemáme měření
-zrychlení po změně ani uživatelskou studii. Počet nejvýše čtyř pracovních
-ploch je návrhový limit s metodikou v §5.4, nikoli nezávisle přepočítaný
-výsledek. **Zelené testy nedokládají, že klient Edit/Test rozumí.**
-
-Typovaná rozhodnutí ve vlastní autentizované schránce jsou produktová
-hypotéza diferenciace. Tržní rešerše vychází z veřejné dokumentace, nikoli
-z přihlášeného srovnávacího testování. Nedokazuje obchodní převahu.
-
-### Zadání oponentovi
-
-Projděte změny a jejich testy, nehodnoťte jen tento souhrn. U nálezu uveďte
-soubor/řádek, konkrétní reprodukci, dopad a chybějící důkaz.
-
-1. Dokládají testy skutečné klient↔server kontrakty a historické snapshoty?
-   Který test by přežil návrat původní chyby nebo pouze opakuje implementaci?
-2. Je rozdíl mezi Test routine, vzorovým testem kroku a skutečným Run či
-   porovnáním zřejmý před akcí? Neslibuje některý text neexistující izolaci?
-3. Je editor skutečně jednodušší při stejné metodě počítání ploch, nebo jsme
-   ovládání pouze schovali? Zachovávají Edit, Code a Test rozpracovaná data?
-4. Jsou odvozené názvy a účely pravdivé u podmínek, DAG a neúplných dat?
-   Neztratí se chyba, čekající rozhodnutí nebo důležitý krok při stránkování?
-5. Jsou odklady R2, R5/R9 a R10 v §11 obhajitelné pro Release 1.0? Který
-   chybějící průchod je překážkou vydání a který pouze další iterací?
-
-Po oponentuře následuje vypořádání nálezů, zelené CI a merge #2485, bezpečné
-přepnutí dev1 na úplný integrovaný zdroj, pět přihlášených úloh s konkrétními
-run IDs, restart/souběh a nové měření. Poslední bránu tvoří uživatelovo
-vysvětlení pěti rutin a výslovné potvrzení srozumitelnosti Edit/Test.
-
-
-### Dodatek po oponentuře
-
-`step_count` znamená počet definovaných kroků **vrchní úrovně**. Nezahrnuje
-vnořené definice uvnitř foreach, počet položek ani pokusy; foreach s osmi
-vnořenými kroky tedy má v seznamu jeden vrchní krok. Není to měřítko objemu práce.
-
-Původní zkratka `invalid_save_token` byla chybná citace; výše je opravená
-na přesnou odpověď. Dochovaný log `/tmp/crewship-1-go.log` obsahuje pro stejný
-jedinečný slug `work-order-proof-mtvcinau` v čase `2026-09-10T09:49:34.749446989Z`
-`pipeline save: save_token rejected`, `err="save_token: HMAC mismatch"`.
-To upřesňuje odmítnutí na neshodu podpisu, nikoli expiraci. Pozorování je
-ze starého nasazení; samo nedokazuje úspěch opravy. Reprodukční skript ukládá,
-testuje a publikuje jednu definici s doslovnými `&`, `<`, `>` ve stejném
-přihlášeném kontextu. Pozitivní opakování po nasazení zůstává povinné.
-
-Závislosti `needs` byly už před oponenturou v rozbaleném detailu editoru i
-spine; chyběly v zavřeném řádku. Dodatek je zobrazuje přímo v řádku a u
-závislostí či automatického paralelismu odstraňuje pořadová čísla a vysvětluje
-rozdíl mezi pořadím receptu a spuštění. Vlastní názvy se zkracují stejně jako
-odvozené; uložený název a ID se nemění. Počet celé testové sady zůstává
-regresní kontrolou, nikoli důkazem použitelnosti nebo pokrytí všech změn.
-
-
-## 14. Odpověď na oponenturu a živý protokol — 10. září 2026
-
-**Oponent měl pravdu: původní podklad nedokládal nasazení ani přejímku.**
-Následující výsledky jsou nové pozorování přihlášeného Chromium na
-[dev1](http://localhost:8081/routines), nikoli dodatečné přejmenování
-unit testů na uživatelský důkaz. Interní průchod nenahrazuje potvrzení člověka.
-
-### Nasazení a ochrana rozpracované práce
-
-Dev1 dostal úplný integrovaný zdroj, včetně upstream main `410563eca`.
-Původní checkout `cd2074d0b` a jeho rozpracované soubory jsou zachované v
-archivu a stash `a1420f0b69c03cb67e8efa192462f8e5d8174e3e`.
-Šestnáct nesouvisejících souborů bylo obnoveno a jejich obsah ověřen SHA-256;
-tři další změny již byly v upstream. Žádná jiná instance nebyla nasazena.
-Sestavení i restart proběhly standardním `systemctl reload crewship-ws@1`.
-Browser úlohy začaly na `bf83d6d21`, následná oprava obnovy běhu byla ověřena
-na `353e0a588`. Revision binárky byla ověřena pomocí `go version -m`, nejen
-podle Git checkoutu. Dev1 obsahuje zachované nesouvisející WIP.
-
-### Pět úloh a autorův Edit/Test
-
-Všechny běhy používají vlastní kontrolované recepty bez agentů a externích
-HTTP akcí. Neproběhlo přihlášené srovnávání s konkurencí ani uživatelská studie.
-
-| Úloha | Pozorování a důkaz |
-| --- | --- |
-| Přečíst účel a kroky | Popisy jsou viditelné v hlavním seznamu. Browser postupně otevřel všech 27 původních rutin včetně skrytých a všech 81 kroků; primární titulky odpovídají odvozeným názvům, žádný není jen technické ID. To dokládá render, nikoli porozumění člověka. |
-| Změnit vstup a dohledat výsledek | `run_cmtvp6yn4001555f2552a`: vstup `message="Message changed in the browser"`; dokončený výstup odpovídá přesně odeslané hodnotě. |
-| Najít neúspěch | `run_cmtvp710k0016dcaa8189`: `failed`, krok `intentional_failure` otevřený. Verdikt i chyba jsou v prvním viewportu 1440×1000. Skutečná chyba je ne-JSON vstup transformace vyžadující JSON, nikoli selhání výstupní kontroly. |
-| Vyřídit rozhodnutí | `run_cmtvp8yvi001dd218715d`: z Routines otevřeno stejné rozhodnutí v Inbox; odpověď `count: 0, enabled: false` přijata HTTP 200, běh dokončen, rozhodnutí odstraněno z čekajících. |
-| Naplánovat a zrušit | Jednorázový start `pnd_cmtvp94qf0012632eb36d` na `2026-09-12T10:30:00Z`, připnutá verze 2; vytvořen a zrušen přes browser, nepřítomnost plánu ověřena API. |
-| Edit/Test/Publish | Vlastní název `Return the entered message`, stabilní ID `echo`, publikovaná verze 2. Test transformace vypočetl `Sample from browser`; UI správně uvádí, že výstupní kontroly nejsou deklarované. Statická kontrola receptu neslibuje spuštění agentů, skriptů ani HTTP. |
-
-Snímky skutečného průchodu: [hlavní seznam](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/assets/routines-acceptance-2026-09-10/main-list.png),
-[změněný vstup](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/assets/routines-acceptance-2026-09-10/changed-input.png),
-[chyba nahoře](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/assets/routines-acceptance-2026-09-10/failure-desktop.png),
-[rozhodnutí v Inbox](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/assets/routines-acceptance-2026-09-10/decision-in-inbox.png),
-[jednorázový plán před zrušením](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/assets/routines-acceptance-2026-09-10/one-time-schedule.png).
-Doplňující kontrola na `6d681bd85`: [úzký displej 390×844](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/assets/routines-acceptance-2026-09-10/failure-mobile.png)
-a [Edit/Test](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/ux/assets/routines-acceptance-2026-09-10/edit-test.png).
-Na 1440×1000 i 390×844 není vodorovný overflow dokumentu a chyba je v prvním
-viewportu (na mobilu y=547,94, výška 64 px). Kontrola běžela s reduced motion.
-Escape nyní vrací fokus na původní Edit; před opravou tato browser aserce
-selhala, po opravě prošla na obou šířkách. Cílených 59 testů prošlo.
-Nejde o úplný audit přístupnosti ani zkoušku všech kombinací délky textu.
-
-Snímky obsahují pouze demo data; autentizační stav a surové odpovědi s tokeny
-nejsou součástí repozitáře.
-
-### Publikační důkaz: původní chyba a pozitivní opakování
-
-Původní serverový log je korelován přes slug `work-order-proof-mtvcinau` a čas
-`2026-09-10T09:49:34.749446989Z`: `save_token: HMAC mismatch`.
-Samotné 422 by chybu podpisu nedokazovalo. Po nasazení tentýž postup nad
-jednou definicí s doslovnými `&`, `<`, `>` prošel: uložení 200, kontrola 200,
-publikace 201, následné čtení 200 a zachování doslovných bajtů.
-Pozitivní sonda `work-order-proof-mtvp2jq1` proběhla v 15:40 UTC a byla odstraněna.
-
-### Souběh a restart odhalily další skutečnou chybu
-
-Dva současné starty se stejným idempotency key vrátily 202/200 a stejné
-`run_cmtvp9dkr001eaf494dda`. Dva zápisy draftu nad stejnou revizí vrátily
-200/409; vítězná hodnota byla přečtena zpět.
-
-**První restart čekajícího rozhodnutí neprošel.** Běh
-`run_cmtvparzs002020412b2c` měl zachycenou původní definici, ale po publikaci
-nové verze obnovovací cesta použila aktuální head a odmítla jej jako
-`definition changed since run started (content hash mismatch)`.
-To je nový runtime nález, nikoli chyba testovacího skriptu. Dva regresní testy
-nejprve selhaly: restart i odpověď na čekání po změně publikované definice.
-
-Commit `353e0a588` opravuje obnovu: používá uložený execution snapshot,
-nepřepíše jej novějšími step overrides a při nečitelném zachyceném receptu
-odmítne pokračovat. Starší běhy bez snapshotu zachovávají dosavadní kontrolu
-verze/hash. Jde o 29 přidaných a 10 odebraných řádků runtime, bez migrace
-nebo nového endpointu; **dřívější tvrzení o nulové změně exekuce již pro celý
-PR neplatí**. Engine se nepřepisuje.
-
-Opakování na opravené binárce prošlo: `run_cmtvpv3y000039bf2ed9a` po běžném
-reloadu zachoval přijatou verzi 1 proti head 2, hash, token, formulář a Inbox
-`ibx_waitpoint_c248743b52fa97fd289338b43291c54a`.
-Ze dvou současných odpovědí přijal jednu (200/409), dokončil se s
-`{count: 0, enabled: false}` podle původního receptu a Inbox přešel na `resolved`.
-Anonymní veřejný callback na toto typované rozhodnutí byl odmítnut 403.
-
-Rozpracovaný běh `run_cmtvpv41j000681bfa329` běžný reload ukončil jako
-`failed: context canceled`, ale zachoval mezivýsledek `saved`.
-**To nedokládá obnovení rozpracované akce po tvrdém pádu ani exactly-once
-vedlejší účinky.** Tyto závěry si nelze odškrtnout z úspěchu čekajícího rozhodnutí.
-
-### Regresní kontroly a dostupnost důkazů
-
-Na aplikačním head `6d681bd85` prošel celý frontend: **8 451 testů / 710 souborů**,
-173,13 s. TypeScript a lint změněných souborů prošly. Vet prošel pro runtime
-`353e0a588`; celý Go běh tohoto runtime je při zápisu protokolu ještě spuštěný.
-Celý pipeline balík po opravě snapshotu prošel (11,083 s). Strict docs inventory
-ověřil 636 API operací a 878 CLI příkazů; agent invariants i migrační lint prošly.
-Výsledek dokončeného Go běhu a CI bude doložen v PR na konkrétním head.
-
-Čtyři kontrolované recepty `work-order-*-mtvp2jz6` zůstávají na dev1 pro
-reprodukci a ruční přejímku. Závěrečné čtení API nepotvrdilo žádný jejich
-aktivní běh; jednorázový plán byl zrušen. Nejde o původní vzorek 27 rutin.
-Surové autentizační/tokenové reporty zůstávají mimo repo. Run IDs, scénáře,
-pozorované výsledky a snímky jsou uvedeny výše; účelové sondy publikace byly
-po pozitivním ověření odstraněny.
-
-### Co se změnilo po připomínkách a co zůstává otevřené
-
-DAG řádky ukazují závislosti a nepředstírají pořadí exekuce čísly.
-`step_count` je výslovně počet definic vrchní úrovně, nikoli vnořených kroků.
-Vlastní názvy se zkracují na první řádek a nejvýše 100 znaků bez změny uložené
-hodnoty. Prázdné uložené vstupy mají jediný řádek; statická kontrola již
-nevypisuje technický výstup `<dry-run>`.
-
-Stejná jednorázová metrika otevření detailu: před 470 ms / 32 API požadavků /
-158 433 bajtů, po 387 ms / 33 požadavků / 161 857 bajtů. Podmínky cache a
-zatížení nejsou kontrolované; nejde o statistický důkaz zrychlení.
-
-CodeRabbit provedl skutečné review původního head `25bfebfab`.
-Osm věcných nálezů a dvě drobnosti bylo opraveno. Ze čtyř požadavků odstranit
-jména konkurentů z evidenční rešerše bot tři stáhl; čtvrtý autor vypořádal
-ručně, protože zadání výslovně vyžaduje zachovat dohledatelnou rešerši.
-Všechna původní vlákna jsou uzavřená; to samo neznamená strojové review
-pozdější opravy obnovy. Aktuální CI a pokrytí další revizí musí být ověřeno
-na konečném head před merge.
-
-**Závěr pro oponenta:** nyní existuje skutečné nasazení, render 81 kroků,
-interní průchod pěti úloh, pozitivní publikace a serverový souběh. Živý test
-navíc našel a následně prokázal opravu obnovy čekajícího běhu. Přetrvává
-neověřená použitelnost člověkem a neprokázané zotavení rozpracované akce po
-náhlém pádu. Před vydáním je nutné dokončit brány CI/review/merge a získat
-uživatelovo potvrzení podle §9–§10. Počty regresních testů tyto brány nenahrazují.

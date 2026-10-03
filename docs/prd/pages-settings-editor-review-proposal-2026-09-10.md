@@ -1,15 +1,8 @@
 # Pages editor — návrh v2 po oponentuře a ověření
 
-Stav: návrh k rozhodnutí. **P0 je implementováno** — co bylo postaveno, co
-změřeno a co zůstává otevřené, je v [implementační evidenci](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-settings-editor-implementation.md).
-Akceptace produktu (§7, měření s pěti lidmi) splněná není a evidence to říká.
-Revize 2 zapracovává [nezávislou oponenturu](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-settings-editor-independent-review-2026-09-10.md).
-Oponentura zůstává beze změny jako nezávislý dokument; její popis v1 je historický.
-Podklad ověření: main `01d4849cd8f61b70b64a290accf52617dbc7fac4`, screenshot
-Operations Lab a cílené regresní testy. Produktové popisky jsou anglické.
-
-[Klikací vizuální prototyp](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-settings-editor-prototype.html) používá pouze
-syntetická data. Ukazuje pracovní plochy a stavy, ne skutečné API nebo autorizaci.
+Stav: veřejný návrh a akceptační hranice z 2026-09-10. Interní oponentury,
+prototypy a průběh ověřování jsou uložené v soukromém kontextu. Návrh
+netvrdí novou lidskou přejímku ani úplný bezpečnostní audit.
 
 ## 1. Rozhodnutí
 
@@ -46,24 +39,9 @@ Všechny cesty níže jsou relativní ke kořeni repozitáře v uvedeném commit
 | V09 | `internal/api/pages_public.go:133`: veřejné DTO nese panely, ne aplikační artefakt. | Public links vysvětlují veřejné panely. Publikovat aplikaci není totéž co ji zveřejnit mimo workspace. |
 | V10 | `components/features/pages/page-preview.tsx:121`: draftový preview nedostává onRequest; RPC handler je volitelný. | Současný náhled nelze označit za kompletní ověření akcí a historie. P0 zachová neprováděcí preview a označí jeho omezení. Živý test akce je samostatná vědomá operace po publikaci. |
 
-Toto jsou závěry statického ověření konkrétních cest, nikoli úplný bezpečnostní audit.
-Cílený běh existujících testů pro webhooky, source restore, policy/CAS a izolaci
-receiptů prošel: `internal/api`, 5.022 s. Log lokálně:
-`/tmp/pages-settings-review-verification.log`.
-
-Klikací prototyp byl ověřen v headless Chromium: čtyři sekce při šířkách
-360, 768 a 1440 px (12 kombinací bez horizontálního přetečení dokumentu),
-souhlas s publikací, konflikt, první publikace, panelová Page, omezení správce
-přístupu a odstranění jednorázového demonstračního tokenu. Další průchod ověřil
-blokování při chybějícím buildu, chybě buildu, chybějícím porovnání a konfliktu;
-nový build neodstraňuje konflikt podkladů. Návrat z preview resetuje souhlas.
-Bez chyb JavaScriptu; dodatečný průchod nevytvořil žádné HTTP(S) požadavky.
-Desktopový a mobilní screenshot byly také vizuálně prohlédnuty.
-
-To neověřuje skutečnou autorizaci, API, ukládání ani publikaci: prototyp je
-simulace, diff je ilustrativní a preview nespouští kandidátův kód. Kompletní
-správa focusu, neuložených změn a přístupnost zůstávají akceptací implementace.
-Neběžel živý průchod novým editorem v produkční aplikaci ani uživatelský test.
+Uvedené technické hranice je nutné ověřit v aktuální implementaci. Simulovaný
+prototyp ani statické čtení kódu neprokazují skutečnou autorizaci, API či
+publikaci. Akceptační podmínky jsou uvedené níže.
 
 ## 3. Navigace a pracovní plochy
 
@@ -203,13 +181,8 @@ Plánované produktové měření s nejméně pěti lidmi bez znalosti implement
 Žádná z těchto měření dosud neproběhla. Vizuální prototyp pouze umožňuje scénáře
 probrat a otestovat navigaci; není důkazem správného backendu.
 
-## 8. Zadání pro další oponenturu
+## 8. Ověření změn
 
-Posuď čtyři obrazovky prototypu, jejich mobilní variantu a tento kontrakt. Ověř
-V01–V10 proti uvedenému commitu. Kritizuj zejména oddělení živé definice od konceptu,
-review snapshot/fence, capability model a pravdivost stavů tokenů a preview.
-
-Výstup: přijmout / přijmout s podmínkami / přepracovat; tabulka ID, závažnost,
-konkrétní scénář, důkaz nebo předpoklad, oprava a test. Odděl produktovou preferenci
-od chyby. Navrhni maximálně tři nutná rozhodnutí vlastníka. Neprováděj implementaci
-ani zprávy do PR. Výslovně napiš, co nebylo ověřeno a které scénáře jsou jen simulace.
+Při změně kontraktu posoudit oprávnění, souběh verzí, zveřejnění a návrat
+z chybových stavů. Výsledky interních review ukládat do soukromého kontextu;
+veřejné chování a jeho akceptační limity udržovat v tomto návrhu a specifikaci.

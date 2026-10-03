@@ -61,4 +61,5 @@ takeover, old-server refusal, role drift failure and absence of plaintext secret
 in command output. On Dev2, compare allowed and denied operations using harmless
 validation/nonexistent-resource probes; inspect actual portraits in a browser.
 
-Implementation and live evidence: [Dev2 verification, 2026-09-07](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/demo-team-seed-dev2-2026-09-07.md).
+Internal execution and deployment records are retained in private context;
+this design does not assert fresh acceptance.
