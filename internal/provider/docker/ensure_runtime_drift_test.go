@@ -52,9 +52,12 @@ func (d *driftCallLog) snapshot() []string {
 
 // newDriftFixture stands up a fake daemon that pretends one team
 // container already exists under `containerName`, running image
-// `runningImage`. EnsureCrewRuntime should see the mismatch against
-// the desired image, stop+remove the stale ID, then create a new one.
+// `runningImage`. A changed image must wait until it is confirmed stopped.
 func newDriftFixture(t *testing.T, containerName, runningImage string) (*Provider, *driftCallLog) {
+	return newDriftFixtureState(t, containerName, runningImage, map[string]any{"Status": "running", "Running": true})
+}
+
+func newDriftFixtureState(t *testing.T, containerName, runningImage string, state map[string]any) (*Provider, *driftCallLog) {
 	t.Helper()
 	calls := &driftCallLog{}
 	const staleID = "stale-cid-0123456789ab"
@@ -83,7 +86,7 @@ func newDriftFixture(t *testing.T, containerName, runningImage string) (*Provide
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"Id":    staleID,
-				"State": map[string]any{"Status": "running"},
+				"State": state,
 				"Image": "sha256:" + strings.Repeat("a", 64),
 				"Config": map[string]any{
 					"Image": runningImage,
@@ -212,21 +215,16 @@ func extractContainerID(path string) string {
 	return rest
 }
 
-// TestEnsureCrewRuntime_RecreatesOnImageDrift is the load-bearing
-// regression test for the fix: a running container whose image tag
-// no longer matches the manifest's desired image MUST be torn down
-// and recreated. Before the fix the call log was just "create" (the
-// short-circuit returned the stale ID without any remove), the test
-// here asserts the remove-then-create order so an accidental revert
-// would fail loudly instead of silently leaking stale containers.
-func TestEnsureCrewRuntime_RecreatesOnImageDrift(t *testing.T) {
+// A stopped container may be replaced with the selected image; running
+// containers are protected by TestImageChangePreservesRunningCrew.
+func TestEnsureCrewRuntime_RecreatesStoppedContainerOnImageDrift(t *testing.T) {
 	t.Parallel()
 
 	const slug = "eng"
 	const oldImg = "crewship-cache:OLD-sha"
 	const newImg = "crewship-cache:NEW-sha"
 
-	p, calls := newDriftFixture(t, "crewship-team-"+slug+"-crew-id-1", oldImg)
+	p, calls := newDriftFixtureState(t, "crewship-team-"+slug+"-crew-id-1", oldImg, map[string]any{"Status": "exited", "Running": false})
 
 	_, err := p.EnsureCrewRuntime(context.Background(), provider.CrewConfig{
 		ID:          "crew-id-1",
@@ -250,9 +248,8 @@ func TestEnsureCrewRuntime_RecreatesOnImageDrift(t *testing.T) {
 	// leaving Docker briefly with two containers under the same
 	// name (one of which the daemon would have rejected, but that
 	// rejection happens at a different layer the test doesn't see).
-	// Stop is still best-effort — the production code ignores its
-	// error — so we don't require it in the ordering check, only
-	// remove + create.
+	// Replacement never stops the runtime itself: this fixture was already
+	// stopped, and removal must finish before creation.
 	removeIdx := -1
 	createIdx := -1
 	for i, c := range snap {

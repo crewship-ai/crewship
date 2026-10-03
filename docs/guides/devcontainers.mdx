@@ -293,7 +293,7 @@ Binaries the build installs on the agent's behalf that mise does not carry (the 
 
 Provisioning is **asynchronous**. The CLI command returns immediately after the backend enqueues a job; you then poll for status. Five triggers can put a crew into provisioning state:
 
-0. **Proactive auto-provision on config save** — when a crew is **created** (`POST /api/v1/crews`, `crewship apply`, `crewship crew create`) or its **devcontainer / mise / runtime-image config changes** (`PATCH /api/v1/crews/{crewId}`), the handler immediately kicks off the build in the background (`CrewHandler.maybeAutoProvision`). This is the primary path: by the time anyone dispatches an issue the image is usually already cached, so operators never touch a "Build now" button. Editing the config invalidates the old cached image, so the rebuild keeps the crew current automatically.
+0. **Proactive auto-provision on config save** — when a crew is **created** (`POST /api/v1/crews`, `crewship apply`, `crewship crew create`) or its **devcontainer / mise / runtime-image config changes** (`PATCH /api/v1/crews/{crewId}`), the handler immediately kicks off the build in the background (`CrewHandler.maybeAutoProvision`). This is the primary path: by the time anyone dispatches an issue the image is usually already cached, so operators never touch a "Build now" button. Editing the config invalidates the old cache selection and prepares an updated image. A running container is not implicitly replaced to apply an image change; finish current work and explicitly stop/restart the crew before using the new image.
 1. **Explicit CLI/API trigger** — `crewship crew provision <slug>` or `POST /api/v1/crews/{crewId}/provision`.
 2. **Crew rebuild** — `crewship crew rebuild <slug>` bypasses the provisioned-image cache and installation-layer caches. It re-runs provisioning, so floating tool selectors can resolve newer versions; explicit versions in the configuration are retained. A rejected request (already provisioning or rate limited) leaves the current cache marker intact. This builds an image; it does not itself replace an already running container.
 3. **Auto-provision on first chat** *(PR #230)* — when an operator opens a chat with an agent in a crew that has a config but no cached image, the chat handler calls `ProvisioningHandler.EnqueueForCrew` directly. The chat surface renders an inline `CrewProvisioningCard` with the live progress checklist; once provisioning succeeds, the agent's first message starts on the freshly cached image.
@@ -702,10 +702,18 @@ yet expose equivalent image inspection through this interface.
 
 Cache inventory and ordinary cache deletion/GC recognize references by image ID.
 This is not retention against external `docker image prune`, forced admin deletion
-or disk loss. Nor does it provide automatic activation between runs: publishing a
-new desired image still uses the existing runtime reconciliation path, which may
-replace the container on a subsequent start. Managed automatic updates require a
-separate admission barrier before activation.
+or disk loss. A start requesting a different image returns `image update pending` while the
+current container is running, paused, restarting or its state is unknown. It
+leaves existing work intact. A freshly inspected stopped container can be
+removed without force and recreated. Selecting the same immutable artifact by
+ID does not require a restart even if the container was created using a tag.
+
+Finish existing work and explicitly stop/restart the crew to apply a pending
+image. This also applies to a warm idle container: this check does not infer
+whether its processes are doing useful work. Automatic draining and activation
+between runs are not implemented. Explicit operator restart remains disruptive;
+this image-change guard does not replace the separate security migration and
+resource-deletion policies.
 
 ### Supplying a native mise lock
 
@@ -742,6 +750,7 @@ bundle does not lock the base image, OS packages, features, build hooks or the
 mise executable itself. It is dependency input, separate from observed CLI
 versions and from qualification of real model/auth combinations. This slice
 adds no scheduled updates or automatic runtime activation.
+
 ### Offline CLI qualification
 
 On Docker, provisioning also checks the recorded CLI binaries in a disposable
@@ -761,3 +770,4 @@ unavailable check is reported without replacing an active environment or
 silently relaxing the qualification profile. Older images and unsupported
 backends can report `unavailable`. The initial runtime port refuses persistent
 mounts and RAM suspension explicitly.
+

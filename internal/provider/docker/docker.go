@@ -197,19 +197,21 @@ type Provider struct {
 const warmCrewTTL = 3 * time.Second
 
 type warmCrewEntry struct {
+	image   string
 	id      string
 	expires time.Time
 }
 
 // warmHit returns the cached running container id for a crew when the entry
-// is still fresh, evicting an expired one.
-func (p *Provider) warmHit(crewID string) (string, bool) {
+// is still fresh and any explicit image selection matches. Expired or
+// differently selected entries are evicted.
+func (p *Provider) warmHit(crewID, requestedImage string) (string, bool) {
 	v, ok := p.warmCrew.Load(crewID)
 	if !ok {
 		return "", false
 	}
 	e := v.(warmCrewEntry)
-	if time.Now().After(e.expires) {
+	if time.Now().After(e.expires) || (requestedImage != "" && e.image != requestedImage) {
 		p.warmCrew.Delete(crewID)
 		return "", false
 	}
@@ -217,8 +219,8 @@ func (p *Provider) warmHit(crewID string) (string, bool) {
 }
 
 // setWarm records that crewID's container is running (extends the TTL).
-func (p *Provider) setWarm(crewID, containerID string) {
-	p.warmCrew.Store(crewID, warmCrewEntry{id: containerID, expires: time.Now().Add(warmCrewTTL)})
+func (p *Provider) setWarm(crewID, containerID, image string) {
+	p.warmCrew.Store(crewID, warmCrewEntry{id: containerID, image: image, expires: time.Now().Add(warmCrewTTL)})
 }
 
 // evictWarm drops any cached fact for a crew — called whenever we tear a

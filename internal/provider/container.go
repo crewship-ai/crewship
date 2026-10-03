@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -9,6 +10,11 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
+
+// ErrRuntimeImageUpdatePending means a selected image cannot be applied while
+// the current runtime may still contain work. Callers must not force-retry by
+// deleting it; stop/restart is an explicit operator action until drain exists.
+var ErrRuntimeImageUpdatePending = errors.New("image update pending: wait for current work to finish, then explicitly stop or restart the crew")
 
 // CrewRef identifies a crew by its globally-unique id and workspace slug. The
 // legacy-resource detector/pruner take a list so they can both TARGET the
