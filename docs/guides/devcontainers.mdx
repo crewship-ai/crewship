@@ -664,3 +664,23 @@ The legacy image is no longer published by CI (`agent-runtime.yml` workflow dele
 - [Configuration → Environment Variables](/configuration/environment) — `CREWSHIP_SIDECAR_PATH`, `CREWSHIP_ENTRYPOINT_PATH`, `CREWSHIP_SKIP_SIDECAR`.
 - [Security → Container Isolation](/security/container-isolation) — UID boundaries, capability drops, network policy.
 - Code of record: `internal/devcontainer/`, `internal/provider/docker/docker.go`, `cmd/crewship/seeddata/crews.go`, `cmd/crewship/cmd_crew_config.go`, `cmd/crewship/cmd_crew_provision.go`.
+
+### Built environment history
+
+`crewship crew provision revisions <crew>` lists the latest 100 immutable build
+records for a crew. The API is `GET /api/v1/crews/{crewId}/provision/revisions`.
+Each record identifies the definition hash, build hash, immutable image ID,
+observed CLI inventory and build time. Records are scoped to the crew's
+workspace; raw configuration and environment variable values are not copied
+into history. Reusing the same image for the same definition reuses its record.
+
+A completed build verifies that the crew definition and required agent adapters
+still match the inputs it built. If they changed or the crew was deleted,
+Crewship refuses to publish the stale result; rebuild the current definition.
+The check and publication are one database transaction.
+
+This history is provenance metadata. It neither preserves Docker images from
+pruning nor changes a running container, and it does not provide rollback or
+RAM snapshots. Builds without recorded immutable image identity do not invent
+a revision. These records will support a later explicit retention and safe
+activation policy.

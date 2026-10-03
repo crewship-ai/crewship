@@ -111,6 +111,9 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	toolchain := object(map[string]any{"requested": requestedTools, "built": inventory})
 	toolchain["required"] = []string{"requested", "built"}
 	add("GET", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionStatusV1", object(map[string]any{"crew_id": str(), "status": str(), "phase": str(), "message": str(), "updated_at": str(), "toolchain": toolchain}))
+	revision := object(map[string]any{"id": str(), "definition_hash": str(), "build_hash": str(), "image_id": str(), "toolchain": inventory, "created_at": str()})
+	revision["required"] = []string{"id", "definition_hash", "build_hash", "image_id", "toolchain", "created_at"}
+	add("GET", "/api/v1/crews/{crewId}/provision/revisions", "EnvironmentRevisionHistoryV1", object(map[string]any{"revisions": array(revision), "limit": integer()}))
 	addAction("POST", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionTriggeredV1")
 	addAction("POST", "/api/v1/crews/{crewId}/rebuild", "RemainingCrewRebuildTriggeredV1")
 	addAction("POST", "/api/v1/crews/{crewId}/restart-agents", "RemainingCrewAgentsRestartedV1")

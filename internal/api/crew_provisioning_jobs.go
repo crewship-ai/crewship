@@ -1130,6 +1130,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		Refs: map[string]any{"crew_id": crewID},
 	})
 
+	expectedDefinition := provisionDefinition{Config: cfgJSON, Mise: miseJSON, Runtime: runtimeImg}
 	cfg, err := devcontainer.ParseBytes([]byte(cfgJSON))
 	if err != nil {
 		h.markJobFailed(job, workspaceID, fmt.Errorf("parse devcontainer_config: %w", err))
@@ -1157,6 +1158,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		h.markJobFailed(job, workspaceID, fmt.Errorf("read crew agents: %w", err))
 		return
 	}
+	expectedDefinition.Adapters = append([]string(nil), adapters...)
 	h.mu.Lock()
 	job.adapters = append([]string(nil), adapters...)
 	h.mu.Unlock()
@@ -1265,18 +1267,6 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		return
 	}
 
-	// Serialize aggregated feature requirements (privileged, capAdd, mounts,
-	// containerEnv) so the runtime can apply them when starting the crew
-	// container. Without this, features like DinD (privileged:true +
-	// docker.sock mount) would silently not work at runtime.
-	var reqJSON sql.NullString
-	if reqBytes, marshalErr := json.Marshal(result.Requirements); marshalErr != nil {
-		h.logger.Warn("marshal cached_requirements failed, storing NULL",
-			"crew_id", crewID, "error", marshalErr)
-	} else if !isEmptyRequirements(result.Requirements) {
-		reqJSON = sql.NullString{String: string(reqBytes), Valid: true}
-	}
-
 	// #1032 (visibility mitigation): a privileged crew runs its container with
 	// --privileged, which collapses the UID 1001 (agent) / 1002 (sidecar)
 	// boundary that keeps a compromised agent from reading /proc/<sidecar>/mem
@@ -1289,49 +1279,10 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 			"crew_id", crewID, "workspace_id", workspaceID, "base_image", baseImage)
 	}
 
-	// Persist the cached image reference on the crew row. Use a fresh context
-	// (not the 30-min provisioning ctx, which may be near its deadline).
 	updateCtx, updateCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer updateCancel()
-	// What the build actually installed, so the image can be audited rather
-	// than inferred from the config (#1779). Stored as '[]' when a crew uses no
-	// features — distinct from NULL, which means "built before this existed".
-	// nil and empty mean different things here, so the test is `!= nil` and
-	// not `len() > 0`. A build always sets the slice — featureRecords returns
-	// a non-nil slice even for a crew with no features — so empty means "this
-	// build installed none", which is an answer and belongs in the column as
-	// '[]'. A cache hit builds nothing and leaves the field nil; writing that
-	// would serialize to JSON `null` and erase the digests an earlier build
-	// recorded, after which the CLI reports the crew as "not recorded" and the
-	// audit trail the column exists for is gone (#1779).
-	setFeatures := ""
-	updateArgs := []any{result.CachedImage, result.ConfigHash, reqJSON}
-	if result.Features != nil {
-		featBytes, marshalErr := json.Marshal(result.Features)
-		if marshalErr != nil {
-			// Leave the column alone rather than blanking it: "unknown" is
-			// better recorded as the previous answer than as no answer.
-			h.logger.Warn("marshal resolved_features failed, leaving the column untouched",
-				"crew_id", crewID, "error", marshalErr)
-		} else {
-			setFeatures = "resolved_features = ?, "
-			updateArgs = append(updateArgs, string(featBytes))
-		}
-	}
-	updateArgs = append(updateArgs, crewID, workspaceID)
-
-	// COALESCE: a result that carries no requirements (a cache hit whose
-	// feature resolution failed) keeps the previous build's contract rather
-	// than erasing it to NULL.
-	_, err = h.db.ExecContext(updateCtx,
-		`UPDATE crews SET cached_image = ?, config_hash = ?, cached_requirements = COALESCE(?, cached_requirements), `+
-			setFeatures+
-			`updated_at = datetime('now')
-		 WHERE id = ? AND workspace_id = ?`,
-		updateArgs...,
-	)
-	if err != nil {
-		h.markJobFailed(job, workspaceID, fmt.Errorf("update db: %w", err))
+	if _, err := h.saveProvisionResult(updateCtx, crewID, workspaceID, expectedDefinition, result); err != nil {
+		h.markJobFailed(job, workspaceID, fmt.Errorf("save environment revision: %w", err))
 		return
 	}
 

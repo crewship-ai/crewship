@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Environment provisioning records immutable build history and refuses to publish a build after its definition changes. Inspect the latest records with `crewship crew provision revisions`.
+
 - **Provisioning status now distinguishes requested CLI selectors from observed versions.** New builds record bounded CLI version/path observations in the image. Docker inspections use the immutable image ID without starting the image; old or unreadable evidence stays unknown. The CLI status command shows built versions. This does not claim that a running, modified environment still matches its image.
 
 

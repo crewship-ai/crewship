@@ -180,7 +180,7 @@ func TestRunProvisioning_SkipPath_CompletesAndPersists(t *testing.T) {
 	// No features / postCreate / containerEnv / mise → the provisioner
 	// skips the build and returns CachedImage "" — runProvisioning's full
 	// success tail (DB update, completed status) runs without Docker.
-	h, wsID, crewID := covProvRig(t, &covCommitClient{}, "")
+	h, wsID, crewID := covProvRig(t, &covCommitClient{}, `{"image":"ubuntu:22.04"}`)
 	job := covJob(crewID)
 	h.jobs[crewID] = job
 
