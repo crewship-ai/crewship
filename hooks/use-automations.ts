@@ -26,10 +26,14 @@ export function useAutomations(workspaceId: string | null | undefined) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const activeWorkspaceRef = useRef<typeof workspaceId>(null)
 
   const refresh = useCallback(async () => {
+    if (activeWorkspaceRef.current !== workspaceId) return
     if (!workspaceId) {
       setAutomations([])
+      setLoading(false)
+      setError(null)
       return
     }
     abortRef.current?.abort()
@@ -65,11 +69,14 @@ export function useAutomations(workspaceId: string | null | undefined) {
   }, [workspaceId])
 
   useEffect(() => {
+    activeWorkspaceRef.current = workspaceId
+    setAutomations([])
     refresh()
     return () => {
+      activeWorkspaceRef.current = null
       abortRef.current?.abort()
     }
-  }, [refresh])
+  }, [refresh, workspaceId])
 
   return { automations, loading, error, refresh }
 }
