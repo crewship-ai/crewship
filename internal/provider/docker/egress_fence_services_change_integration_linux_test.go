@@ -308,3 +308,37 @@ func TestEgressFenceServiceMoveFailureIntegration(t *testing.T) {
 	}
 	assertNothingBroader(ctx, t, p, cid, team)
 }
+
+// Exercise the real daemon boundary repeatedly: Stop must evict the warm
+// cache, and the next Ensure must return a running, fenced runtime.
+func TestEgressFenceStopEnsureIntegration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	defer cancel()
+	p, _ := fenceSvcHarness(ctx, t, "fsvc-restart", []string{"restart"})
+	team := provider.CrewConfig{ID: "restart-crew-001", Slug: "restart", NetworkMode: "restricted", MemoryMB: 256, CPUs: 0.5}
+	defer cleanupFenceSvcCrew(p, team)
+	cid, err := p.EnsureCrewRuntime(ctx, team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for iteration := 0; iteration < 10; iteration++ {
+		if err := p.StopCrewRuntime(ctx, cid); err != nil {
+			t.Fatalf("iteration %d stop: %v", iteration, err)
+		}
+		cid, err = p.EnsureCrewRuntime(ctx, team)
+		if err != nil {
+			t.Fatalf("iteration %d ensure: %v", iteration, err)
+		}
+		inspect, err := p.client.ContainerInspect(ctx, cid, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if inspect.Container.State == nil || !inspect.Container.State.Running {
+			t.Fatalf("iteration %d returned non-running runtime: %+v", iteration, inspect.Container.State)
+		}
+		if _, code := crewNetExecUser(ctx, t, p, cid, "1001", "true"); code != 0 {
+			t.Fatalf("iteration %d exec exit %d", iteration, code)
+		}
+	}
+	assertNothingBroader(ctx, t, p, cid, team)
+}
