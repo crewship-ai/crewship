@@ -13,6 +13,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Restarted agents could remain RUNNING after their container disappeared, and a concurrent stop could miss a newly tracked invocation.** Recovery now confirms container absence, and stop closes the live invocation gate before reporting success.
 
+- **A crew started immediately after stopping could receive a stopped Docker container.** Runtime reconciliation now uses the newer inspect state for reuse and configuration drift decisions, rather than the older container-list snapshot. This also prevents a stale stopped listing from triggering configuration-based removal of a running crew. (#2855)
+
 ### Added
 - **A fenced crew can reach its own services.** A restricted crew on the egress-fence pilot that declares `services:` and is on its own network now gets a narrow path to them: each service has a fixed address on the crew network, the fence opens exactly those addresses on their ports, and the names resolve from the runtime's `/etc/hosts` because DNS stays closed. Declaring a service whose name sorts first shifts the others to new addresses: they are re-attached there and the fence follows, also when ensuring the services fails part-way. The same crew on the shared network is still refused. (#1368, #2240)
 
