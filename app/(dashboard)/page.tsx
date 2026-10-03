@@ -142,7 +142,7 @@ export default function DashboardPage() {
     }, 220)
   }, [invalidateDashboard])
 
-  useEffect(() => () => clearTimeout(debounceRef.current), [])
+  useEffect(() => () => clearTimeout(debounceRef.current), [debouncedRefresh])
   useRealtimeEvent("run.started", debouncedRefresh)
   useRealtimeEvent("run.completed", debouncedRefresh)
   useRealtimeEvent("run.failed", debouncedRefresh)

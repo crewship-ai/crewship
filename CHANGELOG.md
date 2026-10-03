@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Dashboard realtime refresh timers are cancelled when the selected workspace changes, preventing a queued event from refreshing the former workspace.
+
 - Composio trigger lists and enable dialogs clear on workspace changes, ignore superseded reads and abandoned creation responses, and report active-subscription read failures instead of claiming no subscriptions exist.
 
 - Recipe installation clears credentials, account labels and reveal state when closed or switched to another workspace/recipe; abandoned previews and installations cannot update the new selection or redirect it. Credential inputs and reveal controls have accessible labels.
