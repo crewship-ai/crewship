@@ -174,6 +174,27 @@ func TestRecoveryLeavesWorkOwnedRunToDispatcher(t *testing.T) {
 		t.Fatal("no claim")
 	}
 	seedRecoveryTrace(t, s, attempt.RunID, "a")
+	// Even a provider that confirms absence must not let generic startup
+	// recovery settle a durable work attempt owned by its dispatcher.
+	c := &recoveredProbeContainer{mockContainer: &mockContainer{}, answer: "ABSENT"}
+	s.container = c
+	s.orchestrator = orchestrator.New(c, s.state, s.logger)
+	raw, err := json.Marshal(orchestrator.RunState{ID: attempt.RunID, AgentID: "a", AgentSlug: "a", ContainerID: "runtime", Status: "running"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.state.Set(t.Context(), "agent_runs", attempt.RunID, raw); err != nil {
+		t.Fatal(err)
+	}
+	s.recoverOrphanedRuns(t.Context())
+	raw, err = s.state.Get(t.Context(), "agent_runs", attempt.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var running orchestrator.RunState
+	if err := json.Unmarshal(raw, &running); err != nil || running.Status != "running" {
+		t.Fatalf("generic recovery changed work-owned runtime: %+v %v", running, err)
+	}
 	seedStoppedOutbox(t, s, attempt.RunID)
 	if err := s.flushRecoveredStops(t.Context()); err != nil {
 		t.Fatal(err)

@@ -372,6 +372,9 @@ func (o *Orchestrator) probeExec(ctx context.Context, containerID, script string
 	if err != nil {
 		return "", err
 	}
+	if res == nil || res.Reader == nil {
+		return "", fmt.Errorf("runtime probe returned no output stream")
+	}
 	defer res.Reader.Close()
 	out, err := io.ReadAll(res.Reader)
 	if err != nil {

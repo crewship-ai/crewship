@@ -1042,18 +1042,22 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	protectedAgents := map[string]bool{}
 	protectedRuns := map[string]bool{}
 	legacyAgents := map[string]bool{}
+	// Bound all boot probes together, not two seconds per persisted run.
+	probeCtx, probeCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer probeCancel()
 	if s.state != nil {
 		states, err := s.state.List(ctx, "agent_runs")
 		if err != nil {
 			s.logger.Error("recover runtime identities", "error", err)
 			return
 		}
-		for _, raw := range states {
+		for key, raw := range states {
 			var run orchestrator.RunState
 			if err := json.Unmarshal(raw, &run); err != nil {
 				s.logger.Error("decode recovered runtime identity", "error", err)
 				return
 			}
+			run = s.reconcileRecoveredRuntimeAtBoot(probeCtx, key, run)
 			if (run.Status == "running" || (run.Status == "cancelled" && run.StopJournalPending)) && run.AgentID != "" {
 				protectedAgents[run.AgentID] = true
 				if run.ID == "" || run.ID == run.AgentID {

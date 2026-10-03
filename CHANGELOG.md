@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **An interrupted container run could remain RUNNING after a server restart.** Startup now checks eligible persisted runtime identities and reconciles confirmed absence, while preserving live or unverified work and dispatcher-owned outcomes.
+
 - **Repeated environment rebuilds left untagged images outside cache cleanup.** The orphan sweeper now recognizes published artifacts from revision history while preserving images selected by live crews and unknown untagged images. The existing opt-in deletion policy and age floor still apply.
 
 - Runtime editing preserves existing TOML and unsupported mise shapes instead of erasing tool pins; rejected raw edits no longer partially apply other settings.

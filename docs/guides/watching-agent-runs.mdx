@@ -138,6 +138,20 @@ A chat you may not watch answers `404`, the same as a chat that does not exist. 
 - **Streaming does not suppress your inbox item.** Unlike a browser tab on the chat, an open HTTP stream does **not** count as "watching live", so the "agent replied" inbox item is still created. That is deliberate: the inbox row is the durable record of the reply, and a stream that is redirected to a file — or wedged on a reader that stopped consuming — is no evidence anyone saw it. A redundant bell beats a lost record.
 - **An unattended run's reply is kept, but never belled.** A routine step, a scheduled agent or a webhook writes its turn to the chat like any other run, so `crewship chat <chat-id>` shows the prompt and the answer after the stream is over. It raises **no** "agent replied" inbox item, because nobody asked it a question — the bell exists for a human who sent a message and walked away. Routine outcomes have their own notifications; see the [`notify` step](/guides/routines#notify) and [Notification categories](/guides/notifications).
 
+## After a server restart
+
+Startup checks persisted container-run identities before treating them as still
+running. A positively inspected stopped container, or an exact run probe that
+confirms the process is absent, allows restart recovery to close the interrupted
+run. This does not establish a successful exit or recreate its lost output.
+
+Live processes and unverified identities remain protected. An unavailable
+runtime, an unknown container state, incomplete legacy identity or an exhausted
+startup probe budget does not prove that work ended. Attempts owned by the
+durable work dispatcher keep their own recovery authority. These checks happen
+at startup; continuous reconciliation of surviving recovered processes is not
+provided by this check.
+
 ## Related
 
 - [Chat & Sessions](/guides/chat-sessions) — the session model this streams from.
