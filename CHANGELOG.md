@@ -20,6 +20,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Workflow template galleries clear previous workspace data and drafts, ignore abandoned requests, distinguish loading failures from empty catalogs and report creation/deletion network errors.
+
+- Integration marketplace search ignores superseded responses, keeps the current request's loading state, resets stale totals on failure and includes uncategorised servers in their facet.
+
 - Audit-note fields in save footers have distinct accessible labels, including when several editable cards appear together.
 
 - Deployed documentation checks require the declared page identities, so duplicate or unrelated index links cannot hide a missing page behind matching totals.
