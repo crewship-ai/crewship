@@ -93,8 +93,8 @@ func retentionFixture(t *testing.T) (*Retention, *fakeRetentionRuntime, *time.Ti
 			t.Fatal(err)
 		}
 	}
-	if _, err := db.Exec(`CREATE TABLE crews(id TEXT PRIMARY KEY, deleted_at TEXT);
-INSERT INTO crews VALUES('live',NULL),('deleted','2026-09-01')`); err != nil {
+	if _, err := db.Exec(`CREATE TABLE crews(id TEXT PRIMARY KEY, deleted_at TEXT, cached_image TEXT);
+INSERT INTO crews(id,deleted_at) VALUES('live',NULL),('deleted','2026-09-01')`); err != nil {
 		t.Fatal(err)
 	}
 	now := retentionNow
@@ -246,7 +246,7 @@ func TestCacheEvictionNeedsAContinuousUnusedWindow(t *testing.T) {
 	}
 	*now = now.Add(31 * time.Minute)
 	r.Tick(context.Background())
-	if len(f.untagged) != 1 || f.untagged[0] != "crewship-cache:old" {
+	if len(f.untagged) != 1 || f.untagged[0] != "old" {
 		t.Fatalf("not evicted after the window: %v", f.untagged)
 	}
 }
@@ -301,7 +301,7 @@ func TestCacheEvictionRefusedRemovalRestartsWindow(t *testing.T) {
 	r, f, now := retentionFixture(t)
 	r.RuntimeAfter = 0
 	f.images = []CacheImage{cacheImage("old", 48*time.Hour)}
-	f.refuseImage["crewship-cache:old"] = true
+	f.refuseImage["old"] = true
 	r.Tick(context.Background())
 	*now = now.Add(2 * time.Hour)
 	r.Tick(context.Background())

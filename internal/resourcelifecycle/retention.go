@@ -46,12 +46,12 @@ type RetentionRuntime interface {
 	// with Force=false and RemoveVolumes=false.
 	RemoveIdleRuntime(ctx context.Context, containerID, crewID string, verify func(RetentionContainer) error) error
 	ListCacheImages(context.Context) ([]CacheImage, error)
-	// RemoveImage untags/removes one reference with Force=false.
+	// RemoveImage removes an inspected immutable image ID with Force=false.
 	RemoveImage(context.Context, string) error
 }
 
 // Retention removes stopped runtimes of live crews after a period of proven
-// inactivity and evicts cache images no container on the daemon uses. It
+// inactivity and evicts cache images no container or live crew selection uses. It
 // never removes volumes or host data, never touches deleted owners (that is
 // Controller's job) and never acts on another installation's containers.
 type Retention struct {
@@ -235,6 +235,11 @@ func (r *Retention) cache(ctx context.Context) {
 		r.logger().Warn("cache eviction: image list failed", "error", err)
 		return
 	}
+	selected, err := r.selectedImages(ctx)
+	if err != nil {
+		r.logger().Warn("cache eviction: selected image references unavailable; keeping images", "error", err)
+		return
+	}
 	seen, err := r.firstUnused(ctx)
 	if err != nil {
 		r.logger().Warn("cache eviction: state read failed", "error", err)
@@ -253,8 +258,11 @@ func (r *Retention) cache(ctx context.Context) {
 		if quiesce.Yield(ctx) != nil {
 			return
 		}
+		if img.ID == "" {
+			continue
+		}
 		present[img.ID] = true
-		if inUse[img.ID] {
+		if inUse[img.ID] || imageSelected(selected, img) {
 			if _, tracked := seen[img.ID]; tracked {
 				r.forget(ctx, img.ID) // any use restarts the unused window
 			}
@@ -283,18 +291,63 @@ func (r *Retention) cache(ctx context.Context) {
 	}
 }
 
-func (r *Retention) evict(ctx context.Context, img CacheImage) {
+// selectedImages covers every workspace in this database. It deliberately
+// does not imply that historical revision metadata retains artifact bytes.
+func (r *Retention) selectedImages(ctx context.Context) (map[string]bool, error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT DISTINCT cached_image FROM crews
+  WHERE deleted_at IS NULL AND cached_image IS NOT NULL AND cached_image != ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	selected := map[string]bool{}
+	for rows.Next() {
+		var ref string
+		if err := rows.Scan(&ref); err != nil {
+			return nil, err
+		}
+		selected[ref] = true
+	}
+	return selected, rows.Err()
+}
+
+func imageSelected(selected map[string]bool, img CacheImage) bool {
+	if selected[img.ID] {
+		return true
+	}
 	for _, ref := range img.Refs {
-		if err := r.Runtime.RemoveImage(ctx, ref); err != nil {
-			// In use after all (a container created since the list) or a
-			// daemon error: keep it and start the window again.
-			r.logger().Info("cache eviction: image kept", "ref", ref, "error", err)
-			r.forget(ctx, img.ID)
-			return
+		if selected[ref] {
+			return true
 		}
 	}
+	return false
+}
+
+func (r *Retention) evict(ctx context.Context, img CacheImage) {
+	if img.ID == "" {
+		return
+	}
+	// Re-read after enumeration: another request may have selected the artifact
+	// in the meantime. This is not a lease spanning publication and Docker I/O.
+	selected, err := r.selectedImages(ctx)
+	if err != nil {
+		r.logger().Warn("cache eviction: selected image references unavailable; keeping image", "image_id", img.ID, "error", err)
+		return
+	}
+	if imageSelected(selected, img) {
+		r.forget(ctx, img.ID)
+		return
+	}
+	// Never follow a mutable tag from the earlier list: it may now name a
+	// different artifact. Docker's non-force guard also protects container use
+	// and conflicting aliases acquired since enumeration.
+	if err := r.Runtime.RemoveImage(ctx, img.ID); err != nil {
+		r.logger().Info("cache eviction: image kept", "image_id", img.ID, "error", err)
+		r.forget(ctx, img.ID)
+		return
+	}
 	r.forget(ctx, img.ID)
-	r.logger().Info("cache eviction: removed unused cache image; the next start rebuilds it",
+	r.logger().Info("cache eviction: removed unused unselected cache image",
 		"refs", img.Refs, "image_id", img.ID, "size_bytes", img.Size)
 }
 
