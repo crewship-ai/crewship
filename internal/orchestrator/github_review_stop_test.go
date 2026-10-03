@@ -42,7 +42,15 @@ func TestReviewStopMissingOrStoppedContainer(t *testing.T) {
 			o := New(c, store, slog.Default())
 			err := o.StopAgent(t.Context(), "a")
 			if state == "stopped" || state == "missing" {
-				if err != nil || runStatus(t, store, run.ID) != "cancelled" {
+				raw, readErr := store.Get(t.Context(), "agent_runs", run.ID)
+				var persisted RunState
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				if decodeErr := json.Unmarshal(raw, &persisted); decodeErr != nil {
+					t.Fatal(decodeErr)
+				}
+				if err != nil || persisted.Status != "cancelled" {
 					t.Fatalf("stopped container stuck: %v", err)
 				}
 			} else if err == nil {
