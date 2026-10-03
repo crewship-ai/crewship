@@ -19,6 +19,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **A crew started immediately after stopping could receive a stopped Docker container.** Runtime reconciliation now uses the newer inspect state for reuse and configuration drift decisions, rather than the older container-list snapshot. This also prevents a stale stopped listing from triggering configuration-based removal of a running crew. (#2855)
 
 ### Added
+
+- ⚠️ **Behaviour change:** CLI AI connections preserve installation symlinks and support `ai status`, `ai doctor`, ownership-checked `ai disconnect`, and optional bundled skill installation. Registrations created outside the new ownership mechanism, or edited afterward, require explicit native-client removal before reconnecting. MCP refreshes stored login credentials per request, can use the server OpenAPI catalog with an explicit offline fallback, and supports exact operation write allowlists. Focused tools list agents/crews/routines, start and wait for routines with durable receipts, and diagnose runs and crew runtimes.
+- ⚠️ **Behaviour change:** Runtime readiness refuses paused Docker containers with an actionable error, including warm-cache hits, preserving their live processes until an operator explicitly unpauses them.
+
 - **A fenced crew can reach its own services.** A restricted crew on the egress-fence pilot that declares `services:` and is on its own network now gets a narrow path to them: each service has a fixed address on the crew network, the fence opens exactly those addresses on their ports, and the names resolve from the runtime's `/etc/hosts` because DNS stays closed. Declaring a service whose name sorts first shifts the others to new addresses: they are re-attached there and the fence follows, also when ensuring the services fails part-way. The same crew on the shared network is still refused. (#1368, #2240)
 
 - Upload encrypted recovery archives through Admin › Backups › Recovery or `crewship admin instance backups upload`, with cancellation, checksum validation, disk-space checks and atomic catalog/audit recording.

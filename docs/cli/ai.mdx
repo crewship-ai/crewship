@@ -20,15 +20,24 @@ For an installed Codex or Claude Code client:
 
 ```bash
 crewship ai connect codex
-crewship ai connect claude
+crewship ai connect claude --install-skill
 ```
 
-These run the client's native MCP registration command with the absolute path
-to the current Crewship binary. Claude Code registration uses user scope; Codex
-uses its normal MCP configuration. Existing-entry behavior belongs to that
-client. Restart/reload the client and inspect its MCP status after registration.
-Install Crewship at its permanent location before connecting it; reconnect if
-that location changes. Discovery and the bundled guide also work without login.
+These run the client's native MCP registration command. The executable path
+preserves the invoked symlink (for example Homebrew's `bin/crewship`) instead of
+pinning a version inside Cellar. Install at a permanent location before connecting.
+Claude Code uses user scope; Codex uses its normal MCP configuration. Restart or
+reload the client after registration.
+
+`ai connect` records ownership of the exact entry. Repeating the same connection
+is a no-op; changing an owned entry replaces it using the native client command.
+Entries created by older versions or changed manually are refused: inspect them
+and remove them explicitly with the client before reconnecting. Other entries
+are untouched. Receipts contain configuration fingerprints, never tokens.
+
+`--install-skill` also installs the bundled guide in the client's user skill
+folder, honoring `CODEX_HOME` or `CLAUDE_CONFIG_DIR`. Existing custom content is
+never overwritten. Discovery and the bundled guide work without login.
 
 The default connection executes catalog-classified reads only, including six
 audited POST reads: conversation and memory search, automation preview, backup
@@ -40,9 +49,7 @@ crewship ai connect codex --allow-write
 ```
 
 Each mutating call must also set `confirm_write=true`. This does not grant server
-permissions or substitute for user authorization. To change an existing
-registration, use your client's normal edit/remove workflow if it refuses a
-duplicate name, then reconnect.
+permissions or substitute for user authorization.
 
 Select a named server/workspace explicitly when you have several:
 
@@ -53,13 +60,25 @@ crewship --profile staging ai connect codex --dry-run
 
 The preview prints a command/argument array and makes no changes. Registration
 never copies a token into the client config. The MCP process reads Crewship's
-normal credentials at startup; restart it after changing login or profiles.
-Environment-only credentials must be available to that process too.
+stored credentials again before each request. A new login to the pinned profile
+is picked up without restart; logout refuses subsequent requests. Profile, server
+and workspace selection stay pinned for the session. Changing the profile's
+server requires reconnecting. Environment-only credentials are captured at startup
+and must be available to the process. A custom `CREWSHIP_CONFIG` path is carried
+as `--credential-config`; the file's contents are never copied.
 
-Administrators can narrow writes with `--allow-write --write-tags routines,missions`.
+Administrators can narrow writes with `--allow-write --write-tags crews`
+(for operations tagged `crews`). Routine routes are tagged `workspaces`; use the
+operation allowlist below when enabling only routine start.
 Tags match exactly and unknown tags are rejected by the server. With no tag filter,
 non-admin writes are enabled; `admin` must always be listed explicitly. This is
-not a full authorization system: server permissions still apply.
+not a full authorization system: server permissions still apply. For finer control,
+`--write-operations post_api_v1_workspaces_workspaceId_pipelines_slug_run`
+restricts mutations to exact operation IDs. It intersects tag restrictions and
+does not bypass the explicit admin opt-in.
+
+Pending human approvals are bound to the current login as well as the exact request.
+Changing login while a form is pending invalidates that approval; submit a new request.
 
 `--require-approval` requests human confirmation through MCP form elicitation
 before each real write. The client is trusted to present the form to a human;
@@ -73,14 +92,45 @@ annotations help clients apply separate approval policies but are not enforcemen
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
+| `--catalog` | `auto` | Select `auto`, required `server`, or offline `embedded` catalog. |
+| `--write-operations` | (unset) | Further restrict writes to exact operation IDs. |
 | `--write-tags` | (unset) | Restrict mutations to exact catalog tags; admin requires explicit inclusion. |
 | `--require-approval` | `false` | Require human approval through MCP elicitation. |
 | `--allow-write` | `false` | Enable explicitly confirmed mutations in the registered server. |
 | `--dry-run` | `false` | Print registration arguments without executing the client. |
+| `--install-skill` | `false` | Install the bundled skill in the client’s user skill directory without overwriting custom content. |
 
 Supported positional clients are `codex` and `claude`. The client must be on
 PATH. Registration invokes an executable directly, without a shell. Registration
 and skill-installation receipts go to stderr, keeping stdout available for data.
+
+## crewship ai status
+
+```bash
+crewship ai status
+crewship ai doctor claude
+crewship ai disconnect codex --dry-run
+crewship ai disconnect codex
+```
+
+Status reports registration, ownership and whether the executable still exists.
+Doctor adds client paths and warnings for temporary/versioned installation paths.
+Neither starts the MCP server or prints tokens, environment values or unrelated
+client settings. Codex inspection uses its native JSON command; Claude inspection
+reads only its user registration. Native client commands have bounded timeouts.
+## crewship ai doctor
+
+`crewship ai doctor [codex|claude]` adds installed client paths and installation
+warnings to the status report. With no client argument it checks both clients.
+
+## crewship ai disconnect
+
+Disconnect removes only an unchanged entry owned by this CLI in that same client
+configuration directory. It preserves the installed skill and unrelated entries.
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--dry-run` | `false` | Check ownership and report whether removal would occur without changing configuration. |
 
 ## crewship ai config
 
@@ -103,6 +153,8 @@ CLI's global output-format preference.
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
+| `--catalog` | `auto` | Select `auto`, required `server`, or offline `embedded` catalog. |
+| `--write-operations` | (unset) | Further restrict writes to exact operation IDs. |
 | `--write-tags` | (unset) | Restrict mutations to exact catalog tags; admin requires explicit inclusion. |
 | `--require-approval` | `false` | Require human approval through MCP elicitation. |
 | `--allow-write` | `false` | Include the mutation opt-in in the launch arguments. |
@@ -158,9 +210,12 @@ the session.
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
+| `--catalog` | `auto` | Select `auto`, required `server`, or offline `embedded` catalog. |
+| `--write-operations` | (unset) | Further restrict writes to exact operation IDs. |
 | `--write-tags` | (unset) | Restrict mutations to exact catalog tags; admin requires explicit inclusion. |
 | `--require-approval` | `false` | Require human approval through MCP elicitation. |
 | `--allow-write` | `false` | Allow mutations with per-call `confirm_write=true`. |
+| `--credential-config` | (unset) | Explicit CLI credential file, usually generated from `CREWSHIP_CONFIG`. |
 | `--timeout` | `30s` | Overall timeout for each API call; must be positive. |
 | `--max-response-bytes` | `1048576` | API response cap, from 1 to 10485760 bytes. |
 
@@ -173,10 +228,36 @@ the session.
 | `crewship_schema` | Read one operation's OpenAPI contract with referenced schemas. |
 | `crewship_read` | Execute only catalog-classified reads; annotated read-only. |
 | `crewship_write` | Execute only mutations; conservatively annotated potentially destructive. |
+| `crewship_list_agents`, `crewship_list_crews`, `crewship_list_routines` | Common discovery in the pinned workspace. |
+| `crewship_routine_start` | Submit an asynchronous routine with optional bounded waiting. Same write and human-approval policy as raw writes. |
+| `crewship_run_status`, `crewship_run_diagnose` | Read run state, or state together with logs. |
+| `crewship_run_wait` | Wait for an existing run, with progress notifications and a resumable timeout receipt. |
+| `crewship_crew_status` | Read crew configuration and runtime status together. |
 
-Discovery is offline and follows the embedded OpenAPI contract. It is not a claim
-that a different server version exposes identical behavior. Every generated
-operation is discoverable without registering hundreds of separate MCP tools.
+At startup, `auto` fetches `/openapi.json` from the selected server with a five-second
+maximum wait, a 10 MiB bound and no redirects. Failure falls back to the embedded
+catalog. `crewship_guide` reports catalog source, version, catalog SHA-256,
+and any fallback reason. `server` fails startup if the catalog cannot be loaded;
+`embedded` performs no catalog network request. Restart to refresh the catalog.
+
+Remote schemas and descriptions are untrusted data. Only method/path pairs already
+known to this binary are retained; operation IDs, read/write classification and tags
+come from the local catalog. Empty summaries/descriptions retain the local prose.
+Remote metadata cannot grant new write permissions.
+Unknown server operations require a newer binary. External schema references are
+refused. A fresh catalog still does not prove that every endpoint works.
+
+Routine start returns the server's durable receipt. `wait_seconds` is optional for
+start and defaults to 30 for wait; both are capped at 300 seconds. A timeout returns
+the run ID, last observed state and `resume_tool`, without restarting or cancelling
+the background run. Clients requesting progress receive status notifications.
+A deferred receipt without `run_id` is returned without guessing an ID or
+resubmitting. Reuse the receipt and inspect state before retrying an uncertain start.
+A receipt marked `restricted=true` uses the actor-scoped restricted routine endpoint.
+Carry this flag into subsequent status/wait calls; the adapter never follows a
+server-supplied status URL. Restricted diagnosis does not query public run logs. Use
+`crewship_list_routines` with `restricted=true` to read the authorized private
+projection, including definition and execution hashes accepted by routine start.
 
 Requests accept `operation_id`, `path_params`, repeated `query` and `headers`
 entries (`name=value`), a JSON `body`, `dry_run`, `confirm_write`, and an optional
@@ -213,7 +294,7 @@ adapter intentionally exposes JSON HTTP operations, not local shell execution.
 
 ### Scope and remaining limits
 
-MCP pins the server, identity and workspace selectors. `{workspaceId}` is filled
+MCP pins the server, profile and workspace selectors. `{workspaceId}` is filled
 from the launch workspace; a conflicting value is rejected. Such routes require
 an explicit configured workspace. Omit that parameter when using a workspace
 slug; real calls resolve it under a deadline and fail closed on resolution errors.
@@ -221,8 +302,10 @@ Dry-run remains offline and uses the configured selector. This does not validate
 workspace membership of every resource ID or JSON body: server authorization is
 still responsible for that. Global endpoints retain their global scope.
 
-The catalog is embedded, credentials are loaded at startup, and registration
-uses the current executable path. Live-server schema refresh, credential refresh,
-stable upgrade paths, client lifecycle commands and high-level run/wait tools are
-not implemented here. Client registration tests are not model task evaluations;
-no model success-rate or token-saving claim is made.
+The server catalog is loaded at startup; restart MCP to pick up schema changes.
+Stored credentials refresh per request, while environment tokens require a restart.
+Stable symlinks survive upgrades only when the installer preserves that path.
+Native client commands do not provide atomic compare-and-remove: avoid editing
+the same registration concurrently with connect or disconnect.
+Hosted MCP with OAuth is not included. Client registration tests are not model
+task evaluations; no model success-rate or token-saving claim is made.

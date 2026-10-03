@@ -230,7 +230,7 @@ func TestMCPApprovalContinuationBound(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			gate := &mcpApprovalGate{}
 			req := &mcp.CallToolRequest{Session: ss, Params: &mcp.CallToolParamsRaw{}}
-			pending, err := gate.approve(req, original)
+			pending, err := gate.approve(req, original, [32]byte{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -247,11 +247,11 @@ func TestMCPApprovalContinuationBound(t *testing.T) {
 				stored.expires = time.Now().Add(-time.Second)
 				gate.pending[pending.RequestState] = stored
 			case "single use":
-				if _, err := gate.approve(req, next); err != nil {
+				if _, err := gate.approve(req, next, [32]byte{}); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if _, err := gate.approve(req, next); err == nil {
+			if _, err := gate.approve(req, next, [32]byte{}); err == nil {
 				t.Fatal("approval continuation bypass")
 			}
 		})

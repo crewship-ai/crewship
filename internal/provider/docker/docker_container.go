@@ -498,16 +498,36 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// DAG wave's sibling steps on the same crew all hit this in the same few
 	// milliseconds; without it each paid a full host scan under this mutex.
 	if cid, ok := p.warmHit(team.ID); ok {
-		// A fenced crew pays one inspect here: a restart inside the warm TTL
-		// (daemon, restart policy, operator) drops the fence, and the warm
-		// path would otherwise hand the next step an unfenced container.
-		if err := p.ensureEgressFence(ctx, team, cid, ""); err != nil {
+		// An operator can pause or stop a container during the cache TTL.
+		// Never advertise it ready, undo the pause, or reconcile it destructively.
+		inspected, err := p.client.ContainerInspect(ctx, cid, client.ContainerInspectOptions{})
+		if err != nil {
 			p.evictWarm(team.ID)
-			p.stopUnfenced(ctx, team, cid, err)
-			return "", err
+			return "", fmt.Errorf("inspect cached runtime: %w", err)
 		}
-		emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "warm cache hit"})
-		return cid, nil
+		state := inspected.Container.State
+		if state == nil || state.Status == "" {
+			p.evictWarm(team.ID)
+			return "", fmt.Errorf("inspect cached runtime: missing state")
+		}
+		if state.Paused || state.Status == container.StatePaused {
+			p.evictWarm(team.ID)
+			return "", fmt.Errorf("crew runtime %s is paused; unpause it explicitly before retrying", cid)
+		}
+		if state.Status != container.StateRunning {
+			p.evictWarm(team.ID)
+		} else {
+			// Revalidate the fence too: a restart inside the warm TTL
+			// (daemon, restart policy, operator) drops the fence, and the warm
+			// path would otherwise hand the next step an unfenced container.
+			if err := p.ensureEgressFence(ctx, team, cid, ""); err != nil {
+				p.evictWarm(team.ID)
+				p.stopUnfenced(ctx, team, cid, err)
+				return "", err
+			}
+			emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "warm cache hit"})
+			return cid, nil
+		}
 	}
 
 	p.logger.Debug("EnsureCrewRuntime", "crew_id", team.ID, "crew_slug", team.Slug)
@@ -767,6 +787,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					return "", false, fmt.Errorf("inspect existing container %s: missing state", containerName)
 				}
 				state := inspect.State.Status
+				if inspect.State.Paused || state == container.StatePaused {
+					return "", true, fmt.Errorf("crew runtime %s is paused; unpause it explicitly before retrying", c.ID)
+				}
 				// Applies with an empty local identity too (cleanup disabled): the
 				// drift paths below tear down with RemoveVolumes, so adopting a
 				// container another installation labelled would destroy its
