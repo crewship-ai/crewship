@@ -20,6 +20,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Crew policy controls discard abandoned reads and drafts, stop a policy save from continuing into quota writes after selection changes, and disable pending saves when edit access is removed. Unreadable optional quota metadata falls back without hiding the loaded policy.
+
+- Task and mission details retain their selected tab when the same entity refreshes; mission logs include completed tasks even when no start timestamp was recorded.
+
+- Toolbar build and agent-restart actions reset on crew or workspace changes, abort abandoned requests and suppress late notifications without unlocking a newer operation.
+
+- Activity run lists count waiting approvals as active, retain their Inbox action without a saved definition, announce detail-read failures and cancel abandoned deep-link scrolling. Issue source chips no longer nest a link inside a run expansion button.
+
 - Journal run feeds cancel superseded reads, clear previous workspace data and ignore delayed table, insight and live-feed responses after selection changes.
 
 - Routine detail panels clear previous selections, stop reads when closed and cancel abandoned rollback/export operations. Read, rollback and export failures are announced in the panel; failed exports no longer cause unhandled rejections.

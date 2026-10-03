@@ -66,13 +66,14 @@ export function RunsView({ workspaceId }: RunsViewProps) {
     setExpanded((prev) => new Set([...prev, focusRunId]))
     const el = document.getElementById(`run-card-${focusRunId}`)
     if (el) {
-      setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "center" }), 100)
+      const timer = setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "center" }), 100)
+      return () => clearTimeout(timer)
     }
   }, [focusRunId, runs.length])
 
   const counts = useMemo(() => {
     const active = runs.filter((r) =>
-      r.status === "running" || r.status === "queued" || r.status === "paused"
+      r.status === "running" || r.status === "queued" || r.status === "paused" || r.status === "waiting"
     ).length
     const completed = runs.filter((r) => r.status === "completed").length
     const failed = runs.filter((r) => r.status === "failed" || r.status === "cancelled").length
@@ -204,7 +205,7 @@ function RunCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate text-sm font-medium">{run.pipeline_name || run.pipeline_slug}</span>
-            <SourcePill run={run} />
+            <SourcePill run={run} linked={false} />
             <StatusPill status={run.status} />
           </div>
           <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground/70">
@@ -306,7 +307,11 @@ function RunStepTree({ workspaceId, run }: { workspaceId: string; run: PipelineR
         )}
       </div>
 
-      {hasDSL ? (
+      {trace.error ? (
+        <div role="alert" className="px-2 py-1 text-destructive">
+          Run details unavailable: {trace.error}
+        </div>
+      ) : hasDSL ? (
         <ol className="space-y-1">
           {dslSteps.map((step, idx) => {
             const s = statusOf(step.id)
@@ -380,7 +385,7 @@ function RunStepTree({ workspaceId, run }: { workspaceId: string; run: PipelineR
           {(() => {
             const currentStep = dslSteps.find((s) => s.id === run.current_step_id)
             const isWaitingForApproval =
-              run.status === "paused" ||
+              run.status === "paused" || run.status === "waiting" ||
               (run.current_step_id !== "" && currentStep?.type === "wait")
             if (!isWaitingForApproval) return null
             return (
