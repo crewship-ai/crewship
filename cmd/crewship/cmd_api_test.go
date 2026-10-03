@@ -211,6 +211,9 @@ func TestAPIRequestWireAndLargeInteger(t *testing.T) {
 }
 
 func TestAPIRequestRefusesRedirectAndPreservesOutput(t *testing.T) {
+	// setupAPIServer runs inside subtests; only the parent can register the
+	// shared-state reset, including its JSON format, for the next CLI test.
+	guardCLIState(t)
 	for _, status := range []int{301, 302, 303, 307, 308} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			redirected := 0
@@ -232,6 +235,7 @@ func TestAPIRequestRefusesRedirectAndPreservesOutput(t *testing.T) {
 }
 
 func TestAPIRequestBodyAndResponseBoundaries(t *testing.T) {
+	guardCLIState(t) // Subtest fixtures cannot register the parent cleanup.
 	tests := []struct {
 		name, body string
 		status     int
