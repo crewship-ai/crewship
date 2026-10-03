@@ -17,7 +17,7 @@ rule's full text in both places.
 - [`repository-layout.md`](repository-layout.md) — where product code, tests, tools and root configuration belong.
 - [`private-context.md`](private-context.md) — public/private documentation boundary, optional agent discovery and verified migration procedure.
 - [`changelog-guard.md`](changelog-guard.md) — the Changelog Guard's exact comparison, history and label mechanics.
-- [`coderabbit-review-process.md`](coderabbit-review-process.md) — the full review protocol: throttling, tie-breakers, re-trigger etiquette.
+- [`coderabbit-review-process.md`](coderabbit-review-process.md) — historical bot review protocol; current review requirements are in CONTRIBUTING.md.
 - [`claiming-issues.md`](claiming-issues.md) — the claim convention and its failure modes.
 
 ## Build and dependencies

@@ -75,7 +75,7 @@ Configuration files are discoverable entrypoints, not orphaned source code.
 | `vitest.config.ts`, `vitest.setup.ts`, `playwright*.ts`, `.gremlins.yaml` | Unit, browser and mutation-test configuration |
 | `.gitleaks.toml`, `.gitleaksignore` | Secret scanning rules and reviewed historical exceptions |
 | `sentry.*.config.ts` | Error-reporting SDK integration |
-| `.coderabbit.yaml`, `.mailmap` | Review configuration and contributor identity normalization |
+| `.coderabbit.yaml`, `.mailmap` | Historical CodeRabbit configuration (automatic reviews disabled) and contributor identity normalization |
 | `.gitignore`, `.dockerignore`, `.env.example` | Local/build exclusions and documented environment settings |
 | `Makefile`, `dev.sh`, `dev-server.mjs` | Build and development entrypoints |
 

@@ -132,6 +132,7 @@ image processor before `pnpm build` — no source-code surgery in
 | `github.com/go-jose/go-jose/v4` | Apache-2.0 | https://github.com/go-jose/go-jose/blob/v4.1.4/LICENSE |
 | `github.com/go-logr/logr` | Apache-2.0 | https://github.com/go-logr/logr/blob/v1.4.3/LICENSE |
 | `github.com/go-logr/stdr` | Apache-2.0 | https://github.com/go-logr/stdr/blob/v1.2.2/LICENSE |
+| `github.com/google/jsonschema-go/jsonschema` | MIT | https://github.com/google/jsonschema-go/blob/v0.4.3/LICENSE |
 | `github.com/google/uuid` | BSD-3-Clause | https://github.com/google/uuid/blob/v1.6.0/LICENSE |
 | `github.com/gorilla/css/scanner` | BSD-3-Clause | https://github.com/gorilla/css/blob/v1.0.1/LICENSE |
 | `github.com/gorilla/websocket` | BSD-2-Clause | https://github.com/gorilla/websocket/blob/v1.5.3/LICENSE |
@@ -143,6 +144,7 @@ image processor before `pnpm build` — no source-code surgery in
 | `github.com/moby/docker-image-spec/specs-go/v1` | Apache-2.0 | https://github.com/moby/docker-image-spec/blob/v1.3.1/LICENSE |
 | `github.com/moby/moby/api` | Apache-2.0 | https://github.com/moby/moby/blob/api/v1.55.0/LICENSE |
 | `github.com/moby/moby/client` | Apache-2.0 | https://github.com/moby/moby/blob/client/v0.5.0/LICENSE |
+| `github.com/modelcontextprotocol/go-sdk` | Apache-2.0 | https://github.com/modelcontextprotocol/go-sdk/blob/v1.8.0/LICENSE |
 | `github.com/muesli/ansi` | MIT | https://github.com/muesli/ansi/blob/276c6243b2f6/LICENSE |
 | `github.com/muesli/cancelreader` | MIT | https://github.com/muesli/cancelreader/blob/v0.2.2/LICENSE |
 | `github.com/muesli/reflow` | MIT | https://github.com/muesli/reflow/blob/v0.3.0/LICENSE |
@@ -154,9 +156,12 @@ image processor before `pnpm build` — no source-code surgery in
 | `github.com/remyoudompheng/bigfft` | BSD-3-Clause | https://github.com/remyoudompheng/bigfft/blob/24d4a6f8daec/LICENSE |
 | `github.com/rivo/uniseg` | MIT | https://github.com/rivo/uniseg/blob/v0.4.7/LICENSE.txt |
 | `github.com/robfig/cron/v3` | MIT | https://github.com/robfig/cron/blob/v3.0.1/LICENSE |
+| `github.com/segmentio/asm` | MIT | https://github.com/segmentio/asm/blob/v1.1.3/LICENSE |
+| `github.com/segmentio/encoding` | MIT | https://github.com/segmentio/encoding/blob/v0.5.4/LICENSE |
 | `github.com/spf13/cobra` | Apache-2.0 | https://github.com/spf13/cobra/blob/v1.10.2/LICENSE.txt |
 | `github.com/spf13/pflag` | BSD-3-Clause | https://github.com/spf13/pflag/blob/v1.0.9/LICENSE |
 | `github.com/xo/terminfo` | MIT | https://github.com/xo/terminfo/blob/abceb7e1c41e/LICENSE |
+| `github.com/yosida95/uritemplate/v3` | BSD-3-Clause | https://github.com/yosida95/uritemplate/blob/v3.0.2/LICENSE |
 | `github.com/yuin/goldmark-emoji` | MIT | https://github.com/yuin/goldmark-emoji/blob/v1.0.6/LICENSE |
 | `github.com/yuin/goldmark` | MIT | https://github.com/yuin/goldmark/blob/v1.7.13/LICENSE |
 | `go.etcd.io/bbolt` | MIT | https://github.com/etcd-io/bbolt/blob/v1.4.3/LICENSE |

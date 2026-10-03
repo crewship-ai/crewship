@@ -1,3 +1,7 @@
+> Historical process. CodeRabbit was retired on 2026-10-02. Do not apply the
+> waiting or re-trigger instructions below to new PRs. Current policy:
+> [Review before merge](../../CONTRIBUTING.md#review-before-merge).
+
 <!-- Moved from CONTRIBUTING.md in the 2026-09-28 repository-clarity
      reorganisation; the entrypoint keeps the rule, this file keeps the
      full explanation. Index: docs/development/README.md -->

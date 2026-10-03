@@ -13,7 +13,7 @@ over HTTP, so nothing here can act on a remote instance.
 Stop `crewshipd` before commands that write or replace the database. The
 commands are host-side operations and do not require an API session.
 
-## `--local`: which database, and why the CLI asks
+## `crewship db` — local database selection
 
 If `--server`, `--profile` or `CREWSHIP_SERVER` names a server, every `db`
 command **refuses to run** unless you also pass `--local`. The refusal names

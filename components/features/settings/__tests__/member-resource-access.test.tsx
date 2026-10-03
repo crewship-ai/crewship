@@ -68,6 +68,22 @@ describe("member resource access", () => {
     const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")!
     expect(JSON.parse(init.body)).toEqual({ ...policy, mode: "trusted", rights: [] })
   })
+  it("shows names for agent and project grants whichever resource kind is selected (#2863)", async () => {
+    const mixed = { ...policy, rights: [{ kind: "agent", id: "agent-1", operation: "chat" }, { kind: "project", id: "project-1", operation: "read" }] }
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes("/members/")) return response(mixed)
+      if (url.startsWith("/api/v1/projects")) return response([{ id: "project-1", name: "Roadmap project" }])
+      return response([{ id: "agent-1", name: "Shared agent" }])
+    })
+    show(); fireEvent.click(screen.getByRole("button", { name: "Edit resource access" }))
+    const grants = await screen.findByRole("list", { name: "Resource grants" })
+    await waitFor(() => expect(grants.textContent).toContain("agent: Shared agent · chat"))
+    await waitFor(() => expect(grants.textContent).toContain("project: Roadmap project · read"))
+    fireEvent.change(screen.getByLabelText("Resource kind"), { target: { value: "project" } })
+    await screen.findByRole("option", { name: "Roadmap project" })
+    expect(grants.textContent).toContain("agent: Shared agent · chat")
+    expect(grants.textContent).toContain("project: Roadmap project · read")
+  })
   it("rejects a replacement membership and provides no save control", async () => {
     fetchMock.mockResolvedValue(response({ ...policy, membership_id: "new-membership" }))
     show(); fireEvent.click(screen.getByRole("button", { name: "Edit resource access" }))
