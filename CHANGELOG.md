@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Runtime editing preserves existing TOML and unsupported mise shapes instead of erasing tool pins; rejected raw edits no longer partially apply other settings.
+
 - Crew runtime settings show requested and built AI CLI versions with image-bound startup-check status, explicit unknown evidence, and refresh after build events.
 - Idle cache eviction preserves images selected by live crews and removes unselected artifacts by immutable ID; unknown database references keep images.
 - Offline AI CLI qualification disables inherited image healthchecks, keeping the sandbox limited to its lifetime keeper and explicit probes.

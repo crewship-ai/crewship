@@ -43,6 +43,7 @@ import {
   parseDevcontainerConfig,
   parseDevcontainerFull,
   parseMiseConfig,
+  isVisualMiseConfig,
 } from "./runtime-config-data"
 import type { CategoryFilter, FeatureMap } from "./runtime-config-data"
 import { RuntimeSecurityConfig, type SecurityConfigValue } from "./runtime-security-config"
@@ -258,6 +259,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
   // Parse initial state from value
   const initialDC = useMemo(() => parseDevcontainerConfig(value.devcontainerConfig), [value.devcontainerConfig])
   const initialFull = useMemo(() => parseDevcontainerFull(value.devcontainerConfig), [value.devcontainerConfig])
+  const canEditMiseVisually = isVisualMiseConfig(value.miseConfig)
   const initialMise = useMemo(() => parseMiseConfig(value.miseConfig), [value.miseConfig])
 
   // Feature catalog
@@ -455,6 +457,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
 
   // Toggle runtime tool
   function toggleRuntimeTool(toolName: string, defaultVersion: string) {
+    if (!canEditMiseVisually) return
     setMiseTools((prev) => {
       const next = { ...prev }
       if (toolName in next) {
@@ -467,6 +470,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
   }
 
   function updateRuntimeVersion(toolName: string, version: string) {
+    if (!canEditMiseVisually) return
     setMiseTools((prev) => ({ ...prev, [toolName]: version }))
   }
 
@@ -475,6 +479,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
   }
 
   function clearAllRuntimes() {
+    if (!canEditMiseVisually) return
     setMiseTools({})
   }
 
@@ -490,6 +495,13 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
 
   function applyRawEdits() {
     try {
+      // Validate both documents before changing any state. A failed Apply
+      // followed by Cancel must not publish part of the rejected edit.
+      if (rawDevcontainer.trim()) JSON.parse(rawDevcontainer)
+      if (canEditMiseVisually && !isVisualMiseConfig(rawMise)) {
+        toast.error("Language runtimes need a JSON object with string tool versions.")
+        return
+      }
       let img = effectiveImage
       if (rawDevcontainer.trim()) {
         // Validate + fully parse so the structured tabs (incl. Security) and
@@ -516,12 +528,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
         }
       }
 
-      if (rawMise.trim()) {
-        const parsed = JSON.parse(rawMise)
-        setMiseTools(parsed.tools || {})
-      } else {
-        setMiseTools({})
-      }
+      if (canEditMiseVisually) setMiseTools(parseMiseConfig(rawMise))
 
       propagate(
         rawDevcontainer.trim() ||
@@ -534,7 +541,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
             postStartCommand: security.postStartCommand,
             passthrough,
           }),
-        rawMise.trim() || "",
+        canEditMiseVisually ? rawMise.trim() : value.miseConfig,
         img
       )
       setEditRaw(false)
@@ -587,11 +594,12 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
 
         <div className="space-y-2">
           <Label htmlFor="raw-mise" className="text-xs text-muted-foreground">
-            Language runtimes config (JSON)
+            {canEditMiseVisually ? "Language runtimes config (JSON)" : "Language runtimes config (preserved)"}
           </Label>
           <Textarea
             id="raw-mise"
             value={rawMise}
+            readOnly={!canEditMiseVisually}
             onChange={(e) => setRawMise(e.target.value)}
             className="font-mono text-xs min-h-[100px] resize-y"
             placeholder='{"tools": {"node": "22", "python": "3.12"}}'
@@ -994,7 +1002,15 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
     </div>
   )
 
-  const runtimesPane = (
+  const preservedMiseNotice = (
+    <div className="space-y-2 rounded-md border border-border/60 p-3 text-xs text-muted-foreground">
+      <p>Runtime configuration is preserved. This format cannot be edited with the visual tool picker.</p>
+      <p>Edit it through your Crew manifest or CLI. Changes to other settings keep the original configuration.</p>
+      <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]">{value.miseConfig}</pre>
+    </div>
+  )
+
+  const runtimesPane = !canEditMiseVisually ? preservedMiseNotice : (
     <div className="space-y-3">
         <p className="text-[11px] text-muted-foreground">
           Select language runtimes and CLI tools to install in the crew container. Versions are managed
@@ -1164,7 +1180,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
    * dropdown per line. Pinned versions stay editable — they move onto the
    * picked chip, which is where the version actually belongs.
    */
-  const runtimesPaneSections = (
+  const runtimesPaneSections = !canEditMiseVisually ? preservedMiseNotice : (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-1.5">
         {CATEGORY_FILTERS.filter((c) => c !== "all").map((cat) => {
@@ -1315,7 +1331,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
       {miseJSON && (
         <FileCard
           name="mise.toml"
-          hint="language runtimes, as JSON"
+          hint={canEditMiseVisually ? "language runtimes, as JSON" : "original runtime configuration"}
           body={miseJSON}
         />
       )}
@@ -1366,7 +1382,8 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
         ))}
       </div>
 
-      {selectedFeatureCount === 0 && selectedRuntimeCount === 0 && (
+      {!canEditMiseVisually && <p className="text-[11px] text-muted-foreground">Existing runtime configuration is preserved.</p>}
+      {canEditMiseVisually && selectedFeatureCount === 0 && selectedRuntimeCount === 0 && (
         <p className="text-[11px] text-muted-foreground">
           The image as it ships — nothing added. That is a fine place to start; anything below can be
           added later without rebuilding the crew.
@@ -1426,7 +1443,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
           // ("none pinned") answered the first and left the section looking
           // like a duplicate of the tooling list above it.
           summary={
-            selectedRuntimeCount > 0
+            !canEditMiseVisually ? "existing configuration preserved" : selectedRuntimeCount > 0
               ? `${selectedRuntimeCount} pinned to an exact version`
               : "none pinned — only needed for an exact version"
           }
