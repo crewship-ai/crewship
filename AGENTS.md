@@ -83,6 +83,8 @@ binary has no UI (every UI route → `503` + an explanatory page); run
 
 ## Before you merge: confirm the review happened
 
+CodeQL findings can live only in a run’s annotations; inspect them as well as the aggregate check.
+
 CodeRabbit was retired on 2026-10-02. Do not wait for its status or request
 bot reviews. Review the final diff and document concrete findings, fixes and
 validation in the PR. Keep required CI checks green; skipped checks are not
