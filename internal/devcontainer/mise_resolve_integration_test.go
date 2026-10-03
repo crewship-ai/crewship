@@ -36,6 +36,9 @@ func TestMiseResolveRealExactAndFloatingSelectors(t *testing.T) {
 	if exact.ImageID != inspected.ID || exact.MiseVersion == "" || exact.Platform == "" || !strings.Contains(exact.Lock.Files["mise.lock"], `version = "22.0.0"`) {
 		t.Fatalf("missing resolver evidence: %+v", exact)
 	}
+	if !exact.LockChanged || exact.LockSHA256 == "" || exact.PreviousLockSHA256 != "" || len(exact.Tools) != 1 || !exact.Tools[0].VersionChanged {
+		t.Fatalf("initial resolution lacks a bound proposal: %+v", exact)
+	}
 	cfg.Lock = exact.Lock
 	pinned, err := ResolveMiseLock(ctx, docker, inspected.ID, cfg, true)
 	if err != nil {
@@ -44,10 +47,21 @@ func TestMiseResolveRealExactAndFloatingSelectors(t *testing.T) {
 	if !strings.Contains(pinned.Lock.Files["mise.lock"], `version = "22.0.0"`) {
 		t.Fatal("explicit pin floated")
 	}
+	if pinned.PreviousLockSHA256 != exact.LockSHA256 || pinned.SelectorsSHA256 != exact.SelectorsSHA256 {
+		t.Fatal("pinned plan lost its input binding")
+	}
+	for _, tool := range pinned.Tools {
+		if tool.VersionChanged {
+			t.Fatalf("exact pin changed: %+v", tool)
+		}
+	}
 	cfg.Tools["node"] = "22"
 	floating, err := ResolveMiseLock(ctx, docker, inspected.ID, cfg, true)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !floating.LockChanged || floating.SelectorsSHA256 == exact.SelectorsSHA256 || len(floating.Tools) != 1 || !floating.Tools[0].VersionChanged {
+		t.Fatalf("floating proposal missed update: %+v", floating)
 	}
 	lock := floating.Lock.Files["mise.lock"]
 	if !strings.Contains(lock, `specifiers = ["22"]`) || strings.Contains(lock, `version = "22.0.0"`) || !strings.Contains(lock, "checksum = ") {

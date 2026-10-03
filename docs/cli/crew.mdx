@@ -904,7 +904,9 @@ crewship crew provision lock-resolve mise.json --image sha256:<local-image-id> -
 | `--image` | `string` | required | Immutable local Docker image ID containing mise and the documented resolver utilities. |
 | `--bump` | `bool` | `false` | Update an existing input lock within its selectors; exact version pins remain exact. |
 
-Output JSON contains `lock`, `resolver_image_id`, `platform` and `mise_version`.
+Output JSON includes `tools` (native previous/resolved versions), selector and
+complete-bundle hashes, `lock_changed`, `lock`, `resolver_image_id`, `platform`
+and `mise_version`. Hashes bind the proposal, not an authorization to apply it.
 Supply the proposed lock through the ordinary manifest/build path. See
 [resolver limits and trust requirements](/guides/devcontainers#resolving-or-updating-a-lock-with-crewship).
 

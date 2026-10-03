@@ -21,7 +21,8 @@ var crewLockResolveCmd = &cobra.Command{
 The image must contain /usr/local/bin/mise. The builder accesses registries,
 has no host mounts, and receives no config environment values or credentials.
 It does not contact Crewship, change a running crew, or install the result.
-Output JSON contains lock, resolver_image_id, platform and mise_version.
+Output JSON includes the native version proposal, selector/lock hashes, lock,
+resolver_image_id, platform and mise_version. These hashes are not authorization.
 Pass --bump to update within the configured selectors; exact pins stay exact.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

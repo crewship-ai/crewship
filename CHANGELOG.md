@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Mise lock resolution now reports proposed native tool versions and deterministic selector/bundle hashes, distinguishing version changes from other lock changes.
+
 - Managed runs disable Gemini/OpenCode automatic update controls; missing Gemini system settings now fail preflight before launching the CLI.
 
 - Crew create/update accept bounded native mise lock bundles without expanding the 10 KiB non-lock configuration budget; large escaped locks are no longer truncated by the request reader.
