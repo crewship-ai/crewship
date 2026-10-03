@@ -125,6 +125,9 @@ func SaveConfig(cfg *CLIConfig) error {
 	return nil
 }
 
+// LoadConfigFile reads a selected configuration without changing process environment.
+func LoadConfigFile(path string) (*CLIConfig, error) { return loadConfigFrom(path) }
+
 // loadConfigFrom loads config from a specific path.
 func loadConfigFrom(path string) (*CLIConfig, error) {
 	data, err := os.ReadFile(path)
