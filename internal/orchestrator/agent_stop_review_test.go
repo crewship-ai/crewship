@@ -90,3 +90,7 @@ func TestStopAgent_AllOwnedRuntimesReceiveStopBeforeWaiting(t *testing.T) {
 		t.Fatal("unsettled invocations were reported stopped")
 	}
 }
+
+func (c stopReviewContainer) ContainerStatus(context.Context, string) (*provider.ContainerStatus, error) {
+	return &provider.ContainerStatus{State: "running"}, nil
+}

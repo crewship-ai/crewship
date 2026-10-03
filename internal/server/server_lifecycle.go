@@ -1044,7 +1044,22 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 			var run orchestrator.RunState
 			if err := json.Unmarshal(raw, &run); err != nil {
 				s.logger.Error("decode recovered runtime identity", "error", err)
+				if owner := orchestrator.RuntimeRecordAgent(raw); owner != "" {
+					protected[owner] = true
+					continue
+				}
 				return
+			}
+			if run.Status == "running" && s.orchestrator != nil {
+				probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				absent, err := s.orchestrator.ReconcileRecoveredRun(probeCtx, run)
+				cancel()
+				if err != nil {
+					s.logger.Warn("reconcile recovered runtime", "run_id", run.ID, "error", err)
+				}
+				if absent && err == nil {
+					continue
+				}
 			}
 			if run.Status == "running" && run.AgentID != "" {
 				protected[run.AgentID] = true
@@ -1094,9 +1109,6 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 		}
 	}
 	_ = rows.Close()
-	if len(orphans) == 0 {
-		return
-	}
 
 	s.logger.Info("recovered orphaned runs", "count", len(orphans))
 

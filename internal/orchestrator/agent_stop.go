@@ -109,6 +109,7 @@ func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
 	}
 	var errs []error
 	var recovered []RunState
+	var lateOwners []*agentRunControl
 	if o.state != nil {
 		states, err := o.state.List(ctx, "agent_runs")
 		if err != nil {
@@ -131,9 +132,31 @@ func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
 				}
 			}
 			if !owned {
-				recovered = append(recovered, state)
+				// Tracking precedes the durable running write. A control can
+				// therefore appear after our initial snapshot, but before List.
+				if v, ok := o.agentRuns.Load(state.ID); ok {
+					c := v.(*agentRunControl)
+					if c.agentID != agentID {
+						errs = append(errs, fmt.Errorf("run ownership changed for %s", state.ID))
+						continue
+					}
+					lateOwners = append(lateOwners, c)
+				} else {
+					recovered = append(recovered, state)
+				}
 			}
 		}
+	}
+	lateResults := make(chan error, len(lateOwners))
+	for _, c := range lateOwners {
+		c.mu.Lock()
+		c.stopped = true
+		creating := c.creating
+		c.mu.Unlock()
+		if !creating {
+			c.cancel()
+		}
+		go func() { lateResults <- o.stopAgentInvocation(ctx, c, creating) }()
 	}
 	recoveredResults := make(chan error, len(recovered))
 	for _, state := range recovered {
@@ -145,12 +168,17 @@ func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
 			errs = append(errs, err)
 		}
 	}
+	for range lateOwners {
+		if err := <-lateResults; err != nil {
+			errs = append(errs, err)
+		}
+	}
 	for range recovered {
 		if err := <-recoveredResults; err != nil {
 			errs = append(errs, err)
 		}
 	}
-	if len(runs) == 0 && len(recovered) == 0 && len(errs) == 0 {
+	if len(runs) == 0 && len(lateOwners) == 0 && len(recovered) == 0 && len(errs) == 0 {
 		return fmt.Errorf("agent has no runtime owned by this process; stop not confirmed")
 	}
 	return errors.Join(errs...)
@@ -222,4 +250,30 @@ func (o *Orchestrator) persistStoppedRun(ctx context.Context, state RunState) er
 		return fmt.Errorf("persist cancellation for run %s: %w", state.ID, err)
 	}
 	return nil
+}
+
+// ReconcileRecoveredRun clears a stale running identity only when inspecting
+// its exact container proves that the original runtime cannot still exist.
+// Unreachable, creating and running containers remain protected.
+func (o *Orchestrator) ReconcileRecoveredRun(ctx context.Context, run RunState) (bool, error) {
+	if run.Status != "running" || run.ContainerID == "" || o.container == nil {
+		return false, nil
+	}
+	absent, err := o.containerRuntimeAbsent(ctx, run.ContainerID)
+	if err != nil || !absent {
+		return false, err
+	}
+	return true, o.persistStoppedRun(ctx, run)
+}
+
+// RuntimeRecordAgent recovers only the ownership field when another field is
+// malformed. Invalid JSON or missing ownership cannot be safely scoped.
+func RuntimeRecordAgent(raw []byte) string {
+	var owner struct {
+		AgentID string `json:"agent_id"`
+	}
+	if json.Unmarshal(raw, &owner) != nil {
+		return ""
+	}
+	return owner.AgentID
 }

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -753,3 +754,7 @@ func CrewNetworkName(base, crewID string) string {
 	}
 	return base + "-crew-" + crewID
 }
+
+// ErrContainerNotFound means an authoritative provider lookup found no such
+// container. Transport, permission and daemon errors must not wrap this value.
+var ErrContainerNotFound = errors.New("container not found")
