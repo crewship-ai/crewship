@@ -823,7 +823,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				// list is a snapshot and a container that entered backoff
 				// between the list and this inspect still reads "running"
 				// there.
-				if inspect.State != nil && inspect.State.Restarting {
+				if inspect.State.Status == container.StateRestarting || inspect.State.Restarting {
 					p.logger.Info("recreating container (in restart backoff)",
 						"container", containerName,
 						"restart_count", inspect.RestartCount,
