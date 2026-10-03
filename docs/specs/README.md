@@ -20,39 +20,44 @@ in [private context](../development/private-context.md) while preserving the
 public contract here. Superseded a spec? Move it to
 [`docs/archive/`](../archive/README.md) with a link to its replacement.
 
-## Contents
+[Documentation map](../README.md) · [Design context](../prd/README.md)
 
-- [`container-cleanup.md`](container-cleanup.md) — installation labels, container-only cleanup after crew deletion, retry and durable diagnostics.
-- [`quota-service-backup.md`](quota-service-backup.md) — offline fixed-ext4 service
-  snapshots and the explicit restore/recovery release boundary.
+## Runtime, authority and budgets
 
-- [`pages.md`](pages.md) — the Pages implementation reference: panel schemas, freshness,
-  permission model, data model, API/CLI surface (§11), wire decisions
-  (§11b). Referenced from ~140 code files by section anchor — treat section
-  numbers as stable identifiers. Historical design status and market
-  analysis are part of the record inside the document, not a claim of current
-  implementation. The current custom-dashboard contract is
-  [Pages Apps v1](pages-apps.md); further separation of the older
-  design requires checking its code consumers and preserving section anchors.
-- [`response-shape-contract.md`](response-shape-contract.md) — how generated
-  OpenAPI response schemas are graded so that a renamed field cannot pass;
-  consumed by `cmd/gen-openapi` and `scripts/api-contract`.
+- [Restricted context](restricted-context.md): scoped chat, CLI execution, memory,
+  files, profiles and content-free attempt records.
+- [Member resource policy](member-resource-policy.md): the administration API/CLI
+  for restricted member authority; does not itself enable model execution.
+- [Credentials vault](credentials-vault.md): credential types, storage and
+  mounting conventions, with implementation provenance.
+- [Trusted provider budgets](trusted-llm-hard-budgets.md): reservations before
+  provider calls and admission rules for legacy sidecar traffic.
 
-- [`project-files.md`](project-files.md) — immutable, explicitly selected project
-  files and their read-only restricted native mounts.
-- [`trusted-llm-hard-budgets.md`](trusted-llm-hard-budgets.md) — reservations before
-  trusted provider calls and admission rules for legacy sidecar traffic.
+## Work and dispatch
 
-- [`restricted-context.md`](restricted-context.md) — scoped chat, CLI run,
-  memory, files, profile selection and content-free attempt contracts.
-- [`private-issue-preflight.md`](private-issue-preflight.md) — atomic private
-  issue claims, budget/capacity checks, deduplication and recovery.
-- [`restricted-workflows.md`](restricted-workflows.md) — private routine admission,
-  filtered catalog, own receipts, Page polling and bounded delegated execution.
+- [Restricted workflows](restricted-workflows.md): private routine admission,
+  filtered catalogs, receipts, Page polling and bounded delegated execution.
+- [Private issue preflight](private-issue-preflight.md): atomic claims,
+  budget/capacity checks, deduplication and recovery.
 
-- [`pages-apps.md`](pages-apps.md) — published custom application contract,
-  browser/isolation boundaries and explicit remaining acceptance limits.
-- [`credentials-vault.md`](credentials-vault.md) — credential types, storage
-  shape and mounting conventions, with implementation provenance.
-- [`member-resource-policy.md`](member-resource-policy.md) — administration
-  API/CLI for restricted member resource policies.
+## Pages and project files
+
+- [Pages](pages.md): panel schemas, freshness, permissions, data model and
+  API/CLI surface. Code references its section anchors; preserve them.
+  Explicit historical design sections are not claims of current implementation.
+- [Pages Apps](pages-apps.md): custom applications, browser/isolation boundaries
+  and remaining acceptance limits.
+- [Project files](project-files.md): immutable, explicitly selected files and
+  read-only restricted native mounts.
+
+## Storage and lifecycle
+
+- [Quota service backup](quota-service-backup.md): offline fixed-ext4 snapshots
+  and the explicit restore/recovery release boundary.
+- [Container cleanup](container-cleanup.md): installation labels, cleanup after
+  crew deletion, retries and durable diagnostics.
+
+## API documentation contracts
+
+- [Response shapes](response-shape-contract.md): how generated OpenAPI responses
+  are graded; consumed by `cmd/gen-openapi` and `scripts/api-contract`.

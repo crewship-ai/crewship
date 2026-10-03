@@ -24,55 +24,106 @@ this design directory; that is why current contracts belong in `docs/specs/`.
 Shipped migration comments retain their original historical paths. They are
 immutable provenance, not imports or dependencies on private documentation.
 
-## Retained design and acceptance context
+## Browse by topic
 
-| Document | Why it remains public |
+These descriptions explain what to read a document for. They do not refresh
+its implementation status; follow its evidence and the current contract.
+
+[Work and dispatch](#work-and-dispatch) · [Runtime and authority](#runtime-and-authority) · [Pages and authoring](#pages-and-authoring) · [Chat and collaboration](#chat-and-collaboration) · [Memory and guidance](#memory-and-guidance) · [Storage and recovery](#storage-and-recovery) · [Product conventions and verification](#product-conventions-and-verification)
+
+## Work and dispatch
+
+Current boundaries: [restricted workflows](../specs/restricted-workflows.md) and [issue preflight](../specs/private-issue-preflight.md). Queue choice: [decision](../decisions/README.md).
+
+| Document | Context and limits |
 | --- | --- |
-| [BACKUP-SINGLE-WRITER-DECISION-2026-10-01.md](BACKUP-SINGLE-WRITER-DECISION-2026-10-01.md) | Accepted ownership decision; implementation and release gates are explicit. |
-| [BRIEF-COLOR-TOKENS-2026.md](BRIEF-COLOR-TOKENS-2026.md) | Shared styling conventions and the checks that enforce them. |
-| [MISSION-OUTCOMES-TO-MEMORY.md](MISSION-OUTCOMES-TO-MEMORY.md) | Historical migration/provenance design referenced by shipped schema code. |
-| [PRD-ISSUES-AND-ROUTINES-2026.md](PRD-ISSUES-AND-ROUTINES-2026.md) | Issue/routine acceptance design referenced by implementation and regression tests. |
-| [PRD-SLASH-CAPABILITIES-2026.md](PRD-SLASH-CAPABILITIES-2026.md) | Capability model and slash-command design referenced by source/tests. |
-| [PRIVATE-ISSUE-PREFLIGHT-CONTRACT-2026-09-30.md](PRIVATE-ISSUE-PREFLIGHT-CONTRACT-2026-09-30.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [QUEUE-MECHANISM-2026.md](QUEUE-MECHANISM-2026.md) | Admission-control design referenced by the dispatcher and tests. |
-| [RESTRICTED-HTTP-BROKER-CONTRACT-2026-09-28.md](RESTRICTED-HTTP-BROKER-CONTRACT-2026-09-28.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [RESTRICTED-RESPONSES-ADAPTER-2026-09-29.md](RESTRICTED-RESPONSES-ADAPTER-2026-09-29.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [RESTRICTED-RUNTIME-CONTROLLER-EXPIRY-2026-09-28.md](RESTRICTED-RUNTIME-CONTROLLER-EXPIRY-2026-09-28.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [RESTRICTED-RUNTIME-SERVER-CONTRACT-2026-09-28.md](RESTRICTED-RUNTIME-SERVER-CONTRACT-2026-09-28.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [ROUTINES-CLARITY-PRD-2026-09-15.md](ROUTINES-CLARITY-PRD-2026-09-15.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08.md](ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [ROUTINES-DURABILITY-QUICKWINS.md](ROUTINES-DURABILITY-QUICKWINS.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [SERVICE-PERSISTENT-QUOTA-CONTRACT-2026-09-30.md](SERVICE-PERSISTENT-QUOTA-CONTRACT-2026-09-30.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [SPIKE-RIVER-SQLITE-1-0.md](SPIKE-RIVER-SQLITE-1-0.md) | Reproduction protocol for the public rejection ADR and retained harness. |
-| [WEBHOOKS-AGENT-PARALLELISM-IMPLEMENTATION-1-0.md](WEBHOOKS-AGENT-PARALLELISM-IMPLEMENTATION-1-0.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [WEBHOOKS-AGENT-PARALLELISM-MEMORY-1-0-2026-09-10.md](WEBHOOKS-AGENT-PARALLELISM-MEMORY-1-0-2026-09-10.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [agent-ask-packs-and-document-intake.md](agent-ask-packs-and-document-intake.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [agent-memory-on-wake.md](agent-memory-on-wake.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [chat-as-a-primary-surface.md](chat-as-a-primary-surface.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [chat-files-preview-v1.md](chat-files-preview-v1.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [chat-notification-sounds.md](chat-notification-sounds.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [chat-team-workspace.md](chat-team-workspace.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [conversational-onboarding.md](conversational-onboarding.md) | Original onboarding design referenced by implementation; header is historical. |
-| [create-surface-parity.md](create-surface-parity.md) | Historical UI parity criteria referenced by shared components and tests. |
-| [crew-runtime-capacity.md](crew-runtime-capacity.md) | Runtime capacity design and constraints referenced by source/tests. |
-| [crewship-guide.md](crewship-guide.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [demo-business-seed.md](demo-business-seed.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [demo-team-chat.md](demo-team-chat.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [documentation-contract-testing.md](documentation-contract-testing.md) | Design rationale for public contract-checking tooling. |
-| [inbox-maximum-wireframe.md](inbox-maximum-wireframe.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [issues-human-agent-work-contract-2026-09-07.md](issues-human-agent-work-contract-2026-09-07.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [keeper-configuration.md](keeper-configuration.md) | Keeper configuration rationale referenced by implementation. |
-| [memory-retrieval-layer.md](memory-retrieval-layer.md) | Retrieval design referenced by the public implementation. |
-| [model-scoped-credentials.md](model-scoped-credentials.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [opencode-go-zen-integration-2026-09-16.md](opencode-go-zen-integration-2026-09-16.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [pages-apps-architecture.md](pages-apps-architecture.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [pages-collections-access-analysis-2026-09-12.md](pages-collections-access-analysis-2026-09-12.md) | Folder design history referenced by source; later permissions model supersedes parts. |
-| [pages-folder-permissions-linux-model-2026-09-13.md](pages-folder-permissions-linux-model-2026-09-13.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [pages-project-authoring-access.md](pages-project-authoring-access.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [pages-settings-editor-review-proposal-2026-09-10.md](pages-settings-editor-review-proposal-2026-09-10.md) | Editor interaction and acceptance design referenced by tests. |
-| [provider-logins.md](provider-logins.md) | Provider-account lifecycle, access and refresh design referenced across source/tests. |
-| [unified-chat.md](unified-chat.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
-| [workspace-conversations.md](workspace-conversations.md) | Product behaviour, design constraints or acceptance boundaries; read the dated status in the document. |
+| [PRD-ISSUES-AND-ROUTINES-2026.md](PRD-ISSUES-AND-ROUTINES-2026.md) | Issue/routine work loop and acceptance tracks; distinguish local branch evidence from merged delivery. |
+| [issues-human-agent-work-contract-2026-09-07.md](issues-human-agent-work-contract-2026-09-07.md) | Human/agent work handoff and its implementation/test plan. |
+| [QUEUE-MECHANISM-2026.md](QUEUE-MECHANISM-2026.md) | Original per-crew memory admission proposal; its draft header is historical. |
+| [WEBHOOKS-AGENT-PARALLELISM-MEMORY-1-0-2026-09-10.md](WEBHOOKS-AGENT-PARALLELISM-MEMORY-1-0-2026-09-10.md) | Design context for webhook dispatch, parallelism and memory. |
+| [WEBHOOKS-AGENT-PARALLELISM-IMPLEMENTATION-1-0.md](WEBHOOKS-AGENT-PARALLELISM-IMPLEMENTATION-1-0.md) | Implementation boundaries for the durable dispatch design. |
+| [SPIKE-RIVER-SQLITE-1-0.md](SPIKE-RIVER-SQLITE-1-0.md) | Reproduction protocol for the rejected queue alternative; links the ADR and retained harness. |
+| [ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08.md](ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08.md) | Routine authoring and operator experience; includes separate human acceptance limits. |
+| [ROUTINES-CLARITY-PRD-2026-09-15.md](ROUTINES-CLARITY-PRD-2026-09-15.md) | Routine inputs, working rules and diagnostics, with dated local verification. |
+| [ROUTINES-DURABILITY-QUICKWINS.md](ROUTINES-DURABILITY-QUICKWINS.md) | Historical durability and observability changes shipped through PR #455. |
+
+## Runtime and authority
+
+Start with [restricted context](../specs/restricted-context.md), [member policy](../specs/member-resource-policy.md) and [credentials](../specs/credentials-vault.md).
+
+| Document | Context and limits |
+| --- | --- |
+| [PRIVATE-ISSUE-PREFLIGHT-CONTRACT-2026-09-30.md](PRIVATE-ISSUE-PREFLIGHT-CONTRACT-2026-09-30.md) | Original private issue admission boundary; start with the current issue-preflight specification. |
+| [RESTRICTED-HTTP-BROKER-CONTRACT-2026-09-28.md](RESTRICTED-HTTP-BROKER-CONTRACT-2026-09-28.md) | Fixed-operation broker prototype; explicitly does not enable production entrypoints. |
+| [RESTRICTED-RESPONSES-ADAPTER-2026-09-29.md](RESTRICTED-RESPONSES-ADAPTER-2026-09-29.md) | Provider transport boundary and its limits; not application execution acceptance. |
+| [RESTRICTED-RUNTIME-CONTROLLER-EXPIRY-2026-09-28.md](RESTRICTED-RUNTIME-CONTROLLER-EXPIRY-2026-09-28.md) | Independent expiry after controller death and its original integration scope. |
+| [RESTRICTED-RUNTIME-SERVER-CONTRACT-2026-09-28.md](RESTRICTED-RUNTIME-SERVER-CONTRACT-2026-09-28.md) | Original server/acceptance record; later lease supervision supersedes the stated manager-death limitation. |
+| [crew-runtime-capacity.md](crew-runtime-capacity.md) | Runtime capacity constraints and the design referenced by source/tests. |
+| [PRD-SLASH-CAPABILITIES-2026.md](PRD-SLASH-CAPABILITIES-2026.md) | Slash-command and per-user capability model referenced by source/tests. |
+| [keeper-configuration.md](keeper-configuration.md) | Keeper configuration proposal and rationale referenced by implementation. |
+| [model-scoped-credentials.md](model-scoped-credentials.md) | Design for limiting credential use by model; read its proposal status. |
+| [provider-logins.md](provider-logins.md) | Provider-account lifecycle, access and refresh context used by source/tests. |
+| [opencode-go-zen-integration-2026-09-16.md](opencode-go-zen-integration-2026-09-16.md) | Provider integration contract and dated source revision. |
+
+## Pages and authoring
+
+Start with [Pages](../specs/pages.md) and [Pages Apps](../specs/pages-apps.md).
+
+| Document | Context and limits |
+| --- | --- |
+| [pages-apps-architecture.md](pages-apps-architecture.md) | Broader application architecture; the Pages Apps specification owns the delivered contract. |
+| [pages-collections-access-analysis-2026-09-12.md](pages-collections-access-analysis-2026-09-12.md) | Folder, sharing and sidebar design history; later permissions design supersedes parts. |
+| [pages-folder-permissions-linux-model-2026-09-13.md](pages-folder-permissions-linux-model-2026-09-13.md) | Inherited folder permissions and explicitly bounded acceptance evidence. |
+| [pages-project-authoring-access.md](pages-project-authoring-access.md) | Authoring authority separated from panel visibility and whole-document reads. |
+| [pages-settings-editor-review-proposal-2026-09-10.md](pages-settings-editor-review-proposal-2026-09-10.md) | Editor interactions and acceptance criteria; distinguishes implemented P0 from pending user acceptance. |
+
+## Chat and collaboration
+
+Start with the [chat guide](../guides/chat-sessions.mdx) and [UI/UX contract](../ux/README.md).
+
+| Document | Context and limits |
+| --- | --- |
+| [chat-as-a-primary-surface.md](chat-as-a-primary-surface.md) | Original navigation and mobile chat proposal; later conversation design extends its scope. |
+| [workspace-conversations.md](workspace-conversations.md) | Workspace conversation model with dated local/development evidence. |
+| [unified-chat.md](unified-chat.md) | Shared conversation surface for agent sessions, human DMs and mixed groups. |
+| [chat-team-workspace.md](chat-team-workspace.md) | Team workspace chat interaction design. |
+| [chat-files-preview-v1.md](chat-files-preview-v1.md) | File preview interaction and implementation design. |
+| [chat-notification-sounds.md](chat-notification-sounds.md) | Personal audible alert behaviour shared by Chat and Inbox. |
+| [inbox-maximum-wireframe.md](inbox-maximum-wireframe.md) | Inbox attention model and no-loss acceptance boundaries. |
+| [agent-ask-packs-and-document-intake.md](agent-ask-packs-and-document-intake.md) | Prepared questions and document-intake design. |
+
+## Memory and guidance
+
+Start with the [memory guide](../guides/agent-memory.mdx); [restricted context](../specs/restricted-context.md) owns scoped access.
+
+| Document | Context and limits |
+| --- | --- |
+| [MISSION-OUTCOMES-TO-MEMORY.md](MISSION-OUTCOMES-TO-MEMORY.md) | Historical outcome-to-memory design referenced by shipped schema migrations. |
+| [agent-memory-on-wake.md](agent-memory-on-wake.md) | Recall at agent wake and its surrounding memory design. |
+| [memory-retrieval-layer.md](memory-retrieval-layer.md) | Retrieval/storage proposal referenced by the public implementation. |
+| [crewship-guide.md](crewship-guide.md) | Persistent product-specialist design and the scope of its implemented foundation. |
+| [conversational-onboarding.md](conversational-onboarding.md) | Original conversational onboarding design; its header is historical. |
+
+## Storage and recovery
+
+Start with [quota backup](../specs/quota-service-backup.md) and the [backup guide](../guides/backup.mdx).
+
+| Document | Context and limits |
+| --- | --- |
+| [BACKUP-SINGLE-WRITER-DECISION-2026-10-01.md](BACKUP-SINGLE-WRITER-DECISION-2026-10-01.md) | Accepted backup ownership decision; header explicitly leaves implementation/release verification pending. |
+| [SERVICE-PERSISTENT-QUOTA-CONTRACT-2026-09-30.md](SERVICE-PERSISTENT-QUOTA-CONTRACT-2026-09-30.md) | Fixed service-volume quota design with dated branch/acceptance status; see the current quota-backup specification. |
+
+## Product conventions and verification
+
+Start with the [UI/UX contract](../ux/README.md) and [script catalog](../../scripts/README.md).
+
+| Document | Context and limits |
+| --- | --- |
+| [BRIEF-COLOR-TOKENS-2026.md](BRIEF-COLOR-TOKENS-2026.md) | Shared colour tokens and enforcement context. |
+| [create-surface-parity.md](create-surface-parity.md) | Historical UI consistency criteria referenced by shared components/tests. |
+| [demo-business-seed.md](demo-business-seed.md) | Public business demo fixtures and project structure. |
+| [demo-team-chat.md](demo-team-chat.md) | Fictional colleague, role and conversation fixtures. |
+| [documentation-contract-testing.md](documentation-contract-testing.md) | Original proposal for documentation verification; use the current script catalog for commands. |
 
 ## New documents
 

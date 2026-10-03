@@ -27,6 +27,28 @@ from public documentation; do not require private access from contributors or
 put private credentials in configuration. Use separate worktrees when several
 agents edit the private repository concurrently.
 
+## Daily authoring workflow
+
+| What you are writing | Where to write it | How it is saved |
+| --- | --- | --- |
+| Public implementation contract, guide or reproducible test | The owning public category in the [documentation map](../README.md) | Normal product branch, commit and PR |
+| Internal research, plan or session handoff | The private repository's topic area | Follow that repository's instructions |
+| Internal record on a workstation with a configured `internal-docs/` alias | `internal-docs/<topic>/<dated-name>.md` | Follow the private repository's automation/status instructions; Git ignore alone does not save it |
+| Generated inventory, build output or test report | Its ignored output location | Regenerate it; do not version it as authored documentation |
+
+Before writing internal context, resolve `crewship.internalContext` and read
+that repository's `AGENTS.md` and topic index. If the checkout or alias is
+missing, configure private access first; do not fall back to a public PRD or
+assistant directory. Synchronization is workstation configuration, not a
+capability supplied by cloning the public repository.
+
+Keep a record under its topic, link it from that topic's index, and state its
+purpose, date, status and product revision. Link public implementation evidence
+from private notes. Public documents must remain understandable without access
+to those notes: publish the necessary contract and rationale when a decision
+becomes product behaviour. A dated handoff should name its next action and
+unresolved questions; a later document should point back to what it supersedes.
+
 ## Moving existing records
 
 1. Classify the file by its consumers, not its filename or age. A document
