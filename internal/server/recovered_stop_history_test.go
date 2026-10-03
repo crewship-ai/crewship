@@ -298,12 +298,18 @@ type admitAfterStopScan struct {
 
 func (s *admitAfterStopScan) List(ctx context.Context, bucket string) (map[string][]byte, error) {
 	records, err := s.StateProvider.List(ctx, bucket)
+	// The server test provider returns its backing map. Freeze the snapshot
+	// before admission, matching the production bbolt List contract.
+	snapshot := make(map[string][]byte, len(records))
+	for key, raw := range records {
+		snapshot[key] = append([]byte(nil), raw...)
+	}
 	if err == nil && bucket == "agent_runs" && s.admit != nil {
 		admit := s.admit
 		s.admit = nil
 		admit()
 	}
-	return records, err
+	return snapshot, err
 }
 func (s *admitAfterStopScan) Update(ctx context.Context, bucket, key string, fn func([]byte) ([]byte, error)) error {
 	return s.StateProvider.(provider.AtomicStateProvider).Update(ctx, bucket, key, fn)

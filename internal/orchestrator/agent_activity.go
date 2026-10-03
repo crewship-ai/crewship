@@ -9,7 +9,15 @@ func (o *Orchestrator) ReconcileAgentActivity(agentID string, apply func(locally
 	defer o.runRecoveryMu.Unlock()
 	active := false
 	o.agentRuns.Range(func(_, value any) bool {
-		if value.(*agentRunControl).agentID == agentID {
+		control := value.(*agentRunControl)
+		// finish closes done before waiting for this lock to remove the registry
+		// entry. Such a completed invocation must not keep the agent RUNNING.
+		select {
+		case <-control.done:
+			return true
+		default:
+		}
+		if control.agentID == agentID {
 			active = true
 			return false
 		}
