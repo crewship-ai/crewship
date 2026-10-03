@@ -398,5 +398,7 @@ func (o *Orchestrator) containerRuntimeAbsent(ctx context.Context, id string) (b
 	if err != nil {
 		return false, err
 	}
-	return status != nil && status.State == "stopped", nil
+	// Docker reports non-running OOM/dead containers as error. Unknown
+	// provider vocabulary (including an empty state) is not absence evidence.
+	return status != nil && (status.State == "stopped" || status.State == "error"), nil
 }

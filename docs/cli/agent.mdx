@@ -756,3 +756,16 @@ crewship agent git-log viktor --format json
 Default rendering prints short hash + relative date + truncated subject line. The handler tolerates both `[...]` and `{"commits":[...]}` shapes from the server side.
 
 Backed by `GET /api/v1/agents/{id}/git-log`.
+
+### Recovery limits for incomplete runtime records
+
+Restart recovery can confirm absence when the recorded container is missing,
+stopped, or Docker reports a non-running OOM/dead container. An unavailable
+runtime or unknown provider state is not proof of absence.
+
+Legacy or incomplete run records can lack a container identity. The server
+reports that condition with the run ID and keeps the run unverified; it cannot
+safely substitute the crew's current container, which may be a replacement.
+There is currently no automatic repair or force-clear CLI for such records.
+Operators must establish the original runtime's absence before repairing its
+stored identity/state. Repeated restarts alone do not resolve missing identity.
