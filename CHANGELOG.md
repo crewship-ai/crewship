@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- First-run secret bootstrap validates the entire key set and persists generated keys before exporting them. Failed persistence or validation cannot leave partial process secrets that a retry mistakes for externally managed keys.
+
 - API mutations reject malformed or imprecise `Retry-After` values instead of treating them as valid retry delays.
 
 - Work-ledger retention reports expired payloads and reclaimed bytes only after their transaction commits, preserving completed-batch counts when a later batch rolls back.
