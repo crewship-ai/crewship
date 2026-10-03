@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"path"
 	"regexp"
 	"slices"
@@ -24,10 +25,15 @@ import (
 // MiseResolution is a proposed dependency input, not an installed environment.
 // The caller must explicitly apply Lock through the normal build path.
 type MiseResolution struct {
-	ImageID     string          `json:"resolver_image_id"`
-	Platform    string          `json:"platform"`
-	MiseVersion string          `json:"mise_version"`
-	Lock        *MiseLockBundle `json:"lock"`
+	Tools              []MiseResolvedTool `json:"tools"`
+	SelectorsSHA256    string             `json:"selectors_sha256"`
+	PreviousLockSHA256 string             `json:"previous_lock_sha256,omitempty"`
+	LockSHA256         string             `json:"lock_sha256"`
+	LockChanged        bool               `json:"lock_changed"`
+	ImageID            string             `json:"resolver_image_id"`
+	Platform           string             `json:"platform"`
+	MiseVersion        string             `json:"mise_version"`
+	Lock               *MiseLockBundle    `json:"lock"`
 }
 
 const resolverDir = "/tmp/crewship-resolver"
@@ -46,7 +52,10 @@ func ResolveMiseLock(ctx context.Context, docker *client.Client, imageID string,
 		return nil, err
 	}
 	// Environment values do not participate in dependency resolution.
-	clean := &MiseConfig{Tools: cfg.Tools, Lock: cfg.Lock}
+	clean := &MiseConfig{Tools: maps.Clone(cfg.Tools)}
+	if cfg.Lock != nil {
+		clean.Lock = &MiseLockBundle{SchemaVersion: cfg.Lock.SchemaVersion, Files: maps.Clone(cfg.Lock.Files)}
+	}
 	input, err := resolverInputArchive(clean)
 	if err != nil {
 		return nil, err
@@ -114,8 +123,13 @@ func ResolveMiseLock(ctx context.Context, docker *client.Client, imageID string,
 	if bump {
 		command = append(command, "--bump")
 	}
-	if _, err = resolverExec(ctx, docker, created.ID, command, 64<<10); err != nil {
+	report, err := resolverExec(ctx, docker, created.ID, command, 64<<10)
+	if err != nil {
 		return nil, fmt.Errorf("mise resolve: lock operation: %w", err)
+	}
+	tools, err := parseMiseResolutionReport(report)
+	if err != nil {
+		return nil, err
 	}
 	archive, err := resolverExec(ctx, docker, created.ID, []string{"/bin/tar", "-cf", "-", "-C", resolverDir, "config"}, 1<<20)
 	if err != nil {
@@ -125,7 +139,9 @@ func ResolveMiseLock(ctx context.Context, docker *client.Client, imageID string,
 	if err != nil {
 		return nil, err
 	}
-	return &MiseResolution{ImageID: imageID, Platform: platform, MiseVersion: fields[0], Lock: lock}, nil
+	previousHash, lockHash := miseLockDigest(clean.Lock), miseLockDigest(lock)
+	return &MiseResolution{ImageID: imageID, Platform: platform, MiseVersion: fields[0], Lock: lock,
+		Tools: tools, SelectorsSHA256: miseSelectorsDigest(clean.Tools), PreviousLockSHA256: previousHash, LockSHA256: lockHash, LockChanged: previousHash != lockHash}, nil
 }
 
 func auditMiseResolver(c container.InspectResponse, imageID, name string) error {
@@ -240,6 +256,15 @@ func (b *resolverOutput) Write(p []byte) (int, error) {
 	}
 	return b.Buffer.Write(p)
 }
+
+// Keep diagnostics out of machine-readable stdout (JSON and tar archives).
+// They remain bounded even when a tool writes an endless warning stream.
+func copyResolverOutput(out *resolverOutput, reader io.Reader) error {
+	diagnostics := &resolverOutput{limit: 8 << 10}
+	_, err := stdcopy.StdCopy(out, diagnostics, reader)
+	return err
+}
+
 func resolverExec(ctx context.Context, docker *client.Client, id string, cmd []string, limit int) (string, error) {
 	return resolverExecWithInput(ctx, docker, id, cmd, limit, nil)
 }
@@ -272,7 +297,7 @@ func resolverExecWithInput(ctx context.Context, docker *client.Client, id string
 	}
 	out := &resolverOutput{limit: limit}
 	done := make(chan error, 1)
-	go func() { _, e := stdcopy.StdCopy(out, out, attached.Reader); done <- e }()
+	go func() { done <- copyResolverOutput(out, attached.Reader) }()
 	select {
 	case <-ctx.Done():
 		attached.Close()

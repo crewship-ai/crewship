@@ -67,14 +67,22 @@ func TestQualificationThroughDockerRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer p.Close()
-	inventory := &devcontainer.ToolchainInventory{ImageID: committed.ID, Tools: []devcontainer.ToolchainTool{{Binary: "codex", Path: "/usr/local/bin/codex", Version: "0.152.0", Status: "observed"}}}
+	inventory := &devcontainer.ToolchainInventory{SchemaVersion: 1, Status: "recorded", ImageID: committed.ID, Tools: []devcontainer.ToolchainTool{{Binary: "codex", Path: "/usr/local/bin/codex", Version: "0.152.0", Status: "observed"}}}
 	got := Qualify(ctx, p, inventory, "")
 	if got.Status != "passed" {
 		t.Fatalf("synthetic CLI qualification: %+v", got)
+	}
+	inventory.Qualification = &got
+	if err := RequirePassing(committed.ID, inventory, []string{"codex"}); err != nil {
+		t.Fatal(err)
 	}
 	inventory.Tools[0].Path = "/bin/echo"
 	got = Qualify(ctx, p, inventory, "")
 	if got.Status != "failed" || len(got.Tools) != 1 || got.Tools[0].Status != "version_mismatch" {
 		t.Fatalf("false qualification: %+v", got)
+	}
+	inventory.Qualification = &got
+	if err := RequirePassing(committed.ID, inventory, []string{"codex"}); err == nil {
+		t.Fatal("failed real probe passed publication policy")
 	}
 }

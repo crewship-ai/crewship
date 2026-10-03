@@ -1859,9 +1859,10 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 	memoryMB, cpus := containerCrewLimits(inspect.HostConfig)
 
 	return &provider.ContainerStatus{
-		ID:     containerID,
-		State:  state,
-		Uptime: inspect.State.StartedAt,
+		ID:      containerID,
+		State:   state,
+		Uptime:  inspect.State.StartedAt,
+		ImageID: inspect.Image,
 		// Free: the inspect above already carries the label, so reporting
 		// whether this container predates the current container
 		// configuration costs no extra daemon call (#1642).

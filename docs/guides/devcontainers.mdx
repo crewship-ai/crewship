@@ -683,6 +683,23 @@ workspace; raw configuration and environment variable values are not copied
 into history. Reusing the same image for the same definition reuses its record.
 Offline qualification is included in that immutable build evidence; it is not
 a current provider-authentication claim.
+
+By default, offline AI CLI checks record evidence without preventing publication.
+To require them for a crew, set `spec.mise.ai_cli_check: required` in its Crew
+manifest, or `"ai_cli_check":"required"` alongside `tools` in the managed
+`mise_config` JSON. `record` explicitly selects the compatibility default;
+other values are rejected. This is Crewship metadata and is not emitted into
+native mise TOML.
+
+A required check accepts only successful evidence bound to the built immutable
+image, with a passing startup/version probe for every recorded and required
+agent CLI. Missing inventory, an unavailable runtime, mismatched evidence or
+failed probes fail the provisioning job before a new revision/current image is
+published. The previous image and requirements stay selected. Native providers
+without the necessary inspection and offline sandbox capability cannot satisfy
+this opt-in requirement. These checks do not prove account/model compatibility,
+real provider authentication or safe automatic activation.
+
 Workspace and crew backups include these records; restoring them preserves
 provenance and does not restore the referenced image or activate an instance.
 
@@ -725,6 +742,14 @@ current container is running, paused, restarting or its state is unknown. It
 leaves existing work intact. A freshly inspected stopped container can be
 removed without force and recreated. Selecting the same immutable artifact by
 ID does not require a restart even if the container was created using a tag.
+
+Legacy agent runs inspect their actual container at admission and retain its
+immutable source image ID as `runtime_image_id` in run state and `exec.command`
+events. The lookup has a two-second timeout; unavailable evidence is omitted,
+never inferred from the crew's currently selected image. This identifies the
+container's source, not subsequent filesystem changes, the executed CLI's
+version, or a unique environment definition revision. Restricted attempts have
+their own frozen-input evidence; this field does not change their contract.
 
 Finish existing work and explicitly stop/restart the crew to apply a pending
 image. This also applies to a warm idle container: this check does not infer
@@ -799,8 +824,14 @@ Supply a trusted, already-present Linux image containing `/usr/local/bin/mise`,
 The resolver selects `linux-x64` or `linux-arm64` from that image's architecture;
 it does not infer the target from the CLI host's operating system.
 
-The JSON result contains `lock`, `resolver_image_id`, `platform` and
-`mise_version`. Apply its `lock` through `spec.mise.lock` and the ordinary build
+The JSON result contains `lock`, `resolver_image_id`, `platform`, `mise_version`
+and `tools` with native previous/resolved version lists and `version_changed`.
+`selectors_sha256` binds the requested tool selectors; `previous_lock_sha256`
+(when supplied) and `lock_sha256` cover every file in the complete bundle.
+`lock_changed` includes source, checksum, auxiliary-file and formatting changes,
+so it can be true even when no tool version changes. These hashes identify the
+proposal's inputs and output; they are not signed approval or authorization.
+Apply its `lock` through `spec.mise.lock` and the ordinary build
 path. For an update, include the previous `lock` alongside `tools` in the input
 JSON and pass `--bump`. Mise updates within each selector; an exact version
 remains exact. The result is a proposal, with no running-crew or server changes.
@@ -819,3 +850,25 @@ and host mise configuration are not inherited. Input is limited to 4 MiB;
 native bundles retain the limits above, and resolver diagnostics are bounded.
 Resolution does not install the resulting toolchain, prove a real provider
 login, schedule an update or activate a revision.
+
+The required check also compares explicit exact mise CLI selectors with the
+observed version. An overlapping devcontainer feature does not hide an explicit
+mise pin. Floating selectors remain the responsibility of native locked install;
+this check does not implement another dependency resolver.
+
+### Applying a reviewed native lock proposal
+
+`crewship crew provision lock-apply mise.json proposal.json` prints updated mise
+JSON only if the current selectors and previous complete lock match the plan,
+and the proposed lock still matches its digest. Redirect to a **new** output
+file, then review and apply that configuration through your ordinary manifest
+or crew API workflow. The command is local and offline; it does not install
+software, start a build or replace a running environment.
+
+Environment and policy fields come from the current configuration, not from
+the resolver. Unknown JSON fields are preserved. A changed selector or old
+lock requires a new plan. Hashes prevent accidentally applying a stale or
+corrupted proposal; they do not authenticate its author or independently prove
+native resolution. The normal locked build remains responsible for checking
+that lock against the selectors. Provisioning can also require the separate
+image-bound offline AI CLI checks described above.

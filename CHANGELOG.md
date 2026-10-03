@@ -9,6 +9,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Required AI CLI checks reject a build whose observed CLI version differs from its explicit mise pin; requested tool status now gives explicit mise selectors precedence over overlapping features.
+
+- `crew provision lock-apply` validates a reviewed native update proposal against unchanged selectors and lock inputs, preserving other configuration fields and emitting updated JSON without deployment.
+
+- Managed environment definitions can require image-bound offline AI CLI checks before publishing a replacement; failed or unavailable checks preserve the selected image.
+
+- Agent run state and execution events retain the actual container source image ID when available, independently of later environment updates.
+
+- Mise lock resolution now reports proposed native tool versions and deterministic selector/bundle hashes, distinguishing version changes from other lock changes.
+
 - Managed runs disable Gemini/OpenCode automatic update controls; missing Gemini system settings now fail preflight before launching the CLI.
 
 - Crew create/update accept bounded native mise lock bundles without expanding the 10 KiB non-lock configuration budget; large escaped locks are no longer truncated by the request reader.

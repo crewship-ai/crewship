@@ -48,6 +48,8 @@ var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]*$`)
 var ErrExecRefused = errors.New("agent exec refused at the creation gate; no process was created")
 
 type AgentRunRequest struct {
+	// Set by RunAgent from provider inspection, never a caller's desired image.
+	runtimeImageID string
 	// ExecGate, when set, is asked SYNCHRONOUSLY immediately before the
 	// agent's exec is created, and nothing external happens between its
 	// answer and the creation. It is the authoritative "a process is about
@@ -388,13 +390,16 @@ func (c Credential) loginMode() string {
 // RunState tracks the runtime state of an active agent run, persisted in the
 // state provider for crash recovery.
 type RunState struct {
-	ID          string    `json:"id"`
-	AgentID     string    `json:"agent_id"`
-	ChatID      string    `json:"chat_id"`
-	Status      string    `json:"status"`
-	StartedAt   time.Time `json:"started_at"`
-	ContainerID string    `json:"container_id"`
-	ExecID      string    `json:"exec_id"`
+	// RuntimeImageID is source-image evidence, not the mutable filesystem or
+	// proof of the binary eventually selected by PATH. Empty means unknown.
+	RuntimeImageID string    `json:"runtime_image_id,omitempty"`
+	ID             string    `json:"id"`
+	AgentID        string    `json:"agent_id"`
+	ChatID         string    `json:"chat_id"`
+	Status         string    `json:"status"`
+	StartedAt      time.Time `json:"started_at"`
+	ContainerID    string    `json:"container_id"`
+	ExecID         string    `json:"exec_id"`
 	// AgentSlug names the run's tmux session together with ID. Recorded so a
 	// run outliving its server process can still be stopped by location
 	// after the agent row's slug was released for reuse.

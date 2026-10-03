@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/dockerutil"
+	"github.com/crewship-ai/crewship/internal/toolchain"
 )
 
 var errBuildDefinitionChanged = errors.New("environment definition changed during build; rebuild the current definition")
@@ -42,6 +43,31 @@ type EnvironmentRevision struct {
 // build evidence and publishes the cached result. It never changes a running
 // container. Raw configuration/env values are deliberately absent from history.
 func (h *ProvisioningHandler) saveProvisionResult(ctx context.Context, crewID, workspaceID string, expected provisionDefinition, result *devcontainer.ProvisionResult) (string, error) {
+	if expected.Mise != "" {
+		mise, err := devcontainer.ParseMiseConfig(expected.Mise)
+		if err != nil {
+			return "", err
+		}
+		if err := mise.Validate(); err != nil {
+			return "", err
+		}
+		if mise.AICLICheck == "required" {
+			var binaries []string
+			for _, cli := range devcontainer.RequiredAdapterCLIs(expected.Adapters) {
+				binaries = append(binaries, cli.Binary)
+			}
+			if err := toolchain.RequirePassing(result.CachedImage, result.Requirements.Toolchain, binaries); err != nil {
+				return "", err
+			}
+			requested, err := devcontainer.RequestedToolchain(nil, expected.Mise, expected.Adapters)
+			if err != nil {
+				return "", err
+			}
+			if err := toolchain.RequireExactPins(result.Requirements.Toolchain, requested); err != nil {
+				return "", err
+			}
+		}
+	}
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
