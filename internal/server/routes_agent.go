@@ -37,6 +37,10 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 	for _, raw := range states {
 		var run orchestrator.RunState
 		if err := json.Unmarshal(raw, &run); err != nil {
+			if owner := orchestrator.RuntimeRecordAgent(raw); owner != "" && owner != id {
+				s.logger.Warn("skip corrupt runtime for another agent", "agent_id", owner, "error", err)
+				continue
+			}
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime status unavailable"})
 			return
 		}

@@ -3,7 +3,10 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // RecordRecoveredAbsence publishes a confirmed probe result only if the same
@@ -15,27 +18,31 @@ func (o *Orchestrator) RecordRecoveredAbsence(ctx context.Context, key string, e
 	if _, owned := o.agentRuns.Load(expected.ID); owned {
 		return false, nil
 	}
-	raw, err := o.state.Get(ctx, "agent_runs", key)
-	if err != nil {
-		return false, err
+	atomic, ok := o.state.(provider.AtomicStateProvider)
+	if !ok {
+		return false, fmt.Errorf("state provider cannot atomically record recovered absence")
 	}
-	var current RunState
-	if err = json.Unmarshal(raw, &current); err != nil {
-		return false, err
-	}
-	if current.Status != "running" || !SameRecoveredIdentity(current, expected) {
-		return false, nil
-	}
-	current.Status, current.LastActivity = "cancelled", time.Now()
-	current.StopJournalPending, current.StopOrigin = true, "recovered_absence"
-	raw, err = json.Marshal(current)
-	if err != nil {
-		return false, err
-	}
-	if err = o.state.Set(ctx, "agent_runs", key, raw); err != nil {
-		return false, err
-	}
-	return true, nil
+	changed := false
+	err := atomic.Update(ctx, "agent_runs", key, func(raw []byte) ([]byte, error) {
+		if raw == nil {
+			return nil, nil
+		}
+		var current RunState
+		if err := json.Unmarshal(raw, &current); err != nil {
+			return nil, err
+		}
+		if current.Status != "running" || !SameRecoveredIdentity(current, expected) {
+			return raw, nil
+		}
+		current.Status, current.LastActivity = "cancelled", time.Now()
+		current.StopJournalPending, current.StopOrigin = true, "recovered_absence"
+		data, err := json.Marshal(current)
+		if err == nil {
+			changed = true
+		}
+		return data, err
+	})
+	return changed && err == nil, err
 }
 
 // SameRecoveredIdentity prevents an old probe from acting on a replaced record.

@@ -80,3 +80,7 @@ func TestStopAgent_RealDirectProcess(t *testing.T) {
 		t.Fatal("stop returned before process exit")
 	}
 }
+
+func (c stopProcessContainer) ContainerStatus(context.Context, string) (*provider.ContainerStatus, error) {
+	return &provider.ContainerStatus{State: "running"}, nil
+}

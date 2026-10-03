@@ -1056,6 +1056,11 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 			var run orchestrator.RunState
 			if err := json.Unmarshal(raw, &run); err != nil {
 				s.logger.Error("decode recovered runtime identity", "error", err)
+				if owner := orchestrator.RuntimeRecordAgent(raw); owner != "" {
+					protectedAgents[owner] = true
+					legacyAgents[owner] = true
+					continue
+				}
 				return
 			}
 			run = s.reconcileRecoveredRuntimeAtBoot(probeCtx, key, run)
@@ -1067,17 +1072,25 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 				s.recoveredRuntimes[key] = run
 				s.recoveredRuntimesMu.Unlock()
 			}
-			if (run.Status == "running" || (run.Status == "cancelled" && run.StopJournalPending)) && run.AgentID != "" {
+			if run.Status == "running" && run.AgentID != "" {
 				protectedAgents[run.AgentID] = true
 				if run.ID == "" || run.ID == run.AgentID {
-					// Before per-run identities, runtime records used the agent key and
-					// cannot be mapped to one journal trace. Preserve that agent's traces.
 					legacyAgents[run.AgentID] = true
 				} else {
 					protectedRuns[run.ID] = true
 				}
 			}
+			// A confirmed stop protects only its trace from generic recovery,
+			// never unrelated runs or the entire agent's status.
+			if run.Status == "cancelled" && run.StopJournalPending && run.ID != "" {
+				protectedRuns[run.ID] = true
+			}
 		}
+	}
+	// Boot probes can create new outbox entries. Project them before the
+	// journal-based idle decision; failures retain their durable retry marker.
+	if err := s.flushRecoveredStops(ctx); err != nil {
+		s.logger.Warn("project boot runtime absence", "error", err)
 	}
 	if s.journalWriter == nil {
 		// Without a journal writer we can't write the cancel entries —
@@ -1125,9 +1138,6 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 		}
 	}
 	_ = rows.Close()
-	if len(orphans) == 0 {
-		return
-	}
 
 	s.logger.Info("recovered orphaned runs", "count", len(orphans))
 

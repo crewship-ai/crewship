@@ -859,3 +859,18 @@ func TestExtractEnvRefs_NoFalsePositives(t *testing.T) {
 		}
 	}
 }
+
+func (m *memState) Update(ctx context.Context, bucket, key string, fn func([]byte) ([]byte, error)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	raw, err := m.Get(ctx, bucket, key)
+	if err != nil {
+		return err
+	}
+	raw, err = fn(raw)
+	if err != nil {
+		return err
+	}
+	return m.Set(ctx, bucket, key, raw)
+}

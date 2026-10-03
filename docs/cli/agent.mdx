@@ -424,7 +424,10 @@ Confirmed recovered stops retain a durable history update until it succeeds.
 A transient journal failure is retried in the background, including after
 another restart, without executing the agent again. Recovery advances through
 bounded batches, so a pending trace without a known outcome does not repeatedly
-delay later confirmed stops.
+delay later confirmed stops. Another durably recorded running invocation keeps
+the agent `RUNNING` even when its journal start has not appeared yet. Unknown
+runtime ownership leaves the history update pending instead of projecting a
+false `STOPPED` status.
 
 ## `crewship agent logs`
 

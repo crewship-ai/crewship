@@ -3,8 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/provider"
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
@@ -17,19 +20,15 @@ func (s *Server) reconcileRecoveredRuntimeAtBoot(ctx context.Context, key string
 	if !s.recoveredRuntimeAbsent(ctx, run) {
 		return run
 	}
-	ended := run
-	ended.Status, ended.LastActivity = "cancelled", time.Now()
-	data, err := json.Marshal(ended)
+	changed, err := s.orchestrator.RecordRecoveredAbsence(ctx, key, run)
 	if err != nil {
-		return run
-	}
-	if err := s.state.Set(ctx, "agent_runs", key, data); err != nil {
 		s.logger.Warn("persist recovered runtime absence", "run_id", run.ID, "error", err)
+	}
+	if !changed {
 		return run
 	}
-	// Existing journal recovery handles this trace, preserving its retry on
-	// publication failure. Absence does not establish a successful exit code.
-	return ended
+	run.Status, run.StopJournalPending, run.StopOrigin = "cancelled", true, "recovered_absence"
+	return run
 }
 
 func (s *Server) recoveredRuntimeAbsent(ctx context.Context, run orchestrator.RunState) bool {
@@ -43,11 +42,14 @@ func (s *Server) recoveredRuntimeAbsent(ctx context.Context, run orchestrator.Ru
 	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	status, err := s.container.ContainerStatus(probeCtx, run.ContainerID)
+	if errors.Is(err, provider.ErrContainerNotFound) {
+		return true
+	}
 	if err != nil || status == nil || status.ID != run.ContainerID {
 		return false
 	}
 	switch status.State {
-	case "stopped":
+	case "stopped", "error":
 		// No process can survive inside a positively inspected stopped container.
 	case "running", "idle":
 		alive, err := s.orchestrator.RunIsAliveAt(probeCtx, orchestrator.RunLocation{ContainerID: run.ContainerID, AgentSlug: run.AgentSlug, RunID: run.ID})

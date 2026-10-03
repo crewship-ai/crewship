@@ -11,12 +11,22 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // flushRecoveredStops drains the durable stop outbox. Runtime absence is
 // already confirmed; this retries only history projection, never execution.
 // Work-owned attempts retain their own fenced outcome authority.
 func (s *Server) flushRecoveredStops(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return s.flushRecoveredStopsBatch(ctx)
+}
+
+// flushRecoveredStopsBatch bounds work by count and honors the caller's time
+// budget. Keeping the policies separate lets the count/fairness test exercise
+// all three batches without depending on shared-host throughput under -race.
+func (s *Server) flushRecoveredStopsBatch(ctx context.Context) error {
 	if s.state == nil || s.db == nil || s.journalWriter == nil {
 		return nil
 	}
@@ -26,18 +36,28 @@ func (s *Server) flushRecoveredStops(ctx context.Context) error {
 		return nil
 	}
 	defer s.recoveredStopsMu.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
 	states, err := s.state.List(ctx, "agent_runs")
 	if err != nil {
 		return err
 	}
-	// Resume after the last visited key, wrapping at the end. Unresolved IPC
-	// or work-owned stops keep their markers but cannot consume the first
-	// batch forever. Provider List returns a map, so its order is not a cursor.
+	// Resume after the last visited key, wrapping at the end. Failed
+	// projections retain their markers without starving the next batch.
+	// Provider List returns a map, so its order is not a cursor.
 	keys := make([]string, 0, len(states))
-	for key := range states {
+	for key, raw := range states {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		keys = append(keys, key)
+		var run orchestrator.RunState
+		if err := json.Unmarshal(raw, &run); err != nil {
+			// Corruption with a readable owner only protects that agent.
+			if owner := orchestrator.RuntimeRecordAgent(raw); owner != "" {
+				continue
+			}
+			// Without an owner, absence cannot safely be projected.
+			return fmt.Errorf("inspect runtime ownership for stop projection: %w", err)
+		}
 	}
 	sort.Strings(keys)
 	start := sort.Search(len(keys), func(i int) bool { return keys[i] > s.recoveredStopsCursor })
@@ -87,7 +107,7 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
 			return err
 		}
 		if workspace == "" {
-			return nil
+			return s.ackRecoveredStop(ctx, run.ID)
 		} // No trustworthy historical scope.
 		var conflicting bool
 		err = s.db.QueryRowContext(ctx, `SELECT
@@ -115,7 +135,9 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
 	}
 	if !terminal {
 		if workOwned {
-			return nil
+			// Dispatcher owns the outcome; acknowledging our projection marker
+			// does not settle or overwrite its fenced attempt.
+			return s.ackRecoveredStop(ctx, run.ID)
 		}
 		if _, err := s.journalWriter.EmitSync(ctx, journal.Entry{
 			ID: "recovered-stop:" + run.ID, WorkspaceID: workspace, AgentID: run.AgentID,
@@ -139,7 +161,14 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
 			for _, raw := range states {
 				var other orchestrator.RunState
 				if err = json.Unmarshal(raw, &other); err != nil {
-					return err
+					owner := orchestrator.RuntimeRecordAgent(raw)
+					if owner == "" {
+						return err
+					}
+					if owner == run.AgentID {
+						locallyActive = true
+					}
+					continue
 				}
 				if other.AgentID == run.AgentID && other.Status == "running" {
 					locallyActive = true
@@ -164,28 +193,27 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
 		}
 	}
 
-	// Read again so acknowledging the outbox does not restore an older copy
-	// of unrelated state fields. Clearing only after a durable terminal makes
-	// failed writes and a crash after journal commit safe to retry.
-	raw, err := s.state.Get(ctx, "agent_runs", run.ID)
-	if err != nil {
-		return err
-	}
-	var current orchestrator.RunState
-	if err := json.Unmarshal(raw, &current); err != nil {
-		return err
-	}
-	current.StopJournalPending = false
-	raw, err = json.Marshal(current)
-	if err != nil {
-		return err
-	}
-	return s.state.Set(ctx, "agent_runs", run.ID, raw)
+	return s.ackRecoveredStop(ctx, run.ID)
 }
 
-// recoveredStopWorkspace uses durable run scope first. For pre-scope records,
-// an existing agent's immutable workspace provides the legacy fallback. Missing
-// agents without captured scope remain unresolved rather than guessing a tenant.
+func (s *Server) ackRecoveredStop(ctx context.Context, id string) error {
+	atomic, ok := s.state.(provider.AtomicStateProvider)
+	if !ok {
+		return fmt.Errorf("state provider cannot atomically acknowledge recovered stop")
+	}
+	return atomic.Update(ctx, "agent_runs", id, func(raw []byte) ([]byte, error) {
+		if raw == nil {
+			return nil, nil
+		}
+		var current orchestrator.RunState
+		if err := json.Unmarshal(raw, &current); err != nil {
+			return nil, err
+		}
+		current.StopJournalPending = false
+		return json.Marshal(current)
+	})
+}
+
 func (s *Server) recoveredStopWorkspace(ctx context.Context, run orchestrator.RunState) (string, error) {
 	var agentWorkspace string
 	err := s.db.QueryRowContext(ctx, `SELECT workspace_id FROM agents WHERE id=?`, run.AgentID).Scan(&agentWorkspace)

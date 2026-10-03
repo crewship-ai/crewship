@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -54,8 +55,8 @@ func TestStopAgentDoesNotTreatConcurrentLiveAdmissionAsRecovered(t *testing.T) {
 	if run.Status != "running" {
 		t.Fatalf("a live admission after the stop snapshot was treated as recovered: %s", run.Status)
 	}
-	if err := req.ExecGate(t.Context()); err != nil {
-		t.Fatalf("a later admission should remain independent: %v", err)
+	if err := req.ExecGate(t.Context()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a discovered live admission must have its creation gate closed: %v", err)
 	}
 	if stopErr == nil {
 		t.Fatal("no invocation in the original snapshot was stopped, but stop was acknowledged")

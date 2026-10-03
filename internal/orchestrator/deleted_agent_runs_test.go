@@ -207,3 +207,7 @@ func TestDeletedAgentStopRequiresDurableCancellation(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func (s failingCancellationState) Update(context.Context, string, string, func([]byte) ([]byte, error)) error {
+	return errors.New("runtime state disk unavailable")
+}
