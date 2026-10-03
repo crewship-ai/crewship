@@ -9,7 +9,7 @@ import { SettingsCard, SettingsSegmented } from "@/components/features/settings/
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Chip, FieldRow, Gate, ItemRow, SmallButton, TD, TH, Unavailable, WsName } from "./backups-kit"
 import {
-  formatSize, formatWhen, proofLabel, runPlanLabel, shortDate,
+  formatSize, formatSourceDate, formatWhen, proofLabel, runPlanLabel, shortDate,
   type RestoreChecks, type RestoreRecord, type RestoreReport, type RestoreTarget,
 } from "./backups-model"
 import { checksFixture, dryRunFixture, restorePhasesFixture } from "./__fixtures__/backups"
@@ -461,7 +461,7 @@ function RestoreTable({ rows, now }: { rows: RestoreRecord[]; now: Date }) {
               <tr key={r.id} className="[&:last-child>td]:border-b-0">
                 <td className={TD}>{formatWhen(r.created_at, now)}</td>
                 <td className={TD}>{r.actor}</td>
-                <td className={TD}><WsName name={r.source_name} instance={r.source_scope === "instance"} /> · {shortDate(new Date(r.source_date))}</td>
+                <td className={TD}><WsName name={r.source_name} instance={r.source_scope === "instance"} /> · {formatSourceDate(r.source_date)}</td>
                 <td className={TD}>{r.target}{r.kind === "dry_run" ? " · dry run" : ""}</td>
                 <td className={TD}>
                   <Chip tone={r.result === "ok" ? "ok" : r.result === "partial" ? "warn" : "bad"}>{r.result === "ok" ? "done" : r.result}</Chip>{" "}

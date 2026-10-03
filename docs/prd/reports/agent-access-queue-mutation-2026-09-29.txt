@@ -1,5 +1,0 @@
---- FAIL: TestQueuedHumanAuthorityCannotSurviveRejoin (1.30s)
-    human_queue_authority_test.go:55: status=200 want=404
-FAIL
-FAIL	github.com/crewship-ai/crewship/internal/api	1.328s
-FAIL
