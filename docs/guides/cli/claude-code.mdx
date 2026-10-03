@@ -72,7 +72,7 @@ claude --print --output-format stream-json --include-partial-messages \
 
 `--bare` was previously appended for API-key credentials only — it was already dropped for OAuth, whose auth contract it breaks (it strictly requires `ANTHROPIC_API_KEY` or an `apiKeyHelper` via `--settings`, and never reads `CLAUDE_CODE_OAUTH_TOKEN` or the keychain). So every API-key run silently lost `Write`, `Glob`, `Grep`, `WebFetch` and `WebSearch` whatever its tool profile said.
 
-What `--bare` was covering is now covered explicitly, verified against 2.1.226 on a project carrying both a `CLAUDE.md` and a [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/.claude/settings.json) declaring a `SessionStart` hook:
+What `--bare` was covering is now covered explicitly, verified against 2.1.226 on a project carrying both a `CLAUDE.md` and a `.claude/settings.json` declaring a `SessionStart` hook:
 
 - **`--setting-sources ""`** — the hook did not fire, and the model answered NO when asked whether the repo's `CLAUDE.md` marker was in its context (with and without `--system-prompt`). This flag is load-bearing: it is what stands between an agent and a cloned repository's hooks. It also suppresses **project-level skill discovery**, which is why materialised `SKILL.md` files are not natively discovered today.
 - **`--strict-mcp-config`** — only the servers Crewship wrote in `.mcp.json` load.

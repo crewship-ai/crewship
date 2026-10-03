@@ -44,7 +44,7 @@ commit them.
 - [Repository layout](development/repository-layout.md) — where code, tests and configuration belong
 - [Script catalog](../scripts/README.md) — build, verification and operational commands with their side effects
 - [AGENTS.md](../AGENTS.md) — the concise agent/contributor entrypoint
-- [CODEX.md](../CODEX.md) — instance map and Codex-specific operating notes
+- [Private context](development/private-context.md) — optional workstation instructions and internal records
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — the contribution workflow (short form; deep-dives in `docs/development/`)
 - [README.md](../README.md) — the product README
 - [RELEASING.md](../RELEASING.md) — release cutting; the machinery detail is the [CI/CD runbook](runbooks/ci-cd-implementation-2026-09-11.md)

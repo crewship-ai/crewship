@@ -53,8 +53,11 @@ belong in either repository's version history.
 
 ## Publication boundary
 
-Root assistant workspaces (`.claude/`, `.codex/`), local `internal-docs`
-aliases, internal mockups and captured run reports are ignored. The
+Root assistant instructions (`CLAUDE.md`, `CODEX.md`, `GEMINI.md`), workspaces
+(`.claude/`, `.codex/`, `.cursor/`), `.github/copilot-instructions.md`, local
+`internal-docs` aliases, internal mockups and captured run reports are ignored.
+Shared public contributor instructions belong in `AGENTS.md`; workstation
+instructions belong in optional private context. The
 `agents-invariants` CI check inspects tracked paths, so a forced add cannot
 silently reintroduce these categories. The reports directory retains only its
 README and a documented public regression source fixture. This path guard
