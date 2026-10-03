@@ -754,6 +754,14 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					return "", false, fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
 				}
 				inspect := inspectResult.Container
+				// The host-wide list is an older snapshot. In particular, a
+				// Stop followed immediately by Ensure can list a container as
+				// running even though this inspect already reports exited.
+				// Use the same inspected state for reuse and every drift decision.
+				if inspect.State == nil || inspect.State.Status == "" {
+					return "", false, fmt.Errorf("inspect existing container %s: missing state", containerName)
+				}
+				state := inspect.State.Status
 				// Applies with an empty local identity too (cleanup disabled): the
 				// drift paths below tear down with RemoveVolumes, so adopting a
 				// container another installation labelled would destroy its
@@ -865,7 +873,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				// list is a snapshot and a container that entered backoff
 				// between the list and this inspect still reads "running"
 				// there.
-				if c.State == container.StateRestarting || (inspect.State != nil && inspect.State.Restarting) {
+				if state == container.StateRestarting || inspect.State.Restarting {
 					p.logger.Info("recreating container (in restart backoff)",
 						"container", containerName,
 						"restart_count", inspect.RestartCount,
@@ -903,7 +911,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				//     meanwhile — here, and on `crewship crew
 				//     container-status` via ContainerStatus.
 				if want := p.crewRuntimeContractDigest(); want != "" && runtimeContractOf(inspect.Config) != want {
-					if crewContainerHoldsNoProcesses(c.State) {
+					if crewContainerHoldsNoProcesses(state) {
 						p.logger.Info("recreating stopped container (runtime configuration predates this build)",
 							"container", containerName,
 							"container_contract", runtimeContractOf(inspect.Config),
@@ -954,7 +962,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				}
 				if want := p.crewNetworkFor(team.ID, team.Slug); want != "" && (haveNet != want || hostsDrift) &&
 					(p.crewNetworkWanted(team.ID, team.Slug) || haveNet == p.crewNetworkName(team.ID)) {
-					if crewContainerHoldsNoProcesses(c.State) {
+					if crewContainerHoldsNoProcesses(state) {
 						p.logger.Info("recreating stopped container (crew network changed)",
 							"container", containerName, "crew_id", team.ID,
 							"from", haveNet, "to", want)
@@ -967,7 +975,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						"network", haveNet, "configured", want)
 				}
 				if drift := crewResourceDrift(team, inspect.HostConfig); drift != "" {
-					if crewContainerHoldsNoProcesses(c.State) {
+					if crewContainerHoldsNoProcesses(state) {
 						p.logger.Info("recreating stopped container (crew resource limits changed)",
 							"container", containerName,
 							"crew_id", team.ID,
@@ -984,7 +992,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						"drift", drift,
 					)
 				}
-				if c.State == container.StateRunning {
+				if state == container.StateRunning {
 					// A restart this provider did not perform (daemon restart,
 					// restart policy, an operator) recreates the namespace and
 					// drops the fence; ensureEgressFence compares StartedAt.
