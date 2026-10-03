@@ -884,3 +884,13 @@ files are unchanged. Provider sign-in is a separate check.
 The panel refreshes after this crew's build completes or fails and after a
 realtime reconnect. Use its refresh button if live updates are unavailable.
 Viewers can inspect versions without permission to modify the environment.
+
+### Preserving configuration the visual editor cannot represent
+
+The visual tool picker edits JSON with string tool selectors. Existing TOML,
+structured tool values, or malformed input remain unchanged when you edit
+another runtime setting. The picker shows the preserved source instead of
+offering controls that would discard it. Edit that configuration through your
+Crew manifest or CLI; the raw runtime editor keeps unsupported source read-only.
+Supported JSON edits preserve other fields, including environment, lock and
+CLI-check policy. A rejected raw edit applies neither configuration document.
