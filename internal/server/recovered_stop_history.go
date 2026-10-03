@@ -17,6 +17,15 @@ import (
 // already confirmed; this retries only history projection, never execution.
 // Work-owned attempts retain their own fenced outcome authority.
 func (s *Server) flushRecoveredStops(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return s.flushRecoveredStopsBatch(ctx)
+}
+
+// flushRecoveredStopsBatch bounds work by count and honors the caller's time
+// budget. Keeping the policies separate lets the count/fairness test exercise
+// all three batches without depending on shared-host throughput under -race.
+func (s *Server) flushRecoveredStopsBatch(ctx context.Context) error {
 	if s.state == nil || s.db == nil || s.journalWriter == nil {
 		return nil
 	}
@@ -26,8 +35,6 @@ func (s *Server) flushRecoveredStops(ctx context.Context) error {
 		return nil
 	}
 	defer s.recoveredStopsMu.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
 	states, err := s.state.List(ctx, "agent_runs")
 	if err != nil {
 		return err
@@ -36,8 +43,20 @@ func (s *Server) flushRecoveredStops(ctx context.Context) error {
 	// or work-owned stops keep their markers but cannot consume the first
 	// batch forever. Provider List returns a map, so its order is not a cursor.
 	keys := make([]string, 0, len(states))
-	for key := range states {
+	durableRunning := map[string]bool{}
+	for key, raw := range states {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		keys = append(keys, key)
+		var run orchestrator.RunState
+		if err := json.Unmarshal(raw, &run); err != nil {
+			// Unknown runtime ownership cannot justify projecting STOPPED.
+			return fmt.Errorf("inspect runtime ownership for stop projection: %w", err)
+		}
+		if run.Status == "running" && run.AgentID != "" {
+			durableRunning[run.AgentID] = true
+		}
 	}
 	sort.Strings(keys)
 	start := sort.Search(len(keys), func(i int) bool { return keys[i] > s.recoveredStopsCursor })
@@ -61,7 +80,7 @@ func (s *Server) flushRecoveredStops(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return errors.Join(append(failures, err)...)
 		}
-		if err := s.projectRecoveredStop(ctx, run); err != nil {
+		if err := s.projectRecoveredStop(ctx, run, durableRunning[run.AgentID]); err != nil {
 			failures = append(failures, fmt.Errorf("project confirmed stop %s: %w", run.ID, err))
 		}
 		processed++
@@ -69,7 +88,7 @@ func (s *Server) flushRecoveredStops(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
-func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunState) error {
+func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunState, durableRunning bool) error {
 	var workspace string
 	var terminal, workOwned, recoveredTerminal bool
 	err := s.db.QueryRowContext(ctx, `SELECT je.workspace_id,
@@ -102,12 +121,15 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
 		recoveredTerminal = true
 	}
 	if recoveredTerminal {
-		if _, err := s.db.ExecContext(ctx, `UPDATE agents SET status=CASE WHEN EXISTS (
+		// A manual IPC run or delayed start event may have durable runtime
+		// ownership without a journal start. Either source protects RUNNING;
+		// an old stop does not establish absence of the agent's other runs.
+		if _, err := s.db.ExecContext(ctx, `UPDATE agents SET status=CASE WHEN ? OR EXISTS (
  SELECT 1 FROM journal_entries started WHERE started.workspace_id=? AND started.agent_id=? AND started.entry_type='run.started'
  AND NOT EXISTS (SELECT 1 FROM journal_entries done WHERE done.workspace_id=started.workspace_id AND done.trace_id=started.trace_id
    AND done.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout'))
  ) THEN 'RUNNING' ELSE 'STOPPED' END, updated_at=? WHERE id=? AND workspace_id=? AND deleted_at IS NULL`,
-			workspace, run.AgentID, time.Now().UTC().Format(time.RFC3339), run.AgentID, workspace); err != nil {
+			durableRunning, workspace, run.AgentID, time.Now().UTC().Format(time.RFC3339), run.AgentID, workspace); err != nil {
 			return err
 		}
 	}

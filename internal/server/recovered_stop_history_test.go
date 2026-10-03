@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -172,10 +173,15 @@ func TestRecoveredStopHistoryMakesBoundedProgressPastUnresolvedRuns(t *testing.T
 		seedRecoveryTrace(t, s, id, "a")
 		seedStoppedOutbox(t, s, id)
 	}
+	// Isolate the count/fairness policy from the production five-second
+	// budget: a slow -race runner can legitimately exhaust that time budget
+	// before consuming 100 entries. The production wrapper keeps its limit.
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
 	// Three batches of 100 cover every one of these 201 pending runs,
 	// even when unresolved entries retain their durable pending marker.
 	for i := 0; i < 3; i++ {
-		if err := s.flushRecoveredStops(t.Context()); err != nil {
+		if err := s.flushRecoveredStopsBatch(ctx); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -190,5 +196,88 @@ func TestRecoveredStopHistoryMakesBoundedProgressPastUnresolvedRuns(t *testing.T
 	}
 	if !pendingStop(t, s, "absent-000") {
 		t.Fatal("invented history for unresolved manual run")
+	}
+}
+
+// A manual IPC invocation (or a delayed journal start) can have durable runtime
+// ownership before its run.started entry exists. Projecting an older stop must
+// not advertise STOPPED while that runtime is still owned.
+func TestRecoveredStopHistoryPreservesUnjournaledRunningIdentity(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+	seedRecoveryTrace(t, s, "stopped", "a")
+	seedStoppedOutbox(t, s, "stopped")
+	raw, err := json.Marshal(orchestrator.RunState{ID: "unjournaled", AgentID: "a", AgentSlug: "a", ContainerID: "owned-container", Status: "running"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.state.Set(t.Context(), "agent_runs", "unjournaled", raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.flushRecoveredStops(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := s.db.QueryRow(`SELECT status FROM agents WHERE id='a'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "RUNNING" {
+		t.Fatalf("durable live runtime projected as %s", status)
+	}
+	if pendingStop(t, s, "stopped") {
+		t.Fatal("old stop projection was not acknowledged")
+	}
+	if n := recoveryTerminalCount(t, s, "unjournaled"); n != 0 {
+		t.Fatalf("invented %d terminal entries for live runtime", n)
+	}
+}
+
+func TestRecoveredStopHistoryRetainsOutboxWhenRuntimeOwnershipIsCorrupt(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+	seedRecoveryTrace(t, s, "stopped", "a")
+	seedStoppedOutbox(t, s, "stopped")
+	if err := s.state.Set(t.Context(), "agent_runs", "unknown", []byte("{")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.flushRecoveredStops(t.Context()); err == nil {
+		t.Fatal("corrupt runtime ownership accepted")
+	}
+	if !pendingStop(t, s, "stopped") {
+		t.Fatal("unknown ownership lost the retry marker")
+	}
+	var status string
+	if err := s.db.QueryRow(`SELECT status FROM agents WHERE id='a'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "RUNNING" {
+		t.Fatalf("unknown runtime ownership projected as %s", status)
+	}
+}
+
+func TestRecoveredStopHistoryExpiredBudgetPreservesPendingWork(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+	seedRecoveryTrace(t, s, "stopped", "a")
+	seedStoppedOutbox(t, s, "stopped")
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+	if err := s.flushRecoveredStops(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expired budget: %v", err)
+	}
+	if !pendingStop(t, s, "stopped") {
+		t.Fatal("expired budget lost pending work")
+	}
+	if n := recoveryTerminalCount(t, s, "stopped"); n != 0 {
+		t.Fatalf("expired budget wrote %d terminal entries", n)
+	}
+	if err := s.flushRecoveredStops(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if pendingStop(t, s, "stopped") {
+		t.Fatal("next drain failed to acknowledge the stop")
 	}
 }
