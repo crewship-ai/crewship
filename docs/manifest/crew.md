@@ -163,7 +163,7 @@ each catalogue. The difference is what you can say about the version.
 | | `spec.devcontainer.features` | `spec.mise.tools` |
 |---|---|---|
 | runs | as root, at image build | as the agent, during environment build |
-| can | anything — packages, services, `postCreateCommand` | one thing: this tool at this version |
+| can | anything — packages, services, `postCreateCommand` | tools at requested versions or selectors |
 | version | whatever the feature's tag ships | Exact pins or native mise selectors; a lock records resolved dependency inputs |
 | cached | yes, as an image layer | yes, in the environment image; an explicit rebuild bypasses the provisioning cache |
 | capped | no | 20 tools |
@@ -175,9 +175,9 @@ selects from a writable home. See [managed tool versions](/guides/devcontainers)
 for resolution, required offline checks and their runtime limits.
 
 **Pin with mise when a version matters** — `node = "22.11.0"`, not just
-"Node". **Use a feature for everything else**: it is faster, because the
-result is cached with the image, and it is the only one that can install
-something that is not a single binary (a Postgres *server*, not `psql`).
+"Node". **Use a feature for OS packages, services and setup scripts** beyond
+a tool installation (a Postgres *server*, not just `psql`). Both approaches
+cache their installed contents in the environment image.
 
 A pin takes effect because the image puts mise's shim directory on `PATH`
 *ahead* of `/usr/local/bin`, so the shim wins over anything a feature
