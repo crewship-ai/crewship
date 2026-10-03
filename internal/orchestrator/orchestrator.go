@@ -506,6 +506,7 @@ type ContainerBusyProbe func(ctx context.Context, crewID, containerID string) bo
 type StatsRegisterFunc func(containerID, crewID, workspaceID string)
 
 type Orchestrator struct {
+	replayContextStore     ReplayContextStore
 	runRecoveryMu          sync.Mutex // serializes recovered publication with local admission
 	agentRuns              sync.Map   // run id -> *agentRunControl; independent of credential HOME cleanup
 	userModelReader        func(context.Context, string, string) (string, error)

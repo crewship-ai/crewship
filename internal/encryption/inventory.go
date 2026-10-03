@@ -41,6 +41,7 @@ type EnvelopeColumn struct {
 //   - pipeline_webhooks.signing_secret     — pipeline webhook HMAC key (#1029)
 //   - crews.services_json                 — private service documents (crewsvc wrapper)
 //   - backup_offsite_destinations.secret_enc — off-site (S3) secret access key
+//   - run_replay_contexts.secret_values_enc — retained run-output scrub context
 //
 // The two webhook columns are FAIL-OPEN at rest (encrypted only when a key is
 // configured; #1072). A key-less deployment can't run reencrypt at all, and a
@@ -71,4 +72,5 @@ var EnvelopeColumns = []EnvelopeColumn{
 	{Table: "pipeline_webhooks", Column: "signing_secret", FailOpen: true},
 	{Table: "crews", Column: "services_json", Where: "services_json LIKE 'crewsvc:%'", Prefix: "crewsvc:"},
 	{Table: "backup_offsite_destinations", Column: "secret_enc"},
+	{Table: "run_replay_contexts", Column: "secret_values_enc"},
 }

@@ -644,6 +644,11 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// emit. Collected here rather than beside the handler wrap because the
 	// start emit fires first and needs them.
 	secretValues := collectSecretValues(req)
+	if req.DurableOutputDir != "" {
+		if err := o.saveReplayContext(ctx, req, secretValues); err != nil {
+			return err
+		}
+	}
 	// journalCmd is the only argv form allowed to leave this function: the
 	// prompt-bearing elements are gone, what remains is scrubbed and capped.
 	// See journal_exec_command.go for why removal rather than scrubbing.

@@ -42,6 +42,7 @@ import (
 	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
+	"github.com/crewship-ai/crewship/internal/runreplay"
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/terminal"
@@ -394,6 +395,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		// orchestrator's own starts (mission dispatch's minimal {id, slug}
 		// config) fall back to the default runtime image and no sidecars.
 		orch.SetCrewCompleter(goapi.NewCrewConfigCompleter(db))
+		orch.SetReplayContextStore(runreplay.NewContextStore(db))
 	}
 
 	s.registerRoutes()
