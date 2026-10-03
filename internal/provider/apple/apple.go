@@ -569,6 +569,9 @@ func (p *Provider) lookupContainer(ctx context.Context, name string) (*container
 	// In Apple Containers, configuration.id IS the container name (set via --name on create).
 	// There is no separate "name" field in the CLI output.
 	for _, c := range containers {
+		if c.Configuration.ID == "" {
+			return nil, fmt.Errorf("container list contains an entry without identity")
+		}
 		if c.Configuration.ID == name {
 			return &c, nil
 		}

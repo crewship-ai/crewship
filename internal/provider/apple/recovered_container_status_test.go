@@ -17,6 +17,8 @@ func TestRecoveredContainerStatusAbsenceRequiresInventory(t *testing.T) {
 		{"present", `if [ "$1" = inspect ]; then exit 1; fi; echo '[{"configuration":{"id":"cid"},"status":{"state":"running"}}]'`, false},
 		{"unavailable", `exit 1`, false},
 		{"null_inventory", `if [ "$1" = inspect ]; then exit 1; fi; echo null`, false},
+		{"nameless_entry", `if [ "$1" = inspect ]; then exit 1; fi; echo '[{}]'`, false},
+		{"null_entry", `if [ "$1" = inspect ]; then exit 1; fi; echo '[null]'`, false},
 		{"corrupt", `if [ "$1" = inspect ]; then exit 1; fi; echo '{'`, false},
 		{"unknown_state", `echo '[{"configuration":{"id":"cid"},"status":{"state":"unrecognized"}}]'`, false},
 	} {
