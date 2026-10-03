@@ -420,6 +420,27 @@ describe("Recovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "Drills" }))
     expect(await screen.findByText(/no message is sent, no webhook called/)).toBeInTheDocument()
   })
+
+  it("History says the source date is unknown when the bundle is no longer catalogued (#2867)", async () => {
+    // The API fills source_date only while the bundle is still in the
+    // catalog; otherwise it is "" and must not render as an invalid date.
+    h.apiFetch.mockImplementation(async (url: string) => {
+      if (String(url).startsWith("/api/v1/admin/instance/backups/restores")) {
+        return new Response(JSON.stringify([
+          { id: "rr-gone", kind: "restore", actor: "demo@crewship.ai", bundle_path: "/b/gone.cship", source_scope: "workspaces", source_name: "gone.cship", source_date: "", target: "new workspace", result: "ok", warnings: 0, created_at: "2026-09-29T10:00:00Z" },
+          { id: "rr-kept", kind: "restore", actor: "demo@crewship.ai", bundle_path: "/b/dess.cship", source_scope: "workspaces", source_name: "Dess", source_date: "2026-09-27T03:00:00Z", target: "existing workspace", result: "ok", warnings: 0, created_at: "2026-09-28T10:00:00Z" },
+        ]), { status: 200 })
+      }
+      return new Response("{}", { status: 404 })
+    })
+    show("recovery", "")
+    fireEvent.click(await screen.findByRole("button", { name: "History" }))
+    const gone = (await screen.findByText("new workspace")).closest("tr") as HTMLElement
+    expect(gone).toHaveTextContent("gone.cship · source date unknown")
+    expect(gone).not.toHaveTextContent(/Invalid Date|NaN|undefined/)
+    // A catalogued source keeps its short date.
+    expect(screen.getByText("existing workspace").closest("tr")).toHaveTextContent("Dess · 27 Sep")
+  })
 })
 
 describe("Keys & alerts", () => {

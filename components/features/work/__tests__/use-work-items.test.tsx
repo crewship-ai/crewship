@@ -493,4 +493,30 @@ describe("replay availability", () => {
   it("does not offer the button while it still does not know", () => {
     expect(replayAvailability(workItem(), { delivery: null, loading: true, notFound: false }).state).toBe("checking")
   })
+
+  // #2865: the server refuses restricted workflow replay with 409 regardless of
+  // source, so the button must not be offered for it.
+  const RESTRICTED_REASON = "Private workflow replay requires a new authorized routine or Page admission."
+
+  it("is unavailable for finished restricted workflow work, with the server's reason", () => {
+    const a = replayAvailability(
+      workItem({ domain_kind: "restricted_workflow", source: "schedule", source_ref: "" }),
+      noDelivery,
+    )
+    expect(a).toEqual({ state: "unavailable", reason: RESTRICTED_REASON })
+  })
+
+  it("is unavailable for restricted workflow work even when its webhook payload is retained", () => {
+    const a = replayAvailability(workItem({ domain_kind: "restricted_workflow", state: "failed" }), {
+      delivery: null, loading: false, notFound: false,
+    })
+    expect(a).toEqual({ state: "unavailable", reason: RESTRICTED_REASON })
+  })
+
+  it("leaves other finished domains replayable", () => {
+    for (const domain_kind of ["pipeline", "routine", "chat"]) {
+      expect(replayAvailability(workItem({ domain_kind, source: "chat", source_ref: "" }), noDelivery))
+        .toEqual({ state: "available", reason: "" })
+    }
+  })
 })
