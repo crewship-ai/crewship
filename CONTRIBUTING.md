@@ -182,21 +182,28 @@ label — when it is true, not when the entry is inconvenient. The guard's
 history, its exact comparison, and the label mechanics:
 [docs/development/changelog-guard.md](docs/development/changelog-guard.md).
 
-## Review before merge
+## CodeRabbit — wait for a review, not for a green check
 
-CodeRabbit was retired on 2026-10-02. Its status and comments are no longer a
-merge prerequisite; do not queue or wait for bot reviews.
+After `gh pr create`, give CodeRabbit ~2–5 minutes to post its review, and
+**never merge before it does** — merging first kills the run and the findings
+are lost. But when it is *rate-limited*, do not wait: the limit runs 30–45
+minutes and waiting buys a queue position, not a verdict. Review the PR
+yourself, say in the PR what was machine-reviewed, and queue a re-review for
+your own PR.
 
-Review the final diff for behavior, permissions, data lifecycle, error handling
-and compatibility. Record material findings and their resolution in the PR,
-along with the exact checks run and any untested acceptance boundaries. Label
-self-review honestly; it does not constitute an independent review.
+The trap the timing rule does not verify itself: when throttled, CodeRabbit's
+commit **status** still reads `pass` with description `Review rate limited`.
+Only the posted comments/reviews can tell reviewed from throttled:
 
-Required CI checks must pass. A skipped or neutral check is not evidence that
-the scenario ran. For behavioral fixes, include a regression test that exercises
-the failure at the affected boundary (CLI/API, restart, Docker or restore).
-Historical bot tooling remains available for old PR investigations only; see
-[the archived process](docs/development/coderabbit-review-process.md).
+```bash
+scripts/review-status.sh                 # every open PR: reviewed/throttled/…
+scripts/review-status.sh 1568 --checks   # one PR + skipped-but-green checks
+scripts/review-status.sh --retrigger 2227   # re-request one review
+```
+
+The full protocol — tie-breaking empty approvals, re-trigger etiquette, the
+same failure shape from other producers — lives in
+[docs/development/coderabbit-review-process.md](docs/development/coderabbit-review-process.md).
 
 ## Issues
 
