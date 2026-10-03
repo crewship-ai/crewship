@@ -157,8 +157,12 @@ internal-docs/
 
 # Assistant-local configuration, prompts, research and session state stay private.
 # No allow-exceptions: repository-wide contributor rules live in AGENTS.md.
-/.claude/
-/.codex/
+/.claude
+/.codex
+/.cursor
+/CODEX.md
+/GEMINI.md
+/.github/copilot-instructions.md
 # Also exclude the optional private-context symlink (a trailing slash matches
 # directories only). The private checkout itself lives outside this tree.
 /internal-docs

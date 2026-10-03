@@ -187,7 +187,7 @@ func noPrivateWorkingFiles(root string) []violation {
 }
 
 func privateWorkingPath(path string) bool {
-	for _, prefix := range []string{".claude", ".codex", "internal-docs", "audit", "audit-final", "mockups", "public/design"} {
+	for _, prefix := range []string{"CLAUDE.md", "CODEX.md", "GEMINI.md", ".github/copilot-instructions.md", ".claude", ".codex", ".cursor", "internal-docs", "audit", "audit-final", "mockups", "public/design"} {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
 		}
