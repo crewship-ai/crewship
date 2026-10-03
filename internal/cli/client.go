@@ -126,9 +126,27 @@ func NewClient(baseURL, token, workspaceID string) *Client {
 		ctx:         context.Background(),
 		wsResolve:   &wsResolveState{},
 		HTTPClient: &http.Client{
-			Timeout: defaultHTTPTimeout(),
+			Timeout:       defaultHTTPTimeout(),
+			CheckRedirect: sameOriginRedirect,
 		},
 	}
+}
+
+// Redirects stay on the original origin, including scheme and port. Go's
+// default policy permits some cross-origin redirects and can replay bodies;
+// credential-bearing CLI requests must not inherit that browser-like policy.
+func sameOriginRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return fmt.Errorf("stopped after 10 redirects")
+	}
+	if len(via) == 0 {
+		return nil
+	}
+	origin := via[0].URL
+	if req.URL.User != nil || !strings.EqualFold(req.URL.Scheme, origin.Scheme) || !strings.EqualFold(req.URL.Host, origin.Host) {
+		return fmt.Errorf("refusing API redirect to a different origin; configure the intended server explicitly")
+	}
+	return nil
 }
 
 // WithTimeout returns a shallow copy of the client whose HTTP client uses the

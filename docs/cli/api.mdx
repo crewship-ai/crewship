@@ -1,0 +1,102 @@
+---
+title: "API"
+description: "Search API operations, inspect schemas, and call HTTP endpoints from the CLI."
+icon: "code"
+stability: experimental
+tag: Experimental
+---
+
+# API
+
+Use dedicated commands for everyday workflows. `crewship api` exposes the
+embedded OpenAPI contract and provides authenticated HTTP access to endpoints
+that do not have a dedicated command. The catalog belongs to the **CLI build**;
+a newer or older server can have a different contract. Server authorization and
+approval gates apply to every request.
+
+## `crewship api operations [search]`
+
+Search paths, operation IDs, summaries, and tags without contacting a server.
+Results are sorted by path and method. Human output shows the method and path. JSON/YAML/NDJSON include `operation_id`,
+`method`, `path`, and `requires_yes`; quiet output prints operation IDs.
+
+```bash
+crewship api operations agents
+crewship api operations --method GET --format json
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--method` | Filter by HTTP method, case insensitive. |
+
+## `crewship api schema [operation-id | METHOD path]`
+
+Print the complete embedded OpenAPI document, or a document containing one
+operation and its transitively referenced component schemas. Selection uses the
+literal path template, including braces. No authentication or network is needed. Shell completion suggests operation IDs,
+HTTP methods, and schema paths.
+
+```bash
+crewship api schema GET /api/v1/agents --format json
+crewship api schema --format json > crewship-openapi.json
+```
+
+This uses the generated contract, including its schema-quality annotations.
+It does not assert that every response schema is complete. References are kept,
+including recursive schemas. Output defaults to JSON; YAML and NDJSON are also
+supported. Table and quiet modes use JSON for schema and request results.
+
+## `crewship api request METHOD PATH`
+
+Send one request through the active profile, server, token, and workspace.
+Paths are relative to that server. Absolute URLs, authority overrides, fragments,
+traversal segments, and unfilled `{parameters}` are rejected. Use concrete IDs
+in request paths. Query values are encoded; repeated keys are preserved.
+
+```bash
+crewship api request GET /api/v1/agents --query limit=20 --format json
+crewship api request POST /api/v1/agents --input agent.json --dry-run
+crewship api request POST /api/v1/agents --input agent.json --yes
+crewship api request GET /openapi.json --output server-openapi.json
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--header name=value` | Repeatable operation header, e.g. `If-Match`. Authentication, workspace, content type, idempotency, and HTTP transport headers must use their dedicated options. |
+| `--max-input-bytes` | Positive request body limit; defaults to 10 MiB. |
+| `--query name=value` | Repeatable query parameter. |
+| `--input file` | Body from a file; `-` explicitly reads stdin. Defaults to a 10 MiB limit. |
+| `--content-type` | Body media type; defaults to `application/json`. JSON must contain exactly one valid value. |
+| `--output file` | Save the raw response, including binary downloads, atomically with owner-only permissions. An existing file is replaced only after success. |
+| `--include` | Wrap successful output in `{status, headers, body}` to inspect response metadata such as `ETag`. Empty responses have `body: null`. Cannot be combined with `--output`. |
+| `--yes` | Required for POST, PUT, PATCH, and DELETE. No interactive prompt. |
+| `--dry-run` | Print method, server, path, query names, configured workspace, and body presence. No network, file reads, or stdin reads. Query values, header values, and body contents are omitted. |
+| `--idempotency-key` | Send `Idempotency-Key` to an endpoint that supports it. Requests are never automatically retried. |
+| `--timeout` | Positive request duration; defaults to `30s`. |
+| `--max-response-bytes` | Positive response limit; defaults to 10 MiB. Increase explicitly for large downloads. |
+
+JSON responses respect `--format json|yaml|ndjson`, preserving integer precision
+in JSON. Empty successful responses produce no output. Non-JSON responses require
+`--output`. Error responses use the normal structured stderr and classified exit
+codes; failed downloads preserve the original destination file. Redirects are
+refused, including redirects on the same server.
+
+`--dry-run` checks request options, but does not read or validate the body, resolve
+workspace slugs, predict authorization, or promise the request will succeed.
+`--yes` acknowledges the HTTP method; it grants no additional server permissions.
+Keep secrets in input files or stdin rather than command arguments. Response
+contents can contain sensitive data; protect saved output accordingly.
+
+The generic request command does not replace interactive OAuth, WebSocket, or
+live event-stream commands. Multipart requests require an explicitly prepared
+body and matching content type. Input validation checks JSON syntax, not the
+operation's JSON Schema. Consult the schema and prefer a dedicated command where
+one exists.
+
+## Agent workflow
+
+1. Discover a focused command tree with `crewship commands agent --format json`.
+2. For API-level work, find the operation with `crewship api operations agents --format json`.
+3. Inspect its inputs with `crewship api schema GET /api/v1/agents --format json`.
+4. Read first; preview mutation options with `--dry-run`, then execute an authorized mutation with `--yes`.
+5. Use the exit code and stderr envelope to handle failures. Do not blindly retry mutations.

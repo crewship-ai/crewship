@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **CLI agents can discover API operations and inspect their inputs without scraping help.** `api operations` searches the embedded OpenAPI catalog, `api schema` returns focused schemas, and `api request` calls HTTP endpoints through the active profile with explicit mutation consent, offline previews, bounded input/output, and atomic downloads. `commands <path>` narrows discovery and includes required flags, inherited options, and runnable status. (#2836)
+- ⚠️ **Behaviour change:** CLI HTTP redirects must remain on the original server origin, including scheme and port. Configure a moved server explicitly; generic `api request` refuses all redirects.
+
+
 ### Added
 - **A fenced crew can reach its own services.** A restricted crew on the egress-fence pilot that declares `services:` and is on its own network now gets a narrow path to them: each service has a fixed address on the crew network, the fence opens exactly those addresses on their ports, and the names resolve from the runtime's `/etc/hosts` because DNS stays closed. Declaring a service whose name sorts first shifts the others to new addresses: they are re-attached there and the fence follows, also when ensuring the services fails part-way. The same crew on the shared network is still refused. (#1368, #2240)
 

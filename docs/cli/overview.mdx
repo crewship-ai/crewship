@@ -71,7 +71,11 @@ Extension members from RFC 7807 responses (e.g. `missing_integrations`) pass thr
 
 ```bash
 crewship commands --format json | jq '.commands[].path'
+crewship commands agent --format json
 ```
+
+For the full embedded API catalog, input/output schemas, and authenticated HTTP
+requests, use [`crewship api`](/cli/api). Discovery works offline.
 
 <Warning>
 **Token-host binding.** Your CLI bearer token is bound to the host it was
