@@ -172,6 +172,9 @@ func TestCleanupRuntimeCrewNetworkIntegration(t *testing.T) {
 		t.Skipf("Docker not available: %v", err)
 	}
 	defer p.Close()
+	if err := p.pullSidecarImage(ctx, "alpine:3"); err != nil {
+		t.Fatalf("pull alpine:3: %v", err)
+	}
 	name, err := p.ensureCrewNetwork(ctx, "rm-crew-001", "rm-crew")
 	if err != nil {
 		t.Fatalf("ensureCrewNetwork: %v", err)
