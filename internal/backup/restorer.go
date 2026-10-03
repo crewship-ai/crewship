@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"sort"
 	"strings"
 )
 
@@ -751,14 +752,9 @@ func crewRestoreSections(ctx context.Context, crewSlug string, payload *Extracte
 			// are owner rights, so tar exits 2 on them as 1002 —
 			// "Cannot utime: Operation not permitted" — having already
 			// written part of the section. Directory entries are
-			// therefore dropped: every .memory directory is created by
-			// prepMemoryDirs when the agent starts, and a restore
-			// already requires a running container.
-			//
-			// Which is also why PreserveModes is gone. It was here for
-			// the setgid bit on .memory, and .memory is one of the
-			// directories no longer extracted. The bit is set by the
-			// provider at container start and this no longer touches it.
+			// therefore dropped. Restore preflight prepares missing memory
+			// directories with the shared group. File modes and timestamps
+			// remain meaningful and are preserved by their new owner.
 			open: func() (io.ReadCloser, bool, error) {
 				r, ok, err := payload.OpenCrew(ctx, crewSlug)
 				if !ok || err != nil {
@@ -767,7 +763,7 @@ func crewRestoreSections(ctx context.Context, crewSlug string, payload *Extracte
 				return memoryFilesTar(r), true, nil
 			},
 			name: "crew-memory",
-			spec: ExtractSpec{Dest: ContainerCrewPath, User: memoryWriterUser, UnlinkFirst: true},
+			spec: ExtractSpec{Dest: ContainerCrewPath, User: memoryWriterUser, UnlinkFirst: true, PreserveModes: true, PreserveTimes: true},
 		},
 		{
 			// The other half of the crew tree: an agent's own state —
@@ -891,13 +887,28 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 			preflightErrs = append(preflightErrs, fmt.Sprintf("%s: reading section layout: %v", s.name, derr))
 			continue
 		}
+		if len(writesInto) == 0 && len(writesPaths) == 0 {
+			continue
+		}
+		if s.name == "crew-memory" {
+			if err := prepareRestoreMemoryDirs(ctx, ops, containerID, writesInto); err != nil {
+				preflightErrs = append(preflightErrs, fmt.Sprintf("%s: %v", s.name, err))
+				continue
+			}
+		}
 		present[s.name] = true
-		if err := probeWritable(ctx, ops, containerID, crewSlug, s.spec, writesInto, writesPaths); err != nil {
+		probeSpec := s.spec
+		if s.name == "crew-memory" {
+			// This filtered tar has no directory metadata. File metadata is
+			// applied after --unlink-first creates files owned by the writer.
+			probeSpec.PreserveModes, probeSpec.PreserveTimes = false, false
+		}
+		if err := probeWritable(ctx, ops, containerID, crewSlug, probeSpec, writesInto, writesPaths); err != nil {
 			preflightErrs = append(preflightErrs, fmt.Sprintf("%s: %v", s.name, err))
 		}
 	}
 	if len(preflightErrs) > 0 {
-		return fmt.Errorf("%w for crew %s (nothing was written): %s",
+		return fmt.Errorf("%w for crew %s (no payload data was written): %s",
 			ErrRestorePreflight, crewSlug, strings.Join(preflightErrs, "; "))
 	}
 
@@ -941,6 +952,52 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 			// hold, and it survived a mutation saying so.
 			return fmt.Errorf("backup: restore crew %s: %w", crewSlug, err)
 		}
+	}
+	return nil
+}
+
+// prepareRestoreMemoryDirs creates the directory skeleton as the agent before
+// the sidecar identity extracts memory files. Only agent-owned memory directories
+// receive the shared group/mode; existing sidecar ownership is preserved. This
+// may create empty directories during preflight, but never writes payload data.
+func prepareRestoreMemoryDirs(ctx context.Context, ops DockerOps, containerID string, dirs map[string]bool) error {
+	paths := make([]string, 0, len(dirs))
+	for dir := range dirs {
+		if path.IsAbs(dir) || path.Clean(dir) != dir || dir == ".." || strings.HasPrefix(dir, "../") || !strings.Contains("/"+dir+"/", "/.memory/") {
+			return fmt.Errorf("invalid memory directory %q", dir)
+		}
+		paths = append(paths, dir)
+	}
+	sort.Strings(paths)
+	const script = `set -eu
+cd /crew
+for rel do
+  current=.
+  memory=false
+  while [ -n "$rel" ]; do
+    part=${rel%%/*}
+    if [ "$part" = "$rel" ]; then rel=; else rel=${rel#*/}; fi
+    current=$current/$part
+    [ ! -L "$current" ] || { echo "memory directory is a symlink: $current"; exit 1; }
+    if [ ! -e "$current" ]; then mkdir "$current"; fi
+    [ -d "$current" ] || { echo "memory path is not a directory: $current"; exit 1; }
+    if [ "$part" = .memory ]; then memory=true; fi
+    if [ "$memory" = true ] && [ "$(stat -c %u "$current")" = 1001 ]; then
+      chgrp 1002 "$current"
+      chmod 2775 "$current"
+    fi
+    if [ "$memory" = true ]; then
+      mode=$(stat -c %a "$current")
+      [ "$(stat -c %g "$current")" = 1002 ] && [ "$((0$mode & 02000))" -ne 0 ] || { echo "memory directory lacks shared group/setgid: $current"; exit 1; }
+    fi
+  done
+done`
+	code, out, err := ops.ExecAs(ctx, containerID, sidecarWriterUser, append([]string{"sh", "-c", script, "restore-memory-dirs"}, paths...))
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("prepare memory directories: %s", strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -1001,13 +1058,17 @@ func probeWritable(ctx context.Context, ops DockerOps, containerID, crewSlug str
 		probe := path.Join(spec.Dest, ".crewship-restore-probe")
 		rootProbe = fmt.Sprintf("touch %q 2>&1 || exit 4\nrm -f %q", probe, probe)
 	}
+	writableType := ""
+	if spec.UnlinkFirst {
+		writableType = "-type d"
+	}
 	script := fmt.Sprintf(
 		`[ -d %q ] || { echo "destination does not exist"; exit 3; }
 %s
 find %q -maxdepth 0 -writable >/dev/null 2>&1 || { echo UNSUPPORTED; exit 0; }
-find %q ! -writable -print 2>/dev/null | head -n 500
+find %q %s ! -writable -print 2>/dev/null | head -n 500
 %s`,
-		spec.Dest, rootProbe, spec.Dest, spec.Dest, ownershipSweep(spec))
+		spec.Dest, rootProbe, spec.Dest, spec.Dest, writableType, ownershipSweep(spec))
 
 	code, out, err := ops.ExecAs(ctx, containerID, spec.User, []string{"sh", "-c", script})
 	if err != nil {

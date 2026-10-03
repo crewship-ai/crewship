@@ -444,6 +444,7 @@ func fullSectionPayload(t *testing.T) *ExtractedPayload {
 		{name: "volumes/alpha/home/g", body: []byte("h")},
 		{name: "volumes/alpha/tools/i", body: []byte("t")},
 		{name: "crew/alpha/.memory/c", body: []byte("c")},
+		{name: "crew/alpha/init.sh", body: []byte("echo ready")},
 		{name: "memory/alpha/m", body: []byte("m")},
 		{name: "system/alpha/var-lib/s", body: []byte("s")},
 	})

@@ -215,8 +215,9 @@ Examples:
 		}
 
 		var result struct {
-			Restarted int    `json:"restarted" yaml:"restarted"`
-			Error     string `json:"error,omitempty" yaml:"error,omitempty"`
+			Restarted      int    `json:"restarted" yaml:"restarted"`
+			RuntimeRemoved bool   `json:"runtime_removed" yaml:"runtime_removed"`
+			Error          string `json:"error,omitempty" yaml:"error,omitempty"`
 		}
 		if err := postJSON(client, "/api/v1/crews/"+crewID+"/restart-agents", nil, &result); err != nil {
 			return err
@@ -229,7 +230,9 @@ Examples:
 		case "yaml":
 			return f.YAML(result)
 		}
-		if result.Restarted == 0 {
+		if result.RuntimeRemoved && result.Restarted == 0 {
+			cli.PrintSuccess(fmt.Sprintf("Crew %q: runtime container removed; it will be recreated on next exec.", args[0]))
+		} else if result.Restarted == 0 {
 			cli.PrintSuccess(fmt.Sprintf("Crew %q: no running container, nothing to restart.", args[0]))
 		} else {
 			cli.PrintSuccess(fmt.Sprintf("Crew %q restarted: %d agent%s will pick up the new image on next exec.",

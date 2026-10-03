@@ -172,3 +172,42 @@ func TestAgentLivenessSkipsARunWithoutAnAgentID(t *testing.T) {
 }
 
 var _ provider.ContainerProvider = stopProcessContainer{}
+
+type failingCancellationState struct{ *memState }
+
+func (s failingCancellationState) Set(context.Context, string, string, []byte) error {
+	return errors.New("runtime state disk unavailable")
+}
+func TestDeletedAgentStopRequiresDurableCancellation(t *testing.T) {
+	state := newMemState()
+	run := RunState{ID: NewRunID(), AgentID: "gone", AgentSlug: "gone", ContainerID: "test", Status: "running"}
+	raw, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Set(t.Context(), "agent_runs", run.ID, raw); err != nil {
+		t.Fatal(err)
+	}
+	o := New(stopProcessContainer{}, failingCancellationState{state}, slog.Default())
+	lookup := func(context.Context, string) (bool, string, error) { return true, "gone", nil }
+	res := o.StopDeletedAgentRuns(t.Context(), "gone", lookup)
+	if res.Stopped != 0 || res.Pending != 1 || len(res.Errors) != 1 {
+		t.Fatalf("failed durable cancellation acknowledged: %+v", res)
+	}
+	if got := runStatus(t, state, run.ID); got != "running" {
+		t.Fatal(got)
+	}
+	// A later pass can persist the same already-absent runtime exactly once.
+	recovered := New(stopProcessContainer{}, state, slog.Default())
+	res = recovered.StopDeletedAgentRuns(t.Context(), "gone", lookup)
+	if res.Stopped != 1 || res.Pending != 0 || len(res.Errors) != 0 {
+		t.Fatalf("retry: %+v", res)
+	}
+	if got := runStatus(t, state, run.ID); got != "cancelled" {
+		t.Fatal(got)
+	}
+}
+
+func (s failingCancellationState) Update(context.Context, string, string, func([]byte) ([]byte, error)) error {
+	return errors.New("runtime state disk unavailable")
+}

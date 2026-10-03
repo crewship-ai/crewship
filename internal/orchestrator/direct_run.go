@@ -25,6 +25,7 @@ func directRunProbe(runID string, stop bool) string {
 		signal = `/bin/kill -TERM -- "-$pid" 2>/dev/null || true; `
 	}
 	return fmt.Sprintf(`if [ -f '%s' ]; then
+if ! [ -x /bin/kill ] || ! /bin/kill -0 "$$" 2>/dev/null; then echo UNKNOWN; exit; fi
 read -r pid stamp < '%s' || { echo UNKNOWN; exit; }
 case "$pid:$stamp" in *[!0-9:]*|:*) echo UNKNOWN; exit;; esac
 [ "$pid" -gt 1 ] 2>/dev/null && [ -n "$stamp" ] || { echo UNKNOWN; exit; }

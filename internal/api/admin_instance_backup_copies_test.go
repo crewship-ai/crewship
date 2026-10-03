@@ -142,7 +142,12 @@ func TestInstanceBackupCopiesListAndFetch(t *testing.T) {
 
 	const inst = "instance/crewship-instance-20260929T010000Z.tar.zst"
 	const ws = "workspaces/ws-new/crewship-workspace-new-20260929T010000Z.tar.zst"
-	dest.put(inst, []byte("instance bundle bytes"))
+	var bundle bytes.Buffer
+	manifest := &backup.Manifest{FormatVersion: backup.FormatVersion, Scope: backup.ScopeInstance, CreatedBy: backup.Actor{UserID: "fixture-owner"}, CreatedAt: time.Now().UTC(), CompatibleTargets: []backup.Target{backup.TargetAnyInstance}}
+	if err := backup.WriteBundle(&bundle, manifest, strings.NewReader("instance payload"), backup.WriteBundleOptions{NoEncrypt: true}); err != nil {
+		t.Fatal(err)
+	}
+	dest.put(inst, bundle.Bytes())
 	dest.put(ws, []byte("workspace bundle bytes"))
 	dest.put(ws+offsite.EnvironmentRefsSuffix, []byte(`{"blobs":[]}`))
 	dest.put("environments/blobs/sha256/"+strings.Repeat("ab", 32), []byte("layer"))
@@ -200,7 +205,7 @@ func TestInstanceBackupCopiesListAndFetch(t *testing.T) {
 	if filepath.Dir(*job.Path) != dir {
 		t.Fatalf("fetched into %s, want the backups dir %s", *job.Path, dir)
 	}
-	if b, err := os.ReadFile(*job.Path); err != nil || string(b) != "instance bundle bytes" {
+	if b, err := os.ReadFile(*job.Path); err != nil || !bytes.Equal(b, bundle.Bytes()) {
 		t.Fatalf("fetched bytes = %q, %v", b, err)
 	}
 	wantCode(t, f.do(f.boss, "GET", base+"/fetch/nope", ""), http.StatusNotFound, "unknown fetch")

@@ -46,7 +46,8 @@ import (
 // live_crew_roundtrip_test.go and what is under test here is the
 // addressing.
 type recordingOps struct {
-	written []string // "<containerID>:<dest>"
+	includeMemory bool
+	written       []string // "<containerID>:<dest>"
 	// memoryPermResidual, when set, is what the post-restore permission
 	// sweep reports as still wrong — the shape of a .memory directory
 	// the agent could not chgrp.
@@ -78,6 +79,10 @@ func (o *recordingOps) CopyFrom(_ context.Context, _, srcPath string) (io.ReadCl
 		Size: int64(len(body)), Uid: 1001, Gid: 1001,
 	})
 	_, _ = tw.Write(body)
+	if o.includeMemory && srcPath == backup.ContainerCrewPath {
+		_ = tw.WriteHeader(&tar.Header{Name: wrapper + "/agents/robin/.memory/fact.txt", Typeflag: tar.TypeReg, Mode: 0o664, Size: int64(len(body)), Uid: 1002, Gid: 1002})
+		_, _ = tw.Write(body)
+	}
 	_ = tw.Close()
 	return io.NopCloser(bytes.NewReader(buf.Bytes())), nil
 }
@@ -653,7 +658,7 @@ func TestE2E_DegradedMemoryPermsDoNotFailARestoreThatLanded(t *testing.T) {
 		Actor:             backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
 		Passphrase:        passphrase,
 		CrewContainerName: containerFor,
-		DockerOps:         &recordingOps{},
+		DockerOps:         &recordingOps{includeMemory: true},
 	})
 	if err != nil {
 		t.Fatalf("CreateBackup: %v", err)

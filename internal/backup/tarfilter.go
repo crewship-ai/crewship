@@ -64,10 +64,9 @@ func filterTar(src io.ReadCloser, keep func(*tar.Header) bool) io.ReadCloser {
 }
 
 // memoryFilesTar keeps the `.memory` files and nothing else: no
-// directories, because every `.memory` directory is created by
-// prepMemoryDirs at agent start and a restore already requires a
-// running container, and nothing outside `.memory`, which belongs to
-// the other half of the split.
+// directory metadata, which the sidecar cannot apply to agent-owned
+// directories. RestoreCrew prepares the shared directory skeleton before
+// extraction. Nothing outside `.memory` belongs to this ownership domain.
 func memoryFilesTar(src io.ReadCloser) io.ReadCloser {
 	return filterTar(src, func(h *tar.Header) bool {
 		return h.Typeflag != tar.TypeDir && isMemoryEntry(h.Name)
