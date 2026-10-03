@@ -358,28 +358,20 @@ func NewProvisioner(docker CommitClient, installer *Installer, downloader *Featu
 	}
 }
 
-// cacheHitRequirements recomputes the runtime requirements for an image that
-// is being reused, exactly as a fresh build would (feature metadata, the
-// agent tool env, the verified adapter CLIs, start hooks). Feature resolution
-// is served from the catalog cache; if it fails, the feature-declared parts
-// are missing and the log says so, but the parts this build knows without
-// the features are still returned.
-func (p *Provisioner) cacheHitRequirements(ctx context.Context, cfg *Config, o *provisionOpts) (AggregatedRequirements, []FeatureRecord) {
+// cacheHitRequirements recomputes runtime requirements for a reused image.
+// Failure is not an empty contract: publishing partial requirements could drop
+// security settings or attach an unrelated previous artifact's evidence.
+func (p *Provisioner) cacheHitRequirements(ctx context.Context, cfg *Config, o *provisionOpts) (AggregatedRequirements, []FeatureRecord, error) {
 	resolved, _, err := p.resolveFeatures(ctx, cfg)
 	if err != nil {
-		// A half answer (no mounts, no privileged flag) would be stored as
-		// the crew's contract; an empty one leaves the previous build's
-		// contract in place (the job keeps the column when nothing new is
-		// known). Say so, and return nothing.
-		p.logger.Warn("cache hit: could not resolve features; keeping the crew's previous runtime requirements",
-			"error", err)
-		return AggregatedRequirements{}, nil
+		return AggregatedRequirements{}, nil, fmt.Errorf("resolve cached image requirements: %w", err)
 	}
+
 	req := p.aggregateFeatureRequirements(resolved, cfg.ContainerEnv)
 	req.ContainerEnv = ensureAgentToolPath(req.ContainerEnv)
 	req.AdapterBinaries = SortedBinaries(o.requiredBinaries)
 	req.PostStartCommands = append(req.PostStartCommands, cfg.NormalizedPostStartCommands()...)
-	return req, featureRecords(resolved)
+	return req, featureRecords(resolved), nil
 }
 
 // SetImageBuilder overrides the image builder (tests inject a fake; callers can
@@ -500,14 +492,17 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		}
 		// Even a no-build provision is audited: cache_hit → ready.
 		emitEvt(ProvisionEvent{Step: ProvStepCacheHit, Status: ProvStatusCompleted, Tag: tag})
-		emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
 		// The requirements are part of the result even when the image is
 		// reused: the caller stores them as the crew's runtime contract, and
 		// an empty set here used to be written back as NULL — a cache hit
 		// silently dropped the privileged flag, the mounts, the env and the
 		// verified adapter CLIs of the build before it.
-		req, feats := p.cacheHitRequirements(ctx, cfg, o)
+		req, feats, err := p.cacheHitRequirements(ctx, cfg, o)
+		if err != nil {
+			return fail(ProvStepResolveFeatures, err)
+		}
 		req.Toolchain = p.inspectToolchain(ctx, inspected.ID, o.requiredBinaries)
+		emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
 		return &ProvisionResult{CachedImage: inspected.ID, ConfigHash: hash, Requirements: req, Features: feats}, nil
 	}
 

@@ -129,3 +129,48 @@ func TestEnvironmentRevisionWithoutCLIInventoryKeepsArtifactIdentity(t *testing.
 		t.Fatalf("invented CLI evidence: image=%q inventory=%q", got, inventory)
 	}
 }
+
+func TestEnvironmentPublicationClearsPreviousArtifactEvidence(t *testing.T) {
+	config := `{"image":"alpine:3"}`
+	h, ws, crew := covProvRig(t, &covCommitClient{}, config)
+	old := revisionFixture()
+	old.Requirements.Privileged = true
+	old.Features = []devcontainer.FeatureRecord{{Ref: "previous-feature", ID: "previous"}}
+	if _, err := h.saveProvisionResult(t.Context(), crew, ws, provisionDefinition{Config: config}, old); err != nil {
+		t.Fatal(err)
+	}
+	// A successful no-customization result is known empty, not permission to
+	// attach a previous image's privileges, versions or feature provenance.
+	if _, err := h.saveProvisionResult(t.Context(), crew, ws, provisionDefinition{Config: config}, &devcontainer.ProvisionResult{ConfigHash: "new-build"}); err != nil {
+		t.Fatal(err)
+	}
+	var requirements, features string
+	if err := h.db.QueryRow(`SELECT COALESCE(cached_requirements,''),COALESCE(resolved_features,'') FROM crews WHERE id=?`, crew).Scan(&requirements, &features); err != nil {
+		t.Fatal(err)
+	}
+	if requirements != "" || features != "" {
+		t.Fatalf("previous artifact evidence survived: requirements=%s features=%s", requirements, features)
+	}
+}
+
+func TestEnvironmentRevisionKeepsQualificationBoundToArtifact(t *testing.T) {
+	config := `{"image":"alpine:3"}`
+	h, ws, crew := covProvRig(t, &covCommitClient{}, config)
+	result := revisionFixture()
+	result.Requirements.Toolchain.Qualification = &devcontainer.ToolchainQualification{Status: "passed", ImageID: result.Requirements.Toolchain.ImageID, Tools: []devcontainer.ToolchainProbe{{Binary: "codex", Status: "passed"}}}
+	id, err := h.saveProvisionResult(t.Context(), crew, ws, provisionDefinition{Config: config}, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := h.db.QueryRow(`SELECT toolchain_json FROM environment_revisions WHERE id=?`, id).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var evidence devcontainer.ToolchainInventory
+	if err := json.Unmarshal([]byte(raw), &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Qualification == nil || evidence.Qualification.Status != "passed" || evidence.Qualification.ImageID != evidence.ImageID {
+		t.Fatalf("qualification not bound in durable record: %s", raw)
+	}
+}

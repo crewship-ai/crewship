@@ -97,7 +97,7 @@ func (h *ProvisioningHandler) saveProvisionResult(ctx context.Context, crewID, w
 			return "", err
 		}
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE crews SET cached_image=?,config_hash=?,cached_requirements=COALESCE(?,cached_requirements),resolved_features=COALESCE(?,resolved_features),updated_at=datetime('now') WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, result.CachedImage, result.ConfigHash, requirements, features, crewID, workspaceID)
+	_, err = tx.ExecContext(ctx, `UPDATE crews SET cached_image=?,config_hash=?,cached_requirements=?,resolved_features=?,updated_at=datetime('now') WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, result.CachedImage, result.ConfigHash, requirements, features, crewID, workspaceID)
 	if err != nil {
 		return "", err
 	}
