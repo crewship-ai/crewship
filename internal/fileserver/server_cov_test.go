@@ -291,6 +291,18 @@ func TestHandleFileDownload_PermissionDeniedIs500(t *testing.T) {
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500 (EACCES is not a 404)", w.Code)
 	}
+	if w.Body.String() != "internal server error\n" {
+		t.Fatalf("download exposed storage details: %s", w.Body.String())
+	}
+	if err := os.Chmod(crew, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(crew, 0750)
+	list := httptest.NewRecorder()
+	s.HandleFileList(list, listRequest("crew-1", ""))
+	if list.Code != http.StatusInternalServerError || list.Body.String() != "internal server error\n" {
+		t.Fatalf("inaccessible listing: %d %s", list.Code, list.Body.String())
+	}
 }
 
 // TestCrewIDTraversalForbidden pins the crew-id guard. The id arrives from
@@ -347,35 +359,5 @@ func TestFileListRejectsARegularFileAsDirectory(t *testing.T) {
 	}
 	if w.Body.String() != "internal server error\n" {
 		t.Fatalf("file content or storage path leaked: %s", w.Body.String())
-	}
-}
-
-func TestInaccessibleStorageReturnsGenericError(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses discretionary file permissions")
-	}
-	dir := t.TempDir()
-	crew := filepath.Join(dir, "crew")
-	if err := os.Mkdir(crew, 0700); err != nil {
-		t.Fatal(err)
-	}
-	file := filepath.Join(crew, "private.txt")
-	if err := os.WriteFile(file, []byte("private-content"), 0000); err != nil {
-		t.Fatal(err)
-	}
-	server := NewServer(dir)
-	download := httptest.NewRecorder()
-	server.HandleFileDownload(download, downloadRequest("crew", "private.txt"))
-	if download.Code != http.StatusInternalServerError || download.Body.String() != "internal server error\n" {
-		t.Fatalf("inaccessible download: %d %s", download.Code, download.Body.String())
-	}
-	if err := os.Chmod(crew, 0000); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chmod(crew, 0700)
-	list := httptest.NewRecorder()
-	server.HandleFileList(list, listRequest("crew", ""))
-	if list.Code != http.StatusInternalServerError || list.Body.String() != "internal server error\n" {
-		t.Fatalf("inaccessible listing: %d %s", list.Code, list.Body.String())
 	}
 }

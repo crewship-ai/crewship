@@ -20,6 +20,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Runtime reconciliation uses the latest inspected container state, so a stale running-list entry cannot return a stopped crew as ready, and a stale stopped-list entry cannot trigger replacement of a now-live crew.
+
+- The shared agent context panel encodes agent, crew and workspace identifiers when loading context.
+
+- Memory import and export reads remain inside their selected tree when a parent directory is replaced with a symlink, including direct file and directory reads.
+
+- Agent detail panels follow their enabled state and ignore errors from obsolete requests after a selection changes.
+
 - Tool argument validation compares object and array enum values structurally instead of panicking, and rejects null when the enum does not allow it.
 
 - A stopped or cancelled scheduler leader no longer authorizes new work while its last lease is still fresh.
