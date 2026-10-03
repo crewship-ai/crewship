@@ -131,6 +131,13 @@ func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
 				}
 			}
 			if !owned {
+				// A live invocation can register after the initial stop snapshot
+				// and publish state before List returns. It is a new admission,
+				// not a recovered runtime: the recovery path cannot close its
+				// creation gate and must not persist a false cancellation.
+				if _, live := o.agentRuns.Load(state.ID); live {
+					continue
+				}
 				recovered = append(recovered, state)
 			}
 		}
