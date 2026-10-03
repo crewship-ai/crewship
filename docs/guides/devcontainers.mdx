@@ -686,3 +686,23 @@ pruning nor changes a running container, and it does not provide rollback or
 RAM snapshots. Builds without recorded immutable image identity do not invent
 a revision. These records will support a later explicit retention and safe
 activation policy.
+
+### Immutable Docker build references
+
+Docker provisioning records a full local image ID in `cached_image`. A shared
+`crewship-cache:*` tag is only a cache lookup alias; moving it during a later
+build does not change what a previously provisioned crew selected. A failed
+explicit rebuild leaves the previous reference and requirements intact. Builds
+still in progress do not replace the running container.
+
+The build cache key changed once for this transition: new builds use new aliases
+so they do not move tags retained by older crew records. Existing records are not
+rewritten. Native Apple builds still return tags because that provider does not
+yet expose equivalent image inspection through this interface.
+
+Cache inventory and ordinary cache deletion/GC recognize references by image ID.
+This is not retention against external `docker image prune`, forced admin deletion
+or disk loss. Nor does it provide automatic activation between runs: publishing a
+new desired image still uses the existing runtime reconciliation path, which may
+replace the container on a subsequent start. Managed automatic updates require a
+separate admission barrier before activation.

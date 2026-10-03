@@ -199,7 +199,7 @@ func TestCrewImageState_LocalCacheImageIsExempt(t *testing.T) {
 	d.repo.Store(refRepo(ref))
 
 	team := crewCfg(ref)
-	team.CachedImage = localCacheImagePrefix + "abc123"
+	team.CachedImage = "sha256:" + strings.Repeat("a", 64)
 
 	st, err := p.CrewImageState(context.Background(), team)
 	if err != nil {

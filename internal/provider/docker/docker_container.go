@@ -776,7 +776,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				// container is stale by definition (its filesystem
 				// reflects the OLD provisioned image). Tear it down
 				// and fall through to create-new with the new tag.
-				if callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage {
+				if callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && inspect.Image != desiredImage {
 					p.logger.Info("recreating container (image drift)",
 						"container", containerName,
 						"running_image", inspect.Config.Image,

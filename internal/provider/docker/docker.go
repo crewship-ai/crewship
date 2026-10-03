@@ -801,7 +801,7 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) (imageProvenance
 	// a gap: the audit answer for a cache image is its provenance chain
 	// (provisioning.step rows naming the base image it was built FROM), not a
 	// manifest digest that does not exist.
-	if strings.HasPrefix(ref, localCacheImagePrefix) {
+	if strings.HasPrefix(ref, localCacheImagePrefix) || dockerutil.IsLocalImageID(ref) {
 		// Distinguish "definitely absent" from "couldn't tell". The
 		// best-effort helper collapses both to absent, and ErrCachedImageMissing
 		// reaches the user as "the crew's container image is missing locally —

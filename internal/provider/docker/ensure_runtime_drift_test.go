@@ -84,6 +84,7 @@ func newDriftFixture(t *testing.T, containerName, runningImage string) (*Provide
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"Id":    staleID,
 				"State": map[string]any{"Status": "running"},
+				"Image": "sha256:" + strings.Repeat("a", 64),
 				"Config": map[string]any{
 					"Image": runningImage,
 				},
@@ -340,6 +341,20 @@ func TestEnsureCrewRuntime_NoRecreateWhenCallerOmitsImage(t *testing.T) {
 	for _, c := range calls.snapshot() {
 		if strings.HasPrefix(c, "remove ") || c == "create" {
 			t.Errorf("bare-config caller must not recreate a running container; got %q", c)
+		}
+	}
+}
+
+func TestEnsureCrewRuntime_PinSameArtifactDoesNotRestart(t *testing.T) {
+	t.Parallel()
+	p, calls := newDriftFixture(t, "crewship-team-eng-crew-id-1", "crewship-cache:old-alias")
+	id, err := p.EnsureCrewRuntime(context.Background(), provider.CrewConfig{ID: "crew-id-1", Slug: "eng", MemoryMB: 1024, CPUs: 1, CachedImage: "sha256:" + strings.Repeat("a", 64)})
+	if err != nil || id != "stale-cid-0123456789ab" {
+		t.Fatalf("pinning identical artifact replaced container: %q %v", id, err)
+	}
+	for _, call := range calls.snapshot() {
+		if strings.HasPrefix(call, "remove ") || call == "create" {
+			t.Fatalf("pinning same artifact caused %s", call)
 		}
 	}
 }

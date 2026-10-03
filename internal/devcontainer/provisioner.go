@@ -290,7 +290,7 @@ const (
 
 // ProvisionResult contains the output of a successful provisioning run.
 type ProvisionResult struct {
-	CachedImage  string                 // e.g. "crewship-cache:a1b2c3d4e5f6"
+	CachedImage  string                 // Docker: immutable local image ID; native build providers: image tag
 	ConfigHash   string                 // full SHA-256 hex digest
 	Requirements AggregatedRequirements // runtime requirements bubbled up from features
 	// Features records what the build actually installed — ref, resolved
@@ -487,6 +487,13 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		return fail(ProvStepStart, err)
 	}
 	if exists && !o.forceRebuild {
+		inspected, err := p.docker.ImageInspect(ctx, tag)
+		if err != nil {
+			return fail(ProvStepStart, fmt.Errorf("resolve cached artifact: %w", err))
+		}
+		if !dockerutil.IsLocalImageID(inspected.ID) {
+			return fail(ProvStepStart, fmt.Errorf("cached artifact has no valid immutable image identity"))
+		}
 		p.logger.Info("using cached image", "tag", tag)
 		if o.onProgress != nil {
 			o.onProgress(1, 1, "Using cached image")
@@ -500,8 +507,8 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		// silently dropped the privileged flag, the mounts, the env and the
 		// verified adapter CLIs of the build before it.
 		req, feats := p.cacheHitRequirements(ctx, cfg, o)
-		req.Toolchain = p.inspectToolchain(ctx, tag, o.requiredBinaries)
-		return &ProvisionResult{CachedImage: tag, ConfigHash: hash, Requirements: req, Features: feats}, nil
+		req.Toolchain = p.inspectToolchain(ctx, inspected.ID, o.requiredBinaries)
+		return &ProvisionResult{CachedImage: inspected.ID, ConfigHash: hash, Requirements: req, Features: feats}, nil
 	}
 
 	// Skip provisioning if no features, no postCreateCommand, no containerEnv, and no mise config.
@@ -723,6 +730,9 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	if commitErr != nil {
 		return fail("commit", fmt.Errorf("committing container: %w", commitErr))
 	}
+	if !dockerutil.IsLocalImageID(committed.ID) {
+		return fail("commit", fmt.Errorf("committed artifact has no valid immutable image identity"))
+	}
 	// New crewship-cache:* tag is now present locally — drop cached list.
 	p.invalidateImageListCache()
 
@@ -735,7 +745,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	)
 	emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
 	return &ProvisionResult{
-		CachedImage:  tag,
+		CachedImage:  committed.ID,
 		ConfigHash:   hash,
 		Requirements: requirements,
 		Features:     featureRecords(resolvedFeatures),

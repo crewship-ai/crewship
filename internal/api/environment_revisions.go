@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 )
 
 var errBuildDefinitionChanged = errors.New("environment definition changed during build; rebuild the current definition")
@@ -74,18 +75,25 @@ func (h *ProvisioningHandler) saveProvisionResult(ctx context.Context, crewID, w
 		features = sql.NullString{String: string(raw), Valid: true}
 	}
 	revisionID := ""
-	if inventory := result.Requirements.Toolchain; inventory != nil && inventory.ImageID != "" {
+	inventory := result.Requirements.Toolchain
+	imageID := ""
+	if dockerutil.IsLocalImageID(result.CachedImage) {
+		imageID = result.CachedImage
+	} else if inventory != nil {
+		imageID = inventory.ImageID
+	}
+	if imageID != "" {
 		raw, err := json.Marshal(inventory)
 		if err != nil {
 			return "", err
 		}
 		definitionHash := expected.hash()
 		revisionID = generateCUID()
-		_, err = tx.ExecContext(ctx, `INSERT INTO environment_revisions(id,workspace_id,crew_id,definition_hash,build_hash,image_id,toolchain_json,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id,crew_id,definition_hash,image_id) DO NOTHING`, revisionID, workspaceID, crewID, definitionHash, result.ConfigHash, inventory.ImageID, string(raw), time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z"))
+		_, err = tx.ExecContext(ctx, `INSERT INTO environment_revisions(id,workspace_id,crew_id,definition_hash,build_hash,image_id,toolchain_json,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id,crew_id,definition_hash,image_id) DO NOTHING`, revisionID, workspaceID, crewID, definitionHash, result.ConfigHash, imageID, string(raw), time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z"))
 		if err != nil {
 			return "", err
 		}
-		if err = tx.QueryRowContext(ctx, `SELECT id FROM environment_revisions WHERE workspace_id=? AND crew_id=? AND definition_hash=? AND image_id=?`, workspaceID, crewID, definitionHash, inventory.ImageID).Scan(&revisionID); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT id FROM environment_revisions WHERE workspace_id=? AND crew_id=? AND definition_hash=? AND image_id=?`, workspaceID, crewID, definitionHash, imageID).Scan(&revisionID); err != nil {
 			return "", err
 		}
 	}

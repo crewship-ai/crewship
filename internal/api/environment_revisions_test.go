@@ -112,3 +112,20 @@ func TestEnvironmentRevisionsRequiresReadRole(t *testing.T) {
 		t.Fatal(rr.Code)
 	}
 }
+
+func TestEnvironmentRevisionWithoutCLIInventoryKeepsArtifactIdentity(t *testing.T) {
+	config := `{"image":"alpine:3"}`
+	h, workspace, crew := covProvRig(t, &covCommitClient{}, config)
+	image := "sha256:" + strings.Repeat("a", 64)
+	id, err := h.saveProvisionResult(context.Background(), crew, workspace, provisionDefinition{Config: config}, &devcontainer.ProvisionResult{CachedImage: image, ConfigHash: "build"})
+	if err != nil || id == "" {
+		t.Fatalf("artifact revision missing: %q %v", id, err)
+	}
+	var got, inventory string
+	if err := h.db.QueryRow(`SELECT image_id,toolchain_json FROM environment_revisions WHERE id=?`, id).Scan(&got, &inventory); err != nil {
+		t.Fatal(err)
+	}
+	if got != image || inventory != "null" {
+		t.Fatalf("invented CLI evidence: image=%q inventory=%q", got, inventory)
+	}
+}

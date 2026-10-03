@@ -393,11 +393,11 @@ func TestSweepOrphanCacheImages_SkipsTooYoungImage(t *testing.T) {
 	fake := &fakeGCClient{
 		images: []image.Summary{
 			// Old, unreferenced → would normally be swept, but log-only default.
-			{RepoTags: []string{"crewship-cache:old"}, Created: now - int64((24 * time.Hour).Seconds())},
+			{ID: "old-id", RepoTags: []string{"crewship-cache:old"}, Created: now - int64((24 * time.Hour).Seconds())},
 			// Just committed, DB row not yet written → must be protected.
-			{RepoTags: []string{"crewship-cache:just-committed"}, Created: now - 1},
+			{ID: "young-id", RepoTags: []string{"crewship-cache:just-committed"}, Created: now - 1},
 			// Non-cache image → ignored.
-			{RepoTags: []string{"ghcr.io/foo/bar:latest"}, Created: now - int64((24 * time.Hour).Seconds())},
+			{ID: "external-id", RepoTags: []string{"ghcr.io/foo/bar:latest"}, Created: now - int64((24 * time.Hour).Seconds())},
 		},
 	}
 	h := newGCTestHandler(t, fake)
@@ -407,11 +407,11 @@ func TestSweepOrphanCacheImages_SkipsTooYoungImage(t *testing.T) {
 
 	// just-committed must never be removed (age floor). old is allowed.
 	for _, removed := range fake.removedImages {
-		if removed == "crewship-cache:just-committed" {
+		if removed == "young-id" {
 			t.Fatalf("removed freshly-committed image: the age-floor failed")
 		}
 	}
-	if len(fake.removedImages) != 1 || fake.removedImages[0] != "crewship-cache:old" {
+	if len(fake.removedImages) != 1 || fake.removedImages[0] != "old-id" {
 		t.Errorf("expected to remove only 'crewship-cache:old'; got %v", fake.removedImages)
 	}
 }
@@ -420,7 +420,7 @@ func TestSweepOrphanCacheImages_AutoDeleteDisabledByDefault(t *testing.T) {
 	now := time.Now().Unix()
 	fake := &fakeGCClient{
 		images: []image.Summary{
-			{RepoTags: []string{"crewship-cache:old"}, Created: now - int64((24 * time.Hour).Seconds())},
+			{ID: "old-id", RepoTags: []string{"crewship-cache:old"}, Created: now - int64((24 * time.Hour).Seconds())},
 		},
 	}
 	h := newGCTestHandler(t, fake)
@@ -437,7 +437,7 @@ func TestSweepOrphanCacheImages_SkipsReferenced(t *testing.T) {
 	now := time.Now().Unix()
 	fake := &fakeGCClient{
 		images: []image.Summary{
-			{RepoTags: []string{"crewship-cache:live"}, Created: now - int64((24 * time.Hour).Seconds())},
+			{ID: "live-id", RepoTags: []string{"crewship-cache:live"}, Created: now - int64((24 * time.Hour).Seconds())},
 		},
 	}
 	h := newGCTestHandler(t, fake)
@@ -468,9 +468,9 @@ func TestSweepOrphanCacheImages_PrunesFeatureImages(t *testing.T) {
 		images: []image.Summary{
 			// Intermediate BuildKit feature image — regenerable, never
 			// referenced by a crew → must be pruned.
-			{RepoTags: []string{"crewship-feat:abc123"}, Created: old},
+			{ID: "feature-id", RepoTags: []string{"crewship-feat:abc123"}, Created: old},
 			// A feature image younger than the age floor must be kept.
-			{RepoTags: []string{"crewship-feat:young1"}, Created: now - 1},
+			{ID: "young-feature-id", RepoTags: []string{"crewship-feat:young1"}, Created: now - 1},
 		},
 	}
 	h := newGCTestHandler(t, fake)
@@ -478,7 +478,7 @@ func TestSweepOrphanCacheImages_PrunesFeatureImages(t *testing.T) {
 
 	h.sweepOrphanCacheImages(context.Background())
 
-	if len(fake.removedImages) != 1 || fake.removedImages[0] != "crewship-feat:abc123" {
+	if len(fake.removedImages) != 1 || fake.removedImages[0] != "feature-id" {
 		t.Errorf("expected only the old feature image pruned, got %v", fake.removedImages)
 	}
 }

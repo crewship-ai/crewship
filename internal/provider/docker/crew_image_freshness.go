@@ -112,7 +112,7 @@ func (p *Provider) CrewImageState(ctx context.Context, team provider.CrewConfig)
 	ref := p.crewRuntimeImage(team)
 	st := &provider.CrewImageState{Image: ref}
 
-	if strings.HasPrefix(ref, localCacheImagePrefix) {
+	if strings.HasPrefix(ref, localCacheImagePrefix) || dockerutil.IsLocalImageID(ref) {
 		st.Reason = reasonLocalImage
 		return st, nil
 	}

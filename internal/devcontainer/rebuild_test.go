@@ -17,7 +17,7 @@ func TestProvision_ExplicitRebuildBypassesExistingImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(mock.committedIDs) != 1 || res.CachedImage != tag {
+	if len(mock.committedIDs) != 1 || res.CachedImage != fixtureImageID || mock.commitRefs[0] != tag {
 		t.Fatalf("rebuild must commit a new image: commits=%v result=%+v", mock.committedIDs, res)
 	}
 }

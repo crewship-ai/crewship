@@ -25,7 +25,9 @@ type imageListCacheEntry struct {
 
 const imageListTTL = 60 * time.Second
 
-const provisionerSchemaVersion = "v3"
+// v4 publishes immutable Docker IDs. A new namespace of hash-derived cache
+// aliases prevents a rebuild from moving a v3 tag still referenced by a crew.
+const provisionerSchemaVersion = "v4"
 
 // cacheImageTag returns the Docker image tag for a given config hash.
 

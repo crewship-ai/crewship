@@ -524,19 +524,9 @@ func (h *ProvisioningHandler) enqueueForCrew(ctx context.Context, crewID, worksp
 		h.rateLimiter.release(workspaceID)
 		return EnqueueResult{AlreadyRunning: true, Status: status}, nil
 	}
-	// Invalidate only after admission. A conflicting or rate-limited rebuild
-	// must not erase a working image reference. Keep cached_requirements: they
-	// still describe the running container until the replacement is ready.
-	if forceRebuild {
-		_, err := h.db.ExecContext(ctx,
-			`UPDATE crews SET cached_image = NULL, config_hash = NULL, updated_at = datetime('now')
-			 WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`, crewID, workspaceID)
-		if err != nil {
-			h.mu.Unlock()
-			h.rateLimiter.release(workspaceID)
-			return EnqueueResult{}, fmt.Errorf("clear cached image for rebuild: %w", err)
-		}
-	}
+	// Cache bypass belongs to this job. Keep the previous artifact and its
+	// contract until saveProvisionResult publishes a successful replacement.
+	// A failed rebuild must not erase the last usable environment.
 	job := &ProvisionJob{
 		forceRebuild: forceRebuild,
 		CrewID:       crewID,
