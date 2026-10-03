@@ -184,11 +184,14 @@ describe("RunsView request and interaction boundaries", () => {
       const { feed } = kind(input)
       return ok(feed === "insights" ? insights() : feed === "live" ? { data: [row("Live run", { started_at: null, crew_name: null, status: "RUNNING", trigger_type: "" })] } : table([row("Timed run", { status: "RUNNING", finished_at: null })]))
     })
-    const view = render(<RunsView {...props} />)
-    const live = await screen.findByRole("button", { name: /Live run/ })
+    let view!: ReturnType<typeof render>
+    // Settle all three feeds and their passive effects before moving time.
+    // Finding the live-feed row alone does not settle the separate table feed.
+    await act(async () => { view = render(<RunsView {...props} />) })
+    const live = screen.getByRole("button", { name: /Live run/ })
     expect(screen.getByText("1 live execution")).toBeInTheDocument()
     expect(screen.getByText("10s")).toBeInTheDocument()
-    act(() => vi.advanceTimersByTime(2000))
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
     expect(screen.getByText("12s")).toBeInTheDocument()
     fireEvent.keyDown(live, { key: "Escape" }); expect(mocks.push).not.toHaveBeenCalled()
     fireEvent.keyDown(live, { key: "Enter" }); fireEvent.keyDown(live, { key: " " }); fireEvent.click(live)
