@@ -14,7 +14,7 @@ import (
 )
 
 func sandboxTestSpec() provider.SandboxSpec {
-	return provider.SandboxSpec{ID: "qualification-a", ImageID: "sha256:" + strings.Repeat("a", 64), MemoryBytes: 128 << 20, NanoCPUs: 1e9, PIDs: 32}
+	return provider.SandboxSpec{Lifetime: time.Minute, ID: "qualification-a", ImageID: "sha256:" + strings.Repeat("a", 64), MemoryBytes: 128 << 20, NanoCPUs: 1e9, PIDs: 32}
 }
 func TestSandboxRefusesUnsupportedBeforeDocker(t *testing.T) {
 	cases := []struct {
@@ -23,6 +23,7 @@ func TestSandboxRefusesUnsupportedBeforeDocker(t *testing.T) {
 		owner string
 	}{
 		{"missing owner", func(*provider.SandboxSpec) {}, ""},
+		{"unbounded lifetime", func(s *provider.SandboxSpec) { s.Lifetime = 0 }, "installation"},
 		{"mutable image", func(s *provider.SandboxSpec) { s.ImageID = "ubuntu:latest" }, "installation"},
 		{"mounts", func(s *provider.SandboxSpec) {
 			s.Mounts = []provider.SandboxMount{{ResourceID: "volume", Target: "/data"}}
@@ -113,7 +114,7 @@ func TestOfflineSandboxAuditRejectsWeakenedConfiguration(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			pids := int64(64)
-			c := container.InspectResponse{HostConfig: &container.HostConfig{NetworkMode: "none", IpcMode: "private", CgroupnsMode: "private", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Resources: container.Resources{Memory: 128 << 20, MemorySwap: 128 << 20, NanoCPUs: 1e9, PidsLimit: &pids}, Tmpfs: map[string]string{"/home/agent": "rw,nosuid,nodev,size=67108864,uid=1001,gid=1001,mode=0700", "/tmp": "rw,nosuid,nodev,noexec,size=16777216,mode=1777"}}, Config: &container.Config{User: "1001:1001"}}
+			c := container.InspectResponse{HostConfig: &container.HostConfig{NetworkMode: "none", IpcMode: "private", CgroupnsMode: "private", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Resources: container.Resources{Memory: 128 << 20, MemorySwap: 128 << 20, NanoCPUs: 1e9, PidsLimit: &pids}, Tmpfs: map[string]string{"/home/agent": "rw,nosuid,nodev,size=67108864,uid=1001,gid=1001,mode=0700", "/tmp": "rw,nosuid,nodev,noexec,size=16777216,mode=1777"}}, Config: &container.Config{User: "1002:1002"}}
 			if err := auditOfflineSandbox(c); err != nil {
 				t.Fatal("valid fixture rejected", err)
 			}

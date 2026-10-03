@@ -41,9 +41,12 @@ func TestSandboxRuntimeRealDocker(t *testing.T) {
 			t.Errorf("cleanup: %v", err)
 		}
 	})
-	out, err := p.ExecSandbox(ctx, ref, provider.SandboxExec{Command: []string{"/bin/sh", "-c", "id -u; test ! -e /var/run/docker.sock; test ! -w /etc; echo workspace > /home/agent/check; cat /home/agent/check; ip route"}, Timeout: 5 * time.Second, OutputLimit: 1024})
+	out, err := p.ExecSandbox(ctx, ref, provider.SandboxExec{Command: []string{"/bin/sh", "-c", "id -u; test ! -e /var/run/docker.sock; test ! -w /etc; echo workspace > /home/agent/check; cat /home/agent/check; ip route; pid=$(pidof sleep); test -n \"$pid\"; ! kill -STOP \"$pid\" 2>/dev/null"}, Timeout: 5 * time.Second, OutputLimit: 1024})
 	if err != nil || out.ExitCode != 0 || strings.TrimSpace(out.Output) != "1001\nworkspace" {
 		t.Fatalf("offline probe: %+v %v", out, err)
+	}
+	if _, err := p.CreateSandbox(ctx, spec); err == nil {
+		t.Fatal("duplicate instance identity created")
 	}
 	foreign := ref
 	foreign.ID = "another-instance"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -17,7 +18,7 @@ type qualificationRuntime struct {
 }
 
 func (*qualificationRuntime) SandboxCapabilities() provider.SandboxCapabilities {
-	return provider.SandboxCapabilities{Offline: true}
+	return provider.SandboxCapabilities{Offline: true, MaxLifetime: 2 * time.Minute}
 }
 func (r *qualificationRuntime) CreateSandbox(_ context.Context, s provider.SandboxSpec) (provider.SandboxRef, error) {
 	r.spec = s

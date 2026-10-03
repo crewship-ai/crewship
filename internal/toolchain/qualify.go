@@ -25,12 +25,12 @@ func Qualify(ctx context.Context, runtime provider.SandboxRuntime, inventory *de
 		return
 	}
 	result.ImageID = inventory.ImageID
-	if runtime == nil || !runtime.SandboxCapabilities().Offline || inventory.ImageID == "" || len(inventory.Tools) == 0 {
+	if runtime == nil || (!runtime.SandboxCapabilities().Offline || runtime.SandboxCapabilities().MaxLifetime < 90*time.Second) || inventory.ImageID == "" || len(inventory.Tools) == 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	ref, err := runtime.CreateSandbox(ctx, provider.SandboxSpec{ID: "toolchain-" + strings.ToLower(rand.Text()), ImageID: inventory.ImageID, MemoryBytes: 512 << 20, NanoCPUs: 1e9, PIDs: 64})
+	ref, err := runtime.CreateSandbox(ctx, provider.SandboxSpec{Lifetime: 90 * time.Second, ID: "toolchain-" + strings.ToLower(rand.Text()), ImageID: inventory.ImageID, MemoryBytes: 512 << 20, NanoCPUs: 1e9, PIDs: 64})
 	if err != nil {
 		result.Status = "instance_failed"
 		return

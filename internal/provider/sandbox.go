@@ -23,6 +23,10 @@ type SandboxRuntime interface {
 }
 
 type SandboxCapabilities struct {
+	// MaxLifetime bounds transient instances. Zero is not a promise of durable
+	// execution; a backend must document a separate persistence capability.
+	MaxLifetime time.Duration
+
 	Offline       bool
 	NamedVolumes  bool
 	MemorySuspend bool
@@ -35,6 +39,8 @@ type SandboxMount struct {
 }
 
 type SandboxSpec struct {
+	Lifetime time.Duration
+
 	ID          string
 	ImageID     string
 	MemoryBytes int64
