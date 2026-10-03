@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CodeRabbit AI Code Review Configuration
+# Historical CodeRabbit configuration — retired 2026-10-02
 # Project: Crewship - AI Agent Orchestration Platform
 # Stack: Next.js 15 + Prisma + Go (crewshipd) + TypeScript
 # Documentation: https://docs.coderabbit.ai/reference/configuration
@@ -76,8 +76,8 @@ reviews:
   # AUTO REVIEW
   # ─────────────────────────────────────────────────────────────────────────────
   auto_review:
-    enabled: true
-    auto_incremental_review: true
+    enabled: false
+    auto_incremental_review: false
     auto_pause_after_reviewed_commits: 5
 
     base_branches:
