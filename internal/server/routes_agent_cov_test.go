@@ -8,6 +8,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -91,28 +92,28 @@ func TestHandleAgentStart_HappyPathAccepted(t *testing.T) {
 	time.Sleep(60 * time.Millisecond)
 }
 
-// covErrState fails every Get so the status handler's degraded branch
+// covErrState fails every List so the status handler's degraded branch
 // executes; other methods behave like the no-op mockState.
 type covErrState struct {
 	mockState
 }
 
-func (c *covErrState) Get(_ context.Context, _, _ string) ([]byte, error) {
+func (c *covErrState) List(_ context.Context, _ string) (map[string][]byte, error) {
 	return nil, os.ErrPermission
 }
 
-func TestHandleAgentStatus_StateGetErrorIsIdle(t *testing.T) {
+func TestHandleAgentStatus_StateErrorIsUnavailable(t *testing.T) {
 	s := newTestServerWithDeps(t)
 	s.state = &covErrState{}
 	req := httptest.NewRequest("GET", "/agents/agent-e/status", nil)
 	w := httptest.NewRecorder()
 	s.ipcMux.ServeHTTP(w, req)
-	if w.Code != 200 {
-		t.Fatalf("status = %d, want 200", w.Code)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", w.Code)
 	}
 	resp := parseJSON(t, w.Body.Bytes())
-	if resp["status"] != "idle" {
-		t.Errorf("status = %v, want idle on state error", resp["status"])
+	if resp["error"] != "runtime status unavailable" {
+		t.Errorf("error = %v, want unavailable on state error", resp["error"])
 	}
 }
 

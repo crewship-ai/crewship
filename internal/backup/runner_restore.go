@@ -1217,6 +1217,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		})
 		var commitTx *sql.Tx
 		hooks := &RestoreDumpHooks{
+			RejectNoOp: true,
 			// Provenance for the DR resume (#1716), written only for a
 			// rewritten restore — that is the only case that creates a
 			// workspace whose identity the tenant guard cannot recognise
@@ -1266,10 +1267,10 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			},
 		}
 		s, err := RestoreDumpTxHooks(ctx, db, extracted.DBDump, hooks)
-		if err != nil {
+		if err != nil && !errors.Is(err, ErrNoOpRestore) {
 			return nil, err
 		}
-		serviceDatabaseCommitted = true
+		serviceDatabaseCommitted = err == nil
 		stats = s
 		warnSecurityLevelClamps(opts.Logger, stats.SecurityLevelClamps, stats.SecurityLevelClamped, false)
 		warnDroppedColumns(opts.Logger, stats.DroppedColumns, stats.ColumnsDropped, false)
@@ -1300,7 +1301,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// must already be visible. A hook failure surfaces as
 	// ErrRestoreBackfillFailed; the admin must investigate because the
 	// main restore is already committed.
-	if extracted.DBDump != nil && !opts.DryRun && len(manifest.SchemaMigrationVersions) > 0 {
+	if extracted.DBDump != nil && !opts.DryRun && len(manifest.SchemaMigrationVersions) > 0 && !(stats.RowsSeen > 0 && stats.RowsInserted == 0) {
 		if err := replayRestoreBackfills(ctx, db, manifest.SchemaMigrationVersions, opts.Logger); err != nil {
 			return nil, err
 		}

@@ -171,25 +171,26 @@ var backupCreateCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
-		cli.PrintSuccess(fmt.Sprintf("Backup created: %s", out.Path))
-		if len(out.MissingContainerCrews) > 0 {
-			cli.PrintWarning(fmt.Sprintf(
-				"Bundle is DB-rows-only for %d crew(s) whose container is gone from the daemon: %s.\n"+
-					"  Their workspace, memory and volume files are NOT in this bundle. Restore the container\n"+
-					"  (re-provision the crew) and take a fresh backup before relying on it for disaster recovery.",
-				len(out.MissingContainerCrews), strings.Join(out.MissingContainerCrews, ", ")))
-		}
-		f := newFormatter()
-		headers := []string{"SCOPE", "SIZE", "ENCRYPTED", "FORMAT", "SHA256"}
-		rows := [][]string{{
-			out.Scope,
-			formatBytes(out.Size),
-			yesNo(out.Encrypted),
-			fmt.Sprintf("v%d", out.FormatVersion),
-			truncateLong(out.SHA256, 20),
-		}}
-		f.Table(headers, rows)
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(out, func() {
+			cli.PrintSuccess(fmt.Sprintf("Backup created: %s", out.Path))
+			if len(out.MissingContainerCrews) > 0 {
+				cli.PrintWarning(fmt.Sprintf(
+					"Bundle is DB-rows-only for %d crew(s) whose container is gone from the daemon: %s.\n"+
+						"  Their workspace, memory and volume files are NOT in this bundle. Restore the container\n"+
+						"  (re-provision the crew) and take a fresh backup before relying on it for disaster recovery.",
+					len(out.MissingContainerCrews), strings.Join(out.MissingContainerCrews, ", ")))
+			}
+			f := resolvedFormatter(cmd)
+			headers := []string{"SCOPE", "SIZE", "ENCRYPTED", "FORMAT", "SHA256"}
+			rows := [][]string{{
+				out.Scope,
+				formatBytes(out.Size),
+				yesNo(out.Encrypted),
+				fmt.Sprintf("v%d", out.FormatVersion),
+				truncateLong(out.SHA256, 20),
+			}}
+			f.Table(headers, rows)
+		})
 	},
 }
 

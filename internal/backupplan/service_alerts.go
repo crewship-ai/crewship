@@ -597,17 +597,54 @@ func FetchOffsiteCopy(ctx context.Context, db *sql.DB, open DestinationOpener, d
 	path := filepath.Join(dir, filepath.Base(key))
 	if _, err := os.Lstat(path); err == nil {
 		return "", offsite.BundleTransfer{}, fmt.Errorf("%s already exists here; restore it from this server", filepath.Base(path))
+	} else if !os.IsNotExist(err) {
+		return "", offsite.BundleTransfer{}, err
 	}
 	store := backup.EnvironmentStoreFor(dir)
-	tr, err := offsite.DownloadBundle(ctx, dst, store, key, path, offsite.DownloadOptions{})
+	stage, err := os.MkdirTemp(dir, ".offsite-fetch-")
+	if err != nil {
+		return "", offsite.BundleTransfer{}, err
+	}
+	defer os.RemoveAll(stage)
+	stagedPath := filepath.Join(stage, filepath.Base(path))
+	tr, err := offsite.DownloadBundle(ctx, dst, store, key, stagedPath, offsite.DownloadOptions{})
 	if err != nil {
 		return "", tr, err
 	}
+	manifest, err := backup.Inspect(ctx, stagedPath)
+	if err != nil {
+		return "", tr, fmt.Errorf("inspect fetched bundle: %w", err)
+	}
+	info, err := os.Stat(stagedPath)
+	if err != nil {
+		return "", tr, err
+	}
+	// Publish without replacing another fetch or an existing local backup.
+	// The staging directory is on the same filesystem as the destination.
+	if err := os.Link(stagedPath, path); err != nil {
+		return "", tr, fmt.Errorf("publish fetched bundle: %w", err)
+	}
+	// A failed registration must remain retryable. Only this call can own the
+	// published file; shared environment blobs are never removed here.
+	registered := false
+	defer func() {
+		if !registered {
+			_ = os.Remove(path)
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = backup.ReleaseEnvironmentRefs(cleanup, db, path)
+		}
+	}()
 	if len(tr.Blobs) > 0 {
 		if err := backup.AddEnvironmentRefs(ctx, db, store, path, tr.Blobs); err != nil {
 			return path, tr, err
 		}
 	}
+	entry := backup.CatalogEntryFromResult(&backup.CreateResult{Path: path, Size: info.Size(), SHA256: manifest.Checksums.PayloadSHA256}, manifest)
+	if err := backup.UpsertCatalogEntry(ctx, db, entry); err != nil {
+		return path, tr, fmt.Errorf("catalog fetched bundle: %w", err)
+	}
+	registered = true
 	return path, tr, nil
 }
 

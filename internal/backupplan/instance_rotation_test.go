@@ -202,6 +202,25 @@ func TestService_InstancePlanRotatesItsBundles(t *testing.T) {
 		}
 	}
 
+	// A catalog failure must not strand a downloaded file and prevent retry.
+	retryDir := t.TempDir()
+	if _, err := h.db.Exec(`CREATE TRIGGER reject_fetch_catalog BEFORE INSERT ON backup_catalog BEGIN SELECT RAISE(ABORT, 'catalog unavailable'); END`); err != nil {
+		t.Fatal(err)
+	}
+	failedPath, _, err := FetchOffsiteCopy(ctx, h.db, h.svc.Destinations, d.ID, ObjectKey(ScopeInstance, "", b3), retryDir)
+	if err == nil {
+		t.Fatal("catalog error was hidden")
+	}
+	if _, err := os.Stat(failedPath); !os.IsNotExist(err) {
+		t.Fatalf("failed fetch left an unregistered bundle: %v", err)
+	}
+	if _, err := h.db.Exec(`DROP TRIGGER reject_fetch_catalog`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := FetchOffsiteCopy(ctx, h.db, h.svc.Destinations, d.ID, ObjectKey(ScopeInstance, "", b3), retryDir); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+
 	// Restore from off-site onto a server that has neither the bundle nor
 	// its layers: both come back, and the layers are the bundle's refs.
 	fresh := t.TempDir()
@@ -215,6 +234,9 @@ func TestService_InstancePlanRotatesItsBundles(t *testing.T) {
 	if m, err := backup.Inspect(ctx, got); err != nil || m.Scope != backup.ScopeInstance {
 		t.Fatalf("fetched bundle: %+v, %v", m, err)
 	}
+	if entry, err := backup.GetCatalogEntry(ctx, h.db, got); err != nil || entry.Scope != string(backup.ScopeInstance) {
+		t.Fatalf("fetched bundle is not usable through the catalog: %+v, %v", entry, err)
+	}
 	freshStore := backup.EnvironmentStoreFor(fresh)
 	for _, d := range []string{shared, own3} {
 		if !freshStore.Has(d) {
@@ -225,6 +247,36 @@ func TestService_InstancePlanRotatesItsBundles(t *testing.T) {
 	if refs != 2 {
 		t.Errorf("fetched bundle holds %d refs, want 2", refs)
 	}
+	// Two admissions can race before either local file exists. Exactly one
+	// fetch publishes, and the loser must never remove the winner's bundle.
+	concurrentDir := t.TempDir()
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			_, _, err := FetchOffsiteCopy(ctx, h.db, h.svc.Destinations, d.ID, ObjectKey(ScopeInstance, "", b3), concurrentDir)
+			results <- err
+		}()
+	}
+	close(start)
+	wins := 0
+	for range 2 {
+		if <-results == nil {
+			wins++
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("concurrent fetch successes = %d, want 1", wins)
+	}
+	published := filepath.Join(concurrentDir, filepath.Base(b3))
+	if _, err := backup.Inspect(ctx, published); err != nil {
+		t.Fatalf("winner removed: %v", err)
+	}
+	if _, err := backup.GetCatalogEntry(ctx, h.db, published); err != nil {
+		t.Fatalf("winner missing from catalog: %v", err)
+	}
+
 	if _, _, err := FetchOffsiteCopy(ctx, h.db, h.svc.Destinations, d.ID, ObjectKey(ScopeInstance, "", b3), fresh); err == nil {
 		t.Error("fetching over an existing bundle must be refused")
 	}

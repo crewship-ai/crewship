@@ -215,3 +215,30 @@ func (p *Provider) ListByPrefix(_ context.Context, bucket, prefix string) (map[s
 func (p *Provider) Close() error {
 	return p.db.Close()
 }
+
+// Update serializes read-modify-write with every other bbolt writer.
+func (p *Provider) Update(ctx context.Context, bucket, key string, update func([]byte) ([]byte, error)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return p.db.Update(func(tx *bolt.Tx) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
+		if err != nil {
+			return err
+		}
+		value, err := update(bytes.Clone(b.Get([]byte(key))))
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if value == nil {
+			return b.Delete([]byte(key))
+		}
+		return b.Put([]byte(key), value)
+	})
+}

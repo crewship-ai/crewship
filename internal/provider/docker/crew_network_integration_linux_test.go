@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -41,8 +42,9 @@ func TestCrewNetworkIsolationIntegration(t *testing.T) {
 	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nexec sleep infinity\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shared := "crewnet-it-" + time.Now().Format("150405")
+	shared := networkTestID("crewnet-it")
 	p, err := New(ctx, Config{
+		ContainerPrefix:   shared,
 		RuntimeImage:      "alpine:3",
 		DefaultRuntime:    "runc",
 		Network:           shared,
@@ -165,7 +167,7 @@ func crewNetExec(ctx context.Context, t *testing.T, p *Provider, cid string, det
 func TestCleanupRuntimeCrewNetworkIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	p, err := New(ctx, Config{RuntimeImage: "alpine:3", Network: "", InstanceID: "inst-it", CrewNetworkCrews: []string{"rm-crew"}, CrewNetworkPool: "10.239.249.0/24"}, nil)
+	p, err := New(ctx, Config{ContainerPrefix: networkTestID("crewnet-rm"), RuntimeImage: "alpine:3", Network: "", InstanceID: "inst-it", CrewNetworkCrews: []string{"rm-crew"}, CrewNetworkPool: "10.239.249.0/24"}, nil)
 	if err != nil {
 		// SKIP-WAIVER(#2240): needs a live Docker daemon to create and remove
 		// real bridges; same guard as TestResilienceNetworkRecreate.
@@ -243,9 +245,9 @@ func TestCrewNetworkMovesExistingServiceWithRuntimeIntegration(t *testing.T) {
 	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nexec sleep infinity\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shared := "crewnet-mv-" + time.Now().Format("150405")
+	shared := networkTestID("crewnet-mv")
 	base := Config{
-		RuntimeImage: "alpine:3", DefaultRuntime: "runc", Network: shared, OutputBasePath: tmp,
+		ContainerPrefix: shared, RuntimeImage: "alpine:3", DefaultRuntime: "runc", Network: shared, OutputBasePath: tmp,
 		SidecarBinaryPath: sidecarPath, EntrypointPath: entrypointPath, CrewNetworkPool: "10.239.250.0/24",
 	}
 	p, err := New(ctx, base, nil)
@@ -383,8 +385,8 @@ func TestCrewNetworkMovesExistingServiceWithRuntimeIntegration(t *testing.T) {
 func TestCrewNetworkInheritsInternalIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	shared := "crewnet-int-" + time.Now().Format("150405")
-	p, err := New(ctx, Config{RuntimeImage: "alpine:3", Network: "", InstanceID: "inst-int", CrewNetworkCrews: []string{"int-crew"}, CrewNetworkPool: "10.239.251.0/24"}, nil)
+	shared := networkTestID("crewnet-int")
+	p, err := New(ctx, Config{ContainerPrefix: shared, RuntimeImage: "alpine:3", Network: "", InstanceID: "inst-int", CrewNetworkCrews: []string{"int-crew"}, CrewNetworkPool: "10.239.251.0/24"}, nil)
 	if err != nil {
 		// SKIP-WAIVER(#2240): needs a live Docker daemon to create real
 		// bridges.
@@ -408,4 +410,10 @@ func TestCrewNetworkInheritsInternalIntegration(t *testing.T) {
 	if !insp.Network.Internal {
 		t.Fatal("crew network next to an internal instance network must be internal")
 	}
+}
+
+// Names must be unique across concurrent go test processes and worktrees.
+// The provider's default prefix names real shared Docker resources.
+func networkTestID(prefix string) string {
+	return prefix + "-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 }

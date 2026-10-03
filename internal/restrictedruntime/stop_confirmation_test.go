@@ -18,6 +18,9 @@ func TestConfirmAttemptStoppedRequiresOwnedAbsenceAndDurableTermination(t *testi
 		{"container still exists", "echo synthetic-container", "terminated", false},
 		{"unconfirmed journal", "exit 0", "termination_unconfirmed", false},
 		{"terminated and absent", "exit 0", "terminated", true},
+		{"admission failed and absent", "exit 0", "admission_failed", true},
+		{"admission failed but present", "echo synthetic-container", "admission_failed", false},
+		{"admission failed daemon unavailable", "exit 1", "admission_failed", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()

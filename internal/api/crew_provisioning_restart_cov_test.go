@@ -318,12 +318,15 @@ func TestCovCPRRestartCrewAgents(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 		}
-		var resp map[string]int
+		var resp map[string]any
 		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
-		if resp["restarted"] != 0 {
-			t.Fatalf("restarted = %d, want 0", resp["restarted"])
+		if resp["runtime_removed"] != false {
+			t.Fatalf("no container: %v", resp)
+		}
+		if resp["restarted"] != float64(0) {
+			t.Fatalf("restarted = %v, want 0", resp["restarted"])
 		}
 	})
 
@@ -355,12 +358,15 @@ func TestCovCPRRestartCrewAgents(t *testing.T) {
 		if !removed {
 			t.Fatal("expected ContainerRemove call")
 		}
-		var resp map[string]int
+		var resp map[string]any
 		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
-		if resp["restarted"] != 2 {
-			t.Fatalf("restarted = %d, want 2", resp["restarted"])
+		if resp["runtime_removed"] != true {
+			t.Fatalf("removed container: %v", resp)
+		}
+		if resp["restarted"] != float64(2) {
+			t.Fatalf("restarted = %v, want 2", resp["restarted"])
 		}
 	})
 

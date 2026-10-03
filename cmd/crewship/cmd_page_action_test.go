@@ -37,6 +37,23 @@ var (
 	pageActionRoute  = pageActionsRoute + "/" + pageActionCLIID
 )
 
+func TestPageActionCLI_PinsRestrictedIntent(t *testing.T) {
+	stub := pageStub(t)
+	stub.OnPost(pageActionRoute, clitest.JSONResponse(http.StatusAccepted, pageActionReceipt()))
+	out, err := runPageActionCLI(t, "page", "action", pageAcceptSlug+"/"+pageActionCLIPanel, pageActionCLIID,
+		"--expected-intent-hash", "frozen-intent")
+	if err != nil {
+		t.Fatalf("page action: %v\n%s", err, out)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(stub.CallsFor(http.MethodPost, pageActionRoute)[0].Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["expected_intent_hash"] != "frozen-intent" {
+		t.Fatalf("intent missing: %v", body)
+	}
+}
+
 // runPageActionCLI is runPageCLI with this surface's flags reset first. Cobra
 // keeps a flag's value between Execute calls and the command tree is
 // package-level state, so a --input from one test would still be set in the

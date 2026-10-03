@@ -558,7 +558,7 @@ func (m *Manager) ConfirmAttemptStopped(ctx context.Context, attempt string) err
 	data, err := os.ReadFile(filepath.Join(m.dir, attempt+".json"))
 	if err == nil {
 		var record Record
-		if json.Unmarshal(data, &record) != nil || record.Attempt != attempt || record.Status != "terminated" {
+		if json.Unmarshal(data, &record) != nil || record.Attempt != attempt || (record.Status != "terminated" && record.Status != "admission_failed") {
 			return errors.New("restricted termination unconfirmed")
 		}
 	} else if !os.IsNotExist(err) {

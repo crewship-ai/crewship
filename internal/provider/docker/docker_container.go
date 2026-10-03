@@ -8,14 +8,16 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/memory"
+	cerrdefs "github.com/containerd/errdefs"
 	"os"
 	goruntime "runtime"
 	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/safepath"
@@ -226,6 +228,7 @@ func (p *Provider) HasLegacyCrewResources(ctx context.Context, crews []provider.
 func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provider.CrewRef) ([]string, error) {
 	legacy := p.legacyNameSets(crews)
 	removed := []string{}
+	var failures []error
 	if len(legacy) == 0 {
 		return removed, nil
 	}
@@ -240,6 +243,7 @@ func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provide
 			if legacy[n] {
 				if _, rmErr := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); rmErr != nil {
 					p.logger.Warn("legacy C1 container remove failed", "container", n, "error", rmErr)
+					failures = append(failures, fmt.Errorf("remove legacy container %s: %w", n, rmErr))
 				} else {
 					removed = append(removed, n)
 				}
@@ -249,18 +253,19 @@ func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provide
 
 	list, err := p.client.VolumeList(ctx, volumeListOptions())
 	if err != nil {
-		return removed, fmt.Errorf("list volumes (legacy C1 prune): %w", err)
+		return removed, errors.Join(append(failures, fmt.Errorf("list volumes (legacy C1 prune): %w", err))...)
 	}
 	for _, vol := range list.Items {
 		if legacy[vol.Name] {
 			if _, rmErr := p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); rmErr != nil {
 				p.logger.Warn("legacy C1 volume remove failed", "volume", vol.Name, "error", rmErr)
+				failures = append(failures, fmt.Errorf("remove legacy volume %s: %w", vol.Name, rmErr))
 			} else {
 				removed = append(removed, vol.Name)
 			}
 		}
 	}
-	return removed, nil
+	return removed, errors.Join(failures...)
 }
 
 // migrateLegacyVolume copies all data from a legacy slug-scoped volume into a
@@ -1822,6 +1827,9 @@ func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) er
 func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*provider.ContainerStatus, error) {
 	inspectResult, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return nil, fmt.Errorf("container inspect: %w: %s", provider.ErrContainerNotFound, containerID)
+		}
 		return nil, fmt.Errorf("container inspect: %w", err)
 	}
 	inspect := inspectResult.Container
