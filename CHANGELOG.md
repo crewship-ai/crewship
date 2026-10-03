@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Backup conversion releases its rewrite stream when sealing fails, so encryption errors cannot strand the converter or its temporary output. Unknown CLI adapter names use the neutral brand without reading inherited object properties.
+
 - OAuth setup discards obsolete authorization and code-exchange responses, clears owned popups and timers when its scope closes, and prevents overlapping polls or duplicate exchanges. Journal registry scanning skips vendored sources and handles unrelated constants without inheriting an old event type.
 
 - Credential entry resets when the workspace or dialog changes, ignores obsolete key validation and save responses, preserves the default environment name on reopening, and encodes workspace queries.
