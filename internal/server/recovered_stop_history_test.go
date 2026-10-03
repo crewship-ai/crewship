@@ -158,14 +158,21 @@ func TestRecoveredStopHistoryPreservesRecordedCompletion(t *testing.T) {
 	}
 }
 
-// Pending manual IPC runs without a journal start must not repeatedly consume
+// Pending legacy runs without a known workspace must not repeatedly consume
 // the batch budget while actionable stops wait behind them.
 func TestRecoveredStopHistoryMakesBoundedProgressPastUnresolvedRuns(t *testing.T) {
 	s := newTestServerWithDeps(t)
 	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
 	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
 	for i := 0; i < 100; i++ {
-		seedStoppedOutbox(t, s, fmt.Sprintf("absent-%03d", i))
+		id := fmt.Sprintf("absent-%03d", i)
+		raw, err := json.Marshal(orchestrator.RunState{ID: id, AgentID: "missing-agent", Status: "cancelled", StopJournalPending: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = s.state.Set(t.Context(), "agent_runs", id, raw); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for i := 0; i < 101; i++ {
 		id := fmt.Sprintf("ready-%03d", i)
@@ -190,5 +197,93 @@ func TestRecoveredStopHistoryMakesBoundedProgressPastUnresolvedRuns(t *testing.T
 	}
 	if !pendingStop(t, s, "absent-000") {
 		t.Fatal("invented history for unresolved manual run")
+	}
+}
+
+func TestRecoveredStopHistoryWithoutStartedEvent(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+	seedStoppedOutbox(t, s, "manual-stop")
+	other, err := json.Marshal(orchestrator.RunState{ID: "other-manual", AgentID: "a", WorkspaceID: "rw", Status: "running"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.state.Set(t.Context(), "agent_runs", "other-manual", other); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.flushRecoveredStops(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var agentStatus string
+	if err := s.db.QueryRow(`SELECT status FROM agents WHERE id='a'`).Scan(&agentStatus); err != nil {
+		t.Fatal(err)
+	}
+	if agentStatus != "RUNNING" {
+		t.Fatalf("other direct run hidden by status %s", agentStatus)
+	}
+	if pendingStop(t, s, "manual-stop") {
+		t.Fatal("confirmed stop without run.started remains pending")
+	}
+	if n := recoveryTerminalCount(t, s, "manual-stop"); n != 1 {
+		t.Fatalf("terminal entries=%d", n)
+	}
+	var starts int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE trace_id='manual-stop' AND entry_type='run.started'`).Scan(&starts); err != nil {
+		t.Fatal(err)
+	}
+	if starts != 0 {
+		t.Fatal("fabricated a start event")
+	}
+	seedRecoveryTrace(t, s, "manual-stop", "a")
+	s.recoverOrphanedRuns(t.Context())
+	if n := recoveryTerminalCount(t, s, "manual-stop"); n != 1 {
+		t.Fatalf("late start created duplicate terminal entries=%d", n)
+	}
+}
+
+func TestRecoveredStopHistoryMissingStartScope(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw'),('other','Other','other')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING'),('b','other','Other','b','RUNNING')`)
+	for _, tc := range []struct {
+		name, agent, workspace string
+		conflict               bool
+	}{
+		{"captured-after-agent-deletion", "gone", "rw", false},
+		{"agent-scope-conflict", "a", "other", true},
+		{"journal-scope-conflict", "a", "rw", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := orchestrator.RunState{ID: tc.name, AgentID: tc.agent, WorkspaceID: tc.workspace, Status: "cancelled", StopJournalPending: true}
+			raw, err := json.Marshal(run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = s.state.Set(t.Context(), "agent_runs", run.ID, raw); err != nil {
+				t.Fatal(err)
+			}
+			if tc.name == "journal-scope-conflict" {
+				mustExec(t, s.db, `INSERT INTO journal_entries(id,workspace_id,agent_id,ts,entry_type,severity,actor_type,summary,payload,refs,trace_id,priority) VALUES('foreign','other','b',strftime('%Y-%m-%dT%H:%M:%fZ','now'),'run.started','info','sidecar','started','{}','{}',?,'normal')`, run.ID)
+			}
+			err = s.projectRecoveredStop(t.Context(), run)
+			if (err != nil) != tc.conflict {
+				t.Fatalf("projection error=%v want conflict=%v", err, tc.conflict)
+			}
+			if pendingStop(t, s, run.ID) != tc.conflict {
+				t.Fatalf("pending marker disagrees with evidence")
+			}
+			var terminals int
+			if err = s.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE trace_id=? AND entry_type='run.cancelled'`, run.ID).Scan(&terminals); err != nil {
+				t.Fatal(err)
+			}
+			want := 1
+			if tc.conflict {
+				want = 0
+			}
+			if terminals != want {
+				t.Fatalf("terminals=%d want=%d", terminals, want)
+			}
+		})
 	}
 }

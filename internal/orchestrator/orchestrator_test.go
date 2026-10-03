@@ -278,6 +278,7 @@ func TestRunAgentSuccess(t *testing.T) {
 
 	err := o.RunAgent(context.Background(), AgentRunRequest{
 		AgentID:     "a1",
+		WorkspaceID: "run-workspace",
 		AgentSlug:   "test-agent",
 		ChatID:      "s1",
 		RunID:       "run-s1",
@@ -302,6 +303,9 @@ func TestRunAgentSuccess(t *testing.T) {
 	}
 	var run RunState
 	json.Unmarshal(data, &run)
+	if run.WorkspaceID != "run-workspace" {
+		t.Fatalf("lost original run workspace: %q", run.WorkspaceID)
+	}
 	if run.Status != "completed" {
 		t.Errorf("expected completed status, got %q", run.Status)
 	}

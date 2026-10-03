@@ -390,6 +390,8 @@ func (c Credential) loginMode() string {
 // RunState tracks the runtime state of an active agent run, persisted in the
 // state provider for crash recovery.
 type RunState struct {
+	// WorkspaceID preserves the original history scope even without run.started.
+	WorkspaceID string `json:"workspace_id,omitempty"`
 	// RuntimeImageID is source-image evidence, not the mutable filesystem or
 	// proof of the binary eventually selected by PATH. Empty means unknown.
 	RuntimeImageID string    `json:"runtime_image_id,omitempty"`

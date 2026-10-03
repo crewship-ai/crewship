@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Confirmed stops from direct agent starts no longer wait forever for a missing start event.** Recovery retains the run's workspace, publishes the confirmed terminal event without inventing a start, and preserves dispatcher-owned outcomes and conflicting or unknown tenant identities.
+
+
 - **Runs that survive a server restart no longer rely on the startup probe alone.** Background recovery follows only the original recovered identities, preserves new admissions and unknown runtime states, and retries terminal history publication after confirmed process absence. It does not infer a successful exit from missing processes.
 
 

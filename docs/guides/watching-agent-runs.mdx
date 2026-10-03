@@ -156,6 +156,13 @@ the terminal history update. The result records an unknown outcome after
 recovery, rather than claiming success or a user-requested stop. The interval is
 not a recovery deadline: provider failures and a large backlog can delay it.
 
+A confirmed stop can be recorded even when a direct IPC run has no
+`run.started` event. New runtime records retain their original workspace;
+legacy records can use the existing agent's workspace. Recovery never invents
+a start event. Conflicting ownership, or a legacy record with neither its agent
+nor its original workspace available, remains unresolved rather than writing to
+an assumed workspace. Dispatcher-owned attempts still require their own outcome.
+
 ## Related
 
 - [Chat & Sessions](/guides/chat-sessions) — the session model this streams from.

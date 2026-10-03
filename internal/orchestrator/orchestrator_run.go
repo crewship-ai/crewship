@@ -476,6 +476,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// ChatID as its own field, so nothing is lost by the change.
 	req.runtimeImageID = o.observeRunImage(ctx, req.ContainerID)
 	runState := RunState{
+		WorkspaceID:    req.WorkspaceID,
 		RuntimeImageID: req.runtimeImageID,
 		ID:             req.RunID,
 		AgentID:        req.AgentID,
