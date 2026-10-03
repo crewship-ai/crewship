@@ -9,6 +9,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **AI operation discovery now ranks multiword searches** — generated API prose and ranked token search replace whole-query substring matching. Public descriptions omit internal handler comments; resource reads, nested creates and named actions receive clearer labels. MCP splits read/write tools, classifies audited POST reads, restricts admin writes and supports tag filters and optional client human approval. Workspace path selectors can no longer override the configured workspace.
+
+- **AI clients can connect directly to the Crewship binary.** Bundled `mcp serve` exposes paginated API discovery, focused schemas, a built-in Agent Skill and guarded JSON requests. `ai connect` registers Codex/Claude Code, `ai config` emits credential-free client snippets, and `ai skill` exports the embedded guide. Mutations require startup opt-in plus per-call acknowledgment; identity, redirect and size guards are shared with the CLI.
+
+- **CLI agents can discover API operations and inspect their inputs without scraping help.** `api operations` searches the embedded OpenAPI catalog, `api schema` returns focused schemas, and `api request` calls HTTP endpoints through the active profile with explicit mutation consent, offline previews, bounded input/output, and atomic downloads. `commands <path>` narrows discovery and includes required flags, inherited options, and runnable status. (#2836)
+- ⚠️ **Behaviour change:** CLI HTTP redirects must remain on the original server origin, including scheme and port. Configure a moved server explicitly; generic `api request` refuses all redirects.
+
 - **A crew started immediately after stopping could receive a stopped Docker container.** Runtime reconciliation now uses the newer inspect state for reuse and configuration drift decisions, rather than the older container-list snapshot. This also prevents a stale stopped listing from triggering configuration-based removal of a running crew. (#2855)
 
 ### Added
@@ -22,6 +29,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 - **Resource grants showed raw ids for the kind not selected in the add-grant picker** (#2863). In a member's restricted resource access, the grant list resolved names only from the directory of the currently selected kind, so with "Project" selected every agent grant showed its id (and vice versa). Both the agent and project directories now load, and each grant is named from its own kind's directory.
+- **Agent Stop hid a stop the runtime did not confirm** (#2864). On a phone, the agent header's Stop swallowed every failure, so a `502` from `POST /api/v1/agents/{id}/stop` (`runtime stop not confirmed` / `runtime stop unavailable`) looked like success; the agent canvas showed only `HTTP 502`, and its request also omitted `workspace_id`, so the route refused it before trying. Both buttons now share one stop call: a failure shows an error toast saying the agent may still be running and leaves its status as it was; only a confirmed stop shows `STOPPED`.
 - **The crew service quota editor said backups of quota disks are refused.** Since format v4 (#2745) crew, workspace and instance backups include quota-service disks whenever the server's quota helper is configured. The editor's warning and the service disk quota guide now say so: backups are refused only without the helper, and an interrupted backup keeps the service stopped until an admin retries with `--recover-services`. (#2866)
 - **The Work ledger offered Replay on finished restricted workflow work**, and the click failed with 409. The button is now disabled for restricted workflow items and the page states the server's reason: "Private workflow replay requires a new authorized routine or Page admission." Other domains are unchanged. (#2865)
 - **Restore history showed "NaN undefined" for a source bundle no longer in the catalog.** Admin › Backups › Recovery › History now says "source date unknown" when the server sends no source date (it only knows it while the bundle is still catalogued). (#2867)
