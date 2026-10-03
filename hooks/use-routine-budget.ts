@@ -29,20 +29,22 @@ export function useRoutineBudget(
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const activeRefresh = useRef<(() => Promise<void>) | null>(null)
 
   const refresh = useCallback(async () => {
+    abortRef.current?.abort()
+    setError(null)
     if (!workspaceId || !slug) {
       setBudgetState(null)
+      setLoading(false)
       return
     }
-    abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
     setLoading(true)
-    setError(null)
     try {
       const res = await apiFetch(
-        `/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(slug)}/budget`,
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}/budget`,
         { signal: controller.signal },
       )
       if (controller.signal.aborted) return
@@ -71,15 +73,20 @@ export function useRoutineBudget(
   }, [workspaceId, slug])
 
   useEffect(() => {
+    activeRefresh.current = refresh
+    setBudgetState(null)
     refresh()
-    return () => abortRef.current?.abort()
+    return () => {
+      activeRefresh.current = null
+      abortRef.current?.abort()
+    }
   }, [refresh])
 
   const setBudget = useCallback(
     async (monthlyBudgetUsd: number): Promise<RoutineBudget | null> => {
       if (!workspaceId || !slug) return null
       const res = await apiFetch(
-        `/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(slug)}/budget`,
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}/budget`,
         {
           method: "PATCH",
           headers: { "content-type": "application/json" },
@@ -91,10 +98,16 @@ export function useRoutineBudget(
         throw new Error(`set budget failed: ${res.status} ${txt}`)
       }
       const out: RoutineBudget = await res.json()
-      setBudgetState(out)
+      if (activeRefresh.current === refresh) {
+        // A read started before the edit must not restore the previous cap.
+        abortRef.current?.abort()
+        setBudgetState(out)
+        setLoading(false)
+        setError(null)
+      }
       return out
     },
-    [workspaceId, slug],
+    [workspaceId, slug, refresh],
   )
 
   return { budget, loading, error, refresh, setBudget }
@@ -127,18 +140,19 @@ export function useBudgetSummary(workspaceId: string | null | undefined) {
   const abortRef = useRef<AbortController | null>(null)
 
   const refresh = useCallback(async () => {
+    abortRef.current?.abort()
+    setError(null)
     if (!workspaceId) {
       setSummary(null)
+      setLoading(false)
       return
     }
-    abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
     setLoading(true)
-    setError(null)
     try {
       const res = await apiFetch(
-        `/api/v1/workspaces/${workspaceId}/pipelines/budget-summary`,
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/budget-summary`,
         { signal: controller.signal },
       )
       if (controller.signal.aborted) return
@@ -164,6 +178,7 @@ export function useBudgetSummary(workspaceId: string | null | undefined) {
   }, [workspaceId])
 
   useEffect(() => {
+    setSummary(null)
     refresh()
     return () => abortRef.current?.abort()
   }, [refresh])

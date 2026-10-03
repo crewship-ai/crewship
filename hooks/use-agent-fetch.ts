@@ -40,6 +40,7 @@ export function useAgentFetch<T>(
         setError(null)
       })
       .catch((err) => {
+        if (controller.signal.aborted) return
         if (err instanceof DOMException && err.name === "AbortError") return
         if (label) console.error(`${label}: fetch failed`, err)
         setError(err)
@@ -50,7 +51,7 @@ export function useAgentFetch<T>(
       })
     return () => controller.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps)
+  }, [...deps, enabled])
 
   return { data, loading, error }
 }
