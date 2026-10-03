@@ -256,8 +256,14 @@ func (o *Orchestrator) persistStoppedRun(ctx context.Context, state RunState) er
 // its exact container proves that the original runtime cannot still exist.
 // Unreachable, creating and running containers remain protected.
 func (o *Orchestrator) ReconcileRecoveredRun(ctx context.Context, run RunState) (bool, error) {
-	if run.Status != "running" || run.ContainerID == "" || o.container == nil {
+	if run.Status != "running" || o.container == nil {
 		return false, nil
+	}
+	// RunAgent records the caller's ContainerID; legacy/incomplete requests
+	// can therefore lack it. Do not silently claim successful reconciliation
+	// or guess today's crew container: it may be a replacement.
+	if run.ContainerID == "" {
+		return false, fmt.Errorf("run %s has no recorded container identity; runtime absence requires operator verification", run.ID)
 	}
 	absent, err := o.containerRuntimeAbsent(ctx, run.ContainerID)
 	if err != nil || !absent {

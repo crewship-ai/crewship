@@ -21,7 +21,7 @@ func (c reviewRecoveryContainer) ContainerStatus(context.Context, string) (*prov
 	return &provider.ContainerStatus{State: c.state}, c.err
 }
 func TestReviewRestartReconcilesAbsentContainer(t *testing.T) {
-	for _, kind := range []string{"stopped", "missing", "running", "unreachable"} {
+	for _, kind := range []string{"stopped", "missing", "error", "running", "unreachable"} {
 		t.Run(kind, func(t *testing.T) {
 			s := newTestServerWithDeps(t)
 			mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('review','Review','review')`)
@@ -45,7 +45,7 @@ func TestReviewRestartReconcilesAbsentContainer(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := "RUNNING"
-			if kind == "stopped" || kind == "missing" {
+			if kind == "stopped" || kind == "missing" || kind == "error" {
 				want = "IDLE"
 			}
 			if status != want {

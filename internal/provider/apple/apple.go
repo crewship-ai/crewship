@@ -562,6 +562,10 @@ func (p *Provider) lookupContainer(ctx context.Context, name string) (*container
 		return nil, fmt.Errorf("parse container list: %w", err)
 	}
 
+	if containers == nil {
+		return nil, fmt.Errorf("container list returned no inventory")
+	}
+
 	// In Apple Containers, configuration.id IS the container name (set via --name on create).
 	// There is no separate "name" field in the CLI output.
 	for _, c := range containers {
@@ -668,6 +672,11 @@ func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) er
 func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*provider.ContainerStatus, error) {
 	info, err := p.inspectContainer(ctx, containerID)
 	if err != nil {
+		// A CLI exit code does not distinguish missing containers from a
+		// failed runtime. Only a successful complete inventory proves absence.
+		if entry, listErr := p.lookupContainer(ctx, containerID); listErr == nil && entry == nil {
+			return nil, fmt.Errorf("container inspect: %w: %s", provider.ErrContainerNotFound, containerID)
+		}
 		return nil, fmt.Errorf("container inspect: %w", err)
 	}
 
@@ -680,7 +689,9 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 	case "stopped", "exited":
 		state = "stopped"
 	default:
-		state = "error"
+		// Unlike Docker's Dead/OOMKilled flags, an unrecognized Apple state
+		// is not proof that execution stopped.
+		return nil, fmt.Errorf("container inspect: unrecognized state %q", info.State())
 	}
 
 	return &provider.ContainerStatus{
