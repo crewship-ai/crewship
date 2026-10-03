@@ -20,6 +20,18 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Tool argument validation compares object and array enum values structurally instead of panicking, and rejects null when the enum does not allow it.
+
+- A stopped or cancelled scheduler leader no longer authorizes new work while its last lease is still fresh.
+
+- Outbound URL validation rejects blocked IPv6 literals with zone identifiers before dialing, matching the connection-time SSRF guard.
+
+- Onboarding reuses a CLI-delivered model token from the current workspace without asking for the secret again. The Guide starts reliably under Strict Mode, ignores superseded proposal previews, and keeps its created inventory scoped to the workspace across slow or failed polls.
+
+- Notification provider and channel-agent registries, routine schedules, run records and trace details settle loading when their selection is cleared. Obsolete requests and schedule mutations cannot restore data from a previous selection.
+
+- Routine budget views clear data when their workspace changes and ignore obsolete mutation responses. A pending read can no longer overwrite a successfully edited cap.
+
 - Keep the skills browser scoped to the current workspace and Installed lens across imports; rebuild active search results after catalog changes and show crew-assignment network failures in the dialog.
 - Isolate Docker network integration-test installations and subnet leases so concurrent runs cannot adopt or remove each other’s containers.
 - Workflow graphs omit dependency and permission edges whose source or target is absent from the displayed graph.

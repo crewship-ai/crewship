@@ -1,3 +1,4 @@
+import { StrictMode } from "react"
 import { readFileSync } from "fs"
 import { join } from "path"
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -778,5 +779,90 @@ describe("OnboardingSetupChat — reuses the real chat surface, does not reinven
     expect(src).toMatch(/from ["']@\/components\/features\/chat\/composer\/chat-composer["']/)
     expect(src).not.toMatch(/<textarea/i)
     expect(src).not.toMatch(/<Textarea/)
+  })
+})
+
+describe("onboarding chat transport and asynchronous boundaries", () => {
+  const session = { agentId: "a1", sessionId: "s1", workspaceId: "ws-test" }
+  beforeEach(() => { startSetupAgentSessionMock.mockResolvedValue({ ok: true, session }); mockUseChat([]) })
+  it("finishes starting under Strict Mode without provisioning twice", async () => {
+    render(<StrictMode><OnboardingSetupChat onUnavailable={vi.fn()} onProposalApplied={vi.fn()} /></StrictMode>)
+    await screen.findByTestId("onboarding-chat-welcome")
+    expect(startSetupAgentSessionMock).toHaveBeenCalledOnce()
+    expect(screen.queryByText(/Waking up Crewship Guide/)).toBeNull()
+  })
+  it("does not notify an unmounted parent when startup completes", async () => {
+    let finish!: (value: unknown) => void
+    startSetupAgentSessionMock.mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    const unavailable = vi.fn(); const view = render(<OnboardingSetupChat onUnavailable={unavailable} onProposalApplied={vi.fn()} />)
+    view.unmount(); await act(async () => { finish({ ok: false, reason: "unavailable" }) })
+    expect(unavailable).not.toHaveBeenCalled(); expect(useChatMock).not.toHaveBeenCalled()
+  })
+  it.each([200, 401, 403, 503, 204])("passes correct authentication semantics to the socket hook (HTTP %i)", async (status) => {
+    render(<OnboardingSetupChat onUnavailable={vi.fn()} onProposalApplied={vi.fn()} />)
+    await screen.findByTestId("onboarding-chat-welcome")
+    apiFetchMock.mockResolvedValue({ ok: status < 400, status, json: async () => status === 204 ? {} : { token: "socket-fixture" } })
+    const { getToken } = useChatMock.mock.calls.at(-1)![0]
+    if (status === 200) await expect(getToken()).resolves.toBe("socket-fixture")
+    else if (status === 401 || status === 403) await expect(getToken()).resolves.toBeNull()
+    else await expect(getToken()).rejects.toThrow(status === 503 ? "503" : "missing token")
+  })
+  it.each(["http", "network", "invalid"])("opens the history gate after %s failure", async (failure) => {
+    if (failure === "network") apiFetchMock.mockRejectedValue(new Error("offline"))
+    else apiFetchMock.mockResolvedValue({ ok: failure !== "http", json: async () => null })
+    render(<OnboardingSetupChat onUnavailable={vi.fn()} onProposalApplied={vi.fn()} language="Unknown" />)
+    await screen.findByTestId("onboarding-chat-welcome")
+    const chat = useChatMock.mock.results[0].value
+    if (failure === "invalid") expect(chat.loadHistory).toHaveBeenCalledWith([])
+    else expect(chat.markHistoryUnavailable).toHaveBeenCalledOnce()
+  })
+  it("normalizes incomplete history rows before giving them to the shared transport", async () => {
+    apiFetchMock.mockResolvedValue({ ok: true, json: async () => ({ messages: [{ role: "tool", parts: [], metadata: null }, { role: "system", content: 3, ts: "2026-10-02T00:00:00Z" }, { role: "unknown", content: "Reply" }] }) })
+    render(<OnboardingSetupChat onUnavailable={vi.fn()} onProposalApplied={vi.fn()} />)
+    await screen.findByTestId("onboarding-chat-welcome")
+    expect(useChatMock.mock.results[0].value.loadHistory).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ id: "setup-history-s1-0", role: "tool", content: "", parts: [] }),
+      expect.objectContaining({ role: "assistant", content: "Reply" }),
+    ]))
+  })
+  it("shows reconnecting without offering send shortcuts", async () => {
+    mockUseChat([], { connectionStatus: "connecting" })
+    render(<OnboardingSetupChat onUnavailable={vi.fn()} onProposalApplied={vi.fn()} />)
+    expect(await screen.findByTestId("onboarding-chat-connection")).toHaveTextContent("connecting")
+    expect(screen.getByText("Reconnecting to the Guide…")).toBeVisible()
+  })
+  it.each([new Error("Preview unavailable"), "opaque failure"])("surfaces preparation failure %s without applying anything", async (error) => {
+    mockUseChat([turn({ role: "assistant", metadata: SUGGESTION_METADATA })])
+    createOnboardingProposalMock.mockRejectedValue(error)
+    render(<OnboardingSetupChat onUnavailable={vi.fn()} onProposalApplied={vi.fn()} />)
+    expect(await screen.findByRole("alert")).toHaveTextContent(error instanceof Error ? error.message : "Could not prepare the proposal")
+    expect(applyOnboardingProposalMock).not.toHaveBeenCalled()
+  })
+  it.each([new Error("Apply unavailable"), "opaque failure"])("keeps a rejected proposal available for a human retry (%s)", async (error) => {
+    mockUseChat([turn({ role: "assistant", metadata: SUGGESTION_METADATA })]); createOnboardingProposalMock.mockResolvedValue(PROPOSAL)
+    applyOnboardingProposalMock.mockRejectedValueOnce(error).mockResolvedValueOnce({ crewId: "created" })
+    const applied = vi.fn(); render(<OnboardingSetupChat onUnavailable={vi.fn()} onProposalApplied={applied} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Create" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(error instanceof Error ? error.message : "Could not create the crew")
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create" })).toBeEnabled())
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+    await waitFor(() => expect(applied).toHaveBeenCalledOnce())
+  })
+  it("retains the newest preview when an older request resolves last", async () => {
+    let finish!: (value: OnboardingProposal) => void
+    createOnboardingProposalMock.mockReturnValueOnce(new Promise<OnboardingProposal>((resolve) => { finish = resolve })).mockResolvedValueOnce({ ...PROPOSAL, id: "new", crewName: "New crew" })
+    const first = turn({ id: "old", role: "assistant", metadata: SUGGESTION_METADATA })
+    mockUseChat([first]); const prepared = vi.fn(); const applied = vi.fn(); const unavailable = vi.fn()
+    const view = render(<OnboardingSetupChat onUnavailable={unavailable} onProposalApplied={applied} onProposalPrepared={prepared} />)
+    await waitFor(() => expect(createOnboardingProposalMock).toHaveBeenCalledOnce())
+    const chat = useChatMock.mock.results[0].value
+    useChatMock.mockReturnValue({ ...chat, turns: [first, turn({ id: "new", role: "assistant", metadata: SUGGESTION_METADATA })] })
+    view.rerender(<OnboardingSetupChat onUnavailable={unavailable} onProposalApplied={applied} onProposalPrepared={prepared} />)
+    await screen.findByText("New crew")
+    await act(async () => { finish(PROPOSAL) })
+    expect(screen.queryByText(PROPOSAL.crewName)).toBeNull()
+    expect(prepared).toHaveBeenLastCalledWith(expect.objectContaining({ id: "new" }))
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+    expect(applyOnboardingProposalMock).toHaveBeenCalledWith("new", "ws-test")
   })
 })

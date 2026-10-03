@@ -308,6 +308,13 @@ func (l *Lease) attempt(ctx context.Context) {
 // measured against the local monotonic clock: a confirmation older than the TTL
 // is treated as lost even if attempt() hasn't run since.
 func (l *Lease) IsLeader() bool {
+	// The DB row may still be fresh after cancellation, or already released by
+	// Stop. Neither permits a participant whose renewal loop ended to fire work.
+	select {
+	case <-l.stopped:
+		return false
+	default:
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.held && l.localNow().Sub(l.lastConfirmed) < l.ttl

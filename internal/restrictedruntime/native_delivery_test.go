@@ -62,7 +62,12 @@ func nativeDeliveryPlan(t *testing.T) Plan {
 func TestNativeDeliveryRequiresValidatedCompletionAndDurableReceipt(t *testing.T) {
 	for _, kind := range []string{"valid", "content type", "upgrade", "encoding", "non-200", "declared oversize", "read failure", "body oversize", "provider secret", "wrong model", "invalid tool", "receipt rejected", "delivery rejected", "revoked before read", "revoked on receipt"} {
 		t.Run(kind, func(t *testing.T) {
-			p := nativeDeliveryPlan(t)
+			grant := nativeDeliveryPlan(t).Network.Grants[0]
+			// Exercise native response validation/durable delivery with the
+			// portable broker authority fixture. Host AppArmor admission is a
+			// separate boundary: these protocol cases must run on CI kernels
+			// that do not have the native policy installed, including arm64.
+			p := streamingPlan()
 			s, base := brokerTestSession(t, p)
 			authority := &completionAuthority{brokerFixtureAuthority: base}
 			s.manager.Authority = authority
@@ -103,7 +108,7 @@ func TestNativeDeliveryRequiresValidatedCompletionAndDurableReceipt(t *testing.T
 				authority.afterComplete = func() { base.revoke("h") }
 			}
 			var frames []brokerFrame
-			result, usage := s.brokerNativeStream(t.Context(), response, p.Network.Grants[0], BoundSecret{Value: "provider-canary", Expires: time.Now().Add(time.Minute)}, authority, "owned-ticket", func(frame brokerFrame) error {
+			result, usage := s.brokerNativeStream(t.Context(), response, grant, BoundSecret{Value: "provider-canary", Expires: time.Now().Add(time.Minute)}, authority, "owned-ticket", func(frame brokerFrame) error {
 				if authority.completed != 1 {
 					t.Error("output emitted before durable receipt")
 				}

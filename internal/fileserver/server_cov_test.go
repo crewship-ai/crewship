@@ -331,3 +331,51 @@ func TestCrewIDTraversalForbidden(t *testing.T) {
 		})
 	}
 }
+
+func TestFileListRejectsARegularFileAsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "crew"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "crew", "private.txt"), []byte("file-content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	NewServer(dir).HandleFileList(w, listRequest("crew", "private.txt"))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("file listing status=%d body=%s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "internal server error\n" {
+		t.Fatalf("file content or storage path leaked: %s", w.Body.String())
+	}
+}
+
+func TestInaccessibleStorageReturnsGenericError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses discretionary file permissions")
+	}
+	dir := t.TempDir()
+	crew := filepath.Join(dir, "crew")
+	if err := os.Mkdir(crew, 0700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(crew, "private.txt")
+	if err := os.WriteFile(file, []byte("private-content"), 0000); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(dir)
+	download := httptest.NewRecorder()
+	server.HandleFileDownload(download, downloadRequest("crew", "private.txt"))
+	if download.Code != http.StatusInternalServerError || download.Body.String() != "internal server error\n" {
+		t.Fatalf("inaccessible download: %d %s", download.Code, download.Body.String())
+	}
+	if err := os.Chmod(crew, 0000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(crew, 0700)
+	list := httptest.NewRecorder()
+	server.HandleFileList(list, listRequest("crew", ""))
+	if list.Code != http.StatusInternalServerError || list.Body.String() != "internal server error\n" {
+		t.Fatalf("inaccessible listing: %d %s", list.Code, list.Body.String())
+	}
+}

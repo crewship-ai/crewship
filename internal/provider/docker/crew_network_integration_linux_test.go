@@ -183,6 +183,10 @@ func TestCleanupRuntimeCrewNetworkIntegration(t *testing.T) {
 		t.Fatalf("ensureCrewNetwork: %v", err)
 	}
 	defer func() { _, _ = p.client.NetworkRemove(context.Background(), name, client.NetworkRemoveOptions{}) }()
+	// This test must also work first under -shuffle, on an empty image cache.
+	if err := p.pullSidecarImage(ctx, "alpine:3"); err != nil {
+		t.Fatalf("pull alpine:3: %v", err)
+	}
 	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config:     &container.Config{Image: "alpine:3", Cmd: []string{"sleep", "60"}},
 		HostConfig: &container.HostConfig{NetworkMode: container.NetworkMode(name)},
