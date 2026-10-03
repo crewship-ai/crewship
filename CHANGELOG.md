@@ -20,6 +20,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Enforce Page build output limits on actual subprocess pipes; prevent an inherited buffer fast path from bypassing cancellation and retaining unbounded worker output.
+
+- Keep integration catalogs and workspace summaries current when searches or workspace selections change; ignore obsolete API-key saves and encode scoped identifiers. Add recovery coverage for dispatch, off-site backups and conversation writes.
+
 - Connector access editing refuses to save when existing grants cannot be read, encodes resource identifiers, and ignores stale tool, summary and save responses after the selected agent or workspace changes. A missing workspace no longer leaves the connector summary loading indefinitely.
 
 - Runtime reconciliation uses the latest inspected container state, so a stale running-list entry cannot return a stopped crew as ready, and a stale stopped-list entry cannot trigger replacement of a now-live crew.
