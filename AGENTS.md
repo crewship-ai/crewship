@@ -85,8 +85,7 @@ binary has no UI (every UI route → `503` + an explanatory page); run
 
 CodeQL findings can live only in a run’s annotations; inspect them as well as the aggregate check.
 
-CodeRabbit was retired on 2026-10-02. Do not wait for its status or request
-bot reviews. Review the final diff and document concrete findings, fixes and
+Review the final diff and document concrete findings, fixes and
 validation in the PR. Keep required CI checks green; skipped checks are not
 execution evidence. A self-review must be labelled as such, not presented as
 an independent review. See [CONTRIBUTING.md](CONTRIBUTING.md#review-before-merge).
