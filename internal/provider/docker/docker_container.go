@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	cerrdefs "github.com/containerd/errdefs"
 	"os"
 	goruntime "runtime"
 	"strings"
@@ -1823,6 +1824,9 @@ func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) er
 func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*provider.ContainerStatus, error) {
 	inspectResult, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return nil, fmt.Errorf("container inspect: %w: %s", provider.ErrContainerNotFound, containerID)
+		}
 		return nil, fmt.Errorf("container inspect: %w", err)
 	}
 	inspect := inspectResult.Container

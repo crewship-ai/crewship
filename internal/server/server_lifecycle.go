@@ -1052,17 +1052,38 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 			var run orchestrator.RunState
 			if err := json.Unmarshal(raw, &run); err != nil {
 				s.logger.Error("decode recovered runtime identity", "error", err)
+				if owner := orchestrator.RuntimeRecordAgent(raw); owner != "" {
+					protectedAgents[owner] = true
+					legacyAgents[owner] = true
+					continue
+				}
 				return
 			}
-			if (run.Status == "running" || (run.Status == "cancelled" && run.StopJournalPending)) && run.AgentID != "" {
+			if run.Status == "running" && s.orchestrator != nil {
+				probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				absent, err := s.orchestrator.ReconcileRecoveredRun(probeCtx, run)
+				cancel()
+				if err != nil {
+					s.logger.Warn("reconcile recovered runtime", "run_id", run.ID, "error", err)
+				}
+				if absent && err == nil {
+					run.Status = "cancelled"
+					run.StopJournalPending = true
+				}
+			}
+			if run.Status == "running" && run.AgentID != "" {
 				protectedAgents[run.AgentID] = true
 				if run.ID == "" || run.ID == run.AgentID {
-					// Before per-run identities, runtime records used the agent key and
-					// cannot be mapped to one journal trace. Preserve that agent's traces.
 					legacyAgents[run.AgentID] = true
 				} else {
 					protectedRuns[run.ID] = true
 				}
+			}
+			// A confirmed stop protects only its trace from generic recovery,
+			// never unrelated runs or the entire agent's status.
+			if run.Status == "cancelled" && run.StopJournalPending && run.ID != "" {
+				protectedRuns[run.ID] = true
+
 			}
 		}
 	}
@@ -1112,9 +1133,6 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 		}
 	}
 	_ = rows.Close()
-	if len(orphans) == 0 {
-		return
-	}
 
 	s.logger.Info("recovered orphaned runs", "count", len(orphans))
 
