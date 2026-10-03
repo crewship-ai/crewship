@@ -178,8 +178,8 @@ func TestRecoveryLeavesWorkOwnedRunToDispatcher(t *testing.T) {
 	if err := s.flushRecoveredStops(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if !pendingStop(t, s, attempt.RunID) {
-		t.Fatal("unconfirmed work outcome acknowledged")
+	if pendingStop(t, s, attempt.RunID) {
+		t.Fatal("dispatcher-owned marker never acknowledged")
 	}
 	s.recoverOrphanedRuns(t.Context())
 	if n := recoveryTerminalCount(t, s, attempt.RunID); n != 0 {

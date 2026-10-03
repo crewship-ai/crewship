@@ -194,8 +194,11 @@ func TestRecoveredStopHistoryMakesBoundedProgressPastUnresolvedRuns(t *testing.T
 	if remaining != 0 {
 		t.Fatalf("%d actionable stops starved behind unresolved entries", remaining)
 	}
-	if !pendingStop(t, s, "absent-000") {
-		t.Fatal("invented history for unresolved manual run")
+	if pendingStop(t, s, "absent-000") {
+		t.Fatal("manual stop never acknowledged")
+	}
+	if n := recoveryTerminalCount(t, s, "absent-000"); n != 0 {
+		t.Fatal("invented manual history")
 	}
 }
 
@@ -280,4 +283,8 @@ func TestRecoveredStopHistoryExpiredBudgetPreservesPendingWork(t *testing.T) {
 	if pendingStop(t, s, "stopped") {
 		t.Fatal("next drain failed to acknowledge the stop")
 	}
+}
+
+func (failedStopAcknowledgement) Update(context.Context, string, string, func([]byte) ([]byte, error)) error {
+	return errors.New("state acknowledgement unavailable")
 }

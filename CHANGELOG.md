@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Old stop markers could keep agents RUNNING across later restarts.** Manual and dispatcher-owned stops now release their projection markers; pending history protects only its own trace. Atomic state updates preserve concurrent terminal results.
+
 - **Restarted agents could remain RUNNING after their container disappeared, and a concurrent stop could miss a newly tracked invocation.** Recovery now confirms container absence, and stop closes the live invocation gate before reporting success.
 
 ### Added

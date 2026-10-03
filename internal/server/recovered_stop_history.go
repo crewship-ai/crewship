@@ -11,6 +11,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // flushRecoveredStops drains the durable stop outbox. Runtime absence is
@@ -51,7 +52,12 @@ func (s *Server) flushRecoveredStopsBatch(ctx context.Context) error {
 		keys = append(keys, key)
 		var run orchestrator.RunState
 		if err := json.Unmarshal(raw, &run); err != nil {
-			// Unknown runtime ownership cannot justify projecting STOPPED.
+			// Corruption with a readable owner only protects that agent.
+			if owner := orchestrator.RuntimeRecordAgent(raw); owner != "" {
+				durableRunning[owner] = true
+				continue
+			}
+			// Without an owner, absence cannot safely be projected.
 			return fmt.Errorf("inspect runtime ownership for stop projection: %w", err)
 		}
 		if run.Status == "running" && run.AgentID != "" {
@@ -99,16 +105,19 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
  FROM journal_entries je WHERE je.trace_id=? AND je.agent_id=? AND je.entry_type='run.started' LIMIT 1`, run.ID, run.AgentID).
 		Scan(&workspace, &terminal, &workOwned, &recoveredTerminal)
 	if errors.Is(err, sql.ErrNoRows) {
-		// Some manual IPC runs have no journal trace; a delayed run.started
-		// may also not have committed yet. Neither authorizes inventing one.
-		return nil
+		// Runtime absence is already durable. No history exists to project.
+		// A delayed start is handled by normal orphan recovery, not a marker
+		// that would otherwise protect this agent forever.
+		return s.ackRecoveredStop(ctx, run.ID)
 	}
 	if err != nil {
 		return err
 	}
 	if !terminal {
 		if workOwned {
-			return nil
+			// Dispatcher owns the outcome; acknowledging our projection marker
+			// does not settle or overwrite its fenced attempt.
+			return s.ackRecoveredStop(ctx, run.ID)
 		}
 		if _, err := s.journalWriter.EmitSync(ctx, journal.Entry{
 			ID: "recovered-stop:" + run.ID, WorkspaceID: workspace, AgentID: run.AgentID,
@@ -133,21 +142,23 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
 			return err
 		}
 	}
-	// Read again so acknowledging the outbox does not restore an older copy
-	// of unrelated state fields. Clearing only after a durable terminal makes
-	// failed writes and a crash after journal commit safe to retry.
-	raw, err := s.state.Get(ctx, "agent_runs", run.ID)
-	if err != nil {
-		return err
+	return s.ackRecoveredStop(ctx, run.ID)
+}
+
+func (s *Server) ackRecoveredStop(ctx context.Context, id string) error {
+	atomic, ok := s.state.(provider.AtomicStateProvider)
+	if !ok {
+		return fmt.Errorf("state provider cannot atomically acknowledge recovered stop")
 	}
-	var current orchestrator.RunState
-	if err := json.Unmarshal(raw, &current); err != nil {
-		return err
-	}
-	current.StopJournalPending = false
-	raw, err = json.Marshal(current)
-	if err != nil {
-		return err
-	}
-	return s.state.Set(ctx, "agent_runs", run.ID, raw)
+	return atomic.Update(ctx, "agent_runs", id, func(raw []byte) ([]byte, error) {
+		if raw == nil {
+			return nil, nil
+		}
+		var current orchestrator.RunState
+		if err := json.Unmarshal(raw, &current); err != nil {
+			return nil, err
+		}
+		current.StopJournalPending = false
+		return json.Marshal(current)
+	})
 }
