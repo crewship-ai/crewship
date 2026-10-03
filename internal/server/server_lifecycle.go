@@ -102,6 +102,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// Recover orphaned RUNNING runs from previous crashes/restarts.
 	// Without this, agents whose runs were interrupted stay RUNNING forever.
 	if s.db != nil {
+		if err := s.flushRecoveredStops(ctx); err != nil {
+			s.logger.Warn("recover confirmed stop history", "error", err)
+		}
 		s.recoverOrphanedRuns(ctx)
 	}
 
@@ -252,6 +255,9 @@ func (s *Server) Start(ctx context.Context) error {
 			for {
 				if res := s.orchestrator.StopDeletedAgentRuns(ctx, "", lookup); res.Stopped > 0 || res.Pending > 0 {
 					s.logger.Info("deleted agent runs", "stopped", res.Stopped, "pending", res.Pending, "error", errors.Join(res.Errors...))
+				}
+				if err := s.flushRecoveredStops(ctx); err != nil {
+					s.logger.Warn("confirmed stop history pending retry", "error", err)
 				}
 				select {
 				case <-ctx.Done():
@@ -1033,7 +1039,9 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	// The server losing a stream does not kill the container's process. Keep
 	// durable running identities visible and stoppable; journal recovery must
 	// not invent cancellation or IDLE for a runtime it has not stopped.
-	protected := map[string]bool{}
+	protectedAgents := map[string]bool{}
+	protectedRuns := map[string]bool{}
+	legacyAgents := map[string]bool{}
 	if s.state != nil {
 		states, err := s.state.List(ctx, "agent_runs")
 		if err != nil {
@@ -1046,8 +1054,15 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 				s.logger.Error("decode recovered runtime identity", "error", err)
 				return
 			}
-			if run.Status == "running" && run.AgentID != "" {
-				protected[run.AgentID] = true
+			if (run.Status == "running" || (run.Status == "cancelled" && run.StopJournalPending)) && run.AgentID != "" {
+				protectedAgents[run.AgentID] = true
+				if run.ID == "" || run.ID == run.AgentID {
+					// Before per-run identities, runtime records used the agent key and
+					// cannot be mapped to one journal trace. Preserve that agent's traces.
+					legacyAgents[run.AgentID] = true
+				} else {
+					protectedRuns[run.ID] = true
+				}
 			}
 		}
 	}
@@ -1076,6 +1091,9 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 		       MAX(COALESCE(json_extract(je1.payload, '$.chat_id'), ''))
 		FROM journal_entries je1
 		WHERE je1.entry_type = 'run.started'
+		  -- Durable work owns settlement, including attempts with no runtime
+		  -- record yet. Generic startup cleanup must not invent its outcome.
+		  AND NOT EXISTS (SELECT 1 FROM work_attempts wa WHERE wa.run_id = je1.trace_id)
 		  AND NOT EXISTS (
 		    SELECT 1 FROM journal_entries je2
 		    WHERE je2.workspace_id = je1.workspace_id
@@ -1089,7 +1107,7 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	}
 	for rows.Next() {
 		var o orphan
-		if scanErr := rows.Scan(&o.id, &o.agentID, &o.workspaceID, &o.chatID); scanErr == nil && !protected[o.agentID] {
+		if scanErr := rows.Scan(&o.id, &o.agentID, &o.workspaceID, &o.chatID); scanErr == nil && !protectedRuns[o.id] && !legacyAgents[o.agentID] {
 			orphans = append(orphans, o)
 		}
 	}
@@ -1177,7 +1195,7 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	args := []any{now}
 	guard := ""
-	for id := range protected {
+	for id := range protectedAgents {
 		args = append(args, id)
 		guard += "?,"
 	}

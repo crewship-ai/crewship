@@ -213,6 +213,23 @@ func (o *Orchestrator) stopAgentInvocation(ctx context.Context, c *agentRunContr
 // succeeds. Both explicit stops and deleted-agent cleanup retain retry evidence
 // if storage is unavailable after the provider has confirmed runtime absence.
 func (o *Orchestrator) persistStoppedRun(ctx context.Context, state RunState) error {
+	raw, err := o.state.Get(ctx, "agent_runs", state.ID)
+	if err != nil {
+		return fmt.Errorf("read stopped run %s: %w", state.ID, err)
+	}
+	var current RunState
+	if err := json.Unmarshal(raw, &current); err != nil {
+		return fmt.Errorf("decode stopped run %s: %w", state.ID, err)
+	}
+	// A normal completion may have won while the stop probe was in flight.
+	// Preserve its outcome and leave its completion owner responsible for it.
+	if current.Status != "running" {
+		return nil
+	}
+	state = current
+	if _, owned := o.agentRuns.Load(state.ID); !owned {
+		state.StopJournalPending = true
+	}
 	state.Status, state.LastActivity = "cancelled", time.Now()
 	data, err := json.Marshal(state)
 	if err != nil {

@@ -41,7 +41,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Concurrent starts can no longer fork installation identities by observing a partially written nonce owner; owner publication is atomic and malformed records fail without re-keying.
 
 ### Added
-- Agent runtime diagnostics now find runs by their durable run IDs, prefer an active invocation, and report unavailable state instead of inventing an idle result.
 - **A fenced crew can reach its own services.** A restricted crew on the egress-fence pilot that declares `services:` and is on its own network now gets a narrow path to them: each service has a fixed address on the crew network, the fence opens exactly those addresses on their ports, and the names resolve from the runtime's `/etc/hosts` because DNS stays closed. Declaring a service whose name sorts first shifts the others to new addresses: they are re-attached there and the fence follows, also when ensuring the services fails part-way. The same crew on the shared network is still refused. (#1368, #2240)
 
 - Upload encrypted recovery archives through Admin › Backups › Recovery or `crewship admin instance backups upload`, with cancellation, checksum validation, disk-space checks and atomic catalog/audit recording.
@@ -53,6 +52,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Fixed
 
 - Docker environment builds publish immutable local image references, so another rebuild cannot silently replace a selected artifact. Failed explicit rebuilds keep the previous reference; cache inventory and ordinary cleanup recognize image-ID references. The build cache key advances once to avoid retagging legacy references.
+- Confirmed stops recovered after restart now retain a durable journal retry until history and agent state are recorded; retries preserve existing outcomes and leave work-owned settlement to the dispatcher.
+- Agent runtime diagnostics now find runs by their durable run IDs, prefer an active invocation, and report unavailable state instead of inventing an idle result.
+- Restart recovery preserves the exact live run while closing older orphan traces, and leaves work-owned outcomes to the durable dispatcher. Legacy agent-keyed runtime records remain conservatively protected.
 - Runtime reconciliation uses the latest container inspection rather than an older list snapshot, avoiding stopped-container reuse or removal of a newly running container.
 - Agent stop recovers durable runtime identities after a server restart and refuses to confirm process absence when the signal tool is unavailable.
 - Crew restore skips empty sections and prepares missing shared memory directories, preserves file modes and timestamps, and verifies the shared permissions before writing payloads. Off-site fetch registers downloaded bundles in the local catalog without overwriting another fetch.

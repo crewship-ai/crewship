@@ -231,6 +231,9 @@ func (s *Server) handleAgentStop(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime stop not confirmed"})
 		return
 	}
+	if err := s.flushRecoveredStops(ctx); err != nil {
+		s.logger.Warn("confirmed stop history pending retry", "agent_id", id, "error", err)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"agent_id": id,

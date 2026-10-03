@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -59,10 +60,42 @@ func TestStopAgentRecoversPersistedRunAfterRestart(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("confirmed stop before process exit")
 	}
+	raw, err := state.Get(ctx, "agent_runs", a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stopped RunState
+	if err := json.Unmarshal(raw, &stopped); err != nil {
+		t.Fatal(err)
+	}
+	if !stopped.StopJournalPending {
+		t.Fatal("recovered stop lost journal retry")
+	}
 	if runStatus(t, state, a.ID) != "cancelled" {
 		t.Fatal("recovered stop did not persist cancellation")
 	}
 	if alive, err := restarted.RunIsAliveAt(ctx, RunLocation{ContainerID: b.ContainerID, AgentSlug: b.AgentSlug, RunID: b.ID}); !alive || err != nil {
 		t.Fatalf("other agent affected: %v %v", alive, err)
+	}
+}
+
+func TestConfirmedStopPreservesCompletionThatAlreadySettled(t *testing.T) {
+	state := newMemState()
+	run := RunState{ID: "settled", AgentID: "a", Status: "completed"}
+	raw, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Set(t.Context(), "agent_runs", run.ID, raw); err != nil {
+		t.Fatal(err)
+	}
+	o := New(stopProcessContainer{}, state, slog.Default())
+	stale := run
+	stale.Status = "running"
+	if err := o.persistStoppedRun(t.Context(), stale); err != nil {
+		t.Fatal(err)
+	}
+	if got := runStatus(t, state, run.ID); got != "completed" {
+		t.Fatalf("completion overwritten: %s", got)
 	}
 }

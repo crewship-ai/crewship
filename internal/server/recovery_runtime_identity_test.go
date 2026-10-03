@@ -9,6 +9,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 func TestRecoveryPreservesDurableRunningAgent(t *testing.T) {
@@ -24,11 +25,11 @@ func TestRecoveryPreservesDurableRunningAgent(t *testing.T) {
 		mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES(?,'recover-w',?,?,'RUNNING')`, id, id, id)
 		mustExec(t, s.db, `INSERT INTO journal_entries(id,workspace_id,agent_id,ts,entry_type,severity,actor_type,summary,payload,refs,trace_id,priority) VALUES(?,'recover-w',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'run.started','info','sidecar','started','{}','{}',?,'normal')`, "j-"+id, id, "trace-"+id)
 	}
-	raw, err := json.Marshal(orchestrator.RunState{ID: "runtime-live", AgentID: "live", AgentSlug: "live", ContainerID: "container-live", Status: "running"})
+	raw, err := json.Marshal(orchestrator.RunState{ID: "trace-live", AgentID: "live", AgentSlug: "live", ContainerID: "container-live", Status: "running"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.state.Set(t.Context(), "agent_runs", "runtime-live", raw); err != nil {
+	if err := s.state.Set(t.Context(), "agent_runs", "trace-live", raw); err != nil {
 		t.Fatal(err)
 	}
 	s.recoverOrphanedRuns(t.Context())
@@ -87,5 +88,105 @@ func TestAgentStatusFindsRunIdentityAndPrefersActive(t *testing.T) {
 	}
 	if out.Code != 200 || got.ID != "run-active" || got.Status != "running" {
 		t.Fatalf("active run hidden: %d %s", out.Code, out.Body.String())
+	}
+}
+
+func seedRecoveryTrace(t *testing.T, s *Server, id, agent string) {
+	t.Helper()
+	mustExec(t, s.db, `INSERT INTO journal_entries(id,workspace_id,agent_id,ts,entry_type,severity,actor_type,summary,payload,refs,trace_id,priority) VALUES(?,'rw',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'run.started','info','sidecar','started','{}','{}',?,'normal')`, "j-"+id, agent, id)
+}
+func recoveryTerminalCount(t *testing.T, s *Server, id string) int {
+	t.Helper()
+	if err := s.journalWriter.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := s.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM journal_entries WHERE trace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')`, id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+func TestRecoveryUsesExactRunIdentityWithLegacyFallback(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(map[bool]string{false: "run-keyed", true: "legacy-agent-keyed"}[legacy], func(t *testing.T) {
+			s := newTestServerWithDeps(t)
+			mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+			mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+			seedRecoveryTrace(t, s, "live-trace", "a")
+			seedRecoveryTrace(t, s, "old-trace", "a")
+			id := "live-trace"
+			if legacy {
+				id = "a"
+			}
+			raw, err := json.Marshal(orchestrator.RunState{ID: id, AgentID: "a", Status: "running"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.state.Set(t.Context(), "agent_runs", id, raw); err != nil {
+				t.Fatal(err)
+			}
+			s.recoverOrphanedRuns(t.Context())
+			if n := recoveryTerminalCount(t, s, "live-trace"); n != 0 {
+				t.Fatalf("live run terminalized: %d", n)
+			}
+			want := 1
+			if legacy {
+				want = 0
+			}
+			if n := recoveryTerminalCount(t, s, "old-trace"); n != want {
+				t.Fatalf("old trace terminals=%d want=%d", n, want)
+			}
+			var status string
+			if err := s.db.QueryRow(`SELECT status FROM agents WHERE id='a'`).Scan(&status); err != nil {
+				t.Fatal(err)
+			}
+			if status != "RUNNING" {
+				t.Fatalf("live agent=%s", status)
+			}
+			s.recoverOrphanedRuns(t.Context())
+			if n := recoveryTerminalCount(t, s, "old-trace"); n != want {
+				t.Fatalf("repeat recovery terminals=%d want=%d", n, want)
+			}
+		})
+	}
+}
+func TestRecoveryLeavesWorkOwnedRunToDispatcher(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+	store := work.NewStore(s.db)
+	tx, err := s.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := store.AcceptTx(t.Context(), tx, work.AcceptRequest{WorkspaceID: "rw", AgentID: "a", Source: work.SourceWebhook, Class: work.ClassBackground}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "old-server"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempt == nil {
+		t.Fatal("no claim")
+	}
+	seedRecoveryTrace(t, s, attempt.RunID, "a")
+	seedStoppedOutbox(t, s, attempt.RunID)
+	if err := s.flushRecoveredStops(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !pendingStop(t, s, attempt.RunID) {
+		t.Fatal("unconfirmed work outcome acknowledged")
+	}
+	s.recoverOrphanedRuns(t.Context())
+	if n := recoveryTerminalCount(t, s, attempt.RunID); n != 0 {
+		t.Fatalf("generic recovery bypassed work outcome: %d terminals", n)
+	}
+	projection, owned, err := store.RunProjection(t.Context(), attempt.RunID)
+	if err != nil || !owned || projection.Ready {
+		t.Fatalf("work projection changed: %+v %v %v", projection, owned, err)
 	}
 }
