@@ -77,6 +77,9 @@ not a full authorization system: server permissions still apply. For finer contr
 restricts mutations to exact operation IDs. It intersects tag restrictions and
 does not bypass the explicit admin opt-in.
 
+Pending human approvals are bound to the current login as well as the exact request.
+Changing login while a form is pending invalidates that approval; submit a new request.
+
 `--require-approval` requests human confirmation through MCP form elicitation
 before each real write. The client is trusted to present the form to a human;
 this is not proof against a malicious client. Approval continuations expire after
@@ -291,7 +294,7 @@ adapter intentionally exposes JSON HTTP operations, not local shell execution.
 
 ### Scope and remaining limits
 
-MCP pins the server, identity and workspace selectors. `{workspaceId}` is filled
+MCP pins the server, profile and workspace selectors. `{workspaceId}` is filled
 from the launch workspace; a conflicting value is rejected. Such routes require
 an explicit configured workspace. Omit that parameter when using a workspace
 slug; real calls resolve it under a deadline and fail closed on resolution errors.
@@ -299,8 +302,10 @@ Dry-run remains offline and uses the configured selector. This does not validate
 workspace membership of every resource ID or JSON body: server authorization is
 still responsible for that. Global endpoints retain their global scope.
 
-The catalog is embedded, credentials are loaded at startup, and registration
-uses the current executable path. Live-server schema refresh, credential refresh,
-stable upgrade paths, client lifecycle commands and high-level run/wait tools are
-not implemented here. Client registration tests are not model task evaluations;
-no model success-rate or token-saving claim is made.
+The server catalog is loaded at startup; restart MCP to pick up schema changes.
+Stored credentials refresh per request, while environment tokens require a restart.
+Stable symlinks survive upgrades only when the installer preserves that path.
+Native client commands do not provide atomic compare-and-remove: avoid editing
+the same registration concurrently with connect or disconnect.
+Hosted MCP with OAuth is not included. Client registration tests are not model
+task evaluations; no model success-rate or token-saving claim is made.

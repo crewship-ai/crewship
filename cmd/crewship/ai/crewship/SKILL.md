@@ -49,7 +49,7 @@ apply. Do not change them to get an operation through.
 Use `--write-tags` and `--write-operations` to narrow mutations; their restrictions
 intersect and admin writes still need explicit `admin`.
 `--require-approval` requests human confirmation through client MCP elicitation
-and fails closed if unavailable. `confirm_write` alone is not human approval.
+and fails closed if unavailable. A login change while approval is pending requires a new approval. `confirm_write` alone is not human approval.
 
 Use `--dry-run` or `dry_run=true` when a request preview is useful. It checks
 request metadata offline, not server permissions or the body against OpenAPI.

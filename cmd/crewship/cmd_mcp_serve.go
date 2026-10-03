@@ -339,6 +339,7 @@ func (s *cliMCP) server() (*mcp.Server, error) {
 				result, _, marshalErr := cliMCPResult(nil, apiValidation("invalid request arguments: "+err.Error()))
 				return result, marshalErr
 			}
+			requester := s
 			op, err := s.operation(in.OperationID)
 			if err == nil && op.RequiresYes != writeTool {
 				err = apiValidation("operation belongs to the other tool: use crewship_read for reads and crewship_write for mutations")
@@ -347,17 +348,21 @@ func (s *cliMCP) server() (*mcp.Server, error) {
 				if !s.writeAllowed(op) || !in.ConfirmWrite {
 					err = apiValidation("write policy or model acknowledgment missing")
 				} else {
-					pending, approvalErr := approvals.approve(req, in)
-					if approvalErr != nil {
-						err = approvalErr
-					} else if pending != nil {
-						return pending, nil
+					var revision [32]byte
+					requester, revision, err = s.approvalSnapshot()
+					if err == nil {
+						pending, approvalErr := approvals.approve(req, in, revision)
+						if approvalErr != nil {
+							err = approvalErr
+						} else if pending != nil {
+							return pending, nil
+						}
 					}
 				}
 			}
 			var value any
 			if err == nil {
-				value, err = s.request(ctx, in)
+				value, err = requester.request(ctx, in)
 			}
 			result, _, marshalErr := cliMCPResult(value, err)
 			return result, marshalErr

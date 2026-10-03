@@ -18,11 +18,11 @@ import (
 )
 
 type mcpCatalogInfo struct {
-	Source            string `json:"source"`
-	Version           string `json:"version,omitempty"`
-	SHA256            string `json:"sha256,omitempty"`
-	FallbackReason    string `json:"fallback_reason,omitempty"`
-	IgnoredOperations int    `json:"ignored_operations,omitempty"`
+	Source            string `json:"source" yaml:"source"`
+	Version           string `json:"version,omitempty" yaml:"version,omitempty"`
+	SHA256            string `json:"sha256,omitempty" yaml:"sha256,omitempty"`
+	FallbackReason    string `json:"fallback_reason,omitempty" yaml:"fallback_reason,omitempty"`
+	IgnoredOperations int    `json:"ignored_operations,omitempty" yaml:"ignored_operations,omitempty"`
 }
 
 // Capture the credential source and target once, but read the token afresh.

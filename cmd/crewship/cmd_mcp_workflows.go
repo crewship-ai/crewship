@@ -28,30 +28,30 @@ func routineReadOperation(restricted bool) string {
 }
 
 type mcpRunInput struct {
-	Restricted bool   `json:"restricted,omitempty" jsonschema:"True only for a receipt marked restricted; uses the actor-scoped endpoint"`
-	RunID      string `json:"run_id" jsonschema:"Durable routine run ID from the start receipt"`
+	Restricted bool   `json:"restricted,omitempty" yaml:"restricted,omitempty" jsonschema:"True only for a receipt marked restricted; uses the actor-scoped endpoint"`
+	RunID      string `json:"run_id" yaml:"run_id" jsonschema:"Durable routine run ID from the start receipt"`
 }
 type mcpWaitInput struct {
-	Restricted  bool   `json:"restricted,omitempty" jsonschema:"Carry restricted=true from a private receipt when resuming observation"`
-	RunID       string `json:"run_id" jsonschema:"Durable routine run ID; this tool never starts a run"`
-	WaitSeconds int    `json:"wait_seconds,omitempty" jsonschema:"Maximum wait in seconds, default 30, maximum 300"`
+	Restricted  bool   `json:"restricted,omitempty" yaml:"restricted,omitempty" jsonschema:"Carry restricted=true from a private receipt when resuming observation"`
+	RunID       string `json:"run_id" yaml:"run_id" jsonschema:"Durable routine run ID; this tool never starts a run"`
+	WaitSeconds int    `json:"wait_seconds,omitempty" yaml:"wait_seconds,omitempty" jsonschema:"Maximum wait in seconds, default 30, maximum 300"`
 }
 type mcpRoutineListInput struct {
-	Restricted bool `json:"restricted,omitempty" jsonschema:"Use the authorized private routine projection for restricted members"`
+	Restricted bool `json:"restricted,omitempty" yaml:"restricted,omitempty" jsonschema:"Use the authorized private routine projection for restricted members"`
 }
 
 type mcpCrewInput struct {
-	CrewID string `json:"crew_id" jsonschema:"Exact crew ID from crewship_list_crews"`
+	CrewID string `json:"crew_id" yaml:"crew_id" jsonschema:"Exact crew ID from crewship_list_crews"`
 }
 type mcpRoutineStartInput struct {
-	Slug                   string          `json:"slug" jsonschema:"Routine slug from crewship_list_routines"`
-	Inputs                 json.RawMessage `json:"inputs,omitempty" jsonschema:"Routine input object; inspect the routine definition first"`
-	ExpectedExecutionHash  string          `json:"expected_execution_hash,omitempty" jsonschema:"Optional expected execution graph hash from restricted routine discovery"`
-	ExpectedDefinitionHash string          `json:"expected_definition_hash,omitempty" jsonschema:"Optional expected definition hash to refuse changed routines"`
-	IdempotencyKey         string          `json:"idempotency_key,omitempty" jsonschema:"Caller-chosen key for server deduplication; retain the same key when reconciling uncertain submission"`
-	ConfirmWrite           bool            `json:"confirm_write,omitempty" jsonschema:"Model acknowledgment; operator write policy and any required human approval still apply"`
-	DryRun                 bool            `json:"dry_run,omitempty" jsonschema:"Validate request metadata without starting the routine"`
-	WaitSeconds            int             `json:"wait_seconds,omitempty" jsonschema:"Optional bounded wait after accepted run, 0 returns receipt immediately, maximum 300"`
+	Slug                   string          `json:"slug" yaml:"slug" jsonschema:"Routine slug from crewship_list_routines"`
+	Inputs                 json.RawMessage `json:"inputs,omitempty" yaml:"inputs,omitempty" jsonschema:"Routine input object; inspect the routine definition first"`
+	ExpectedExecutionHash  string          `json:"expected_execution_hash,omitempty" yaml:"expected_execution_hash,omitempty" jsonschema:"Optional expected execution graph hash from restricted routine discovery"`
+	ExpectedDefinitionHash string          `json:"expected_definition_hash,omitempty" yaml:"expected_definition_hash,omitempty" jsonschema:"Optional expected definition hash to refuse changed routines"`
+	IdempotencyKey         string          `json:"idempotency_key,omitempty" yaml:"idempotency_key,omitempty" jsonschema:"Caller-chosen key for server deduplication; retain the same key when reconciling uncertain submission"`
+	ConfirmWrite           bool            `json:"confirm_write,omitempty" yaml:"confirm_write,omitempty" jsonschema:"Model acknowledgment; operator write policy and any required human approval still apply"`
+	DryRun                 bool            `json:"dry_run,omitempty" yaml:"dry_run,omitempty" jsonschema:"Validate request metadata without starting the routine"`
+	WaitSeconds            int             `json:"wait_seconds,omitempty" yaml:"wait_seconds,omitempty" jsonschema:"Optional bounded wait after accepted run, 0 returns receipt immediately, maximum 300"`
 }
 
 func (s *cliMCP) workflowRead(ctx context.Context, id string, params map[string]string) (any, error) {
@@ -230,12 +230,18 @@ func (s *cliMCP) startRoutine(ctx context.Context, req *mcp.CallToolRequest, app
 	if err != nil {
 		return finish(nil, err)
 	}
+	requester := s
 	if !in.DryRun {
 		if !s.writeAllowed(op) || !in.ConfirmWrite {
 			return finish(nil, apiValidation("write policy or model acknowledgment missing"))
 		}
 		if s.requireApproval {
-			pending, err := approvals.approve(req, input)
+			var revision [32]byte
+			requester, revision, err = s.approvalSnapshot()
+			if err != nil {
+				return finish(nil, err)
+			}
+			pending, err := approvals.approve(req, input, revision)
 			if err != nil {
 				return finish(nil, err)
 			}
@@ -244,7 +250,7 @@ func (s *cliMCP) startRoutine(ctx context.Context, req *mcp.CallToolRequest, app
 			}
 		}
 	}
-	receipt, err := s.request(ctx, input)
+	receipt, err := requester.request(ctx, input)
 	if err != nil {
 		return finish(nil, err)
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/memory"
 )
 
 var aiConnectionDir = func() (string, error) {
@@ -30,17 +31,17 @@ var aiConnectionDir = func() (string, error) {
 }
 
 type aiEntry struct {
-	Raw     json.RawMessage   `json:"-"`
-	Type    string            `json:"type,omitempty"`
-	Command string            `json:"command"`
-	Args    []string          `json:"args"`
-	Env     map[string]string `json:"env,omitempty"`
+	Raw     json.RawMessage   `json:"-" yaml:"-"`
+	Type    string            `json:"type,omitempty" yaml:"type,omitempty"`
+	Command string            `json:"command" yaml:"command"`
+	Args    []string          `json:"args" yaml:"args"`
+	Env     map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
 }
 type aiConnectionReceipt struct {
-	Client      string `json:"client"`
-	Context     string `json:"context"`
-	Fingerprint string `json:"fingerprint"`
-	Command     string `json:"command"`
+	Client      string `json:"client" yaml:"client"`
+	Context     string `json:"context" yaml:"context"`
+	Fingerprint string `json:"fingerprint" yaml:"fingerprint"`
+	Command     string `json:"command" yaml:"command"`
 }
 
 // Prefer the invoked symlink (e.g. Homebrew's bin/crewship), not the resolved
@@ -171,7 +172,7 @@ func inspectAIEntry(ctx context.Context, client string) (aiEntry, bool, error) {
 			return aiEntry{}, false, fmt.Errorf("Claude configuration unreadable or too large")
 		}
 		var cfg struct {
-			Servers map[string]json.RawMessage `json:"mcpServers"`
+			Servers map[string]json.RawMessage `json:"mcpServers" yaml:"mcpServers"`
 		}
 		if json.Unmarshal(raw, &cfg) != nil {
 			return aiEntry{}, false, fmt.Errorf("invalid Claude user configuration")
@@ -204,7 +205,7 @@ func inspectAIEntry(ctx context.Context, client string) (aiEntry, bool, error) {
 		return aiEntry{}, false, fmt.Errorf("Codex MCP inspection failed; inspect the client configuration locally")
 	}
 	var config struct {
-		Transport aiEntry `json:"transport"`
+		Transport aiEntry `json:"transport" yaml:"transport"`
 	}
 	if json.Unmarshal(out.Bytes(), &config) != nil || config.Transport.Type != "stdio" {
 		return aiEntry{}, true, fmt.Errorf("Crewship entry is not a supported stdio configuration")
@@ -268,23 +269,7 @@ func saveAIReceipt(client string, entry aiEntry) error {
 	if err != nil {
 		return err
 	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".receipt-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(file.Name())
-	if _, err = file.Write(data); err != nil {
-		file.Close()
-		return err
-	}
-	if err = file.Sync(); err != nil {
-		file.Close()
-		return err
-	}
-	if err = file.Close(); err != nil {
-		return err
-	}
-	return os.Rename(file.Name(), path)
+	return memory.WriteFileDurable(path, data, 0600)
 }
 
 func connectAIClient(cmd *cobra.Command, client, executable string, args, registration []string) error {
