@@ -706,6 +706,14 @@ jobs:
           docker version
           docker pull alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
           docker tag alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 alpine:3
+      - name: Require detached launch dependency
+        timeout-minutes: 3
+        run: |
+          if ! command -v tmux >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends tmux
+          fi
+          tmux -V
       - name: Require executed Docker fixtures
         timeout-minutes: 14
         run: python3 scripts/ci/managed-environments.py

@@ -510,8 +510,10 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	// its own finalization path). Synthesize a non-error terminal result so
 	// downstream finalization has an envelope — usage stays absent, which
 	// ParseResultUsage reads as zeros. Flagged via subtype so observability
-	// can count occurrences per adapter.
-	if useStreamJSON && handler != nil && !sawResult && !sawError &&
+	// can count occurrences per adapter. A durable observer can end while
+	// the workload remains alive; that path requires a retained terminal
+	// record and must never infer success from transport EOF.
+	if req.DurableOutputDir == "" && useStreamJSON && handler != nil && !sawResult && !sawError &&
 		ctx.Err() == nil && totalBytes > 0 {
 		o.logger.Warn("stream ended without terminal result — synthesizing",
 			"agent_id", req.AgentID,
