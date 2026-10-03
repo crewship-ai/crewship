@@ -281,7 +281,7 @@ Binaries the build installs on the agent's behalf that mise does not carry (the 
     Server-side validation rejects blobs with whitespace/control chars in the image ref or non-allowlisted feature IDs. JSON config has per-field size limits enforced by the API:
 
     - `devcontainer_config`: 100 KB max
-    - `mise_config`: 10 KB max
+    - `mise_config`: 10 KiB for configuration; an optional native lock has its own 512 KiB decoded-file budget and 4 MiB JSON envelope limit
 
     Configs larger than these limits are rejected at the API layer with HTTP 400. This prevents accidentally storing huge configs (often a sign of pasted-in log output or wrong field).
   </Tab>

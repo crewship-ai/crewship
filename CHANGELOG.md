@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Crew create/update accept bounded native mise lock bundles without expanding the 10 KiB non-lock configuration budget; large escaped locks are no longer truncated by the request reader.
+
 - `crew provision lock-resolve` creates or updates complete native mise lock bundles in a disposable Docker builder, preserving exact pins and reporting the resolver image/platform/version.
 
 - Managed mise builds accept complete native lock bundles, enforce locked reinstall, and preserve lock inputs through manifest and visual tool edits; `crew provision lock-pack` packages local lock files.
