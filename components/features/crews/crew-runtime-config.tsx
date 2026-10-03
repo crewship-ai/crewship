@@ -9,6 +9,7 @@ import { RuntimeConfig, type RuntimeConfigValue } from "@/components/features/cr
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { useAbilities } from "@/hooks/use-abilities"
+import { CrewToolchainStatus } from "./crew-toolchain-status"
 
 interface CrewRuntimeConfigProps {
   crewId: string
@@ -117,7 +118,7 @@ export function CrewRuntimeConfig({
         toast.error(data.error || `HTTP ${res.status}`)
         return
       }
-      toast.success("Cache invalidated. Container will be rebuilt on next start.")
+      toast.success("Rebuild queued. Running environments stay on their current build.")
     } catch {
       toast.error("Network error")
     } finally {
@@ -178,6 +179,8 @@ export function CrewRuntimeConfig({
           </div>
         )}
       </div>
+
+      <CrewToolchainStatus crewId={crewId} workspaceId={workspaceId} refreshKey={[runtimeImage, devcontainerConfig, miseConfig, cachedImage].join("\0")} />
 
       {/* Runtime config editor */}
       {canEdit ? (
