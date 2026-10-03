@@ -110,3 +110,32 @@ func TestReviewCorruptKnownOwnerDoesNotBlockOtherStops(t *testing.T) {
 		t.Fatal("other agent's corruption blocked projection")
 	}
 }
+
+func TestReviewRecoveredAbsenceIsNotUserStop(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+	seedRecoveryTrace(t, s, "gone", "a")
+	raw, _ := json.Marshal(orchestrator.RunState{ID: "gone", AgentID: "a", ContainerID: "old", AgentSlug: "a", Status: "running"})
+	if err := s.state.Set(t.Context(), "agent_runs", "gone", raw); err != nil {
+		t.Fatal(err)
+	}
+	s.orchestrator = orchestrator.New(reviewRecoveryContainer{state: "stopped"}, s.state, s.logger)
+	s.recoverOrphanedRuns(t.Context())
+	if err := s.flushRecoveredStops(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var origin, status string
+	if err := s.db.QueryRow(`SELECT json_extract(payload,'$.metadata.stop_origin') FROM journal_entries WHERE id='recovered-stop:gone'`).Scan(&origin); err != nil {
+		t.Fatal(err)
+	}
+	if origin != "recovered_absence" {
+		t.Fatalf("restart absence invented stop origin %q", origin)
+	}
+	if err := s.db.QueryRow(`SELECT status FROM agents WHERE id='a'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "IDLE" {
+		t.Fatalf("restart absence projected %s", status)
+	}
+}

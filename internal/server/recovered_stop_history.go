@@ -40,9 +40,9 @@ func (s *Server) flushRecoveredStopsBatch(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Resume after the last visited key, wrapping at the end. Unresolved IPC
-	// or work-owned stops keep their markers but cannot consume the first
-	// batch forever. Provider List returns a map, so its order is not a cursor.
+	// Resume after the last visited key, wrapping at the end. Failed
+	// projections retain their markers without starving the next batch.
+	// Provider List returns a map, so its order is not a cursor.
 	keys := make([]string, 0, len(states))
 	durableRunning := map[string]bool{}
 	for key, raw := range states {
@@ -95,6 +95,10 @@ func (s *Server) flushRecoveredStopsBatch(ctx context.Context) error {
 }
 
 func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunState, durableRunning bool) error {
+	origin, reason, summary, idleStatus := "agent_stop", "confirmed_runtime_stop", "run cancelled after confirmed runtime stop", "STOPPED"
+	if run.StopOrigin == "recovered_absence" {
+		origin, reason, summary, idleStatus = "recovered_absence", "server_restart", "runtime absent after server restart; outcome unverified", "IDLE"
+	}
 	var workspace string
 	var terminal, workOwned, recoveredTerminal bool
 	err := s.db.QueryRowContext(ctx, `SELECT je.workspace_id,
@@ -122,8 +126,8 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
 		if _, err := s.journalWriter.EmitSync(ctx, journal.Entry{
 			ID: "recovered-stop:" + run.ID, WorkspaceID: workspace, AgentID: run.AgentID,
 			TraceID: run.ID, Type: journal.EntryRunCancelled, Severity: journal.SeverityNotice,
-			ActorType: journal.ActorSystem, Summary: "run cancelled after confirmed runtime stop",
-			Payload: map[string]any{"reason": "confirmed_runtime_stop", "metadata": map[string]any{"stop_origin": "agent_stop"}},
+			ActorType: journal.ActorSystem, Summary: summary,
+			Payload: map[string]any{"reason": reason, "metadata": map[string]any{"stop_origin": origin}},
 		}); err != nil {
 			return err
 		}
@@ -137,8 +141,8 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
  SELECT 1 FROM journal_entries started WHERE started.workspace_id=? AND started.agent_id=? AND started.entry_type='run.started'
  AND NOT EXISTS (SELECT 1 FROM journal_entries done WHERE done.workspace_id=started.workspace_id AND done.trace_id=started.trace_id
    AND done.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout'))
- ) THEN 'RUNNING' ELSE 'STOPPED' END, updated_at=? WHERE id=? AND workspace_id=? AND deleted_at IS NULL`,
-			durableRunning, workspace, run.AgentID, time.Now().UTC().Format(time.RFC3339), run.AgentID, workspace); err != nil {
+ ) THEN 'RUNNING' ELSE ? END, updated_at=? WHERE id=? AND workspace_id=? AND deleted_at IS NULL`,
+			durableRunning, workspace, run.AgentID, idleStatus, time.Now().UTC().Format(time.RFC3339), run.AgentID, workspace); err != nil {
 			return err
 		}
 	}

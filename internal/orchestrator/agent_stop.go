@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/provider"
 	"sync"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // ErrAgentStopped identifies a SIGTERM exit following an explicit agent stop.
@@ -242,6 +243,10 @@ func (o *Orchestrator) stopAgentInvocation(ctx context.Context, c *agentRunContr
 // succeeds. Both explicit stops and deleted-agent cleanup retain retry evidence
 // if storage is unavailable after the provider has confirmed runtime absence.
 func (o *Orchestrator) persistStoppedRun(ctx context.Context, state RunState) error {
+	return o.persistStoppedRunWithOrigin(ctx, state, "agent_stop")
+}
+
+func (o *Orchestrator) persistStoppedRunWithOrigin(ctx context.Context, state RunState, origin string) error {
 	atomic, ok := o.state.(provider.AtomicStateProvider)
 	if !ok {
 		return fmt.Errorf("state provider cannot atomically persist stopped run")
@@ -258,6 +263,7 @@ func (o *Orchestrator) persistStoppedRun(ctx context.Context, state RunState) er
 		}
 		if _, owned := o.agentRuns.Load(state.ID); !owned {
 			current.StopJournalPending = true
+			current.StopOrigin = origin
 		}
 		current.Status, current.LastActivity = "cancelled", time.Now()
 		return json.Marshal(current)
@@ -275,7 +281,7 @@ func (o *Orchestrator) ReconcileRecoveredRun(ctx context.Context, run RunState) 
 	if err != nil || !absent {
 		return false, err
 	}
-	return true, o.persistStoppedRun(ctx, run)
+	return true, o.persistStoppedRunWithOrigin(ctx, run, "recovered_absence")
 }
 
 // RuntimeRecordAgent recovers only the ownership field when another field is
