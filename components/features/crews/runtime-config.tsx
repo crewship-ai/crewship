@@ -361,7 +361,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
       }),
     [effectiveImage, selectedFeatures, security, passthrough]
   )
-  const miseJSON = useMemo(() => buildMiseJSON(miseTools), [miseTools])
+  const miseJSON = useMemo(() => buildMiseJSON(miseTools, value.miseConfig), [miseTools, value.miseConfig])
 
   // Propagate changes upstream
   const propagate = useCallback(

@@ -90,6 +90,21 @@ ${spec}
     expect(JSON.parse(patch.miseConfig!)).toEqual({ tools: { node: "22", python: "3.12" } })
   })
 
+  it("preserves a native lock bundle and raw mise fields", () => {
+    const { patch } = parseCrewManifest(base(`  mise:
+    tools:
+      node: "22"
+    raw:
+      env:
+        MODE: test
+    lock:
+      schema_version: 1
+      files:
+        mise.lock: "native lock"
+        .mise/locks/gemini/1/package.json: '{}'`))
+    expect(JSON.parse(patch.miseConfig!)).toEqual({ tools: { node: "22" }, env: { MODE: "test" }, lock: { schema_version: 1, files: { "mise.lock": "native lock", ".mise/locks/gemini/1/package.json": "{}" } } })
+  })
+
   it("lets typed devcontainer fields win over raw, as the Go side does", () => {
     const { patch } = parseCrewManifest(
       base('  devcontainer:\n    image: real:1\n    raw:\n      image: shadow:1\n      remoteUser: agent'),

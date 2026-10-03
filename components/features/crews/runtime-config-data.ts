@@ -411,9 +411,18 @@ function buildDevcontainerJSON(
   return JSON.stringify(config, null, 2)
 }
 
-function buildMiseJSON(tools: Record<string, string>): string {
-  if (Object.keys(tools).length === 0) return ""
-  return JSON.stringify({ tools }, null, 2)
+function buildMiseJSON(tools: Record<string, string>, previous = ""): string {
+  // Tool edits must not silently unlock the environment or erase its env.
+  let extras: Record<string, unknown> = {}
+  try {
+    const parsed: unknown = JSON.parse(previous)
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      extras = { ...parsed }
+      delete extras.tools
+    }
+  } catch { /* Existing TOML handling remains outside this JSON editor. */ }
+  if (Object.keys(tools).length === 0 && Object.keys(extras).length === 0) return ""
+  return JSON.stringify({ ...extras, tools }, null, 2)
 }
 
 // ---- Component ------------------------------------------------------------

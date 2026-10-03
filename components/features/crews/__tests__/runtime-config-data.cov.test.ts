@@ -96,6 +96,15 @@ describe("buildMiseJSON", () => {
   })
 })
 
+describe("mise lock preservation", () => {
+  it("retains the complete lock and environment when editing a tool", () => {
+    const lock = { schema_version: 1, files: { "mise.lock": "native lock", ".mise/locks/gemini/1/package.json": "{}" } }
+    const previous = JSON.stringify({ tools: { node: "22" }, lock, env: { MODE: "test" } })
+    expect(JSON.parse(buildMiseJSON({ node: "24" }, previous))).toEqual({ tools: { node: "24" }, lock, env: { MODE: "test" } })
+    expect(JSON.parse(buildMiseJSON({}, previous)).lock).toEqual(lock)
+  })
+})
+
 describe("catalog data", () => {
   it("has exactly one recommended base image and it is Node", () => {
     const recommended = BASE_IMAGES.filter((i) => i.recommended)

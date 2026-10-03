@@ -118,7 +118,9 @@ function miseJSON(mise: Record<string, unknown>): string {
   for (const [tool, version] of Object.entries(tools)) {
     asStrings[tool] = version == null ? "" : String(version)
   }
-  return JSON.stringify({ tools: asStrings })
+  const extras = isRecord(mise.raw) ? { ...mise.raw } : {}
+  if (mise.lock !== undefined) extras.lock = mise.lock
+  return JSON.stringify({ ...extras, tools: asStrings })
 }
 
 /**

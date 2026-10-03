@@ -76,6 +76,11 @@ func configHash(baseImage string, cfg *Config, miseConfig, dockerfile string) st
 	if miseConfig != "" {
 		var miseData any
 		if err := json.Unmarshal([]byte(miseConfig), &miseData); err == nil {
+			// Older installers ignored unknown lock input. Never reuse an image
+			// built before locked installation was enforced for this definition.
+			if fields, ok := miseData.(map[string]any); ok && fields["lock"] != nil {
+				h.Write([]byte("mise-lock-install-v1|"))
+			}
 			sortedMise, _ := json.Marshal(miseData)
 			h.Write(sortedMise)
 		} else {

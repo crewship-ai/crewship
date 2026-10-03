@@ -706,3 +706,39 @@ or disk loss. Nor does it provide automatic activation between runs: publishing 
 new desired image still uses the existing runtime reconciliation path, which may
 replace the container on a subsequent start. Managed automatic updates require a
 separate admission barrier before activation.
+
+### Supplying a native mise lock
+
+The managed build can consume a complete native mise lock bundle. Generate
+`mise.lock` with mise for the **container's** target platform, then run:
+
+```bash
+crewship crew provision lock-pack /path/to/mise-config-directory > lock-bundle.json
+```
+
+This local command reads only `mise.lock` and `.mise/locks/`, rejects symlinks,
+limits file sizes, and does not contact Crewship or change the environment. Keep
+auxiliary files: npm-backed tools may use an aube lock beside `mise.lock`.
+The bundle supports up to 128 UTF-8 files, 128 KiB per file and 512 KiB total.
+
+Put the resulting JSON object in `spec.mise.lock` in a `kind: Crew` manifest,
+alongside `spec.mise.tools`. JSON configuration stored in `mise_config` accepts
+that same `lock` object. Manifest export/import and the visual tools editor
+preserve it. Raw TOML input still supports the existing `[tools]`/`[env]` subset;
+the lock bundle is a Crewship JSON/YAML field, not a new TOML section.
+
+With a bundle, builds install using `mise install --locked --force --yes`.
+An absent version/platform, invalid lock or checksum mismatch fails the build;
+it does not fall back to a floating install. Force reinstalls tools so an
+already-installed version in the base image cannot bypass this check. Added AI
+adapters still need matching entries in the supplied lock. Changing a selector
+in the visual editor preserves the lock and may therefore require regenerating
+it before the next build. Remove the lock explicitly to return to ordinary
+unlocked installation.
+
+Mise owns resolution and backend semantics. A native lock without an upstream
+checksum does not gain one from Crewship, and support varies by backend. The
+bundle does not lock the base image, OS packages, features, build hooks or the
+mise executable itself. It is dependency input, separate from observed CLI
+versions and from qualification of real model/auth combinations. This slice
+adds no scheduled updates or automatic runtime activation.
