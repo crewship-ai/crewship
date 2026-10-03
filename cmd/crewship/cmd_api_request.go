@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -120,6 +121,20 @@ Server authorization, approval gates, and scope restrictions remain in force.`}
 }
 
 func runAPIRequest(cmd *cobra.Command, args []string) error {
+	f := newFormatter()
+	switch f.Format {
+	case "", "table", "json", "yaml", "ndjson", "quiet":
+	default:
+		return apiValidation("unsupported output format")
+	}
+	return executeAPIRequest(cmd, args, newAPIClient(), requireAuth, func(value any) error {
+		return apiStructuredOutput(cmd, value)
+	})
+}
+
+// executeAPIRequest shares validation, auth, redirect and size guards with MCP.
+// Each call owns its Cobra command and client clone; no shared flags are mutated.
+func executeAPIRequest(cmd *cobra.Command, args []string, baseClient *cli.Client, authenticate func() error, emit func(any) error) error {
 	method := strings.ToUpper(args[0])
 	if !apiHTTPMethod(method) {
 		return apiValidation("unsupported HTTP method; use GET, HEAD, OPTIONS, POST, PUT, PATCH, or DELETE")
@@ -160,13 +175,9 @@ func runAPIRequest(cmd *cobra.Command, args []string) error {
 	if strings.ContainsAny(key, "\r\n\x00") {
 		return apiValidation("invalid --idempotency-key")
 	}
-	f := newFormatter()
-	switch f.Format {
-	case "", "table", "json", "yaml", "ndjson", "quiet":
-	default:
-		return apiValidation("unsupported output format")
-	}
-	client := newAPIClient().WithContext(cmd.Context()).WithTimeout(timeout)
+	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+	defer cancel()
+	client := baseClient.WithContext(ctx).WithTimeout(timeout)
 	authentication := "configured"
 	if anonymous {
 		// Omitting authentication must not also omit the target-selection guard.
@@ -181,9 +192,9 @@ func runAPIRequest(cmd *cobra.Command, args []string) error {
 		client.WorkspaceID = ""
 		authentication = "anonymous"
 	}
-	server, err := url.Parse(client.BaseURL)
-	if err != nil || (server.Scheme != "http" && server.Scheme != "https") || server.Host == "" || server.User != nil || server.RawQuery != "" || server.Fragment != "" {
-		return apiValidation("server must be an HTTP(S) URL without credentials, query, or fragment")
+	server, err := validatedAPIServer(client.BaseURL)
+	if err != nil {
+		return err
 	}
 	client.BaseURL = strings.TrimRight(client.BaseURL, "/")
 	if dryRun {
@@ -198,13 +209,13 @@ func runAPIRequest(cmd *cobra.Command, args []string) error {
 			headerNames = append(headerNames, name)
 		}
 		sort.Strings(headerNames)
-		return apiStructuredOutput(cmd, map[string]any{"method": method, "server": server.String(), "path": u.EscapedPath(), "query_keys": keys, "header_names": headerNames, "workspace": client.WorkspaceID, "authentication": authentication, "has_body": input != "", "content_type": contentType, "requires_yes": apiRequiresYes(method), "dry_run": true})
+		return emit(map[string]any{"method": method, "server": server.String(), "path": u.EscapedPath(), "query_keys": keys, "header_names": headerNames, "workspace": client.WorkspaceID, "authentication": authentication, "has_body": input != "", "content_type": contentType, "requires_yes": apiRequiresYes(method), "dry_run": true})
 	}
 	if apiRequiresYes(method) && !yes {
 		return apiValidation("mutating requests require --yes; inspect with --dry-run first")
 	}
 	if !anonymous {
-		if err := requireAuth(); err != nil {
+		if err := authenticate(); err != nil {
 			return err
 		}
 	}
@@ -221,7 +232,7 @@ func runAPIRequest(cmd *cobra.Command, args []string) error {
 	hc := *client.HTTPClient
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	client.HTTPClient = &hc
-	req, err := client.NewRequest(cmd.Context(), method, path, body)
+	req, err := client.NewRequest(ctx, method, path, body)
 	if err != nil {
 		return err
 	}
@@ -288,7 +299,7 @@ func runAPIRequest(cmd *cobra.Command, args []string) error {
 	if include {
 		value = map[string]any{"status": resp.StatusCode, "headers": resp.Header, "body": value}
 	}
-	return apiStructuredOutput(cmd, value)
+	return emit(value)
 }
 
 // Headers may express operation-specific preconditions (If-Match) and webhook
@@ -321,4 +332,12 @@ func apiRequestHeaders(pairs []string) (http.Header, error) {
 		headers.Add(name, value)
 	}
 	return headers, nil
+}
+
+func validatedAPIServer(raw string) (*url.URL, error) {
+	server, err := url.Parse(raw)
+	if err != nil || (server.Scheme != "http" && server.Scheme != "https") || server.Host == "" || server.User != nil || server.RawQuery != "" || server.Fragment != "" {
+		return nil, apiValidation("server must be an HTTP(S) URL without credentials, query, or fragment")
+	}
+	return server, nil
 }

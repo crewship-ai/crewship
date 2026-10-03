@@ -1,0 +1,187 @@
+---
+title: "AI clients"
+description: "Connect AI clients to the MCP server and Agent Skill embedded in the Crewship binary."
+icon: "plug"
+---
+
+# crewship ai
+
+The Crewship binary includes an MCP stdio server, its API operation catalog,
+and an Agent Skill. The normal and CLI-only builds contain the same integration.
+No Node/Python runtime, separate MCP package, provider SDK, or downloaded skill
+is needed. Authenticate to your Crewship server with `crewship login` first.
+The AI client still needs its own normal model access.
+
+## Quick start
+
+For an installed Codex or Claude Code client:
+
+```bash
+crewship ai connect codex
+crewship ai connect claude
+```
+
+These run the client's native MCP registration command with the absolute path
+to the current Crewship binary. Claude Code registration uses user scope; Codex
+uses its normal MCP configuration. Existing-entry behavior belongs to that
+client. Restart/reload the client and inspect its MCP status after registration.
+Install Crewship at its permanent location before connecting it; reconnect if
+that location changes. Discovery and the bundled guide also work without login.
+
+The default connection executes read methods only. To enable mutations:
+
+```bash
+crewship ai connect codex --allow-write
+```
+
+Each mutating call must also set `confirm_write=true`. This does not grant server
+permissions or substitute for user authorization. To change an existing
+registration, use your client's normal edit/remove workflow if it refuses a
+duplicate name, then reconnect.
+
+Select a named server/workspace explicitly when you have several:
+
+```bash
+crewship --profile staging --workspace engineering ai connect claude --allow-write
+crewship --profile staging ai connect codex --dry-run
+```
+
+The preview prints a command/argument array and makes no changes. Registration
+never copies a token into the client config. The MCP process reads Crewship's
+normal credentials at startup; restart it after changing login or profiles.
+Environment-only credentials must be available to that process too.
+
+## crewship ai connect
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--allow-write` | `false` | Enable explicitly confirmed mutations in the registered server. |
+| `--dry-run` | `false` | Print registration arguments without executing the client. |
+
+Supported positional clients are `codex` and `claude`. The client must be on
+PATH. Registration invokes an executable directly, without a shell. Registration
+and skill-installation receipts go to stderr, keeping stdout available for data.
+
+## crewship ai config
+
+For clients configured through a settings file, print a snippet:
+
+```bash
+crewship ai config cursor
+crewship ai config vscode
+crewship ai config gemini
+crewship ai config generic
+crewship ai config codex
+```
+
+Merge the printed entry into the client's settings; do not replace an existing
+settings file with the snippet. This command itself writes no client files.
+`codex` emits TOML, `vscode` emits a `servers` JSON object with `type: stdio`, and
+`generic`, `claude`, `cursor`, and `gemini` emit an `mcpServers` JSON object.
+Configuration output uses the requested client's syntax regardless of the
+CLI's global output-format preference.
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--allow-write` | `false` | Include the mutation opt-in in the launch arguments. |
+
+The selected profile and workspace are carried into the launch arguments.
+Without a named profile the effective server URL is pinned. Tokens are omitted.
+The host-mismatch escape hatch is not automatically propagated.
+
+Compatibility depends on the **client**, not the model/provider name. Any client
+that can launch a local MCP stdio process can use this interface; configuration
+syntax may differ. A Grok-backed agent can use it if its host supports MCP stdio,
+or use the skill if it supports shell execution and Agent Skills. A hosted chat
+that accepts only remote HTTP MCP cannot directly launch this local adapter.
+Crewship does not open a public MCP listener or claim universal client support.
+
+## crewship ai skill
+
+Print the exact skill embedded in this binary, or install it into a chosen skill
+directory (the directory containing `SKILL.md`, not its parent collection):
+
+```bash
+crewship ai skill
+crewship ai skill --directory .agents/skills/crewship
+crewship ai skill --directory .claude/skills/crewship
+```
+
+Choose a skill location supported by your client. `crewship ai guide` is an alias.
+MCP clients can read the same guide through `crewship_guide`, so separate skill
+installation is optional for MCP users. The guide explains progressive discovery,
+JSON input/output, profiles, mutation acknowledgments, retries, run receipts and
+CLI fallbacks for streaming/binary operations.
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--directory` | (unset) | Install the bundled `SKILL.md` into this directory. |
+
+Installation creates parent directories and an owner-only file. Identical content
+is a no-op; differing content or a symlink at `SKILL.md` is refused. To update an
+exported skill after a CLI upgrade, review/remove the old file or choose another
+directory. The embedded MCP guide always matches the running binary.
+
+## crewship mcp serve
+
+```bash
+crewship mcp serve
+crewship --profile staging mcp serve --allow-write
+```
+
+This long-running command reserves stdout for MCP JSON-RPC and writes diagnostics
+to stderr. It communicates over stdin/stdout; it does not bind a port. The SDK
+handles initialization, tool discovery, calls and cancellation. EOF terminates
+the session.
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--allow-write` | `false` | Allow mutations with per-call `confirm_write=true`. |
+| `--timeout` | `30s` | Overall timeout for each API call; must be positive. |
+| `--max-response-bytes` | `1048576` | API response cap, from 1 to 10485760 bytes. |
+
+### Small tool surface
+
+| Tool | Purpose |
+| --- | --- |
+| `crewship_guide` | Read the bundled skill and current write policy. |
+| `crewship_search` | Search operation IDs, paths, summaries and tags. Defaults to 20 results, maximum 100; follow `next_offset`. |
+| `crewship_schema` | Read one operation's OpenAPI contract with referenced schemas. |
+| `crewship_request` | Execute that operation using JSON arguments and the fixed CLI identity. |
+
+Discovery is offline and follows the embedded OpenAPI contract. It is not a claim
+that a different server version exposes identical behavior. Every generated
+operation is discoverable without registering hundreds of separate MCP tools.
+
+Requests accept `operation_id`, `path_params`, repeated `query` and `headers`
+entries (`name=value`), a JSON `body`, `dry_run`, `confirm_write`, and an optional
+`idempotency_key`. Success returns `{status, headers, body}`; tool failures carry
+`isError` and the CLI error envelope (`error.message`, `error.exit_code`, and
+HTTP status/detail/extensions when available). Responses include a text fallback for clients
+that do not consume structured content.
+
+The adapter shares the CLI request implementation: no redirects or automatic
+retries, bounded input/output, managed auth/workspace/transport headers, and
+normal server authorization. Tool arguments cannot choose another server, token,
+profile, output file, shell command or arbitrary route. Path parameters must be
+single segments; traversal and encoded separators are rejected. Input frames
+are capped at 12 MiB and JSON bodies at 10 MiB. Mutation acknowledgments and MCP
+annotations are not a replacement for server-side access controls.
+
+`dry_run=true` checks request metadata without network access; it does not validate
+the body against OpenAPI or predict authorization. An oversized response may
+arrive **after** a mutation succeeded. Inspect state before repeating such calls.
+For binary bodies/downloads, interactive authentication, streaming, WebSockets or
+file access, use the dedicated CLI commands or [API request](/cli/api). The MCP
+adapter intentionally exposes JSON HTTP operations, not local shell execution.
+
+## Integration references
+
+- [Official MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk)
+- [Agent Skills format](https://agentskills.io/specification)
+- [Codex MCP configuration](https://developers.openai.com/codex/mcp)
+- [Claude Code MCP configuration](https://code.claude.com/docs/en/mcp)
+
+- [Cursor MCP configuration](https://cursor.com/docs/mcp)
+- [VS Code MCP configuration](https://code.visualstudio.com/docs/agent-customization/mcp-servers)
+- [Gemini CLI MCP configuration](https://geminicli.com/docs/tools/mcp-server/)
