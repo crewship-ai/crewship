@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Refreshing a Page review respects disabled reads and unavailable source archives instead of requesting an absent baseline revision.
+
 - Backup activity checks report routine-query failures instead of silently treating them as idle; older schemas without the routine-run table remain supported.
 
 - The repository UID invariant checks the actual runtime package paths, so a checkout directory containing `sidecar` or `provider` cannot make unrelated UID literals satisfy the check.
