@@ -75,8 +75,8 @@ func (o *Orchestrator) trackAgentRun(ctx context.Context, req *AgentRunRequest) 
 	return ctx, func() { cancel(); close(c.done); o.agentRuns.Delete(req.RunID) }
 }
 
-// StopAgent stops the invocations owned by this orchestrator at the time of
-// the request. New submissions remain a separate admission decision. It waits
+// StopAgent stops current invocations and durable running records recovered
+// after a server restart. New submissions remain a separate admission decision. It waits
 // for both runtime absence and RunAgent settlement; an unresponsive provider
 // or creation that outlives the deadline is an error, not STOPPED.
 func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
@@ -108,6 +108,7 @@ func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
 		go func() { stopResults <- o.stopAgentInvocation(ctx, c, creating[i]) }()
 	}
 	var errs []error
+	var recovered []RunState
 	if o.state != nil {
 		states, err := o.state.List(ctx, "agent_runs")
 		if err != nil {
@@ -130,9 +131,13 @@ func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
 				}
 			}
 			if !owned {
-				errs = append(errs, fmt.Errorf("run %s has no live process owner; stop cannot be confirmed", state.ID))
+				recovered = append(recovered, state)
 			}
 		}
+	}
+	recoveredResults := make(chan error, len(recovered))
+	for _, state := range recovered {
+		go func() { recoveredResults <- o.stopRecoveredAgentRun(ctx, state) }()
 	}
 
 	for range runs {
@@ -140,10 +145,38 @@ func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
 			errs = append(errs, err)
 		}
 	}
-	if len(runs) == 0 && len(errs) == 0 {
+	for range recovered {
+		if err := <-recoveredResults; err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(runs) == 0 && len(recovered) == 0 && len(errs) == 0 {
 		return fmt.Errorf("agent has no runtime owned by this process; stop not confirmed")
 	}
 	return errors.Join(errs...)
+}
+
+// A server restart loses the invocation but not its durable runtime identity.
+// Signal only that exact location, and persist cancellation only after the
+// provider confirms absence. Missing legacy identities remain unconfirmed.
+func (o *Orchestrator) stopRecoveredAgentRun(ctx context.Context, state RunState) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	location := RunLocation{ContainerID: state.ContainerID, AgentSlug: state.AgentSlug, RunID: state.ID}
+	for {
+		stopped, err := o.StopRunAt(ctx, location)
+		if err != nil {
+			return err
+		}
+		if stopped {
+			return o.persistStoppedRun(ctx, state)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("stop recovered run %s not confirmed: %w", state.ID, ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func (o *Orchestrator) stopAgentInvocation(ctx context.Context, c *agentRunControl, creating bool) error {
@@ -174,4 +207,19 @@ func (o *Orchestrator) stopAgentInvocation(ctx context.Context, c *agentRunContr
 		case <-tick.C:
 		}
 	}
+}
+
+// persistStoppedRun acknowledges cancellation only when its durable state write
+// succeeds. Both explicit stops and deleted-agent cleanup retain retry evidence
+// if storage is unavailable after the provider has confirmed runtime absence.
+func (o *Orchestrator) persistStoppedRun(ctx context.Context, state RunState) error {
+	state.Status, state.LastActivity = "cancelled", time.Now()
+	data, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	if err := o.state.Set(ctx, "agent_runs", state.ID, data); err != nil {
+		return fmt.Errorf("persist cancellation for run %s: %w", state.ID, err)
+	}
+	return nil
 }

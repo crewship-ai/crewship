@@ -56,6 +56,14 @@ The restricted Pages UI uses this directory and the existing declared action end
 
 Restricted Page catalog actions expose `intent_hash`, binding the exact declared action, publication and complete frozen execution graph/provider slots. Restricted Page dispatch requires `expected_intent_hash`; missing hashes return 400 and changed intent is denied before admission. Trusted dispatch retains its existing payload contract. UI retries preserve the same hash, body and idempotency key.
 
+The CLI forwards the selected action hash with `crewship page action --expected-intent-hash <hash>`.
+Use the `intent_hash` from the authorized Page catalog and preserve it across
+retries; a changed declaration requires a fresh selection. `crewship routine run
+<slug> --wait` polls the actor-scoped private receipt, including delayed runs.
+Machine formats produce one receipt or final result document. Failed, canceled
+and reconciliation-required results exit nonzero; authorization failure stops
+polling without printing a cached result.
+
 Admission receipts use `SCHEDULED` or replayed `DEDUPED`; both require private-result polling. Live result states are lowercase `pending`, `running`, `completed`, `failed`, `canceled` or `needs_reconciliation`. Forms remain active through admission and running states, and stop polling only on terminal results or authorization failure.
 
 ## Common dispatch ownership

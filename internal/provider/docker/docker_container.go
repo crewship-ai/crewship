@@ -8,6 +8,7 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	goruntime "runtime"
@@ -228,6 +229,7 @@ func (p *Provider) HasLegacyCrewResources(ctx context.Context, crews []provider.
 func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provider.CrewRef) ([]string, error) {
 	legacy := p.legacyNameSets(crews)
 	removed := []string{}
+	var failures []error
 	if len(legacy) == 0 {
 		return removed, nil
 	}
@@ -242,6 +244,7 @@ func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provide
 			if legacy[n] {
 				if _, rmErr := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); rmErr != nil {
 					p.logger.Warn("legacy C1 container remove failed", "container", n, "error", rmErr)
+					failures = append(failures, fmt.Errorf("remove legacy container %s: %w", n, rmErr))
 				} else {
 					removed = append(removed, n)
 				}
@@ -251,18 +254,19 @@ func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provide
 
 	list, err := p.client.VolumeList(ctx, volumeListOptions())
 	if err != nil {
-		return removed, fmt.Errorf("list volumes (legacy C1 prune): %w", err)
+		return removed, errors.Join(append(failures, fmt.Errorf("list volumes (legacy C1 prune): %w", err))...)
 	}
 	for _, vol := range list.Items {
 		if legacy[vol.Name] {
 			if _, rmErr := p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); rmErr != nil {
 				p.logger.Warn("legacy C1 volume remove failed", "volume", vol.Name, "error", rmErr)
+				failures = append(failures, fmt.Errorf("remove legacy volume %s: %w", vol.Name, rmErr))
 			} else {
 				removed = append(removed, vol.Name)
 			}
 		}
 	}
-	return removed, nil
+	return removed, errors.Join(failures...)
 }
 
 // migrateLegacyVolume copies all data from a legacy slug-scoped volume into a
@@ -760,6 +764,11 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					return "", false, fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
 				}
 				inspect := inspectResult.Container
+				// The list is an older snapshot. A stop/start between list and
+				// inspect must not reuse a stopped runtime or tear down a live one.
+				if inspect.State != nil && inspect.State.Status != "" {
+					c.State = inspect.State.Status
+				}
 				// Applies with an empty local identity too (cleanup disabled): the
 				// drift paths below tear down with RemoveVolumes, so adopting a
 				// container another installation labelled would destroy its

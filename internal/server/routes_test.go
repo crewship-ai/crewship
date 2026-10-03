@@ -36,8 +36,10 @@ func (m *mockState) Set(_ context.Context, bucket, key string, value []byte) err
 	m.data[bucket][key] = value
 	return nil
 }
-func (m *mockState) Delete(_ context.Context, _, _ string) error                 { return nil }
-func (m *mockState) List(_ context.Context, _ string) (map[string][]byte, error) { return nil, nil }
+func (m *mockState) Delete(_ context.Context, _, _ string) error { return nil }
+func (m *mockState) List(_ context.Context, bucket string) (map[string][]byte, error) {
+	return m.data[bucket], nil
+}
 func (m *mockState) ListByPrefix(_ context.Context, _, _ string) (map[string][]byte, error) {
 	return nil, nil
 }
@@ -120,20 +122,14 @@ func TestAgentStatusWithState(t *testing.T) {
 
 func TestAgentStatusInvalidJSON(t *testing.T) {
 	s := newTestServerWithDeps(t)
-	s.state.Set(context.Background(), "agent_runs", "a1", []byte("not json"))
-
+	if err := s.state.Set(t.Context(), "agent_runs", "a1", []byte("not json")); err != nil {
+		t.Fatal(err)
+	}
 	req := httptest.NewRequest("GET", "/agents/a1/status", nil)
 	w := httptest.NewRecorder()
 	s.ipcMux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	var body map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &body)
-	if body["status"] != "idle" {
-		t.Errorf("expected idle for invalid JSON, got %v", body["status"])
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("corrupt state reported %d: %s", w.Code, w.Body.String())
 	}
 }
 

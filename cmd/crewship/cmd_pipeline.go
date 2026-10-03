@@ -645,9 +645,9 @@ var pipelineRunCmd = &cobra.Command{
 					ok++
 				}
 			}
-			fmt.Printf("Batch %s: %d runs (%d ok). Retrieve with: crewship routine records %s --tag batch:%s\n",
-				br.BatchID, br.Count, ok, args[0], br.BatchID)
-			return nil
+			return resolvedFormatter(cmd).AutoHuman(br, func() {
+				fmt.Printf("Batch %s: %d runs (%d ok). Retrieve with: crewship routine records %s --tag batch:%s\n", br.BatchID, br.Count, ok, args[0], br.BatchID)
+			})
 		}
 		runBody := map[string]any{"inputs": inputs}
 		if tierOverride != "" {
@@ -750,6 +750,9 @@ var pipelineRunCmd = &cobra.Command{
 		// terminal user, not us — we just label COMPLETED / FAILED
 		// / DRY_RUN_OK + show output + show step outputs map.
 		var result struct {
+			ChatID         string            `json:"chat_id,omitempty" yaml:"chat_id,omitempty"`
+			Restricted     bool              `json:"restricted,omitempty" yaml:"restricted,omitempty"`
+			StatusURL      string            `json:"status_url,omitempty" yaml:"status_url,omitempty"`
 			RunID          string            `json:"run_id" yaml:"run_id"`
 			Status         string            `json:"status" yaml:"status"`
 			Output         string            `json:"output" yaml:"output"`
@@ -770,6 +773,30 @@ var pipelineRunCmd = &cobra.Command{
 		}
 		waitForRun, _ := cmd.Flags().GetBool("wait")
 		waitTimeout, _ := cmd.Flags().GetDuration("wait-timeout")
+		f := resolvedFormatter(cmd)
+		if result.Restricted {
+			if waitForRun {
+				return waitForRestrictedRoutineRun(cmd, client, result.RunID, waitTimeout)
+			}
+			return f.AutoHuman(result, func() {
+				fmt.Printf("Run %s: %s\n", result.RunID, result.Status)
+			})
+		}
+		if !f.RoutesToHuman() {
+			if waitForRun && (result.Status == "IN_PROGRESS" || result.Status == "DEDUPED" || result.Status == "WAITING") {
+				return waitForPipelineRun(cmd, client, result.RunID, waitTimeout)
+			}
+			if err := f.Machine(result); err != nil {
+				return err
+			}
+			if result.Status == "FAILED" {
+				return fmt.Errorf("routine run failed")
+			}
+			if waitForRun && result.Status == "SCHEDULED" {
+				cli.PrintWarning("--wait ignored: a deferred run has no run id until it fires")
+			}
+			return nil
+		}
 		if result.Status == "SCHEDULED" {
 			verb := "Scheduled"
 			if result.Coalesced {
@@ -895,7 +922,7 @@ func waitForPipelineRun(cmd *cobra.Command, client *cli.Client, runID string, ti
 			lastStatus = d.Status
 			fmt.Fprintf(os.Stderr, "%s[wait]%s %s status=%s elapsed=%s\n",
 				cli.Dim, cli.Reset, runID, d.Status, time.Since(start).Truncate(time.Second))
-			if strings.EqualFold(d.Status, "waiting") {
+			if strings.EqualFold(d.Status, "waiting") && resolvedFormatter(cmd).RoutesToHuman() {
 				// The run parked on an approval while we were polling (an
 				// --async start, or a DEDUPED original). The sync path
 				// prints the token and the approve/reject commands from
@@ -914,6 +941,17 @@ func waitForPipelineRun(cmd *cobra.Command, client *cli.Client, runID string, ti
 				time.Since(start).Truncate(time.Second), runID, runID)
 		}
 		return err
+	}
+
+	if f := resolvedFormatter(cmd); !f.RoutesToHuman() {
+		if err := f.Machine(detail); err != nil {
+			return err
+		}
+		switch strings.ToLower(detail.Status) {
+		case "failed", "interrupted", "cancelled":
+			return fmt.Errorf("routine run %s", detail.Status)
+		}
+		return nil
 	}
 
 	fmt.Printf("Run %s: %s (%dms, $%.4f)\n",

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -136,8 +137,19 @@ func TestAcceptance_AdminInstanceBackupCopies(t *testing.T) {
 		s3.mu.Unlock()
 	}
 	const inst = "instance/crewship-instance-20260929T010000Z.tar.zst"
-	put(inst, []byte("the instance bundle from the lost server"))
-	put("workspaces/bc-people/crewship-workspace-people-20260929T010000Z.tar.zst", []byte("workspace bundle"))
+	var bundle bytes.Buffer
+	manifest := &backup.Manifest{FormatVersion: backup.FormatVersion, Scope: backup.ScopeInstance, CreatedBy: backup.Actor{UserID: "fixture-owner"}, CreatedAt: time.Now().UTC(), CompatibleTargets: []backup.Target{backup.TargetAnyInstance}}
+	if err := backup.WriteBundle(&bundle, manifest, strings.NewReader("the instance payload"), backup.WriteBundleOptions{NoEncrypt: true}); err != nil {
+		t.Fatal(err)
+	}
+	put(inst, bundle.Bytes())
+	var workspaceBundle bytes.Buffer
+	workspaceManifest := *manifest
+	workspaceManifest.Scope = backup.ScopeWorkspace
+	if err := backup.WriteBundle(&workspaceBundle, &workspaceManifest, strings.NewReader("workspace payload"), backup.WriteBundleOptions{NoEncrypt: true}); err != nil {
+		t.Fatal(err)
+	}
+	put("workspaces/bc-people/crewship-workspace-people-20260929T010000Z.tar.zst", workspaceBundle.Bytes())
 	put("workspaces/bc-people/crewship-workspace-people-20260929T010000Z.tar.zst.environments.json", []byte(`{"blobs":[]}`))
 
 	if out, err := run(cli("copies", "list")...); err == nil || !strings.Contains(out, "--destination") {
@@ -154,8 +166,12 @@ func TestAcceptance_AdminInstanceBackupCopies(t *testing.T) {
 	}
 	dir, _ := backup.DefaultBackupsDir()
 	local := filepath.Join(dir, filepath.Base(inst))
-	if b, err := os.ReadFile(local); err != nil || string(b) != "the instance bundle from the lost server" {
+	if b, err := os.ReadFile(local); err != nil || !bytes.Equal(b, bundle.Bytes()) {
 		t.Fatalf("fetched bundle: %q %v", b, err)
+	}
+
+	if entry, err := backup.GetCatalogEntry(t.Context(), db, local); err != nil || entry.Scope != string(backup.ScopeInstance) {
+		t.Fatalf("fetch did not register catalog: %+v %v", entry, err)
 	}
 
 	raw = must(cli("copies", "list", "--destination", destID, "--format", "json")...)

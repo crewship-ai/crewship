@@ -9,6 +9,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -18,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -32,6 +34,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/presence"
 	"github.com/crewship-ai/crewship/internal/provider"
 	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
@@ -1027,6 +1030,27 @@ func (a *convStoreAdapter) SearchConversations(ctx context.Context, agentID, use
 const interruptedChatMessage = "The agent's reply was interrupted by a server restart — try again"
 
 func (s *Server) recoverOrphanedRuns(ctx context.Context) {
+	// The server losing a stream does not kill the container's process. Keep
+	// durable running identities visible and stoppable; journal recovery must
+	// not invent cancellation or IDLE for a runtime it has not stopped.
+	protected := map[string]bool{}
+	if s.state != nil {
+		states, err := s.state.List(ctx, "agent_runs")
+		if err != nil {
+			s.logger.Error("recover runtime identities", "error", err)
+			return
+		}
+		for _, raw := range states {
+			var run orchestrator.RunState
+			if err := json.Unmarshal(raw, &run); err != nil {
+				s.logger.Error("decode recovered runtime identity", "error", err)
+				return
+			}
+			if run.Status == "running" && run.AgentID != "" {
+				protected[run.AgentID] = true
+			}
+		}
+	}
 	if s.journalWriter == nil {
 		// Without a journal writer we can't write the cancel entries —
 		// but we can still reset agents to IDLE since their status is
@@ -1065,7 +1089,7 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	}
 	for rows.Next() {
 		var o orphan
-		if scanErr := rows.Scan(&o.id, &o.agentID, &o.workspaceID, &o.chatID); scanErr == nil {
+		if scanErr := rows.Scan(&o.id, &o.agentID, &o.workspaceID, &o.chatID); scanErr == nil && !protected[o.agentID] {
 			orphans = append(orphans, o)
 		}
 	}
@@ -1151,6 +1175,15 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	// subquery is workspace-scoped so a terminal entry that happens to
 	// share a trace_id across workspaces can't suppress this query.
 	now := time.Now().UTC().Format(time.RFC3339)
+	args := []any{now}
+	guard := ""
+	for id := range protected {
+		args = append(args, id)
+		guard += "?,"
+	}
+	if guard != "" {
+		guard = " AND id NOT IN (" + strings.TrimSuffix(guard, ",") + ")"
+	}
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE agents SET status = 'IDLE', updated_at = ?
 		WHERE status = 'RUNNING'
@@ -1165,7 +1198,7 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 			      AND je2.trace_id = je1.trace_id
 			      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
 			  )
-		)`, now); err != nil {
+		)`+guard, args...); err != nil {
 		s.logger.Error("reset agent statuses after recovery", "error", err)
 	}
 }
