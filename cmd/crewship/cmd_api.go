@@ -26,10 +26,10 @@ type apiOperation struct {
 }
 
 type apiDocument struct {
-	OpenAPI    string                                `json:"openapi"`
-	Info       map[string]any                        `json:"info"`
-	Paths      map[string]map[string]json.RawMessage `json:"paths"`
-	Components map[string]map[string]json.RawMessage `json:"components"`
+	OpenAPI    string                                `json:"openapi" yaml:"openapi"`
+	Info       map[string]any                        `json:"info" yaml:"info"`
+	Paths      map[string]map[string]json.RawMessage `json:"paths" yaml:"paths"`
+	Components map[string]map[string]json.RawMessage `json:"components" yaml:"components"`
 }
 
 func loadAPIDocument() (*apiDocument, error) {
@@ -61,9 +61,9 @@ func (d *apiDocument) operations(search, method string) ([]apiOperation, error) 
 				continue
 			}
 			var op struct {
-				ID      string   `json:"operationId"`
-				Summary string   `json:"summary"`
-				Tags    []string `json:"tags"`
+				ID      string   `json:"operationId" yaml:"operationId"`
+				Summary string   `json:"summary" yaml:"summary"`
+				Tags    []string `json:"tags" yaml:"tags"`
 			}
 			if err := json.Unmarshal(raw, &op); err != nil {
 				return nil, err
