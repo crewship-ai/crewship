@@ -673,6 +673,8 @@ Each record identifies the definition hash, build hash, immutable image ID,
 observed CLI inventory and build time. Records are scoped to the crew's
 workspace; raw configuration and environment variable values are not copied
 into history. Reusing the same image for the same definition reuses its record.
+Workspace and crew backups include these records; restoring them preserves
+provenance and does not restore the referenced image or activate an instance.
 
 A completed build verifies that the crew definition and required agent adapters
 still match the inputs it built. If they changed or the crew was deleted,

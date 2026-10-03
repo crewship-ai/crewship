@@ -40,7 +40,7 @@ var crewProvisionRevisionsCmd = &cobra.Command{
 			return err
 		}
 		var result struct {
-			Revisions []environmentRevision `json:"revisions"`
+			Revisions []environmentRevision `json:"revisions" yaml:"revisions"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
