@@ -626,14 +626,20 @@ WHERE workspace_id = ? AND deleted_at IS NULL`
 		c.OwnerUserID = ownerUserID.String
 		c.MinPriority = minPriority
 		var parsed channelConfig
-		_ = json.Unmarshal([]byte(cfg), &parsed)
+		if err := json.Unmarshal([]byte(cfg), &parsed); err != nil {
+			return nil, fmt.Errorf("notify: decode config for %s: %w", c.ID, err)
+		}
 		c.URL = parsed.URL
 		c.To = parsed.To
 		if eventsJSON.Valid && eventsJSON.String != "" {
-			_ = json.Unmarshal([]byte(eventsJSON.String), &c.Events)
+			if err := json.Unmarshal([]byte(eventsJSON.String), &c.Events); err != nil {
+				return nil, fmt.Errorf("notify: decode events for %s: %w", c.ID, err)
+			}
 		}
 		if categoriesJSON.Valid && categoriesJSON.String != "" {
-			_ = json.Unmarshal([]byte(categoriesJSON.String), &c.Categories)
+			if err := json.Unmarshal([]byte(categoriesJSON.String), &c.Categories); err != nil {
+				return nil, fmt.Errorf("notify: decode categories for %s: %w", c.ID, err)
+			}
 		}
 		if withSecret && secretEnc.Valid && secretEnc.String != "" {
 			dec, err := encryption.Decrypt(secretEnc.String)

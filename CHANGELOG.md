@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Notification channel reads reject malformed stored configuration and filters instead of silently treating unreadable category restrictions as permission to deliver every category. Valid legacy empty filters retain their existing defaults.
+
 - Account signup recovers from network and unreadable error responses, keeps entered values for retry, and announces refusals accessibly. Password reset treats a null refusal body as a server refusal instead of a network failure.
 
 - First-run secret bootstrap validates the entire key set and persists generated keys before exporting them. Failed persistence or validation cannot leave partial process secrets that a retry mistakes for externally managed keys.
