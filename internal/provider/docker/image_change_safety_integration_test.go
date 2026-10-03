@@ -42,7 +42,7 @@ func TestImageChange_RealHeartbeatSurvivesNewImageAdmission(t *testing.T) {
 	crew := provider.CrewConfig{ID: "fixture", Slug: "fixture", CachedImage: "sha256:" + strings.Repeat("b", 64)}
 	name := p.CrewContainerName(crew.ID, crew.Slug)
 	created, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{Name: name,
-		Config:     &container.Config{Image: image.ID, User: "1001:1001", Entrypoint: []string{"/bin/sh", "-c"}, Cmd: []string{`n=0; while true; do n=$((n+1)); echo "$n" > /tmp/heartbeat; sleep 0.1; done`}},
+		Config:     &container.Config{Image: image.ID, User: "1001:1001", Entrypoint: []string{"/bin/sh", "-c"}, Cmd: []string{`sleep 0.2; n=0; while true; do n=$((n+1)); echo "$n" > /tmp/heartbeat.next && mv /tmp/heartbeat.next /tmp/heartbeat; sleep 0.1; done`}},
 		HostConfig: &container.HostConfig{NetworkMode: "none", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges"}, Tmpfs: map[string]string{"/tmp": "rw,nosuid,nodev,size=1048576,uid=1001,gid=1001"}, Resources: container.Resources{Memory: 32 << 20, NanoCPUs: 500_000_000}},
 	})
 	if err != nil {
@@ -55,6 +55,15 @@ func TestImageChange_RealHeartbeatSurvivesNewImageAdmission(t *testing.T) {
 	})
 	if _, err := cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
 		t.Fatal(err)
+	}
+	// ContainerStart acknowledges the process start, not the first heartbeat.
+	// Delay the fixture's first write above to exercise this readiness boundary;
+	// atomic publication also prevents readers observing a truncated counter.
+	readyCtx, stopReady := context.WithTimeout(ctx, 5*time.Second)
+	readyOutput, readyErr := exec.CommandContext(readyCtx, "docker", "exec", created.ID, "sh", "-c", "until test -s /tmp/heartbeat; do sleep 0.01; done").CombinedOutput()
+	stopReady()
+	if readyErr != nil {
+		t.Fatalf("heartbeat fixture did not become ready: %v %s", readyErr, readyOutput)
 	}
 	heartbeat := func() int {
 		t.Helper()
