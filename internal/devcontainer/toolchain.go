@@ -174,6 +174,12 @@ func RequestedToolchain(cfg *Config, miseConfig string, adapters []string) ([]To
 	for _, cli := range RequiredAdapterCLIs(adapters) {
 		request := ToolchainRequest{Adapter: cli.Adapter, Binary: cli.Binary}
 		switch {
+		case mise != nil && cli.MiseTool != "" && mise.Tools[cli.MiseTool] != "":
+			// Explicit mise input is installed after features and its shim takes
+			// precedence. Do not hide a user's pin behind an overlapping feature.
+			request.Source = "mise"
+			request.Selector = mise.Tools[cli.MiseTool]
+			request.Exact = toolVersionPattern.MatchString(request.Selector)
 		case cfg != nil && featureProvidesBinary(cfg, cli):
 			request.Source = "devcontainer_feature"
 		case cli.MiseTool != "":

@@ -9,7 +9,7 @@ import (
 )
 
 func TestRequiredCLICheckGuardsRevisionPublication(t *testing.T) {
-	for _, mode := range []string{"missing", "unavailable", "failed", "wrong image", "missing tool", "duplicate tool", "passed", "record only"} {
+	for _, mode := range []string{"missing", "unavailable", "failed", "wrong image", "missing tool", "duplicate tool", "wrong pinned version", "passed", "record only"} {
 		t.Run(mode, func(t *testing.T) {
 			config := `{"image":"ubuntu:22.04"}`
 			h, ws, crew := covProvRig(t, &covCommitClient{}, config)
@@ -35,6 +35,8 @@ func TestRequiredCLICheckGuardsRevisionPublication(t *testing.T) {
 				q.Status = mode
 			case "wrong image":
 				q.ImageID = "sha256:" + strings.Repeat("b", 64)
+			case "wrong pinned version":
+				inv.Tools[0].Version = "0.153.0"
 			case "missing tool":
 				q.Tools = nil
 			case "duplicate tool":

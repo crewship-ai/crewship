@@ -2,7 +2,9 @@ package toolchain
 
 import (
 	"errors"
+	"fmt"
 	"path"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/dockerutil"
@@ -36,6 +38,30 @@ func RequirePassing(imageID string, inventory *devcontainer.ToolchainInventory, 
 	for _, binary := range binaries {
 		if !passed[binary] {
 			return rejected
+		}
+	}
+	return nil
+}
+
+// RequireExactPins checks explicit CLI pins against the image observations.
+// Floating selectors retain native mise semantics; this does not parse the
+// native lock or independently qualify provider/model compatibility.
+func RequireExactPins(inventory *devcontainer.ToolchainInventory, requests []devcontainer.ToolchainRequest) error {
+	for _, request := range requests {
+		if request.Source != "mise" || !request.Exact {
+			continue
+		}
+		observed := ""
+		if inventory != nil {
+			for _, tool := range inventory.Tools {
+				if tool.Binary == request.Binary && tool.Status == "observed" {
+					observed = tool.Version
+					break
+				}
+			}
+		}
+		if observed != strings.TrimPrefix(request.Selector, "v") {
+			return fmt.Errorf("AI CLI startup check required: %s does not match requested version %s", request.Binary, request.Selector)
 		}
 	}
 	return nil

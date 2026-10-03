@@ -75,7 +75,7 @@ func TestToolchainVersionDoesNotMistakeErrorTextForVersion(t *testing.T) {
 
 func TestRequestedToolchainPreservesSelectorAndSource(t *testing.T) {
 	cfg := &Config{Features: map[string]map[string]any{"ghcr.io/devcontainers/features/claude-code:1": nil}}
-	got, err := RequestedToolchain(cfg, `{"tools":{"codex":"0.153.2","claude":"latest"}}`, []string{"CLAUDE_CODE", "CODEX_CLI", "GEMINI_CLI"})
+	got, err := RequestedToolchain(cfg, `{"tools":{"codex":"0.153.2"}}`, []string{"CLAUDE_CODE", "CODEX_CLI", "GEMINI_CLI"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,5 +90,16 @@ func TestRequestedToolchainPreservesSelectorAndSource(t *testing.T) {
 	}
 	if got[2].Selector != "latest" || got[2].Exact {
 		t.Fatalf("default selector=%+v", got[2])
+	}
+}
+
+func TestRequestedToolchainExplicitMiseOverridesFeatureSource(t *testing.T) {
+	cfg := &Config{Features: map[string]map[string]any{"ghcr.io/devcontainers/features/claude-code:1": nil}}
+	got, err := RequestedToolchain(cfg, `{"tools":{"claude":"2.1.263"}}`, []string{"CLAUDE_CODE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Source != "mise" || got[0].Selector != "2.1.263" || !got[0].Exact {
+		t.Fatalf("explicit pin hidden behind feature: %+v", got)
 	}
 }

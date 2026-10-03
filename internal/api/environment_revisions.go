@@ -59,6 +59,13 @@ func (h *ProvisioningHandler) saveProvisionResult(ctx context.Context, crewID, w
 			if err := toolchain.RequirePassing(result.CachedImage, result.Requirements.Toolchain, binaries); err != nil {
 				return "", err
 			}
+			requested, err := devcontainer.RequestedToolchain(nil, expected.Mise, expected.Adapters)
+			if err != nil {
+				return "", err
+			}
+			if err := toolchain.RequireExactPins(result.Requirements.Toolchain, requested); err != nil {
+				return "", err
+			}
 		}
 	}
 	tx, err := h.db.BeginTx(ctx, nil)

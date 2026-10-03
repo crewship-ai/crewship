@@ -43,3 +43,27 @@ func TestRequirePassingRejectsIncompleteEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestRequireExactPinsUsesDeclaredVersions(t *testing.T) {
+	for _, tc := range []struct {
+		selector, observed, source string
+		exact, want                bool
+	}{
+		{"1.2.3", "1.2.3", "mise", true, true},
+		{"v1.2.3", "1.2.3", "mise", true, true},
+		{"1.2.3", "1.2.4", "mise", true, false},
+		{"1.2.3", "", "mise", true, false},
+		{"1.2", "1.2.4", "mise", false, true},
+		{"latest", "1.2.4", "mise", false, true},
+		{"", "1.2.4", "devcontainer_feature", false, true},
+	} {
+		inv := &devcontainer.ToolchainInventory{Tools: []devcontainer.ToolchainTool{{Binary: "codex", Version: tc.observed, Status: "observed"}}}
+		requests := []devcontainer.ToolchainRequest{{Binary: "codex", Selector: tc.selector, Source: tc.source, Exact: tc.exact}}
+		if err := RequireExactPins(inv, requests); (err == nil) != tc.want {
+			t.Errorf("%+v: %v", tc, err)
+		}
+	}
+	if err := RequireExactPins(nil, []devcontainer.ToolchainRequest{{Binary: "codex", Selector: "1.2.3", Source: "mise", Exact: true}}); err == nil {
+		t.Fatal("unknown image evidence satisfied a pin")
+	}
+}

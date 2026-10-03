@@ -851,6 +851,11 @@ native bundles retain the limits above, and resolver diagnostics are bounded.
 Resolution does not install the resulting toolchain, prove a real provider
 login, schedule an update or activate a revision.
 
+The required check also compares explicit exact mise CLI selectors with the
+observed version. An overlapping devcontainer feature does not hide an explicit
+mise pin. Floating selectors remain the responsibility of native locked install;
+this check does not implement another dependency resolver.
+
 ### Applying a reviewed native lock proposal
 
 `crewship crew provision lock-apply mise.json proposal.json` prints updated mise
