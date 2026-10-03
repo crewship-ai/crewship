@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Deployed documentation checks require the declared page identities, so duplicate or unrelated index links cannot hide a missing page behind matching totals.
+
 - Notification preference failures roll back only their own edits, preserve concurrent successful changes, and cannot restore data from a former workspace. Workflow and automation lists clear old scope data and loading state; step I/O clears the previous step while its replacement loads.
 
 - Refreshing a Page review respects disabled reads and unavailable source archives instead of requesting an absent baseline revision.
