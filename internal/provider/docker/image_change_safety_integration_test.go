@@ -122,13 +122,14 @@ func TestImageChange_RealIdleVerifierProtectsDetachedWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cli.Close()
+	t.Cleanup(func() { _ = cli.Close() })
 	image, err := cli.ImageInspect(ctx, "alpine:3")
 	if err != nil {
 		t.Fatalf("requires local alpine:3: %v", err)
 	}
 	prefix := "crewship-idle-proof-" + strings.ToLower(rand.Text())
 	p := &Provider{client: cli, cfg: Config{ContainerPrefix: prefix, InstanceID: prefix, Network: "bridge", OutputBasePath: t.TempDir()}, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	t.Cleanup(func() { reclaimBindOwnership(t, cli.DaemonHost(), image.ID, p.cfg.OutputBasePath) })
 	crew := provider.CrewConfig{ID: "fixture", Slug: "fixture"}
 	entrypoint := filepath.Join(t.TempDir(), "entrypoint.sh")
 	if err := os.WriteFile(entrypoint, []byte("#!/bin/sh\nexec /bin/sleep infinity\n"), 0755); err != nil {
@@ -149,6 +150,11 @@ func TestImageChange_RealIdleVerifierProtectsDetachedWork(t *testing.T) {
 	t.Cleanup(func() {
 		cleanup, stop := context.WithTimeout(context.Background(), 20*time.Second)
 		defer stop()
+		// A create can succeed before admission returns an error. Find only
+		// this fixture's exact name and installation label to cover that path.
+		if current, err := cli.ContainerInspect(cleanup, p.CrewContainerName(crew.ID, crew.Slug), client.ContainerInspectOptions{}); err == nil && current.Container.Config != nil && current.Container.Config.Labels[resourcelifecycle.InstanceLabel] == prefix {
+			_, _ = cli.ContainerRemove(cleanup, current.Container.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+		}
 		_, _ = cli.ContainerRemove(cleanup, created.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
 		if replacementID != "" {
 			_, _ = cli.ContainerRemove(cleanup, replacementID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
