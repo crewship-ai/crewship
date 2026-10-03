@@ -48,7 +48,7 @@ func mcpOpID(t *testing.T, s *cliMCP, method, path string) string {
 	return ""
 }
 
-func testMCPSession(t *testing.T, s *cliMCP) *mcp.ClientSession {
+func testMCPSession(t *testing.T, s *cliMCP, options ...*mcp.ClientOptions) *mcp.ClientSession {
 	t.Helper()
 	a, b := mcp.NewInMemoryTransports()
 	server, err := s.server()
@@ -60,7 +60,11 @@ func testMCPSession(t *testing.T, s *cliMCP) *mcp.ClientSession {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = serverSession.Close() })
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	var opts *mcp.ClientOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, opts)
 	session, err := client.Connect(context.Background(), b, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -93,10 +97,11 @@ func TestCLIMCPWireDiscoveryAndJSONBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 5 {
-		t.Fatalf("expected compact 5-tool surface, got %d", len(tools.Tools))
+	if len(tools.Tools) != 13 {
+		t.Fatalf("expected bounded 13-tool surface, got %d", len(tools.Tools))
 	}
 	raw, _ := json.Marshal(tools)
+	t.Logf("MCP manifest: %d tools, %d JSON bytes", len(tools.Tools), len(raw))
 	if len(raw) > 12000 {
 		t.Fatalf("tool manifest too large: %d", len(raw))
 	}
@@ -313,7 +318,7 @@ func TestCLIMCPBinaryStdio(t *testing.T) {
 	}
 	defer session.Close()
 	tools, err := session.ListTools(ctx, nil)
-	if err != nil || len(tools.Tools) != 5 {
+	if err != nil || len(tools.Tools) != 13 {
 		t.Fatalf("tools: %+v %v", tools, err)
 	}
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "crewship_guide", Arguments: map[string]any{}})
