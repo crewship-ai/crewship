@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -12,6 +13,17 @@ func TestPrivateWorkingPath(t *testing.T) {
 		path    string
 		private bool
 	}{
+		{"CLAUDE.md", true},
+		{"CODEX.md", true},
+		{"GEMINI.md", true},
+		{".cursor", true},
+		{".cursor/rules/local.mdc", true},
+		{".github/copilot-instructions.md", true},
+		{"AGENTS.md", false},
+		{".github/workflows/ci.yml", false},
+		{"internal/orchestrator/testdata/CODEX.md", false},
+		{"docs/guides/CODEX.md", false},
+		{".cursor-examples/rule.md", false},
 		{".claude/settings.json", true},
 		{".codex/session.json", true},
 		{"internal-docs", true},
@@ -44,31 +56,37 @@ func TestPrivateWorkingFilesUsesIndexNotLocalIgnoredFiles(t *testing.T) {
 		}
 	}
 	run("init", "-q")
-	if err := os.Mkdir(filepath.Join(root, ".claude"), 0o755); err != nil {
+	paths := []string{".claude/settings.json", ".codex/session.json", "CLAUDE.md", "CODEX.md", "GEMINI.md", ".cursor/rules/local.mdc", ".github/copilot-instructions.md"}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(strings.Join(paths, "\n")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".claude/\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, ".claude", "settings.json"), []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := noPrivateWorkingFiles(root); len(got) != 0 {
-		t.Fatalf("ignored local configuration blocked: %v", got)
-	}
-	run("add", "-f", ".claude/settings.json")
-	if got := noPrivateWorkingFiles(root); len(got) != 1 {
-		t.Fatalf("force-added configuration not blocked: %v", got)
-	}
-	if err := os.Remove(filepath.Join(root, ".claude", "settings.json")); err != nil {
-		t.Fatal(err)
-	}
-	if got := noPrivateWorkingFiles(root); len(got) != 1 {
-		t.Fatalf("staged content escaped through working-tree deletion: %v", got)
-	}
-	run("rm", "--cached", ".claude/settings.json")
-	if got := noPrivateWorkingFiles(root); len(got) != 0 {
-		t.Fatalf("removed index entry still blocked: %v", got)
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			file := filepath.Join(root, path)
+			if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(file, []byte("private workstation instructions"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got := noPrivateWorkingFiles(root); len(got) != 0 {
+				t.Fatalf("ignored local file blocked: %v", got)
+			}
+			run("add", "-f", path)
+			if got := noPrivateWorkingFiles(root); len(got) != 1 {
+				t.Fatalf("force-added file not blocked: %v", got)
+			}
+			if err := os.Remove(file); err != nil {
+				t.Fatal(err)
+			}
+			if got := noPrivateWorkingFiles(root); len(got) != 1 {
+				t.Fatalf("staged content escaped through working-tree deletion: %v", got)
+			}
+			run("rm", "--cached", path)
+			if got := noPrivateWorkingFiles(root); len(got) != 0 {
+				t.Fatalf("removed index entry still blocked: %v", got)
+			}
+		})
 	}
 }
 

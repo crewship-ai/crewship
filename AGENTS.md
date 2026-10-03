@@ -3,7 +3,8 @@
 Concise entrypoint for AI agents and new contributors working in this repo.
 For contributor process see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-**Codex sessions:** read [`CODEX.md`](CODEX.md) for the instance map and basic operating instructions.
+**Assistant sessions:** this file and `CONTRIBUTING.md` are the public entrypoints.
+For optional workstation instructions, discover private context as described below.
 
 **Design context and working records.**
 [`docs/README.md`](docs/README.md) is the map — from there, current contracts
@@ -206,8 +207,10 @@ does and cannot be, so they are prose and say so.
 - Never use `"sqlite3"` as the driver name — `modernc.org/sqlite` registers `"sqlite"`.
 - Never use `npm`/`yarn` — `pnpm` only (a stray lockfile is the evidence).
 - Never change sidecar UID (1002) or agent UID (1001) — it's a security boundary.
-- Never track root assistant workspaces (`.claude/`, `.codex/`), private-context
-  aliases, internal mockups or captured run reports. The invariant reads the
+- Never track root assistant instructions (`CLAUDE.md`, `CODEX.md`, `GEMINI.md`),
+  workspaces (`.claude/`, `.codex/`, `.cursor/`),
+  `.github/copilot-instructions.md`, private-context aliases, internal mockups
+  or captured run reports. The invariant reads the
   Git index; ignored local files remain allowed. Public test fixtures stay public.
 
 **Prose — nothing enforces these but you:**

@@ -15,6 +15,11 @@ web/.next
 .gitignore
 .claude
 .codex
+.cursor
+CLAUDE.md
+CODEX.md
+GEMINI.md
+.github/copilot-instructions.md
 internal-docs
 .vscode
 .idea
