@@ -263,7 +263,8 @@ type Devcontainer struct {
 // a JSON string; mise itself reads TOML, but devcontainer.ParseMiseConfig
 // accepts both forms. We emit JSON for round-trip stability.
 type MiseConfig struct {
-	Lock *devcontainer.MiseLockBundle `yaml:"lock,omitempty" json:"lock,omitempty"`
+	AICLICheck string                       `yaml:"ai_cli_check,omitempty" json:"ai_cli_check,omitempty"`
+	Lock       *devcontainer.MiseLockBundle `yaml:"lock,omitempty" json:"lock,omitempty"`
 	// Tools maps tool name → version pin (e.g. "node" → "22", "python" → "3.12").
 	Tools map[string]string `yaml:"tools,omitempty" json:"tools,omitempty"`
 
@@ -956,6 +957,12 @@ func (d *CrewDocument) miseJSON() (string, error) {
 	for k, v := range d.Spec.Mise.Raw {
 		out[k] = v
 	}
+	if d.Spec.Mise.AICLICheck != "" {
+		if err := (&devcontainer.MiseConfig{AICLICheck: d.Spec.Mise.AICLICheck}).Validate(); err != nil {
+			return "", err
+		}
+		out["ai_cli_check"] = d.Spec.Mise.AICLICheck
+	}
 	if d.Spec.Mise.Lock != nil {
 		if err := d.Spec.Mise.Lock.Validate(); err != nil {
 			return "", err
@@ -1198,6 +1205,17 @@ func parseMiseConfigJSON(s string) (*MiseConfig, error) {
 		return nil, fmt.Errorf("decode mise_config: %w", err)
 	}
 	out := &MiseConfig{Raw: map[string]any{}}
+	if v, exists := raw["ai_cli_check"]; exists {
+		value, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("decode mise ai_cli_check: expected string")
+		}
+		if err := (&devcontainer.MiseConfig{AICLICheck: value}).Validate(); err != nil {
+			return nil, err
+		}
+		out.AICLICheck = value
+		delete(raw, "ai_cli_check")
+	}
 	if v, exists := raw["lock"]; exists {
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -1225,7 +1243,7 @@ func parseMiseConfigJSON(s string) (*MiseConfig, error) {
 	} else {
 		out.Raw = nil
 	}
-	if len(out.Tools) == 0 && len(out.Raw) == 0 && out.Lock == nil {
+	if len(out.Tools) == 0 && len(out.Raw) == 0 && out.Lock == nil && out.AICLICheck == "" {
 		return nil, nil
 	}
 	return out, nil

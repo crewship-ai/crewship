@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Managed environment definitions can require image-bound offline AI CLI checks before publishing a replacement; failed or unavailable checks preserve the selected image.
+
 - Agent run state and execution events retain the actual container source image ID when available, independently of later environment updates.
 
 - Mise lock resolution now reports proposed native tool versions and deterministic selector/bundle hashes, distinguishing version changes from other lock changes.

@@ -30,9 +30,12 @@ var (
 // MiseConfig represents a mise tool configuration stored as JSON in the DB.
 // It maps tool names to version strings.
 type MiseConfig struct {
-	Lock  *MiseLockBundle   `json:"lock,omitempty"`
-	Tools map[string]string `json:"tools"`         // e.g., {"node": "22", "python": "3.12"}
-	Env   map[string]string `json:"env,omitempty"` // e.g., {"NODE_OPTIONS": "--max-old-space-size=4096"}
+	// AICLICheck is Crewship publication policy, not a native mise setting.
+	// Empty/record retains compatibility; required rejects unqualified builds.
+	AICLICheck string            `json:"ai_cli_check,omitempty"`
+	Lock       *MiseLockBundle   `json:"lock,omitempty"`
+	Tools      map[string]string `json:"tools"`         // e.g., {"node": "22", "python": "3.12"}
+	Env        map[string]string `json:"env,omitempty"` // e.g., {"NODE_OPTIONS": "--max-old-space-size=4096"}
 }
 
 // ParseMiseConfig parses either a JSON or a TOML string into MiseConfig.
@@ -195,6 +198,9 @@ func (c *MiseConfig) ToTOML() string {
 
 // Validate checks that tool names and versions are reasonable.
 func (c *MiseConfig) Validate() error {
+	if c.AICLICheck != "" && c.AICLICheck != "record" && c.AICLICheck != "required" {
+		return fmt.Errorf("mise: ai_cli_check must be record or required")
+	}
 	if err := c.Lock.Validate(); err != nil {
 		return err
 	}

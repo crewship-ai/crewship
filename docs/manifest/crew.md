@@ -151,6 +151,8 @@ Two caveats worth knowing:
 |---|---|---|
 | `tools` | map[string]string | tool → version pin (e.g. `node: "22"`). |
 | `raw` | map | passthrough for unmodeled mise config (e.g. `env`, `tasks`). |
+| `lock` | object | Complete native mise lock bundle; see [managed tool versions](/guides/devcontainers). |
+| `ai_cli_check` | string | `record` (default) or `required`. Required rejects publication without passing image-bound offline AI CLI startup checks; it does not verify provider authentication. |
 
 #### mise or a devcontainer feature?
 

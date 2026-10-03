@@ -683,6 +683,23 @@ workspace; raw configuration and environment variable values are not copied
 into history. Reusing the same image for the same definition reuses its record.
 Offline qualification is included in that immutable build evidence; it is not
 a current provider-authentication claim.
+
+By default, offline AI CLI checks record evidence without preventing publication.
+To require them for a crew, set `spec.mise.ai_cli_check: required` in its Crew
+manifest, or `"ai_cli_check":"required"` alongside `tools` in the managed
+`mise_config` JSON. `record` explicitly selects the compatibility default;
+other values are rejected. This is Crewship metadata and is not emitted into
+native mise TOML.
+
+A required check accepts only successful evidence bound to the built immutable
+image, with a passing startup/version probe for every recorded and required
+agent CLI. Missing inventory, an unavailable runtime, mismatched evidence or
+failed probes fail the provisioning job before a new revision/current image is
+published. The previous image and requirements stay selected. Native providers
+without the necessary inspection and offline sandbox capability cannot satisfy
+this opt-in requirement. These checks do not prove account/model compatibility,
+real provider authentication or safe automatic activation.
+
 Workspace and crew backups include these records; restoring them preserves
 provenance and does not restore the referenced image or activate an instance.
 
