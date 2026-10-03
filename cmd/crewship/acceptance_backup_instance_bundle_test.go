@@ -59,7 +59,19 @@ func TestAcceptance_BackupCommandsReadAnInstanceBundle(t *testing.T) {
 		OutputDir: outDir, DataDir: storage, Quiesce: quiesce.New(),
 		Paths: backup.InstancePaths{Output: storage},
 	})
-	srv := httptest.NewServer(router)
+	// Receiving Content-Length bytes can finish the client before the server
+	// commits the post-stream audit. Synchronize on handler completion, not
+	// just receipt of the response body.
+	downloadDone := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		router.ServeHTTP(w, r)
+		if r.URL.Path == "/api/v1/admin/instance/backups/bundles/download" {
+			select {
+			case downloadDone <- struct{}{}:
+			default:
+			}
+		}
+	}))
 	defer srv.Close()
 
 	tmp := t.TempDir()
@@ -144,21 +156,17 @@ func TestAcceptance_BackupCommandsReadAnInstanceBundle(t *testing.T) {
 	if len(got) == 0 || string(got) != string(want) {
 		t.Fatalf("download: %d bytes, the bundle has %d", len(got), len(want))
 	}
-	// The client can receive all Content-Length bytes before the handler's
-	// post-copy audit transaction commits. Wait for that server-side work.
-	deadline := time.Now().Add(20 * time.Second)
-	for {
-		var audited int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM instance_audit_logs WHERE action = 'instance.backup_downloaded'`).Scan(&audited); err != nil {
-			t.Fatalf("read instance download audit: %v", err)
-		}
-		if audited == 1 {
-			break
-		}
-		if audited > 1 || time.Now().After(deadline) {
-			t.Fatalf("instance audit entries for the download = %d, want 1", audited)
-		}
-		time.Sleep(20 * time.Millisecond)
+	select {
+	case <-downloadDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("instance download handler did not finish its post-stream audit")
+	}
+	var audited int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM instance_audit_logs WHERE action = 'instance.backup_downloaded'`).Scan(&audited); err != nil {
+		t.Fatal(err)
+	}
+	if audited != 1 {
+		t.Fatalf("instance audit entries for the download = %d, want 1", audited)
 	}
 
 	// Not in the catalog: still a 404 on both routes.
