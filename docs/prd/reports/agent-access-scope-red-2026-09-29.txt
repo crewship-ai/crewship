@@ -1,5 +1,0 @@
---- FAIL: TestRecreatedChatCannotReuseAttemptDataScope (1.77s)
-    store_test.go:288: recreated chat reused old private data scope
-FAIL
-FAIL	github.com/crewship-ai/crewship/internal/access	1.778s
-FAIL

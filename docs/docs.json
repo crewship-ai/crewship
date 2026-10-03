@@ -255,6 +255,8 @@
             "pages": [
               "cli/overview",
               "cli/commands",
+                "cli/api",
+              "cli/ai",
               "cli/start",
               "cli/onboarding",
               "cli/login",
