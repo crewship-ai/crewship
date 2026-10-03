@@ -20,6 +20,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Journal run feeds cancel superseded reads, clear previous workspace data and ignore delayed table, insight and live-feed responses after selection changes.
+
+- Routine detail panels clear previous selections, stop reads when closed and cancel abandoned rollback/export operations. Read, rollback and export failures are announced in the panel; failed exports no longer cause unhandled rejections.
+
+- Mission timelines retain agent counts when collapsed, announce expansion state and make task timing/usage tooltips reachable from the keyboard.
+
 - Empty routine lookups cannot select a demo pack whose optional probe is absent. CLI HTTP test logs return independent header and body snapshots so assertions cannot corrupt later observations.
 
 - Mission controls require complete workspace/crew/mission selection, cancel abandoned requests and ignore stale completions or errors after a selection change.
