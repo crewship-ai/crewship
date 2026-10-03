@@ -691,6 +691,10 @@ manifest, or `"ai_cli_check":"required"` alongside `tools` in the managed
 other values are rejected. This is Crewship metadata and is not emitted into
 native mise TOML.
 
+The crew creation wizard preserves this policy when importing Crew YAML, even
+when the mise section has no explicit tools. A nonempty typed `ai_cli_check`
+overrides the value in `spec.mise.raw`; unsupported typed values are rejected.
+
 A required check accepts only successful evidence bound to the built immutable
 image, with a passing startup/version probe for every recorded and required
 agent CLI. Missing inventory, an unavailable runtime, mismatched evidence or
