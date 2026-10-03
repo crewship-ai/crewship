@@ -64,14 +64,20 @@ describe("service disk policy", () => {
     expect(screen.getByRole("spinbutton", { name: "redis/data: Capacity in MiB" })).toHaveValue(128)
     expect(save.mock.calls[0][0].expected_services_json).toBe(enforced)
   })
-  it("warns that quota storage makes crew and workspace backups refuse", () => {
+  it("explains that backups include quota disks only when the quota helper is configured", () => {
     const save = vi.fn()
+    const included = /Backups of this crew and its workspace include these disks when the server's quota helper is configured; without it, they are refused\./
+    const interrupted = /An interrupted backup keeps the service stopped until an admin retries the backup with --recover-services\./
     const { rerender } = render(<CrewServiceQuotas servicesJSON={legacy} canManage save={save} />)
-    expect(screen.queryByText(/backups of this crew and its workspace are refused/)).not.toBeInTheDocument()
+    expect(screen.queryByText(included)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("checkbox", { name: "redis: Enforce disk quotas" }))
-    expect(screen.getByRole("checkbox", { name: /I understand/ }).closest("label")).toHaveTextContent(/backups of this crew and its workspace are refused/)
+    const acknowledgement = screen.getByRole("checkbox", { name: /I understand/ }).closest("label")
+    expect(acknowledgement).toHaveTextContent(included)
+    expect(acknowledgement).toHaveTextContent(interrupted)
+    expect(acknowledgement).not.toHaveTextContent(/snapshot transport/)
     rerender(<CrewServiceQuotas servicesJSON={enforced} canManage={false} save={save} />)
-    expect(screen.getByRole("note")).toHaveTextContent(/backups of this crew and its workspace are refused/)
+    expect(screen.getByRole("note")).toHaveTextContent(included)
+    expect(screen.getByRole("note")).toHaveTextContent(interrupted)
   })
   it("offers no mutation below manager and does not reconstruct private settings", () => {
     const save = vi.fn()
