@@ -41,12 +41,12 @@ func TestEgressFenceOwnServicesIntegration(t *testing.T) {
 	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nexec sleep infinity\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shared := networkFixtureIdentity(t)
+	shared := "fence-svc-it-" + time.Now().Format("150405")
 	t.Setenv("CREWSHIP_RUNTIME", "runc")
 	p, err := New(ctx, Config{
 		RuntimeImage: "alpine:3", DefaultRuntime: "runc", Network: shared, OutputBasePath: tmp,
-		SidecarBinaryPath: sidecarPath, EntrypointPath: entrypointPath, InstanceID: shared, ContainerPrefix: shared,
-		EgressFenceCrews: []string{"fsvc"}, CrewNetworkCrews: []string{"fsvc"}, CrewNetworkPool: networkFixturePool(t),
+		SidecarBinaryPath: sidecarPath, EntrypointPath: entrypointPath, InstanceID: "inst-fsvc",
+		EgressFenceCrews: []string{"fsvc"}, CrewNetworkCrews: []string{"fsvc"}, CrewNetworkPool: "10.239.252.0/24",
 	}, nil)
 	if err != nil {
 		// SKIP-WAIVER(#1368): needs a live Docker daemon for real namespaces,
@@ -175,6 +175,7 @@ func crewNetExecUser(ctx context.Context, t *testing.T, p *Provider, cid, user, 
 	t.Helper()
 	res, err := p.Exec(ctx, provider.ExecConfig{ContainerID: cid, Cmd: []string{"sh", "-c", cmd}, User: user + ":" + user})
 	if err != nil {
+		fenceLogContainerState(t, p, cid)
 		t.Fatalf("exec %q: %v", cmd, err)
 	}
 	b, _ := readAllAndClose(res.Reader)

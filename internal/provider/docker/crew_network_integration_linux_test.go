@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -42,19 +41,16 @@ func TestCrewNetworkIsolationIntegration(t *testing.T) {
 	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nexec sleep infinity\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shared := networkFixtureIdentity(t)
-	pool := networkFixturePool(t)
+	shared := "crewnet-it-" + time.Now().Format("150405")
 	p, err := New(ctx, Config{
 		RuntimeImage:      "alpine:3",
 		DefaultRuntime:    "runc",
 		Network:           shared,
-		ContainerPrefix:   shared,
-		InstanceID:        shared,
 		OutputBasePath:    tmp,
 		SidecarBinaryPath: sidecarPath,
 		EntrypointPath:    entrypointPath,
 		CrewNetworkCrews:  []string{"net-a", "net-b"},
-		CrewNetworkPool:   pool,
+		CrewNetworkPool:   "10.239.248.0/24",
 	}, nil)
 	if err != nil {
 		// SKIP-WAIVER(#2240): needs a live Docker daemon to create real
@@ -107,7 +103,7 @@ func TestCrewNetworkIsolationIntegration(t *testing.T) {
 		ip[c.Slug] = got
 	}
 	for _, slug := range []string{"net-a", "net-b"} {
-		if !netip.MustParsePrefix(pool).Contains(netip.MustParseAddr(ip[slug])) {
+		if !strings.HasPrefix(ip[slug], "10.239.248.") {
 			t.Fatalf("%s got %s, want an address from the crew-network pool", slug, ip[slug])
 		}
 	}
@@ -169,24 +165,21 @@ func crewNetExec(ctx context.Context, t *testing.T, p *Provider, cid string, det
 func TestCleanupRuntimeCrewNetworkIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	identity := networkFixtureIdentity(t)
-	crewID := identity + "-crew"
-	p, err := New(ctx, Config{RuntimeImage: "alpine:3", Network: "", InstanceID: identity, ContainerPrefix: identity, CrewNetworkCrews: []string{"rm-crew"}, CrewNetworkPool: networkFixturePool(t)}, nil)
+	p, err := New(ctx, Config{RuntimeImage: "alpine:3", Network: "", InstanceID: "inst-it", CrewNetworkCrews: []string{"rm-crew"}, CrewNetworkPool: "10.239.249.0/24"}, nil)
 	if err != nil {
 		// SKIP-WAIVER(#2240): needs a live Docker daemon to create and remove
 		// real bridges; same guard as TestResilienceNetworkRecreate.
 		t.Skipf("Docker not available: %v", err)
 	}
 	defer p.Close()
-	name, err := p.ensureCrewNetwork(ctx, crewID, "rm-crew")
+	if err := p.pullSidecarImage(ctx, "alpine:3"); err != nil {
+		t.Fatalf("pull alpine:3: %v", err)
+	}
+	name, err := p.ensureCrewNetwork(ctx, "rm-crew-001", "rm-crew")
 	if err != nil {
 		t.Fatalf("ensureCrewNetwork: %v", err)
 	}
 	defer func() { _, _ = p.client.NetworkRemove(context.Background(), name, client.NetworkRemoveOptions{}) }()
-	// This test must also work first under -shuffle, on an empty image cache.
-	if err := p.pullSidecarImage(ctx, "alpine:3"); err != nil {
-		t.Fatalf("pull alpine:3: %v", err)
-	}
 	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config:     &container.Config{Image: "alpine:3", Cmd: []string{"sleep", "60"}},
 		HostConfig: &container.HostConfig{NetworkMode: container.NetworkMode(name)},
@@ -208,11 +201,11 @@ func TestCleanupRuntimeCrewNetworkIntegration(t *testing.T) {
 	}
 	var found resourcelifecycle.Network
 	for _, n := range nets {
-		if n.CrewID == crewID {
+		if n.CrewID == "rm-crew-001" {
 			found = n
 		}
 	}
-	if found.ID == "" || found.InstanceID != identity || found.Kind != resourcelifecycle.NetworkKind {
+	if found.ID == "" || found.InstanceID != "inst-it" || found.Kind != resourcelifecycle.NetworkKind {
 		t.Fatalf("crew network not reported with its ownership labels: %+v", found)
 	}
 	if err := rt.RemoveNetwork(ctx, found.ID); !errors.Is(err, resourcelifecycle.ErrNetworkInUse) {
@@ -250,10 +243,10 @@ func TestCrewNetworkMovesExistingServiceWithRuntimeIntegration(t *testing.T) {
 	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nexec sleep infinity\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shared := networkFixtureIdentity(t)
+	shared := "crewnet-mv-" + time.Now().Format("150405")
 	base := Config{
-		RuntimeImage: "alpine:3", DefaultRuntime: "runc", Network: shared, OutputBasePath: tmp, ContainerPrefix: shared, InstanceID: shared,
-		SidecarBinaryPath: sidecarPath, EntrypointPath: entrypointPath, CrewNetworkPool: networkFixturePool(t),
+		RuntimeImage: "alpine:3", DefaultRuntime: "runc", Network: shared, OutputBasePath: tmp,
+		SidecarBinaryPath: sidecarPath, EntrypointPath: entrypointPath, CrewNetworkPool: "10.239.250.0/24",
 	}
 	p, err := New(ctx, base, nil)
 	if err != nil {
@@ -390,8 +383,8 @@ func TestCrewNetworkMovesExistingServiceWithRuntimeIntegration(t *testing.T) {
 func TestCrewNetworkInheritsInternalIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	shared := networkFixtureIdentity(t)
-	p, err := New(ctx, Config{RuntimeImage: "alpine:3", Network: "", InstanceID: shared, ContainerPrefix: shared, CrewNetworkCrews: []string{"int-crew"}, CrewNetworkPool: networkFixturePool(t)}, nil)
+	shared := "crewnet-int-" + time.Now().Format("150405")
+	p, err := New(ctx, Config{RuntimeImage: "alpine:3", Network: "", InstanceID: "inst-int", CrewNetworkCrews: []string{"int-crew"}, CrewNetworkPool: "10.239.251.0/24"}, nil)
 	if err != nil {
 		// SKIP-WAIVER(#2240): needs a live Docker daemon to create real
 		// bridges.

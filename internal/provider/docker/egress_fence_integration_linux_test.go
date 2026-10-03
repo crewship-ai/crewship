@@ -42,12 +42,7 @@ func TestEgressFenceIntegration(t *testing.T) {
 	}
 	defer os.RemoveAll(tmp)
 	sidecarPath := filepath.Join(tmp, "crewship-sidecar")
-	buildArgs := []string{"build", "-o", sidecarPath}
-	if os.Getenv("CREWSHIP_TEST_SIDECAR_COVERAGE_DIR") != "" {
-		buildArgs = append(buildArgs, "-cover", "-coverpkg=github.com/crewship-ai/crewship/cmd/crewship-sidecar,github.com/crewship-ai/crewship/internal/egressfence")
-	}
-	buildArgs = append(buildArgs, "github.com/crewship-ai/crewship/cmd/crewship-sidecar")
-	build := exec.CommandContext(ctx, "go", buildArgs...)
+	build := exec.CommandContext(ctx, "go", "build", "-o", sidecarPath, "github.com/crewship-ai/crewship/cmd/crewship-sidecar")
 	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("cannot build crewship-sidecar: %v\n%s", err, out)
@@ -57,15 +52,13 @@ func TestEgressFenceIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	network := networkFixtureIdentity(t)
+	network := "egresspilot-it-" + time.Now().Format("150405")
 	t.Setenv("CREWSHIP_RUNTIME", "runc")
 	var p *Provider
 	p, err = New(ctx, Config{
 		RuntimeImage:      "alpine:3",
 		DefaultRuntime:    "runc",
 		Network:           network,
-		ContainerPrefix:   network,
-		InstanceID:        network,
 		OutputBasePath:    tmp,
 		SidecarBinaryPath: sidecarPath,
 		EntrypointPath:    entrypointPath,
@@ -200,6 +193,7 @@ func TestEgressFenceIntegration(t *testing.T) {
 		t.Fatal("a connection opened before the fence kept delivering data after it")
 	}
 	if _, err := p.Exec(ctx, provider.ExecConfig{ContainerID: cid, Cmd: []string{"true"}, User: "1001:1001"}); err != nil {
+		fenceLogContainerState(t, p, cid)
 		t.Fatalf("Exec after re-fence: %v", err)
 	}
 	assertExit("re-fenced", "1001", probe, false)
@@ -352,25 +346,13 @@ func TestEgressFenceIntegration(t *testing.T) {
 // cid's network namespace with NET_ADMIN, and returns its exit code.
 func fenceTestNetnsRun(ctx context.Context, t *testing.T, p *Provider, cid, image, bin string, args ...string) int64 {
 	t.Helper()
-	config := &container.Config{Image: image, User: "0:0", Entrypoint: []string{"/x"}, Cmd: args}
-	mounts := []mount.Mount{{Type: mount.TypeBind, Source: bin, Target: "/x", ReadOnly: true}}
-	// Opt-in coverage for the real kernel path. The helper runs in this
-	// fixture's namespace; its counters go to the caller's owned directory,
-	// separate from the crew's data and from the host's network namespace.
-	if coverageDir := os.Getenv("CREWSHIP_TEST_SIDECAR_COVERAGE_DIR"); coverageDir != "" {
-		if !filepath.IsAbs(coverageDir) {
-			t.Fatal("CREWSHIP_TEST_SIDECAR_COVERAGE_DIR must be absolute")
-		}
-		config.Env = append(config.Env, "GOCOVERDIR=/crewship-test-coverage")
-		mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: coverageDir, Target: "/crewship-test-coverage"})
-	}
 	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Config: config,
+		Config: &container.Config{Image: image, User: "0:0", Entrypoint: []string{"/x"}, Cmd: args},
 		HostConfig: &container.HostConfig{
 			NetworkMode: container.NetworkMode("container:" + cid),
 			CapDrop:     []string{"ALL"},
 			CapAdd:      []string{"NET_ADMIN"},
-			Mounts:      mounts,
+			Mounts:      []mount.Mount{{Type: mount.TypeBind, Source: bin, Target: "/x", ReadOnly: true}},
 		},
 	})
 	if err != nil {
@@ -413,6 +395,7 @@ func fenceTestExec(ctx context.Context, t *testing.T, p *Provider, cid, user str
 	t.Helper()
 	ex, err := p.client.ExecCreate(ctx, cid, client.ExecCreateOptions{Cmd: cmd, User: user})
 	if err != nil {
+		fenceLogContainerState(t, p, cid)
 		t.Fatalf("exec create %v: %v", cmd, err)
 	}
 	if _, err := p.client.ExecStart(ctx, ex.ID, client.ExecStartOptions{}); err != nil {
@@ -423,4 +406,18 @@ func fenceTestExec(ctx context.Context, t *testing.T, p *Provider, cid, user str
 		t.Fatalf("exec %v did not finish: running=%v err=%v", cmd, running, err)
 	}
 	return code
+}
+
+// Preserve the evidence before deferred cleanup removes the failed fixture.
+// State contains lifecycle/exit information, not credentials or container env.
+func fenceLogContainerState(t *testing.T, p *Provider, cid string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	inspection, err := p.client.ContainerInspect(ctx, cid, client.ContainerInspectOptions{})
+	if err != nil {
+		t.Logf("failed fixture inspect: %v", err)
+		return
+	}
+	t.Logf("failed fixture %s state: %+v", shortID(cid), inspection.Container.State)
 }

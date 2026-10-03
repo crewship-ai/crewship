@@ -137,15 +137,16 @@ producer, and both are links.
 
 ## 7. Process for one area
 
-1. Read this file. Read the screen's code and every hook it uses.
-2. Seed a throwaway server (`docs/ux/agent-brief.md` §Verification) and
-   screenshot desktop 1440, tablet 820 and phone 390 with demo data; also with
-   100 of the main object.
-3. Write `docs/ux/audit-<area>.md`: what the screen is for, every dead end from
-   §6, every missing cross-link from §5, what is inconsistent with §2.
-4. Implement in the order: dead ends → cross-links → anatomy → motion.
-5. Tests first for every pure derivation; Vitest for render behaviour that has
-   a defect behind it; Playwright only for a flow.
-6. Docs ship with the change (`docs/guides/<area>.mdx`).
-7. Screenshots before/after in the PR. One PR per area; never touch another
-   area's files except through a shared component in `components/ui`.
+Follow [CONTRIBUTING](../../CONTRIBUTING.md) for claims, branches and review.
+
+1. Read this contract and the screen's code and hooks.
+2. Build the UI and server, then use `scripts/throwaway-server.sh` for an
+   isolated screenshot server; see the [script catalog](../../scripts/README.md).
+   Check desktop 1440px, tablet 820px and phone 390px with representative data.
+3. Keep internal audits, work allocation and before/after evidence in
+   [private working context](../development/private-context.md). Publish only
+   the documentation, reproducible tests and review evidence needed by public
+   contributors. Do not start a new `docs/ux/audit-*.md` session log.
+4. Fix dead ends, cross-links, shared anatomy and motion in that order.
+5. Add regressions for changed behaviour and update the user-facing guide.
+6. Describe shared primitive changes in the PR and the relevant public contract.

@@ -30,12 +30,21 @@ func validInvariantTree(t *testing.T) string {
 	invariantFile(t, root, "app/page.tsx", "export default function Page() { return null }")
 	invariantFile(t, root, "internal/database/open.go", `package database; var _ = sql.Open("sqlite", "db")`)
 	invariantFile(t, root, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+	// The private-working-files invariant examines the index, so model a real
+	// public checkout rather than an unversioned directory.
+	for _, args := range [][]string{{"init", "-q"}, {"add", "."}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
 	return root
 }
 
 func TestRepositoryInvariantChecksAcceptSupportedTree(t *testing.T) {
 	root := validInvariantTree(t)
-	for _, check := range []func(string) []violation{noAPIRoutesUnderApp, noSqlite3DriverName, noNpmOrYarnLockfile, sidecarAndAgentUIDsUnchanged} {
+	for _, check := range []func(string) []violation{noAPIRoutesUnderApp, noSqlite3DriverName, noNpmOrYarnLockfile, sidecarAndAgentUIDsUnchanged, noPrivateWorkingFiles} {
 		if got := check(root); len(got) != 0 {
 			t.Fatalf("valid checkout rejected: %#v", got)
 		}
@@ -140,7 +149,7 @@ func TestRepositoryInvariantMainReportsSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(got), "4 checkable NEVER DO entries hold") != 2 {
+	if strings.Count(string(got), "5 checkable NEVER DO entries hold") != 2 {
 		t.Fatalf("unexpected success output: %s", got)
 	}
 }
