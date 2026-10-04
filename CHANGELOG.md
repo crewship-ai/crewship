@@ -144,7 +144,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Refreshing a Page review respects disabled reads and unavailable source archives instead of requesting an absent baseline revision.
 
-- Backup activity checks report routine-query failures instead of silently treating them as idle; older schemas without the routine-run table remain supported.
+- Backup activity checks report routine-query failures instead of silently treating them as idle; older schemas without the routine-run table remain supported through an explicit schema probe.
 
 - The repository UID invariant checks the actual runtime package paths, so a checkout directory containing `sidecar` or `provider` cannot make unrelated UID literals satisfy the check.
 
@@ -184,7 +184,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - OAuth setup discards obsolete authorization and code-exchange responses, clears owned popups and timers when its scope closes, and prevents overlapping polls or duplicate exchanges. Journal registry scanning skips vendored sources and handles unrelated constants without inheriting an old event type.
 
-- Credential entry resets when the workspace or dialog changes, ignores obsolete key validation and save responses, preserves the default environment name on reopening, and encodes workspace queries.
+- Removed the unused legacy credential dialog and its tests; credential creation continues through the existing wizard.
 
 - Enforce Page build output limits on actual subprocess pipes; prevent an inherited buffer fast path from bypassing cancellation and retaining unbounded worker output.
 

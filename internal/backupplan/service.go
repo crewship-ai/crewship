@@ -1188,11 +1188,18 @@ func (b DBBusy) Busy(ctx context.Context, ids []string) (bool, string, error) {
 	}
 	runFilter := strings.ReplaceAll(filter, "c.workspace_id", "workspace_id")
 	var runs int
-	if err := b.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM pipeline_runs WHERE status = 'running'`+runFilter, args...).Scan(&runs); err != nil {
-		if !strings.Contains(err.Error(), "no such table: pipeline_runs") {
+	var runRelation int
+	// Legacy schemas have no routine runs. Distinguish that absence through
+	// sql.ErrNoRows, rather than matching the driver's error message. Views
+	// count as relations too: failures reading them must not imply idle.
+	err := b.DB.QueryRowContext(ctx, `SELECT 1 FROM sqlite_schema WHERE name = 'pipeline_runs' COLLATE NOCASE AND type IN ('table', 'view')`).Scan(&runRelation)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, "", err
+	}
+	if err == nil {
+		if err := b.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM pipeline_runs WHERE status = 'running'`+runFilter, args...).Scan(&runs); err != nil {
 			return false, "", err
 		}
-		runs = 0 // tolerate a schema without routine runs
 	}
 	if agents == 0 && runs == 0 {
 		return false, "", nil

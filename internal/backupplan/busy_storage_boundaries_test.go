@@ -1,7 +1,9 @@
 package backupplan
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -76,5 +78,28 @@ func TestBackupBusyGuardDistinguishesLegacySchemaFromReadFailure(t *testing.T) {
 	}
 	if _, _, err := guard.Busy(t.Context(), []string{"ws_c"}); err == nil || !strings.Contains(err.Error(), "malformed JSON") {
 		t.Fatalf("broken activity read treated as idle: %v", err)
+	}
+}
+
+func TestBackupBusyGuardRejectsCanceledContextWithLegacySchema(t *testing.T) {
+	db := busyFixtureDB(t)
+	if _, err := db.Exec(`DROP TABLE pipeline_runs`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, _, err := (DBBusy{DB: db}).Busy(ctx, []string{"ws_c"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled activity read treated as idle: %v", err)
+	}
+}
+
+func TestBackupBusyGuardRecognizesCaseInsensitiveRoutineTable(t *testing.T) {
+	db := busyFixtureDB(t)
+	if _, err := db.Exec(`ALTER TABLE pipeline_runs RENAME TO runs_intermediate; ALTER TABLE runs_intermediate RENAME TO PIPELINE_RUNS`); err != nil {
+		t.Fatal(err)
+	}
+	busy, detail, err := (DBBusy{DB: db}).Busy(t.Context(), []string{"ws_b"})
+	if err != nil || !busy || detail != "1 routine run(s) in progress" {
+		t.Fatalf("routine activity lost through schema spelling: %v %q %v", busy, detail, err)
 	}
 }
