@@ -77,6 +77,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **Required Go race checks run in smaller parallel groups.** The API suite is split into four complete test partitions and the remaining race-tested packages into two balanced groups. Every partition remains required, with coverage evidence, distinct timing artifacts and the existing timeout and aggregate budget checks (#2886).
+
 - Live chat demo scripts now require `--state-dir` or `CREWSHIP_CHAT_DEMO_DIR` for private credentials, outside the checkout. The fleet-watch example requires `CREWSHIP_FLEET_ROOT` instead of assuming a workstation checkout path. Existing demos can reuse their state by selecting its current directory.
 
 - Public documentation now separates product contracts from internal working records and prototypes. Start at `docs/README.md` for guides, specifications and decisions; contributor instructions remain in `AGENTS.md`. Assistant-specific workstation files are ignored and rejected by the tracked-path CI guard. Public builds need no private context checkout. (#2778)

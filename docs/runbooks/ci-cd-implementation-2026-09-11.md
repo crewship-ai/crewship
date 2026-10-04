@@ -8,6 +8,26 @@ Tracking: #2504. Worktree: `/tmp/crewship-3-ci-hardening`.
 
 API, CLI and remaining Go race shards run independently. CI Result directly requires all shards, the shuffle job, and the reusable image build. Browser jobs download the same embedded server from Binary Build and retain independent databases, secrets and processes. Nightly browser and harness matrices likewise build their tools once per workflow run.
 
+The API race suite now enumerates race-built top-level tests into four sorted,
+interleaved partitions, keeping every parent's subtests together. Each successful
+worker records its selected inventory and verifies actual terminal test events.
+The stable `Go Race (internal/api)` check verifies four distinct, exhaustive,
+non-overlapping inventories and sums their package durations for the existing
+2300-second baseline / 1.6x erosion alarm. Package setup runs in each worker,
+so the sum is conservative; the 4600-second hang deadline remains unchanged.
+Artifacts stay in separate directories. `CI Result` requires workers and the
+aggregate, and no failed worker cancels the others. Four partitions also keep
+each test-selection argument under Linux's per-argument size limit; unexpected
+growth fails clearly instead of truncating coverage.
+
+The other Go race packages run in two groups balanced by committed historical
+costs. Fresh `go list` output determines membership; timings only choose the
+group and execution order. New packages receive a default cost automatically,
+and stale exclusions fail. CLI race, shuffle and platform checks remain intact.
+Run `bash scripts/verify.sh quick` to exercise the partition and workflow
+contracts. The first hosted execution measures the actual improvement; summed
+historical test costs are placement estimates, not predicted wall-clock times.
+
 `Security Result` and `CodeQL Result` distinguish planned exclusions from unexpected skipped/cancelled/failed jobs. CodeQL success proves analysis executed, not that all historic SARIF alerts were remediated; the existing alert tracking policy remains. The deterministic API shape checks still block; the broader Schemathesis finding exemption remains explicit and needs its separate API remediation work.
 
 Recommended required contexts are `CI Result`, `Security Result`, `CodeQL Result`, with a pull-request requirement and conversation resolution. Roll out the rules only after these checks exist on the merged workflow. Enabling them while older branches lack the jobs requires those branches to update from main. The required automated review still needs to be read: a throttled green status is not a review. Do not remove the repository's claim/review process.
