@@ -6,11 +6,15 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/moby/moby/api/types/image"
-	"github.com/moby/moby/client"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/client"
 )
 
 func TestToolchainCaptureIsSharedWithBuildOnlyProvisioning(t *testing.T) {
@@ -157,5 +161,128 @@ func TestToolchainCaptureUsesRuntimeMiseLocationsWithoutUnrelatedEnv(t *testing.
 	}
 	if strings.Contains(joined, "UNRELATED_SECRET") {
 		t.Fatal("version probe inherited unrelated configured environment")
+	}
+}
+
+func TestManagedNativeEvidenceDoesNotChangeLegacyInventory(t *testing.T) {
+	for _, mode := range []string{"native", "mise-fails", "shim", "legacy-shim"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			inventory := filepath.Join(dir, "inventory")
+			shadow := filepath.Join(dir, "shadow", "codex")
+			native := filepath.Join(dir, "native", "codex")
+			mise := filepath.Join(dir, "mise")
+			for _, p := range []string{inventory, filepath.Dir(shadow), filepath.Dir(native)} {
+				if err := os.MkdirAll(p, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for p, source := range map[string]string{shadow: "#!/bin/sh\necho codex-cli 0.159.0\n", native: "#!/bin/sh\necho codex-cli 0.160.0\n"} {
+				if err := os.WriteFile(p, []byte(source), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			resolved := native
+			if mode == "shim" {
+				resolved = filepath.Join(dir, "shim")
+				if err := os.Symlink(mise, resolved); err != nil {
+					t.Fatal(err)
+				}
+			}
+			source := "#!/bin/sh\nif [ \"$1\" = --version ]; then case \"$0\" in */codex) echo codex-cli 0.160.0;; *) echo mise 2026.10.0;; esac; exit 0; fi\nprintf '%s\\n' '" + resolved + "'\n"
+			if mode == "mise-fails" {
+				source = "#!/bin/sh\nexit 1\n"
+			}
+			if mode == "legacy-shim" {
+				if err := os.Remove(shadow); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(mise, shadow); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(mise, []byte(source), 0700); err != nil {
+				t.Fatal(err)
+			}
+			run := func(ctx context.Context, _ string, cmd []string, user string, env []string) (string, int, error) {
+				if user != "1001:1001" {
+					return "", 0, nil
+				}
+				script := strings.ReplaceAll(strings.ReplaceAll(cmd[2], toolchainDirectory, inventory), "/usr/local/bin/mise", mise)
+				command := exec.CommandContext(ctx, "sh", "-c", script)
+				command.Env = append(os.Environ(), env...)
+				out, err := command.CombinedOutput()
+				if err != nil {
+					return string(out), 1, err
+				}
+				return string(out), 0, nil
+			}
+			if err := writeToolchainInventory(context.Background(), "fixture", []string{"codex"}, map[string]string{"PATH": filepath.Dir(shadow) + ":/usr/bin:/bin"}, run); err != nil {
+				t.Fatal(err)
+			}
+			baseline := filepath.Join(dir, "baseline")
+			if err := os.MkdirAll(baseline, 0700); err != nil {
+				t.Fatal(err)
+			}
+			mainProbe := exec.Command("sh", "-c", `command -v codex > "$1/codex.path"; codex --version > "$1/codex.version"`, "baseline", baseline)
+			mainProbe.Env = append(os.Environ(), "PATH="+filepath.Dir(shadow)+":/usr/bin:/bin")
+			if out, err := mainProbe.CombinedOutput(); err != nil {
+				t.Fatalf("main probe: %v %s", err, out)
+			}
+			for _, name := range []string{"codex.path", "codex.version"} {
+				before, err := os.ReadFile(filepath.Join(baseline, name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				after, err := os.ReadFile(filepath.Join(inventory, name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(before, after) {
+					t.Fatalf("legacy %s changed: before=%q after=%q", name, before, after)
+				}
+			}
+			read := func(name string) string {
+				raw, err := os.ReadFile(filepath.Join(inventory, name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return strings.TrimSpace(string(raw))
+			}
+			legacyVersion := "codex-cli 0.159.0"
+			if mode == "legacy-shim" {
+				legacyVersion = "codex-cli 0.160.0"
+			}
+			if read("codex.path") != shadow || read("codex.version") != legacyVersion || read("codex.status") != "0" {
+				t.Fatal("legacy PATH-first evidence changed")
+			}
+			if mode == "native" || mode == "legacy-shim" {
+				if read("codex.native-path") != native || read("codex.native-version") != "codex-cli 0.160.0" {
+					t.Fatal("native probe did not use exact executable")
+				}
+			} else if _, err := os.Stat(filepath.Join(inventory, "codex.native-path")); !os.IsNotExist(err) {
+				t.Fatal("failed mise/shim resolution became managed evidence")
+			}
+		})
+	}
+}
+
+func TestManagedToolchainCandidateRejectsShimAndMise(t *testing.T) {
+	for _, candidate := range []string{"/opt/mise/data/installs/codex/0.160.0/bin/codex", "/opt/mise/data/shims/codex", "/usr/local/bin/mise", "/opt/mise/data/installs/codex/0.159.0/bin/codex"} {
+		files := map[string]string{"schema": "1", "codex.path": "/usr/local/bin/mise", "codex.status": "0", "codex.version": "codex-cli 0.160.0", "codex.native-path": candidate, "codex.native-version": "codex-cli 0.160.0", "codex.native-status": "0"}
+		got, err := parseToolchainArchive(bytes.NewReader(toolchainArchive(t, files)), []string{"codex"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		valid := candidate == "/opt/mise/data/installs/codex/0.160.0/bin/codex"
+		if (got.Tools[0].ManagedPath != "") != valid {
+			t.Fatalf("candidate=%q evidence=%+v", candidate, got.Tools[0])
+		}
+		if got.Tools[0].Path != "/usr/local/bin/mise" || got.Tools[0].Version != "0.160.0" {
+			t.Fatal("legacy shim observation changed")
+		}
+	}
+	if captureLaunchArtifact("/usr/local/bin/mise", strings.NewReader("irrelevant")) != nil {
+		t.Fatal("mise misattributed as CLI")
 	}
 }

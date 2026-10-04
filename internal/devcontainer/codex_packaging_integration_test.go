@@ -103,7 +103,7 @@ func TestCodexNativePackaging(t *testing.T) {
 		t.Fatalf("inventory: %+v", got)
 	}
 	tool := got.Tools[0]
-	if tool.Status != "observed" || tool.Version != "0.160.0" || tool.LaunchArtifact == nil || !strings.HasPrefix(tool.Path, "/opt/mise/data/installs/") {
+	if tool.Status != "observed" || tool.Version != "0.160.0" || tool.LaunchArtifact == nil || tool.Path != "/opt/mise/data/shims/codex" || tool.ManagedVersion != "0.160.0" || !strings.HasPrefix(tool.ManagedPath, "/opt/mise/data/installs/") {
 		t.Fatalf("native artifact: %+v", tool)
 	}
 	launcher := filepath.Join(t.TempDir(), "launcher")
@@ -114,7 +114,7 @@ func TestCodexNativePackaging(t *testing.T) {
 	}
 	runtime, err := docker.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name: tempContainerName(), Config: &container.Config{Image: committed, User: "1001:1001", Entrypoint: []string{"/bin/sleep"}, Cmd: []string{"120"}, Env: []string{"HOME=/home/agent", "PATH=/usr/local/bin:/usr/bin:/bin", "LD_PRELOAD=/home/agent/evil.so", "NODE_OPTIONS=evil"}},
-		HostConfig: &container.HostConfig{ReadonlyRootfs: true, NetworkMode: "none", CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges"}, Mounts: []mount.Mount{{Type: mount.TypeBind, Source: launcher, Target: managedlaunch.LauncherPath, ReadOnly: true}}, Resources: container.Resources{Memory: 1 << 30, NanoCPUs: 1e9}},
+		HostConfig: &container.HostConfig{ReadonlyRootfs: true, Tmpfs: map[string]string{"/tmp": "rw,noexec,nosuid,mode=1777,size=16m"}, NetworkMode: "none", CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges"}, Mounts: []mount.Mount{{Type: mount.TypeBind, Source: launcher, Target: managedlaunch.LauncherPath, ReadOnly: true}}, Resources: container.Resources{Memory: 1 << 30, NanoCPUs: 1e9}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -123,10 +123,10 @@ func TestCodexNativePackaging(t *testing.T) {
 	if _, err := docker.ContainerStart(ctx, runtimeID, client.ContainerStartOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	descriptor := managedlaunch.Descriptor{Artifact: *tool.LaunchArtifact, ImageID: committed, RevisionID: "packaging-fixture", LockSHA256: strings.TrimPrefix(miseLockDigest(cfg.Lock), "sha256:"), Binary: "codex", Version: "0.160.0", EnvKeys: []string{"HOME"}}
+	descriptor := managedlaunch.Descriptor{Artifact: *tool.LaunchArtifact, ImageID: committed, RevisionID: "packaging-fixture", LockSHA256: strings.TrimPrefix(miseLockDigest(cfg.Lock), "sha256:"), Binary: "codex", Version: "0.160.0", RunID: "packaging-fixture", EnvKeys: []string{"HOME"}}
 	encoded, _ := json.Marshal(descriptor)
 	if out, code, err := run(ctx, runtimeID, []string{managedlaunch.LauncherPath, "--managed-launch", base64.RawURLEncoding.EncodeToString(encoded), "--version"}, "1001:1001", []string{"HOME=/home/agent"}); err != nil || code != 0 || !strings.Contains(out, "codex-cli 0.160.0") {
 		t.Fatalf("native managed launcher: %v %d %s", err, code, out)
 	}
-	t.Logf("image=%s path=%s version=%s artifact=%+v native_lock=%s", committed, tool.Path, tool.Version, tool.LaunchArtifact, lock)
+	t.Logf("image=%s legacy_path=%s managed_path=%s legacy_version=%s managed_version=%s artifact=%+v native_lock=%s", committed, tool.Path, tool.ManagedPath, tool.Version, tool.ManagedVersion, tool.LaunchArtifact, lock)
 }

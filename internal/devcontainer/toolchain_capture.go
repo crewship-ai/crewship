@@ -53,12 +53,16 @@ func writeToolchainInventory(ctx context.Context, containerID string, bins []str
 	script := "umask 077\nexport PATH=" + pathExpression + "\n" +
 		"export HOME=/home/agent DISABLE_AUTOUPDATER=1\n" +
 		"for binary in " + strings.Join(quoted, " ") + "; do\n" +
-		"  executable=$(command -v \"$binary\")\n" +
-		"  if test -x /usr/local/bin/mise; then resolved=$(timeout -k 1 8 /usr/local/bin/mise which \"$binary\" 2>/dev/null) && executable=$resolved; fi\n" +
-		"  readlink -f \"$executable\" > " + toolchainDirectory + "/\"$binary\".path || :\n" +
-		"  (ulimit -f 8; timeout -k 1 8 \"$executable\" --version > " + toolchainDirectory + "/\"$binary\".version 2>/dev/null)\n" +
+		"  command -v \"$binary\" > " + toolchainDirectory + "/\"$binary\".path || :\n" +
+		"  (ulimit -f 8; timeout -k 1 8 \"$binary\" --version > " + toolchainDirectory + "/\"$binary\".version 2>/dev/null)\n" +
 		"  code=$?\n" +
 		"  printf '%s\\n' \"$code\" > " + toolchainDirectory + "/\"$binary\".status || exit 1\n" +
+		"  if test -x /usr/local/bin/mise; then\n" +
+		"    native=$(timeout -k 1 8 /usr/local/bin/mise which \"$binary\" 2>/dev/null) && canonical=$(readlink -f \"$native\") && test \"$native\" = \"$canonical\" && {\n" +
+		"      printf '%s\\n' \"$native\" > " + toolchainDirectory + "/\"$binary\".native-path\n" +
+		"      (ulimit -f 8; timeout -k 1 8 \"$native\" --version > " + toolchainDirectory + "/\"$binary\".native-version 2>/dev/null)\n" +
+		"      printf '%s\\n' \"$?\" > " + toolchainDirectory + "/\"$binary\".native-status\n" +
+		"    }; fi\n" +
 		"done\nprintf '1\\n' > " + toolchainDirectory + "/schema\n"
 	probeEnv := []string{"HOME=/home/agent", "DISABLE_AUTOUPDATER=1"}
 	for _, kv := range MiseRuntimeEnv {
@@ -128,14 +132,14 @@ func (p *Provisioner) inspectToolchain(ctx context.Context, image string, bins [
 	inventory.ImageID = inspected.ID
 	for i := range inventory.Tools {
 		tool := &inventory.Tools[i]
-		if tool.Status != "observed" || (tool.Binary != "claude" && tool.Binary != "codex") || !managedlaunch.ImagePath(tool.Path) {
+		if tool.Status != "observed" || (tool.Binary != "claude" && tool.Binary != "codex") || !managedToolPath(tool.Binary, tool.ManagedVersion, tool.ManagedPath) {
 			continue
 		}
-		artifactCopy, err := copier.CopyFromContainer(ctx, created.ID, client.CopyFromContainerOptions{SourcePath: tool.Path})
+		artifactCopy, err := copier.CopyFromContainer(ctx, created.ID, client.CopyFromContainerOptions{SourcePath: tool.ManagedPath})
 		if err != nil {
 			continue
 		}
-		tool.LaunchArtifact = captureLaunchArtifact(tool.Path, artifactCopy.Content)
+		tool.LaunchArtifact = captureLaunchArtifact(tool.ManagedPath, artifactCopy.Content)
 		artifactCopy.Content.Close()
 	}
 	return inventory
@@ -144,6 +148,9 @@ func (p *Provisioner) inspectToolchain(ctx context.Context, image string, bins [
 // A host read of the stopped, immutable image supplies the hash. Version probe
 // stdout and digest files produced by image programs never authorize launch.
 func captureLaunchArtifact(executable string, reader io.Reader) *managedlaunch.Artifact {
+	if path.Base(executable) != "codex" && path.Base(executable) != "claude" {
+		return nil
+	}
 	limited := &io.LimitedReader{R: reader, N: managedlaunch.MaxArtifactBytes + 8192}
 	tr := tar.NewReader(limited)
 	h, err := tr.Next()

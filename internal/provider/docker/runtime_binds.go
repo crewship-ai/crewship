@@ -235,7 +235,10 @@ func (p *Provider) preflightMandatoryBinds(ctx context.Context) {
 // Retain old generations for existing containers; garbage collection is separate.
 func stageManagedLauncher(source, output string) (string, error) {
 	denied := errors.New("managed launch: safe immutable launcher staging required")
-	if source == "" || output == "" || os.Geteuid() == 1001 || os.Geteuid() == 1002 {
+	if err := managedLauncherServerUIDError(os.Geteuid()); err != nil {
+		return "", err
+	}
+	if source == "" || output == "" {
 		return "", denied
 	}
 	dir := filepath.Join(output, runtimestage.DirName)
@@ -246,7 +249,7 @@ func stageManagedLauncher(source, output string) (string, error) {
 	for parent := filepath.Dir(dir); ; parent = filepath.Dir(parent) {
 		info, err := os.Lstat(parent)
 		if err != nil || !safeLauncherDirectory(info) {
-			return "", denied
+			return "", fmt.Errorf("%w: unsafe ancestor %s", denied, parent)
 		}
 		if parent == filepath.Dir(parent) {
 			break
@@ -302,4 +305,11 @@ func stageManagedLauncher(source, output string) (string, error) {
 		return "", denied
 	}
 	return dest, nil
+}
+
+func managedLauncherServerUIDError(uid int) error {
+	if uid == 1001 || uid == 1002 {
+		return fmt.Errorf("managed launch: server UID %d collides with agent/sidecar UID; use a host-native server under a different UID (official server image unsupported for this pilot)", uid)
+	}
+	return nil
 }

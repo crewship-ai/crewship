@@ -36,6 +36,8 @@ type ToolchainInventory struct {
 }
 
 type ToolchainTool struct {
+	ManagedPath    string                  `json:"managed_path,omitempty" yaml:"managed_path,omitempty"`
+	ManagedVersion string                  `json:"managed_version,omitempty" yaml:"managed_version,omitempty"`
 	LaunchArtifact *managedlaunch.Artifact `json:"launch_artifact,omitempty" yaml:"launch_artifact,omitempty"`
 	Binary         string                  `json:"binary" yaml:"binary"`
 	Version        string                  `json:"version,omitempty" yaml:"version,omitempty"`
@@ -129,6 +131,13 @@ func parseToolchainArchive(r io.Reader, bins []string) (*ToolchainInventory, err
 	result.Status = "recorded"
 	for i := range result.Tools {
 		tool := &result.Tools[i]
+		if strings.TrimSpace(files[tool.Binary+".native-status"]) == "0" {
+			version := ObservedToolVersion(tool.Binary, files[tool.Binary+".native-version"])
+			native := strings.TrimSpace(files[tool.Binary+".native-path"])
+			if managedToolPath(tool.Binary, version, native) {
+				tool.ManagedPath, tool.ManagedVersion = native, version
+			}
+		}
 		status, found := files[tool.Binary+".status"]
 		if !found {
 			continue
@@ -198,4 +207,11 @@ func RequestedToolchain(cfg *Config, miseConfig string, adapters []string) ([]To
 		result = append(result, request)
 	}
 	return result, nil
+}
+
+// Independent native evidence must name the tool's exact mise installation,
+// never a shim (which may resolve to mise itself) or PATH-first shadow binary.
+func managedToolPath(binary, version, executable string) bool {
+	return (binary == "codex" || binary == "claude") && version != "" &&
+		managedlaunch.ImagePath(executable) && strings.HasSuffix(executable, "/installs/"+binary+"/"+version+"/bin/"+binary)
 }

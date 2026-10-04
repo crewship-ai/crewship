@@ -89,7 +89,7 @@ func managedLaunchResolver(db *sql.DB) orchestrator.ManagedLaunchResolver {
 			if tool.Binary != cli.Binary {
 				continue
 			}
-			if tool.LaunchArtifact == nil || tool.LaunchArtifact.Path != tool.Path {
+			if tool.LaunchArtifact == nil || tool.LaunchArtifact.Path != tool.ManagedPath || tool.ManagedVersion != locked {
 				return nil, denied
 			}
 			d := &managedlaunch.Descriptor{Artifact: *tool.LaunchArtifact, ImageID: inventory.ImageID, RevisionID: revisionID, LockSHA256: hex.EncodeToString(sum[:]), Binary: cli.Binary, Version: locked}

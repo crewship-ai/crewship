@@ -37,7 +37,7 @@ func (o *Orchestrator) admitManagedLaunch(ctx context.Context, req *AgentRunRequ
 		return nil
 	}
 	if req.CLIAdapter == "CLAUDE_CODE" {
-		return errors.New("managed launch: pilot A1 podporuje statický Codex; dynamický ELF (Claude Code) zatím nepodporován, A2")
+		return errors.New("managed launch: pilot A1 supports static Codex; dynamic ELF (Claude Code) requires A2 qualification")
 	}
 	if req.CLIAdapter != "CODEX_CLI" {
 		return errors.New("managed launch: pilot A1 supports only the static Codex adapter")
@@ -45,7 +45,7 @@ func (o *Orchestrator) admitManagedLaunch(ctx context.Context, req *AgentRunRequ
 	if use == nil || !use.Matches(req.CrewID, req.ContainerID) || o.managedLaunchResolver == nil {
 		return errors.New("managed launch: runtime reservation or build authority unavailable")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	d, err := o.managedLaunchResolver(ctx, req.WorkspaceID, req.CrewID, req.CLIAdapter)
 	if err != nil {
@@ -80,6 +80,10 @@ func (o *Orchestrator) attestManagedLaunch(ctx context.Context, id string, d man
 
 func managedExecConfig(req AgentRunRequest, cmd, env []string, workDir string) (provider.ExecConfig, error) {
 	d := *req.managedLaunch
+	if !ValidRunID(req.RunID) {
+		return provider.ExecConfig{}, errors.New("managed launch: valid run identity required")
+	}
+	d.RunID = req.RunID
 	if err := d.Validate(); err != nil {
 		return provider.ExecConfig{}, err
 	}

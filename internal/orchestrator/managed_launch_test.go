@@ -32,7 +32,7 @@ func TestManagedLaunchClaudeExplainsA2Refusal(t *testing.T) {
 	o := New(execStartedProbeContainer{}, newLockedMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	req := AgentRunRequest{CrewID: "pilot-crew", CLIAdapter: "CLAUDE_CODE"}
 	err := o.admitManagedLaunch(context.Background(), &req, nil)
-	if err == nil || !strings.Contains(err.Error(), "dynamický ELF") || !strings.Contains(err.Error(), "A2") {
+	if err == nil || !strings.Contains(err.Error(), "dynamic ELF") || !strings.Contains(err.Error(), "A2") {
 		t.Fatalf("unsupported Claude error=%v", err)
 	}
 }
@@ -96,7 +96,7 @@ func TestManagedLaunchUsesCommonRunAdmissionAndDirectExec(t *testing.T) {
 					}
 					raw, _ := base64.RawURLEncoding.DecodeString(cfg.Cmd[2])
 					var actual managedlaunch.Descriptor
-					if json.Unmarshal(raw, &actual) != nil || actual.Version != d.Version || actual.Artifact != d.Artifact {
+					if json.Unmarshal(raw, &actual) != nil || actual.Version != d.Version || actual.Artifact != d.Artifact || actual.RunID != req.RunID || !strings.Contains(directRunProbe(actual.RunID, false), managedlaunch.DirectRunPIDFile(actual.RunID)) {
 						t.Fatal("launcher lost admission evidence")
 					}
 				}
@@ -135,5 +135,78 @@ func TestManagedLaunchRechecksBeforeCreationGate(t *testing.T) {
 		if len(cfg.Cmd) > 1 && cfg.Cmd[1] == "--managed-launch" {
 			t.Fatal("drift launched CLI")
 		}
+	}
+}
+
+type managedPersistFailure struct{ *lockedMemState }
+
+func (s managedPersistFailure) Set(ctx context.Context, bucket, key string, value []byte) error {
+	if bucket == "agent_runs" {
+		return errors.New("fixture persistence unavailable")
+	}
+	return s.lockedMemState.Set(ctx, bucket, key, value)
+}
+
+func TestManagedLaunchPersistenceFailurePreventsExec(t *testing.T) {
+	t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "pilot-crew")
+	c := &launchContainer{}
+	o := New(c, managedPersistFailure{newLockedMemState()}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	o.SetManagedLaunchResolver(func(context.Context, string, string, string) (*managedlaunch.Descriptor, error) {
+		return launchDescriptor(), nil
+	})
+	use := provider.NewRuntimeUse("pilot-crew", "c1", func() {})
+	defer use.Release()
+	gate := false
+	err := o.RunAgent(context.Background(), AgentRunRequest{RuntimeUse: use, RunID: "managed-persist", CrewID: "pilot-crew", WorkspaceID: "w1", AgentID: "a1", AgentSlug: "agent-1", ContainerID: "c1", CLIAdapter: "CODEX_CLI", ExecGate: func(context.Context) error { gate = true; return nil }}, nil)
+	if err == nil || !strings.Contains(err.Error(), "persistence failed") || gate || len(c.commands) != 0 {
+		t.Fatalf("persistence failure executed: err=%v gate=%v commands=%v", err, gate, c.commands)
+	}
+}
+
+func TestManagedRunProbePreservesDurableScopeAndMissingState(t *testing.T) {
+	t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "pilot-crew")
+	state := newLockedMemState()
+	o := New(&launchContainer{}, state, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	location := RunLocation{ContainerID: "c1", AgentSlug: "agent-1", RunID: "managed-probe", Managed: true}
+	if _, err := o.managedRunProbe(context.Background(), location, false); err == nil {
+		t.Fatal("known managed attempt fell back after lost durable state")
+	}
+	for _, wrong := range []string{"container", "agent", "run", "valid"} {
+		run := RunState{ID: location.RunID, ContainerID: location.ContainerID, AgentSlug: location.AgentSlug, ManagedLaunch: launchDescriptor()}
+		switch wrong {
+		case "container":
+			run.ContainerID = "other"
+		case "agent":
+			run.AgentSlug = "other"
+		case "run":
+			run.ID = "other"
+		}
+		raw, _ := json.Marshal(run)
+		if err := state.Set(context.Background(), "agent_runs", location.RunID, raw); err != nil {
+			t.Fatal(err)
+		}
+		probe, err := o.managedRunProbe(context.Background(), location, true)
+		if wrong == "valid" {
+			if err != nil || !strings.HasSuffix(probe, "echo UNKNOWN; exit; ") {
+				t.Fatalf("durable managed probe=%q %v", probe, err)
+			}
+		} else if err == nil {
+			t.Fatalf("confused %s scope accepted", wrong)
+		}
+	}
+}
+
+func TestManagedRunProbeAfterPilotSelectorDisabled(t *testing.T) {
+	t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "")
+	state := newLockedMemState()
+	location := RunLocation{ContainerID: "c1", AgentSlug: "agent-1", RunID: "managed-recovery"}
+	raw, _ := json.Marshal(RunState{ID: location.RunID, ContainerID: location.ContainerID, AgentSlug: location.AgentSlug, ManagedLaunch: launchDescriptor()})
+	if err := state.Set(context.Background(), "agent_runs", location.RunID, raw); err != nil {
+		t.Fatal(err)
+	}
+	restarted := New(&launchContainer{}, state, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	probe, err := restarted.managedRunProbe(context.Background(), location, false)
+	if err != nil || !strings.HasSuffix(probe, "echo UNKNOWN; exit; ") {
+		t.Fatalf("disabled selector bypassed durable managed marker: %q %v", probe, err)
 	}
 }

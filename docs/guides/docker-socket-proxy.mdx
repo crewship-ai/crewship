@@ -107,7 +107,7 @@ or a listed endpoint nobody calls.
 | `ContainerUnpause` | `POST /containers/{id}/unpause` | Resumes it afterwards |
 | `ContainerUpdate` | `POST /containers/{id}/update` | Applies managed service resource bounds before startup and recovery |
 | `CopyToContainer` | `HEAD` + `PUT /containers/{id}/archive` | Writes devcontainer features, restored backups, the sidecar binary |
-| `CopyFromContainer` | `GET /containers/{id}/archive` | Streams crew backups, bounded built-toolchain inventory, and actual bind-mounted launcher bytes for managed admission |
+| `CopyFromContainer` | `GET /containers/{id}/archive` | Streams crew backups, bounded built-toolchain inventory, and secondary launcher archive consistency for managed admission (does not prove the running bind inode) |
 | `ContainerStatPath` | `HEAD /containers/{id}/archive` | Rejects symlink ancestors that could alias managed CLI image paths into writable home; requires `POST: 1` for HEAD |
 | `ExecCreate` | `POST /containers/{id}/exec` | Creates the exec session an agent turn runs in |
 

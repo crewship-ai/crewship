@@ -7,9 +7,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -30,6 +33,14 @@ func Launch(encoded string, args []string) error {
 		return errors.New("managed launch: invalid descriptor encoding")
 	}
 	if err := d.Validate(); err != nil {
+		return err
+	}
+	if !ValidRunID(d.RunID) {
+		return errors.New("managed launch: valid run identity required")
+	}
+	// Establish identity before potentially expensive artifact validation so
+	// stop and restart reconciliation can also locate the trusted launcher.
+	if err := establishRunIdentity(d.RunID); err != nil {
 		return err
 	}
 	canonical, err := filepath.EvalSymlinks(d.Path)
@@ -68,4 +79,45 @@ func Launch(encoded string, args []string) error {
 	// The provider attests read-only root and no covering mounts while retaining
 	// the exact runtime. Those facts close the hash-to-exec replacement window.
 	return syscall.Exec(d.Path, argv, env)
+}
+
+// Keep the legacy direct-run PID/starttime contract without invoking image
+// shell code. execve preserves PID and session/process group; group signals
+// therefore reach the CLI and its children. An existing file (including a
+// symlink) refuses this attempt instead of overwriting another run identity.
+func establishRunIdentity(runID string) error {
+	_, sessionErr := syscall.Setsid()
+	if sessionErr != nil && !errors.Is(sessionErr, syscall.EPERM) {
+		return errors.New("managed launch: cannot establish isolated run session")
+	}
+	raw, err := os.ReadFile("/proc/self/stat")
+	if err != nil {
+		return errors.New("managed launch: process identity unavailable")
+	}
+	end := strings.LastIndexByte(string(raw), ')')
+	if end < 0 {
+		return errors.New("managed launch: invalid process identity")
+	}
+	fields := strings.Fields(string(raw[end+1:]))
+	// Some container runtimes already create the exec process as a session
+	// leader. EPERM is safe only when kernel evidence confirms this process
+	// owns both the session and group; never borrow a caller-supplied identity.
+	pid := strconv.Itoa(os.Getpid())
+	if len(fields) < 20 || fields[2] != pid || fields[3] != pid {
+		return errors.New("managed launch: invalid process identity")
+	}
+	stamp, err := strconv.ParseUint(fields[19], 10, 64)
+	if err != nil || stamp == 0 {
+		return errors.New("managed launch: invalid process identity")
+	}
+	f, err := os.OpenFile(DirectRunPIDFile(runID), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return errors.New("managed launch: exclusive run identity unavailable")
+	}
+	_, writeErr := fmt.Fprintf(f, "%d %d\n", os.Getpid(), stamp)
+	closeErr := f.Close()
+	if writeErr != nil || closeErr != nil {
+		return errors.New("managed launch: cannot publish run identity")
+	}
+	return nil
 }

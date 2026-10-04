@@ -17,6 +17,10 @@ Interpreter and library qualification is a subsequent capability (A2). Pilot
 selection is restricted to Codex-only crews. Claude dispatch in a selected crew
 returns an explicit dynamic-ELF/A2 capability error before creation.
 
+The pilot requires a host-native server running under a UID other than 1001
+or 1002. The official server Docker image runs as UID 1001 and is unsupported
+for this pilot; recreating crew runtimes cannot correct that host UID collision.
+
 Before selecting a crew, use the existing CLI environment flow:
 
 1. Set an exact Codex pin in `crew config <crew> --mise <file>` and resolve/apply its
@@ -60,8 +64,35 @@ before the durable exec creation gate. The reservation survives execution.
 The first process is the static host-bound `crewship-sidecar --managed-launch`
 helper. It checks native format, canonical path, ownership/permissions and
 SHA-256 before `execve`, without shell, stdbuf, agent PATH, tmux or writable
-argument/environment files. Its child environment contains only names supplied
-by host admission, with a fixed system PATH. Image-only variables, `LD_*`,
+argument/environment files. The trusted launcher creates a new session and an exclusive 0600
+`/tmp/crewship-direct-<run>.pid` file containing its PID and kernel start time
+before artifact validation. Exec preserves that identity for the existing
+stop, liveness and restart recovery probes; existing files or symlinks refuse
+the attempt rather than overwriting another identity. This writable PID file
+is lifecycle evidence, never authority to launch an executable. The existing
+host-side `RunState.ManagedLaunch` marker must be persisted before exec and is
+retained by restart recovery. If that managed PID file disappears, probes return
+UNKNOWN and retain the hold instead of falling through to tmux absence; an
+authoritatively stopped or removed container can still prove absence. Lost
+identity in a running container requires operator reconciliation/recreation.
+Same-RunID re-execution refuses an existing identity file, matching legacy
+direct-exec parity: retries must mint a new attempt ID.
+
+Process-group signal probing calibrates against the probe's own group using
+portable explicit-signal syntax. Unsupported utilities, permission errors and
+failed calibration return UNKNOWN; only a definite no-such-process error
+proves group absence. PID/starttime checks prevent accidental PID reuse. They do not establish an
+adversarial isolation boundary between processes sharing UID 1001: that UID can
+rewrite its PID file to a valid foreign PID/starttime in the same container.
+The durable marker prevents false tmux absence and cross-run state confusion;
+it does not attest the PID file against such deliberate forgery. This pilot
+retains that legacy lifecycle limitation and does not qualify agent isolation.
+
+Its child environment contains only names supplied
+by host admission, with a fixed system PATH (`/usr/local/bin:/usr/bin:/bin`). Host-admitted
+lowercase `http_proxy`, `https_proxy` and `no_proxy` are retained. Crew mise
+and feature PATH additions are excluded: shell tools must use canonical
+image paths when absent from the fixed PATH. This is a pilot limitation. Image-only variables, `LD_*`,
 `DYLD_*`, `NODE_OPTIONS`, loader/interpreter options and tmux variables are
 discarded. Existing host-admitted HOME, proxy and credential values remain;
 moving credentials outside agents belongs to the later gateway work.
@@ -91,3 +122,25 @@ This gate resolves the public Codex 0.160.0 native lock, installs with
 image without starting it for inspection. A separate read-only, network-disabled
 runtime executes the actual native binary through the static launcher with
 `--version`. It makes no authentication or model requests.
+
+Legacy inventory path/version observations remain PATH-first and keep their
+existing publication-gate meaning. Managed evidence separately resolves the
+canonical native mise installation, probes that exact binary's version and
+captures its bytes from the stopped image. A shim or mise executable cannot
+become the managed candidate; its independently observed version must match
+the native lock and exact selector. Older revisions without independent
+`managed_path` and `managed_version` evidence require a rebuild.
+
+Artifact validation currently buffers up to 512 MiB per reader; operators must
+budget memory for launcher validation in addition to the native CLI. The bound
+limits individual allocations, not aggregate concurrency or an OOM guarantee.
+Attestation uses a 20-second provider bound within 30-second admission.
+Immutable launcher generations are retained; remove a generation only after
+verifying that no running or stopped container references its host bind source.
+Upstream Codex packaging qualification is an explicit opt-in test, separate from
+the required synthetic managed-environment CI gate.
+
+The once-run Linux amd64 Codex 0.160.0 native packaging qualification used
+a 289,101,384-byte executable and a 1 GiB runtime memory limit. That result
+does not qualify smaller memory limits, other platforms, authentication or
+model calls. No crew memory defaults are changed by this pilot.

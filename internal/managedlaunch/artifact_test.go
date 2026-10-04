@@ -95,3 +95,31 @@ func TestManagedArtifactStaticPIERejectsLoaderDependencies(t *testing.T) {
 		})
 	}
 }
+
+func TestManagedEnvironmentKeepsOnlyAuthoritativeLowercaseProxies(t *testing.T) {
+	values, keys, err := Environment([]string{"http_proxy=http://fixture:9119", "https_proxy=http://fixture:9119", "no_proxy=localhost", "arbitrary_lowercase=discard", "PATH=/opt/mise/data/installs/python/3/bin:/home/agent/bin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := SelectedEnvironment(Descriptor{EnvKeys: keys}, append(values, "image_only=discard", "NODE_OPTIONS=discard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(got, "\n")
+	for _, want := range []string{"http_proxy=http://fixture:9119", "https_proxy=http://fixture:9119", "no_proxy=localhost", "PATH=" + SafePath} {
+		if !strings.Contains(joined, want) {
+			t.Fatal(joined)
+		}
+	}
+	if strings.Contains(joined, "discard") || strings.Contains(joined, "/opt/mise") || strings.Contains(joined, "/home/agent/bin") {
+		t.Fatal(joined)
+	}
+}
+
+func TestManagedDescriptorRejectsUnsafeRunIdentity(t *testing.T) {
+	for _, id := range []string{"", "../escape", "x/y", "x'", strings.Repeat("a", 81)} {
+		if ValidRunID(id) {
+			t.Fatalf("unsafe identity accepted: %q", id)
+		}
+	}
+}

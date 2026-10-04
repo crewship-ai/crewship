@@ -26,11 +26,14 @@ func covers(a, b string) bool {
 // AttestManagedLaunch is Docker metadata/file-stat inspection, never an
 // in-container PATH probe. The orchestrator holds the matching RuntimeUse.
 func (p *Provider) AttestManagedLaunch(ctx context.Context, id string, d managedlaunch.Descriptor) error {
+	if err := managedLauncherServerUIDError(os.Geteuid()); err != nil {
+		return err
+	}
 	denied := errors.New("managed launch: runtime/image/launcher attestation failed")
 	if d.Validate() != nil || p.cfg.SidecarBinaryPath == "" {
 		return denied
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	got, err := p.client.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	if err != nil {

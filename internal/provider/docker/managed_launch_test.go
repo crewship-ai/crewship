@@ -153,3 +153,16 @@ func TestManagedLauncherStagingNeverReplacesAddressedInode(t *testing.T) {
 		t.Fatal("writable addressed source accepted")
 	}
 }
+
+func TestManagedLauncherServerUIDDiagnostic(t *testing.T) {
+	for _, uid := range []int{0, 1000, 1001, 1002} {
+		err := managedLauncherServerUIDError(uid)
+		if uid == 1001 || uid == 1002 {
+			if err == nil || !strings.Contains(err.Error(), "server UID") || !strings.Contains(err.Error(), "host-native") {
+				t.Fatalf("uid=%d err=%v", uid, err)
+			}
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+}

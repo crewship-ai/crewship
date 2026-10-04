@@ -30,8 +30,15 @@ type Descriptor struct {
 	LockSHA256 string   `json:"lock_sha256"`
 	Binary     string   `json:"binary"`
 	Version    string   `json:"version"`
+	RunID      string   `json:"run_id,omitempty"`
 	EnvKeys    []string `json:"env_keys,omitempty"`
 }
+
+var runIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
+
+func ValidRunID(id string) bool { return runIDPattern.MatchString(id) }
+
+func DirectRunPIDFile(id string) string { return "/tmp/crewship-direct-" + id + ".pid" }
 
 var digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
@@ -42,7 +49,7 @@ func ImagePath(p string) bool {
 }
 
 func (d Descriptor) Validate() error {
-	if !ImagePath(d.Path) || !digestPattern.MatchString(d.SHA256) || d.Format != "static_elf" ||
+	if (d.RunID != "" && !ValidRunID(d.RunID)) || !ImagePath(d.Path) || !digestPattern.MatchString(d.SHA256) || d.Format != "static_elf" ||
 		!strings.HasPrefix(d.ImageID, "sha256:") || !digestPattern.MatchString(strings.TrimPrefix(d.ImageID, "sha256:")) ||
 		!digestPattern.MatchString(d.LockSHA256) || d.RevisionID == "" || len(d.RevisionID) > 128 ||
 		(d.Binary != "claude" && d.Binary != "codex") || !versionPattern.MatchString(d.Version) {

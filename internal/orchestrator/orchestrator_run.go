@@ -506,6 +506,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 
 	stateBytes, _ := json.Marshal(runState)
 	if err := o.state.Set(ctx, "agent_runs", runState.ID, stateBytes); err != nil {
+		if req.managedLaunch != nil {
+			return fmt.Errorf("managed launch: durable run identity persistence failed: %w", err)
+		}
 		o.logger.Error("failed to persist run state", "error", err)
 	}
 

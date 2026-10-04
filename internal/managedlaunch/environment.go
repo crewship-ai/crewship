@@ -12,6 +12,9 @@ const SafePath = "/usr/local/bin:/usr/bin:/bin"
 var envKeyPattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,127}$`)
 
 func AllowedEnvKey(key string) bool {
+	if key == "http_proxy" || key == "https_proxy" || key == "no_proxy" {
+		return true
+	}
 	if !envKeyPattern.MatchString(key) || strings.HasPrefix(key, "LD_") || strings.HasPrefix(key, "DYLD_") {
 		return false
 	}

@@ -1,8 +1,12 @@
 package orchestrator
 
-import "fmt"
+import (
+	"fmt"
 
-func directRunPIDFile(runID string) string { return "/tmp/crewship-direct-" + runID + ".pid" }
+	"github.com/crewship-ai/crewship/internal/managedlaunch"
+)
+
+func directRunPIDFile(runID string) string { return managedlaunch.DirectRunPIDFile(runID) }
 
 // A direct exec needs a container-local process identity too. setsid isolates
 // its process group; argv and stdin are preserved, including large prompts.
@@ -22,17 +26,33 @@ exec "$@"`
 func directRunProbe(runID string, stop bool) string {
 	signal := ""
 	if stop {
-		signal = `/bin/kill -TERM -- "-$pid" 2>/dev/null || true; `
+		// Explicit signal avoids interpreting a negative PID as a signal option.
+		// Select the separator by probing our own live process group first.
+		signal = `signal_error=$(LC_ALL=C /bin/kill -TERM $group_separator "-$pid" 2>&1) || { case "$signal_error" in *"No such process"*) ;; *) echo UNKNOWN; exit;; esac; }; `
 	}
 	return fmt.Sprintf(`if [ -f '%s' ]; then
 if ! [ -x /bin/kill ] || ! /bin/kill -0 "$$" 2>/dev/null; then echo UNKNOWN; exit; fi
+own_group=$(awk '{print $5}' /proc/$$/stat) || { echo UNKNOWN; exit; }
+case "$own_group" in ''|*[!0-9]*) echo UNKNOWN; exit;; esac
+if ! [ "$own_group" -gt 1 ]; then echo UNKNOWN; exit; fi
+group_separator=''
+if /bin/kill -0 -- "-$own_group" 2>/dev/null; then group_separator='--'
+elif /bin/kill -0 "-$own_group" 2>/dev/null; then group_separator=''
+else echo UNKNOWN; exit; fi
+crewship_probe_group() {
+ group_error=$(LC_ALL=C /bin/kill -0 $group_separator "-$1" 2>&1) && { echo PRESENT; return; }
+ case "$group_error" in *"No such process"*) echo ABSENT;; *) echo UNKNOWN;; esac
+}
 read -r pid stamp < '%s' || { echo UNKNOWN; exit; }
 case "$pid:$stamp" in *[!0-9:]*|:*) echo UNKNOWN; exit;; esac
 [ "$pid" -gt 1 ] 2>/dev/null && [ -n "$stamp" ] || { echo UNKNOWN; exit; }
 current=$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null)
 if [ "$current" = "$stamp" ]; then
-%sif /bin/kill -0 -- "-$pid" 2>/dev/null; then echo PRESENT; else echo ABSENT; fi
-elif /bin/kill -0 -- "-$pid" 2>/dev/null; then echo UNKNOWN; else echo ABSENT; fi
+%screwship_probe_group "$pid"
+else
+ group_state=$(crewship_probe_group "$pid")
+ case "$group_state" in ABSENT) echo ABSENT;; *) echo UNKNOWN;; esac
+fi
 exit
 fi; `, directRunPIDFile(runID), directRunPIDFile(runID), signal)
 }

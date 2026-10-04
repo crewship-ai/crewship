@@ -31,7 +31,7 @@ func TestManagedLaunchResolverBindsStoredRevisionAndCurrentLock(t *testing.T) {
 	mise := devcontainer.MiseConfig{Tools: map[string]string{"codex": "0.160.0"}, Lock: &devcontainer.MiseLockBundle{SchemaVersion: 1, Files: map[string]string{"mise.lock": "lockfile_version = 3\n[[tools.codex]]\nversion = \"0.160.0\"\n"}}}
 	miseRaw, _ := json.Marshal(mise)
 	image := "sha256:" + strings.Repeat("a", 64)
-	inventory := devcontainer.ToolchainInventory{SchemaVersion: 1, Status: "recorded", ImageID: image, Tools: []devcontainer.ToolchainTool{{Binary: "codex", Version: "0.160.0", Status: "observed", Path: "/opt/native/codex", LaunchArtifact: &managedlaunch.Artifact{Path: "/opt/native/codex", SHA256: strings.Repeat("b", 64), Format: "static_elf"}}}, Qualification: &devcontainer.ToolchainQualification{Status: "passed", ImageID: image, Tools: []devcontainer.ToolchainProbe{{Binary: "codex", Status: "passed"}}}}
+	inventory := devcontainer.ToolchainInventory{SchemaVersion: 1, Status: "recorded", ImageID: image, Tools: []devcontainer.ToolchainTool{{Binary: "codex", Version: "0.160.0", Status: "observed", Path: "/opt/native/codex", ManagedPath: "/opt/native/codex", ManagedVersion: "0.160.0", LaunchArtifact: &managedlaunch.Artifact{Path: "/opt/native/codex", SHA256: strings.Repeat("b", 64), Format: "static_elf"}}}, Qualification: &devcontainer.ToolchainQualification{Status: "passed", ImageID: image, Tools: []devcontainer.ToolchainProbe{{Binary: "codex", Status: "passed"}}}}
 	inventoryRaw, _ := json.Marshal(inventory)
 	requirements, _ := json.Marshal(devcontainer.AggregatedRequirements{Toolchain: &inventory})
 	if _, err := db.Exec(`UPDATE crews SET mise_config=?,cached_requirements=?,config_hash='build-1'`, string(miseRaw), string(requirements)); err != nil {
@@ -51,6 +51,20 @@ func TestManagedLaunchResolverBindsStoredRevisionAndCurrentLock(t *testing.T) {
 	}
 	if _, err := resolve(context.Background(), "ws-1", "crew-1", "GEMINI_CLI"); err == nil {
 		t.Fatal("unsupported adapter accepted")
+	}
+
+	for _, version := range []string{"", "0.159.0"} {
+		inventory.Tools[0].ManagedVersion = version
+		bad, _ := json.Marshal(inventory)
+		if _, err := db.Exec(`UPDATE environment_revisions SET toolchain_json=?`, string(bad)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := resolve(context.Background(), "ws-1", "crew-1", "CODEX_CLI"); err == nil {
+			t.Fatal("missing/mismatched independent native version accepted")
+		}
+	}
+	if _, err := db.Exec(`UPDATE environment_revisions SET toolchain_json=?`, string(inventoryRaw)); err != nil {
+		t.Fatal(err)
 	}
 	// Same exact selector, different material: old build must not authorize it.
 	mise.Lock.Files["mise.lock"] = "lockfile_version = 3\n[[tools.codex]]\nversion = \"0.159.0\"\n"
