@@ -5,12 +5,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/crewship-ai/crewship/internal/managedlaunch"
-	"github.com/crewship-ai/crewship/internal/provider"
 	"io"
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/managedlaunch"
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // Selecting a pilot must never silently use the legacy launch when the
@@ -306,5 +307,32 @@ func TestManagedLaunchLeavesNonpilotProbeBehaviorUnchanged(t *testing.T) {
 		if !strings.HasPrefix(script, directRunProbe(location.RunID, i == 1)) || strings.Contains(script, "group_separator") {
 			t.Fatal("legacy probe changed", script)
 		}
+	}
+}
+
+func TestRetainManagedRunLocationAtCreation(t *testing.T) {
+	t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "pilot-crew")
+	state := newLockedMemState()
+	o := New(&launchContainer{}, state, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	req := AgentRunRequest{CrewID: "pilot-crew", ContainerID: "c1", AgentSlug: "agent-1", RunID: "retained-managed"}
+	ctx, finish := o.trackAgentRun(context.Background(), &req)
+	location := RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID}
+	if _, err := o.RetainManagedRunLocation(ctx, location); err == nil {
+		t.Fatal("missing persisted admission accepted")
+	}
+	raw, _ := json.Marshal(RunState{ID: req.RunID, ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, ManagedLaunch: launchDescriptor()})
+	if err := state.Set(ctx, "agent_runs", req.RunID, raw); err != nil {
+		t.Fatal(err)
+	}
+	retained, err := o.RetainManagedRunLocation(ctx, location)
+	finish()
+	if err != nil || !retained.Managed {
+		t.Fatalf("capture from tracked admission: %+v %v", retained, err)
+	}
+	t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "")
+	restarted := New(&launchContainer{}, state, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	retained, err = restarted.RetainManagedRunLocation(context.Background(), retained)
+	if err != nil || !retained.Managed {
+		t.Fatalf("recovered admitted identity lost: %+v %v", retained, err)
 	}
 }

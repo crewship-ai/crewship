@@ -234,21 +234,27 @@ func (p *Provider) preflightMandatoryBinds(ctx context.Context) {
 // a temporary filesystem view and cannot prove the inode in a running bind.
 // Retain old generations for existing containers; garbage collection is separate.
 func stageManagedLauncher(source, output string) (string, error) {
-	denied := errors.New("managed launch: safe immutable launcher staging required")
 	if err := managedLauncherServerUIDError(os.Geteuid()); err != nil {
 		return "", err
 	}
+	return stageManagedLauncherWithHostTrust(source, output, safeLauncherOwner, safeLauncherDirectory)
+}
+
+// Only unit fixtures replace host ownership trust; production staging always
+// enters through the UID guard and the real owner/directory validators above.
+func stageManagedLauncherWithHostTrust(source, output string, owner, directory func(os.FileInfo) bool) (string, error) {
+	denied := errors.New("managed launch: safe immutable launcher staging required")
 	if source == "" || output == "" {
 		return "", denied
 	}
 	dir := filepath.Join(output, runtimestage.DirName)
 	info, err := os.Lstat(dir)
-	if err != nil || !safeLauncherDirectory(info) {
+	if err != nil || !directory(info) {
 		return "", denied
 	}
 	for parent := filepath.Dir(dir); ; parent = filepath.Dir(parent) {
 		info, err := os.Lstat(parent)
-		if err != nil || !safeLauncherDirectory(info) {
+		if err != nil || !directory(info) {
 			return "", fmt.Errorf("%w: unsafe ancestor %s", denied, parent)
 		}
 		if parent == filepath.Dir(parent) {
@@ -291,7 +297,7 @@ func stageManagedLauncher(source, output string) (string, error) {
 		return "", err
 	}
 	info, err = os.Lstat(dest)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0222 != 0 || !safeLauncherOwner(info) {
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0222 != 0 || !owner(info) {
 		return "", denied
 	}
 	f, err = os.Open(dest)

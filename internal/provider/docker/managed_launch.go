@@ -29,6 +29,13 @@ func (p *Provider) AttestManagedLaunch(ctx context.Context, id string, d managed
 	if err := managedLauncherServerUIDError(os.Geteuid()); err != nil {
 		return err
 	}
+	return p.attestManagedLaunch(ctx, id, d, safeLauncherOwner, safeLauncherDirectory)
+}
+
+// attestManagedLaunch separates runtime validation from the host trust policy.
+// Production always enters through AttestManagedLaunch and its UID refusal;
+// unit fixtures can validate Docker controls under otherwise unsupported UIDs.
+func (p *Provider) attestManagedLaunch(ctx context.Context, id string, d managedlaunch.Descriptor, owner, directory func(os.FileInfo) bool) error {
 	denied := errors.New("managed launch: runtime/image/launcher attestation failed")
 	if d.Validate() != nil || p.cfg.SidecarBinaryPath == "" {
 		return denied
@@ -111,7 +118,7 @@ func (p *Provider) AttestManagedLaunch(ctx context.Context, id string, d managed
 	}
 	info, err := os.Lstat(p.cfg.SidecarBinaryPath)
 	parent, parentErr := os.Lstat(filepath.Dir(p.cfg.SidecarBinaryPath))
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0222 != 0 || !safeLauncherOwner(info) || parentErr != nil || !safeLauncherDirectory(parent) {
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0222 != 0 || !owner(info) || parentErr != nil || !directory(parent) {
 		return denied
 	}
 	// Secondary consistency check; archive reads do not attest live bind inodes.

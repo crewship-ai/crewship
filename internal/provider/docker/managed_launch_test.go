@@ -8,12 +8,13 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/managedlaunch"
 )
 
 func TestManagedLaunchRejectsRuntimeDriftAndMountAliases(t *testing.T) {
@@ -118,21 +119,30 @@ func TestManagedLaunchRejectsRuntimeDriftAndMountAliases(t *testing.T) {
 			defer close()
 			p.cfg.SidecarBinaryPath = launcher
 			d := managedlaunch.Descriptor{Artifact: managedlaunch.Artifact{Path: "/opt/native/claude", SHA256: strings.Repeat("b", 64), Format: "static_elf"}, ImageID: image, RevisionID: "r1", LockSHA256: strings.Repeat("c", 64), Binary: "claude", Version: "2.1.288"}
-			err = p.AttestManagedLaunch(context.Background(), "c1", d)
+			err = p.attestManagedLaunch(context.Background(), "c1", d, fixtureLauncherOwner, fixtureLauncherDirectory)
 			if which == "valid" || which == "tmpfs-unrelated" {
+				// Also exercise the actual production entrypoint on this host.
+				productionErr := p.AttestManagedLaunch(context.Background(), "c1", d)
 				if unsupported := managedLauncherServerUIDError(os.Geteuid()); unsupported != nil {
-					if err == nil || err.Error() != unsupported.Error() {
-						t.Fatalf("unsupported host profile admitted: %v", err)
+					if productionErr == nil || productionErr.Error() != unsupported.Error() {
+						t.Fatalf("production UID refusal: %v", productionErr)
 					}
-					return
+				} else if productionErr != nil {
+					t.Fatalf("supported production attestation: %v", productionErr)
 				}
 				if err != nil {
 					info, _ := os.Lstat(launcher)
 					parent, _ := os.Lstat(filepath.Dir(launcher))
 					t.Fatalf("%v launcher=%s info=%+v parent=%+v expected=%s", err, launcher, info, parent, p.ExpectedSidecarHash())
 				}
-			} else if err == nil {
-				t.Fatal("unsafe runtime admitted")
+			} else {
+				want := "managed launch: runtime/image/launcher attestation failed"
+				if which == "fixed-launcher" {
+					want = "managed launch: recreate runtime with immutable launcher staging required"
+				}
+				if err == nil || err.Error() != want {
+					t.Fatalf("%s: got %v, want %q", which, err, want)
+				}
 			}
 		})
 	}
@@ -148,25 +158,33 @@ func TestManagedLauncherStagingNeverReplacesAddressedInode(t *testing.T) {
 	if err := os.WriteFile(source, []byte("first artifact"), 0555); err != nil {
 		t.Fatal(err)
 	}
-	first := stageRuntimeArtifacts(Config{SidecarBinaryPath: source, OutputBasePath: dir}, quietLogger())
+	if err := os.Mkdir(filepath.Join(dir, ".runtime"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	stage := func(source string) string {
+		t.Helper()
+		path, err := stageManagedLauncherWithHostTrust(source, dir, fixtureLauncherOwner, fixtureLauncherDirectory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	first := stage(source)
+	// Keep genuine public-entrypoint coverage separate from fixture validation.
+	productionPath, productionErr := stageManagedLauncher(source, dir)
 	if unsupported := managedLauncherServerUIDError(os.Geteuid()); unsupported != nil {
-		if _, err := stageManagedLauncher(source, dir); err == nil || err.Error() != unsupported.Error() {
-			t.Fatalf("unsupported host staging admitted: %v", err)
+		if productionErr == nil || productionErr.Error() != unsupported.Error() {
+			t.Fatalf("production staging UID refusal: %v", productionErr)
 		}
-		if strings.HasPrefix(filepath.Base(first.SidecarBinaryPath), "crewship-sidecar-") {
-			t.Fatal("unsupported host staged digest-addressed managed launcher")
-		}
-		return
+	} else if productionErr != nil || productionPath != first {
+		t.Fatalf("supported production staging: %q %v", productionPath, productionErr)
 	}
-	if _, err := stageManagedLauncher(source, dir); err != nil {
-		t.Fatalf("supported host staging failed: %v", err)
-	}
-	before, err := os.Stat(first.SidecarBinaryPath)
+	before, err := os.Stat(first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again := stageRuntimeArtifacts(Config{SidecarBinaryPath: source, OutputBasePath: dir}, quietLogger())
-	after, err := os.Stat(again.SidecarBinaryPath)
+	again := stage(source)
+	after, err := os.Stat(again)
 	if err != nil || !os.SameFile(before, after) {
 		t.Fatal("staging replaced an existing immutable inode")
 	}
@@ -176,18 +194,18 @@ func TestManagedLauncherStagingNeverReplacesAddressedInode(t *testing.T) {
 	if err := os.WriteFile(source, []byte("second artifact"), 0555); err != nil {
 		t.Fatal(err)
 	}
-	next := stageRuntimeArtifacts(Config{SidecarBinaryPath: source, OutputBasePath: dir}, quietLogger())
-	if next.SidecarBinaryPath == first.SidecarBinaryPath {
+	next := stage(source)
+	if next == first {
 		t.Fatal("new generation reused old bind source")
 	}
-	raw, err := os.ReadFile(first.SidecarBinaryPath)
+	raw, err := os.ReadFile(first)
 	if err != nil || string(raw) != "first artifact" {
 		t.Fatal("old generation lost")
 	}
-	if err := os.Chmod(first.SidecarBinaryPath, 0755); err != nil {
+	if err := os.Chmod(first, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stageManagedLauncher(first.SidecarBinaryPath, dir); err == nil {
+	if _, err := stageManagedLauncherWithHostTrust(first, dir, fixtureLauncherOwner, fixtureLauncherDirectory); err == nil {
 		t.Fatal("writable addressed source accepted")
 	}
 }
@@ -201,6 +219,34 @@ func TestManagedLauncherServerUIDDiagnostic(t *testing.T) {
 			}
 		} else if err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+// These fixtures deliberately substitute host ownership/directory trust.
+// Runtime checks, launcher type/mode, digest, and archive validation remain real.
+func fixtureLauncherOwner(info os.FileInfo) bool     { return info != nil }
+func fixtureLauncherDirectory(info os.FileInfo) bool { return info != nil && info.IsDir() }
+
+func TestManagedLauncherHostProfile(t *testing.T) {
+	p, close := newFakeDockerProvider(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("invalid descriptor or unsupported UID must refuse before Docker")
+	})
+	defer close()
+	err := p.AttestManagedLaunch(context.Background(), "c1", managedlaunch.Descriptor{})
+	_, stagingErr := stageManagedLauncher("", "")
+	if unsupported := managedLauncherServerUIDError(os.Geteuid()); unsupported != nil {
+		for _, got := range []error{err, stagingErr} {
+			if got == nil || got.Error() != unsupported.Error() {
+				t.Fatalf("host UID refusal: %v", got)
+			}
+		}
+	} else {
+		if err == nil || err.Error() != "managed launch: runtime/image/launcher attestation failed" {
+			t.Fatalf("supported attestation: %v", err)
+		}
+		if stagingErr == nil || stagingErr.Error() != "managed launch: safe immutable launcher staging required" {
+			t.Fatalf("supported staging: %v", stagingErr)
 		}
 	}
 }
