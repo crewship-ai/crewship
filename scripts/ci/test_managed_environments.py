@@ -33,3 +33,37 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         events[-1]['Package'] = 'unrelated/package'
         self.assertTrue(managed.failures(events, 0))
         self.assertTrue(managed.failures([e for e in self.passing() if e['Action'] == 'pass'], 0))
+
+    def test_skipped_required_child_is_not_a_green_parent(self):
+        package, name = sorted(managed.REQUIRED)[0]
+        events = self.passing() + [{'Package': package, 'Test': name + '/restart_race', 'Action': 'skip'}]
+        self.assertTrue(managed.failures(events, 0))
+
+    def test_every_required_child_needs_run_and_pass_without_skip_or_fail(self):
+        for child in managed.REQUIRED_CHILDREN:
+            for action in ('skip', 'fail'):
+                with self.subTest(child=child, action=action):
+                    events = self.passing() + [{'Package': child[0], 'Test': child[1], 'Action': action}]
+                    self.assertTrue(managed.failures(events, 0))
+            events = [event for event in self.passing()
+                      if not ((event['Package'], event['Test']) == child and event['Action'] == 'run')]
+            self.assertTrue(managed.failures(events, 0))
+
+    def test_staged_invocation_has_separate_bounded_budget(self):
+        legacy, staged = managed.commands()
+        self.assertIn('-timeout=3m', legacy)
+        self.assertIn('-timeout=12m', staged)
+        self.assertEqual(staged[-1], './' + managed.STAGED_PACKAGE)
+        self.assertEqual(staged[staged.index('-run') + 1], '^' + managed.STAGED + '$')
+        legacy_pattern = legacy[legacy.index('-run') + 1]
+        self.assertNotIn(managed.STAGED, legacy_pattern)
+        for package, name in managed.REQUIRED_TOP_LEVEL:
+            if name != managed.STAGED:
+                self.assertIn(name, legacy_pattern)
+                self.assertIn('./' + package.removeprefix(managed.PREFIX), legacy)
+
+    def test_deleted_required_staged_child_cannot_pass(self):
+        for name in managed.STAGED_CHILDREN:
+            missing = managed.STAGED + '/' + name
+            events = [event for event in self.passing() if event['Test'] != missing]
+            self.assertTrue(managed.failures(events, 0), missing)

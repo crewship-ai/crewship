@@ -692,7 +692,7 @@ jobs:
     if: needs.changes.outputs.go == 'true'
     name: Managed environment Docker conformance
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -707,7 +707,7 @@ jobs:
           docker pull alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
           docker tag alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 alpine:3
       - name: Require executed Docker fixtures
-        timeout-minutes: 14
+        timeout-minutes: 18
         # Hosted runners can use UID1001, which is deliberately unsupported
         # for host launcher ownership. Run this disposable positive gate
         # under root while keeping all in-container UID/capability controls.

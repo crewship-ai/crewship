@@ -38,7 +38,7 @@ func TestEgressFenceOwnServicesIntegration(t *testing.T) {
 		t.Fatalf("build sidecar: %v\n%s", err, out)
 	}
 	entrypointPath := filepath.Join(tmp, "entrypoint.sh")
-	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nexec sleep infinity\n"), 0o755); err != nil {
+	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nif [ \"${1:-}\" = --bootstrap-only ]; then exit 0; fi\nexec sleep infinity\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	shared := networkTestID("fence-svc-it")

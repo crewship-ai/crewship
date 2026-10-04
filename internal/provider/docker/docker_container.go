@@ -26,6 +26,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/safepath"
+	"github.com/crewship-ai/crewship/internal/stagedstart"
 )
 
 // FindCrewContainer is a non-mutating lookup for an existing crew
@@ -503,6 +504,26 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		requestedImage = team.Image
 	}
 	if cid, ok := p.warmHit(team.ID, requestedImage); ok {
+		// A mutable desired tag must be resolved against the daemon even within
+		// the warm TTL. The tag cached by setWarm is a request, not an image ID.
+		_, stagedKnown := p.fencedCrew.Load(cid)
+		if requestedImage != "" && (p.egressFenceWanted(team) || stagedKnown) {
+			got, err := p.client.ContainerInspect(ctx, cid, client.ContainerInspectOptions{})
+			if err != nil {
+				p.evictWarm(team.ID)
+				return "", err
+			}
+			drift, err := p.stagedImageDrift(ctx, got.Container, requestedImage)
+			if err != nil {
+				p.evictWarm(team.ID)
+				return "", err
+			}
+			if drift || got.Container.State == nil || !got.Container.State.Running {
+				p.evictWarm(team.ID)
+				// Reconcile below applies the inactive/non-force removal policy.
+				goto coldReconcile
+			}
+		}
 		// A fenced crew pays one inspect here: a restart inside the warm TTL
 		// (daemon, restart policy, operator) drops the fence, and the warm
 		// path would otherwise hand the next step an unfenced container.
@@ -515,6 +536,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		return cid, nil
 	}
 
+coldReconcile:
 	p.logger.Debug("EnsureCrewRuntime", "crew_id", team.ID, "crew_slug", team.Slug)
 	// Ensure the crew's network exists (auto-recreate if deleted at runtime):
 	// its own when listed (#2240), the instance network otherwise.
@@ -563,7 +585,13 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// drops the (ephemeral) legacy container and copies legacy volume data into
 	// the id-scoped volumes — hard-failing only, fail-safe, when a copy can't
 	// complete (the legacy volume is never removed unless its data was copied).
-	if err := p.migrateLegacyCrewResources(ctx, team.ID, team.Slug, desiredImage); err != nil {
+	var migrationErr error
+	if p.egressFenceWanted(team) {
+		migrationErr = p.stagedLegacyCheck(ctx, team)
+	} else {
+		migrationErr = p.migrateLegacyCrewResources(ctx, team.ID, team.Slug, desiredImage)
+	}
+	if err := migrationErr; err != nil {
 		return "", err
 	}
 
@@ -651,11 +679,21 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
-	p.fixBindMountOwnership(ctx, runtimeImage, dirs, crewVolumes)
+	if p.egressFenceWanted(team) {
+		if err := p.stagedOwnership(ctx, team, runtimeImage, dirs, crewVolumes); err != nil {
+			return "", err
+		}
+	} else {
+		p.fixBindMountOwnership(ctx, runtimeImage, dirs, crewVolumes)
+	}
 
-	containerCfg, hostConfig, err := p.buildCrewContainerConfig(ctx, team, containerName, runtimeImage, runtime, memoryMB, cpus, dirs)
+	var workloadEnv []string
+	containerCfg, hostConfig, err := p.buildCrewContainerConfig(ctx, team, containerName, runtimeImage, runtime, memoryMB, cpus, dirs, &workloadEnv)
 	if err != nil {
 		return "", err
+	}
+	if p.egressFenceWanted(team) {
+		containerCfg.Labels[stagedEnvLabel] = newStagedEnvHandle()
 	}
 	resp, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config:           containerCfg,
@@ -671,6 +709,11 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepContainerCreate, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage, Digest: runtimeDigest})
 
+	if p.egressFenceWanted(team) {
+		if e := p.prepareCreatedStaged(ctx, resp.ID, containerCfg, workloadEnv, team); e != nil {
+			return "", e
+		}
+	}
 	if _, err := p.client.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		return "", fmt.Errorf("container start: %w", err)
 	}
@@ -764,6 +807,11 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					return "", false, fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
 				}
 				inspect := inspectResult.Container
+				if p.egressFenceWanted(team) || staged(inspect) {
+					if e := p.auditStaged(ctx, inspect, team); e != nil {
+						return "", false, e
+					}
+				}
 				// The list is an older snapshot. A stop/start between list and
 				// inspect must not reuse a stopped runtime or tear down a live one.
 				if inspect.State == nil || inspect.State.Status == "" {
@@ -834,12 +882,20 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				// A new desired image must not destroy work in the existing
 				// runtime. Only a freshly confirmed inactive container may be
 				// replaced. Docker's non-force removal also closes a start race.
-				if callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && inspect.Image != desiredImage {
+				imageDrift := callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && inspect.Image != desiredImage
+				if callerSpecifiedImage && staged(inspect) {
+					var e error
+					imageDrift, e = p.stagedImageDrift(ctx, inspect, desiredImage)
+					if e != nil {
+						return "", false, e
+					}
+				}
+				if imageDrift {
 					state := inspect.State
 					if state == nil || state.Running || state.Paused || state.Restarting || (state.Status != "exited" && state.Status != "created") {
 						return "", false, &provider.RuntimeImageUpdatePendingError{ContainerID: c.ID, CurrentImageID: inspect.Image, DesiredImage: desiredImage}
 					}
-					if _, err := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: true}); err != nil {
+					if err := p.removeCrewContainer(ctx, c.ID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: true}); err != nil {
 						if cerrdefs.IsConflict(err) {
 							return "", false, fmt.Errorf("%w: runtime changed while removing stopped container", provider.ErrRuntimeImageUpdatePending)
 						}
@@ -1316,7 +1372,7 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 // expanding devcontainer containerEnv, applying the agent login PATH) and
 // constructs the container.Config / container.HostConfig pair for the crew
 // container create call.
-func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.CrewConfig, containerName, runtimeImage, runtime string, memoryMB int, cpus float64, dirs crewDirs) (*container.Config, *container.HostConfig, error) {
+func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.CrewConfig, containerName, runtimeImage, runtime string, memoryMB int, cpus float64, dirs crewDirs, requestedEnv ...*[]string) (*container.Config, *container.HostConfig, error) {
 	// A crew on its own network resolves its services from /etc/hosts
 	// (fixed addresses): under the egress fence the agent has no DNS.
 	svcHosts, err := p.serviceExtraHosts(ctx, team)
@@ -1356,15 +1412,42 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 				break
 			}
 		}
-		if needsExpansion {
+		if needsExpansion || p.egressFenceWanted(team) {
 			return nil, nil, fmt.Errorf("inspect image env for containerEnv expansion (%s): %w", runtimeImage, imgEnvErr)
 		}
 		p.logger.Warn("could not inspect image for env expansion — passing containerEnv literally",
 			"image", runtimeImage, "error", imgEnvErr)
 	}
-	cfg, hostCfg, err := p.assembleCrewSpec(team, runtimeImage, runtime, memoryMB, cpus, dirs, env, imgEnv)
+	cfg, hostCfg, err := p.assembleCrewSpec(team, runtimeImage, runtime, memoryMB, cpus, dirs, env, imgEnv, requestedEnv...)
 	if err != nil {
 		return nil, nil, err
+	}
+	if p.egressFenceWanted(team) {
+		image, e := p.client.ImageInspect(ctx, runtimeImage)
+		if e != nil {
+			return nil, nil, e
+		}
+		if image.Config == nil || len(image.Config.Volumes) > 0 {
+			return nil, nil, fmt.Errorf("%w: image VOLUME unsupported in staged pilot", errStagedDenied)
+		}
+		source, digest, e := p.stageArtifact(ctx, runtimeImage)
+		if e != nil {
+			return nil, nil, e
+		}
+		bootSource, e := p.stageTrustedFile(p.cfg.EntrypointPath, 1<<20)
+		if e != nil {
+			return nil, nil, e
+		}
+		cfg.Image = image.ID
+		cfg.Labels["crewship.keeper-sha256"] = digest
+		for i := range hostCfg.Mounts {
+			if hostCfg.Mounts[i].Target == stagedstart.Bootstrap {
+				hostCfg.Mounts[i].Source = bootSource
+			}
+			if hostCfg.Mounts[i].Target == stagedstart.Binary {
+				hostCfg.Mounts[i].Source = source
+			}
+		}
 	}
 	if hostCfg != nil {
 		hostCfg.ExtraHosts = append(hostCfg.ExtraHosts, svcHosts...)
@@ -1396,7 +1479,7 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 // Everything here is a pure function of its arguments plus the provider's own
 // configuration. Anything needing the daemon — the image inspect behind
 // imgEnv — happens in the caller and arrives as a parameter.
-func (p *Provider) assembleCrewSpec(team provider.CrewConfig, runtimeImage, runtime string, memoryMB int, cpus float64, dirs crewDirs, env []string, imgEnv map[string]string) (*container.Config, *container.HostConfig, error) {
+func (p *Provider) assembleCrewSpec(team provider.CrewConfig, runtimeImage, runtime string, memoryMB int, cpus float64, dirs crewDirs, env []string, imgEnv map[string]string, requestedEnv ...*[]string) (*container.Config, *container.HostConfig, error) {
 	pidsLimit := int64(200)
 	// Set the agent exec PATH explicitly. A non-login `docker exec` (how the
 	// agent CLI runs) inherits only the image ENV PATH, which omits the
@@ -1639,6 +1722,29 @@ func (p *Provider) assembleCrewSpec(team provider.CrewConfig, runtimeImage, runt
 		},
 		NetworkMode: container.NetworkMode(p.crewNetworkFor(team.ID, team.Slug)),
 	}
+	if p.egressFenceWanted(team) {
+		if err := p.egressFenceApplicable(team); err != nil {
+			return nil, nil, err
+		}
+		if len(team.CapAdd) > 0 || len(team.SecurityOpt) > 0 {
+			return nil, nil, errStagedDenied
+		}
+		for _, m := range team.ExtraMounts {
+			if overlap(m.Target, stagedstart.Binary) || overlap(m.Target, stagedstart.Bootstrap) || m.Source == "/var/run/docker.sock" {
+				return nil, nil, errStagedDenied
+			}
+		}
+		containerCfg.User = "1002:1002"
+		containerCfg.Entrypoint = []string{stagedstart.Binary}
+		containerCfg.Cmd = []string{"--staged-keeper"}
+		containerCfg.Labels[stagedstart.Label] = stagedstart.Version
+		if len(requestedEnv) > 0 {
+			*requestedEnv[0] = append([]string(nil), containerCfg.Env...)
+		}
+		containerCfg.Env = keeperEnv(containerCfg.Env, imgEnv)
+		off := false
+		hostConfig.Init = &off
+	}
 	return containerCfg, hostConfig, nil
 }
 
@@ -1693,9 +1799,84 @@ func (p *Provider) runByoiSidecarCheck(ctx context.Context, containerID, image s
 func (p *Provider) forceTeardown(ctx context.Context, containerID, crewID string) {
 	timeout := 10
 	_, _ = p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout})
-	_, _ = p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+	_ = p.removeCrewContainer(ctx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
 	p.evictWarm(crewID)
 	p.forgetFenced(containerID)
+}
+
+// stagedImageDrift compares the actual immutable image with the daemon's
+// current local tag mapping. Never accept Config.Image (a mutable tag) as proof.
+// CachedImage > Image selection remains with the caller; no pull or registry
+// freshness policy is added to runtime reuse.
+func (p *Provider) stagedImageDrift(ctx context.Context, c container.InspectResponse, desired string) (bool, error) {
+	if !staged(c) || desired == "" {
+		return false, errStagedDenied
+	}
+	lookup, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	image, err := p.client.ImageInspect(lookup, desired)
+	if err != nil {
+		return false, fmt.Errorf("resolve staged desired image: %w", err)
+	}
+	if image.ID == "" || c.Image == "" {
+		return false, fmt.Errorf("%w: staged image identity unavailable", errStagedDenied)
+	}
+	return c.Image != image.ID, nil
+}
+
+// A successful create response grants cleanup authority for only that exact ID.
+// Preparation runs before ContainerStart. Even a cancelled request must roll
+// back its never-started runtime; persistent named volumes and binds survive.
+func (p *Provider) prepareCreatedStaged(ctx context.Context, id string, cfg *container.Config, env []string, team provider.CrewConfig) (err error) {
+	created := container.InspectResponse{Config: cfg}
+	created.ID, created.Image = id, cfg.Image
+	defer func() {
+		if err == nil {
+			return
+		}
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if _, e := p.client.ContainerRemove(cleanup, id, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}); e != nil {
+			err = errors.Join(err, fmt.Errorf("remove failed staged create: %w", e))
+			return // Material is still needed while Docker retains the runtime.
+		}
+		if e := p.removeStagedEnv(created); e != nil {
+			err = errors.Join(err, fmt.Errorf("clean failed staged create material: %w", e))
+		}
+	}()
+	got, err := p.client.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	if err != nil {
+		return err
+	}
+	c := got.Container
+	if c.ID != id || c.Image != cfg.Image || c.Config == nil || c.Config.Labels[resourcelifecycle.InstanceLabel] != p.cfg.InstanceID || c.Config.Labels[crewCrewIDLabel] != team.ID || c.Config.Labels[stagedEnvLabel] != cfg.Labels[stagedEnvLabel] {
+		return fmt.Errorf("%w: created runtime identity mismatch", errStagedDenied)
+	}
+	if err = p.saveStagedEnv(c, env); err != nil {
+		return err
+	}
+	return p.auditStaged(ctx, c, team)
+}
+
+// Capture material scope before Docker forgets it; delete only after successful
+// removal. Legacy/foreign runtimes have no local staged material authority.
+func (p *Provider) removeCrewContainer(ctx context.Context, id string, opts client.ContainerRemoveOptions) error {
+	var got client.ContainerInspectResult
+	var inspectErr error
+	if p.cfg.InstanceID != "" {
+		got, inspectErr = p.client.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	}
+	if _, err := p.client.ContainerRemove(ctx, id, opts); err != nil {
+		return err
+	}
+	if inspectErr == nil && got.Container.ID == id && staged(got.Container) && got.Container.Config.Labels[resourcelifecycle.InstanceLabel] == p.cfg.InstanceID {
+		if err := p.removeStagedEnv(got.Container); err != nil {
+			return fmt.Errorf("clean removed runtime material: %w", err)
+		}
+	}
+	// An unavailable inspect leaves an orphan; never infer a scope from a path
+	// or sweep other records. Explicit ownership evidence is required.
+	return nil
 }
 
 // waitExecExit polls ContainerExecInspect for execID every 50ms until the
@@ -1742,6 +1923,12 @@ func (p *Provider) runPostStartCommands(ctx context.Context, containerID string,
 			cancel()
 			p.logger.Warn("postStartCommand refused: egress fence not confirmed",
 				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
+			return
+		}
+		execCfg.Cmd, execCfg.Env, err = p.WrapExternalExec(runCtx, containerID, execCfg.Cmd, execCfg.Env)
+		if err != nil {
+			cancel()
+			p.logger.Warn("postStartCommand refused by staged gate", "error", err)
 			return
 		}
 		ex, err := p.client.ExecCreate(runCtx, containerID, execCfg)
@@ -1839,7 +2026,7 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
 	p.forgetFenced(containerID)
 	p.evictWarmContainer(containerID)
-	if _, err := p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
+	if err := p.removeCrewContainer(ctx, containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
 		return fmt.Errorf("remove crew runtime %s: %w", provider.ShortID(containerID), err)
 	}
 	return nil

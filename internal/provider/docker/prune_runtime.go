@@ -100,7 +100,7 @@ func (p *Provider) PruneCrewRuntimes(ctx context.Context, crews []provider.CrewR
 		if !match {
 			continue
 		}
-		if _, rmErr := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); rmErr != nil {
+		if rmErr := p.removeCrewContainer(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); rmErr != nil {
 			p.logger.Warn("crew runtime container remove failed", "container", name, "error", rmErr)
 			failed = append(failed, fmt.Errorf("remove container %s: %w", name, rmErr))
 		} else {

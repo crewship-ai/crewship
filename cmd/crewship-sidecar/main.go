@@ -18,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/sidecar"
+	"github.com/crewship-ai/crewship/internal/stagedstart"
 )
 
 // version is overridden at build time via ldflags (-X main.version=...).
@@ -50,6 +51,16 @@ func main() {
 			os.Exit(126)
 		}
 		return
+	}
+	if len(os.Args) > 1 && strings.HasPrefix(os.Args[1], "--staged-") {
+		code, err := stagedstart.Run(os.Args[1:])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			if code == 0 {
+				code = 1
+			}
+		}
+		os.Exit(code)
 	}
 	addr := flag.String("addr", sidecar.DefaultAddr, "listen address")
 	_ = flag.String("managed-launch", "", "internal static-native launch descriptor; followed by CLI arguments")

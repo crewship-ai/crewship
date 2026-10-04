@@ -132,9 +132,14 @@ func (h *ProvisioningHandler) RestartCrewAgents(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Force-remove drops the container. The next agent exec will trigger
-	// EnsureCrewRuntime which re-creates from the current cached_image.
-	if _, err := h.docker.ContainerRemove(r.Context(), containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
+	// The provider force-removes the runtime and cleans its owned secret
+	// material. The next exec re-creates it from the current cached_image.
+	if h.removeCrewRuntime != nil {
+		err = h.removeCrewRuntime(r.Context(), containerID)
+	} else {
+		_, err = h.docker.ContainerRemove(r.Context(), containerID, client.ContainerRemoveOptions{Force: true})
+	}
+	if err != nil {
 		h.logger.Error("remove crew container", "container_id", containerID, "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to remove crew container")
 		return

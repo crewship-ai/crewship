@@ -24,6 +24,8 @@ public contract here. Superseded a spec? Move it to
 
 ## Runtime, authority and budgets
 
+- [Staged runtime start](staged-runtime-start.md): keeper-only pilot boot, fresh fence readback and generation-gated image execution.
+
 - [Restricted context](restricted-context.md): scoped chat, CLI execution, memory,
   files, profiles and content-free attempt records.
 - [Member resource policy](member-resource-policy.md): the administration API/CLI

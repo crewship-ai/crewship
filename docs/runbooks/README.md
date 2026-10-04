@@ -16,6 +16,8 @@ reports are ignored build output, not an operational procedure.
 
 ## Contents
 
+- [Staged runtime start](staged-runtime-start.md): activate, recover and explicitly roll back the Docker egress pilot while preserving data.
+
 - [`ci-cd-implementation-2026-09-11.md`](ci-cd-implementation-2026-09-11.md) —
   the CI/CD publication runbook: CI Result composition, image and binary
   publication, exact-SHA gates, nightly/smoke verification, signing and

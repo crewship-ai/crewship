@@ -82,7 +82,7 @@ func (p *Provider) RemoveIdleRuntime(ctx context.Context, containerID, crewID st
 	// Force=false: Docker refuses a container that started meanwhile.
 	// RemoveVolumes=false: anonymous and named volumes, and the host data
 	// behind bind-backed ones, all stay.
-	if _, err := p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: false}); err != nil {
+	if err := p.removeCrewContainer(ctx, containerID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: false}); err != nil {
 		return cleanupError(err)
 	}
 	p.evictWarm(crewID)

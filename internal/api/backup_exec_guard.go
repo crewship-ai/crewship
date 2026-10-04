@@ -22,6 +22,14 @@ type externalExecGuard interface {
 func (r *Router) backupDockerOps(cli *client.Client) *backup.MobyDockerOps {
 	return &backup.MobyDockerOps{
 		Client: cli,
+		Wrap: func(ctx context.Context, id string, cmd, env []string) ([]string, []string, error) {
+			if g, ok := r.activeContainer().(interface {
+				WrapExternalExec(context.Context, string, []string, []string) ([]string, []string, error)
+			}); ok {
+				return g.WrapExternalExec(ctx, id, cmd, env)
+			}
+			return cmd, env, nil
+		},
 		Guard: func(ctx context.Context, containerID string) (func(context.Context) error, func(context.Context) error, error) {
 			if g, ok := r.activeContainer().(externalExecGuard); ok {
 				return g.GuardExternalExec(ctx, containerID)

@@ -49,7 +49,7 @@ func TestEgressFenceIntegration(t *testing.T) {
 		t.Fatalf("cannot build crewship-sidecar: %v\n%s", err, out)
 	}
 	entrypointPath := filepath.Join(tmp, "entrypoint.sh")
-	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nexec sleep infinity\n"), 0o755); err != nil {
+	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nif [ \"${1:-}\" = --bootstrap-only ]; then exit 0; fi\nexec sleep infinity\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -58,6 +58,7 @@ func TestEgressFenceIntegration(t *testing.T) {
 	var p *Provider
 	p, err = New(ctx, Config{
 		ContainerPrefix:   network,
+		InstanceID:        "inst-" + network,
 		RuntimeImage:      "alpine:3",
 		DefaultRuntime:    "runc",
 		Network:           network,
@@ -200,10 +201,10 @@ func TestEgressFenceIntegration(t *testing.T) {
 
 	// A provider exec into the unfenced start (the orchestrator's cached-
 	// container path, the terminal) re-installs the fence BEFORE the command
-	// runs — never runs it unfenced. The raw client above is the operator's
+	// runs, and staged admission refuses the command until Ensure completes. The raw client above is the operator's
 	// docker socket, which is root-equivalent anyway.
-	if code := fenceTestProviderExec(ctx, t, p, cid, "1001:1001", probe); code == 0 {
-		t.Fatal("a provider exec after an outside restart reached the peer: it ran unfenced")
+	if _, err := p.Exec(ctx, provider.ExecConfig{ContainerID: cid, User: "1001:1001", Cmd: probe}); !errors.Is(err, errStagedDenied) {
+		t.Fatalf("outside restart must refuse image exec before staged admission: %v", err)
 	}
 	if _, err := p.EnsureCrewRuntime(ctx, team); err != nil {
 		t.Fatalf("EnsureCrewRuntime after restart: %v", err)
@@ -226,11 +227,17 @@ func TestEgressFenceIntegration(t *testing.T) {
 	if _, err := p.client.ContainerRestart(ctx, cid, client.ContainerRestartOptions{}); err != nil {
 		t.Fatalf("restart: %v", err)
 	}
-	ops := &backup.MobyDockerOps{Client: p.client, Guard: p.GuardExternalExec}
+	ops := &backup.MobyDockerOps{Client: p.client, Guard: p.GuardExternalExec, Wrap: p.WrapExternalExec}
+	if _, _, err := ops.ExecAs(ctx, cid, "1001:1001", probe); !errors.Is(err, errStagedDenied) {
+		t.Fatalf("backup image exec before staged admission lacks gate denial: %v", err)
+	}
+	if _, err := p.EnsureCrewRuntime(ctx, team); err != nil {
+		t.Fatalf("staged admission before backup exec: %v", err)
+	}
 	if code, out, err := ops.ExecAs(ctx, cid, "1001:1001", probe); err != nil {
-		t.Fatalf("backup exec after an outside restart: %v (%s)", err, out)
+		t.Fatalf("ready backup exec: %v (%s)", err, out)
 	} else if code == 0 {
-		t.Fatal("a backup exec after an outside restart reached the peer: it ran unfenced")
+		t.Fatal("ready backup exec reached forbidden peer")
 	}
 	assertExit("re-fenced by a backup exec", "1001", probe, false)
 
@@ -259,8 +266,12 @@ func TestEgressFenceIntegration(t *testing.T) {
 			if !fired {
 				t.Fatal("hook did not fire")
 			}
-			if !errors.Is(err, errFenceNotInPlace) {
-				t.Fatalf("an exec raced by a restart must be refused, got %v", err)
+			want := errFenceNotInPlace
+			if stage == fenceStageAfterGuard {
+				want = errStagedDenied
+			}
+			if !errors.Is(err, want) {
+				t.Fatalf("an exec raced by a restart must be refused at %s, got %v", stage, err)
 			}
 			switch stage {
 			case fenceStageAfterGuard, fenceStageBeforeStart:
@@ -294,9 +305,14 @@ func TestEgressFenceIntegration(t *testing.T) {
 	if _, err := p.client.ContainerRestart(ctx, cid, client.ContainerRestartOptions{}); err != nil {
 		t.Fatalf("restart: %v", err)
 	}
-	if code := fenceTestProviderExec(ctx, t, p, cid, "1001:1001", probe); code == 0 {
-		t.Fatal("a fenced container whose crew no longer matches by label ran an exec unfenced after a restart")
+	if _, err := p.Exec(ctx, provider.ExecConfig{ContainerID: cid, User: "1001:1001", Cmd: probe}); !errors.Is(err, errStagedDenied) {
+		t.Fatalf("retired selector bypassed staged admission: %v", err)
 	}
+	if _, err := p.EnsureCrewRuntime(ctx, team); err != nil {
+		t.Fatalf("retired selector staged admission: %v", err)
+	}
+	assertExit("retired selector re-fenced", "1001", probe, false)
+	assertExit("retired selector re-fenced", "1002", probe, true)
 	p.cfg.EgressFenceCrews = listed
 
 	// Check reads rule contents, not just markers: an in-place edit that
@@ -333,6 +349,27 @@ func TestEgressFenceIntegration(t *testing.T) {
 	// runs unfenced, and the crew is not stopped.
 	if _, err := p.client.ContainerRestart(ctx, cid, client.ContainerRestartOptions{}); err != nil {
 		t.Fatalf("restart: %v", err)
+	}
+	execErrors := make([]error, 4)
+	for i := range execErrors {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			out, err := p.Exec(ctx, provider.ExecConfig{ContainerID: cid, User: "1001:1001", Cmd: probe})
+			if out != nil {
+				out.Reader.Close()
+			}
+			execErrors[i] = err
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range execErrors {
+		if !errors.Is(err, errStagedDenied) {
+			t.Fatalf("concurrent pre-admission exec %d lacked gate denial: %v", i, err)
+		}
+	}
+	if _, err := p.EnsureCrewRuntime(ctx, team); err != nil {
+		t.Fatalf("admission before concurrent network probes: %v", err)
 	}
 	execCodes := make([]int, 4)
 	for i := range execCodes {

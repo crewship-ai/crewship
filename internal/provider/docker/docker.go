@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -105,6 +106,11 @@ type Provider struct {
 	fenceTeams sync.Map
 	// fenceLocks serialises fence installs per container id.
 	fenceLocks sync.Map
+	// Test-only deterministic faults at the staged admission boundary.
+	stagedTestHook func(string, string) error
+	// Test-only mutation before fence helper creation; nil preserves production spec.
+	stagedFenceHelperTestHook func(*container.Config, *container.HostConfig)
+	stagedDiscoveryPending    atomic.Bool
 	// fenceDests maps a fenced container id to the service endpoint set its
 	// fence was installed with (serviceTargets.key).
 	fenceDests sync.Map
@@ -658,6 +664,10 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 	// A runtime switch leaves the previous daemon's crew containers running,
 	// still bind-mounted to the same live host crew directories (#1704).
 	p.reconcileStrandedCrews(ctx)
+	if err := p.discoverStaged(ctx); err != nil {
+		p.stagedDiscoveryPending.Store(true)
+		p.logger.Warn("staged inventory unavailable; exec will inspect actual configuration", "error", err)
+	}
 
 	return p, nil
 }
@@ -1860,6 +1870,10 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 		return nil, fmt.Errorf("exec: refusing to run as privileged user %q in container %s", execCfg.User, cfg.ContainerID)
 	}
 
+	execCfg.Cmd, execCfg.Env, err = p.WrapExternalExec(ctx, cfg.ContainerID, execCfg.Cmd, execCfg.Env)
+	if err != nil {
+		return nil, err
+	}
 	exec, err := p.client.ExecCreate(ctx, cfg.ContainerID, execCfg)
 	if err != nil {
 		return nil, fmt.Errorf("exec create: %w", err)
@@ -1981,6 +1995,10 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 		return nil, fmt.Errorf("exec interactive: refusing to run as privileged user %q in container %s", execCfg.User, cfg.ContainerID)
 	}
 
+	execCfg.Cmd, execCfg.Env, err = p.WrapExternalExec(ctx, cfg.ContainerID, execCfg.Cmd, execCfg.Env)
+	if err != nil {
+		return nil, err
+	}
 	exec, err := p.client.ExecCreate(ctx, cfg.ContainerID, execCfg)
 	if err != nil {
 		return nil, fmt.Errorf("exec interactive create: %w", err)
@@ -2061,6 +2079,9 @@ func (p *Provider) ContainerUser(ctx context.Context, containerID string) (strin
 	}
 	if inspectResult.Container.Config == nil {
 		return "", fmt.Errorf("container %s has no config", containerID)
+	}
+	if staged(inspectResult.Container) {
+		return "1001:1001", nil
 	}
 	return inspectResult.Container.Config.User, nil
 }

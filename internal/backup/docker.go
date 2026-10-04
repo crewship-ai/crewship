@@ -142,6 +142,8 @@ type MobyDockerOps struct {
 	// exec starts. Any error refuses the exec. The server wires it to the
 	// container provider; nil means no guard (no provider, tests).
 	Guard ExecGuard
+	// Wrap binds image commands to the current staged boot before Docker starts them.
+	Wrap func(context.Context, string, []string, []string) ([]string, []string, error)
 }
 
 // ExecGuard is MobyDockerOps.Guard. beforeStart and afterStart may be nil.
@@ -341,7 +343,15 @@ func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID string, 
 	if err != nil {
 		return err
 	}
+	var env []string
+	if m.Wrap != nil {
+		cmd, env, err = m.Wrap(ctx, containerID, cmd, nil)
+		if err != nil {
+			return err
+		}
+	}
 	exec, err := m.Client.ExecCreate(ctx, containerID, client.ExecCreateOptions{
+		Env:          env,
 		Cmd:          cmd,
 		User:         user,
 		AttachStdin:  true,
@@ -431,7 +441,15 @@ func (m *MobyDockerOps) ExecAs(ctx context.Context, containerID, user string, cm
 	if err != nil {
 		return -1, nil, err
 	}
+	var env []string
+	if m.Wrap != nil {
+		cmd, env, err = m.Wrap(ctx, containerID, cmd, nil)
+		if err != nil {
+			return -1, nil, err
+		}
+	}
 	exec, err := m.Client.ExecCreate(ctx, containerID, client.ExecCreateOptions{
+		Env:          env,
 		Cmd:          cmd,
 		User:         user,
 		AttachStdout: true,
