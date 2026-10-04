@@ -961,6 +961,13 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 		in.restoredCostUSD = rec.CostUSD
 	}
 
+	// Sweeper admission is bounded separately from full execution. Release its
+	// permit only after acquiring the run lifetime and fencing stale plans,
+	// before hooks, downstream steps or retry backoff can run indefinitely.
+	if in.resumeAdmitted != nil {
+		in.resumeAdmitted()
+	}
+
 	hookSlug := ""
 	if in.pipeline != nil {
 		hookSlug = in.pipeline.Slug
@@ -1177,6 +1184,9 @@ type RunInput struct {
 	// resumeReasonRestart (boot scan) or resumeReasonApproval
 	// (waitpoint approved in-process). Set only by runResumedRun.
 	resumeReason string
+	// resumeAdmitted releases the sweeper's admission permit. The full Run
+	// lifetime remains tracked by its caller until Run returns.
+	resumeAdmitted func()
 }
 
 // costCapExceededMessage is the single wording for max_cost_usd

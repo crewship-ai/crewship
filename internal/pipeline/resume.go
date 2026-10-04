@@ -332,10 +332,10 @@ func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resume
 //   - Anything else (pipeline reload failure, broken inputs) is
 //     permanent for this lifetime → interrupted with the reason.
 func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *slog.Logger) {
-	e.runResumedRunWithRetry(ctx, plan, logger, true)
+	e.runResumedRunWithRetry(ctx, plan, logger, true, nil)
 }
 
-func (e *Executor) runResumedRunWithRetry(ctx context.Context, plan *resumePlan, logger *slog.Logger, waitForSlot bool) {
+func (e *Executor) runResumedRunWithRetry(ctx context.Context, plan *resumePlan, logger *slog.Logger, waitForSlot bool, onAdmitted func()) {
 	rec := plan.rec
 	backoff := e.resumeRetryBase
 	if backoff <= 0 {
@@ -363,6 +363,7 @@ func (e *Executor) runResumedRunWithRetry(ctx context.Context, plan *resumePlan,
 			// compares the stamped hash against the pinned definition.
 			PinnedVersion:   rec.PipelineVersion,
 			resume:          true,
+			resumeAdmitted:  onAdmitted,
 			resumeReason:    plan.reason,
 			restoredOutputs: plan.restored,
 			restoredCostUSD: rec.CostUSD,

@@ -16,7 +16,9 @@ import (
 // an immediate startup pass. Resolution stays durable until the normal resume
 // path completes, so a failed scan, busy slot, or restart cannot lose a wake.
 // The returned stop function cancels and joins BOTH the ticker and its workers;
-// call it before closing the DB/journal. At most eight resumes run at once.
+// call it before closing the DB/journal. At most eight admission attempts run
+// at once; admitted executions retain their normal pipeline concurrency limits
+// and are all tracked and joined without holding an admission permit.
 func StartEventWaitSweeper(parent context.Context, db *sql.DB, exec *Executor, gate leader.Gate, logger *slog.Logger, interval time.Duration) func() {
 	if logger == nil {
 		logger = slog.Default()
@@ -28,10 +30,11 @@ func StartEventWaitSweeper(parent context.Context, db *sql.DB, exec *Executor, g
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		var workers sync.WaitGroup
-		defer workers.Wait()
+		var executions sync.WaitGroup
+		defer executions.Wait()
 		var mu sync.Mutex
 		active := make(map[string]bool)
+		admissions := make(chan struct{}, 8)
 		cursor := ""
 		sweep := func() {
 			if ctx.Err() != nil || (gate != nil && !gate.IsLeader()) {
@@ -77,23 +80,28 @@ ORDER BY run_id LIMIT 128`, tsformat.Format(time.Now()), cursor, cursor)
 					return
 				}
 				mu.Lock()
-				if len(active) >= 8 {
-					mu.Unlock()
-					break
-				}
 				if active[id] {
 					mu.Unlock()
 					cursor = id
 					continue
 				}
+				select {
+				case admissions <- struct{}{}:
+				default:
+					mu.Unlock()
+					return // admission full; retry remaining IDs next tick
+				}
 				active[id] = true
 				cursor = id
 				mu.Unlock()
-				workers.Add(1)
+				executions.Add(1)
 				go func(runID string) {
-					defer workers.Done()
+					defer executions.Done()
 					defer func() { mu.Lock(); delete(active, runID); mu.Unlock() }()
-					exec.resumeEventRun(ctx, runID, logger, false)
+					var admitted sync.Once
+					releaseAdmission := func() { admitted.Do(func() { <-admissions }) }
+					defer releaseAdmission() // every failed/declined admission path
+					exec.resumeEventRun(ctx, runID, logger, false, releaseAdmission)
 				}(id)
 			}
 		}
@@ -117,10 +125,10 @@ ORDER BY run_id LIMIT 128`, tsformat.Format(time.Now()), cursor, cursor)
 // Wait for the original run's registry lifetime before loading its durable
 // state: delivery/expiry can race the original MarkWaiting/slot release.
 func (e *Executor) ResumeEventRun(ctx context.Context, runID string, logger *slog.Logger) {
-	e.resumeEventRun(ctx, runID, logger, true)
+	e.resumeEventRun(ctx, runID, logger, true, nil)
 }
 
-func (e *Executor) resumeEventRun(ctx context.Context, runID string, logger *slog.Logger, waitForSlot bool) {
+func (e *Executor) resumeEventRun(ctx context.Context, runID string, logger *slog.Logger, waitForSlot bool, onAdmitted func()) {
 	if e.runStore == nil {
 		return
 	}
@@ -129,10 +137,18 @@ func (e *Executor) resumeEventRun(ctx context.Context, runID string, logger *slo
 	}
 	if e.runs != nil {
 		if released := e.runs.released(runID); released != nil {
-			select {
-			case <-released:
-			case <-ctx.Done():
-				return
+			if !waitForSlot {
+				select {
+				case <-released:
+				default:
+					return // original lifetime owns it; retry durably next tick
+				}
+			} else {
+				select {
+				case <-released:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}
@@ -181,5 +197,5 @@ func (e *Executor) resumeEventRun(ctx context.Context, runID string, logger *slo
 			plan.reason = resumeReasonEventTimeout
 		}
 	}
-	e.runResumedRunWithRetry(ctx, plan, logger, waitForSlot)
+	e.runResumedRunWithRetry(ctx, plan, logger, waitForSlot, onAdmitted)
 }

@@ -584,3 +584,40 @@ func TestEventWaitDeadline_SpuriousResumeDoesNotEnterPendingWait(t *testing.T) {
 		t.Fatalf("spurious resume changed pending run: %+v %v", rec, err)
 	}
 }
+
+// An API-owned original lifetime can still hold its registry slot after
+// MarkWaiting. Sweep admission must yield instead of waiting for release.
+func TestEventWaitDeadline_LiveOriginalsDoNotStarveOtherExpiry(t *testing.T) {
+	db := openFactoryTestDB(t)
+	defer db.Close()
+	deps := fullExecutorDeps(t, db, newMockRunner())
+	deps.RunVerdict = nil
+	exec := NewWiredExecutor(deps)
+	p := saveResumePipeline(t, deps.Store, "live-originals", eventWaitDSL)
+	ctx := context.Background()
+	for i := 0; i < 9; i++ {
+		res, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun, RunIDOverride: fmt.Sprintf("live-%02d", i)})
+		if err != nil || res.Status != "WAITING" {
+			t.Fatalf("park %d: %+v %v", i, res, err)
+		}
+		if i < 8 {
+			_, release, err := deps.Runs.Acquire(ctx, AcquireOpts{RunID: res.RunID, WorkspaceID: "ws_test"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer release()
+		}
+	}
+	if _, err := db.Exec(`UPDATE pipeline_signal_waits SET timeout_at=?`, tsformat.Format(time.Now().Add(-time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	stop := StartEventWaitSweeper(ctx, db, exec, nil, slog.New(slog.NewTextHandler(io.Discard, nil)), 10*time.Millisecond)
+	defer stop()
+	waitForRunStatus(t, deps.RunStore, "live-08", RunStatusFailed, time.Second)
+	for i := 0; i < 8; i++ {
+		rec, err := deps.RunStore.Get(ctx, fmt.Sprintf("live-%02d", i))
+		if err != nil || rec.Status != RunStatusWaiting {
+			t.Fatalf("live original changed: %+v %v", rec, err)
+		}
+	}
+}
