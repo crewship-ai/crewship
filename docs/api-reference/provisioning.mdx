@@ -154,7 +154,7 @@ GET /api/v1/crews/{crewId}/provision
 
 **Auth:** Authenticated workspace request; `crewId` must belong to that workspace. **Request:** `crewId` path parameter; no body. **Response:** JSON provision-status object described below. **Statuses:** `200 OK`; `404 Not Found` when the crew is not in the workspace; `503 Service Unavailable` when provisioning is not configured.
 
-**Response:** `200 OK`. Always-present fields come from the `crews` row; the `step` / `total` / `message` / `steps` / `log_tail` / `started_at` / `completed_at` / `error` fields appear **only** when an in-memory job is currently running or recently finished for this crew.
+**Response:** `200 OK`. Always-present fields come from the `crews` row; the `step` / `total` / `message` / `steps` / `log_tail` / `started_at` / `completed_at` / `error` fields appear when an in-memory job is currently running or recently finished for this crew. `error`, `log_tail` and `completed_at` also surface **without** a live job when the crew's most recent build outcome was a failure — they are read back from the journal, so they survive the in-memory job's TTL and a server restart.
 
 ```json
 {
@@ -184,9 +184,10 @@ GET /api/v1/crews/{crewId}/provision
 
 | Field | When present | Meaning |
 |---|---|---|
-| `devcontainer_config` | always | Raw JSON blob pulled from `crews.devcontainer_config` (or null). |
-| `cached_image` | always | Last successfully committed cache tag, or null. |
-| `config_hash` | always | SHA-256 of (base, devcontainer, mise) used as the cache key. |
+| `devcontainer_config` | always | The **effective** devcontainer JSON: the crew's own `devcontainer_config`, or the built-in default when the crew never set one. |
+| `devcontainer_config_defaulted` | always | `true` when `devcontainer_config` is the built-in default rather than a config the crew set. |
+| `cached_image` | always | The currently selected image. On Docker this is the immutable local image ID (`sha256:…`) of the last successful build — the `crewship-cache:*` tag is only a cache lookup alias. Native build providers report the image tag. Null when nothing is built. |
+| `config_hash` | always | SHA-256 over (base image, devcontainer, mise, generated-build fingerprint, required adapter CLIs) used as the cache key — adding an agent changes it too. |
 | `agents_pending_restart` | always | Count of crew agents whose live container is on a stale image. |
 | `step` / `total` | active job | Numeric progress (e.g. `3 / 6`). The UI's `CrewProvisioningCard` renders a checklist from this pair. |
 | `message` | active job | Free-form short message for the current step. |
@@ -244,7 +245,7 @@ which provisions first if the crew has no image and then starts it.
 
 | Status | Condition |
 |---|---|
-| 400 | Invalid crew ID, **or** crew has no `devcontainer_config`. |
+| 400 | Invalid crew ID. A crew with no `devcontainer_config` is provisioned from the built-in default, not rejected. |
 | 403 | Caller lacks `create` permission. |
 | 404 | Crew not in workspace. |
 | 409 | A provisioning job is already in progress for this crew. The 409 body extends Problem Details with `job_status` (the existing job's state) so callers can decide whether to wait or fall through. **Not** idempotent — the second caller is told to back off, not silently joined to the running job. |
@@ -260,10 +261,13 @@ POST /api/v1/crews/{crewId}/rebuild
 
 **Auth:** Authenticated caller with the `create` role action. **Request:** `crewId` path parameter; no body. **Response:** the same JSON shape as the trigger endpoint. **Statuses:** `202 Accepted`; `403`, `404`, `409`, `429`, `500`, or `503` when the corresponding provisioning condition applies.
 
-Clears the cached image marker on the crew row and triggers a fresh provision. Use when upstream features publish breaking updates under the same tag.
+Triggers a fresh build that bypasses the provisioned-image cache and the installation-layer caches, so floating tool selectors can resolve newer versions. The previously selected image stays in place until the new build publishes: a failed or superseded rebuild leaves the previous image and its requirements selected, and the crew remains startable throughout. Use when upstream features publish breaking updates under the same tag.
 
 <Warning>
-  Discards the existing cache marker before rebuilding — the next agent run waits on a full pipeline pass.
+  The cache bypass belongs to the build, not to the crew row — the previous
+  image is not discarded up front. A running container is not replaced
+  either: it keeps its image until the new one activates (see
+  [Immutable Docker build references](/guides/devcontainers#immutable-docker-build-references)).
 </Warning>
 
 **Response:** `202 Accepted` — same shape as Trigger.

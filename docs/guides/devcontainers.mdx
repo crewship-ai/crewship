@@ -328,7 +328,7 @@ The `EnqueueForCrew` API is idempotent: if a job is already running for the crew
     # Config Hash   a1b2c3d4e5f6…
     ```
 
-    The hash is a deterministic SHA-256 of `(baseImage, devcontainer_config, mise_config)` — see `configHash` in `internal/devcontainer/provisioner.go`. Any change invalidates the cache.
+    The hash is a deterministic SHA-256 of `(baseImage, devcontainer_config, mise_config)` plus the generated-build fingerprint and the crew's required adapter CLIs — see `configHash` in `internal/devcontainer/provisioner_cache.go`. Any change to those invalidates the cache.
   </Step>
 
   <Step title="Re-build on demand">
@@ -336,7 +336,7 @@ The `EnqueueForCrew` API is idempotent: if a job is already running for the crew
     crewship crew rebuild engineering
     ```
 
-    Clears the cached image marker on the crew row and kicks off provisioning again. Use this when upstream features publish breaking updates under the same tag.
+    Bypasses the provisioned-image and installation-layer caches and re-runs the build. The previously selected image stays in place until the new build succeeds — a failed rebuild leaves it selected. Use this when upstream features publish breaking updates under the same tag.
   </Step>
 </Steps>
 
@@ -619,7 +619,7 @@ PR #225 extends the devcontainer expansion vocabulary the spec defines:
   </Accordion>
 
   <Accordion title="cache image never refreshes">
-    `configHash` is deterministic over `(baseImage, devcontainer_config, mise_config)`. Upstream feature releases that re-use the same tag don't change the hash. Force a rebuild:
+    `configHash` is deterministic over `(baseImage, devcontainer_config, mise_config)` plus the generated-build fingerprint and required adapter CLIs. Upstream feature releases that re-use the same tag don't change the hash. Force a rebuild:
 
     ```bash
     crewship crew rebuild my-crew
