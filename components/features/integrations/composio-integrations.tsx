@@ -117,8 +117,29 @@ export function ComposioIntegrations({
   // late response belongs to a workspace the operator has already switched away
   // from — and bail before clobbering the current workspace's state.
   const wsRef = React.useRef(workspaceId)
+  const requests = React.useRef({ inventory: 0, toolkits: 0, agents: 0, settings: 0 })
   React.useEffect(() => {
+    const activeRequests = requests.current
     wsRef.current = workspaceId
+    setData(null)
+    setError(null)
+    setSettings(null)
+    setAgents([])
+    setBindings({})
+    setToolkits([])
+    setTotal(0)
+    setLoading(!!workspaceId)
+    setAgentsLoading(!!workspaceId)
+    setTkLoading(!!workspaceId)
+    setConnect(null)
+    setKeyOpenState(false)
+    return () => {
+      wsRef.current = ""
+      activeRequests.inventory += 1
+      activeRequests.toolkits += 1
+      activeRequests.agents += 1
+      activeRequests.settings += 1
+    }
   }, [workspaceId])
 
   // ── Inventory (connected accounts + auth configs) ──
@@ -127,15 +148,17 @@ export function ComposioIntegrations({
   const [error, setError] = React.useState<string | null>(null)
 
   const load = React.useCallback(async (wid: string) => {
+    const generation = ++requests.current.inventory
+    const isCurrent = () => wsRef.current === wid && requests.current.inventory === generation
     // Serve whatever is cached first. Leaving and re-entering this tab used to
     // pay the full round trip again and show skeletons for it, even when the
     // data was seconds old — see lib/stale-cache.ts.
     const { value, fresh, fromCache } = readThrough(`composio:${wid}:inventory`, async () => {
-      const r = await apiFetch(`/api/v1/integrations/composio/inventory?workspace_id=${wid}`)
+      const r = await apiFetch(`/api/v1/integrations/composio/inventory?${new URLSearchParams({ workspace_id: wid })}`)
       if (!r.ok) throw new Error(`Request failed (${r.status})`)
       return (await r.json()) as Inventory
     })
-    if (value && wsRef.current === wid) {
+    if (value && isCurrent()) {
       setData(value)
       setLoading(false)
     } else {
@@ -144,15 +167,15 @@ export function ComposioIntegrations({
     setError(null)
     try {
       const j = await fresh
-      if (wsRef.current !== wid) return // workspace switched mid-flight
+      if (!isCurrent()) return // workspace switched mid-flight
       setData(j)
     } catch (e) {
-      if (wsRef.current !== wid) return
+      if (!isCurrent()) return
       // A background refresh that fails while cached data is on screen is not
       // worth an error banner over data the user can still see.
       if (!fromCache) setError(e instanceof Error ? e.message : "Failed to load inventory")
     } finally {
-      if (wsRef.current === wid) setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }, [])
 
@@ -170,6 +193,8 @@ export function ComposioIntegrations({
   const [tkLoading, setTkLoading] = React.useState(true)
 
   const loadToolkits = React.useCallback(async (wid: string, q: string) => {
+    const generation = ++requests.current.toolkits
+    const isCurrent = () => wsRef.current === wid && requests.current.toolkits === generation
     // Cached per query, so going back to the unfiltered catalog after a search
     // is instant — this is the slowest of the four calls, since it reaches
     // Composio's own API.
@@ -180,7 +205,7 @@ export function ComposioIntegrations({
       if (!r.ok) throw new Error(String(r.status))
       return (await r.json()) as ToolkitsResp
     })
-    if (value && wsRef.current === wid) {
+    if (value && isCurrent()) {
       setToolkits(value.toolkits ?? [])
       setTotal(value.total ?? 0)
       setTkLoading(false)
@@ -189,22 +214,27 @@ export function ComposioIntegrations({
     }
     try {
       const j = await fresh
-      if (wsRef.current !== wid) return // workspace switched mid-flight
+      if (!isCurrent()) return // workspace switched mid-flight
       setToolkits(j.toolkits ?? [])
       setTotal(j.total ?? 0)
     } catch {
-      if (wsRef.current !== wid) return
+      if (!isCurrent()) return
       if (!value) setToolkits([])
     } finally {
-      if (wsRef.current === wid) setTkLoading(false)
+      if (isCurrent()) setTkLoading(false)
     }
   }, [])
 
   // Debounce the catalog search so each keystroke doesn't hammer Composio.
   React.useEffect(() => {
+    const activeRequests = requests.current
+    activeRequests.toolkits += 1
     if (!workspaceId) return
     const t = setTimeout(() => void loadToolkits(workspaceId, search), 300)
-    return () => clearTimeout(t)
+    return () => {
+      clearTimeout(t)
+      activeRequests.toolkits += 1
+    }
   }, [workspaceId, search, loadToolkits])
 
   // ── Agents + their Composio bindings (agent-access + MCP + KPI) ──
@@ -213,11 +243,13 @@ export function ComposioIntegrations({
   const [agentsLoading, setAgentsLoading] = React.useState(true)
 
   const loadAgents = React.useCallback(async (wid: string) => {
+    const generation = ++requests.current.agents
+    const isCurrent = () => wsRef.current === wid && requests.current.agents === generation
     // The priciest of the four: one call for the agent list, then one per
     // agent for its bindings. Cached as a unit — re-running an N+1 fan-out on
     // every tab entry is what made this surface feel slow.
     const { value, fresh } = readThrough(`composio:${wid}:agents`, async () => {
-      const r = await apiFetch(`/api/v1/agents?workspace_id=${wid}`)
+      const r = await apiFetch(`/api/v1/agents?${new URLSearchParams({ workspace_id: wid })}`)
       if (!r.ok) throw new Error(String(r.status))
       const list = (await r.json()) as AgentLite[]
       // Fetch each agent's Composio binding in parallel. A failed lookup for
@@ -227,7 +259,7 @@ export function ComposioIntegrations({
         list.map(async (a): Promise<[string, AgentBindingsMap[string]]> => {
           try {
             const br = await apiFetch(
-              `/api/v1/integrations/composio/agents/${a.id}/bind?workspace_id=${wid}`,
+              `/api/v1/integrations/composio/agents/${encodeURIComponent(a.id)}/bind?${new URLSearchParams({ workspace_id: wid })}`,
             )
             if (!br.ok) return [a.id, []]
             const bj = (await br.json()) as { bindings?: AgentBindingsMap[string] }
@@ -240,7 +272,7 @@ export function ComposioIntegrations({
       return { agents: list, bindings: Object.fromEntries(entries) as AgentBindingsMap }
     })
 
-    if (value && wsRef.current === wid) {
+    if (value && isCurrent()) {
       setAgents(value.agents)
       setBindings(value.bindings)
       setAgentsLoading(false)
@@ -249,17 +281,17 @@ export function ComposioIntegrations({
     }
     try {
       const j = await fresh
-      if (wsRef.current !== wid) return // workspace switched mid-flight
+      if (!isCurrent()) return // workspace switched mid-flight
       setAgents(j.agents)
       setBindings(j.bindings)
     } catch {
-      if (wsRef.current !== wid) return
+      if (!isCurrent()) return
       if (!value) {
         setAgents([])
         setBindings({})
       }
     } finally {
-      if (wsRef.current === wid) setAgentsLoading(false)
+      if (isCurrent()) setAgentsLoading(false)
     }
   }, [])
 
@@ -292,15 +324,17 @@ export function ComposioIntegrations({
   } | null>(null)
 
   const loadSettings = React.useCallback(async (wid: string) => {
+    const generation = ++requests.current.settings
+    const isCurrent = () => wsRef.current === wid && requests.current.settings === generation
     const { value, fresh } = readThrough(`composio:${wid}:settings`, async () => {
-      const r = await apiFetch(`/api/v1/integrations/composio/settings?workspace_id=${wid}`)
+      const r = await apiFetch(`/api/v1/integrations/composio/settings?${new URLSearchParams({ workspace_id: wid })}`)
       if (!r.ok) throw new Error(String(r.status))
       return (await r.json()) as ComposioSettings
     })
-    if (value && wsRef.current === wid) setSettings(value)
+    if (value && isCurrent()) setSettings(value)
     try {
       const j = await fresh
-      if (wsRef.current !== wid) return // workspace switched mid-flight
+      if (!isCurrent()) return // workspace switched mid-flight
       setSettings(j)
     } catch {
       /* non-fatal */
@@ -313,6 +347,7 @@ export function ComposioIntegrations({
 
   const refreshAll = React.useCallback(
     (wid: string) => {
+      if (wsRef.current !== wid) return
       // Refresh means refresh: drop this workspace's cache first, or the
       // button would re-render the same values it was pressed to replace.
       invalidate(`composio:${wid}:`)
@@ -463,10 +498,12 @@ export function ComposioIntegrations({
 
       {keyOpen && workspaceId && (
         <ApiKeyModal
+          key={workspaceId}
           workspaceId={workspaceId}
           current={settings}
           onClose={() => setKeyOpen(false)}
           onChanged={() => {
+            if (wsRef.current !== workspaceId) return
             setKeyOpen(false)
             refreshAll(workspaceId)
           }}
@@ -475,12 +512,14 @@ export function ComposioIntegrations({
 
       {connect && workspaceId && (
         <ConnectModal
+          key={workspaceId}
           workspaceId={workspaceId}
           toolkit={connect.toolkit}
           presetUserId={connect.userId}
           users={data?.users.map((u) => u.user_id) ?? []}
           onClose={() => setConnect(null)}
           onConnected={() => {
+            if (wsRef.current !== workspaceId) return
             setConnect(null)
             refreshAll(workspaceId)
           }}
@@ -654,7 +693,7 @@ function ApiKeyModal({
     setSaving(true)
     setErr(null)
     try {
-      const r = await apiFetch(`/api/v1/integrations/composio/settings?workspace_id=${workspaceId}`, {
+      const r = await apiFetch(`/api/v1/integrations/composio/settings?${new URLSearchParams({ workspace_id: workspaceId })}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ api_key: apiKey.trim(), base_url: current?.base_url ?? "", label: label.trim() }),
@@ -675,7 +714,7 @@ function ApiKeyModal({
     setSaving(true)
     setErr(null)
     try {
-      const r = await apiFetch(`/api/v1/integrations/composio/settings?workspace_id=${workspaceId}`, {
+      const r = await apiFetch(`/api/v1/integrations/composio/settings?${new URLSearchParams({ workspace_id: workspaceId })}`, {
         method: "DELETE",
       })
       if (!r.ok) throw new Error(`Failed (${r.status})`)
@@ -786,7 +825,7 @@ function ConnectModal({
     // request resolves (and close it if there's no redirect or an error).
     const popup = window.open("", "_blank", "noopener,noreferrer")
     try {
-      const r = await apiFetch(`/api/v1/integrations/composio/connect?workspace_id=${workspaceId}`, {
+      const r = await apiFetch(`/api/v1/integrations/composio/connect?${new URLSearchParams({ workspace_id: workspaceId })}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ toolkit: slug, user_id: uid }),

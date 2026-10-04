@@ -33,6 +33,7 @@ export function usePipelineStepOverrides(
   const refresh = useCallback(async () => {
     if (!workspaceId || !slug) {
       setOverrides([])
+      setLoading(false)
       return
     }
     abortRef.current?.abort()

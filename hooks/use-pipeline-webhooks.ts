@@ -62,10 +62,16 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const activeWorkspaceRef = useRef(workspaceId)
 
   const refresh = useCallback(async () => {
+    // A mutation may finish after a workspace switch or unmount. Its
+    // captured refresh must not replace the currently selected workspace.
+    if (activeWorkspaceRef.current !== workspaceId) return
     if (!workspaceId) {
       setWebhooks([])
+      setLoading(false)
+      setError(null)
       return
     }
     abortRef.current?.abort()
@@ -95,9 +101,13 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
   }, [workspaceId])
 
   useEffect(() => {
+    activeWorkspaceRef.current = workspaceId
     refresh()
-    return () => abortRef.current?.abort()
-  }, [refresh])
+    return () => {
+      activeWorkspaceRef.current = null
+      abortRef.current?.abort()
+    }
+  }, [refresh, workspaceId])
 
   // Liveness: fire_count / last_fired_at / last_status previously refreshed
   // only on mount or after a create/delete — an inbound webhook firing while
@@ -109,7 +119,8 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
   const liveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => () => {
     if (liveTimerRef.current) clearTimeout(liveTimerRef.current)
-  }, [])
+    liveTimerRef.current = null
+  }, [workspaceId])
   useRealtimeEventSafe(
     "pipeline.run.started",
     useCallback((event) => {

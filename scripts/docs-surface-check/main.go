@@ -364,9 +364,6 @@ func checkServed(baseURL string, declared []string) (int, error) {
 	}
 	links := llmsLink.FindAllStringSubmatch(llms, -1)
 	served := len(links)
-	if served >= len(declared) {
-		return served, nil
-	}
 	// Naming the pages is the whole point. A bare count is true and
 	// unactionable: the scheduled run said "306 vs 307" for days while the
 	// one page it meant — manifest/README, a basename Mintlify does not
@@ -382,6 +379,9 @@ func checkServed(baseURL string, declared []string) (int, error) {
 		if !have[strings.TrimPrefix(id, "/")] {
 			missing = append(missing, id)
 		}
+	}
+	if served >= len(declared) && len(missing) == 0 {
+		return served, nil
 	}
 	detail := ""
 	if len(missing) > 0 {

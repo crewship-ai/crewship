@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
@@ -56,98 +56,116 @@ interface PipelineVersion {
   created_at: string
 }
 
+interface DetailScope {
+  workspaceId: string
+  slug: string
+  controller: AbortController
+}
+
+function detailBase(scope: DetailScope) {
+  return `/api/v1/workspaces/${encodeURIComponent(scope.workspaceId)}/pipelines/${encodeURIComponent(scope.slug)}`
+}
+
+async function loadDetails(scope: DetailScope) {
+  const base = detailBase(scope)
+  const options = { signal: scope.controller.signal }
+  const [pRes, vRes] = await Promise.all([apiFetch(base, options), apiFetch(`${base}/versions`, options)])
+  if (!pRes.ok) throw new Error(`pipeline: ${pRes.status}`)
+  if (!vRes.ok) throw new Error(`versions: ${vRes.status}`)
+  const pipeline: PipelineRow = await pRes.json()
+  const versions: PipelineVersion[] = await vRes.json()
+  return { pipeline, versions: Array.isArray(versions) ? versions : [] }
+}
+
 export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: PipelineDetailSheetProps) {
   const [pipeline, setPipeline] = useState<PipelineRow | null>(null)
   const [versions, setVersions] = useState<PipelineVersion[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const { runs } = usePipelineRuns(workspaceId, slug)
+  const [pendingAction, setPendingAction] = useState<"rollback" | "export" | null>(null)
+  const scopeRef = useRef<DetailScope | null>(null)
+  const { runs } = usePipelineRuns(open ? workspaceId : null, open ? slug : null)
 
   useEffect(() => {
-    if (!open || !slug || !workspaceId) {
-      setPipeline(null)
-      setVersions([])
-      return
-    }
-    let cancelled = false
-    const ctrl = new AbortController()
-    const load = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const [pRes, vRes] = await Promise.all([
-          apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}`, { signal: ctrl.signal }),
-          apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/versions`, { signal: ctrl.signal }),
-        ])
-        if (!pRes.ok) throw new Error(`pipeline: ${pRes.status}`)
-        if (!vRes.ok) throw new Error(`versions: ${vRes.status}`)
-        const p: PipelineRow = await pRes.json()
-        const v: PipelineVersion[] = await vRes.json()
-        if (cancelled) return
-        setPipeline(p)
-        setVersions(Array.isArray(v) ? v : [])
-      } catch (e) {
-        if (!cancelled && (e as Error).name !== "AbortError") {
-          setError((e as Error).message)
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    load()
+    setPipeline(null)
+    setVersions([])
+    setError(null)
+    setPendingAction(null)
+    setLoading(false)
+    if (!open || !slug || !workspaceId) return
+    const scope = { workspaceId, slug, controller: new AbortController() }
+    scopeRef.current = scope
+    setLoading(true)
+    const active = () => scopeRef.current === scope && !scope.controller.signal.aborted
+    void loadDetails(scope).then((details) => {
+      if (!active()) return
+      setPipeline(details.pipeline)
+      setVersions(details.versions)
+    }).catch((e: unknown) => {
+      if (active()) setError(e instanceof Error ? e.message : String(e))
+    }).finally(() => {
+      if (active()) setLoading(false)
+    })
     return () => {
-      cancelled = true
-      ctrl.abort()
+      scope.controller.abort()
+      if (scopeRef.current === scope) scopeRef.current = null
     }
   }, [open, slug, workspaceId])
 
   const handleRollback = async (version: number) => {
-    if (!workspaceId || !slug) return
+    const scope = scopeRef.current
+    if (!scope || pendingAction !== null) return
     if (!confirm(`Rollback to version ${version}? History is preserved; the next save will be version ${(versions[0]?.version ?? 0) + 1}.`)) return
+    const active = () => scopeRef.current === scope && !scope.controller.signal.aborted
+    setPendingAction("rollback")
+    setError(null)
     try {
-      const res = await apiFetch(
-        `/api/v1/workspaces/${workspaceId}/pipelines/${slug}/rollback`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ version }),
-        },
-      )
+      const res = await apiFetch(`${detailBase(scope)}/rollback`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version }), signal: scope.controller.signal,
+      })
+      if (!active()) return
       if (!res.ok) {
         const body = await res.text()
-        alert(`Rollback failed: ${body}`)
+        if (active()) setError(`Rollback failed: ${body}`)
         return
       }
-      // Reload — quick and dirty; a stale-fetch guard would be
-      // overkill for an explicit user action like this
-      const reload = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}`)
-      if (reload.ok) {
-        setPipeline(await reload.json())
-      }
-      const vReload = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/versions`)
-      if (vReload.ok) {
-        setVersions(await vReload.json())
-      }
+      const details = await loadDetails(scope)
+      if (!active()) return
+      setPipeline(details.pipeline)
+      setVersions(details.versions)
     } catch (e) {
-      alert(`Rollback error: ${(e as Error).message}`)
+      if (active()) setError(`Rollback error: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      if (active()) setPendingAction(null)
     }
   }
 
   const handleExport = async () => {
-    if (!workspaceId || !slug) return
-    const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/export?include_history=1`)
-    if (!res.ok) return
-    const bundle = await res.json()
-    // Trigger download. Browsers require an anchor click for File
-    // System Access fallback; this is the lowest-friction route.
-    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `routine-${slug}-bundle.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    const scope = scopeRef.current
+    if (!scope || pendingAction !== null) return
+    const active = () => scopeRef.current === scope && !scope.controller.signal.aborted
+    setPendingAction("export")
+    setError(null)
+    let url: string | null = null
+    try {
+      const res = await apiFetch(`${detailBase(scope)}/export?include_history=1`, { signal: scope.controller.signal })
+      if (!active()) return
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const bundle = await res.json()
+      if (!active()) return
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" })
+      url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `routine-${scope.slug}-bundle.json`
+      a.click()
+    } catch (e) {
+      if (active()) setError(`Export failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      if (url) URL.revokeObjectURL(url)
+      if (active()) setPendingAction(null)
+    }
   }
 
   return (
@@ -164,7 +182,7 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
         </SheetHeader>
 
         {loading && <div className="py-8 text-center text-sm text-muted-foreground">Loading…</div>}
-        {error && <div className="py-4 text-sm text-destructive">Error: {error}</div>}
+        {error && <div role="alert" className="py-4 text-sm text-destructive">Error: {error}</div>}
 
         {pipeline && !loading && (
           <Tabs defaultValue="overview" className="mt-4">
@@ -204,7 +222,7 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
               <Row label="Updated" value={new Date(pipeline.updated_at).toLocaleString()} />
 
               <div className="mt-4 flex gap-2">
-                <Button size="sm" variant="outline" onClick={handleExport}>
+                <Button size="sm" variant="outline" onClick={handleExport} disabled={pendingAction !== null}>
                   <Download className="mr-1.5 h-3.5 w-3.5" />
                   Export bundle
                 </Button>
@@ -255,6 +273,7 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
                             size="sm"
                             variant="ghost"
                             onClick={() => handleRollback(v.version)}
+                            disabled={pendingAction !== null}
                             className="h-6 px-2 text-xs"
                           >
                             <RotateCcw className="mr-1 h-3 w-3" />

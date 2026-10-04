@@ -31,10 +31,10 @@
 // their own thin wrapper that maps their Config onto Artifacts; what must not be
 // re-derived per provider is the copy semantics below.
 //
-// Deliberately no tests of its own: the contract is pinned twice over, through
-// each wrapper, in internal/provider/docker/runtime_binds_test.go and
-// internal/provider/apple/runtime_binds_test.go. A third in-package copy of the
-// same six assertions would be the one nobody updates.
+// Successful staging is tested through each provider wrapper in
+// internal/provider/docker/runtime_binds_test.go and
+// internal/provider/apple/runtime_binds_test.go. Local tests cover failed
+// copies, preserving existing artifacts and removing temporary files.
 package runtimestage
 
 import (

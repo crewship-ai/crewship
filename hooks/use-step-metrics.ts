@@ -55,6 +55,9 @@ export function useStepMetrics(
       return
     }
     let cancelled = false
+    // The previous scope's heatmap must not shade the newly selected run
+    // while its history is still loading.
+    setMetrics(new Map())
     setLoading(true)
     apiFetch(
       `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(pipelineSlug)}/runs?limit=200&include_steps=1`,
@@ -70,19 +73,21 @@ export function useStepMetrics(
           const eventRunId = p.run_id ?? p.pipeline_run_id
           if (eventRunId !== runId) continue
           if (!p.step_id) continue
-          // Last event wins — re-runs of the same step (unusual on
-          // pipeline_runs but possible) replace prior metrics.
+          // ListRuns returns journal entries ORDER BY ts DESC. Keep the
+          // first completion so an older retry cannot replace the latest.
+          if (next.has(p.step_id)) continue
           next.set(p.step_id, {
             durationMs: typeof p.duration_ms === "number" ? p.duration_ms : 0,
             costUsd: typeof p.cost_usd === "number" ? p.cost_usd : 0,
           })
         }
-        setMetrics(next)
+        // Live completions observed during this request are newer than
+        // its history snapshot and must survive its eventual response.
+        setMetrics((live) => new Map([...next, ...live]))
       })
       .catch(() => {
-        if (cancelled) return
-        // Non-fatal — heatmap just won't shade. Surface as empty map.
-        setMetrics(new Map())
+        // History is best-effort. The map was cleared on scope change;
+        // retain any live completions already observed for this scope.
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -96,7 +101,7 @@ export function useStepMetrics(
   // Live updates — one entry at a time as steps complete.
   const handleStepCompleted = useCallback(
     (event: RealtimeEvent) => {
-      if (!runId) return
+      if (!workspaceId || !pipelineSlug || !runId) return
       const p = event.payload as JournalEntry["payload"]
       if (!p) return
       const eventRunId = p.run_id ?? p.pipeline_run_id
@@ -111,7 +116,7 @@ export function useStepMetrics(
         return next
       })
     },
-    [runId],
+    [workspaceId, pipelineSlug, runId],
   )
 
   useRealtimeEvent("pipeline.step.completed", handleStepCompleted)

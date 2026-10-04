@@ -91,6 +91,8 @@ export function usePipelineRuns(
   const refresh = useCallback(async () => {
     if (!workspaceId) {
       setRuns([])
+      setLoading(false)
+      setError(null)
       return
     }
     if (inFlightRef.current) return
@@ -118,8 +120,12 @@ export function usePipelineRuns(
       if (ctrl.signal.aborted) return
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      inFlightRef.current = false
-      if (!ctrl.signal.aborted) setLoading(false)
+      // A cancelled request can settle after a new scope has started its
+      // replacement. Only the current controller owns the in-flight gate.
+      if (abortRef.current === ctrl) {
+        inFlightRef.current = false
+        if (!ctrl.signal.aborted) setLoading(false)
+      }
     }
   }, [workspaceId, filter, limit])
 

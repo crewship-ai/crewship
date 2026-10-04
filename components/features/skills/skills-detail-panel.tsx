@@ -660,6 +660,8 @@ function AssignToCrewDialog({
       setOpen(false)
       setPickedCrew(null)
       onAssigned?.()
+    } catch (err) {
+      setError(`Failed to assign skill: ${err instanceof Error ? err.message : "network error"}`)
     } finally {
       setSubmitting(false)
     }
