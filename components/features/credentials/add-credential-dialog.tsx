@@ -80,7 +80,11 @@ const TYPE_CONFIG = {
   },
 } as const
 
-export function AddCredentialDialog({
+export function AddCredentialDialog(props: AddCredentialDialogProps) {
+  return props.open ? <CredentialForm key={props.workspaceId} {...props} /> : null
+}
+
+function CredentialForm({
   workspaceId,
   open,
   onOpenChange,
@@ -88,7 +92,7 @@ export function AddCredentialDialog({
 }: AddCredentialDialogProps) {
   const [type, setType] = React.useState<CredentialType>("API_KEY")
   const [provider, setProvider] = React.useState<CredentialProvider>("ANTHROPIC")
-  const [name, setName] = React.useState("")
+  const [name, setName] = React.useState("ANTHROPIC_API_KEY")
   const [description, setDescription] = React.useState("")
   const [value, setValue] = React.useState("")
   const [accountLabel, setAccountLabel] = React.useState("")
@@ -110,21 +114,36 @@ export function AddCredentialDialog({
     }
   }, [type, provider])
 
+  const active = React.useRef(false)
+  const validation = React.useRef(0)
   React.useEffect(() => {
-    if (scope === "CREW" && crews.length === 0) {
-      setTeamsLoading(true)
-      apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
-        .then((res) => res.json())
-        .then((data: Team[]) => setTeams(Array.isArray(data) ? data : []))
-        .catch(() => setTeams([]))
-        .finally(() => setTeamsLoading(false))
-    }
-  }, [scope, workspaceId, crews.length])
+    active.current = true
+    return () => { active.current = false }
+  }, [])
+  React.useEffect(() => {
+    validation.current++
+    setTesting(false)
+    setTestResult(null)
+  }, [value, provider, type])
+
+  React.useEffect(() => {
+    if (scope !== "CREW") return
+    let current = true
+    const controller = new AbortController()
+    setTeamsLoading(true)
+    apiFetch(`/api/v1/crews?${new URLSearchParams({ workspace_id: workspaceId })}`, { signal: controller.signal })
+      .then(res => { if (!res.ok) throw new Error("Failed to load crews"); return res.json() })
+      .then((data: Team[]) => { if (current) setTeams(Array.isArray(data) ? data : []) })
+      .catch(() => { if (current) setTeams([]) })
+      .finally(() => { if (current) setTeamsLoading(false) })
+    return () => { current = false; controller.abort() }
+  }, [scope, workspaceId])
 
   function resetForm() {
     setType("API_KEY")
     setProvider("ANTHROPIC")
-    setName("")
+    setName("ANTHROPIC_API_KEY")
+    validation.current++
     setDescription("")
     setValue("")
     setAccountLabel("")
@@ -142,6 +161,8 @@ export function AddCredentialDialog({
       setError("Enter a value to test")
       return
     }
+    const request = ++validation.current
+    const isCurrent = () => active.current && validation.current === request
     setTesting(true)
     setTestResult(null)
     setError("")
@@ -151,16 +172,18 @@ export function AddCredentialDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider, type, value: value.trim() }),
       })
+      if (!isCurrent()) return
       if (!res.ok) {
         setTestResult({ valid: false, error: "Test request failed" })
         return
       }
       const data = await res.json()
+      if (!isCurrent()) return
       setTestResult({ valid: data.valid, error: data.error })
     } catch {
-      setTestResult({ valid: false, error: "Network error" })
+      if (isCurrent()) setTestResult({ valid: false, error: "Network error" })
     } finally {
-      setTesting(false)
+      if (isCurrent()) setTesting(false)
     }
   }
 
@@ -218,14 +241,16 @@ export function AddCredentialDialog({
       if (accountLabel.trim()) body.account_label = accountLabel.trim()
       if (scope === "CREW") body.crew_ids = crewIds
 
-      const res = await apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/credentials?${new URLSearchParams({ workspace_id: workspaceId })}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       })
 
+      if (!active.current) return
       if (!res.ok) {
         const data = await res.json()
+        if (!active.current) return
         setError(typeof data.error === "string" ? data.error : "Failed to create credential")
         return
       }
@@ -233,9 +258,9 @@ export function AddCredentialDialog({
       handleOpenChange(false)
       onSuccess()
     } catch {
-      setError("Network error. Please try again.")
+      if (active.current) setError("Network error. Please try again.")
     } finally {
-      setSubmitting(false)
+      if (active.current) setSubmitting(false)
     }
   }
 
@@ -279,7 +304,7 @@ export function AddCredentialDialog({
           {type !== "SECRET" && (
             <div className="space-y-2">
               <Label htmlFor="cred-provider">Provider</Label>
-              <Select value={provider} onValueChange={(v) => setProvider(v as CredentialProvider)}>
+              <Select value={provider} onValueChange={(v) => { if (v) setProvider(v as CredentialProvider) }}>
                 <SelectTrigger id="cred-provider" className="w-full">
                   <SelectValue />
                 </SelectTrigger>

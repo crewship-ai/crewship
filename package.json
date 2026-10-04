@@ -16,6 +16,7 @@
     "test": "vitest run --passWithNoTests",
     "test:types": "node scripts/typecheck-tests.mjs",
     "test:coverage": "vitest run --coverage",
+    "test:coverage:full": "vitest run --coverage --config vitest.full-coverage.config.ts",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",

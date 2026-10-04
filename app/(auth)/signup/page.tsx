@@ -27,33 +27,35 @@ export default function SignupPage() {
     }
 
     setLoading(true)
+    try {
+      const res = await serverFetch("/api/v1/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ full_name: fullName, email, password }),
+      })
 
-     
-    const res = await serverFetch("/api/v1/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ full_name: fullName, email, password }),
-    })
-
-    setLoading(false)
-
-    if (!res.ok) {
-      const data = await res.json()
-      if (data.error?.fieldErrors) {
-        const messages = Object.values(data.error.fieldErrors).flat()
-        setError(messages.join(". ") || "Invalid input")
-      } else {
-        setError(typeof data.error === "string" ? data.error : "Something went wrong")
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        if (data?.error?.fieldErrors) {
+          const messages = Object.values(data.error.fieldErrors).flat()
+          setError(messages.join(". ") || "Invalid input")
+        } else {
+          setError(typeof data?.error === "string" ? data.error : "Something went wrong")
+        }
+        return
       }
-      return
-    }
 
-    // The API answers 202 with the same generic body whether or not the
-    // address already had an account, and hands out no session — telling
-    // this form "already registered" (the old 409) or logging it straight
-    // in would give away who has an account here. So: no auto-login, and
-    // a banner on /login that promises no more than the API did.
-    router.push("/login?signup=submitted")
+      // The API answers 202 with the same generic body whether or not the
+      // address already had an account, and hands out no session — telling
+      // this form "already registered" (the old 409) or logging it straight
+      // in would give away who has an account here. So: no auto-login, and
+      // a banner on /login that promises no more than the API did.
+      router.push("/login?signup=submitted")
+    } catch {
+      setError("Network error. Please try again.")
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -74,7 +76,7 @@ export default function SignupPage() {
         </p>
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             {error && (
-              <p className="text-sm text-destructive text-center">{error}</p>
+              <p role="alert" className="text-sm text-destructive text-center">{error}</p>
             )}
             <div className="space-y-2">
               <Label htmlFor="full_name">Full Name</Label>

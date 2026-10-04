@@ -50,7 +50,7 @@
 //   - /api/v1/runs/insights      — sections 2 & 3 (windowed aggregates).
 // Both refresh silently on run.* AND pipeline.run.* WebSocket events.
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Activity,
   AlertTriangle,
@@ -241,6 +241,9 @@ export function RunsView({
   onPageChange,
 }: RunsViewProps) {
   const router = useRouter()
+  const tableRequest = useRef<AbortController | null>(null)
+  const insightsRequest = useRef<AbortController | null>(null)
+  const liveRequest = useRef<AbortController | null>(null)
   const [data, setData] = useState<RunsResponse | null>(null)
   const [insights, setInsights] = useState<RunInsights | null>(null)
   const [liveRuns, setLiveRuns] = useState<Run[]>([])
@@ -288,6 +291,9 @@ export function RunsView({
   const fetchRuns = useCallback(
     async (opts?: { silent?: boolean }) => {
       if (!workspaceId) return
+      tableRequest.current?.abort()
+      const request = new AbortController()
+      tableRequest.current = request
       const silent = opts?.silent ?? false
       if (silent) setRefreshing(true)
       else {
@@ -303,18 +309,24 @@ export function RunsView({
         if (statusFilter !== "all") params.set("status", statusFilter)
         if (triggerFilter !== "all") params.set("trigger", triggerFilter)
 
-        const res = await apiFetch(`/api/v1/runs?${params}`)
+        const res = await apiFetch(`/api/v1/runs?${params}`, { signal: request.signal })
+        if (request.signal.aborted) return
         if (!res.ok) {
           setError("Failed to load runs")
           return
         }
         const result = (await res.json()) as RunsResponse
-        setData(result)
+        if (!request.signal.aborted) {
+          setData(result)
+          setError(null)
+        }
       } catch {
-        setError("Failed to load runs")
+        if (!request.signal.aborted) setError("Failed to load runs")
       } finally {
-        setLoading(false)
-        setRefreshing(false)
+        if (!request.signal.aborted) {
+          setLoading(false)
+          setRefreshing(false)
+        }
       }
     },
     [workspaceId, page, statusFilter, triggerFilter],
@@ -322,10 +334,16 @@ export function RunsView({
 
   const fetchInsights = useCallback(async () => {
     if (!workspaceId) return
+    insightsRequest.current?.abort()
+    const request = new AbortController()
+    insightsRequest.current = request
     try {
       const params = new URLSearchParams({ workspace_id: workspaceId, window })
-      const res = await apiFetch(`/api/v1/runs/insights?${params}`)
-      if (res.ok) setInsights((await res.json()) as RunInsights)
+      const res = await apiFetch(`/api/v1/runs/insights?${params}`, { signal: request.signal })
+      if (res.ok && !request.signal.aborted) {
+        const result = (await res.json()) as RunInsights
+        if (!request.signal.aborted) setInsights(result)
+      }
     } catch {
       /* insights are non-critical decoration; leave the last snapshot up */
     }
@@ -333,16 +351,19 @@ export function RunsView({
 
   const fetchLive = useCallback(async () => {
     if (!workspaceId) return
+    liveRequest.current?.abort()
+    const request = new AbortController()
+    liveRequest.current = request
     try {
       const params = new URLSearchParams({
         workspace_id: workspaceId,
         status: "RUNNING",
         limit: String(LIVE_LIMIT),
       })
-      const res = await apiFetch(`/api/v1/runs?${params}`)
-      if (res.ok) {
+      const res = await apiFetch(`/api/v1/runs?${params}`, { signal: request.signal })
+      if (res.ok && !request.signal.aborted) {
         const result = (await res.json()) as RunsResponse
-        setLiveRuns(result.data ?? [])
+        if (!request.signal.aborted) setLiveRuns(result.data ?? [])
       }
     } catch {
       /* non-critical */
@@ -350,19 +371,27 @@ export function RunsView({
   }, [workspaceId])
 
   useEffect(() => {
+    setData(null)
+    setError(null)
+    setRefreshing(false)
     if (!workspaceId) {
       if (!workspaceLoading) setLoading(false)
       return
     }
-    fetchRuns()
+    void fetchRuns()
+    return () => tableRequest.current?.abort()
   }, [workspaceId, workspaceLoading, fetchRuns])
 
   useEffect(() => {
-    fetchInsights()
+    setInsights(null)
+    void fetchInsights()
+    return () => insightsRequest.current?.abort()
   }, [fetchInsights])
 
   useEffect(() => {
-    fetchLive()
+    setLiveRuns([])
+    void fetchLive()
+    return () => liveRequest.current?.abort()
   }, [fetchLive])
 
   // Real-time refetch on run events. Backend collapses terminal statuses

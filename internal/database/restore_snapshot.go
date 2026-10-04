@@ -76,7 +76,7 @@ func ListSnapshots(dbPath string) ([]Snapshot, error) {
 //
 //   - refuses any snapshotPath that isn't a pre-migrate snapshot belonging to
 //     dbPath (so it can't clobber the DB with an arbitrary file),
-//   - copies the CURRENT db aside to "<db>.before-restore-<ts>" first, so the
+//   - copies the CURRENT db aside to "<db>.before-restore-<ts>-<unique>" first, so the
 //     restore is itself reversible,
 //   - removes the WAL/SHM sidecars so SQLite can't replay stale WAL frames
 //     over the restored file,
@@ -130,17 +130,17 @@ func RestoreSnapshot(dbPath, snapshotPath string) error {
 		if rerr != nil {
 			return fmt.Errorf("stash current db before restore (read %s): %w", dbPath, rerr)
 		}
-		aside := dbPath + ".before-restore-" + time.Now().UTC().Format("20060102T150405Z")
-		if werr := os.WriteFile(aside, cur, 0o600); werr != nil {
-			return fmt.Errorf("stash current db before restore (write %s): %w", aside, werr)
+		pattern := filepath.Base(dbPath) + ".before-restore-" + time.Now().UTC().Format("20060102T150405Z") + "-*"
+		if _, werr := writeRestoreTemp(filepath.Dir(dbPath), pattern, cur); werr != nil {
+			return fmt.Errorf("stash current db before restore: %w", werr)
 		}
 	}
 
 	// Stage the restored bytes to a temp file in the same dir first, so the
 	// final swap is an atomic rename — a failure staging it leaves the live
 	// DB untouched.
-	tmp := dbPath + ".restore-tmp"
-	if err := os.WriteFile(tmp, snapData, 0o600); err != nil {
+	tmp, err := writeRestoreTemp(filepath.Dir(dbPath), filepath.Base(dbPath)+".restore-tmp-*", snapData)
+	if err != nil {
 		return fmt.Errorf("stage restored db: %w", err)
 	}
 	defer os.Remove(tmp) // no-op after a successful rename
@@ -157,4 +157,30 @@ func RestoreSnapshot(dbPath, snapshotPath string) error {
 		return fmt.Errorf("swap restored db into place: %w", err)
 	}
 	return nil
+}
+
+// Allocate each restore file exclusively: a predictable name can already be
+// a symlink or a rollback copy from another restore in the same second.
+func writeRestoreTemp(dir, pattern string, data []byte) (path string, err error) {
+	file, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return "", err
+	}
+	path = file.Name()
+	defer func() {
+		_ = file.Close()
+		if err != nil {
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err = file.Write(data); err != nil {
+		return path, err
+	}
+	if err = file.Sync(); err != nil {
+		return path, err
+	}
+	if err = file.Close(); err != nil {
+		return path, err
+	}
+	return path, nil
 }

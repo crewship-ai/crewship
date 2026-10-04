@@ -146,9 +146,19 @@ export function useChains(workspaceId: string | null, limit = 25): UseChainsResu
   // Guards against an older response landing after a newer one and overwriting
   // it — the same reason use-journal-list keeps a request id.
   const reqIdRef = useRef(0)
+  const scopeRef = useRef<{ workspaceId: string | null; limit: number } | null>(null)
+  const invalidatePending = useCallback(() => {
+    scopeRef.current = null
+    reqIdRef.current++
+  }, [])
 
   const refresh = useCallback(async () => {
-    if (!workspaceId) return
+    if (!scopeRef.current || scopeRef.current.workspaceId !== workspaceId || scopeRef.current.limit !== limit) return
+    if (!workspaceId) {
+      setLoading(false)
+      setError(null)
+      return
+    }
     const reqId = ++reqIdRef.current
     setLoading(true)
     setError(null)
@@ -178,8 +188,13 @@ export function useChains(workspaceId: string | null, limit = 25): UseChainsResu
   }, [workspaceId, limit])
 
   useEffect(() => {
+    scopeRef.current = { workspaceId, limit }
+    setChains([])
+    setHasMore(true)
+    setHasUnrecordedRuns(false)
     void refresh()
-  }, [refresh])
+    return invalidatePending
+  }, [refresh, workspaceId, limit, invalidatePending])
 
   return { chains, loading, error, hasUnrecordedRuns, hasMore, refresh }
 }

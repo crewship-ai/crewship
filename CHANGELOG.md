@@ -85,6 +85,143 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **A corrupt notification channel could stop healthy workspace deliveries.** Unreadable channels now remain available for administration but are excluded from delivery and test sends.
+- **Memory append buffers used unchecked sums for initial allocation sizes.** Append now checks the combined size before allocating and reports oversized content instead of overflowing.
+
+- Crew group headers expose their collapse state and support activation with Enter and Space.
+
+- Run registry compaction uses exclusive temporary files, preventing pre-existing staging symlinks from overwriting unrelated files.
+
+- Foreach body steps now receive the same retry, failure-policy, output-validation and lifecycle-hook checks as top-level routine steps, rejecting invalid definitions before they run.
+
+- Routine definition tag batches commit atomically; rejected batches leave existing labels intact, and adding an existing label remains idempotent at the tag limit.
+
+- Crew journal summary actions reset on crew/workspace changes and suppress notifications or refreshes from abandoned requests.
+
+- Runtime availability ignores superseded checks; graph agent cards support keyboard activation, routine cards hide unknown step progress, and graph edges refresh changed handles and arrow markers.
+
+- Integration workspace changes close old confirmation dialogs, clear selection and form state, and suppress notifications from abandoned connection actions.
+
+- Crew policy controls discard abandoned reads and drafts, stop a policy save from continuing into quota writes after selection changes, and disable pending saves when edit access is removed. Unreadable optional quota metadata falls back without hiding the loaded policy.
+
+- Task and mission details retain their selected tab when the same entity refreshes; mission logs include completed tasks even when no start timestamp was recorded.
+
+- Toolbar build and agent-restart actions reset on crew or workspace changes, abort abandoned requests and suppress late notifications without unlocking a newer operation.
+
+- Activity run lists count waiting approvals as active, retain their Inbox action without a saved definition, announce detail-read failures and cancel abandoned deep-link scrolling. Issue source chips no longer nest a link inside a run expansion button.
+
+- Journal run feeds cancel superseded reads, clear previous workspace data and ignore delayed table, insight and live-feed responses after selection changes.
+
+- Routine detail panels clear previous selections, stop reads when closed and cancel abandoned rollback/export operations. Read, rollback and export failures are announced in the panel; failed exports no longer cause unhandled rejections.
+
+- Mission timelines retain agent counts when collapsed, announce expansion state and make task timing/usage tooltips reachable from the keyboard.
+
+- Database snapshot restore creates exclusive staging and rollback files, preventing a pre-existing staging symlink from redirecting writes and preserving earlier rollback copies from the same second.
+
+- Empty routine lookups cannot select a demo pack whose optional probe is absent. CLI HTTP test logs return independent header and body snapshots so assertions cannot corrupt later observations.
+
+- Mission controls require complete workspace/crew/mission selection, cancel abandoned requests and ignore stale completions or errors after a selection change.
+
+- The activity feed’s Done filter includes canonical `DONE` missions alongside legacy `COMPLETED` events, with success styling for both.
+
+- Issue-board refresh timers are cancelled when workspace callbacks or crew filters change, preventing queued events from refreshing a former selection.
+
+- Dashboard realtime refresh timers are cancelled when the selected workspace changes, preventing a queued event from refreshing the former workspace.
+
+- Composio trigger lists and enable dialogs clear on workspace changes, ignore superseded reads and abandoned creation responses, and report active-subscription read failures instead of claiming no subscriptions exist.
+
+- Recipe installation clears credentials, account labels and reveal state when closed or switched to another workspace/recipe; abandoned previews and installations cannot update the new selection or redirect it. Credential inputs and reveal controls have accessible labels.
+
+- Workflow template galleries clear previous workspace data and drafts, ignore abandoned requests, distinguish loading failures from empty catalogs and report creation/deletion network errors.
+
+- Integration marketplace search ignores superseded responses, keeps the current request's loading state, resets stale totals on failure and includes uncategorised servers in their facet.
+
+- Audit-note fields in save footers have distinct accessible labels, including when several editable cards appear together.
+
+- Deployed documentation checks require the declared page identities, so duplicate or unrelated index links cannot hide a missing page behind matching totals.
+
+- Notification preference failures roll back only their own edits, preserve concurrent successful changes, and cannot restore data from a former workspace. Workflow and automation lists clear old scope data and loading state; step I/O clears the previous step while its replacement loads.
+
+- Refreshing a Page review respects disabled reads and unavailable source archives instead of requesting an absent baseline revision.
+
+- Backup activity checks report routine-query failures instead of silently treating them as idle; older schemas without the routine-run table remain supported.
+
+- The repository UID invariant checks the actual runtime package paths, so a checkout directory containing `sidecar` or `provider` cannot make unrelated UID literals satisfy the check.
+
+- Page application reads wait for both a workspace and a Page selection instead of requesting an incomplete URL; incomplete crew owner references retain a visible fallback label.
+
+- Page actions reject non-finite numeric inputs and defaults; project recovery refuses checkpoint pins that do not identify an existing Git commit.
+
+- MCP credential creation clears secret input when its workspace or environment variable changes, cancels abandoned requests and ignores late results after closing the picker.
+
+- Guaranteed memory-tool writes require a caller-supplied operation identifier, preserving retry deduplication instead of silently inventing a fresh identifier on each attempt.
+
+- Backend connection status and uptime reset when switching or clearing the selected workspace, so an earlier workspace cannot appear connected during the new workspace's first check.
+
+- Native restricted execution refuses a missing authority database instead of panicking before worker admission.
+
+- Account-group management stays idle and hides cached metadata when no workspace is selected.
+
+- User preferences finish loading after refused or empty server responses while retaining the locally cached value.
+
+- File trees clear stale contents, selection and loading indicators when workspace selection is cleared or resolving. Refresh correctly replaces a directory with a file and clears the path prefix when the listing becomes empty.
+
+- Notification channel reads reject malformed stored configuration and filters instead of silently treating unreadable category restrictions as permission to deliver every category. Valid legacy empty filters retain their existing defaults.
+
+- Account signup recovers from network and unreadable error responses, keeps entered values for retry, and announces refusals accessibly. Password reset treats a null refusal body as a server refusal instead of a network failure.
+
+- First-run secret bootstrap validates the entire key set and persists generated keys before exporting them. Failed persistence or validation cannot leave partial process secrets that a retry mistakes for externally managed keys.
+
+- API mutations reject malformed or imprecise `Retry-After` values instead of treating them as valid retry delays.
+
+- Work-ledger retention reports expired payloads and reclaimed bytes only after their transaction commits, preserving completed-batch counts when a later batch rolls back.
+
+- Secret replacement discards drafts and obsolete completions when its workspace, credential or dialog changes. Revealed values report clipboard success only after the browser confirms it, with recoverable errors and no stale copy status after hiding.
+
+- Chat questionnaires clear when the agent or workspace changes; failed optional requests cannot leave the previous agent’s forms visible.
+
+- Backup conversion releases its rewrite stream when sealing fails, so encryption errors cannot strand the converter or its temporary output. Unknown CLI adapter names use the neutral brand without reading inherited object properties.
+
+- OAuth setup discards obsolete authorization and code-exchange responses, clears owned popups and timers when its scope closes, and prevents overlapping polls or duplicate exchanges. Journal registry scanning skips vendored sources and handles unrelated constants without inheriting an old event type.
+
+- Credential entry resets when the workspace or dialog changes, ignores obsolete key validation and save responses, preserves the default environment name on reopening, and encodes workspace queries.
+
+- Enforce Page build output limits on actual subprocess pipes; prevent an inherited buffer fast path from bypassing cancellation and retaining unbounded worker output.
+
+- Keep integration catalogs and workspace summaries current when searches or workspace selections change; ignore obsolete API-key saves and encode scoped identifiers. Add recovery coverage for dispatch, off-site backups and conversation writes.
+
+- Connector access editing refuses to save when existing grants cannot be read, encodes resource identifiers, and ignores stale tool, summary and save responses after the selected agent or workspace changes. A missing workspace no longer leaves the connector summary loading indefinitely.
+
+- Runtime reconciliation uses the latest inspected container state, so a stale running-list entry cannot return a stopped crew as ready, and a stale stopped-list entry cannot trigger replacement of a now-live crew.
+
+- The shared agent context panel encodes agent, crew and workspace identifiers when loading context.
+
+- Memory import and export reads remain inside their selected tree when a parent directory is replaced with a symlink, including direct file and directory reads.
+
+- Agent detail panels follow their enabled state and ignore errors from obsolete requests after a selection changes.
+
+- Tool argument validation compares object and array enum values structurally instead of panicking, and rejects null when the enum does not allow it.
+
+- A stopped or cancelled scheduler leader no longer authorizes new work while its last lease is still fresh.
+
+- Outbound URL validation rejects blocked IPv6 literals with zone identifiers before dialing, matching the connection-time SSRF guard.
+
+- Onboarding reuses a CLI-delivered model token from the current workspace without asking for the secret again. The Guide starts reliably under Strict Mode, ignores superseded proposal previews, and keeps its created inventory scoped to the workspace across slow or failed polls.
+
+- Notification provider and channel-agent registries, routine schedules, run records and trace details settle loading when their selection is cleared. Obsolete requests and schedule mutations cannot restore data from a previous selection.
+
+- Routine budget views clear data when their workspace changes and ignore obsolete mutation responses. A pending read can no longer overwrite a successfully edited cap.
+
+- Keep the skills browser scoped to the current workspace and Installed lens across imports; rebuild active search results after catalog changes and show crew-assignment network failures in the dialog.
+- Isolate Docker network integration-test installations and subnet leases so concurrent runs cannot adopt or remove each other’s containers.
+- Workflow graphs omit dependency and permission edges whose source or target is absent from the displayed graph.
+- Notification channel settings and delivery logs clear loading and errors when their workspace is removed. Responses still decoding and completed channel mutations from an older workspace cannot replace or refresh the newly selected workspace's data.
+- Pipeline lists, run feeds and webhook settings settle loading when their workspace is cleared; old webhook refreshes and aborted run requests cannot interfere with a newly selected workspace.
+- The quota helper checks its backend and server identity before binding a namespace, avoiding a nil-backend panic and catalog changes on rejected startup.
+- Value previews keep their configured length limit when strings include display quotes or JSON serialization falls back to text.
+- **A terminal could reconnect after being closed or show errors from a previous crew.** Disconnect now invalidates pending authentication and obsolete socket callbacks, releases resize tracking, and reports missing or malformed connection tokens as errors. (#2775)
+- **Routine approval prompts could return after their workspace was cleared.** Clearing the workspace or run selection now invalidates outstanding waitpoint requests before their results can restore stale approvals. (#2775)
+- **Run heatmaps could show an older retry or lose live results while history loaded.** Step metrics keep the newest historical completion, preserve live completions when history arrives or fails, and clear the previous run's metrics when the selection changes. (#2775)
 - Docker environment builds publish immutable local image references, so another rebuild cannot silently replace a selected artifact. Failed explicit rebuilds keep the previous reference; cache inventory and ordinary cleanup recognize image-ID references. The build cache key advances once to avoid retagging legacy references.
 - Confirmed stops recovered after restart now retain a durable journal retry until history and agent state are recorded; retries preserve existing outcomes and leave work-owned settlement to the dispatcher.
 - Confirmed stops recovered after restart now retain a durable journal retry until history and agent state are recorded; retries preserve existing outcomes and leave work-owned settlement to the dispatcher. Another durable running invocation keeps the agent RUNNING even before its journal start is visible.

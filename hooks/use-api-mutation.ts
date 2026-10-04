@@ -269,12 +269,14 @@ export function useApiMutation<TVariables = void, TData = unknown>(
       // "kind" that onSuccess is willing to invalidate on.
       if (res.status === 429) {
         const retryAfterHeader = res.headers.get("Retry-After")
-        const parsedRetryAfter = retryAfterHeader === null ? Number.NaN : Number(retryAfterHeader)
+        const parsedRetryAfter = retryAfterHeader !== null && /^\d+$/.test(retryAfterHeader)
+          ? Number(retryAfterHeader)
+          : Number.NaN
         const message = await readApiError(res, "Already running (HTTP 429)")
         const outcome: AlreadyRunningOutcome = {
           kind: "already-running",
           status: 429,
-          retryAfterSeconds: Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : null,
+          retryAfterSeconds: Number.isSafeInteger(parsedRetryAfter) ? parsedRetryAfter : null,
           message,
         }
         return outcome

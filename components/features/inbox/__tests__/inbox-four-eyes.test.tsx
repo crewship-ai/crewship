@@ -29,6 +29,7 @@ vi.mock("../waitpoint-run-detail", () => ({ WaitpointRunDetail: () => null }))
 
 import { InboxDetail } from "../inbox-detail"
 import { EscalationResponseCard } from "@/components/features/escalations/escalation-response-card"
+import { FourEyesNotice } from "@/components/features/escalations/four-eyes-notice"
 
 const CRED_ITEM: InboxItem = {
   id: "in-1",
@@ -234,5 +235,24 @@ describe("the notice names the requesting agent, not the sender", () => {
     })
 
     expect(screen.getByTestId("escalation-four-eyes").textContent).toContain("casey")
+  })
+})
+
+describe("four-eyes notices with incomplete identity metadata", () => {
+  afterEach(cleanup)
+
+  it.each([true, false])("keeps the tier requirement explicit without a tier label (workspace rule: %s)", (byWorkspace) => {
+    render(<FourEyesNotice required byWorkspace={byWorkspace} byTier securityLevelLabel={null} />)
+    const notice = screen.getByTestId("escalation-four-eyes")
+    expect(notice).toHaveTextContent("Whoever owns the agent that raised this")
+    expect(notice).toHaveTextContent("approve, reject or redirect")
+    expect(notice).toHaveTextContent(byWorkspace ? "require one regardless of that setting" : "require one anyway")
+    expect(notice).not.toHaveTextContent("undefined")
+    expect(notice).not.toHaveTextContent("null")
+  })
+
+  it("uses the server's required decision even when policy source flags are set", () => {
+    render(<FourEyesNotice required={false} byWorkspace byTier securityLevelLabel="L4" agentSlug="casey" />)
+    expect(screen.queryByTestId("escalation-four-eyes")).not.toBeInTheDocument()
   })
 })
