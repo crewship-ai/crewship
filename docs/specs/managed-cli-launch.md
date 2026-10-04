@@ -118,10 +118,14 @@ injected image environment. Wrong hashes exit 126. Unit regressions cover common
 run admission, missing evidence, current-lock drift, tenant scope, mount aliases,
 unsafe formats, immutable launcher generations and static PIE dependencies. No subscription account or model call is used.
 
-For explicit upstream packaging qualification, provide a local mise image:
+For explicit upstream packaging qualification, provide a local mise image
+using the test-only selector documented in
+[codex_packaging_integration_test.go](../../internal/devcontainer/codex_packaging_integration_test.go).
+Export that test-only image selector before running the command below.
+A missing selector skips the test and supplies no packaging qualification:
 
 ```sh
-CREWSHIP_CODEX_QUALIFICATION_IMAGE=<local-mise-image> go test -tags=integration ./internal/devcontainer -run '^TestCodexNativePackaging$' -count=1 -timeout 10m
+go test -tags=integration ./internal/devcontainer -run '^TestCodexNativePackaging$' -count=1 -timeout 10m
 ```
 
 This gate resolves the public Codex 0.160.0 native lock, installs with

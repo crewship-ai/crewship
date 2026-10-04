@@ -20,7 +20,11 @@ func TestManagedLaunchRejectsRuntimeDriftAndMountAliases(t *testing.T) {
 	for _, which := range []string{"valid", "writable-root", "wrong-image", "privileged", "binary-overlay", "readonly-overlay", "launcher-overlay", "missing-launcher", "symlink-parent", "dynamic-launcher", "stale-launcher", "launcher-symlink", "launcher-duplicate", "fixed-launcher"} {
 		t.Run(which, func(t *testing.T) {
 			image := "sha256:" + strings.Repeat("a", 64)
-			launcher := filepath.Join(t.TempDir(), "launcher")
+			launcherDir, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			launcher := filepath.Join(launcherDir, "launcher")
 			raw := make([]byte, 64)
 			copy(raw, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1})
 			binary.LittleEndian.PutUint16(raw[16:], 2)
@@ -101,8 +105,14 @@ func TestManagedLaunchRejectsRuntimeDriftAndMountAliases(t *testing.T) {
 			defer close()
 			p.cfg.SidecarBinaryPath = launcher
 			d := managedlaunch.Descriptor{Artifact: managedlaunch.Artifact{Path: "/opt/native/claude", SHA256: strings.Repeat("b", 64), Format: "static_elf"}, ImageID: image, RevisionID: "r1", LockSHA256: strings.Repeat("c", 64), Binary: "claude", Version: "2.1.288"}
-			err := p.AttestManagedLaunch(context.Background(), "c1", d)
+			err = p.AttestManagedLaunch(context.Background(), "c1", d)
 			if which == "valid" {
+				if unsupported := managedLauncherServerUIDError(os.Geteuid()); unsupported != nil {
+					if err == nil || err.Error() != unsupported.Error() {
+						t.Fatalf("unsupported host profile admitted: %v", err)
+					}
+					return
+				}
 				if err != nil {
 					info, _ := os.Lstat(launcher)
 					parent, _ := os.Lstat(filepath.Dir(launcher))
@@ -117,12 +127,27 @@ func TestManagedLaunchRejectsRuntimeDriftAndMountAliases(t *testing.T) {
 
 func TestManagedLauncherStagingNeverReplacesAddressedInode(t *testing.T) {
 	t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "pilot")
-	dir := t.TempDir()
-	source := filepath.Join(t.TempDir(), "launcher")
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "launcher")
 	if err := os.WriteFile(source, []byte("first artifact"), 0555); err != nil {
 		t.Fatal(err)
 	}
 	first := stageRuntimeArtifacts(Config{SidecarBinaryPath: source, OutputBasePath: dir}, quietLogger())
+	if unsupported := managedLauncherServerUIDError(os.Geteuid()); unsupported != nil {
+		if _, err := stageManagedLauncher(source, dir); err == nil || err.Error() != unsupported.Error() {
+			t.Fatalf("unsupported host staging admitted: %v", err)
+		}
+		if strings.HasPrefix(filepath.Base(first.SidecarBinaryPath), "crewship-sidecar-") {
+			t.Fatal("unsupported host staged digest-addressed managed launcher")
+		}
+		return
+	}
+	if _, err := stageManagedLauncher(source, dir); err != nil {
+		t.Fatalf("supported host staging failed: %v", err)
+	}
 	before, err := os.Stat(first.SidecarBinaryPath)
 	if err != nil {
 		t.Fatal(err)

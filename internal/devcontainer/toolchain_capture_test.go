@@ -167,7 +167,10 @@ func TestToolchainCaptureUsesRuntimeMiseLocationsWithoutUnrelatedEnv(t *testing.
 func TestManagedNativeEvidenceDoesNotChangeLegacyInventory(t *testing.T) {
 	for _, mode := range []string{"native", "mise-fails", "shim", "legacy-shim"} {
 		t.Run(mode, func(t *testing.T) {
-			dir := t.TempDir()
+			dir, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
 			inventory := filepath.Join(dir, "inventory")
 			shadow := filepath.Join(dir, "shadow", "codex")
 			native := filepath.Join(dir, "native", "codex")
@@ -179,6 +182,21 @@ func TestManagedNativeEvidenceDoesNotChangeLegacyInventory(t *testing.T) {
 			}
 			for p, source := range map[string]string{shadow: "#!/bin/sh\necho codex-cli 0.159.0\n", native: "#!/bin/sh\necho codex-cli 0.160.0\n"} {
 				if err := os.WriteFile(p, []byte(source), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Model the Linux image utilities explicitly: host macOS lacks
+			// GNU timeout and readlink -f. These immediate fixture programs
+			// exercise argv/path evidence, not timeout enforcement.
+			utilities := filepath.Join(dir, "utilities")
+			if err := os.MkdirAll(utilities, 0700); err != nil {
+				t.Fatal(err)
+			}
+			for name, source := range map[string]string{
+				"timeout":  "#!/bin/sh\n[ \"$1\" = -k ] && [ \"$2\" = 1 ] && [ \"$3\" = 8 ] || exit 125\nshift 3\nexec \"$@\"\n",
+				"readlink": "#!/bin/sh\n[ \"$1\" = -f ] || exit 125\nif [ -L \"$2\" ]; then /usr/bin/readlink \"$2\"; else printf '%s\\n' \"$2\"; fi\n",
+			} {
+				if err := os.WriteFile(filepath.Join(utilities, name), []byte(source), 0700); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -217,7 +235,7 @@ func TestManagedNativeEvidenceDoesNotChangeLegacyInventory(t *testing.T) {
 				}
 				return string(out), 0, nil
 			}
-			if err := writeToolchainInventory(context.Background(), "fixture", []string{"codex"}, map[string]string{"PATH": filepath.Dir(shadow) + ":/usr/bin:/bin"}, run); err != nil {
+			if err := writeToolchainInventory(context.Background(), "fixture", []string{"codex"}, map[string]string{"PATH": filepath.Dir(shadow) + ":" + utilities + ":/usr/bin:/bin"}, run); err != nil {
 				t.Fatal(err)
 			}
 			baseline := filepath.Join(dir, "baseline")
