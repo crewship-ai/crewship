@@ -21,6 +21,7 @@ TESTS = {
     'internal/orchestrator': {'TestManagedLaunchRealDocker'},
     'internal/provider/docker': {
         'TestSandboxRuntimeRealDocker',
+        'TestStagedQualificationRealDocker',
         'TestSandboxDisablesImageHealthcheckRealDocker',
         'TestCacheEvictionRealDockerRetag',
         'TestImageChange_RealHeartbeatSurvivesNewImageAdmission',

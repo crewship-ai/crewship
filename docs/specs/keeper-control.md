@@ -36,3 +36,6 @@ configuration, actual kernel fence readback before sealing, environment storage
 and provider exec routing. It does not provide B/sibling isolation or OAuth.
 The mandatory Docker fixture exercises real control, bootstrap, peer saturation,
 replay denial and restart generation change; absence or skipping fails CI.
+
+Explicit provider qualification is exercised separately from Ensure activation;
+legacy startup remains in place until the provider selector is activated.
