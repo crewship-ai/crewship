@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -341,4 +342,64 @@ func TestEgressFenceStopEnsureIntegration(t *testing.T) {
 		}
 	}
 	assertNothingBroader(ctx, t, p, cid, team)
+}
+
+// A pause is an operator decision. Ensure must preserve live process state,
+// including a warm-cache hit, until an explicit unpause.
+func TestCrewRuntimePauseEnsureIntegration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	p, _ := fenceSvcHarness(ctx, t, "fsvc-pause", []string{"pause"})
+	team := provider.CrewConfig{ID: "pause-crew-001", Slug: "pause", NetworkMode: "restricted", MemoryMB: 256, CPUs: 0.5}
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		if id, _, err := p.FindCrewContainer(cleanupCtx, team.ID, team.Slug); err == nil && id != "" {
+			if _, err := p.client.ContainerRemove(cleanupCtx, id, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}); err != nil && !cerrdefs.IsNotFound(err) {
+				t.Errorf("remove test container: %v", err)
+			}
+		}
+		cleanupFenceSvcCrew(p, team)
+		for _, name := range []string{p.homeVolumeName(team.ID, team.Slug), p.toolsVolumeName(team.ID, team.Slug)} {
+			if _, err := p.client.VolumeRemove(cleanupCtx, name, client.VolumeRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
+				t.Errorf("remove test volume %s: %v", name, err)
+			}
+		}
+	}()
+	cid, err := p.EnsureCrewRuntime(ctx, team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := p.client.ContainerInspect(ctx, cid, client.ContainerInspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = p.client.ContainerPause(ctx, cid, client.ContainerPauseOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = p.client.ContainerUnpause(context.Background(), cid, client.ContainerUnpauseOptions{}) }()
+	for _, warm := range []bool{true, false} {
+		if !warm {
+			p.evictWarm(team.ID)
+		}
+		if id, err := p.EnsureCrewRuntime(ctx, team); err == nil || !strings.Contains(err.Error(), "paused") || id != "" {
+			t.Fatalf("warm=%t: id=%q err=%v", warm, id, err)
+		}
+	}
+	after, err := p.client.ContainerInspect(ctx, cid, client.ContainerInspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.Container.State.Paused || before.Container.State.StartedAt != after.Container.State.StartedAt {
+		t.Fatal("Ensure changed paused process state")
+	}
+	if _, err = p.client.ContainerUnpause(ctx, cid, client.ContainerUnpauseOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := p.EnsureCrewRuntime(ctx, team); err != nil || id != cid {
+		t.Fatalf("explicit unpause: id=%q err=%v", id, err)
+	}
+	if _, code := crewNetExecUser(ctx, t, p, cid, "1001", "true"); code != 0 {
+		t.Fatalf("resumed exec exit %d", code)
+	}
 }
