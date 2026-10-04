@@ -62,3 +62,36 @@ func TestManagedEnvironmentDiscardsImageAndLoaderInjection(t *testing.T) {
 		t.Fatal("missing authoritative environment accepted")
 	}
 }
+
+func TestManagedArtifactStaticPIERejectsLoaderDependencies(t *testing.T) {
+	for _, kind := range []string{"static-pie", "needed", "interpreter", "truncated", "unterminated", "audit"} {
+		t.Run(kind, func(t *testing.T) {
+			raw := append(nativeFixture(), make([]byte, 32)...)
+			binary.LittleEndian.PutUint16(raw[16:], 3)
+			binary.LittleEndian.PutUint32(raw[64:], 2)
+			binary.LittleEndian.PutUint64(raw[72:], 120)
+			binary.LittleEndian.PutUint64(raw[96:], 32)
+			binary.LittleEndian.PutUint64(raw[120:], 30) // DT_FLAGS, followed by DT_NULL
+			switch kind {
+			case "needed":
+				binary.LittleEndian.PutUint64(raw[120:], 1)
+			case "interpreter":
+				binary.LittleEndian.PutUint32(raw[64:], 3)
+			case "truncated":
+				raw = raw[:151]
+			case "unterminated":
+				binary.LittleEndian.PutUint64(raw[136:], 30)
+			case "audit":
+				binary.LittleEndian.PutUint64(raw[120:], 0x6ffffefc)
+			}
+			artifact, err := Capture("/opt/native/codex", raw)
+			if kind == "static-pie" {
+				if err != nil || artifact == nil {
+					t.Fatalf("static PIE rejected: %v", err)
+				}
+			} else if err == nil {
+				t.Fatal("loader-bearing or malformed PIE admitted")
+			}
+		})
+	}
+}

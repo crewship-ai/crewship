@@ -43,7 +43,11 @@ package docker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -54,6 +58,7 @@ import (
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 )
 
@@ -65,8 +70,16 @@ import (
 // holds the staging rules — unconditional, best-effort, atomic and
 // mtime-preserving — and the reasoning for each of them.
 func stageRuntimeArtifacts(cfg Config, logger *slog.Logger) Config {
+	sidecarSource := cfg.SidecarBinaryPath
 	cfg.SidecarBinaryPath, cfg.EntrypointPath = runtimestage.Artifacts(
 		cfg.OutputBasePath, cfg.SidecarBinaryPath, cfg.EntrypointPath, logger)
+	if strings.TrimSpace(os.Getenv("CREWSHIP_MANAGED_LAUNCH_CREWS")) != "" {
+		if immutable, err := stageManagedLauncher(sidecarSource, cfg.OutputBasePath); err == nil {
+			cfg.SidecarBinaryPath = immutable
+		} else {
+			logger.Warn("managed launcher staging failed; pilot admission will refuse unqualified binds", "error", err)
+		}
+	}
 	return cfg
 }
 
@@ -215,4 +228,78 @@ func (p *Provider) preflightMandatoryBinds(ctx context.Context) {
 		"socket", p.detected.Socket,
 		"error", p.explainBindFailure(createErr).Error(),
 	)
+}
+
+// A digest-addressed bind source is never replaced. Docker archive reads mount
+// a temporary filesystem view and cannot prove the inode in a running bind.
+// Retain old generations for existing containers; garbage collection is separate.
+func stageManagedLauncher(source, output string) (string, error) {
+	denied := errors.New("managed launch: safe immutable launcher staging required")
+	if source == "" || output == "" || os.Geteuid() == 1001 || os.Geteuid() == 1002 {
+		return "", denied
+	}
+	dir := filepath.Join(output, runtimestage.DirName)
+	info, err := os.Lstat(dir)
+	if err != nil || !safeLauncherDirectory(info) {
+		return "", denied
+	}
+	for parent := filepath.Dir(dir); ; parent = filepath.Dir(parent) {
+		info, err := os.Lstat(parent)
+		if err != nil || !safeLauncherDirectory(info) {
+			return "", denied
+		}
+		if parent == filepath.Dir(parent) {
+			break
+		}
+	}
+	f, err := os.Open(source)
+	if err != nil {
+		return "", err
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, managedlaunch.MaxArtifactBytes+1))
+	f.Close()
+	if err != nil || len(raw) == 0 || len(raw) > managedlaunch.MaxArtifactBytes {
+		return "", denied
+	}
+	sum := sha256.Sum256(raw)
+	dest := filepath.Join(dir, runtimestage.SidecarFileName+"-"+hex.EncodeToString(sum[:]))
+	tmp, err := os.CreateTemp(dir, ".managed-launcher-")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(tmp.Name(), 0555); err != nil {
+		return "", err
+	}
+	if original, err := os.Stat(source); err == nil {
+		if err := os.Chtimes(tmp.Name(), original.ModTime(), original.ModTime()); err != nil {
+			return "", err
+		}
+	}
+	// Link publishes atomically and fails if the destination already exists.
+	if err := os.Link(tmp.Name(), dest); err != nil && !os.IsExist(err) {
+		return "", err
+	}
+	info, err = os.Lstat(dest)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0222 != 0 || !safeLauncherOwner(info) {
+		return "", denied
+	}
+	f, err = os.Open(dest)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	hash := sha256.New()
+	length, err := io.Copy(hash, io.LimitReader(f, managedlaunch.MaxArtifactBytes+1))
+	if err != nil || length != int64(len(raw)) || hex.EncodeToString(hash.Sum(nil)) != hex.EncodeToString(sum[:]) {
+		return "", denied
+	}
+	return dest, nil
 }

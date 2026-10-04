@@ -13,7 +13,7 @@ import (
 )
 
 const LauncherPath = "/usr/local/bin/crewship-sidecar"
-const MaxArtifactBytes = 256 << 20
+const MaxArtifactBytes = 512 << 20
 
 // Artifact is host-captured executable evidence, separate from --version output.
 // A1 deliberately supports static ELF only; scripts and dynamic ELF require A2.
@@ -65,9 +65,34 @@ func Capture(p string, raw []byte) (*Artifact, error) {
 		(f.Machine != elf.EM_X86_64 && f.Machine != elf.EM_AARCH64) {
 		return nil, errors.New("managed launch: unsupported native executable")
 	}
+	dynamic := false
 	for _, p := range f.Progs {
-		if p.Type == elf.PT_INTERP || p.Type == elf.PT_DYNAMIC {
+		if p.Type == elf.PT_INTERP {
 			return nil, errors.New("managed launch: dynamic ELF requires interpreter/library qualification")
+		}
+		if p.Type != elf.PT_DYNAMIC {
+			continue
+		}
+		// Static PIE has relocation metadata but no external loader or
+		// dependencies. Inspect the program segment itself: section headers
+		// may be absent or disagree with what the kernel maps.
+		if dynamic || f.Type != elf.ET_DYN || p.Filesz == 0 || p.Filesz%16 != 0 || p.Off > uint64(len(raw)) || p.Filesz > uint64(len(raw))-p.Off {
+			return nil, errors.New("managed launch: malformed static PIE")
+		}
+		dynamic = true
+		terminated := false
+		for off := p.Off; off < p.Off+p.Filesz; off += 16 {
+			tag := elf.DynTag(f.ByteOrder.Uint64(raw[off : off+8]))
+			if tag == elf.DT_NULL {
+				terminated = true
+				break
+			}
+			if tag == elf.DT_NEEDED || tag == elf.DT_AUDIT || tag == elf.DT_DEPAUDIT || tag == elf.DT_FILTER || tag == elf.DT_AUXILIARY {
+				return nil, errors.New("managed launch: dynamic ELF requires interpreter/library qualification")
+			}
+		}
+		if !terminated {
+			return nil, errors.New("managed launch: unterminated static PIE metadata")
 		}
 	}
 	sum := sha256.Sum256(raw)

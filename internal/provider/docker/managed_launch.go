@@ -1,10 +1,14 @@
 package docker
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -12,6 +16,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
+	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 )
 
 func covers(a, b string) bool {
@@ -40,7 +45,13 @@ func (p *Provider) AttestManagedLaunch(ctx context.Context, id string, d managed
 	}
 	launcherBound := false
 	for _, mount := range c.Mounts {
-		if mount.Destination == managedlaunch.LauncherPath && mount.Source == p.cfg.SidecarBinaryPath && !mount.RW && mount.Type == "bind" {
+		if mount.Destination == managedlaunch.LauncherPath {
+			if mount.Source != p.cfg.SidecarBinaryPath {
+				return errors.New("managed launch: recreate runtime with current immutable launcher generation required")
+			}
+			if mount.RW || mount.Type != "bind" {
+				return denied
+			}
 			launcherBound = true
 			continue
 		}
@@ -70,11 +81,47 @@ func (p *Provider) AttestManagedLaunch(ctx context.Context, id string, d managed
 	}
 	// The FIRST process must already be immune to loader injection. Merely
 	// clearing LD_* after starting a dynamic image wrapper would be too late.
-	raw, err := os.ReadFile(p.cfg.SidecarBinaryPath)
+	f, err := os.Open(p.cfg.SidecarBinaryPath)
 	if err != nil {
 		return denied
 	}
-	if _, err := managedlaunch.Capture("/opt/crewship/launcher", raw); err != nil {
+	raw, err := io.ReadAll(io.LimitReader(f, managedlaunch.MaxArtifactBytes+1))
+	f.Close()
+	if err != nil {
+		return denied
+	}
+	hostArtifact, err := managedlaunch.Capture("/opt/crewship/launcher", raw)
+	if err != nil {
+		return denied
+	}
+	// Require immutable, digest-addressed staging. Fixed-name binds may hold
+	// an older inode, even when the archive API returns the current host file.
+	if filepath.Base(p.cfg.SidecarBinaryPath) != runtimestage.SidecarFileName+"-"+hostArtifact.SHA256 {
+		return errors.New("managed launch: recreate runtime with immutable launcher staging required")
+	}
+	info, err := os.Lstat(p.cfg.SidecarBinaryPath)
+	parent, parentErr := os.Lstat(filepath.Dir(p.cfg.SidecarBinaryPath))
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0222 != 0 || !safeLauncherOwner(info) || parentErr != nil || !safeLauncherDirectory(parent) {
+		return denied
+	}
+	// Secondary consistency check; archive reads do not attest live bind inodes.
+	copied, err := p.client.CopyFromContainer(ctx, id, client.CopyFromContainerOptions{SourcePath: managedlaunch.LauncherPath})
+	if err != nil {
+		return denied
+	}
+	defer copied.Content.Close()
+	limited := &io.LimitedReader{R: copied.Content, N: managedlaunch.MaxArtifactBytes + 8192}
+	tr := tar.NewReader(limited)
+	entry, err := tr.Next()
+	if err != nil || entry.Typeflag != tar.TypeReg || entry.Name != path.Base(managedlaunch.LauncherPath) || entry.Size != int64(len(raw)) {
+		return denied
+	}
+	live, err := io.ReadAll(tr)
+	if err != nil || !bytes.Equal(live, raw) {
+		return denied
+	}
+	expected := p.ExpectedSidecarHash()
+	if _, err := tr.Next(); err != io.EOF || limited.N <= 0 || expected == "" || !strings.HasPrefix(hostArtifact.SHA256, expected) {
 		return denied
 	}
 	return nil

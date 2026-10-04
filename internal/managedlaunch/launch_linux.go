@@ -46,8 +46,8 @@ func Launch(encoded string, args []string) error {
 		return errors.New("managed launch: unsafe executable permissions")
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != 0 {
-		return errors.New("managed launch: executable is not root-owned")
+	if !ok || (stat.Uid != 0 && stat.Uid != 1001) {
+		return errors.New("managed launch: unsupported executable ownership")
 	}
 	content, err := io.ReadAll(io.LimitReader(f, MaxArtifactBytes+1))
 	if err != nil {

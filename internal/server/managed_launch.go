@@ -21,7 +21,7 @@ func managedLaunchResolver(db *sql.DB) orchestrator.ManagedLaunchResolver {
 	return func(ctx context.Context, workspace, crew, adapter string) (*managedlaunch.Descriptor, error) {
 		denied := errors.New("managed launch: qualified exact pin and current image revision required")
 		cli, ok := devcontainer.AdapterCLIFor(adapter)
-		if !ok || (cli.Binary != "claude" && cli.Binary != "codex") {
+		if !ok || cli.Binary != "codex" {
 			return nil, denied
 		}
 		var miseRaw, requirements, buildHash, runtime string
@@ -42,6 +42,10 @@ func managedLaunchResolver(db *sql.DB) orchestrator.ManagedLaunchResolver {
 				rows.Close()
 				return nil, denied
 			}
+			if value != "CODEX_CLI" {
+				rows.Close()
+				return nil, denied
+			}
 			adapters = append(adapters, value)
 		}
 		rowsErr := rows.Err()
@@ -56,6 +60,10 @@ func managedLaunchResolver(db *sql.DB) orchestrator.ManagedLaunchResolver {
 		}
 		requested, err := devcontainer.RequestedToolchain(nil, miseRaw, []string{adapter})
 		if err != nil || len(requested) != 1 || !requested[0].Exact {
+			return nil, denied
+		}
+		locked, err := devcontainer.LockedToolVersion(mise.Lock, cli.MiseTool)
+		if err != nil || locked != strings.TrimPrefix(requested[0].Selector, "v") {
 			return nil, denied
 		}
 		var reqs devcontainer.AggregatedRequirements
@@ -84,7 +92,7 @@ func managedLaunchResolver(db *sql.DB) orchestrator.ManagedLaunchResolver {
 			if tool.LaunchArtifact == nil || tool.LaunchArtifact.Path != tool.Path {
 				return nil, denied
 			}
-			d := &managedlaunch.Descriptor{Artifact: *tool.LaunchArtifact, ImageID: inventory.ImageID, RevisionID: revisionID, LockSHA256: hex.EncodeToString(sum[:]), Binary: cli.Binary, Version: strings.TrimPrefix(requested[0].Selector, "v")}
+			d := &managedlaunch.Descriptor{Artifact: *tool.LaunchArtifact, ImageID: inventory.ImageID, RevisionID: revisionID, LockSHA256: hex.EncodeToString(sum[:]), Binary: cli.Binary, Version: locked}
 			if d.Validate() != nil {
 				return nil, denied
 			}

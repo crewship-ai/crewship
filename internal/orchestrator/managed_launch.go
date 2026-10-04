@@ -36,6 +36,12 @@ func (o *Orchestrator) admitManagedLaunch(ctx context.Context, req *AgentRunRequ
 	if !o.managedLaunchCrews[req.CrewID] {
 		return nil
 	}
+	if req.CLIAdapter == "CLAUDE_CODE" {
+		return errors.New("managed launch: pilot A1 podporuje statický Codex; dynamický ELF (Claude Code) zatím nepodporován, A2")
+	}
+	if req.CLIAdapter != "CODEX_CLI" {
+		return errors.New("managed launch: pilot A1 supports only the static Codex adapter")
+	}
 	if use == nil || !use.Matches(req.CrewID, req.ContainerID) || o.managedLaunchResolver == nil {
 		return errors.New("managed launch: runtime reservation or build authority unavailable")
 	}

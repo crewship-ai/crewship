@@ -53,8 +53,10 @@ func writeToolchainInventory(ctx context.Context, containerID string, bins []str
 	script := "umask 077\nexport PATH=" + pathExpression + "\n" +
 		"export HOME=/home/agent DISABLE_AUTOUPDATER=1\n" +
 		"for binary in " + strings.Join(quoted, " ") + "; do\n" +
-		"  executable=$(command -v \"$binary\") && readlink -f \"$executable\" > " + toolchainDirectory + "/\"$binary\".path || :\n" +
-		"  (ulimit -f 8; timeout -k 1 8 \"$binary\" --version > " + toolchainDirectory + "/\"$binary\".version 2>/dev/null)\n" +
+		"  executable=$(command -v \"$binary\")\n" +
+		"  if test -x /usr/local/bin/mise; then resolved=$(timeout -k 1 8 /usr/local/bin/mise which \"$binary\" 2>/dev/null) && executable=$resolved; fi\n" +
+		"  readlink -f \"$executable\" > " + toolchainDirectory + "/\"$binary\".path || :\n" +
+		"  (ulimit -f 8; timeout -k 1 8 \"$executable\" --version > " + toolchainDirectory + "/\"$binary\".version 2>/dev/null)\n" +
 		"  code=$?\n" +
 		"  printf '%s\\n' \"$code\" > " + toolchainDirectory + "/\"$binary\".status || exit 1\n" +
 		"done\nprintf '1\\n' > " + toolchainDirectory + "/schema\n"
@@ -145,7 +147,7 @@ func captureLaunchArtifact(executable string, reader io.Reader) *managedlaunch.A
 	limited := &io.LimitedReader{R: reader, N: managedlaunch.MaxArtifactBytes + 8192}
 	tr := tar.NewReader(limited)
 	h, err := tr.Next()
-	if err != nil || h.Typeflag != tar.TypeReg || h.Name != path.Base(executable) || h.Uid != 0 ||
+	if err != nil || h.Typeflag != tar.TypeReg || h.Name != path.Base(executable) || (h.Uid != 0 && h.Uid != 1001) ||
 		h.Mode&0022 != 0 || h.Mode&0111 == 0 || h.Size <= 0 || h.Size > managedlaunch.MaxArtifactBytes {
 		return nil
 	}

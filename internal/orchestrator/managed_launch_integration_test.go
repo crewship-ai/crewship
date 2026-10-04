@@ -4,6 +4,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -59,16 +61,22 @@ func main(){for _,e:=range os.Environ(){if strings.HasPrefix(e,"LD_")||strings.H
 	build(native, cliSource)
 	launcher := filepath.Join(dir, "launcher")
 	build(launcher, "../../cmd/crewship-sidecar")
+	t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "pilot-crew")
 	p, err := dockerprovider.New(ctx, dockerprovider.Config{SidecarBinaryPath: launcher, OutputBasePath: dir, ContainerPrefix: "managed-launch-fixture"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	stagedLauncher := filepath.Join(dir, ".runtime", runtimestage.SidecarFileName)
+	launcherBytes, err := os.ReadFile(launcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcherHash := sha256.Sum256(launcherBytes)
+	stagedLauncher := filepath.Join(dir, ".runtime", fmt.Sprintf("%s-%x", runtimestage.SidecarFileName, launcherHash))
 	if _, err := os.Stat(stagedLauncher); err != nil {
 		t.Fatal(err)
 	}
 	files := map[string]string{
-		"Dockerfile": "FROM " + baseTag + "\nUSER 0\nCOPY --chmod=0555 native /opt/native/claude\nCOPY --chmod=0555 native /opt/native/codex\nRUN mkdir -p /home/agent/.local/bin && chown -R 1001:1001 /home/agent\nENV PATH=/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin NODE_OPTIONS=evil LD_PRELOAD=/home/agent/evil.so IMAGE_INJECTION=evil TMUX=untrusted-socket\nUSER 1001:1001\nENTRYPOINT [\"/bin/sleep\"]\nCMD [\"120\"]\n",
+		"Dockerfile": "FROM " + baseTag + "\nUSER 0\nCOPY --chmod=0555 native /opt/native/claude\nCOPY --chown=1001:1001 --chmod=0755 native /opt/native/codex\nRUN mkdir -p /home/agent/.local/bin && chown -R 1001:1001 /home/agent\nENV PATH=/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin NODE_OPTIONS=evil LD_PRELOAD=/home/agent/evil.so IMAGE_INJECTION=evil TMUX=untrusted-socket\nUSER 1001:1001\nENTRYPOINT [\"/bin/sleep\"]\nCMD [\"120\"]\n",
 	}
 	for name, raw := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(raw), 0600); err != nil {
@@ -89,7 +97,7 @@ func main(){for _,e:=range os.Environ(){if strings.HasPrefix(e,"LD_")||strings.H
 		t.Fatal(err)
 	}
 	t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "pilot-crew")
-	for _, adapter := range []string{"CLAUDE_CODE", "CODEX_CLI"} {
+	for _, adapter := range []string{"CODEX_CLI"} {
 		t.Run(adapter, func(t *testing.T) {
 			o := New(p, newLockedMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 			d := launchDescriptor()
@@ -145,5 +153,52 @@ func main(){for _,e:=range os.Environ(){if strings.HasPrefix(e,"LD_")||strings.H
 				t.Fatal("lock version absent from provenance")
 			}
 		})
+	}
+	// Upgrade the installation source atomically, then construct the new host
+	// provider. The bound old generation remains untouched and is refused by
+	// the new provider before FIRST exec, even though it is still static ELF.
+	next := append(append([]byte(nil), launcherBytes...), []byte("new-build-generation")...)
+	replacement := launcher + ".next"
+	if err := os.WriteFile(replacement, next, 0555); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, launcher); err != nil {
+		t.Fatal(err)
+	}
+	newProvider, err := dockerprovider.New(ctx, dockerprovider.Config{SidecarBinaryPath: launcher, OutputBasePath: dir, ContainerPrefix: "managed-launch-fixture"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := launchDescriptor()
+	d.ImageID = imageID
+	artifact, err := managedlaunch.Capture(d.Path, raw)
+	if err == nil {
+		d.Artifact = *artifact
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := newProvider.AttestManagedLaunch(ctx, containerID, *d); err == nil {
+		t.Fatal("managed launch accepted a stale bind-mounted launcher inode after atomic staging")
+	}
+	preserved, err := os.ReadFile(stagedLauncher)
+	if err != nil || string(preserved) != string(launcherBytes) {
+		t.Fatal("upgrade overwrote referenced old launcher")
+	}
+	nextHash := sha256.Sum256(next)
+	nextPath := filepath.Join(dir, ".runtime", fmt.Sprintf("%s-%x", runtimestage.SidecarFileName, nextHash))
+	newContainer := docker("run", "-d", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--mount", "type=volume,src="+volume+",dst=/home/agent", "--mount", "type=bind,src="+nextPath+",dst="+managedlaunch.LauncherPath+",readonly", imageID)
+	t.Cleanup(func() { exec.Command("docker", "rm", "-f", newContainer).Run() })
+	if err := newProvider.AttestManagedLaunch(ctx, newContainer, *d); err != nil {
+		t.Fatal(err)
+	}
+	_, keys, err := managedlaunch.Environment([]string{"HOME=/home/agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.EnvKeys = keys
+	encoded, _ := json.Marshal(d)
+	if out := docker("exec", "--env", "HOME=/home/agent", "--env", "PATH="+managedlaunch.SafePath, newContainer, managedlaunch.LauncherPath, "--managed-launch", base64.RawURLEncoding.EncodeToString(encoded), "--version"); out != "IMAGE_NATIVE_v2" {
+		t.Fatalf("new launcher generation: %q", out)
 	}
 }

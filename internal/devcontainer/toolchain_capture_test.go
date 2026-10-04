@@ -33,7 +33,7 @@ func TestManagedArtifactCaptureRejectsArchiveSubstitution(t *testing.T) {
 	binary.LittleEndian.PutUint16(raw[18:], 62)
 	binary.LittleEndian.PutUint32(raw[20:], 1)
 	binary.LittleEndian.PutUint16(raw[52:], 64)
-	for _, which := range []string{"valid", "symlink", "agent-owned", "writable", "wrong-name", "script", "duplicate"} {
+	for _, which := range []string{"valid", "symlink", "agent-owned", "sidecar-owned", "writable", "wrong-name", "script", "duplicate"} {
 		t.Run(which, func(t *testing.T) {
 			var buf bytes.Buffer
 			tw := tar.NewWriter(&buf)
@@ -50,6 +50,8 @@ func TestManagedArtifactCaptureRejectsArchiveSubstitution(t *testing.T) {
 				data = nil
 			case "agent-owned":
 				h.Uid = 1001
+			case "sidecar-owned":
+				h.Uid = 1002
 			case "writable":
 				h.Mode = 0777
 			case "wrong-name":
@@ -69,7 +71,7 @@ func TestManagedArtifactCaptureRejectsArchiveSubstitution(t *testing.T) {
 				t.Fatal(err)
 			}
 			artifact := captureLaunchArtifact("/opt/native/claude", &buf)
-			if which == "valid" {
+			if which == "valid" || which == "agent-owned" {
 				if artifact == nil || len(artifact.SHA256) != 64 {
 					t.Fatal("immutable host hash missing")
 				}
