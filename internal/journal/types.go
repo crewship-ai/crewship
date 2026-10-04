@@ -75,7 +75,9 @@ const (
 	EntryRunCompleted EntryType = "run.completed"
 	EntryRunFailed    EntryType = "run.failed"
 	EntryRunCancelled EntryType = "run.cancelled"
-	EntryRunTimeout   EntryType = "run.timeout"
+	// Audit-only stop with no recorded start; never an automation or billing event.
+	EntryRunRecoveredStop EntryType = "run.recovered_stop"
+	EntryRunTimeout       EntryType = "run.timeout"
 
 	// Security
 	EntryKeeperRequest     EntryType = "keeper.request"
@@ -893,6 +895,12 @@ func (e *Entry) Validate() error {
 	}
 	if e.Summary == "" {
 		return errors.New("journal: summary required")
+	}
+	if e.Type == EntryRunRecoveredStop {
+		recorded, ok := e.Payload["start_recorded"].(bool)
+		if e.AgentID == "" || e.TraceID == "" || !ok || recorded {
+			return errors.New("journal: recovered stop requires agent, trace and start_recorded=false")
+		}
 	}
 	if e.Severity == "" {
 		e.Severity = SeverityInfo

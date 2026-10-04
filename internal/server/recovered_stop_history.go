@@ -89,32 +89,39 @@ func (s *Server) flushRecoveredStopsBatch(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
-func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunState) error {
+func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunState) (err error) {
+	defer func() {
+		if err != nil && s.logger != nil {
+			s.logger.Warn("recovered stop history not projected", "run_id", run.ID, "agent_id", run.AgentID, "error", err)
+		}
+	}()
+	if run.ID == "" || run.AgentID == "" {
+		return fmt.Errorf("recovered stop lacks confirmed run or agent identity")
+	}
+	startRecorded := true
 	var workspace string
 	var terminal, workOwned, recoveredTerminal bool
-	err := s.db.QueryRowContext(ctx, `SELECT je.workspace_id,
+	err = s.db.QueryRowContext(ctx, `SELECT je.workspace_id,
  EXISTS (SELECT 1 FROM journal_entries t WHERE t.workspace_id=je.workspace_id AND t.trace_id=je.trace_id
-   AND t.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')),
+   AND t.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') AND (t.entry_type<>'run.recovered_stop' OR t.agent_id=je.agent_id)),
  EXISTS (SELECT 1 FROM work_attempts a WHERE a.run_id=je.trace_id),
  EXISTS (SELECT 1 FROM journal_entries t WHERE t.id='recovered-stop:' || je.trace_id AND t.workspace_id=je.workspace_id)
  FROM journal_entries je WHERE je.trace_id=? AND je.agent_id=? AND je.entry_type='run.started' LIMIT 1`, run.ID, run.AgentID).
 		Scan(&workspace, &terminal, &workOwned, &recoveredTerminal)
 	if errors.Is(err, sql.ErrNoRows) {
+		startRecorded = false
 		// Manual IPC runs may never emit run.started. A confirmed stop can
 		// still publish its own terminal event without fabricating a start.
 		workspace, err = s.recoveredStopWorkspace(ctx, run)
 		if err != nil {
 			return err
 		}
-		if workspace == "" {
-			return s.ackRecoveredStop(ctx, run.ID)
-		} // No trustworthy historical scope.
 		var conflicting bool
 		err = s.db.QueryRowContext(ctx, `SELECT
-          EXISTS (SELECT 1 FROM journal_entries WHERE workspace_id=? AND trace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')),
+          EXISTS (SELECT 1 FROM journal_entries WHERE workspace_id=? AND trace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop')),
           EXISTS (SELECT 1 FROM work_attempts WHERE run_id=?),
           EXISTS (SELECT 1 FROM journal_entries WHERE id=? AND workspace_id=? AND agent_id=?),
-          EXISTS (SELECT 1 FROM journal_entries WHERE trace_id=? AND entry_type IN ('run.started','run.completed','run.failed','run.cancelled','run.timeout') AND (workspace_id<>? OR COALESCE(agent_id,'')<>?))`,
+          EXISTS (SELECT 1 FROM journal_entries WHERE trace_id=? AND entry_type IN ('run.started','run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') AND (workspace_id<>? OR COALESCE(agent_id,'')<>?))`,
 			workspace, run.ID, run.ID, "recovered-stop:"+run.ID, workspace, run.AgentID, run.ID, workspace, run.AgentID).Scan(&terminal, &workOwned, &recoveredTerminal, &conflicting)
 		if err != nil {
 			return err
@@ -134,16 +141,23 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
 		origin, reason, summary, idleStatus = "recovered_absence", "recovered_runtime_absent", "recovered run ended without a verified outcome", "IDLE"
 	}
 	if !terminal {
-		if workOwned {
+		if workOwned && startRecorded {
 			// Dispatcher owns the outcome; acknowledging our projection marker
 			// does not settle or overwrite its fenced attempt.
 			return s.ackRecoveredStop(ctx, run.ID)
 		}
+		kind := journal.EntryRunCancelled
+		payload := map[string]any{"reason": reason, "metadata": map[string]any{"stop_origin": origin}}
+		if !startRecorded {
+			kind = journal.EntryRunRecoveredStop
+			summary = "Zastaveno během obnovy, začátek nebyl zaznamenán."
+			payload["start_recorded"] = false
+		}
 		if _, err := s.journalWriter.EmitSync(ctx, journal.Entry{
 			ID: "recovered-stop:" + run.ID, WorkspaceID: workspace, AgentID: run.AgentID,
-			TraceID: run.ID, Type: journal.EntryRunCancelled, Severity: journal.SeverityNotice,
+			TraceID: run.ID, Type: kind, Severity: journal.SeverityNotice,
 			ActorType: journal.ActorSystem, Summary: summary,
-			Payload: map[string]any{"reason": reason, "metadata": map[string]any{"stop_origin": origin}},
+			Payload: payload,
 		}); err != nil {
 			return err
 		}
@@ -177,7 +191,7 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
 			_, err = s.db.ExecContext(ctx, `UPDATE agents SET status=CASE WHEN ? OR EXISTS (
  SELECT 1 FROM journal_entries started WHERE started.workspace_id=? AND started.agent_id=? AND started.entry_type='run.started'
  AND NOT EXISTS (SELECT 1 FROM journal_entries done WHERE done.workspace_id=started.workspace_id AND done.trace_id=started.trace_id
-   AND done.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout'))
+   AND done.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') AND (done.entry_type<>'run.recovered_stop' OR done.agent_id=started.agent_id))
  ) THEN 'RUNNING' ELSE ? END, updated_at=? WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, locallyActive,
 				workspace, run.AgentID, idleStatus, time.Now().UTC().Format(time.RFC3339), run.AgentID, workspace)
 			return err
@@ -214,28 +228,20 @@ func (s *Server) ackRecoveredStop(ctx context.Context, id string) error {
 	})
 }
 
+// Missing-start history requires BOTH the captured scope and its current
+// non-deleted agent to agree. Neither can stand in for the other.
 func (s *Server) recoveredStopWorkspace(ctx context.Context, run orchestrator.RunState) (string, error) {
+	if run.WorkspaceID == "" || run.AgentID == "" {
+		return "", fmt.Errorf("recovered run %s lacks captured ownership", run.ID)
+	}
 	var agentWorkspace string
-	err := s.db.QueryRowContext(ctx, `SELECT workspace_id FROM agents WHERE id=?`, run.AgentID).Scan(&agentWorkspace)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", err
+	err := s.db.QueryRowContext(ctx, `SELECT a.workspace_id FROM agents a
+ JOIN workspaces w ON w.id=a.workspace_id WHERE a.id=? AND a.deleted_at IS NULL`, run.AgentID).Scan(&agentWorkspace)
+	if err != nil {
+		return "", fmt.Errorf("confirm recovered run %s agent ownership: %w", run.ID, err)
 	}
-	workspace := run.WorkspaceID
-	if workspace == "" {
-		workspace = agentWorkspace
-	}
-	if workspace == "" {
-		return "", nil
-	}
-	if agentWorkspace != "" && agentWorkspace != workspace {
+	if agentWorkspace != run.WorkspaceID {
 		return "", fmt.Errorf("recovered run %s workspace disagrees with agent", run.ID)
 	}
-	var exists bool
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM workspaces WHERE id=?)`, workspace).Scan(&exists); err != nil {
-		return "", err
-	}
-	if !exists {
-		return "", nil
-	}
-	return workspace, nil
+	return run.WorkspaceID, nil
 }

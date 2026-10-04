@@ -101,6 +101,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "run.completed": CheckCircle,
   "run.failed": XCircle,
   "run.cancelled": Ban,
+  "run.recovered_stop": Ban,
   "run.timeout": AlertTriangle,
 
   // Durable work ledger — the dispatch decision under a run. Accept and
