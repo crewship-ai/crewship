@@ -35,19 +35,34 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         self.assertTrue(managed.failures(events, 0))
         self.assertTrue(managed.failures([e for e in self.passing() if e['Action'] == 'pass'], 0))
 
-    def test_sudo_is_limited_to_managed_launcher_fixture(self):
-        legacy, launcher = managed.commands()
-        self.assertEqual(legacy[0], 'go')
-        self.assertNotIn('sudo', legacy)
-        self.assertNotIn('./internal/orchestrator', legacy)
-        self.assertEqual(launcher[:2], ['sudo', 'env'])
-        self.assertEqual(launcher[-1], './internal/orchestrator')
-        self.assertEqual(launcher[launcher.index('-run') + 1], '^(TestManagedLaunchRealDocker)$')
-        for package, names in managed.TESTS.items():
-            for name in names:
-                command = launcher if package == 'internal/orchestrator' else legacy
-                self.assertIn(name, command[command.index('-run') + 1])
-                self.assertIn('./' + package, command)
+    def test_every_required_child_needs_run_and_pass_without_skip_or_fail(self):
+        for child in managed.REQUIRED_CHILDREN:
+            for action in ('skip', 'fail'):
+                with self.subTest(child=child, action=action):
+                    events = self.passing() + [{'Package': child[0], 'Test': child[1], 'Action': action}]
+                    self.assertTrue(managed.failures(events, 0))
+            events = [event for event in self.passing()
+                      if not ((event['Package'], event['Test']) == child and event['Action'] == 'run')]
+            self.assertTrue(managed.failures(events, 0))
+
+    def test_staged_invocation_has_separate_bounded_budget(self):
+        legacy, staged = managed.commands()
+        self.assertIn('-timeout=3m', legacy)
+        self.assertIn('-timeout=12m', staged)
+        self.assertEqual(staged[-1], './' + managed.STAGED_PACKAGE)
+        self.assertEqual(staged[staged.index('-run') + 1], '^' + managed.STAGED + '$')
+        legacy_pattern = legacy[legacy.index('-run') + 1]
+        self.assertNotIn(managed.STAGED, legacy_pattern)
+        for package, name in managed.REQUIRED_TOP_LEVEL:
+            if name != managed.STAGED:
+                self.assertIn(name, legacy_pattern)
+                self.assertIn('./' + package.removeprefix(managed.PREFIX), legacy)
+
+    def test_deleted_required_staged_child_cannot_pass(self):
+        for name in managed.STAGED_CHILDREN:
+            missing = managed.STAGED + '/' + name
+            events = [event for event in self.passing() if event['Test'] != missing]
+            self.assertTrue(managed.failures(events, 0), missing)
 
     def test_skipped_or_failed_child_cannot_hide_behind_parent_pass(self):
         package, parent = sorted(managed.REQUIRED_TOP_LEVEL)[0]

@@ -503,6 +503,26 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		requestedImage = team.Image
 	}
 	if cid, ok := p.warmHit(team.ID, requestedImage); ok {
+		// A mutable desired tag must be resolved against the daemon even within
+		// the warm TTL. The tag cached by setWarm is a request, not an image ID.
+		_, stagedKnown := p.fencedCrew.Load(cid)
+		if requestedImage != "" && (p.egressFenceWanted(team) || stagedKnown) {
+			got, err := p.client.ContainerInspect(ctx, cid, client.ContainerInspectOptions{})
+			if err != nil {
+				p.evictWarm(team.ID)
+				return "", err
+			}
+			drift, err := p.stagedImageDrift(ctx, got.Container, requestedImage)
+			if err != nil {
+				p.evictWarm(team.ID)
+				return "", err
+			}
+			if drift || got.Container.State == nil || !got.Container.State.Running {
+				p.evictWarm(team.ID)
+				// Reconcile below applies the inactive/non-force removal policy.
+				goto coldReconcile
+			}
+		}
 		// A fenced crew pays one inspect here: a restart inside the warm TTL
 		// (daemon, restart policy, operator) drops the fence, and the warm
 		// path would otherwise hand the next step an unfenced container.
@@ -515,6 +535,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		return cid, nil
 	}
 
+coldReconcile:
 	p.logger.Debug("EnsureCrewRuntime", "crew_id", team.ID, "crew_slug", team.Slug)
 	// Ensure the crew's network exists (auto-recreate if deleted at runtime):
 	// its own when listed (#2240), the instance network otherwise.
@@ -563,7 +584,13 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// drops the (ephemeral) legacy container and copies legacy volume data into
 	// the id-scoped volumes — hard-failing only, fail-safe, when a copy can't
 	// complete (the legacy volume is never removed unless its data was copied).
-	if err := p.migrateLegacyCrewResources(ctx, team.ID, team.Slug, desiredImage); err != nil {
+	var migrationErr error
+	if p.egressFenceWanted(team) {
+		migrationErr = p.stagedLegacyCheck(ctx, team)
+	} else {
+		migrationErr = p.migrateLegacyCrewResources(ctx, team.ID, team.Slug, desiredImage)
+	}
+	if err := migrationErr; err != nil {
 		return "", err
 	}
 
@@ -651,9 +678,22 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
-	p.fixBindMountOwnership(ctx, runtimeImage, dirs, crewVolumes)
+	if p.egressFenceWanted(team) {
+		if err := p.stagedOwnership(ctx, team, runtimeImage, dirs, crewVolumes); err != nil {
+			return "", err
+		}
+	} else {
+		p.fixBindMountOwnership(ctx, runtimeImage, dirs, crewVolumes)
+	}
 
-	containerCfg, hostConfig, err := p.buildCrewContainerConfig(ctx, team, containerName, runtimeImage, runtime, memoryMB, cpus, dirs)
+	var workloadEnv []string
+	var containerCfg *container.Config
+	var hostConfig *container.HostConfig
+	if p.egressFenceWanted(team) {
+		containerCfg, hostConfig, workloadEnv, err = p.buildStagedCrewContainerConfig(ctx, team, containerName, runtimeImage, runtime, memoryMB, cpus, dirs)
+	} else {
+		containerCfg, hostConfig, err = p.buildCrewContainerConfig(ctx, team, containerName, runtimeImage, runtime, memoryMB, cpus, dirs)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -671,6 +711,11 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepContainerCreate, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage, Digest: runtimeDigest})
 
+	if p.egressFenceWanted(team) {
+		if e := p.prepareCreatedStaged(ctx, resp.ID, containerCfg, workloadEnv, team); e != nil {
+			return "", e
+		}
+	}
 	if _, err := p.client.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		return "", fmt.Errorf("container start: %w", err)
 	}
@@ -779,6 +824,15 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						return "", false, fmt.Errorf("existing runtime %s is labelled for another installation; if this installation's identity was reset, remove that container by hand (volumes are kept) so it can be recreated", containerName)
 					}
 				}
+				if p.egressFenceWanted(team) || staged(inspect) {
+					removed, e := p.reconcileStagedRevision(ctx, team, inspect)
+					if e != nil {
+						return "", false, e
+					}
+					if removed {
+						break
+					}
+				}
 				// The reused container may still be running a previously
 				// provisioned cached image, while desiredImage falls back to the
 				// provider default when the caller left Image/CachedImage empty.
@@ -834,7 +888,15 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				// A new desired image must not destroy work in the existing
 				// runtime. Only a freshly confirmed inactive container may be
 				// replaced. Docker's non-force removal also closes a start race.
-				if callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && inspect.Image != desiredImage {
+				imageDrift := callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && inspect.Image != desiredImage
+				if callerSpecifiedImage && staged(inspect) {
+					var e error
+					imageDrift, e = p.stagedImageDrift(ctx, inspect, desiredImage)
+					if e != nil {
+						return "", false, e
+					}
+				}
+				if imageDrift {
 					state := inspect.State
 					if state == nil || state.Running || state.Paused || state.Restarting || (state.Status != "exited" && state.Status != "created") {
 						return "", false, &provider.RuntimeImageUpdatePendingError{ContainerID: c.ID, CurrentImageID: inspect.Image, DesiredImage: desiredImage}
@@ -1743,6 +1805,14 @@ func (p *Provider) runPostStartCommands(ctx context.Context, containerID string,
 			p.logger.Warn("postStartCommand refused: egress fence not confirmed",
 				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
 			return
+		}
+		if fence.active() || p.stagedDiscoveryPending.Load() {
+			execCfg.Cmd, execCfg.Env, err = p.WrapExternalExec(runCtx, containerID, execCfg.Cmd, execCfg.Env)
+			if err != nil {
+				cancel()
+				p.logger.Warn("postStartCommand refused by staged gate", "error", err)
+				return
+			}
 		}
 		ex, err := p.client.ExecCreate(runCtx, containerID, execCfg)
 		if err != nil {

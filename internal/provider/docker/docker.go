@@ -667,6 +667,13 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 	// A runtime switch leaves the previous daemon's crew containers running,
 	// still bind-mounted to the same live host crew directories (#1704).
 	p.reconcileStrandedCrews(ctx)
+	if err := p.reconcileStagedEnvCleanup(ctx, 64); err != nil {
+		p.logger.Warn("staged cleanup recovery incomplete; pending material retained for explicit repair", "error", err)
+	}
+	if err := p.discoverStaged(ctx); err != nil {
+		p.stagedDiscoveryPending.Store(true)
+		p.logger.Warn("staged inventory unavailable; exec will inspect actual configuration", "error", err)
+	}
 
 	return p, nil
 }
@@ -1869,6 +1876,12 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 		return nil, fmt.Errorf("exec: refusing to run as privileged user %q in container %s", execCfg.User, cfg.ContainerID)
 	}
 
+	if fence.active() || p.stagedDiscoveryPending.Load() {
+		execCfg.Cmd, execCfg.Env, err = p.WrapExternalExec(ctx, cfg.ContainerID, execCfg.Cmd, execCfg.Env)
+		if err != nil {
+			return nil, err
+		}
+	}
 	exec, err := p.client.ExecCreate(ctx, cfg.ContainerID, execCfg)
 	if err != nil {
 		return nil, fmt.Errorf("exec create: %w", err)
@@ -1990,6 +2003,12 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 		return nil, fmt.Errorf("exec interactive: refusing to run as privileged user %q in container %s", execCfg.User, cfg.ContainerID)
 	}
 
+	if fence.active() || p.stagedDiscoveryPending.Load() {
+		execCfg.Cmd, execCfg.Env, err = p.WrapExternalExec(ctx, cfg.ContainerID, execCfg.Cmd, execCfg.Env)
+		if err != nil {
+			return nil, err
+		}
+	}
 	exec, err := p.client.ExecCreate(ctx, cfg.ContainerID, execCfg)
 	if err != nil {
 		return nil, fmt.Errorf("exec interactive create: %w", err)
@@ -2070,6 +2089,9 @@ func (p *Provider) ContainerUser(ctx context.Context, containerID string) (strin
 	}
 	if inspectResult.Container.Config == nil {
 		return "", fmt.Errorf("container %s has no config", containerID)
+	}
+	if staged(inspectResult.Container) {
+		return "1001:1001", nil
 	}
 	return inspectResult.Container.Config.User, nil
 }
