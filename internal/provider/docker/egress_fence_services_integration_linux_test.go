@@ -24,6 +24,9 @@ import (
 // address changes, the fence follows: the new address opens and the old one
 // closes (checked by putting a different container on the old address).
 func TestEgressFenceOwnServicesIntegration(t *testing.T) {
+	if !lifecycleHostSupported(t) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	tmp, err := os.MkdirTemp("", "crewship-fence-svc-*")
@@ -37,6 +40,7 @@ func TestEgressFenceOwnServicesIntegration(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build sidecar: %v\n%s", err, out)
 	}
+	qualifyFenceFixtureSidecar(t, sidecarPath)
 	entrypointPath := filepath.Join(tmp, "entrypoint.sh")
 	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nif [ \"${1:-}\" = --bootstrap-only ]; then exit 0; fi\nexec sleep infinity\n"), 0o755); err != nil {
 		t.Fatal(err)

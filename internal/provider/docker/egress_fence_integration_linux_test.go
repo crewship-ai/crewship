@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -32,6 +33,9 @@ import (
 // The target is a peer container, not the internet, so the test needs no
 // external network. Linux only (build tag); skips when Docker is unavailable.
 func TestEgressFenceIntegration(t *testing.T) {
+	if !lifecycleHostSupported(t) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 
@@ -48,6 +52,7 @@ func TestEgressFenceIntegration(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("cannot build crewship-sidecar: %v\n%s", err, out)
 	}
+	qualifyFenceFixtureSidecar(t, sidecarPath)
 	entrypointPath := filepath.Join(tmp, "entrypoint.sh")
 	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nif [ \"${1:-}\" = --bootstrap-only ]; then exit 0; fi\nexec sleep infinity\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -506,4 +511,18 @@ func fenceLogContainerState(t *testing.T, p *Provider, cid string) {
 		return
 	}
 	t.Logf("failed fixture %s state: %+v", shortID(cid), inspection.Container.State)
+}
+
+// Release artifacts are immutable, regardless of the workstation's build umask.
+// Leave owner and ELF qualification to production; report actual fixture facts.
+func qualifyFenceFixtureSidecar(t *testing.T, sidecarPath string) {
+	t.Helper()
+	if err := os.Chmod(sidecarPath, 0555); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(sidecarPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("fence fixture host UID=%d GID=%d architecture=%s sidecar mode=%s stat=%+v", os.Geteuid(), os.Getegid(), runtime.GOARCH, info.Mode(), info.Sys())
 }
