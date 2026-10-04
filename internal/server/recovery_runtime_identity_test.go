@@ -102,7 +102,7 @@ func recoveryTerminalCount(t *testing.T, s *Server, id string) int {
 		t.Fatal(err)
 	}
 	var n int
-	if err := s.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM journal_entries WHERE trace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')`, id).Scan(&n); err != nil {
+	if err := s.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM journal_entries WHERE trace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop')`, id).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -208,8 +208,14 @@ func TestRecoveryLeavesWorkOwnedRunToDispatcher(t *testing.T) {
 				t.Fatal("dispatcher-owned projection marker never acknowledged")
 			}
 			s.recoverOrphanedRuns(t.Context())
-			if n := recoveryTerminalCount(t, s, attempt.RunID); n != 0 {
-				t.Fatalf("generic recovery bypassed work outcome: %d terminals", n)
+			// Owner decision: a missing-start confirmed stop leaves one
+			// audit, but never settles the dispatcher's outcome.
+			wantHistory := 0
+			if !withStart {
+				wantHistory = 1
+			}
+			if n := recoveryTerminalCount(t, s, attempt.RunID); n != wantHistory {
+				t.Fatalf("recovery history=%d want=%d", n, wantHistory)
 			}
 			projection, owned, err := store.RunProjection(t.Context(), attempt.RunID)
 			if err != nil || !owned || projection.Ready {

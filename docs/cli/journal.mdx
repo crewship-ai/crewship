@@ -20,6 +20,12 @@ crewship journal verify
 
 The top-level command is the list view. `--follow` opens an SSE connection to `/api/v1/journal/stream` and prints entries as they arrive (Ctrl-C to exit). The CLI auto-reconnects on transient failure with bounded exponential backoff (1 s → 30 s) and threads `Last-Event-ID` so a brief disconnect resumes without dropping or duplicating entries. For pretty in-browser viewing, the web UI `/journal` page is also available.
 
+A `run.recovered_stop` entry records a confirmed stop whose start was never
+recorded (`start_recorded: false`). It is audit-only: it does not represent a
+completed run, trigger automations or approvals, or add charges. Read these
+entries with `crewship journal --type run.recovered_stop`; `--follow` also
+includes them. The journal UI explains the missing start explicitly.
+
 ## Flags
 
 | Flag | Type | Default | Description |

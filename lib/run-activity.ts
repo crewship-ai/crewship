@@ -187,6 +187,13 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
         meta: joinMeta(formatDurationPrecise(num(p, "duration_ms"))),
       }
 
+    case "run.recovered_stop":
+      return {
+        ...base,
+        tone: "warn",
+        title: "Zastaveno během obnovy, začátek nebyl zaznamenán.",
+      }
+
     case "run.cancelled":
     case "assignment.cancelled":
       return { ...base, tone: "warn", title: "Cancelled", detail: e.summary || undefined }
@@ -421,6 +428,7 @@ const RUN_TERMINAL_TYPES = new Set<string>([
   "run.completed",
   "run.failed",
   "run.cancelled",
+  "run.recovered_stop",
   "run.timeout",
   "assignment.completed",
   "assignment.failed",

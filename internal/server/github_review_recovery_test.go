@@ -31,7 +31,7 @@ func TestReviewRestartReconcilesAbsentContainer(t *testing.T) {
 			mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('review','Review','review')`)
 			mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','review','Agent','a','RUNNING')`)
 			// No journal trace: manual IPC runs must also leave RUNNING after confirmed absence.
-			raw, _ := json.Marshal(orchestrator.RunState{ID: "review-run", AgentID: "a", ContainerID: "old-container", AgentSlug: "a", Status: "running"})
+			raw, _ := json.Marshal(orchestrator.RunState{ID: "review-run", AgentID: "a", WorkspaceID: "review", ContainerID: "old-container", AgentSlug: "a", Status: "running"})
 			if err := s.state.Set(t.Context(), "agent_runs", "review-run", raw); err != nil {
 				t.Fatal(err)
 			}

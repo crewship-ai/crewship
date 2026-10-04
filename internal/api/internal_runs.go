@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -77,6 +78,10 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if h.rejectRecoveredStopWrite(w, r, body.WorkspaceID, body.AgentID, body.ID) {
+		return
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Persist run.started FIRST — this is the source of truth for runs
@@ -113,6 +118,10 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			Payload:   payload,
 			TraceID:   body.ID,
 		}); err != nil {
+			if errors.Is(err, journal.ErrRecoveredStopConflict) {
+				replyError(w, http.StatusConflict, "Run was stopped during recovery without a recorded start")
+				return
+			}
 			replyInternalError(w, h.logger, "create run: emit run.started", err)
 			return
 		}
@@ -216,6 +225,10 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 
 	if crew := InternalTokenCrewFromContext(r.Context()); crew != "" && crew != agentCrew.String {
 		replyError(w, http.StatusNotFound, "run not found")
+		return
+	}
+
+	if h.rejectRecoveredStopWrite(w, r, workspaceID, agentID, runID) {
 		return
 	}
 
@@ -378,7 +391,7 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 					    SELECT 1 FROM journal_entries je2
 					    WHERE je2.workspace_id = je1.workspace_id
 					      AND je2.trace_id = je1.trace_id
-					      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
+					      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') AND (je2.entry_type<>'run.recovered_stop' OR je2.agent_id=je1.agent_id)
 					  )
 				) > 0 THEN 'RUNNING'
 				ELSE ?
@@ -535,4 +548,19 @@ func terminalEntryType(status string) journal.EntryType {
 	default:
 		return journal.EntryRunFailed
 	}
+}
+
+// A recovered stop is audit-only. Late sidecar messages cannot turn it into
+// a normal run, produce an outcome, or launch follow-up work.
+func (h *InternalHandler) rejectRecoveredStopWrite(w http.ResponseWriter, r *http.Request, workspace, agent, run string) bool {
+	stopped, err := journal.HasRecoveredStop(r.Context(), h.db, workspace, agent, run)
+	if err != nil {
+		replyInternalError(w, h.logger, "check recovered stop", err)
+		return true
+	}
+	if stopped {
+		replyError(w, http.StatusConflict, "Run was stopped during recovery without a recorded start")
+		return true
+	}
+	return false
 }
