@@ -94,6 +94,10 @@ type DetectResult struct {
 // It auto-detects the container runtime (Docker, Podman, Colima, OrbStack, etc.)
 // and manages crew containers with security isolation (non-root, cap-drop ALL).
 type Provider struct {
+	// stagedEnvScopes holds authenticated host-material scope for exact canonical
+	// IDs learned on publication/readback. It is cleanup authority, not boot proof.
+	stagedEnvScopes sync.Map
+
 	// fenced maps a crew container id to the State.StartedAt at which its
 	// egress fence was installed. A restart recreates the network namespace
 	// and drops the fence, so a different StartedAt means "install again".
