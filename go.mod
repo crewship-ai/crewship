@@ -24,6 +24,7 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/klauspost/compress v1.20.1
 	github.com/mattn/go-isatty v0.0.24
+	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42
 	github.com/moby/moby/api v1.56.0
 	github.com/moby/moby/client v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
@@ -99,7 +100,6 @@ require (
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
 	github.com/mattn/go-runewidth v0.0.17 // indirect
-	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
 	github.com/mdlayher/socket v0.5.0 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect

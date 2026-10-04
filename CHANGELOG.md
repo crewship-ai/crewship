@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Concurrent egress-fence installation retries incomplete rule reads without reinstalling or accepting a fence that fails verification. Checks reject results spanning a ruleset generation change.
+
 - **Importing a Crew YAML could silently disable required AI CLI checks.** The creation wizard preserves the typed policy, including configurations without explicit tools, and rejects unsupported policy values.
 
 - Recovery and explicit stop now share atomic runtime updates: an OOM-killed or missing container can leave RUNNING, concurrent completion is preserved, and a stop also closes the controls of runs discovered during ownership inspection.
