@@ -448,17 +448,17 @@ export default function OnboardingPage() {
     let cancelled = false
     const check = async () => {
       try {
-        // eslint-disable-next-line no-restricted-syntax -- onboarding-time credential probe; mirrors the pairing poll above
-        const res = await fetch("/api/v1/credentials")
-        if (!res.ok) return
-        const data = await res.json()
-        const list = Array.isArray(data) ? data : (data?.credentials ?? [])
-        const found = list.some(
-          (c: { provider?: string; status?: string }) =>
-            (c.provider ?? "").toUpperCase() === "ANTHROPIC" &&
-            (!c.status || c.status.toUpperCase() === "ACTIVE"),
-        )
-        if (found && !cancelled) setTokenDelivered(true)
+        // Use the same workspace-scoped, typed credential lookup as resume.
+        // A token in a different workspace (or an account API key) cannot
+        // make this crew runnable. Retain the descriptor so Continue can
+        // reuse the encrypted token without asking the user to paste it again.
+        const resumed = await loadOnboardingResumeState()
+        if (!resumed.ok || cancelled) return
+        const { workspaceId, savedCredential } = resumed.state
+        const provider = CLI_ADAPTERS[adapter]?.provider.toUpperCase()
+        if (workspaceId !== onboardingWorkspaceId || !savedCredential || savedCredential.provider.toUpperCase() !== provider) return
+        setPersistedCredential({ id: savedCredential.id, provider, apiKey: null })
+        setTokenDelivered(true)
       } catch {
         // network blip — the next tick retries
       }
@@ -469,7 +469,7 @@ export default function OnboardingPage() {
       cancelled = true
       clearInterval(interval)
     }
-  }, [mode, step, pairStatus, tokenDelivered])
+  }, [mode, step, pairStatus, tokenDelivered, adapter, onboardingWorkspaceId])
 
   // Live countdown for the pair-code expiry. Updates every second
   // while the code is pending so the user can see at a glance how

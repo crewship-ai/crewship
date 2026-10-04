@@ -123,7 +123,11 @@ export interface OAuthFormProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function OAuthForm({
+export function OAuthForm(props: OAuthFormProps) {
+  return <ScopedOAuthForm key={JSON.stringify([props.workspaceId, props.envKey])} {...props} />
+}
+
+function ScopedOAuthForm({
   envKey,
   workspaceId,
   onAddCredential,
@@ -149,13 +153,38 @@ export function OAuthForm({
   const [pendingRedirectUri, setPendingRedirectUri] = useState("")
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  const manualTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const popupRef = useRef<Window | null>(null)
+  const active = useRef(false)
+  const flow = useRef(0)
+  const busy = useRef(false)
+  const exchanging = useRef(false)
+
+  function clearTimers() {
+    if (pollRef.current) clearInterval(pollRef.current)
+    if (manualTimer.current) clearTimeout(manualTimer.current)
+    pollRef.current = null
+    manualTimer.current = null
+  }
+
+  function completeAuthorization() {
+    flow.current++
+    busy.current = false
+    clearTimers()
+    setPolling(false)
+    setAuthorizing(false)
+    setShowCodeInput(false)
+    if (popupRef.current && !popupRef.current.closed) popupRef.current.close()
+    popupRef.current = null
+  }
+
   // Fetch available providers on mount
   useEffect(() => {
     let cancelled = false
 
     async function fetchProviders() {
       try {
-        const res = await apiFetch(`/api/v1/oauth/providers?workspace_id=${workspaceId}`)
+        const res = await apiFetch(`/api/v1/oauth/providers?workspace_id=${encodeURIComponent(workspaceId)}`)
         if (res.ok) {
           const data = await res.json()
           if (!cancelled) setProviders(data)
@@ -173,10 +202,13 @@ export function OAuthForm({
     }
   }, [workspaceId])
 
-  // Always clear pollRef on unmount (handleAuthorize also sets pollRef)
   useEffect(() => {
+    active.current = true
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
+      active.current = false
+      clearTimers()
+      if (popupRef.current && !popupRef.current.closed) popupRef.current.close()
+      popupRef.current = null
     }
   }, [])
 
@@ -205,6 +237,7 @@ export function OAuthForm({
   // caller's footer actually renders from.
   const canAuthorize =
     !authorizing &&
+    !polling &&
     clientId.trim() !== "" &&
     clientSecret.trim() !== "" &&
     !(selectedProvider === "custom" && (!authUrl.trim() || !tokenUrl.trim()))
@@ -243,11 +276,15 @@ export function OAuthForm({
   }, [onActionChange, authorize, canAuthorize, authorizing, polling, primaryLabel])
 
   async function handleAuthorize() {
+    if (!active.current || busy.current || pollRef.current) return
     if (!clientId.trim() || !clientSecret.trim() || !authUrl.trim() || !tokenUrl.trim()) {
       toast.error("Client ID, Client Secret, Auth URL, and Token URL are required")
       return
     }
 
+    const request = ++flow.current
+    const isCurrent = () => active.current && flow.current === request
+    busy.current = true
     setAuthorizing(true)
 
     try {
@@ -257,7 +294,7 @@ export function OAuthForm({
         : (selectedProvider ?? "custom") + "-oauth"
       const credName = baseName + "-" + Date.now().toString(36)
 
-      const createRes = await apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
+      const createRes = await apiFetch(`/api/v1/credentials?workspace_id=${encodeURIComponent(workspaceId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -273,14 +310,18 @@ export function OAuthForm({
         }),
       })
 
+      if (!isCurrent()) return
       if (!createRes.ok) {
         const data = await createRes.json().catch(() => ({ error: "Failed to create OAuth credential" }))
-        toast.error(typeof data.error === "string" ? data.error : "Failed to create OAuth credential")
+        if (!isCurrent()) return
+        toast.error(typeof data?.error === "string" ? data.error : "Failed to create OAuth credential")
         setAuthorizing(false)
+        busy.current = false
         return
       }
 
       const created: Credential = await createRes.json()
+      if (!isCurrent()) return
       onAddCredential(created)
       setPendingCredId(created.id)
       setPendingCredName(credName)
@@ -296,18 +337,22 @@ export function OAuthForm({
 
       if (isLocalhost) {
         // LOCALHOST: loopback server (same as gh auth login, gcloud auth login)
-        const res = await apiFetch(`/api/v1/oauth/loopback?workspace_id=${workspaceId}`, {
+        const res = await apiFetch(`/api/v1/oauth/loopback?workspace_id=${encodeURIComponent(workspaceId)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ credential_id: created.id }),
         })
+        if (!isCurrent()) return
         if (!res.ok) {
           const data = await res.json().catch(() => ({ error: "Failed to start OAuth" }))
-          toast.error(typeof data.error === "string" ? data.error : "Failed to start OAuth flow")
+          if (!isCurrent()) return
+          toast.error(typeof data?.error === "string" ? data.error : "Failed to start OAuth flow")
           setAuthorizing(false)
+          busy.current = false
           return
         }
         const result = await res.json()
+        if (!isCurrent()) return
         oauthRedirectUrl = result.auth_url
         try {
           const authParams = new URL(oauthRedirectUrl)
@@ -317,33 +362,41 @@ export function OAuthForm({
         // PUBLIC DOMAIN: standard redirect callback
         const redirectUri = `${window.location.origin}/api/v1/oauth/callback`
         setPendingRedirectUri(redirectUri)
-        const res = await apiFetch(`/api/v1/oauth/initiate?workspace_id=${workspaceId}`, {
+        const res = await apiFetch(`/api/v1/oauth/initiate?workspace_id=${encodeURIComponent(workspaceId)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ credential_id: created.id, redirect_uri: redirectUri }),
         })
+        if (!isCurrent()) return
         if (!res.ok) {
           const data = await res.json().catch(() => ({ error: "Failed to initiate OAuth" }))
-          toast.error(typeof data.error === "string" ? data.error : "Failed to initiate OAuth flow")
+          if (!isCurrent()) return
+          toast.error(typeof data?.error === "string" ? data.error : "Failed to initiate OAuth flow")
           setAuthorizing(false)
+          busy.current = false
           return
         }
         const result = await res.json()
+        if (!isCurrent()) return
         oauthRedirectUrl = result.auth_url
       } else {
         // PRIVATE IP: loopback + manual paste (callback won't reach browser)
-        const res = await apiFetch(`/api/v1/oauth/loopback?workspace_id=${workspaceId}`, {
+        const res = await apiFetch(`/api/v1/oauth/loopback?workspace_id=${encodeURIComponent(workspaceId)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ credential_id: created.id }),
         })
+        if (!isCurrent()) return
         if (!res.ok) {
           const data = await res.json().catch(() => ({ error: "Failed to start OAuth" }))
-          toast.error(typeof data.error === "string" ? data.error : "Failed to start OAuth flow")
+          if (!isCurrent()) return
+          toast.error(typeof data?.error === "string" ? data.error : "Failed to start OAuth flow")
           setAuthorizing(false)
+          busy.current = false
           return
         }
         const result = await res.json()
+        if (!isCurrent()) return
         oauthRedirectUrl = result.auth_url
         try {
           const authParams = new URL(oauthRedirectUrl)
@@ -358,61 +411,68 @@ export function OAuthForm({
 
       // Step 3: Open auth URL in popup and start polling
       const popup = window.open(oauthRedirectUrl, "oauth_popup", "width=600,height=700,popup=yes")
+      popupRef.current = popup
       if (!popup) {
         toast.error("Popup blocked — please allow popups for this site and try again")
         setAuthorizing(false)
+        busy.current = false
         return
       }
       setPolling(true)
 
       if (!showCodeInput) {
-        setTimeout(() => setShowCodeInput(true), 5000)
+        manualTimer.current = setTimeout(() => { if (isCurrent()) setShowCodeInput(true) }, 5000)
       }
 
       let elapsed = 0
       const POLL_INTERVAL = 2000
       const MAX_WAIT = 120000
 
+      let checking = false
       pollRef.current = setInterval(async () => {
+        if (!isCurrent()) return
         elapsed += POLL_INTERVAL
         if (elapsed > MAX_WAIT) {
-          if (pollRef.current) clearInterval(pollRef.current)
-          pollRef.current = null
-          setPolling(false)
-          setAuthorizing(false)
+          completeAuthorization()
           toast.error("OAuth authorization timed out")
           return
         }
 
+        if (checking) return
+        checking = true
         try {
           const statusRes = await apiFetch(
-            `/api/v1/credentials/${created.id}?workspace_id=${workspaceId}`,
+            `/api/v1/credentials/${encodeURIComponent(created.id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
           )
+          if (!isCurrent()) return
           if (statusRes.ok) {
             const statusData = await statusRes.json()
+            if (!isCurrent()) return
             if (statusData.status === "ACTIVE") {
-              if (pollRef.current) clearInterval(pollRef.current)
-              pollRef.current = null
-              setPolling(false)
-              setAuthorizing(false)
-              setShowCodeInput(false)
-              if (popup && !popup.closed) popup.close()
+              completeAuthorization()
               toast.success("OAuth authorization successful")
               onSelectCredential(credName)
             }
           }
         } catch {
           // Continue polling
+        } finally {
+          checking = false
         }
       }, POLL_INTERVAL)
     } catch {
+      if (!isCurrent()) return
       toast.error("Network error during OAuth setup")
       setAuthorizing(false)
+      busy.current = false
     }
   }
 
   async function handleManualCodeExchange() {
-    if (!manualCode.trim() || !pendingCredId) return
+    if (!active.current || exchanging.current || !manualCode.trim() || !pendingCredId) return
+    const request = flow.current
+    const isCurrent = () => active.current && flow.current === request
+    exchanging.current = true
     setAuthorizing(true)
 
     // Extract code from URL or raw code
@@ -425,7 +485,7 @@ export function OAuthForm({
     }
 
     try {
-      const res = await apiFetch(`/api/v1/oauth/exchange?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/oauth/exchange?workspace_id=${encodeURIComponent(workspaceId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -435,22 +495,25 @@ export function OAuthForm({
         }),
       })
 
+      if (!isCurrent()) return
       if (res.ok) {
-        if (pollRef.current) clearInterval(pollRef.current)
-        pollRef.current = null
-        setPolling(false)
-        setAuthorizing(false)
-        setShowCodeInput(false)
+        completeAuthorization()
         toast.success("OAuth authorization successful")
         onSelectCredential(pendingCredName)
       } else {
         const data = await res.json().catch(() => ({ error: "Code exchange failed" }))
-        toast.error(typeof data.error === "string" ? data.error : "Failed to exchange code")
+        if (!isCurrent()) return
+        toast.error(typeof data?.error === "string" ? data.error : "Failed to exchange code")
         setAuthorizing(false)
+        busy.current = false
       }
     } catch {
+      if (!isCurrent()) return
       toast.error("Network error during code exchange")
       setAuthorizing(false)
+      busy.current = false
+    } finally {
+      exchanging.current = false
     }
   }
 

@@ -263,6 +263,13 @@ export function SkillsBrowser() {
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const oramaIndex = useRef<AnyOrama | null>(null)
   const [searchHits, setSearchHits] = useState<Set<string> | null>(null)
+  const loadGeneration = useRef(0)
+  const activeReload = useRef<(() => void) | null>(null)
+  const [indexVersion, setIndexVersion] = useState(0)
+
+  useEffect(() => {
+    setSelected(null)
+  }, [workspaceId])
 
   // buildIndex creates a fresh Orama database from a skill list. v3 of
   // the Orama API is async — both create() and insertMultiple() return
@@ -301,36 +308,45 @@ export function SkillsBrowser() {
   // concern once registries mirror in). Sort already happens server-
   // side OFFICIAL → COMMUNITY → ...
   useEffect(() => {
+    const requests = loadGeneration
+    const generation = ++requests.current
+    setSkills([])
+    oramaIndex.current = null
+    setSearchHits(null)
+    setError(null)
     if (!workspaceId) {
-      if (!wsLoading) setLoading(false)
+      setLoading(wsLoading)
       return
     }
     let cancelled = false
     setLoading(true)
-    setError(null)
     // Switching to "Installed" pushes the filter server-side so we get
     // the actual agent_skills join result rather than guessing from
     // downloads. Other tabs use the unfiltered list.
     const installedQuery = activeTab === "installed" ? "&installed=1" : ""
-    apiFetch(`/api/v1/skills?workspace_id=${workspaceId}${installedQuery}`)
+    apiFetch(`/api/v1/skills?workspace_id=${encodeURIComponent(workspaceId)}${installedQuery}`)
       .then((res) => {
         if (!res.ok) throw new Error("HTTP " + res.status)
         return res.json()
       })
       .then(async (json) => {
-        if (cancelled) return
+        if (cancelled || generation !== loadGeneration.current) return
         const data = (json as SkillCardData[]) ?? []
+        const index = await buildIndex(data)
+        if (cancelled || generation !== loadGeneration.current) return
         setSkills(data)
-        oramaIndex.current = await buildIndex(data)
+        oramaIndex.current = index
+        setIndexVersion((v) => v + 1)
       })
       .catch(() => {
-        if (!cancelled) setError("Failed to load skills")
+        if (!cancelled && generation === loadGeneration.current) setError("Failed to load skills")
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled && generation === loadGeneration.current) setLoading(false)
       })
     return () => {
       cancelled = true
+      ++requests.current
     }
   }, [workspaceId, wsLoading, buildIndex, activeTab])
 
@@ -338,6 +354,7 @@ export function SkillsBrowser() {
   // Below that we'd be re-running the search on every keystroke which
   // is wasteful; above that the user notices the lag.
   useEffect(() => {
+    let cancelled = false
     if (debounceTimer.current) clearTimeout(debounceTimer.current)
     debounceTimer.current = setTimeout(() => {
       const trimmed = searchInput.trim()
@@ -356,16 +373,17 @@ export function SkillsBrowser() {
       })
       const promise = result instanceof Promise ? result : Promise.resolve(result)
       promise.then((res) => {
-        if (!res) return
+        if (cancelled || !res) return
         const hits = new Set<string>(res.hits.map((h) => String(h.id)))
         setSearchHits(hits)
         setFilter((prev) => ({ ...prev, query: trimmed }))
       })
     }, 150)
     return () => {
+      cancelled = true
       if (debounceTimer.current) clearTimeout(debounceTimer.current)
     }
-  }, [searchInput])
+  }, [searchInput, indexVersion, workspaceId, activeTab])
 
   const filtered = useMemo(() => {
     return skills.filter((s) => {
@@ -436,23 +454,39 @@ export function SkillsBrowser() {
   }, [filter, toggle])
 
   const reload = useCallback(() => {
-    if (!workspaceId) return
+    if (!workspaceId || activeReload.current !== reload) return
     // Clear the previous error before the new fetch so a successful
     // reload after a transient failure doesn't leave the centre panel
     // stuck on the error state.
     setError(null)
-    apiFetch(`/api/v1/skills?workspace_id=${workspaceId}`)
+    const generation = ++loadGeneration.current
+    const installedQuery = activeTab === "installed" ? "&installed=1" : ""
+    apiFetch(`/api/v1/skills?workspace_id=${encodeURIComponent(workspaceId)}${installedQuery}`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then(async (json) => {
         const data = (json as SkillCardData[]) ?? []
-        setSkills(data)
         // Rebuild the Orama index — without this, search would still
         // resolve hits to old row IDs that no longer exist or have
         // been re-keyed.
-        oramaIndex.current = await buildIndex(data)
+        const index = await buildIndex(data)
+        if (generation !== loadGeneration.current) return
+        setSkills(data)
+        oramaIndex.current = index
+        setIndexVersion((v) => v + 1)
+        setLoading(false)
       })
-      .catch(() => setError("Failed to reload skills"))
-  }, [workspaceId, buildIndex])
+      .catch(() => {
+        if (generation === loadGeneration.current) {
+          setError("Failed to reload skills")
+          setLoading(false)
+        }
+      })
+  }, [workspaceId, buildIndex, activeTab])
+
+  useEffect(() => {
+    activeReload.current = reload
+    return () => { activeReload.current = null }
+  }, [reload])
 
   const bundledCount = skills.filter((s) => s.source === "BUNDLED").length
 
