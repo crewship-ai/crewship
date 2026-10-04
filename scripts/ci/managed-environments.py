@@ -29,14 +29,22 @@ TESTS = {
     'internal/toolchain': {'TestQualificationThroughDockerRuntime'},
     'internal/devcontainer': {'TestProvisionImmutableArtifact_RealRebuild'},
 }
-REQUIRED = {(PREFIX + package, name) for package, names in TESTS.items() for name in names}
+REQUIRED_TOP_LEVEL = {(PREFIX + package, name) for package, names in TESTS.items() for name in names}
+# Optional explicit child catalog; a green parent cannot replace its evidence.
+CHILDREN = {}
+REQUIRED_CHILDREN = {(PREFIX + package, parent + '/' + child)
+                     for (package, parent), children in CHILDREN.items() for child in children}
+REQUIRED = REQUIRED_TOP_LEVEL | REQUIRED_CHILDREN
 
 
 def failures(events, returncode):
     started, passed, rejected = set(), set(), set()
     for event in events:
         key = (event.get('Package'), event.get('Test'))
+        parent = (key[0], (key[1] or '').split('/')[0])
         if key not in REQUIRED:
+            if parent in REQUIRED_TOP_LEVEL and event.get('Action') in ('skip', 'fail'):
+                rejected.add(key)
             continue
         action = event.get('Action')
         if action == 'run':

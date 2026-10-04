@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('managed', Path(__file__).with_name('managed-environments.py'))
 managed = importlib.util.module_from_spec(spec)
@@ -47,3 +48,22 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
                 command = launcher if package == 'internal/orchestrator' else legacy
                 self.assertIn(name, command[command.index('-run') + 1])
                 self.assertIn('./' + package, command)
+
+    def test_skipped_or_failed_child_cannot_hide_behind_parent_pass(self):
+        package, parent = sorted(managed.REQUIRED_TOP_LEVEL)[0]
+        for action in ('skip', 'fail'):
+            events = self.passing() + [{'Package': package, 'Test': parent + '/control', 'Action': action}]
+            self.assertTrue(managed.failures(events, 0))
+
+    def test_catalogued_child_requires_start_pass_and_no_rejection(self):
+        package, parent = sorted(managed.REQUIRED_TOP_LEVEL)[0]
+        child = (package, parent + '/mandatory')
+        with patch.object(managed, 'REQUIRED', managed.REQUIRED | {child}):
+            complete = self.passing()
+            self.assertEqual(managed.failures(complete, 0), [])
+            for action in ('run', 'pass'):
+                events = [e for e in complete if not ((e['Package'], e['Test']) == child and e['Action'] == action)]
+                self.assertTrue(managed.failures(events, 0))
+            for action in ('skip', 'fail'):
+                events = complete + [{'Package': child[0], 'Test': child[1], 'Action': action}]
+                self.assertTrue(managed.failures(events, 0))
