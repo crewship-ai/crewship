@@ -1233,9 +1233,10 @@ func TestStagedStartRealDocker(t *testing.T) {
 				if stateErr != nil || next.Phase != "staging" || next.Nonce == state.Nonce {
 					t.Fatalf("mid-bootstrap restart lacked fresh staging nonce: %+v %v", next, stateErr)
 				}
-			} else if nextInspect.Container.State.ExitCode != 0 || !strings.Contains(e.Error(), "bootstrap outcome unknown") {
+			} else if !midBootstrapFailClosedStop(nextInspect.Container.State, cid, e) {
 				t.Fatalf("unexpected stop without fail-closed unknown-bootstrap verdict: state=%+v err=%v", nextInspect.Container.State, e)
 			}
+			t.Logf("mid-bootstrap attempt=%d old_started_at=%s next_state=%+v ensure=%v", attempt+1, got.Container.State.StartedAt, nextInspect.Container.State, e)
 			assertNoImage(t, before+1)
 			if e := os.WriteFile(releaseFile, []byte("1"), 0666); e != nil {
 				t.Fatal(e)
@@ -1314,6 +1315,56 @@ func TestStagedStartRealDocker(t *testing.T) {
 	})
 	probe(t, "1001:1001", []string{"/bin/sh", "-c", "test $(cat /home/agent/retained) = persistent"})
 	networkCheck(t)
+}
+
+// The interrupted exec must be SIGKILLed by the injected restart, and the
+// keeper status read must fail or remain incomplete. No other unknown
+// outcome justifies accepting a stopped replacement generation.
+func midBootstrapFailClosedStop(state *container.State, id string, err error) bool {
+	if state == nil || state.Running || state.Status != "exited" || state.OOMKilled || state.Dead || state.Error != "" || err == nil {
+		return false
+	}
+	// stopUnfenced sends Docker's default TERM to the replacement keeper.
+	// Its signal.Notify handler exits zero; TERM before that registration can
+	// terminate the Go process with 128+SIGTERM instead. Neither is readiness.
+	bootstrap, status, joined := strings.Cut(err.Error(), "\n")
+	return (state.ExitCode == 0 || state.ExitCode == 128+int(syscall.SIGTERM)) &&
+		joined && strings.HasPrefix(bootstrap, "staged start: bootstrap outcome unknown: staged start: trusted exec ") &&
+		strings.HasSuffix(bootstrap, " incomplete or exited 137 (bounded stderr 0 bytes withheld)") &&
+		(status == "Error response from daemon: container "+id+" is not running" ||
+			(strings.HasPrefix(status, "staged start: trusted exec ") &&
+				strings.HasSuffix(status, " incomplete or exited 0 (bounded stderr 0 bytes withheld)")))
+}
+
+func TestMidBootstrapFailClosedStop(t *testing.T) {
+	const id = "replacement-container"
+	interrupted := fmt.Errorf("staged start: bootstrap outcome unknown: %w", errors.Join(
+		errors.New("staged start: trusted exec interrupted-exec incomplete or exited 137 (bounded stderr 0 bytes withheld)"),
+		fmt.Errorf("Error response from daemon: container %s is not running", id)))
+	for _, tc := range []struct {
+		name string
+		code int
+		err  error
+		want bool
+	}{
+		{"graceful stop", 0, interrupted, true},
+		{"TERM during keeper startup", 143, interrupted, true},
+		{"incomplete status exec", 143, fmt.Errorf("%s", strings.ReplaceAll(interrupted.Error(), "Error response from daemon: container "+id+" is not running", "staged start: trusted exec status-exec incomplete or exited 0 (bounded stderr 0 bytes withheld)")), true},
+		{"SIGKILL replacement", 137, interrupted, false},
+		{"keeper failure", 1, interrupted, false},
+		{"no verdict", 143, nil, false},
+		{"arbitrary unknown outcome", 143, errors.New("bootstrap outcome unknown"), false},
+		{"staged denial only", 143, errStagedDenied, false},
+		{"wrong container", 143, fmt.Errorf("%s", strings.ReplaceAll(interrupted.Error(), id, "other-container")), false},
+		{"wrong exec exit", 143, fmt.Errorf("%s", strings.ReplaceAll(interrupted.Error(), "exited 137", "exited 1")), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := &container.State{Status: "exited", ExitCode: tc.code}
+			if got := midBootstrapFailClosedStop(state, id, tc.err); got != tc.want {
+				t.Fatalf("accepted=%v want=%v state=%+v err=%v", got, tc.want, state, tc.err)
+			}
+		})
+	}
 }
 
 // This static, fixture-owned shim delays the real qualified helper process or
