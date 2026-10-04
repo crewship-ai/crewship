@@ -54,6 +54,12 @@ import (
 type Server struct {
 	containerCleanup *resourcelifecycle.Controller
 
+	recoveredStopsMu        sync.Mutex
+	recoveredStopsCursor    string
+	recoveredRuntimesMu     sync.Mutex
+	recoveredRuntimes       map[string]orchestrator.RunState
+	recoveredRuntimesCursor string
+
 	httpServer    *http.Server
 	ipcServer     *http.Server
 	mux           *http.ServeMux
@@ -1201,6 +1207,11 @@ func (s *Server) mountAPIRouter(
 // orchestrator and the IPC base URL containers use to reach this server.
 func buildOrchestrator(cfg *config.Config, logger *slog.Logger, ctr provider.ContainerProvider, sta provider.StateProvider) (*orchestrator.Orchestrator, string) {
 	orch := orchestrator.New(ctr, sta, logger, orchestrator.WithMaxConcurrentRuns(cfg.Orchestrator.MaxConcurrentRuns))
+	if managed, ok := ctr.(interface {
+		SetRuntimeIdleVerifier(func(context.Context, string, string) error)
+	}); ok {
+		managed.SetRuntimeIdleVerifier(orch.VerifyRuntimeIdle)
+	}
 	if cfg.Container.SidecarEnabled {
 		orch.SetSidecarEnabled(true)
 		logger.Info("sidecar proxy enabled for credential injection")

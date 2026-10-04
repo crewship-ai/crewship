@@ -424,8 +424,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		releaseAgent()
 		return fmt.Errorf("acquire run slot: %w", slotErr)
 	}
-	// A detached hold owns both reservations until confirmed termination.
-	releaseRunSlot := func() { releaseServer(); releaseAgent() }
+	// A detached hold owns capacity AND the concrete runtime until confirmed
+	// termination. Retain an existing handle instead of reacquiring a reader:
+	// a queued activation may be waiting for the caller's own reservation.
+	runtimeUse, useErr := o.retainRuntimeUse(ctx, req)
+	if useErr != nil {
+		releaseServer()
+		releaseAgent()
+		return fmt.Errorf("reserve run runtime: %w", useErr)
+	}
+	releaseRunSlot := func() { runtimeUse.Release(); releaseServer(); releaseAgent() }
 	// slotTransferredToHold is set when a detached exec whose stop could not
 	// be confirmed hands the slot to a detached hold (#2626): the watcher
 	// owns the release from there, because capacity must stay occupied for
@@ -474,14 +482,17 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// paths reuse the CALLER's chat id — so two live runs of one agent shared
 	// this row and each terminal status overwrote the other's. RunState keeps
 	// ChatID as its own field, so nothing is lost by the change.
+	req.runtimeImageID = o.observeRunImage(ctx, req.ContainerID)
 	runState := RunState{
-		ID:          req.RunID,
-		AgentID:     req.AgentID,
-		AgentSlug:   req.AgentSlug,
-		ChatID:      req.ChatID,
-		Status:      "running",
-		StartedAt:   time.Now(),
-		ContainerID: req.ContainerID,
+		WorkspaceID:    req.WorkspaceID,
+		RuntimeImageID: req.runtimeImageID,
+		ID:             req.RunID,
+		AgentID:        req.AgentID,
+		AgentSlug:      req.AgentSlug,
+		ChatID:         req.ChatID,
+		Status:         "running",
+		StartedAt:      time.Now(),
+		ContainerID:    req.ContainerID,
 	}
 
 	cred := o.selectCredential(req.Credentials)
@@ -1837,6 +1848,11 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 
 	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)
 
+	if err := setupManagedToolchainSettings(ctx, batch, req, o.logger); err != nil {
+		o.failRun(ctx, req, runID, "error")
+		return nil, "", fmt.Errorf("prepare managed toolchain settings: %w", err)
+	}
+
 	// Write non-secret Claude config (skip onboarding). Credentials are
 	// also available as files in /secrets/{agent-slug}/ for CLI tools.
 	if err := setupClaudeConfig(ctx, batch, req.ContainerID, req.AgentSlug, req.RunID, o.logger); err != nil {
@@ -1881,6 +1897,13 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	unlockSecrets()
 	if flushErr != nil {
 		o.logger.Warn("preflight steps failed", "error", flushErr, "agent_id", req.AgentID)
+	}
+
+	if req.CLIAdapter == "GEMINI_CLI" && batch.stepFailed("file:"+managedGeminiSettingsFile) {
+		// An earlier read probe may already have flushed this step. Its
+		// recorded failure still matters even when the last flush succeeded.
+		o.failRun(ctx, req, runID, "error")
+		return nil, "", fmt.Errorf("prepare managed toolchain settings: Gemini system settings were not written")
 	}
 
 	if fileCreds && (batch.stepFailed(preflightStepAgentDirs) || batch.stepFailed(preflightStepCredentials)) {

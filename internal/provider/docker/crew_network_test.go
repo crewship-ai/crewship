@@ -139,18 +139,18 @@ func TestHostRoutesVisible(t *testing.T) {
 // the #2767 migration test).
 func TestEvictWarmContainer(t *testing.T) {
 	p := &Provider{}
-	p.setWarm("crew-a", "abc123def456")
-	p.setWarm("crew-b", "zzz")
+	p.setWarm("crew-a", "abc123def456", "")
+	p.setWarm("crew-b", "zzz", "")
 	p.evictWarmContainer("abc123def456")
-	if _, ok := p.warmHit("crew-a"); ok {
+	if _, ok := p.warmHit("crew-a", ""); ok {
 		t.Fatal("warm entry of the stopped container survived")
 	}
-	if _, ok := p.warmHit("crew-b"); !ok {
+	if _, ok := p.warmHit("crew-b", ""); !ok {
 		t.Fatal("another crew's warm entry was dropped")
 	}
-	p.setWarm("crew-a", "abc123def456")
+	p.setWarm("crew-a", "abc123def456", "")
 	p.evictWarmContainer("abc123def456"[:12])
-	if _, ok := p.warmHit("crew-a"); ok {
+	if _, ok := p.warmHit("crew-a", ""); ok {
 		t.Fatal("a short container id must evict too")
 	}
 }

@@ -139,6 +139,12 @@ type Provider struct {
 	// run in parallel.
 	crewLocks sync.Map // crew_id (string) → *sync.Mutex
 
+	// Runtime users outlive EnsureCrewRuntime; image activation requires their
+	// exclusive counterpart. The idle verifier covers recovered/external work.
+	runtimeUses         sync.Map // crew id -> *provider.RuntimeUseGate
+	runtimeIdleMu       sync.RWMutex
+	runtimeIdleVerifier func(context.Context, string, string) error
+
 	// migrationLocks serializes the pre-C1 legacy-resource migration by
 	// *legacy slug*, not crew id. The legacy resources reconciled in
 	// migrateLegacyCrewResources ("<prefix>-{team,home,tools}-<slug>") are
@@ -197,19 +203,21 @@ type Provider struct {
 const warmCrewTTL = 3 * time.Second
 
 type warmCrewEntry struct {
+	image   string
 	id      string
 	expires time.Time
 }
 
 // warmHit returns the cached running container id for a crew when the entry
-// is still fresh, evicting an expired one.
-func (p *Provider) warmHit(crewID string) (string, bool) {
+// is still fresh and any explicit image selection matches. Expired or
+// differently selected entries are evicted.
+func (p *Provider) warmHit(crewID, requestedImage string) (string, bool) {
 	v, ok := p.warmCrew.Load(crewID)
 	if !ok {
 		return "", false
 	}
 	e := v.(warmCrewEntry)
-	if time.Now().After(e.expires) {
+	if time.Now().After(e.expires) || (requestedImage != "" && e.image != requestedImage) {
 		p.warmCrew.Delete(crewID)
 		return "", false
 	}
@@ -217,8 +225,8 @@ func (p *Provider) warmHit(crewID string) (string, bool) {
 }
 
 // setWarm records that crewID's container is running (extends the TTL).
-func (p *Provider) setWarm(crewID, containerID string) {
-	p.warmCrew.Store(crewID, warmCrewEntry{id: containerID, expires: time.Now().Add(warmCrewTTL)})
+func (p *Provider) setWarm(crewID, containerID, image string) {
+	p.warmCrew.Store(crewID, warmCrewEntry{id: containerID, image: image, expires: time.Now().Add(warmCrewTTL)})
 }
 
 // evictWarm drops any cached fact for a crew — called whenever we tear a
@@ -801,7 +809,7 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) (imageProvenance
 	// a gap: the audit answer for a cache image is its provenance chain
 	// (provisioning.step rows naming the base image it was built FROM), not a
 	// manifest digest that does not exist.
-	if strings.HasPrefix(ref, localCacheImagePrefix) {
+	if strings.HasPrefix(ref, localCacheImagePrefix) || dockerutil.IsLocalImageID(ref) {
 		// Distinguish "definitely absent" from "couldn't tell". The
 		// best-effort helper collapses both to absent, and ErrCachedImageMissing
 		// reaches the user as "the crew's container image is missing locally —

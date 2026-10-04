@@ -99,8 +99,8 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "ContainerInspect", HTTP: "GET /containers/{id}/json", ProxyVars: []string{"CONTAINERS"},
-		Tier: TierCore, Packages: []string{"internal/api", "internal/backup", "internal/provider/docker"},
-		Why: "state, mounts and network reads for running crews",
+		Tier: TierCore, Packages: []string{"internal/api", "internal/backup", "internal/devcontainer", "internal/provider/docker"},
+		Why: "state, mounts and network reads for running crews; effective configuration audit for disposable lock builders",
 	},
 	{
 		Method: "ContainerList", HTTP: "GET /containers/json", ProxyVars: []string{"CONTAINERS"},
@@ -149,8 +149,8 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "CopyFromContainer", HTTP: "GET /containers/{id}/archive", ProxyVars: []string{"CONTAINERS"},
-		Tier: TierCore, Packages: []string{"internal/backup"},
-		Why: "streams crew content out for a backup",
+		Tier: TierCore, Packages: []string{"internal/backup", "internal/devcontainer"},
+		Why: "streams crew backups and bounded built-toolchain inventory from stopped inspection containers",
 	},
 	{
 		Method: "CopyToContainer", HTTP: "HEAD + PUT /containers/{id}/archive", ProxyVars: []string{"CONTAINERS", proxyVarPOST},

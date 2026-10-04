@@ -202,6 +202,30 @@ The agent runs through a non-login `docker exec`, which does not read `/etc/prof
 
 ### Adapter CLIs are installed and verified
 
+Provisioning also records the required agent CLIs' observed versions and paths
+inside the image. `crewship crew provision status <slug>` shows the built
+versions; JSON output separates `toolchain.requested` selectors from
+`toolchain.built` evidence and its immutable image ID. An old image, an
+unsupported version response, or an unavailable inspector is reported as unknown.
+This describes the built image, not a running agent's writable files or a
+compatibility qualification for a particular model/account. Native Apple
+Containers currently bakes the inventory but cannot read it back through this
+inspector; Docker-backed installations can.
+
+Crewship disables Claude Code's background updater with `DISABLE_AUTOUPDATER=1`
+and Codex's startup update check with `check_for_update_on_startup=false`.
+OpenCode receives `OPENCODE_DISABLE_AUTOUPDATE=1`. Gemini receives per-run system
+settings that disable automatic updates and update notifications, including the
+older inverted setting names. Failure to write those settings stops preflight.
+The Gemini and OpenCode controls were checked against
+[Gemini v0.62.0](https://github.com/google-gemini/gemini-cli/blob/v0.62.0/packages/cli/src/utils/handleAutoUpdate.ts)
+and [OpenCode v1.18.34](https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/cli/upgrade.ts).
+Their current automatic updater call sites are interactive; these settings also
+cover interactive descendants inheriting the run environment. They do not stop
+an agent with a shell from deliberately installing or running another binary.
+Equivalent controls for Cursor and Droid have not been qualified.
+Updates belong to environment provisioning.
+
 An agent on `CLAUDE_CODE` needs `claude` in the image; `CODEX_CLI` needs `codex`, `GEMINI_CLI` `gemini`, `OPENCODE` `opencode`, `CURSOR_CLI` `cursor-agent`, `FACTORY_DROID` `droid`. Nobody has to remember that: every build reads the crew's agents and adds what is missing — a mise tool for each CLI no declared feature already provides (`claude`, `codex`, `gemini-cli`, `opencode`, `cursor-agent`), an install command for `droid`. Your own choices are kept: a pinned `claude` version in the mise config, or the `claude-code` feature, is used as-is.
 
 After the install steps the build runs `command -v` for every required binary as the agent user, with the agent's PATH. A binary that did not land fails the build with its name — `adapter CLI not installed in this image: claude` — instead of the first chat message failing with "No such file or directory".
@@ -265,7 +289,7 @@ Binaries the build installs on the agent's behalf that mise does not carry (the 
     Server-side validation rejects blobs with whitespace/control chars in the image ref or non-allowlisted feature IDs. JSON config has per-field size limits enforced by the API:
 
     - `devcontainer_config`: 100 KB max
-    - `mise_config`: 10 KB max
+    - `mise_config`: 10 KiB for configuration; an optional native lock has its own 512 KiB decoded-file budget and 4 MiB JSON envelope limit
 
     Configs larger than these limits are rejected at the API layer with HTTP 400. This prevents accidentally storing huge configs (often a sign of pasted-in log output or wrong field).
   </Tab>
@@ -277,9 +301,9 @@ Binaries the build installs on the agent's behalf that mise does not carry (the 
 
 Provisioning is **asynchronous**. The CLI command returns immediately after the backend enqueues a job; you then poll for status. Five triggers can put a crew into provisioning state:
 
-0. **Proactive auto-provision on config save** — when a crew is **created** (`POST /api/v1/crews`, `crewship apply`, `crewship crew create`) or its **devcontainer / mise / runtime-image config changes** (`PATCH /api/v1/crews/{crewId}`), the handler immediately kicks off the build in the background (`CrewHandler.maybeAutoProvision`). This is the primary path: by the time anyone dispatches an issue the image is usually already cached, so operators never touch a "Build now" button. Editing the config invalidates the old cached image, so the rebuild keeps the crew current automatically.
+0. **Proactive auto-provision on config save** — when a crew is **created** (`POST /api/v1/crews`, `crewship apply`, `crewship crew create`) or its **devcontainer / mise / runtime-image config changes** (`PATCH /api/v1/crews/{crewId}`), the handler immediately kicks off the build in the background (`CrewHandler.maybeAutoProvision`). This is the primary path: by the time anyone dispatches an issue the image is usually already cached, so operators never touch a "Build now" button. Editing the config invalidates the old cache selection and prepares an updated image. Managed Docker starts wait for current reservations and replace the container only after confirming it is idle. Unresolved occupancy leaves the update pending; an explicit stop/restart remains available after finishing existing work.
 1. **Explicit CLI/API trigger** — `crewship crew provision <slug>` or `POST /api/v1/crews/{crewId}/provision`.
-2. **Crew rebuild** — `crewship crew rebuild <slug>` clears the cached image marker and re-runs provision.
+2. **Crew rebuild** — `crewship crew rebuild <slug>` bypasses the provisioned-image cache and installation-layer caches. It re-runs provisioning, so floating tool selectors can resolve newer versions; explicit versions in the configuration are retained. A rejected request (already provisioning or rate limited) leaves the current cache marker intact. This builds an image; it does not itself replace an already running container.
 3. **Auto-provision on first chat** *(PR #230)* — when an operator opens a chat with an agent in a crew that has a config but no cached image, the chat handler calls `ProvisioningHandler.EnqueueForCrew` directly. The chat surface renders an inline `CrewProvisioningCard` with the live progress checklist; once provisioning succeeds, the agent's first message starts on the freshly cached image.
 4. **Auto-provision on dispatch** — when an **issue, mission, or routine** is dispatched to an agent in a crew that needs provisioning but has no usable cached image (never built, or the cache tag was pruned from the daemon), the dispatch path (`AssignmentHandler.runAssignment` → `ProvisioningHandler.EnsureProvisioned`) **blocks until the image is built**, then starts the agent on it. The same `provision.*` workspace events fire, so the top-right toolbar provisioning popover lights up ("preparing container") with no extra wiring. If the build fails or times out, the run finishes with a clear *"preparing the crew container failed: …"* message instead of the cryptic `exit 127` you'd get from launching the agent on a bare base image with no `claude` CLI. This guarantee means a crew is runnable the moment it's created — operators don't have to remember to `crewship crew provision` first.
 
@@ -648,3 +672,274 @@ The legacy image is no longer published by CI (`agent-runtime.yml` workflow dele
 - [Configuration → Environment Variables](/configuration/environment) — `CREWSHIP_SIDECAR_PATH`, `CREWSHIP_ENTRYPOINT_PATH`, `CREWSHIP_SKIP_SIDECAR`.
 - [Security → Container Isolation](/security/container-isolation) — UID boundaries, capability drops, network policy.
 - Code of record: `internal/devcontainer/`, `internal/provider/docker/docker.go`, `cmd/crewship/seeddata/crews.go`, `cmd/crewship/cmd_crew_config.go`, `cmd/crewship/cmd_crew_provision.go`.
+
+### Built environment history
+
+`crewship crew provision revisions <crew>` lists the latest 100 immutable build
+records for a crew. The API is `GET /api/v1/crews/{crewId}/provision/revisions`.
+Each record identifies the definition hash, build hash, immutable image ID,
+observed CLI inventory and build time. Records are scoped to the crew's
+workspace; raw configuration and environment variable values are not copied
+into history. Reusing the same image for the same definition reuses its record.
+Offline qualification is included in that immutable build evidence; it is not
+a current provider-authentication claim.
+
+By default, offline AI CLI checks record evidence without preventing publication.
+To require them for a crew, set `spec.mise.ai_cli_check: required` in its Crew
+manifest, or `"ai_cli_check":"required"` alongside `tools` in the managed
+`mise_config` JSON. `record` explicitly selects the compatibility default;
+other values are rejected. This is Crewship metadata and is not emitted into
+native mise TOML.
+
+The crew creation wizard preserves this policy when importing Crew YAML, even
+when the mise section has no explicit tools. A nonempty typed `ai_cli_check`
+overrides the value in `spec.mise.raw`; unsupported typed values are rejected.
+
+A required check accepts only successful evidence bound to the built immutable
+image, with a passing startup/version probe for every recorded and required
+agent CLI. Missing inventory, an unavailable runtime, mismatched evidence or
+failed probes fail the provisioning job before a new revision/current image is
+published. The previous image and requirements stay selected. Native providers
+without the necessary inspection and offline sandbox capability cannot satisfy
+this opt-in requirement. These checks do not prove account/model compatibility,
+real provider authentication or safe automatic activation.
+
+Workspace and crew backups include these records; restoring them preserves
+provenance and does not restore the referenced image or activate an instance.
+
+A cache hit whose feature requirements cannot be resolved fails provisioning
+and leaves the previous selection intact. A successful empty build clears the
+previous artifact's runtime requirements and feature evidence.
+
+A completed build verifies that the crew definition and required agent adapters
+still match the inputs it built. If they changed, Crewship refuses to publish the stale result and retries the
+current definition within the same job, retaining pending messages. Retries share
+the original 30-minute budget and stop after eight superseded attempts; ongoing
+edits or a deleted crew produce a terminal failure without replacing the previous
+selection.
+The check and publication are one database transaction.
+
+This history is provenance metadata. It neither preserves Docker images from
+pruning nor changes a running container, and it does not provide rollback or
+RAM snapshots. Builds without recorded immutable image identity do not invent
+a revision. These records will support a later explicit retention and safe
+activation policy.
+
+### Immutable Docker build references
+
+Docker provisioning records a full local image ID in `cached_image`. A shared
+`crewship-cache:*` tag is only a cache lookup alias; moving it during a later
+build does not change what a previously provisioned crew selected. A failed
+explicit rebuild leaves the previous reference and requirements intact. Builds
+still in progress do not replace the running container.
+
+The build cache key changed once for this transition: new builds use new aliases
+so they do not move tags retained by older crew records. Existing records are not
+rewritten. Native Apple builds still return tags because that provider does not
+yet expose equivalent image inspection through this interface.
+
+The provisioning API's cache inventory, deletion and orphan sweeper recognize
+crew references by image ID. The separate opt-in
+[idle cache eviction policy](/specs/container-cleanup#idle-retention) also keeps
+images selected by live crews in this installation, including legacy tag aliases. Revision history does not retain image bytes or guarantee rollback. External
+`docker image prune`, forced admin deletion and disk loss also remain outside
+this protection. A bare provider start requesting a different image returns
+`image update pending` while the current container is running, paused or its
+state is unknown. Managed starts reserve the runtime through preparation and
+execution; an image change waits for existing reservations, then verifies
+installation ownership and controller/runtime occupancy before stopping the
+old instance. A freshly inspected stopped container can be removed without
+force and recreated. Selecting the same immutable artifact by ID does not
+require a restart even if the container was created using a tag. A runtime
+confirmed to be in restart backoff retains the separate crash-recovery path.
+
+The orphan sweeper also recognizes published image IDs recorded in revision
+history after a rebuild removes their last tag. With cache auto-deletion enabled,
+the existing age floor and live-crew reference checks apply to those artifacts
+too; removal remains non-force. Unrecognized images without tags are left alone.
+An unpublished build, or an artifact whose history was removed with its crew,
+cannot be identified this way. Revision history is not a promise to retain an
+old image for rollback.
+
+Legacy agent runs inspect their actual container at admission and retain its
+immutable source image ID as `runtime_image_id` in run state and `exec.command`
+events. The lookup has a two-second timeout; unavailable evidence is omitted,
+never inferred from the crew's currently selected image. This identifies the
+container's source, not subsequent filesystem changes, the executed CLI's
+version, or a unique environment definition revision. Restricted attempts have
+their own frozen-input evidence; this field does not change their contract.
+
+Automatic activation requires no local holds, local or unresolved recovered
+invocations, external exposures, or additional workload processes. A bounded
+kernel process census recognizes the standard sleep/init entrypoint and the
+trusted sidecar UID. Missing state, incomplete observations and custom resident
+process trees keep the update pending. Idle expiry uses the same reservation
+exclusion. Terminal sessions retain the existing runtime rather than selecting
+a pending image, and prevent its replacement while connected.
+
+This is controller-local coordination for managed runtime users, not a guarantee
+against an operator concurrently using Docker directly or replacing the daemon.
+Providers without managed admission do not gain automatic activation. Explicit
+operator restart remains disruptive; finish existing work before using it to
+resolve a pending update. No scheduled updater or crash-safe output replay is
+implied by this activation path.
+
+### Supplying a native mise lock
+
+The managed build can consume a complete native mise lock bundle. Generate
+`mise.lock` with mise for the **container's** target platform, then run:
+
+```bash
+crewship crew provision lock-pack /path/to/mise-config-directory > lock-bundle.json
+```
+
+This local command reads only `mise.lock` and `.mise/locks/`, rejects symlinks,
+limits file sizes, and does not contact Crewship or change the environment. Keep
+auxiliary files: npm-backed tools may use an aube lock beside `mise.lock`.
+The bundle supports up to 128 UTF-8 files, 128 KiB per file and 512 KiB total.
+
+Put the resulting JSON object in `spec.mise.lock` in a `kind: Crew` manifest,
+alongside `spec.mise.tools`. JSON configuration stored in `mise_config` accepts
+that same `lock` object. Manifest export/import and the visual tools editor
+preserve it. Raw TOML input still supports the existing `[tools]`/`[env]` subset;
+the lock bundle is a Crewship JSON/YAML field, not a new TOML section.
+
+With a bundle, builds install using `mise install --locked --force --yes`.
+An absent version/platform, invalid lock or checksum mismatch fails the build;
+it does not fall back to a floating install. Force reinstalls tools so an
+already-installed version in the base image cannot bypass this check. Added AI
+adapters still need matching entries in the supplied lock. Changing a selector
+in the visual editor preserves the lock and may therefore require regenerating
+it before the next build. Remove the lock explicitly to return to ordinary
+unlocked installation.
+
+Mise owns resolution and backend semantics. A native lock without an upstream
+checksum does not gain one from Crewship, and support varies by backend. The
+bundle does not lock the base image, OS packages, features, build hooks or the
+mise executable itself. It is dependency input, separate from observed CLI
+versions and from qualification of real model/auth combinations. This slice
+adds no scheduled updates; runtime activation is governed separately above.
+
+### Offline CLI qualification
+
+On Docker, provisioning also checks the recorded CLI binaries in a disposable
+instance pinned to the built image ID. The instance runs as UID 1001 with no
+external network, no persistent mounts, a read-only root filesystem and bounded
+CPU, memory, process count, output and execution time. Its temporary home is
+removed after the check. Crewship supplies no provider credentials. The
+qualification requests a 90-second lifetime; the initial backend accepts at
+most two minutes and uses a separate UID 1002 for its lifetime keeper. This
+temporary profile disables inherited image healthchecks and is not a durable
+agent-run backend.
+
+`toolchain.built.qualification` reports the image ID, per-tool result and overall
+status. `passed` means that the recorded binaries started and reported the same
+versions in this offline profile. It does **not** verify provider login, model
+compatibility, streaming, or isolation of ordinary crew runs. A failed or
+unavailable check is reported without replacing an active environment or
+silently relaxing the qualification profile. Older images and unsupported
+backends can report `unavailable`. The initial runtime port refuses persistent
+mounts and RAM suspension explicitly.
+
+
+### Resolving or updating a lock with Crewship
+
+`crewship crew provision lock-resolve mise.json --image sha256:<local-image-id>`
+resolves a mise JSON/TOML tool configuration in a disposable Docker builder.
+Supply a trusted, already-present Linux image containing `/usr/local/bin/mise`,
+`/usr/bin/env`, `/bin/sleep` and `/bin/tar`. No image is pulled automatically.
+The resolver selects `linux-x64` or `linux-arm64` from that image's architecture;
+it does not infer the target from the CLI host's operating system.
+
+The JSON result contains `lock`, `resolver_image_id`, `platform`, `mise_version`
+and `tools` with native previous/resolved version lists and `version_changed`.
+`selectors_sha256` binds the requested tool selectors; `previous_lock_sha256`
+(when supplied) and `lock_sha256` cover every file in the complete bundle.
+`lock_changed` includes source, checksum, auxiliary-file and formatting changes,
+so it can be true even when no tool version changes. These hashes identify the
+proposal's inputs and output; they are not signed approval or authorization.
+Apply its `lock` through `spec.mise.lock` and the ordinary build
+path. For an update, include the previous `lock` alongside `tools` in the input
+JSON and pass `--bump`. Mise updates within each selector; an exact version
+remains exact. The result is a proposal, with no running-crew or server changes.
+
+This is trusted build work with Docker bridge networking for registries. It
+uses a read-only root, no persistent or host mounts, UID 1001 for resolution,
+dropped capabilities, bounded memory/CPU/processes, a private 256 MiB temporary
+filesystem and a five-minute operation deadline. A separate UID-1002 keeper
+exits after six minutes if the client disappears; stopped-container cleanup
+still depends on the client or provisioning cleanup. The image, its tool
+backends and the Docker host remain trusted. This is not the restricted agent
+network policy or hostile-image execution.
+
+Configuration environment values are excluded; private registry credentials
+and host mise configuration are not inherited. Input is limited to 4 MiB;
+native bundles retain the limits above, and resolver diagnostics are bounded.
+Resolution does not install the resulting toolchain, prove a real provider
+login, schedule an update or activate a revision.
+
+The required check also compares explicit exact mise CLI selectors with the
+observed version. An overlapping devcontainer feature does not hide an explicit
+mise pin. Floating selectors remain the responsibility of native locked install;
+this check does not implement another dependency resolver.
+
+### Python tools need a prepared resolver and builder
+
+The resolver image must contain the native backend's prerequisites as well as
+mise. For Python package graphs, prepare a compatible Python interpreter and
+`uv` in that trusted image; the build image must also provide the interpreter
+mise selects. Crewship's resolver does not install these prerequisites or
+silently relax a locked installation. See the upstream
+[PyPI backend requirements](https://mise.jdx.dev/dev-tools/backends/pypi.html).
+
+In a live Ansible check, an image without uv produced only a top-level version
+record; the subsequent `mise install --locked` correctly rejected its missing
+Python graph. Adding uv without a sufficiently recent interpreter also failed.
+Treat resolution as a proposal, then verify installation and the actual tool
+before selecting the resulting environment. The Ansible distribution version
+and the `ansible-core` version printed by `ansible --version` are different
+identities.
+
+An explicit `--bump` can refresh dependency metadata even when an exact
+package version stays unchanged. Review `lock_changed` and the complete bundle,
+not only the top-level version diff. A normal resolution without `--bump`
+reuses the existing native lock; no update scheduler is introduced here.
+
+### Applying a reviewed native lock proposal
+
+`crewship crew provision lock-apply mise.json proposal.json` prints updated mise
+JSON only if the current selectors and previous complete lock match the plan,
+and the proposed lock still matches its digest. Redirect to a **new** output
+file, then review and apply that configuration through your ordinary manifest
+or crew API workflow. The command is local and offline; it does not install
+software, start a build or replace a running environment.
+
+Environment and policy fields come from the current configuration, not from
+the resolver. Unknown JSON fields are preserved. A changed selector or old
+lock requires a new plan. Hashes prevent accidentally applying a stale or
+corrupted proposal; they do not authenticate its author or independently prove
+native resolution. The normal locked build remains responsible for checking
+that lock against the selectors. Provisioning can also require the separate
+image-bound offline AI CLI checks described above.
+
+### Viewing built CLI versions
+
+Crew settings → Runtime shows requested AI CLI selectors alongside versions
+recorded in the selected build. Startup-check status belongs to that same image;
+older or unavailable evidence remains unknown. These observations do not claim
+that an already-running environment has switched image or that its writable
+files are unchanged. Provider sign-in is a separate check.
+
+The panel refreshes after this crew's build completes or fails and after a
+realtime reconnect. Use its refresh button if live updates are unavailable.
+Viewers can inspect versions without permission to modify the environment.
+
+### Preserving configuration the visual editor cannot represent
+
+The visual tool picker edits JSON with string tool selectors. Existing TOML,
+structured tool values, or malformed input remain unchanged when you edit
+another runtime setting. The picker shows the preserved source instead of
+offering controls that would discard it. Edit that configuration through your
+Crew manifest or CLI; the raw runtime editor keeps unsupported source read-only.
+Supported JSON edits preserve other fields, including environment, lock and
+CLI-check policy. A rejected raw edit applies neither configuration document.

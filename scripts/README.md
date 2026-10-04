@@ -55,7 +55,7 @@ commands. They may publish or remove release/package artifacts.
 | [go-toolchain-pin.sh](go-toolchain-pin.sh), [pr-image-build-paths.sh](pr-image-build-paths.sh) | Toolchain version and CI image-path consistency |
 | [no-root-binaries.sh](no-root-binaries.sh), [skip-budget.sh](skip-budget.sh) | Root build-output guard and test-skip budget (`skip-budget.txt`) |
 | [typecheck-tests.mjs](typecheck-tests.mjs) | Test fixture type checking via `pnpm test:types` |
-| [check-control-accessibility.tsx](check-control-accessibility.tsx) | Renders controls in Chromium and writes measurements/screenshots under `/tmp`; requires browser dependencies |
+| [check-control-accessibility.tsx](check-control-accessibility.tsx) | Renders controls in Chromium and writes measurements/screenshots into a fresh private directory under the OS temporary directory (printed on stderr and retained for inspection); requires browser dependencies |
 | [cli-command-smoke.sh](cli-command-smoke.sh), [cli-exit-code-contract.sh](cli-exit-code-contract.sh) | Built CLI parser/help and exit-code contracts |
 | [test-harness-integrity.sh](test-harness-integrity.sh) | Checks the acceptance harness itself |
 | [ci/general-race-shard.py](ci/general-race-shard.py) | `python3 scripts/ci/general-race-shard.py run INDEX COUNT TIMEOUT_SECONDS`: runs a complete package partition under the race detector; checked-in measured costs balance work, while fresh `go list` inventory determines coverage; writes the partition record to `.ci-results/` |
@@ -70,6 +70,7 @@ name as proof that it never contacts a server.
 
 | Location | Requirements and effects |
 | --- | --- |
+| [ci/managed-environments.py](ci/managed-environments.py) | Requires local Docker `alpine:3`; runs five named synthetic environment fixtures with isolated resources; fails on skipped/missing tests; no provider credentials or global cleanup |
 | [api-contract/](api-contract/README.md) | API contract/fuzz checks; use its isolation, authentication and pacing instructions |
 | [test-harness/](test-harness/) | CLI-driven acceptance scenarios; may create and delete resources on the selected server |
 | [test-pages-apps.sh](test-pages-apps.sh) | Pages application acceptance checks; inspect required build/runtime setup |

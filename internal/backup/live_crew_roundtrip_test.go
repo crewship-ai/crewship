@@ -242,8 +242,9 @@ func startLiveCrew(ctx context.Context, t *testing.T, cli *client.Client, id str
 			Cmd:   []string{"sleep", "infinity"},
 		},
 		HostConfig: &container.HostConfig{
-			Mounts:  mounts,
-			CapDrop: []string{"ALL"},
+			Mounts:   mounts,
+			CapDrop:  []string{"ALL"},
+			GroupAdd: []string{"1001", "1002"}, // production crew shared-memory groups
 		},
 		NetworkingConfig: &dockernetwork.NetworkingConfig{},
 		Name:             name,
@@ -501,7 +502,7 @@ func assertBundleRecordsOwnership(t *testing.T, payload []byte, wantPrefix strin
 // collectToPayload runs the real collector into a real bundle payload and
 // hands back the extracted sections (what RestoreCrew consumes) plus the
 // raw payload bytes (what the bundle actually records).
-func collectToPayload(ctx context.Context, t *testing.T, ops DockerOps, crew CrewTarget, level ScopeLevel) (*ExtractedPayload, []byte) {
+func collectToPayload(ctx context.Context, t *testing.T, ops DockerOps, crew CrewTarget, level ScopeLevel, withoutMemory ...bool) (*ExtractedPayload, []byte) {
 	t.Helper()
 	var buf bytes.Buffer
 	w, err := NewTarZstWriter(&buf)
@@ -521,7 +522,7 @@ func collectToPayload(ctx context.Context, t *testing.T, ops DockerOps, crew Cre
 	// CrewFiles counts init.sh too, so it is not evidence of memory.
 	// Against a fixture that seeds a real memory tree, the memory count
 	// is what proves the section carries what the manifest will claim.
-	if capture.CrewMemoryFiles == 0 {
+	if capture.CrewMemoryFiles == 0 && (len(withoutMemory) == 0 || !withoutMemory[0]) {
 		t.Errorf("collector counted no files inside a .memory directory, so memory_included would be false for a crew whose memory tree was just seeded")
 	}
 	if err := w.Close(); err != nil {
@@ -592,9 +593,13 @@ func TestLive_CrewMemoryRoundTrip(t *testing.T) {
 		if got.content != content {
 			failures = append(failures, fmt.Sprintf("%s: content %q, want %q", p, got.content, content))
 		}
-		if got.uid != before[p].uid || got.gid != before[p].gid {
+		wantUID := before[p].uid
+		if isMemoryEntry(p) {
+			wantUID = "1002"
+		} // memory files belong to their writer after extraction
+		if got.uid != wantUID || got.gid != before[p].gid {
 			failures = append(failures, fmt.Sprintf("%s: ownership %s:%s, want %s:%s (agent cannot write its own restored data)",
-				p, got.uid, got.gid, before[p].uid, before[p].gid))
+				p, got.uid, got.gid, wantUID, before[p].gid))
 		}
 		if got.mode != before[p].mode {
 			failures = append(failures, fmt.Sprintf("%s: mode %s, want %s", p, got.mode, before[p].mode))
@@ -734,8 +739,12 @@ func TestLive_RestoreIntoFreshVolumes(t *testing.T) {
 		if got.content != wantContent {
 			failures = append(failures, fmt.Sprintf("%s: content %q, want %q", p, got.content, wantContent))
 		}
-		if got.uid != fmt.Sprint(agentUID) {
-			failures = append(failures, fmt.Sprintf("%s: uid %s, want %d", p, got.uid, agentUID))
+		wantUID := agentUID
+		if isMemoryEntry(p) {
+			wantUID = 1002
+		}
+		if got.uid != fmt.Sprint(wantUID) {
+			failures = append(failures, fmt.Sprintf("%s: uid %s, want %d", p, got.uid, wantUID))
 		}
 	}
 	check("/crew/shared/.memory/CREW.md", "crew charter: ship the backup fix\n")
@@ -853,13 +862,10 @@ func TestLive_RestoreSurvivesRootOwnedEntriesInsideAgentVolume(t *testing.T) {
 		assertRefusedWithNothingWritten(t, dst2, "/home/agent/.config")
 	})
 
-	// Writability is not the only thing tar needs. The crew section
-	// restores with PreserveModes and PreserveTimes, and utime()/chmod()
-	// are OWNER rights — so a .memory directory the agent can write but
-	// does not own passes a writability probe and then dies mid-apply
-	// with "Cannot utime: Operation not permitted", after the workspace
-	// section has already landed. Found live, exactly that way.
-	t.Run("a memory dir the agent can write but does not own is refused", func(t *testing.T) {
+	// A memory directory this bundle writes must carry the shared group and
+	// setgid contract before any payload lands. The agent cannot repair a
+	// sidecar-owned directory that lost those bits.
+	t.Run("a memory dir with unrepairable shared permissions is refused", func(t *testing.T) {
 		const dstID = "notownerdst"
 		dst4 := startLiveCrew(ctx, t, cli, dstID, true)
 		crewRoot := "/mnt/root/output/crews/" + dstID
@@ -877,7 +883,7 @@ func TestLive_RestoreSurvivesRootOwnedEntriesInsideAgentVolume(t *testing.T) {
 			t.Fatalf("restore into a memory dir the agent does not own reported success")
 		}
 		if !errors.Is(err, ErrRestorePreflight) {
-			t.Fatalf("must be refused in the preflight — otherwise tar fails on utime after earlier sections have landed: %v", err)
+			t.Fatalf("must refuse invalid shared permissions before earlier sections land: %v", err)
 		}
 		if dst4.stat(ctx, t, "/workspace/probe.txt").exists {
 			t.Fatalf("the workspace section landed before the crew section failed — the mid-apply failure this exists to prevent")

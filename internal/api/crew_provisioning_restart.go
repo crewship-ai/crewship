@@ -64,6 +64,9 @@ func (h *ProvisioningHandler) agentsPendingRestartCount(ctx context.Context, cre
 	if inspectResult.Container.Config != nil && inspectResult.Container.Config.Image == cachedImage {
 		return 0
 	}
+	if inspectResult.Container.Image == cachedImage {
+		return 0 // the stored reference was pinned after this container started
+	}
 	// Stale container — count active agents in this crew. We deliberately
 	// count only non-deleted rows; the actual runtime impact is "all of
 	// them" because they share one container, but the UI shows a number
@@ -125,7 +128,7 @@ func (h *ProvisioningHandler) RestartCrewAgents(w http.ResponseWriter, r *http.R
 	}
 	if containerID == "" {
 		// Nothing to restart — agents will pick up the new image on next start.
-		writeJSON(w, http.StatusOK, map[string]any{"restarted": 0})
+		writeJSON(w, http.StatusOK, map[string]any{"restarted": 0, "runtime_removed": false})
 		return
 	}
 
@@ -144,5 +147,5 @@ func (h *ProvisioningHandler) RestartCrewAgents(w http.ResponseWriter, r *http.R
 	).Scan(&restarted)
 
 	h.logger.Info("crew runtime restarted", "crew_id", crewID, "slug", slug, "agents", restarted)
-	writeJSON(w, http.StatusOK, map[string]any{"restarted": restarted})
+	writeJSON(w, http.StatusOK, map[string]any{"restarted": restarted, "runtime_removed": true})
 }

@@ -216,6 +216,15 @@ func (b *AppleContainerBuilder) Available() bool {
 // sequences, and these lines are streamed verbatim into provision events, the
 // journal and the live WS payload.
 func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag string, onLog func(string)) error {
+	return b.build(ctx, contextDir, tag, onLog, false)
+}
+
+// BuildWithoutCache re-runs installation layers for an explicit rebuild.
+func (b *AppleContainerBuilder) BuildWithoutCache(ctx context.Context, contextDir, tag string, onLog func(string)) error {
+	return b.build(ctx, contextDir, tag, onLog, true)
+}
+
+func (b *AppleContainerBuilder) build(ctx context.Context, contextDir, tag string, onLog func(string), noCache bool) error {
 	if !b.Available() {
 		return fmt.Errorf("devcontainer: Apple `container` CLI not available")
 	}
@@ -227,6 +236,9 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 		"--tag", tag,
 		"--file", filepath.Join(contextDir, "Dockerfile"),
 		"--progress", "plain",
+	}
+	if noCache {
+		args = append(args, "--no-cache")
 	}
 	args = append(args, contextDir)
 	// #nosec G204 — bin is PATH-resolved; every argument is internally built.

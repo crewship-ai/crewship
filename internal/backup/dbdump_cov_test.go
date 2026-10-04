@@ -15,6 +15,38 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func TestRestoreDumpNoOpRejectsBeforeHooksAndRollsBack(t *testing.T) {
+	db := openMigratedDBCov(t)
+	ws, _ := seedCovWorkspace(t, db, "no-op-hooks")
+	var before string
+	if err := db.QueryRow(`SELECT name FROM workspaces WHERE id = ?`, ws).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	dump := &DBDump{Tables: map[string][]map[string]any{
+		"workspaces": {{"id": ws, "name": "From bundle", "slug": "no-op-bundle"}},
+	}}
+	postInsert, preCommit := false, false
+	stats, err := RestoreDumpTxHooks(t.Context(), db, dump, &RestoreDumpHooks{
+		RejectNoOp: true,
+		PreInsert: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `UPDATE workspaces SET name = 'Uncommitted change' WHERE id = ?`, ws)
+			return err
+		},
+		PostInsert: func(context.Context, *sql.Tx) error { postInsert = true; return nil },
+		PreCommit:  func(context.Context) error { preCommit = true; return nil },
+	})
+	if !errors.Is(err, ErrNoOpRestore) || stats.RowsSeen != 1 || stats.RowsInserted != 0 {
+		t.Fatalf("wrong rejection: stats=%+v err=%v", stats, err)
+	}
+	if postInsert || preCommit {
+		t.Fatalf("rejected transaction published hooks: postInsert=%t preCommit=%t", postInsert, preCommit)
+	}
+	var after string
+	if err := db.QueryRow(`SELECT name FROM workspaces WHERE id = ?`, ws).Scan(&after); err != nil || after != before {
+		t.Fatalf("rejected transaction did not roll back: before=%q after=%q err=%v", before, after, err)
+	}
+}
+
 func TestDumpCrew_Branches(t *testing.T) {
 	ctx := context.Background()
 

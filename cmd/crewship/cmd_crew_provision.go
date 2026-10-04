@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
 
 // provisionStatusResponse mirrors what GET /api/v1/crews/{id}/provision returns.
@@ -33,7 +34,35 @@ type provisionStatusResponse struct {
 	// ResolvedFeatures is what the image is actually made of. Absent (nil) for
 	// a crew provisioned before this was recorded — a different answer from an
 	// empty list, and reported differently.
-	ResolvedFeatures []resolvedFeature `json:"resolved_features" yaml:"resolved_features"`
+	ResolvedFeatures []resolvedFeature   `json:"resolved_features" yaml:"resolved_features"`
+	Toolchain        *provisionToolchain `json:"toolchain,omitempty" yaml:"toolchain,omitempty"`
+}
+
+type provisionToolchain struct {
+	Requested []devcontainer.ToolchainRequest  `json:"requested" yaml:"requested"`
+	Built     *devcontainer.ToolchainInventory `json:"built" yaml:"built"`
+}
+
+func toolchainDetailRows(status *provisionToolchain) [][]string {
+	if status == nil || status.Built == nil {
+		return [][]string{{"Built CLI versions", "not recorded"}}
+	}
+	imageID := status.Built.ImageID
+	if imageID == "" {
+		imageID = "not recorded"
+	}
+	rows := [][]string{{"Toolchain image ID", imageID}}
+	if status.Built.Qualification != nil {
+		rows = append(rows, []string{"Offline CLI qualification", status.Built.Qualification.Status})
+	}
+	for _, tool := range status.Built.Tools {
+		version := "unknown (" + tool.Status + ")"
+		if tool.Status == "observed" && tool.Version != "" {
+			version = tool.Version
+		}
+		rows = append(rows, []string{"Built " + tool.Binary, version})
+	}
+	return rows
 }
 
 // resolvedFeature mirrors devcontainer.FeatureRecord over the wire.
@@ -148,6 +177,7 @@ var crewProvisionStatusCmd = &cobra.Command{
 			{"Cached Image", cachedImage},
 			{"Config Hash", configHash},
 		}
+		pairs = append(pairs, toolchainDetailRows(result.Toolchain)...)
 		if result.Total > 0 {
 			pairs = append(pairs, []string{"Step", fmt.Sprintf("%d/%d %s", result.Step, result.Total, result.Message)})
 		}
@@ -215,8 +245,9 @@ Examples:
 		}
 
 		var result struct {
-			Restarted int    `json:"restarted" yaml:"restarted"`
-			Error     string `json:"error,omitempty" yaml:"error,omitempty"`
+			Restarted      int    `json:"restarted" yaml:"restarted"`
+			RuntimeRemoved bool   `json:"runtime_removed" yaml:"runtime_removed"`
+			Error          string `json:"error,omitempty" yaml:"error,omitempty"`
 		}
 		if err := postJSON(client, "/api/v1/crews/"+crewID+"/restart-agents", nil, &result); err != nil {
 			return err
@@ -229,7 +260,9 @@ Examples:
 		case "yaml":
 			return f.YAML(result)
 		}
-		if result.Restarted == 0 {
+		if result.RuntimeRemoved && result.Restarted == 0 {
+			cli.PrintSuccess(fmt.Sprintf("Crew %q: runtime container removed; it will be recreated on next exec.", args[0]))
+		} else if result.Restarted == 0 {
 			cli.PrintSuccess(fmt.Sprintf("Crew %q: no running container, nothing to restart.", args[0]))
 		} else {
 			cli.PrintSuccess(fmt.Sprintf("Crew %q restarted: %d agent%s will pick up the new image on next exec.",

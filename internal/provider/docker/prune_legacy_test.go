@@ -107,7 +107,7 @@ func TestPruneLegacyCrewResources_ProtectsCollidingLiveCrew(t *testing.T) {
 	}
 }
 
-func TestPruneLegacyCrewResources_VolumeFailureNonFatal(t *testing.T) {
+func TestPruneLegacyCrewResources_VolumeFailureReported(t *testing.T) {
 	t.Parallel()
 
 	p, cleanup := newFakeDockerProvider(t, func(w http.ResponseWriter, r *http.Request) {
@@ -129,8 +129,8 @@ func TestPruneLegacyCrewResources_VolumeFailureNonFatal(t *testing.T) {
 
 	removed, err := p.PruneLegacyCrewResources(context.Background(),
 		[]provider.CrewRef{{Slug: "engineering"}})
-	if err != nil {
-		t.Errorf("per-resource failure must not propagate: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "crewship-tools-engineering") {
+		t.Errorf("per-resource failure must name the retained resource: %v", err)
 	}
 	if len(removed) != 0 {
 		t.Errorf("failed delete should not be reported as removed: %v", removed)

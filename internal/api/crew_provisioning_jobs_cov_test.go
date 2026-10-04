@@ -13,7 +13,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
@@ -63,7 +62,7 @@ func (c *covCommitClient) ContainerRemove(_ context.Context, _ string, _ client.
 	return client.ContainerRemoveResult{}, nil
 }
 func (c *covCommitClient) ContainerCommit(_ context.Context, _ string, _ client.ContainerCommitOptions) (client.ContainerCommitResult, error) {
-	return client.ContainerCommitResult{ID: "sha256:x"}, nil
+	return client.ContainerCommitResult{ID: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 }
 func (c *covCommitClient) ImageList(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
 	if c.listErr != nil {
@@ -180,7 +179,7 @@ func TestRunProvisioning_SkipPath_CompletesAndPersists(t *testing.T) {
 	// No features / postCreate / containerEnv / mise → the provisioner
 	// skips the build and returns CachedImage "" — runProvisioning's full
 	// success tail (DB update, completed status) runs without Docker.
-	h, wsID, crewID := covProvRig(t, &covCommitClient{}, "")
+	h, wsID, crewID := covProvRig(t, &covCommitClient{}, `{"image":"ubuntu:22.04"}`)
 	job := covJob(crewID)
 	h.jobs[crewID] = job
 
@@ -404,22 +403,17 @@ func TestProvisionRebuild_Matrix(t *testing.T) {
 			t.Errorf("status = %d, want 400", rr.Code)
 		}
 	})
-	t.Run("happy path clears cache and starts", func(t *testing.T) {
+	t.Run("happy path admits a forced replacement", func(t *testing.T) {
 		rr := run(crewID, "OWNER")
 		if rr.Code != http.StatusAccepted {
 			t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
 		}
-		var cached, hash sql.NullString
-		if err := h.db.QueryRow(`SELECT cached_image, config_hash FROM crews WHERE id = ?`, crewID).Scan(&cached, &hash); err != nil {
-			t.Fatalf("query: %v", err)
-		}
-		// The async rebuild may have already completed (skip path writes a
-		// fresh hash) — but the OLD cache values must be gone either way.
-		if cached.Valid && cached.String == "crewship-cache:old" {
-			t.Errorf("cached_image still old: %v", cached.String)
-		}
-		if hash.Valid && hash.String == "oldhash" {
-			t.Errorf("config_hash still old: %v", hash.String)
+		h.mu.RLock()
+		job := h.jobs[crewID]
+		forced := job != nil && job.forceRebuild
+		h.mu.RUnlock()
+		if !forced {
+			t.Fatal("rebuild was not admitted with cache bypass")
 		}
 	})
 }

@@ -178,15 +178,22 @@ func elapsedMs(start time.Time) int64 { return time.Since(start).Milliseconds() 
 type ProvisionOption func(*provisionOpts)
 
 type provisionOpts struct {
-	onProgress  ProgressCallback
-	onPlan      PlanCallback
-	onProvision ProvisionSink
+	forceRebuild bool
+	onProgress   ProgressCallback
+	onPlan       PlanCallback
+	onProvision  ProvisionSink
 	// requiredBinaries are the executables that must resolve for the agent
 	// user from a non-login shell once everything is installed — the CLIs of
 	// the crew's adapters (adapter_clis.go). Checked by verifyRequiredBinaries
 	// in both provisioning paths; a miss fails the build with the binary's
 	// name instead of surfacing as "No such file or directory" in a chat.
 	requiredBinaries []string
+}
+
+// WithForceRebuild bypasses both the final-image cache and installation-layer
+// caches. It is per call, so rebuilding one crew cannot affect another job.
+func WithForceRebuild(force bool) ProvisionOption {
+	return func(o *provisionOpts) { o.forceRebuild = force }
 }
 
 // WithRequiredBinaries names the executables the finished image must be able
@@ -283,7 +290,7 @@ const (
 
 // ProvisionResult contains the output of a successful provisioning run.
 type ProvisionResult struct {
-	CachedImage  string                 // e.g. "crewship-cache:a1b2c3d4e5f6"
+	CachedImage  string                 // Docker: immutable local image ID; native build providers: image tag
 	ConfigHash   string                 // full SHA-256 hex digest
 	Requirements AggregatedRequirements // runtime requirements bubbled up from features
 	// Features records what the build actually installed — ref, resolved
@@ -324,7 +331,8 @@ type AggregatedRequirements struct {
 	// AdapterBinaries are the adapter CLIs this image was verified to run
 	// (sorted). The agent handlers compare a new agent's adapter against it
 	// to decide whether the crew must be rebuilt.
-	AdapterBinaries []string `json:"adapterBinaries,omitempty"`
+	AdapterBinaries []string            `json:"adapterBinaries,omitempty"`
+	Toolchain       *ToolchainInventory `json:"toolchain,omitempty"`
 }
 
 // aggregateFeatureRequirements merges runtime requirements across features.
@@ -350,28 +358,20 @@ func NewProvisioner(docker CommitClient, installer *Installer, downloader *Featu
 	}
 }
 
-// cacheHitRequirements recomputes the runtime requirements for an image that
-// is being reused, exactly as a fresh build would (feature metadata, the
-// agent tool env, the verified adapter CLIs, start hooks). Feature resolution
-// is served from the catalog cache; if it fails, the feature-declared parts
-// are missing and the log says so, but the parts this build knows without
-// the features are still returned.
-func (p *Provisioner) cacheHitRequirements(ctx context.Context, cfg *Config, o *provisionOpts) (AggregatedRequirements, []FeatureRecord) {
+// cacheHitRequirements recomputes runtime requirements for a reused image.
+// Failure is not an empty contract: publishing partial requirements could drop
+// security settings or attach an unrelated previous artifact's evidence.
+func (p *Provisioner) cacheHitRequirements(ctx context.Context, cfg *Config, o *provisionOpts) (AggregatedRequirements, []FeatureRecord, error) {
 	resolved, _, err := p.resolveFeatures(ctx, cfg)
 	if err != nil {
-		// A half answer (no mounts, no privileged flag) would be stored as
-		// the crew's contract; an empty one leaves the previous build's
-		// contract in place (the job keeps the column when nothing new is
-		// known). Say so, and return nothing.
-		p.logger.Warn("cache hit: could not resolve features; keeping the crew's previous runtime requirements",
-			"error", err)
-		return AggregatedRequirements{}, nil
+		return AggregatedRequirements{}, nil, fmt.Errorf("resolve cached image requirements: %w", err)
 	}
+
 	req := p.aggregateFeatureRequirements(resolved, cfg.ContainerEnv)
 	req.ContainerEnv = ensureAgentToolPath(req.ContainerEnv)
 	req.AdapterBinaries = SortedBinaries(o.requiredBinaries)
 	req.PostStartCommands = append(req.PostStartCommands, cfg.NormalizedPostStartCommands()...)
-	return req, featureRecords(resolved)
+	return req, featureRecords(resolved), nil
 }
 
 // SetImageBuilder overrides the image builder (tests inject a fake; callers can
@@ -478,21 +478,32 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	if err != nil {
 		return fail(ProvStepStart, err)
 	}
-	if exists {
+	if exists && !o.forceRebuild {
+		inspected, err := p.docker.ImageInspect(ctx, tag)
+		if err != nil {
+			return fail(ProvStepStart, fmt.Errorf("resolve cached artifact: %w", err))
+		}
+		if !dockerutil.IsLocalImageID(inspected.ID) {
+			return fail(ProvStepStart, fmt.Errorf("cached artifact has no valid immutable image identity"))
+		}
 		p.logger.Info("using cached image", "tag", tag)
 		if o.onProgress != nil {
 			o.onProgress(1, 1, "Using cached image")
 		}
 		// Even a no-build provision is audited: cache_hit → ready.
 		emitEvt(ProvisionEvent{Step: ProvStepCacheHit, Status: ProvStatusCompleted, Tag: tag})
-		emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
 		// The requirements are part of the result even when the image is
 		// reused: the caller stores them as the crew's runtime contract, and
 		// an empty set here used to be written back as NULL — a cache hit
 		// silently dropped the privileged flag, the mounts, the env and the
 		// verified adapter CLIs of the build before it.
-		req, feats := p.cacheHitRequirements(ctx, cfg, o)
-		return &ProvisionResult{CachedImage: tag, ConfigHash: hash, Requirements: req, Features: feats}, nil
+		req, feats, err := p.cacheHitRequirements(ctx, cfg, o)
+		if err != nil {
+			return fail(ProvStepResolveFeatures, err)
+		}
+		req.Toolchain = p.inspectToolchain(ctx, inspected.ID, o.requiredBinaries)
+		emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
+		return &ProvisionResult{CachedImage: inspected.ID, ConfigHash: hash, Requirements: req, Features: feats}, nil
 	}
 
 	// Skip provisioning if no features, no postCreateCommand, no containerEnv, and no mise config.
@@ -578,7 +589,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		// buildFeatureImage emits image_build_start, per-feature feature_install,
 		// image_build_done, and on any failure provision.failed (with the build
 		// log tail) — so we just propagate its error here.
-		featImage, berr := p.buildFeatureImage(ctx, baseImage, resolvedFeatures, optionsByRef, cfg.ContainerEnv, emit, o.onProvision)
+		featImage, berr := p.buildFeatureImage(ctx, baseImage, resolvedFeatures, optionsByRef, cfg.ContainerEnv, emit, o.onProvision, o.forceRebuild)
 		if berr != nil {
 			return nil, berr
 		}
@@ -690,6 +701,10 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// prepending the well-known dirs, so this can never break provisioning.
 	requirements.LoginPath = p.captureLoginPath(ctx, containerID)
 
+	if err := writeToolchainInventory(ctx, containerID, o.requiredBinaries, requirements.ContainerEnv, p.installer.execInContainerAsUser); err != nil {
+		return fail("toolchain_inventory", err)
+	}
+
 	// 8. Clean up caches inside the container.
 	if err := p.cleanupCaches(ctx, containerID, p.installer.execInContainerAsUser); err != nil {
 		p.logger.Warn("cache cleanup failed", "error", err)
@@ -703,16 +718,20 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// `${containerEnv:X}` references are expanded against the base image's
 	// env here — a committed ENV line is applied to the image config as-is,
 	// with no build-time substitution the way a Dockerfile ENV gets.
-	_, commitErr := p.docker.ContainerCommit(ctx, containerID, client.ContainerCommitOptions{
+	committed, commitErr := p.docker.ContainerCommit(ctx, containerID, client.ContainerCommitOptions{
 		Reference: tag,
 		Changes:   imageEnvChanges(requirements.ContainerEnv, p.containerEnvSnapshot(ctx, containerID)),
 	})
 	if commitErr != nil {
 		return fail("commit", fmt.Errorf("committing container: %w", commitErr))
 	}
+	if !dockerutil.IsLocalImageID(committed.ID) {
+		return fail("commit", fmt.Errorf("committed artifact has no valid immutable image identity"))
+	}
 	// New crewship-cache:* tag is now present locally — drop cached list.
 	p.invalidateImageListCache()
 
+	requirements.Toolchain = p.inspectToolchain(ctx, committed.ID, o.requiredBinaries)
 	p.logger.Info("provisioned cached image",
 		"tag", tag,
 		"privileged", requirements.Privileged,
@@ -721,7 +740,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	)
 	emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
 	return &ProvisionResult{
-		CachedImage:  tag,
+		CachedImage:  committed.ID,
 		ConfigHash:   hash,
 		Requirements: requirements,
 		Features:     featureRecords(resolvedFeatures),

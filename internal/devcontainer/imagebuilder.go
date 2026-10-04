@@ -48,6 +48,23 @@ type ImageBuilder interface {
 	Build(ctx context.Context, contextDir, tag string, onLog func(string)) error
 }
 
+// UncachedImageBuilder is required for explicit rebuilds. A provider without
+// this capability must fail rather than silently return stale tool versions.
+type UncachedImageBuilder interface {
+	BuildWithoutCache(ctx context.Context, contextDir, tag string, onLog func(string)) error
+}
+
+func buildProvisionImage(ctx context.Context, builder ImageBuilder, dir, tag string, onLog func(string), force bool) error {
+	if !force {
+		return builder.Build(ctx, dir, tag, onLog)
+	}
+	uncached, ok := builder.(UncachedImageBuilder)
+	if !ok {
+		return fmt.Errorf("devcontainer: image builder does not support explicit rebuilds")
+	}
+	return uncached.BuildWithoutCache(ctx, dir, tag, onLog)
+}
+
 // DockerBuildKitBuilder shells out to the Docker CLI with BuildKit enabled.
 // Shelling to `docker build` (not the Docker SDK ImageBuild) is the most
 // portable way to get full BuildKit behavior — cache mounts and the dockerfile
@@ -156,16 +173,27 @@ func buildEnv(parent []string, host string) []string {
 
 // Build runs `docker build` with DOCKER_BUILDKIT=1 against contextDir.
 func (b *DockerBuildKitBuilder) Build(ctx context.Context, contextDir, tag string, onLog func(string)) error {
+	return b.build(ctx, contextDir, tag, onLog, false)
+}
+
+// BuildWithoutCache re-runs installation layers for an explicit rebuild.
+func (b *DockerBuildKitBuilder) BuildWithoutCache(ctx context.Context, contextDir, tag string, onLog func(string)) error {
+	return b.build(ctx, contextDir, tag, onLog, true)
+}
+
+func (b *DockerBuildKitBuilder) build(ctx context.Context, contextDir, tag string, onLog func(string), noCache bool) error {
 	if !b.Available() {
 		return fmt.Errorf("devcontainer: no BuildKit-capable docker CLI available")
 	}
 	// #nosec G204 — bin is a PATH-resolved docker binary; tag/contextDir are
 	// internally constructed (cache tag + temp dir), not user-controlled shell.
-	cmd := exec.CommandContext(ctx, b.bin, "build",
-		"--tag", tag,
-		"--file", filepath.Join(contextDir, "Dockerfile"),
-		contextDir,
-	)
+	args := []string{"build", "--tag", tag, "--file", filepath.Join(contextDir, "Dockerfile")}
+	if noCache {
+		args = append(args, "--no-cache")
+	}
+	args = append(args, contextDir)
+	// #nosec G204 — PATH-resolved binary and discrete build arguments.
+	cmd := exec.CommandContext(ctx, b.bin, args...)
 	cmd.Env = buildEnv(os.Environ(), b.host)
 	if b.host != "" {
 		b.logger.Debug("docker build pinned to the provider's daemon", "docker_host", b.host, "tag", tag)
@@ -235,7 +263,7 @@ func buildOutputSuffix(tail *boundedLog) string {
 // BuildKit. The returned tag is used as the base for the temp container that
 // then runs mise/postCreate/env. emit reports plan progress (pull + per-feature)
 // so the UI checklist advances identically to the container-commit path.
-func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, rootEnv map[string]string, emit func(string), sink ProvisionSink) (string, error) {
+func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, rootEnv map[string]string, emit func(string), sink ProvisionSink, force bool) (string, error) {
 	emit(pullStepLabel(baseImage))
 
 	contextDir, _, featTag, err := stageBuildContext(baseImage, features, optionsByRef, rootEnv)
@@ -255,7 +283,7 @@ func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, f
 
 	// Exact-tag hit: skip invoking the builder entirely. BuildKit also caches
 	// layers, but this avoids the process spawn when nothing changed.
-	if exists, _ := p.imageExists(ctx, featTag); exists {
+	if exists, _ := p.imageExists(ctx, featTag); exists && !force {
 		for _, f := range features {
 			emit(featureStepLabel(f.Metadata.ID))
 			emitProvision(sink, ProvisionEvent{Step: ProvStepFeatureInstall, Feature: f.Metadata.ID, Status: ProvStatusCompleted, Detail: "cached"})
@@ -278,10 +306,10 @@ func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, f
 	// Capture a bounded tail of the BuildKit log so a build failure carries the
 	// output of the failing step without flooding the journal/WS on success.
 	logTail := newBoundedLog(buildLogTailLineCap, buildLogTailByteCap)
-	if err := p.builder.Build(ctx, contextDir, featTag, func(line string) {
+	if err := buildProvisionImage(ctx, p.builder, contextDir, featTag, func(line string) {
 		logTail.add(line)
 		p.logger.Debug("buildkit", "line", line)
-	}); err != nil {
+	}, force); err != nil {
 		emitProvision(sink, ProvisionEvent{
 			Step:       ProvStepFailed,
 			Status:     ProvStatusFailed,

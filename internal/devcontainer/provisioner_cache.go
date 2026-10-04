@@ -25,7 +25,9 @@ type imageListCacheEntry struct {
 
 const imageListTTL = 60 * time.Second
 
-const provisionerSchemaVersion = "v3"
+// v4 publishes immutable Docker IDs. A new namespace of hash-derived cache
+// aliases prevents a rebuild from moving a v3 tag still referenced by a crew.
+const provisionerSchemaVersion = "v4"
 
 // cacheImageTag returns the Docker image tag for a given config hash.
 
@@ -74,6 +76,11 @@ func configHash(baseImage string, cfg *Config, miseConfig, dockerfile string) st
 	if miseConfig != "" {
 		var miseData any
 		if err := json.Unmarshal([]byte(miseConfig), &miseData); err == nil {
+			// Older installers ignored unknown lock input. Never reuse an image
+			// built before locked installation was enforced for this definition.
+			if fields, ok := miseData.(map[string]any); ok && fields["lock"] != nil {
+				h.Write([]byte("mise-lock-install-v1|"))
+			}
 			sortedMise, _ := json.Marshal(miseData)
 			h.Write(sortedMise)
 		} else {

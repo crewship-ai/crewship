@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"io"
@@ -346,7 +347,13 @@ func (o *Orchestrator) StopRunAt(ctx context.Context, location RunLocation) (boo
 		"if tmux has-session -t '" + session + "' 2>/dev/null; then echo PRESENT; else echo ABSENT; fi; fi"
 	out, err := o.probeExec(ctx, containerID, probe)
 	if err != nil {
-		return false, fmt.Errorf("stop run %s: %w", runID, err)
+		// Exec cannot enter a removed/stopped container. Confirm that
+		// condition with an authoritative inspect, not error-message matching.
+		absent, inspectErr := o.containerRuntimeAbsent(ctx, containerID)
+		if inspectErr == nil && absent {
+			return true, nil
+		}
+		return false, fmt.Errorf("stop run %s: %w", runID, errors.Join(err, inspectErr))
 	}
 	switch {
 	case strings.Contains(out, "ABSENT"):
@@ -372,10 +379,26 @@ func (o *Orchestrator) probeExec(ctx context.Context, containerID, script string
 	if err != nil {
 		return "", err
 	}
+	if res == nil || res.Reader == nil {
+		return "", fmt.Errorf("runtime probe returned no output stream")
+	}
 	defer res.Reader.Close()
 	out, err := io.ReadAll(res.Reader)
 	if err != nil {
 		return "", fmt.Errorf("read probe output: %w", err)
 	}
 	return string(out), nil
+}
+
+func (o *Orchestrator) containerRuntimeAbsent(ctx context.Context, id string) (bool, error) {
+	status, err := o.container.ContainerStatus(ctx, id)
+	if errors.Is(err, provider.ErrContainerNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	// Docker reports non-running OOM/dead containers as error. Unknown
+	// provider vocabulary (including an empty state) is not absence evidence.
+	return status != nil && (status.State == "stopped" || status.State == "error"), nil
 }

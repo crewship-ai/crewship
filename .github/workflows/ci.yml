@@ -685,6 +685,31 @@ jobs:
       - name: Default devcontainer boots and runs the adapter
         run: go test -tags conformance -run TestOnboardingDefaultBoots -v -count=1 ./internal/provider/docker/
 
+  # Synthetic real-Docker checks are required on Go/runtime changes. No keys
+  # or live providers; the runner verifies named test execution, not only exit 0.
+  managed-environments:
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
+    name: Managed environment Docker conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Prepare pinned synthetic fixture
+        timeout-minutes: 3
+        run: |
+          docker version
+          docker pull alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+          docker tag alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 alpine:3
+      - name: Require executed Docker fixtures
+        timeout-minutes: 14
+        run: python3 scripts/ci/managed-environments.py
+
   # Required evidence for Pages: no Docker env opt-in can silently skip this lane.
   pages-apps:
     needs: [merge-conflict-markers, changes]
@@ -2046,7 +2071,7 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [release-rehearsal, image, changes, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
+    needs: [release-rehearsal, image, changes, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:

@@ -8,21 +8,24 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/memory"
 	"os"
 	goruntime "runtime"
 	"strings"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/devcontainer"
-	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
-	"github.com/crewship-ai/crewship/internal/safepath"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	dockernetwork "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
+	"github.com/crewship-ai/crewship/internal/safepath"
 )
 
 // FindCrewContainer is a non-mutating lookup for an existing crew
@@ -226,6 +229,7 @@ func (p *Provider) HasLegacyCrewResources(ctx context.Context, crews []provider.
 func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provider.CrewRef) ([]string, error) {
 	legacy := p.legacyNameSets(crews)
 	removed := []string{}
+	var failures []error
 	if len(legacy) == 0 {
 		return removed, nil
 	}
@@ -240,6 +244,7 @@ func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provide
 			if legacy[n] {
 				if _, rmErr := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); rmErr != nil {
 					p.logger.Warn("legacy C1 container remove failed", "container", n, "error", rmErr)
+					failures = append(failures, fmt.Errorf("remove legacy container %s: %w", n, rmErr))
 				} else {
 					removed = append(removed, n)
 				}
@@ -249,18 +254,19 @@ func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provide
 
 	list, err := p.client.VolumeList(ctx, volumeListOptions())
 	if err != nil {
-		return removed, fmt.Errorf("list volumes (legacy C1 prune): %w", err)
+		return removed, errors.Join(append(failures, fmt.Errorf("list volumes (legacy C1 prune): %w", err))...)
 	}
 	for _, vol := range list.Items {
 		if legacy[vol.Name] {
 			if _, rmErr := p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); rmErr != nil {
 				p.logger.Warn("legacy C1 volume remove failed", "volume", vol.Name, "error", rmErr)
+				failures = append(failures, fmt.Errorf("remove legacy volume %s: %w", vol.Name, rmErr))
 			} else {
 				removed = append(removed, vol.Name)
 			}
 		}
 	}
-	return removed, nil
+	return removed, errors.Join(failures...)
 }
 
 // migrateLegacyVolume copies all data from a legacy slug-scoped volume into a
@@ -492,7 +498,11 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// migration, and (the expensive part) the host-wide container lookup. A
 	// DAG wave's sibling steps on the same crew all hit this in the same few
 	// milliseconds; without it each paid a full host scan under this mutex.
-	if cid, ok := p.warmHit(team.ID); ok {
+	requestedImage := team.CachedImage
+	if requestedImage == "" {
+		requestedImage = team.Image
+	}
+	if cid, ok := p.warmHit(team.ID, requestedImage); ok {
 		// A fenced crew pays one inspect here: a restart inside the warm TTL
 		// (daemon, restart policy, operator) drops the fence, and the warm
 		// path would otherwise hand the next step an unfenced container.
@@ -722,7 +732,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	hooks = append(hooks, team.PostStartCommands...)
 	p.runPostStartCommands(ctx, resp.ID, hooks)
 
-	p.setWarm(team.ID, resp.ID)
+	p.setWarm(team.ID, resp.ID, runtimeImage)
 	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage, Digest: runtimeDigest})
 	return resp.ID, nil
 }
@@ -754,14 +764,12 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					return "", false, fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
 				}
 				inspect := inspectResult.Container
-				// The host-wide list is an older snapshot. In particular, a
-				// Stop followed immediately by Ensure can list a container as
-				// running even though this inspect already reports exited.
-				// Use the same inspected state for reuse and every drift decision.
+				// The list is an older snapshot. A stop/start between list and
+				// inspect must not reuse a stopped runtime or tear down a live one.
 				if inspect.State == nil || inspect.State.Status == "" {
-					return "", false, fmt.Errorf("inspect existing container %s: missing state", containerName)
+					return "", false, fmt.Errorf("%w: inspect existing container %s: missing state", provider.ErrRuntimeImageUpdatePending, containerName)
 				}
-				state := inspect.State.Status
+				c.State = inspect.State.Status
 				// Applies with an empty local identity too (cleanup disabled): the
 				// drift paths below tear down with RemoveVolumes, so adopting a
 				// container another installation labelled would destroy its
@@ -779,19 +787,68 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				if inspect.Config != nil && inspect.Config.Image != "" {
 					reusedImage = inspect.Config.Image
 				}
-				// Image-drift check before the mount checks: if a
-				// re-provision produced a new image tag, the running
-				// container is stale by definition (its filesystem
-				// reflects the OLD provisioned image). Tear it down
-				// and fall through to create-new with the new tag.
-				if callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage {
-					p.logger.Info("recreating container (image drift)",
+				warmImage := reusedImage
+				if callerSpecifiedImage {
+					warmImage = desiredImage
+				}
+				// Restart backoff is its own state and it is neither
+				// "running" nor startable (#1636). A crew container gained a
+				// RestartPolicy in #1630, which made `restarting` reachable
+				// for the first time; the code below only asked "is it
+				// running?" and fell through to ContainerStart for everything
+				// else. The daemon answers a start during backoff with 304 Not
+				// Modified — State.Running is true the whole time — and the
+				// moby Go client turns 304 into a nil error, so this function
+				// returned (id, true, nil), logged "restarted stopped
+				// container" and setWarm()'d it. Every agent exec for the rest
+				// of the warm-TTL window then failed with "container is
+				// restarting" while the provider reported the crew ready.
+				//
+				// Tear down rather than wait for backoff to settle. Waiting
+				// looks cheaper but returns a container that is at best about
+				// to die again: PID 1 is `exec sleep infinity`, which never
+				// exits on its own, so a container in backoff has had PID 1
+				// killed (OOM, host reboot, an external docker kill). Moby
+				// resets the on-failure retry count once a container has run
+				// for 10 s, so a crew that crashes every ~15 s crash-loops
+				// forever with short `restarting` windows in between — waiting
+				// there succeeds within ~100 ms and hands the caller a runtime
+				// that dies mid-exec. Recreating is deterministic, costs one
+				// container create, and loses nothing: /workspace, /output and
+				// /crew are host binds and /home/agent and /opt/crew-tools are
+				// named volumes, so only the container's own ephemeral layer
+				// and tmpfs go — which a daemon-driven restart wipes anyway.
+				//
+				// Checked on the inspect, not only on the host-wide list: that
+				// list is a snapshot and a container that entered backoff
+				// between the list and this inspect still reads "running"
+				// there.
+				if inspect.State.Status == container.StateRestarting || inspect.State.Restarting {
+					p.logger.Info("recreating container (in restart backoff)",
 						"container", containerName,
-						"running_image", inspect.Config.Image,
-						"desired_image", desiredImage,
+						"restart_count", inspect.RestartCount,
 					)
 					p.forceTeardown(ctx, c.ID, team.ID)
 					break // fall through to create new container
+				}
+				// A new desired image must not destroy work in the existing
+				// runtime. Only a freshly confirmed inactive container may be
+				// replaced. Docker's non-force removal also closes a start race.
+				if callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && inspect.Image != desiredImage {
+					state := inspect.State
+					if state == nil || state.Running || state.Paused || state.Restarting || (state.Status != "exited" && state.Status != "created") {
+						return "", false, &provider.RuntimeImageUpdatePendingError{ContainerID: c.ID, CurrentImageID: inspect.Image, DesiredImage: desiredImage}
+					}
+					if _, err := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: true}); err != nil {
+						if cerrdefs.IsConflict(err) {
+							return "", false, fmt.Errorf("%w: runtime changed while removing stopped container", provider.ErrRuntimeImageUpdatePending)
+						}
+						return "", false, fmt.Errorf("remove stopped runtime for image update: %w", err)
+					}
+					p.evictWarm(team.ID)
+					p.forgetFenced(c.ID)
+					p.logger.Info("recreating stopped container (image drift)", "container", containerName, "previous_image", inspect.Config.Image, "desired_image", desiredImage)
+					break
 				}
 				// Check required mounts: /crew, /home/agent (volume), /opt/crew-tools (volume).
 				requiredMounts := map[string]bool{"/crew": false, "/home/agent": false, "/opt/crew-tools": false}
@@ -838,47 +895,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				}
 				if needsRecreate {
 					p.logger.Info("recreating container (missing required mounts)", "container", containerName)
-					p.forceTeardown(ctx, c.ID, team.ID)
-					break // fall through to create new container
-				}
-				// Restart backoff is its own state and it is neither
-				// "running" nor startable (#1636). A crew container gained a
-				// RestartPolicy in #1630, which made `restarting` reachable
-				// for the first time; the code below only asked "is it
-				// running?" and fell through to ContainerStart for everything
-				// else. The daemon answers a start during backoff with 304 Not
-				// Modified — State.Running is true the whole time — and the
-				// moby Go client turns 304 into a nil error, so this function
-				// returned (id, true, nil), logged "restarted stopped
-				// container" and setWarm()'d it. Every agent exec for the rest
-				// of the warm-TTL window then failed with "container is
-				// restarting" while the provider reported the crew ready.
-				//
-				// Tear down rather than wait for backoff to settle. Waiting
-				// looks cheaper but returns a container that is at best about
-				// to die again: PID 1 is `exec sleep infinity`, which never
-				// exits on its own, so a container in backoff has had PID 1
-				// killed (OOM, host reboot, an external docker kill). Moby
-				// resets the on-failure retry count once a container has run
-				// for 10 s, so a crew that crashes every ~15 s crash-loops
-				// forever with short `restarting` windows in between — waiting
-				// there succeeds within ~100 ms and hands the caller a runtime
-				// that dies mid-exec. Recreating is deterministic, costs one
-				// container create, and loses nothing: /workspace, /output and
-				// /crew are host binds and /home/agent and /opt/crew-tools are
-				// named volumes, so only the container's own ephemeral layer
-				// and tmpfs go — which a daemon-driven restart wipes anyway.
-				//
-				// Checked on the inspect, not only on the host-wide list: that
-				// list is a snapshot and a container that entered backoff
-				// between the list and this inspect still reads "running"
-				// there.
-				if state == container.StateRestarting || inspect.State.Restarting {
-					p.logger.Info("recreating container (in restart backoff)",
-						"container", containerName,
-						"restart_count", inspect.RestartCount,
-					)
-					p.forceTeardown(ctx, c.ID, team.ID)
+					if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+						return "", false, err
+					}
 					break // fall through to create new container
 				}
 				// Runtime-contract drift (#1642). Everything above asks
@@ -911,13 +930,15 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				//     meanwhile — here, and on `crewship crew
 				//     container-status` via ContainerStatus.
 				if want := p.crewRuntimeContractDigest(); want != "" && runtimeContractOf(inspect.Config) != want {
-					if crewContainerHoldsNoProcesses(state) {
+					if crewContainerHoldsNoProcesses(c.State) {
 						p.logger.Info("recreating stopped container (runtime configuration predates this build)",
 							"container", containerName,
 							"container_contract", runtimeContractOf(inspect.Config),
 							"build_contract", want,
 						)
-						p.forceTeardown(ctx, c.ID, team.ID)
+						if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+							return "", false, err
+						}
 						break // fall through to create new container
 					}
 					p.logger.Warn("crew container predates the current runtime configuration and is still serving; "+
@@ -962,11 +983,13 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				}
 				if want := p.crewNetworkFor(team.ID, team.Slug); want != "" && (haveNet != want || hostsDrift) &&
 					(p.crewNetworkWanted(team.ID, team.Slug) || haveNet == p.crewNetworkName(team.ID)) {
-					if crewContainerHoldsNoProcesses(state) {
+					if crewContainerHoldsNoProcesses(c.State) {
 						p.logger.Info("recreating stopped container (crew network changed)",
 							"container", containerName, "crew_id", team.ID,
 							"from", haveNet, "to", want)
-						p.forceTeardown(ctx, c.ID, team.ID)
+						if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+							return "", false, err
+						}
 						break // fall through to create new container
 					}
 					p.logger.Warn("crew container is still on its previous network and serving; it moves when next recreated "+
@@ -975,13 +998,15 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						"network", haveNet, "configured", want)
 				}
 				if drift := crewResourceDrift(team, inspect.HostConfig); drift != "" {
-					if crewContainerHoldsNoProcesses(state) {
+					if crewContainerHoldsNoProcesses(c.State) {
 						p.logger.Info("recreating stopped container (crew resource limits changed)",
 							"container", containerName,
 							"crew_id", team.ID,
 							"drift", drift,
 						)
-						p.forceTeardown(ctx, c.ID, team.ID)
+						if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+							return "", false, err
+						}
 						break // fall through to create new container
 					}
 					p.logger.Warn("crew container was created with different resource limits and is still serving; "+
@@ -992,7 +1017,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						"drift", drift,
 					)
 				}
-				if state == container.StateRunning {
+				if c.State == container.StateRunning {
 					// A restart this provider did not perform (daemon restart,
 					// restart policy, an operator) recreates the namespace and
 					// drops the fence; ensureEgressFence compares StartedAt.
@@ -1000,7 +1025,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						p.stopUnfenced(ctx, team, c.ID, err)
 						return "", false, err
 					}
-					p.setWarm(team.ID, c.ID)
+					p.setWarm(team.ID, c.ID, warmImage)
 					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
 					return c.ID, true, nil
 				}
@@ -1033,7 +1058,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				}
 				if bindsMissing {
 					p.logger.Info("bind-mount dirs missing, recreating container", "container", containerName)
-					p.forceTeardown(ctx, c.ID, team.ID)
+					if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+						return "", false, err
+					}
 					break // fall through to create new container
 				}
 				// Admission control (#1668). Starting a stopped container puts
@@ -1068,7 +1095,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				// template authors actually want. If a future use case needs
 				// ephemeral hooks that re-run on each restart, add a
 				// per-feature opt-in flag rather than flipping this default.
-				p.setWarm(team.ID, c.ID)
+				p.setWarm(team.ID, c.ID, warmImage)
 				emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "restarted stopped container", Tag: reusedImage})
 				return c.ID, true, nil
 			}
@@ -1822,6 +1849,9 @@ func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) er
 func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*provider.ContainerStatus, error) {
 	inspectResult, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return nil, fmt.Errorf("container inspect: %w: %s", provider.ErrContainerNotFound, containerID)
+		}
 		return nil, fmt.Errorf("container inspect: %w", err)
 	}
 	inspect := inspectResult.Container
@@ -1843,9 +1873,10 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 	memoryMB, cpus := containerCrewLimits(inspect.HostConfig)
 
 	return &provider.ContainerStatus{
-		ID:     containerID,
-		State:  state,
-		Uptime: inspect.State.StartedAt,
+		ID:      containerID,
+		State:   state,
+		Uptime:  inspect.State.StartedAt,
+		ImageID: inspect.Image,
 		// Free: the inspect above already carries the label, so reporting
 		// whether this container predates the current container
 		// configuration costs no extra daemon call (#1642).

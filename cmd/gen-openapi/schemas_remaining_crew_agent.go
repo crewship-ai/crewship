@@ -99,10 +99,28 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("PATCH", "/api/v1/crews/{crewId}/missions/{missionId}", "RemainingCrewMissionUpdatedV1", object(map[string]any{"id": str(), "title": str(), "description": str(), "status": str(), "tasks": array(anyObject()), "created_at": str(), "updated_at": str()}))
 	add("PUT", "/api/v1/crews/{crewId}/persona", "RemainingCrewPersonaUpdatedV1", ref("CrewPersonaResponseV1"))
 	add("PUT", "/api/v1/crews/{crewId}/policy", "RemainingCrewPolicyUpdatedV1", ref("CrewPolicyResponseV1"))
-	add("GET", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionStatusV1", object(map[string]any{"crew_id": str(), "status": str(), "phase": str(), "message": str(), "updated_at": str()}))
+	tool := object(map[string]any{"binary": str(), "version": str(), "path": str(), "status": str()})
+	tool["required"] = []string{"binary", "status"}
+	probe := object(map[string]any{"binary": str(), "status": str()})
+	probe["required"] = []string{"binary", "status"}
+	qualification := object(map[string]any{"status": str(), "image_id": str(), "tools": array(probe)})
+	qualification["required"] = []string{"status", "image_id", "tools"}
+	inventory := object(map[string]any{"schema_version": integer(), "status": str(), "image_id": str(), "tools": array(tool), "qualification": qualification})
+	inventory["nullable"] = true
+	inventory["required"] = []string{"schema_version", "status", "tools"}
+	requestedTool := object(map[string]any{"adapter": str(), "binary": str(), "source": str(), "selector": str(), "exact": boolean()})
+	requestedTool["required"] = []string{"adapter", "binary", "source", "exact"}
+	requestedTools := array(requestedTool)
+	requestedTools["nullable"] = true
+	toolchain := object(map[string]any{"requested": requestedTools, "built": inventory})
+	toolchain["required"] = []string{"requested", "built"}
+	add("GET", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionStatusV1", object(map[string]any{"crew_id": str(), "status": str(), "phase": str(), "message": str(), "updated_at": str(), "toolchain": toolchain}))
+	revision := object(map[string]any{"id": str(), "definition_hash": str(), "build_hash": str(), "image_id": str(), "toolchain": inventory, "created_at": str()})
+	revision["required"] = []string{"id", "definition_hash", "build_hash", "image_id", "toolchain", "created_at"}
+	add("GET", "/api/v1/crews/{crewId}/provision/revisions", "EnvironmentRevisionHistoryV1", object(map[string]any{"revisions": array(revision), "limit": integer()}))
 	addAction("POST", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionTriggeredV1")
 	addAction("POST", "/api/v1/crews/{crewId}/rebuild", "RemainingCrewRebuildTriggeredV1")
-	addAction("POST", "/api/v1/crews/{crewId}/restart-agents", "RemainingCrewAgentsRestartedV1")
+	add("POST", "/api/v1/crews/{crewId}/restart-agents", "RemainingCrewAgentsRestartedV1", object(map[string]any{"restarted": integer(), "runtime_removed": boolean()}))
 	// #1845 crew image freshness. Given real shapes rather than the shared
 	// `action` envelope, because both answers are the whole point of the
 	// endpoints: a client that cannot read `behind` and `reason` off the

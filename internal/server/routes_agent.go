@@ -26,19 +26,44 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := s.state.Get(r.Context(), "agent_runs", id)
-	if err != nil || data == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"agent_id": id, "status": "idle"})
+	states, err := s.state.List(r.Context(), "agent_runs")
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime status unavailable"})
 		return
 	}
-
-	if !json.Valid(data) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"agent_id": id, "status": "idle"})
+	// Runs are keyed by run ID, not agent ID. Prefer a still-running run even
+	// when another invocation finished more recently; break ties deterministically.
+	var selected *orchestrator.RunState
+	for _, raw := range states {
+		var run orchestrator.RunState
+		if err := json.Unmarshal(raw, &run); err != nil {
+			if owner := orchestrator.RuntimeRecordAgent(raw); owner != "" && owner != id {
+				s.logger.Warn("skip corrupt runtime for another agent", "agent_id", owner, "error", err)
+				continue
+			}
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime status unavailable"})
+			return
+		}
+		if run.AgentID != id {
+			continue
+		}
+		newer := selected == nil
+		if selected != nil {
+			if (run.Status == "running") != (selected.Status == "running") {
+				newer = run.Status == "running"
+			} else {
+				newer = run.StartedAt.After(selected.StartedAt) || (run.StartedAt.Equal(selected.StartedAt) && run.ID > selected.ID)
+			}
+		}
+		if newer {
+			selected = &run
+		}
+	}
+	if selected == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"agent_id": id, "status": "idle"})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	writeJSON(w, http.StatusOK, selected)
 }
 
 type agentStartRequest struct {
@@ -86,18 +111,20 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	// Resource limits come from the request (an agent run may size its own
 	// container); the crew's provisioned image and declared sidecars are filled
 	// in by the starter, which is what this route never looked up (#1717/#1708).
-	containerID, err := s.startCrew(r.Context(), provider.CrewConfig{
+	runtimeUse, _, err := s.crewStarter().StartUse(r.Context(), provider.CrewConfig{
 		ID:       req.CrewID,
 		Slug:     req.CrewSlug,
 		MemoryMB: memoryMB,
 		CPUs:     cpus,
-	})
+	}, nil)
 	if err != nil {
+		runtimeUse.Release()
 		s.logger.Error("failed to ensure team runtime", "crew_id", req.CrewID, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to start container"})
 		return
 	}
 
+	containerID := runtimeUse.ContainerID()
 	// Start file watcher for this crew's output directory (idempotent).
 	s.ensureFileWatcher(req.CrewID)
 
@@ -116,6 +143,7 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	runID := orchestrator.NewRunID()
 
 	runReq := orchestrator.AgentRunRequest{
+		RuntimeUse:     runtimeUse,
 		AgentID:        agentID,
 		AgentSlug:      req.AgentSlug,
 		RunID:          runID,
@@ -138,6 +166,7 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
+		defer runtimeUse.Release()
 		timeout := time.Duration(req.TimeoutSecs) * time.Second
 		if timeout <= 0 {
 			timeout = 30 * time.Minute
@@ -209,6 +238,9 @@ func (s *Server) handleAgentStop(w http.ResponseWriter, r *http.Request) {
 		s.logger.Warn("agent stop not confirmed", "agent_id", id, "error", err)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime stop not confirmed"})
 		return
+	}
+	if err := s.flushRecoveredStops(ctx); err != nil {
+		s.logger.Warn("confirmed stop history pending retry", "agent_id", id, "error", err)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

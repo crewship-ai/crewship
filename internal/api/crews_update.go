@@ -76,7 +76,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req updateCrewRequest
-	if err := readJSON(r, &req); err != nil {
+	if err := readCrewConfigJSON(r, &req); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
@@ -121,10 +121,6 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "devcontainer_config exceeds 100KB limit")
 		return
 	}
-	if req.MiseConfig != nil && len(*req.MiseConfig) > 10240 {
-		replyError(w, http.StatusBadRequest, "mise_config exceeds 10KB limit")
-		return
-	}
 	if req.DevcontainerConfig != nil && *req.DevcontainerConfig != "" {
 		cfg, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig))
 		if err != nil {
@@ -145,7 +141,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.MiseConfig != nil && *req.MiseConfig != "" {
-		if _, err := devcontainer.ParseMiseConfig(*req.MiseConfig); err != nil {
+		if err := devcontainer.ValidateMiseConfigInput(*req.MiseConfig); err != nil {
 			replyError(w, http.StatusBadRequest, "invalid mise_config: "+err.Error())
 			return
 		}
@@ -166,20 +162,17 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			replyInternalError(w, h.logger, "read service configuration for update", err)
 			return
 		}
-		// Older manifest clients regenerate passwords when the read snapshot
-		// is redacted. Do not let that silently replace a running service's
-		// authentication. Runtime-reference migration must precede such edits.
+		// Reject every submitted replacement of withheld settings, including
+		// identical plaintext: accepting only a correct guess is an equality
+		// oracle. Clients updating other fields must omit services_json.
+		// Decide before opening secrets or comparing a client snapshot.
+		if serviceconfig.Public(previousServices.String) == serviceconfig.Redacted {
+			replyError(w, http.StatusConflict, "Private service settings cannot be replaced through crew updates; existing credentials and services were left unchanged")
+			return
+		}
 		previousPlain, openErr := serviceconfig.Open(previousServices.String)
 		if openErr != nil {
 			replyInternalError(w, h.logger, "open service configuration for update", openErr)
-			return
-		}
-		// Decide the redacted case before comparing the client snapshot: a
-		// snapshot comparison would answer whether a guessed private
-		// configuration is right. A snapshot editor never saw these
-		// settings, so any request carrying one is refused outright.
-		if serviceconfig.Public(previousServices.String) == serviceconfig.Redacted && (req.ExpectedServicesJSON != nil || *req.ServicesJSON != previousPlain) {
-			replyError(w, http.StatusConflict, "Private service settings cannot be replaced through crew updates; existing credentials and services were left unchanged")
 			return
 		}
 		if req.ExpectedServicesJSON != nil && *req.ExpectedServicesJSON != previousPlain {

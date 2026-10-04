@@ -23,7 +23,8 @@
 # rather than `script/…`. See docs/guides/pages.mdx, "From inside a crew
 # container".
 #
-#   CREWSHIP_SERVER=http://localhost:8083 \
+#   CREWSHIP_FLEET_ROOT=/absolute/path/to/checkouts \
+#   CREWSHIP_SERVER=http://localhost:8080 \
 #   CREWSHIP_TOKEN=... CREWSHIP_WORKSPACE=... \
 #   ./fleet-watch.sh            # one pass
 #   ./fleet-watch.sh --loop 30  # every 30s
@@ -31,7 +32,14 @@
 set -euo pipefail
 
 PAGE=${PAGE:-flotila}
-CS=${CS:-/tmp/crewship-3-dev}
+CS=${CS:-crewship}
+# Explicit host-local root containing crewship_1, crewship_2 and crewship_3.
+# No deployment-specific checkout path is a public default.
+: "${CREWSHIP_FLEET_ROOT:?Set CREWSHIP_FLEET_ROOT to the absolute checkout parent directory}"
+if [[ "$CREWSHIP_FLEET_ROOT" != /* || ! -d "$CREWSHIP_FLEET_ROOT" ]]; then
+  echo "CREWSHIP_FLEET_ROOT must be an existing absolute directory" >&2
+  exit 2
+fi
 CLONES=(1 2 3)
 
 push() {
@@ -117,7 +125,7 @@ collect_memory() {
 collect_disk_series() {
   local labels="[]" values="[]"
   for n in "${CLONES[@]}"; do
-    local mb; mb=$(du -sm "/srv/crewship/crewship_$n" 2>/dev/null | cut -f1 || echo 0)
+    local mb; mb=$(du -sm "${CREWSHIP_FLEET_ROOT%/}/crewship_$n" 2>/dev/null | cut -f1 || echo 0)
     labels=$(jq -c --arg l "crewship_$n" '. + [$l]' <<<"$labels")
     values=$(jq -c --argjson v "${mb:-0}" '. + [$v]' <<<"$values")
   done
@@ -132,7 +140,7 @@ collect_disk_series() {
 collect_clones() {
   local rows="[]"
   for n in "${CLONES[@]}"; do
-    local dir="/srv/crewship/crewship_$n" head branch up
+    local dir="${CREWSHIP_FLEET_ROOT%/}/crewship_$n" head branch up
     head=$(git -C "$dir" rev-parse --short HEAD 2>/dev/null || echo "")
     branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
     up=$(systemctl show "crewship-ws@$n" -p ActiveEnterTimestamp --value 2>/dev/null || echo "")

@@ -110,15 +110,27 @@ function devcontainerJSON(dc: Record<string, unknown>): string {
 
 /** The mise column's shape: `{"tools": {...}}`, JSON even though mise is TOML. */
 function miseJSON(mise: Record<string, unknown>): string {
+  const out: Record<string, unknown> = isRecord(mise.raw) ? { ...mise.raw } : {}
+  // Match the manifest's nonempty typed-field precedence over raw. A policy
+  // can apply to inferred adapter tools even without an explicit tools map.
+  if (mise.ai_cli_check !== undefined && mise.ai_cli_check !== "") {
+    if (mise.ai_cli_check !== "required" && mise.ai_cli_check !== "record") {
+      throw new CrewImportError("`spec.mise.ai_cli_check` must be `required` or `record`.")
+    }
+    out.ai_cli_check = mise.ai_cli_check
+  }
+  if (mise.lock !== undefined) out.lock = mise.lock
   const tools = isRecord(mise.tools) ? mise.tools : null
-  if (!tools || Object.keys(tools).length === 0) return ""
   // Versions arrive as YAML scalars — `node: 22` parses to a number, and the
   // column is map[string]string on the Go side (devcontainer.MiseConfig).
-  const asStrings: Record<string, string> = {}
-  for (const [tool, version] of Object.entries(tools)) {
-    asStrings[tool] = version == null ? "" : String(version)
+  if (tools && Object.keys(tools).length > 0) {
+    const asStrings: Record<string, string> = {}
+    for (const [tool, version] of Object.entries(tools)) {
+      asStrings[tool] = version == null ? "" : String(version)
+    }
+    out.tools = asStrings
   }
-  return JSON.stringify({ tools: asStrings })
+  return Object.keys(out).length > 0 ? JSON.stringify(out) : ""
 }
 
 /**

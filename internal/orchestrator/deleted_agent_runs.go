@@ -72,7 +72,11 @@ func (o *Orchestrator) StopDeletedAgentRuns(ctx context.Context, agentID string,
 			}
 			continue
 		}
-		o.updateRunStatus(ctx, st.ID, "cancelled")
+		if err := o.persistStoppedRun(ctx, st); err != nil {
+			res.Pending++
+			res.Errors = append(res.Errors, err)
+			continue
+		}
 		res.Stopped++
 	}
 	return res

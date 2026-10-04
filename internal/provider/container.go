@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -9,6 +10,22 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
+
+// ErrRuntimeImageUpdatePending means a selected image cannot be applied while
+// the current runtime may still contain work. Callers must not force-retry by
+// deleting it; stop/restart is an explicit operator action until drain exists.
+var ErrRuntimeImageUpdatePending = errors.New("image update pending: wait for current work to finish, then explicitly stop or restart the crew")
+
+// RuntimeImageUpdatePendingError identifies the runtime that needs activation.
+// Identity is evidence for an admission controller, never permission to stop it.
+type RuntimeImageUpdatePendingError struct {
+	ContainerID    string
+	CurrentImageID string
+	DesiredImage   string
+}
+
+func (e *RuntimeImageUpdatePendingError) Error() string { return ErrRuntimeImageUpdatePending.Error() }
+func (e *RuntimeImageUpdatePendingError) Unwrap() error { return ErrRuntimeImageUpdatePending }
 
 // CrewRef identifies a crew by its globally-unique id and workspace slug. The
 // legacy-resource detector/pruner take a list so they can both TARGET the
@@ -216,6 +233,9 @@ type ContainerStatus struct {
 	ID     string
 	State  string // "creating", "running", "idle", "stopped", "error"
 	Uptime string
+	// ImageID is the immutable source image observed on this container, never
+	// its configured tag. Empty when the provider cannot report that evidence.
+	ImageID string
 	// RuntimeContract reports whether this container was created with the
 	// container configuration the running build applies today: "current",
 	// "stale", or "" when the provider has no opinion.
@@ -753,3 +773,7 @@ func CrewNetworkName(base, crewID string) string {
 	}
 	return base + "-crew-" + crewID
 }
+
+// ErrContainerNotFound means an authoritative provider lookup found no such
+// container. Transport, permission and daemon errors must not wrap this value.
+var ErrContainerNotFound = errors.New("container not found")

@@ -234,6 +234,9 @@ func TestFieldDelivery_ReservedRuntimeNamesAreNeverShadowed(t *testing.T) {
 	for i, tc := range []struct{ slot, key, derived string }{
 		{"CREWSHIP", "agent_id", "CREWSHIP_AGENT_ID"},
 		{"HTTP", "proxy", "HTTP_PROXY"},
+		{"DISABLE", "autoupdater", "DISABLE_AUTOUPDATER"},
+		{"OPENCODE", "disable_autoupdate", "OPENCODE_DISABLE_AUTOUPDATE"},
+		{"GEMINI_CLI", "system_settings_path", "GEMINI_CLI_SYSTEM_SETTINGS_PATH"},
 		{"CLAUDE_CODE", "oauth_token", "CLAUDE_CODE_OAUTH_TOKEN"},
 	} {
 		credID := "fd-reserved-" + tc.derived
@@ -243,7 +246,7 @@ func TestFieldDelivery_ReservedRuntimeNamesAreNeverShadowed(t *testing.T) {
 	}
 
 	for name, got := range allConsumers(t, db, e.agentA) {
-		for _, derived := range []string{"CREWSHIP_AGENT_ID", "HTTP_PROXY", "CLAUDE_CODE_OAUTH_TOKEN"} {
+		for _, derived := range []string{"CREWSHIP_AGENT_ID", "HTTP_PROXY", "CLAUDE_CODE_OAUTH_TOKEN", "DISABLE_AUTOUPDATER", "OPENCODE_DISABLE_AUTOUPDATE", "GEMINI_CLI_SYSTEM_SETTINGS_PATH"} {
 			if _, hijacked := got[derived]; hijacked {
 				t.Errorf("%s: a credential field was delivered as %s — the agent runtime owns that name", name, derived)
 			}

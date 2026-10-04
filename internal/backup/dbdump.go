@@ -99,6 +99,7 @@ var BackupTables = []string{
 	"skills",
 	// Depth 1: direct workspace_id children
 	"crews",
+	"environment_revisions",
 	"service_runtime_intents",
 	"chats",
 	"workspace_files",
@@ -766,6 +767,7 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 		)`, []any{crewID, crewID, crewID}, ""},
 		{"workspaces", "id = ?", []any{workspaceID}, ""},
 		{"crews", "id = ?", []any{crewID}, ""},
+		{"environment_revisions", "crew_id = ?", []any{crewID}, ""},
 		{"service_runtime_intents", "crew_id = ?", []any{crewID}, ""},
 		{"agents", "crew_id = ?", []any{crewID}, ""},
 		{"skills", `id IN (SELECT skill_id FROM agent_skills WHERE agent_id IN (SELECT id FROM agents WHERE crew_id = ?))`, []any{crewID}, ""},
@@ -995,6 +997,10 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 // well-defined points inside RestoreDumpTxHooks's transaction. nil
 // closures or a nil RestoreDumpHooks are equivalent to no-ops.
 type RestoreDumpHooks struct {
+	// RejectNoOp refuses a nonempty dump whose rows all collided, before
+	// PostInsert/PreCommit can publish filesystem or service changes.
+	// The insert transaction rolls back and its statistics remain available.
+	RejectNoOp bool
 	// PreInsert runs INSIDE the tx, AFTER PRAGMA setup but BEFORE the
 	// per-table INSERT pass. Used by --replace mode to wipe the
 	// target workspace's rows first so the bundle can land with
@@ -1278,6 +1284,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	// for the whole restore. On an early error return above, the tx rolls
 	// back and there is no restore to report skew about.
 	stats.ColumnsDropped, stats.DroppedColumns = dropped.result()
+	if hooks.RejectNoOp && stats.RowsSeen > 0 && stats.RowsInserted == 0 {
+		return stats, ErrNoOpRestore
+	}
 	// Force-resolve deferred FK violations BEFORE preCommit. preCommit
 	// is the docker-restore closure that mutates container filesystems;
 	// without this scan a bad bundle (or schema-skew leaving an orphan

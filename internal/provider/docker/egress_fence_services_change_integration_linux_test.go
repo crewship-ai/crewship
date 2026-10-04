@@ -44,10 +44,10 @@ func fenceSvcHarness(ctx context.Context, t *testing.T, instance string, fenced 
 	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nexec sleep infinity\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shared := instance + "-" + time.Now().Format("150405")
+	shared := networkTestID(instance)
 	t.Setenv("CREWSHIP_RUNTIME", "runc")
 	p, err := New(ctx, Config{
-		RuntimeImage: "alpine:3", DefaultRuntime: "runc", Network: shared, OutputBasePath: tmp,
+		ContainerPrefix: shared, RuntimeImage: "alpine:3", DefaultRuntime: "runc", Network: shared, OutputBasePath: tmp,
 		SidecarBinaryPath: sidecarPath, EntrypointPath: entrypointPath, InstanceID: "inst-" + instance,
 		EgressFenceCrews: fenced, CrewNetworkCrews: fenced, CrewNetworkPool: "10.239.251.0/24",
 	}, nil)

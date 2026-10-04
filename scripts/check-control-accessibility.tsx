@@ -1,6 +1,8 @@
 import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import fs from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import postcss from "postcss"
 import tailwind from "@tailwindcss/postcss"
 import { chromium } from "@playwright/test"
@@ -15,6 +17,8 @@ const css = (await postcss([tailwind()]).process(await fs.readFile("app/globals.
 const markup=renderToStaticMarkup(<section className="bg-card p-6 flex flex-col gap-4 max-w-md"><h1>Pages controls</h1><Input aria-label="Name" placeholder="Page name"/><Textarea aria-label="Description" placeholder="Description"/><Select><SelectTrigger><SelectValue placeholder="Choose a crew"/></SelectTrigger></Select><Button variant="outline">Review changes</Button><SidebarFilterButton/><div className="flex gap-2"><Spinner/><span>Reading source…</span></div></section>)
 const browser=await chromium.launch({headless:true})
 try {
+ const reportDir=await fs.mkdtemp(path.join(tmpdir(),"crewship-controls-"))
+ console.error(`Control accessibility reports: ${reportDir}`)
  const page=await browser.newPage({viewport:{width:640,height:600},reducedMotion:"reduce"})
  const results=[]
  for(const theme of ["dark", "light"]){
@@ -33,9 +37,9 @@ try {
    return {controls,filterTextContrast:ratio(color(getComputedStyle(filter).color),bg(filter)),spinnerAnimation:getComputedStyle(spinner).animationName}
   })
   results.push({theme,...data})
-  if(theme==='dark') await page.screenshot({path:'/tmp/pages-completion-controls.png'})
+  if(theme==='dark') await page.screenshot({path:path.join(reportDir,'pages-completion-controls.png')})
  }
- await fs.writeFile('/tmp/pages-completion-controls.json',JSON.stringify(results,null,2))
+ await fs.writeFile(path.join(reportDir,'pages-completion-controls.json'),JSON.stringify(results,null,2))
  console.log(JSON.stringify(results,null,2))
  if(results.some(r=>r.controls.some(c=>c.contrast<3)||r.filterTextContrast<4.5||r.spinnerAnimation!=="none")) process.exitCode=1
 } finally {await browser.close()}
