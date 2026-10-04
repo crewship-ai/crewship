@@ -802,6 +802,10 @@ subscriptions. Resumed pending event waits park again and release their slot.
 expired, each retry reports the same timeout. Upgrading also applies the original
 deadline to existing parked waits; waits already older than their configured
 (or default one-hour) timeout can fail immediately and run failure hooks.
+Legacy deadline recovery looks up top-level steps only. Existing nested event-wait
+rows that cannot be matched use the one-hour fallback, even if their nested step
+configured a longer timeout. Newly armed nested waits persist their configured
+timeout.
 Shutdown cancels event-resumed work already executing, matching other
 lifecycle-owned runs; parked waits and expirations awaiting a slot remain
 recoverable at the next boot.
