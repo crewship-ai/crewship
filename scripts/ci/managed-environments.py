@@ -17,6 +17,7 @@ import sys
 PREFIX = 'github.com/crewship-ai/crewship/'
 TESTS = {
     'internal/managedlaunch': {'TestNativeLauncherConformanceRealDocker'},
+    'internal/stagedstart': {'TestKeeperControlRealDocker'},
     'internal/orchestrator': {'TestManagedLaunchRealDocker'},
     'internal/provider/docker': {
         'TestSandboxRuntimeRealDocker',
