@@ -271,7 +271,7 @@ func TestCompactAllWorkspaces_HappyPath(t *testing.T) {
 		t.Fatalf("insert ws_idle: %v", err)
 	}
 
-	old := time.Now().UTC().Add(-45 * 24 * time.Hour)
+	old := time.Date(2026, 10, 3, 23, 57, 0, 0, time.UTC).Add(-45 * 24 * time.Hour)
 	for i := 0; i < 12; i++ {
 		emitDirect(t, db, makeID("rcav", 0, i), "ws_test", "crew_test",
 			old.Add(time.Duration(i)*time.Minute),
