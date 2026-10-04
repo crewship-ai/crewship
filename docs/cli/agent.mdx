@@ -429,13 +429,27 @@ the agent `RUNNING` even when its journal start has not appeared yet. Unknown
 runtime ownership leaves the history update pending instead of projecting a
 false `STOPPED` status.
 
-When a confirmed stop has no `run.started` event, recovery can still record its
-terminal event using the captured workspace or the existing agent's workspace.
-It does not fabricate a start event. Conflicting workspace ownership leaves the
-update pending for investigation. If neither history nor a trustworthy workspace
-exists, the projection marker is acknowledged without inventing history. A
-marker owned by the work dispatcher is also acknowledged without settling the
-dispatcher's outcome.
+When a confirmed stop has no `run.started` event, recovery records exactly one
+`run.recovered_stop` audit entry for the run ID, with `start_recorded: false`.
+It never fabricates a start, duration or normal execution outcome. The captured
+workspace and the existing, non-deleted agent must agree; missing or conflicting
+ownership produces an operational warning and leaves the marker pending without
+writing history or changing the agent's status.
+
+The audit entry does not invoke journal automations, bill usage, create approvals
+or follow-up work, or count as a completed run. Work-owned attempts retain their
+fenced settlement authority. A recorded start keeps the existing work-dispatcher
+rules; a missing-start audit does not settle its attempt. Retries, including a
+restart between journal commit and marker acknowledgement, cannot duplicate the
+entry. Late lifecycle writes for the audited identity are rejected.
+
+The journal explains the record as “Zastaveno během obnovy, začátek nebyl
+zaznamenán.” It remains readable through the journal UI and CLI, including the
+live journal stream:
+
+```bash
+crewship journal --type run.recovered_stop --trace-id <run-id>
+```
 
 ## `crewship agent logs`
 
