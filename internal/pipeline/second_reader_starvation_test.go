@@ -29,6 +29,9 @@ func runStarvation(t *testing.T, longDSL string, deliver bool) {
 	defer db.Close()
 	deps := fullExecutorDeps(t, db, newMockRunner())
 	deps.RunVerdict = nil
+	// This regression exercises expiry fairness, not websocket capture. The
+	// factory's counter fake is not safe for eight concurrent retry emitters.
+	deps.WS = nil
 	blocker := &starvationBlockingCodeRunner{}
 	deps.CodeRunner = blocker
 	exec := NewWiredExecutor(deps)
