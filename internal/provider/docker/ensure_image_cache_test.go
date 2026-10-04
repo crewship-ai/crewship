@@ -92,6 +92,16 @@ func TestEnsureImage_LocalCacheTag(t *testing.T) {
 		wantPulls int32
 	}{
 		{
+			name:      "immutable local ID missing -> sentinel, no pull",
+			ref:       "sha256:" + strings.Repeat("a", 64),
+			wantErrIs: ErrCachedImageMissing,
+		},
+		{
+			name:    "immutable local ID present -> no pull",
+			ref:     "sha256:" + strings.Repeat("a", 64),
+			present: true,
+		},
+		{
 			name:      "cache image missing -> sentinel, no pull",
 			ref:       "crewship-cache:deadbeef",
 			present:   false,

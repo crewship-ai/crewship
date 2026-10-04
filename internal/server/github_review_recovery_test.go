@@ -17,11 +17,15 @@ type reviewRecoveryContainer struct {
 	err   error
 }
 
-func (c reviewRecoveryContainer) ContainerStatus(context.Context, string) (*provider.ContainerStatus, error) {
-	return &provider.ContainerStatus{State: c.state}, c.err
+func (c reviewRecoveryContainer) ContainerStatus(_ context.Context, id string) (*provider.ContainerStatus, error) {
+	return &provider.ContainerStatus{ID: id, State: c.state}, c.err
+}
+
+func (c reviewRecoveryContainer) Exec(context.Context, provider.ExecConfig) (*provider.ExecResult, error) {
+	return nil, errors.New("runtime probe unavailable")
 }
 func TestReviewRestartReconcilesAbsentContainer(t *testing.T) {
-	for _, kind := range []string{"stopped", "missing", "error", "running", "unreachable"} {
+	for _, kind := range []string{"stopped", "error", "missing", "running", "unreachable"} {
 		t.Run(kind, func(t *testing.T) {
 			s := newTestServerWithDeps(t)
 			mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('review','Review','review')`)
@@ -38,6 +42,7 @@ func TestReviewRestartReconcilesAbsentContainer(t *testing.T) {
 			if kind == "unreachable" {
 				c.err = errors.New("daemon offline")
 			}
+			s.container = c
 			s.orchestrator = orchestrator.New(c, s.state, s.logger)
 			s.recoverOrphanedRuns(t.Context())
 			var status string
@@ -45,7 +50,7 @@ func TestReviewRestartReconcilesAbsentContainer(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := "RUNNING"
-			if kind == "stopped" || kind == "missing" || kind == "error" {
+			if kind == "stopped" || kind == "error" || kind == "missing" {
 				want = "IDLE"
 			}
 			if status != want {

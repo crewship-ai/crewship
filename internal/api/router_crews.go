@@ -10,6 +10,7 @@ package api
 // chatbridge auto-provision).
 
 import (
+	"github.com/crewship-ai/crewship/internal/provider"
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/config"
@@ -581,6 +582,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Stash the handler on the router so cmd_start can wire it into chatbridge
 	// for the auto-provision-on-first-message UX without a second instance.
 	provisioning := NewProvisioningHandler(r.db, r.logger, r.catalogFetcher, r.runtimeFetcher, r.dockerClient, r.imageBuilder, r.featureCacheDir, r.hub)
+	if sandbox, ok := r.activeContainer().(provider.SandboxRuntime); ok {
+		provisioning.sandboxRuntime = sandbox
+	}
 	r.provisioning = provisioning
 	// Proactive provisioning: building the devcontainer image starts the moment
 	// a crew is created or its config changes (CrewHandler.maybeAutoProvision),
@@ -609,7 +613,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 
 	// Crew provisioning (require workspace context)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/provision", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionStatus))))
+	r.mux.Handle("GET /api/v1/crews/{crewId}/provision/revisions", authed(wsCtx(http.HandlerFunc(provisioning.EnvironmentRevisions))))
 	r.authedMut("POST", "/api/v1/crews/{crewId}/provision", roleCreate, provisioning.ProvisionTrigger)
+	// The rebuild handler delegates its enqueue failure response.
+	// openapi: responses 500
 	r.authedMut("POST", "/api/v1/crews/{crewId}/rebuild", roleCreate, provisioning.ProvisionRebuild)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/restart-agents", roleCreate, provisioning.RestartCrewAgents)
 

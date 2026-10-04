@@ -99,6 +99,7 @@ var BackupTables = []string{
 	"skills",
 	// Depth 1: direct workspace_id children
 	"crews",
+	"environment_revisions",
 	"service_runtime_intents",
 	"chats",
 	"workspace_files",
@@ -766,6 +767,7 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 		)`, []any{crewID, crewID, crewID}, ""},
 		{"workspaces", "id = ?", []any{workspaceID}, ""},
 		{"crews", "id = ?", []any{crewID}, ""},
+		{"environment_revisions", "crew_id = ?", []any{crewID}, ""},
 		{"service_runtime_intents", "crew_id = ?", []any{crewID}, ""},
 		{"agents", "crew_id = ?", []any{crewID}, ""},
 		{"skills", `id IN (SELECT skill_id FROM agent_skills WHERE agent_id IN (SELECT id FROM agents WHERE crew_id = ?))`, []any{crewID}, ""},

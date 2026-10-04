@@ -120,7 +120,8 @@ func TestReviewRecoveredAbsenceIsNotUserStop(t *testing.T) {
 	if err := s.state.Set(t.Context(), "agent_runs", "gone", raw); err != nil {
 		t.Fatal(err)
 	}
-	s.orchestrator = orchestrator.New(reviewRecoveryContainer{state: "stopped"}, s.state, s.logger)
+	s.container = reviewRecoveryContainer{state: "stopped"}
+	s.orchestrator = orchestrator.New(s.container, s.state, s.logger)
 	s.recoverOrphanedRuns(t.Context())
 	if err := s.flushRecoveredStops(t.Context()); err != nil {
 		t.Fatal(err)

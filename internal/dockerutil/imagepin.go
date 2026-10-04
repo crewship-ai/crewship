@@ -1,10 +1,21 @@
 package dockerutil
 
 import (
+	"encoding/hex"
 	"strings"
 
 	"github.com/google/go-containerregistry/pkg/name"
 )
+
+// IsLocalImageID recognizes a full Docker image configuration digest. It is a
+// daemon-local identity, not a registry manifest reference or a pull target.
+func IsLocalImageID(ref string) bool {
+	if !strings.HasPrefix(ref, "sha256:") || len(ref) != 71 {
+		return false
+	}
+	_, err := hex.DecodeString(strings.TrimPrefix(ref, "sha256:"))
+	return err == nil && ref == strings.ToLower(ref)
+}
 
 // PinnedRef rewrites a (possibly tagged) image reference into an immutable
 // digest reference — "<registry>/<repo>@sha256:<hex>" — so the pull that

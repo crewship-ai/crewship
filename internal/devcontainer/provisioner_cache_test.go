@@ -150,7 +150,7 @@ func TestProvision_CacheHitPrunedImageRebuilds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Provision: %v", err)
 	}
-	if res.CachedImage != tag || len(mock.createdContainers) != 0 {
+	if res.CachedImage != fixtureImageID || len(mock.createdContainers) != 0 {
 		t.Fatalf("first Provision should be a pure cache hit: image=%q creates=%d", res.CachedImage, len(mock.createdContainers))
 	}
 
@@ -162,7 +162,7 @@ func TestProvision_CacheHitPrunedImageRebuilds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Provision: %v", err)
 	}
-	if res.CachedImage != tag {
+	if res.CachedImage != fixtureImageID {
 		t.Errorf("second Provision image = %q, want %q", res.CachedImage, tag)
 	}
 	if len(mock.createdContainers) == 0 || len(mock.commitRefs) == 0 {

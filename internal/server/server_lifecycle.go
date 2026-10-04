@@ -256,6 +256,7 @@ func (s *Server) Start(ctx context.Context) error {
 				if res := s.orchestrator.StopDeletedAgentRuns(ctx, "", lookup); res.Stopped > 0 || res.Pending > 0 {
 					s.logger.Info("deleted agent runs", "stopped", res.Stopped, "pending", res.Pending, "error", errors.Join(res.Errors...))
 				}
+				s.reconcileRecoveredRuntimes(ctx)
 				if err := s.flushRecoveredStops(ctx); err != nil {
 					s.logger.Warn("confirmed stop history pending retry", "error", err)
 				}
@@ -1042,13 +1043,16 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	protectedAgents := map[string]bool{}
 	protectedRuns := map[string]bool{}
 	legacyAgents := map[string]bool{}
+	// Bound all boot probes together, not two seconds per persisted run.
+	probeCtx, probeCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer probeCancel()
 	if s.state != nil {
 		states, err := s.state.List(ctx, "agent_runs")
 		if err != nil {
 			s.logger.Error("recover runtime identities", "error", err)
 			return
 		}
-		for _, raw := range states {
+		for key, raw := range states {
 			var run orchestrator.RunState
 			if err := json.Unmarshal(raw, &run); err != nil {
 				s.logger.Error("decode recovered runtime identity", "error", err)
@@ -1059,17 +1063,14 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 				}
 				return
 			}
-			if run.Status == "running" && s.orchestrator != nil {
-				probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				absent, err := s.orchestrator.ReconcileRecoveredRun(probeCtx, run)
-				cancel()
-				if err != nil {
-					s.logger.Warn("reconcile recovered runtime", "run_id", run.ID, "error", err)
+			run = s.reconcileRecoveredRuntimeAtBoot(probeCtx, key, run)
+			if run.Status == "running" && run.ID != "" && run.ID != run.AgentID && key == run.ID {
+				s.recoveredRuntimesMu.Lock()
+				if s.recoveredRuntimes == nil {
+					s.recoveredRuntimes = make(map[string]orchestrator.RunState)
 				}
-				if absent && err == nil {
-					run.Status = "cancelled"
-					run.StopJournalPending = true
-				}
+				s.recoveredRuntimes[key] = run
+				s.recoveredRuntimesMu.Unlock()
 			}
 			if run.Status == "running" && run.AgentID != "" {
 				protectedAgents[run.AgentID] = true
@@ -1083,9 +1084,13 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 			// never unrelated runs or the entire agent's status.
 			if run.Status == "cancelled" && run.StopJournalPending && run.ID != "" {
 				protectedRuns[run.ID] = true
-
 			}
 		}
+	}
+	// Boot probes can create new outbox entries. Project them before the
+	// journal-based idle decision; failures retain their durable retry marker.
+	if err := s.flushRecoveredStops(ctx); err != nil {
+		s.logger.Warn("project boot runtime absence", "error", err)
 	}
 	if s.journalWriter == nil {
 		// Without a journal writer we can't write the cancel entries —

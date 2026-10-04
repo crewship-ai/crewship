@@ -23,6 +23,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
+	"github.com/crewship-ai/crewship/internal/toolchain"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -33,14 +34,16 @@ import (
 const provisionLogTailCap = 50
 
 type ProvisionJob struct {
-	CrewID      string
-	Status      string // "pending", "running", "completed", "failed"
-	StartedAt   time.Time
-	CompletedAt *time.Time
-	Error       string
-	CachedImage string
-	ConfigHash  string
-	adapters    []string // adapter snapshot used by this build; guarded by mu
+	CrewID          string
+	Status          string // "pending", "running", "completed", "failed"
+	StartedAt       time.Time
+	CompletedAt     *time.Time
+	Error           string
+	CachedImage     string
+	ConfigHash      string
+	adapters        []string             // adapter snapshot used by this build; guarded by mu
+	forceRebuild    bool                 // immutable after admission
+	builtDefinition *provisionDefinition // successful final attempt; guarded by mu
 
 	Step      int       // 1-based current milestone
 	Total     int       // total milestones; 0 until the first progress event
@@ -204,12 +207,12 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var devcontainerConfig, cachedImage, cfgHash, slug, resolvedFeatures sql.NullString
+	var devcontainerConfig, cachedImage, cfgHash, slug, resolvedFeatures, miseConfig, requirementsJSON sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT devcontainer_config, cached_image, config_hash, slug, resolved_features
+		`SELECT devcontainer_config, cached_image, config_hash, slug, resolved_features, mise_config, cached_requirements
 		 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		crewID, workspaceID,
-	).Scan(&devcontainerConfig, &cachedImage, &cfgHash, &slug, &resolvedFeatures)
+	).Scan(&devcontainerConfig, &cachedImage, &cfgHash, &slug, &resolvedFeatures, &miseConfig, &requirementsJSON)
 
 	if err == sql.ErrNoRows {
 		replyError(w, http.StatusNotFound, "crew not found")
@@ -240,6 +243,24 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 		"cached_image":                  nullStringPtr(cachedImage),
 		"config_hash":                   nullStringPtr(cfgHash),
 	}
+
+	// Report desired selectors separately from evidence belonging to a built
+	// image. Old requirements retained during rebuild are not the new artifact.
+	var built *devcontainer.ToolchainInventory
+	if cachedImage.Valid && cachedImage.String != "" && requirementsJSON.Valid {
+		var requirements devcontainer.AggregatedRequirements
+		if json.Unmarshal([]byte(requirementsJSON.String), &requirements) == nil {
+			built = requirements.Toolchain
+		}
+	}
+	var requested []devcontainer.ToolchainRequest
+	effective := database.EffectiveCrewDevcontainerConfig(devcontainerConfig.String, devcontainerConfig.Valid)
+	if cfg, err := devcontainer.ParseBytes([]byte(effective)); err == nil {
+		if adapters, err := crewAgentAdapters(r.Context(), h.db, crewID); err == nil {
+			requested, _ = devcontainer.RequestedToolchain(cfg, miseConfig.String, adapters)
+		}
+	}
+	resp["toolchain"] = map[string]any{"requested": requested, "built": built}
 
 	// What the image is actually made of. Null (rather than []) when the crew
 	// was provisioned before provenance was recorded — "we do not know" and
@@ -437,6 +458,10 @@ var (
 // "send first message" can auto-provision a crew whose devcontainer hasn't
 // been built yet — without the bridge needing to round-trip through HTTP.
 func (h *ProvisioningHandler) EnqueueForCrew(ctx context.Context, crewID, workspaceID string) (EnqueueResult, error) {
+	return h.enqueueForCrew(ctx, crewID, workspaceID, false)
+}
+
+func (h *ProvisioningHandler) enqueueForCrew(ctx context.Context, crewID, workspaceID string, forceRebuild bool) (EnqueueResult, error) {
 	if h.provisioner == nil {
 		return EnqueueResult{}, ErrProvisionerUnavailable
 	}
@@ -501,10 +526,14 @@ func (h *ProvisioningHandler) EnqueueForCrew(ctx context.Context, crewID, worksp
 		h.rateLimiter.release(workspaceID)
 		return EnqueueResult{AlreadyRunning: true, Status: status}, nil
 	}
+	// Cache bypass belongs to this job. Keep the previous artifact and its
+	// contract until saveProvisionResult publishes a successful replacement.
+	// A failed rebuild must not erase the last usable environment.
 	job := &ProvisionJob{
-		CrewID:    crewID,
-		Status:    "pending",
-		StartedAt: time.Now(),
+		forceRebuild: forceRebuild,
+		CrewID:       crewID,
+		Status:       "pending",
+		StartedAt:    time.Now(),
 	}
 	h.jobs[crewID] = job
 	h.mu.Unlock()
@@ -844,14 +873,20 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 // Returns 503 if the Docker client is not configured, 409 if a job is already
 // in progress for the same crew.
 
+// provisionRebuildKey is internal request intent, set only by ProvisionRebuild.
+// Keep the response branches in the registered handler so OpenAPI's source
+// scanner continues to see the actual status codes and error envelopes.
+type provisionRebuildKey struct{}
+
 func (h *ProvisioningHandler) ProvisionTrigger(w http.ResponseWriter, r *http.Request) {
+	forceRebuild, _ := r.Context().Value(provisionRebuildKey{}).(bool)
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if !requireRole(w, r, "create") {
 		return
 	}
 
 	crewID := r.PathValue("crewId")
-	res, err := h.EnqueueForCrew(r.Context(), crewID, workspaceID)
+	res, err := h.enqueueForCrew(r.Context(), crewID, workspaceID, forceRebuild)
 	if err != nil {
 		// Match by typed sentinel — message strings drift; an HTTP contract
 		// keyed off strings.Contains(err.Error(), "rate limited") would
@@ -869,6 +904,10 @@ func (h *ProvisioningHandler) ProvisionTrigger(w http.ResponseWriter, r *http.Re
 			writeProblem(w, r, http.StatusTooManyRequests, err.Error())
 		default:
 			h.logger.Error("provision trigger", "error", err)
+			if forceRebuild {
+				replyInternalError(w, h.logger, "enqueue rebuild", err)
+				return
+			}
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		}
 		return
@@ -1061,6 +1100,34 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		}
 	}()
 
+	// Keep the same admitted job, pending messages and rate-limit slot while
+	// converging on edits coalesced during a build. Never publish a stale image
+	// or turn its supersession into a terminal chat failure. Both the original
+	// wall-clock budget and an attempt bound apply to continual configuration churn.
+	for attempt := 0; attempt < 8; attempt++ {
+		if err := ctx.Err(); err != nil {
+			h.markJobFailed(job, workspaceID, err)
+			return
+		}
+		if !h.runProvisioningAttempt(ctx, crewID, workspaceID, cfgJSON, miseJSON, runtimeImg, job) {
+			return
+		}
+		var cfg, mise, image sql.NullString
+		if err := h.db.QueryRowContext(ctx, `SELECT devcontainer_config,mise_config,runtime_image FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, crewID, workspaceID).Scan(&cfg, &mise, &image); err != nil {
+			h.markJobFailed(job, workspaceID, fmt.Errorf("reload changed environment definition: %w", err))
+			return
+		}
+		cfgJSON = database.EffectiveCrewDevcontainerConfig(cfg.String, cfg.Valid)
+		miseJSON, runtimeImg = mise.String, image.String
+		h.logger.Info("environment changed during build; preparing current definition", "crew_id", crewID)
+	}
+	h.markJobFailed(job, workspaceID, errors.New("environment definition kept changing during build; retry after editing has settled"))
+}
+
+// runProvisioningAttempt returns true only when successful build work was
+// superseded by a definition edit. That leaves the job running and its pending
+// messages attached; actual build/publication errors remain terminal.
+func (h *ProvisioningHandler) runProvisioningAttempt(ctx context.Context, crewID, workspaceID, cfgJSON, miseJSON, runtimeImg string, job *ProvisionJob) (superseded bool) {
 	h.mu.Lock()
 	job.Status = "running"
 	h.mu.Unlock()
@@ -1083,6 +1150,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		Refs: map[string]any{"crew_id": crewID},
 	})
 
+	expectedDefinition := provisionDefinition{Config: cfgJSON, Mise: miseJSON, Runtime: runtimeImg}
 	cfg, err := devcontainer.ParseBytes([]byte(cfgJSON))
 	if err != nil {
 		h.markJobFailed(job, workspaceID, fmt.Errorf("parse devcontainer_config: %w", err))
@@ -1110,6 +1178,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		h.markJobFailed(job, workspaceID, fmt.Errorf("read crew agents: %w", err))
 		return
 	}
+	expectedDefinition.Adapters = append([]string(nil), adapters...)
 	h.mu.Lock()
 	job.adapters = append([]string(nil), adapters...)
 	h.mu.Unlock()
@@ -1211,22 +1280,16 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		devcontainer.WithProgress(progress),
 		devcontainer.WithProvisionSink(provisionEventSink),
 		devcontainer.WithRequiredBinaries(cliPlan.Binaries),
+		devcontainer.WithForceRebuild(job.forceRebuild),
 	)
 	if err != nil {
 		h.markJobFailed(job, workspaceID, fmt.Errorf("provision: %w", err))
 		return
 	}
 
-	// Serialize aggregated feature requirements (privileged, capAdd, mounts,
-	// containerEnv) so the runtime can apply them when starting the crew
-	// container. Without this, features like DinD (privileged:true +
-	// docker.sock mount) would silently not work at runtime.
-	var reqJSON sql.NullString
-	if reqBytes, marshalErr := json.Marshal(result.Requirements); marshalErr != nil {
-		h.logger.Warn("marshal cached_requirements failed, storing NULL",
-			"crew_id", crewID, "error", marshalErr)
-	} else if !isEmptyRequirements(result.Requirements) {
-		reqJSON = sql.NullString{String: string(reqBytes), Valid: true}
+	if inventory := result.Requirements.Toolchain; inventory != nil {
+		qualification := toolchain.Qualify(ctx, h.sandboxRuntime, inventory, result.Requirements.LoginPath)
+		inventory.Qualification = &qualification
 	}
 
 	// #1032 (visibility mitigation): a privileged crew runs its container with
@@ -1241,49 +1304,13 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 			"crew_id", crewID, "workspace_id", workspaceID, "base_image", baseImage)
 	}
 
-	// Persist the cached image reference on the crew row. Use a fresh context
-	// (not the 30-min provisioning ctx, which may be near its deadline).
 	updateCtx, updateCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer updateCancel()
-	// What the build actually installed, so the image can be audited rather
-	// than inferred from the config (#1779). Stored as '[]' when a crew uses no
-	// features — distinct from NULL, which means "built before this existed".
-	// nil and empty mean different things here, so the test is `!= nil` and
-	// not `len() > 0`. A build always sets the slice — featureRecords returns
-	// a non-nil slice even for a crew with no features — so empty means "this
-	// build installed none", which is an answer and belongs in the column as
-	// '[]'. A cache hit builds nothing and leaves the field nil; writing that
-	// would serialize to JSON `null` and erase the digests an earlier build
-	// recorded, after which the CLI reports the crew as "not recorded" and the
-	// audit trail the column exists for is gone (#1779).
-	setFeatures := ""
-	updateArgs := []any{result.CachedImage, result.ConfigHash, reqJSON}
-	if result.Features != nil {
-		featBytes, marshalErr := json.Marshal(result.Features)
-		if marshalErr != nil {
-			// Leave the column alone rather than blanking it: "unknown" is
-			// better recorded as the previous answer than as no answer.
-			h.logger.Warn("marshal resolved_features failed, leaving the column untouched",
-				"crew_id", crewID, "error", marshalErr)
-		} else {
-			setFeatures = "resolved_features = ?, "
-			updateArgs = append(updateArgs, string(featBytes))
+	if _, err := h.saveProvisionResult(updateCtx, crewID, workspaceID, expectedDefinition, result); err != nil {
+		if errors.Is(err, errBuildDefinitionChanged) {
+			return true
 		}
-	}
-	updateArgs = append(updateArgs, crewID, workspaceID)
-
-	// COALESCE: a result that carries no requirements (a cache hit whose
-	// feature resolution failed) keeps the previous build's contract rather
-	// than erasing it to NULL.
-	_, err = h.db.ExecContext(updateCtx,
-		`UPDATE crews SET cached_image = ?, config_hash = ?, cached_requirements = COALESCE(?, cached_requirements), `+
-			setFeatures+
-			`updated_at = datetime('now')
-		 WHERE id = ? AND workspace_id = ?`,
-		updateArgs...,
-	)
-	if err != nil {
-		h.markJobFailed(job, workspaceID, fmt.Errorf("update db: %w", err))
+		h.markJobFailed(job, workspaceID, fmt.Errorf("save environment revision: %w", err))
 		return
 	}
 
@@ -1293,6 +1320,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	job.CompletedAt = &now
 	job.CachedImage = result.CachedImage
 	job.ConfigHash = result.ConfigHash
+	job.builtDefinition = &expectedDefinition
 	pending := job.Pending
 	job.Pending = nil
 	h.mu.Unlock()
@@ -1322,6 +1350,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		},
 		Refs: map[string]any{"crew_id": crewID},
 	})
+	return false
 }
 
 // markJobFailed records a failure on the job, logs it, and broadcasts a
@@ -1365,39 +1394,18 @@ func (h *ProvisioningHandler) markJobFailed(job *ProvisionJob, workspaceID strin
 }
 
 // ProvisionRebuild invalidates the cached image and triggers re-provisioning.
-// Implemented as: clear DB cache columns, then delegate to ProvisionTrigger.
+// Cache invalidation and the force flag are applied only after job admission.
 
 func (h *ProvisioningHandler) ProvisionRebuild(w http.ResponseWriter, r *http.Request) {
-	workspaceID := WorkspaceIDFromContext(r.Context())
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
+	if !canRole(RoleFromContext(r.Context()), "create") {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
-	crewID := r.PathValue("crewId")
-	if crewID == "" {
+	if r.PathValue("crewId") == "" {
 		replyError(w, http.StatusBadRequest, "crew ID is required")
 		return
 	}
-	// Clear cache so Provisioner won't short-circuit on the existing tag.
-	// cached_requirements is deliberately left alone (#1032): it's the only
-	// signal resolveAgentConfig's fail-closed credential gate has for "is
-	// this crew's actual RUNNING container privileged", and EnqueueForCrew
-	// below is async — nulling it here would open a window where the
-	// container is STILL privileged (unchanged until the rebuild completes)
-	// but the gate reads "unknown" and hands out credentials anyway. The
-	// stale value stays accurate until the provisioning job's completion
-	// handler overwrites it with the freshly computed one.
-	_, err := h.db.ExecContext(r.Context(),
-		`UPDATE crews SET cached_image = NULL, config_hash = NULL, updated_at = datetime('now')
-		 WHERE id = ? AND workspace_id = ?`,
-		crewID, workspaceID,
-	)
-	if err != nil {
-		replyInternalError(w, h.logger, "clear cached image for rebuild", err)
-		return
-	}
-	h.ProvisionTrigger(w, r)
+	h.ProvisionTrigger(w, r.WithContext(context.WithValue(r.Context(), provisionRebuildKey{}, true)))
 }
 
 // cacheImagePrefix is the Docker repository name used for all provisioned
@@ -1412,6 +1420,7 @@ func isEmptyRequirements(r devcontainer.AggregatedRequirements) bool {
 		len(r.SecurityOpt) == 0 &&
 		len(r.PostStartCommands) == 0 &&
 		len(r.AdapterBinaries) == 0 &&
+		r.Toolchain == nil &&
 		r.LoginPath == ""
 }
 
@@ -1430,6 +1439,9 @@ func (h *ProvisioningHandler) prepareLatestCrew(crewID, workspaceID, builtConfig
 	h.mu.RLock()
 	completed := job.Status == "completed"
 	builtAdapters := append([]string(nil), job.adapters...)
+	if job.builtDefinition != nil {
+		builtConfig, builtMise, builtImage = job.builtDefinition.Config, job.builtDefinition.Mise, job.builtDefinition.Runtime
+	}
 	h.mu.RUnlock()
 	if !completed {
 		return

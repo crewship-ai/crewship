@@ -153,7 +153,7 @@ context where supported, or `X-Workspace-ID` as described above.
 | `escalation_config` | string? | Escalation policy config JSON |
 | `runtime_image` | string? | Custom runtime image (e.g., `ghcr.io/org/runtime:1.0`) |
 | `devcontainer_config` | string? | Raw devcontainer.json (max 100 KB) |
-| `mise_config` | string? | Raw mise config TOML (max 10 KB) |
+| `mise_config` | string? | Mise JSON/TOML (10 KiB configuration; native lock separately bounded) |
 | `services_json` | string? | Sidecar services JSON (max 64 KB). **Redacted on every read** when any service carries a field beyond `name`, `image`, `ports`, `env_refs` and `volumes` (`env`, `command`, `healthcheck`, or any unknown key) — regardless of the caller's role: the field is then the literal string `[service configuration withheld: contains private runtime settings]`, never a services array. Crew read permission is not permission to read a password |
 | `cached_image` | string? | Locally built image tag (set by provisioner) |
 | `config_hash` | string? | Hash of devcontainer/mise/runtime inputs used for `cached_image` |
@@ -190,7 +190,7 @@ POST /api/v1/crews?workspace_id={workspaceId}
 | `allowed_domains` | string[] | No | `[]` | Allowed domains when `network_mode` is `"restricted"` (ignored otherwise) |
 | `runtime_image` | string | No | `null` | Custom runtime image; existence is validated against the registry before insert |
 | `devcontainer_config` | string | No | `null` | Raw devcontainer.json (max 100 KB; parsed for syntax) |
-| `mise_config` | string | No | `null` | Raw mise config TOML (max 10 KB; parsed for syntax) |
+| `mise_config` | string | No | `null` | Mise JSON/TOML (10 KiB configuration; optional lock: 512 KiB decoded files, 4 MiB total JSON envelope) |
 | `services_json` | string | No | `null` | Sidecar services JSON (max 64 KB; structurally validated). Any key outside the five public ones (`name`, `image`, `ports`, `env_refs`, `volumes`) — `env`, `command`, `healthcheck` — makes the stored configuration come back redacted on every later read; see [Response Fields](#response-fields). This route has no `auto_credentials`: that key is a manifest-bundle feature and is not part of the wire shape |
 
 <Note>
@@ -311,7 +311,7 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 | `issue_prefix` | string | Issue identifier prefix (e.g., `"ENG"`); must match `^[A-Za-z0-9_-]{1,16}$` — letters, digits, underscore or hyphen, 1-16 characters — because it becomes part of the issue identifier, which is a single URL path segment. Empty string clears it (identifiers then use the first three letters of the crew slug upper-cased). Prefixes stored before this rule existed are left alone and keep working; they are refused on the next write |
 | `runtime_image` | string | Custom runtime image (empty string clears; existence validated) |
 | `devcontainer_config` | string | Raw devcontainer.json (empty string clears; max 100 KB) |
-| `mise_config` | string | Raw mise config TOML (empty string clears; max 10 KB) |
+| `mise_config` | string | Mise JSON/TOML (empty string clears; 10 KiB configuration, separately bounded native lock) |
 | `services_json` | string | Sidecar services JSON (empty/whitespace clears; max 64 KB). When the stored configuration is one that reads back redacted, every submitted replacement — including identical plaintext, the redaction sentinel, or an empty string — is `409` and leaves the services and their credentials untouched. Omit this field when updating other crew settings; such patches can be retried safely without resubmitting private configuration |
 
 **Response:** `200 OK` -- updated crew object.

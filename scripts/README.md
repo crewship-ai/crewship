@@ -70,6 +70,7 @@ name as proof that it never contacts a server.
 
 | Location | Requirements and effects |
 | --- | --- |
+| [ci/managed-environments.py](ci/managed-environments.py) | Requires local Docker `alpine:3`; runs five named synthetic environment fixtures with isolated resources; fails on skipped/missing tests; no provider credentials or global cleanup |
 | [api-contract/](api-contract/README.md) | API contract/fuzz checks; use its isolation, authentication and pacing instructions |
 | [test-harness/](test-harness/) | CLI-driven acceptance scenarios; may create and delete resources on the selected server |
 | [test-pages-apps.sh](test-pages-apps.sh) | Pages application acceptance checks; inspect required build/runtime setup |

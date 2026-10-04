@@ -24,12 +24,38 @@ Implementation lives in `internal/api/crew_provisioning_jobs.go` and `internal/a
 | GET | [`/api/v1/runtimes/catalog`](#runtime-catalog) | List mise-managed runtimes |
 | GET | [`/api/v1/crews/{crewId}/provision`](#provision-status) | Get crew provision status |
 | POST | [`/api/v1/crews/{crewId}/provision`](#trigger-provision) | Trigger a provision |
-| POST | [`/api/v1/crews/{crewId}/rebuild`](#rebuild) | Clear the cache marker and rebuild |
+| GET | [`/api/v1/crews/{crewId}/provision/revisions`](#environment-revisions) | Read bounded immutable build history |
+| POST | [`/api/v1/crews/{crewId}/rebuild`](#rebuild) | Rebuild without reusing the build cache |
 | POST | [`/api/v1/crews/{crewId}/restart-agents`](#restart-agents) | Recreate the runtime container without rebuilding |
 | GET | [`/api/v1/crews/{crewId}/image-status`](#image-status) | Report whether the running container is behind its image tag |
 | POST | [`/api/v1/crews/{crewId}/refresh-image`](#refresh-image) | Pull the current image and recycle the container |
 | GET | [`/api/v1/cache/images`](#list-cached-images) | List cached images |
 | DELETE | [`/api/v1/cache/images/{tag}`](#delete-cached-image) | Delete a cached image |
+
+---
+
+## Environment revisions
+
+```
+GET /api/v1/crews/{crewId}/provision/revisions
+```
+
+**Auth:** Authenticated workspace member with the `read` action. **Request:**
+`crewId` path parameter; no body or pagination parameters. **Response:** JSON
+object containing `revisions` and the fixed `limit: 100`, newest records first.
+**Statuses:** `200 OK`; `401 Unauthorized` at authentication middleware;
+`403 Forbidden` without the read role; `404 Not Found` for a missing, deleted or
+other-workspace crew; `500 Internal Server Error` on storage/evidence errors.
+
+Each revision contains `id`, `definition_hash`, `build_hash`, `image_id`,
+`created_at` and nullable `toolchain` inventory/qualification evidence. Raw
+configuration values and credentials are omitted. Empty history returns an
+empty array. Records describe builds, not running containers; this endpoint
+neither checks whether image bytes still exist nor performs retention or rollback.
+
+```json
+{"revisions": [], "limit": 100}
+```
 
 ---
 

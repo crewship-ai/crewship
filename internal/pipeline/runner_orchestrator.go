@@ -262,7 +262,9 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		r.logger.Warn("pipeline orchestrator runner: crew services unresolved, starting without them",
 			"crew_id", info.CrewID, "error", cfgErr)
 	}
-	containerID, startedCfg, err := r.startCrew(ctx, stepCfg, req.WorkspaceID)
+	runtimeUse, startedCfg, err := r.startCrewUse(ctx, stepCfg, req.WorkspaceID)
+	defer runtimeUse.Release()
+	containerID := runtimeUse.ContainerID()
 	if err != nil {
 		// The runtime container can be UP behind this error — the sidecars are
 		// started after it, so ErrSidecarStart means "container running,
@@ -465,6 +467,7 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		}
 	}
 
+	runReq.RuntimeUse = runtimeUse
 	runErr := r.orch.RunAgent(ctx, runReq, finalHandler)
 	// Surface volume-bounding so operators can tell a sparse trace from a
 	// throttled one (a chatty agent hitting the per-step cap / detail cap).

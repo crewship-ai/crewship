@@ -64,6 +64,9 @@ func (h *ProvisioningHandler) agentsPendingRestartCount(ctx context.Context, cre
 	if inspectResult.Container.Config != nil && inspectResult.Container.Config.Image == cachedImage {
 		return 0
 	}
+	if inspectResult.Container.Image == cachedImage {
+		return 0 // the stored reference was pinned after this container started
+	}
 	// Stale container — count active agents in this crew. We deliberately
 	// count only non-deleted rows; the actual runtime impact is "all of
 	// them" because they share one container, but the UI shows a number

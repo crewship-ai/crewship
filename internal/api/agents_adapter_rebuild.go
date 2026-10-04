@@ -32,7 +32,9 @@ func (h *AgentHandler) SetProvisioner(p agentProvisionEnqueuer) { h.provisioner 
 
 // crewAgentAdapters returns the distinct cli_adapter values of a crew's live
 // agents, the input of devcontainer.RequiredAdapterCLIs.
-func crewAgentAdapters(ctx context.Context, db *sql.DB, crewID string) ([]string, error) {
+func crewAgentAdapters(ctx context.Context, db interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, crewID string) ([]string, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT DISTINCT cli_adapter FROM agents
 		 WHERE crew_id = ? AND deleted_at IS NULL AND cli_adapter IS NOT NULL AND cli_adapter != ''

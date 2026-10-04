@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -151,42 +152,69 @@ func TestRecoveryUsesExactRunIdentityWithLegacyFallback(t *testing.T) {
 	}
 }
 func TestRecoveryLeavesWorkOwnedRunToDispatcher(t *testing.T) {
-	s := newTestServerWithDeps(t)
-	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
-	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
-	store := work.NewStore(s.db)
-	tx, err := s.db.BeginTx(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-	if _, err := store.AcceptTx(t.Context(), tx, work.AcceptRequest{WorkspaceID: "rw", AgentID: "a", Source: work.SourceWebhook, Class: work.ClassBackground}); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	attempt, err := store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "old-server"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if attempt == nil {
-		t.Fatal("no claim")
-	}
-	seedRecoveryTrace(t, s, attempt.RunID, "a")
-	seedStoppedOutbox(t, s, attempt.RunID)
-	if err := s.flushRecoveredStops(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if pendingStop(t, s, attempt.RunID) {
-		t.Fatal("dispatcher-owned marker never acknowledged")
-	}
-	s.recoverOrphanedRuns(t.Context())
-	if n := recoveryTerminalCount(t, s, attempt.RunID); n != 0 {
-		t.Fatalf("generic recovery bypassed work outcome: %d terminals", n)
-	}
-	projection, owned, err := store.RunProjection(t.Context(), attempt.RunID)
-	if err != nil || !owned || projection.Ready {
-		t.Fatalf("work projection changed: %+v %v %v", projection, owned, err)
+	for _, withStart := range []bool{false, true} {
+		t.Run(fmt.Sprintf("started-%v", withStart), func(t *testing.T) {
+			s := newTestServerWithDeps(t)
+			mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+			mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+			store := work.NewStore(s.db)
+			tx, err := s.db.BeginTx(t.Context(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if _, err := store.AcceptTx(t.Context(), tx, work.AcceptRequest{WorkspaceID: "rw", AgentID: "a", Source: work.SourceWebhook, Class: work.ClassBackground}); err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			attempt, err := store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "old-server"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if attempt == nil {
+				t.Fatal("no claim")
+			}
+			if withStart {
+				seedRecoveryTrace(t, s, attempt.RunID, "a")
+			}
+			// Even a provider that confirms absence must not let generic startup
+			// recovery settle a durable work attempt owned by its dispatcher.
+			c := &recoveredProbeContainer{mockContainer: &mockContainer{}, answer: "ABSENT"}
+			s.container = c
+			s.orchestrator = orchestrator.New(c, s.state, s.logger)
+			raw, err := json.Marshal(orchestrator.RunState{ID: attempt.RunID, AgentID: "a", AgentSlug: "a", ContainerID: "runtime", Status: "running"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.state.Set(t.Context(), "agent_runs", attempt.RunID, raw); err != nil {
+				t.Fatal(err)
+			}
+			s.recoverOrphanedRuns(t.Context())
+			raw, err = s.state.Get(t.Context(), "agent_runs", attempt.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var running orchestrator.RunState
+			if err := json.Unmarshal(raw, &running); err != nil || running.Status != "running" {
+				t.Fatalf("generic recovery changed work-owned runtime: %+v %v", running, err)
+			}
+			seedStoppedOutbox(t, s, attempt.RunID)
+			if err := s.flushRecoveredStops(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if pendingStop(t, s, attempt.RunID) {
+				t.Fatal("dispatcher-owned projection marker never acknowledged")
+			}
+			s.recoverOrphanedRuns(t.Context())
+			if n := recoveryTerminalCount(t, s, attempt.RunID); n != 0 {
+				t.Fatalf("generic recovery bypassed work outcome: %d terminals", n)
+			}
+			projection, owned, err := store.RunProjection(t.Context(), attempt.RunID)
+			if err != nil || !owned || projection.Ready {
+				t.Fatalf("work projection changed: %+v %v %v", projection, owned, err)
+			}
+		})
 	}
 }

@@ -3907,6 +3907,123 @@
         "properties": {},
         "type": "object"
       },
+      "EnvironmentRevisionHistoryV1": {
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "revisions": {
+            "items": {
+              "properties": {
+                "build_hash": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "definition_hash": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "image_id": {
+                  "type": "string"
+                },
+                "toolchain": {
+                  "nullable": true,
+                  "properties": {
+                    "image_id": {
+                      "type": "string"
+                    },
+                    "qualification": {
+                      "properties": {
+                        "image_id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "tools": {
+                          "items": {
+                            "properties": {
+                              "binary": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "binary",
+                              "status"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "image_id",
+                        "tools"
+                      ],
+                      "type": "object"
+                    },
+                    "schema_version": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "tools": {
+                      "items": {
+                        "properties": {
+                          "binary": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "binary",
+                          "status"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "status",
+                    "tools"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "id",
+                "definition_hash",
+                "build_hash",
+                "image_id",
+                "toolchain",
+                "created_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "EvalRegressionRequest": {
         "properties": {
           "baseline_mission_id": {
@@ -10425,6 +10542,123 @@
           },
           "status": {
             "type": "string"
+          },
+          "toolchain": {
+            "properties": {
+              "built": {
+                "nullable": true,
+                "properties": {
+                  "image_id": {
+                    "type": "string"
+                  },
+                  "qualification": {
+                    "properties": {
+                      "image_id": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "tools": {
+                        "items": {
+                          "properties": {
+                            "binary": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "binary",
+                            "status"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "status",
+                      "image_id",
+                      "tools"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "type": "integer"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "tools": {
+                    "items": {
+                      "properties": {
+                        "binary": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "binary",
+                        "status"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "status",
+                  "tools"
+                ],
+                "type": "object"
+              },
+              "requested": {
+                "items": {
+                  "properties": {
+                    "adapter": {
+                      "type": "string"
+                    },
+                    "binary": {
+                      "type": "string"
+                    },
+                    "exact": {
+                      "type": "boolean"
+                    },
+                    "selector": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "adapter",
+                    "binary",
+                    "source",
+                    "exact"
+                  ],
+                  "type": "object"
+                },
+                "nullable": true,
+                "type": "array"
+              }
+            },
+            "required": [
+              "requested",
+              "built"
+            ],
+            "type": "object"
           },
           "updated_at": {
             "type": "string"
@@ -53875,6 +54109,24 @@
             },
             "description": "Forbidden"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -82908,6 +83160,149 @@
           "crews"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/crews/{crewId}/provision/revisions": {
+      "get": {
+        "description": "List crew provision revisions (GET /api/v1/crews/{crewId}/provision/revisions).",
+        "operationId": "get_api_v1_crews_crewId_provision_revisions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvironmentRevisionHistoryV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List crew provision revisions",
+        "tags": [
+          "crews"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/crews/{crewId}/rebuild": {

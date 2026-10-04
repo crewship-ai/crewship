@@ -81,7 +81,7 @@ func TestEnsureCrewRuntime_WarmCacheEvictedOnRecreate(t *testing.T) {
 	if newID == "old-cid" {
 		t.Fatal("expected a freshly created container, got the stale one")
 	}
-	got, ok := p.warmHit(covTeam().ID)
+	got, ok := p.warmHit(covTeam().ID, "")
 	if !ok {
 		t.Fatal("create path should warm the cache")
 	}

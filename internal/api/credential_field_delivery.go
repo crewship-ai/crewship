@@ -104,9 +104,9 @@ var reservedDeliveryEnvVars = map[string]struct{}{
 	"HOME": {}, "PATH": {}, "SHELL": {}, "IFS": {}, "ENV": {}, "BASH_ENV": {},
 	"LD_PRELOAD": {}, "LD_LIBRARY_PATH": {},
 	"HTTP_PROXY": {}, "HTTPS_PROXY": {}, "NO_PROXY": {},
-	"CLAUDE_CODE_OAUTH_TOKEN": {}, "CLAUDE_CODE_DISABLE_AUTOUPDATE": {},
+	"CLAUDE_CODE_OAUTH_TOKEN": {}, "CLAUDE_CODE_DISABLE_AUTOUPDATE": {}, "DISABLE_AUTOUPDATER": {},
 	"ANTHROPIC_BASE_URL": {}, "OPENAI_BASE_URL": {}, "GOOGLE_GEMINI_BASE_URL": {},
-	"OPENCODE_CONFIG_CONTENT": {},
+	"OPENCODE_CONFIG_CONTENT": {}, "OPENCODE_DISABLE_AUTOUPDATE": {}, "GEMINI_CLI_SYSTEM_SETTINGS_PATH": {},
 }
 
 // deliveredFieldEnvVar is THE naming rule. One function, so the docs, the tests

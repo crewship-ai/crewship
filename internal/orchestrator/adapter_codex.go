@@ -51,7 +51,7 @@ func (codexAdapter) BuildCommand(req AgentRunRequest) []string {
 	// 0.153.2 during the first live run on crewship-dev (#2428). Agent
 	// workdirs are not repositories unless a task cloned one, and the
 	// sandbox policy below is the safety boundary here, not the repo check.
-	cmd := []string{"codex", "exec", "--json", "--skip-git-repo-check"}
+	cmd := []string{"codex", "exec", "--json", "--skip-git-repo-check", "--config", "check_for_update_on_startup=false"}
 	model := req.LLMModel
 
 	// Codex supports custom OpenAI Responses providers through its native

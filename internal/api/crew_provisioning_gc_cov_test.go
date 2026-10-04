@@ -152,8 +152,8 @@ func TestCovGC_SweepCacheImages_NilClientNoOp(t *testing.T) {
 
 func TestCovGC_SweepCacheImages_DBQueryErrorAborts(t *testing.T) {
 	fake := &covGCFake{images: []image.Summary{{
-		RepoTags: []string{cacheImagePrefix + "orphan"},
-		Created:  time.Now().Add(-time.Hour).Unix(),
+		ID: "orphan-id", RepoTags: []string{cacheImagePrefix + "orphan"},
+		Created: time.Now().Add(-time.Hour).Unix(),
 	}}}
 	h := covGCHandler(t, fake)
 	h.db.Close()
@@ -179,8 +179,8 @@ func TestCovGC_SweepCacheImages_AutoDeleteRemoveError(t *testing.T) {
 	t.Setenv(cacheGCAutoDeleteEnv, "true")
 	fake := &covGCFake{
 		images: []image.Summary{{
-			RepoTags: []string{cacheImagePrefix + "covgc-orphan"},
-			Created:  time.Now().Add(-time.Hour).Unix(),
+			ID: "orphan-id", RepoTags: []string{cacheImagePrefix + "covgc-orphan"},
+			Created: time.Now().Add(-time.Hour).Unix(),
 		}},
 		imageRemoveErr: errors.New("image in use"),
 	}

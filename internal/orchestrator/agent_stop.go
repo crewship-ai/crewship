@@ -255,6 +255,8 @@ func (o *Orchestrator) persistStoppedRun(ctx context.Context, state RunState) er
 }
 
 func (o *Orchestrator) persistStoppedRunWithOrigin(ctx context.Context, state RunState, origin string) error {
+	o.runRecoveryMu.Lock()
+	defer o.runRecoveryMu.Unlock()
 	atomic, ok := o.state.(provider.AtomicStateProvider)
 	if !ok {
 		return fmt.Errorf("state provider cannot atomically persist stopped run")

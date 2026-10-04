@@ -172,7 +172,7 @@ func TestResumeDeferredChatMessage(t *testing.T) {
 			// handler directly — no client involvement possible.
 			name: "success: job completion resumes the attached message exactly once",
 			run: func(t *testing.T) {
-				h, wsID, crewID, hub := resumeTestRig(t, "")
+				h, wsID, crewID, hub := resumeTestRig(t, skipCfg)
 				fake := newFakeChatResumer()
 				fake.stream = []ws.ChatEvent{{Type: "text", Content: "hello from the resumed run"}}
 				h.chatResumer = fake
@@ -221,7 +221,7 @@ func TestResumeDeferredChatMessage(t *testing.T) {
 			// survives to run, exactly once.
 			name: "coalescing: a second deferred send on the same chat replaces, not queues",
 			run: func(t *testing.T) {
-				h, wsID, crewID, hub := resumeTestRig(t, "")
+				h, wsID, crewID, hub := resumeTestRig(t, skipCfg)
 				fake := newFakeChatResumer()
 				h.chatResumer = fake
 
@@ -297,7 +297,7 @@ func TestResumeDeferredChatMessage(t *testing.T) {
 			// devcontainer build just failed.
 			name: "failure: job failure surfaces a real error and never runs the agent",
 			run: func(t *testing.T) {
-				h, wsID, crewID, hub := resumeTestRig(t, "")
+				h, wsID, crewID, hub := resumeTestRig(t, skipCfg)
 				fake := newFakeChatResumer()
 				h.chatResumer = fake
 
@@ -375,7 +375,7 @@ func TestResumeDeferredChatMessage(t *testing.T) {
 			// the same turn.
 			name: "concurrent manual run wins the slot: the resume stays silent, not a duplicate",
 			run: func(t *testing.T) {
-				h, wsID, crewID, hub := resumeTestRig(t, "")
+				h, wsID, crewID, hub := resumeTestRig(t, skipCfg)
 				fake := newFakeChatResumer()
 				fake.err = ws.ErrAgentBusy
 				h.chatResumer = fake

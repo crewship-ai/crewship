@@ -91,7 +91,9 @@ func (rt *ScheduledRuntime) Run(ctx context.Context, a dispatch.Assignment, star
 	if info.CrewID == "" {
 		cfg.ID, cfg.Slug = "scheduler-"+a.Item.WorkspaceID, "scheduler"
 	}
-	containerID, err := crewstart.New(h.container, NewCrewConfigCompleter(h.db), h.logger).Start(runCtx, cfg)
+	runtimeUse, _, err := crewstart.New(h.container, NewCrewConfigCompleter(h.db), h.logger).StartUse(runCtx, cfg, nil)
+	defer runtimeUse.Release()
+	containerID := runtimeUse.ContainerID()
 	if err != nil {
 		if stopped := launch.Enter("run record"); stopped != nil {
 			return stopped
@@ -127,6 +129,10 @@ func (rt *ScheduledRuntime) Run(ctx context.Context, a dispatch.Assignment, star
 		MemoryMB: info.MemoryMB, CPUs: info.CPUs,
 		MaxTurns: orchestrator.RoutineMaxTurns,
 	})
+	req.RuntimeUse = runtimeUse
+	if req.CrewID == "" {
+		req.CrewID = cfg.ID
+	}
 	req.RunID = a.RunID
 	location := orchestrator.RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID}
 	if err := launch.Launch(location); err != nil {

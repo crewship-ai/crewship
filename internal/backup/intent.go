@@ -69,6 +69,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 
 	// === Core entities (round-trip) =========================
 	"crews":                    IntentInclude,
+	"environment_revisions":    IntentInclude,        // provenance only; does not restore images or grant execution authority
 	"service_operation_leases": IntentExcludeRuntime, // host provider admissions cannot be restored
 	"service_backup_fences":    IntentExcludeRuntime, // host maintenance fences cannot be transplanted
 	"service_runtime_intents":  IntentInclude,        // Durable user-requested service state.

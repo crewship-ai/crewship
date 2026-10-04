@@ -81,7 +81,7 @@ func (m *mockCommitClient) ContainerCommit(_ context.Context, containerID string
 	if m.commitErr != nil {
 		return client.ContainerCommitResult{}, m.commitErr
 	}
-	return client.ContainerCommitResult{ID: "sha256:committed"}, nil
+	return client.ContainerCommitResult{ID: fixtureImageID}, nil
 }
 
 func (m *mockCommitClient) ImageList(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
@@ -109,7 +109,7 @@ func (m *mockCommitClient) ImageInspect(_ context.Context, ref string, _ ...clie
 	}
 	for _, tag := range m.existingImages {
 		if tag == ref {
-			return client.ImageInspectResult{InspectResponse: image.InspectResponse{RepoDigests: m.inspectDigests[ref]}}, nil
+			return client.ImageInspectResult{InspectResponse: image.InspectResponse{ID: fixtureImageID, RepoDigests: m.inspectDigests[ref]}}, nil
 		}
 	}
 	// The real client maps the daemon's 404 to a containerd NotFound, and
@@ -247,7 +247,7 @@ func TestProvision_CacheHit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if result.CachedImage != tag {
+	if result.CachedImage != fixtureImageID {
 		t.Errorf("CachedImage = %q, want %q", result.CachedImage, tag)
 	}
 	if result.ConfigHash != hash {
@@ -275,7 +275,7 @@ func TestProvision_CacheHitReturnsRequirements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.CachedImage != tag {
+	if result.CachedImage != fixtureImageID {
 		t.Fatalf("expected the cache hit, got %q", result.CachedImage)
 	}
 	req := result.Requirements

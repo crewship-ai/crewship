@@ -126,7 +126,11 @@ func TestCacheImagesAndRemoveWithoutForceFakeAPI(t *testing.T) {
 	if err != nil || len(imgs) != 1 || len(imgs[0].Refs) != 1 || imgs[0].Refs[0] != "crewship-cache:aaa" {
 		t.Fatalf("%+v %v", imgs, err)
 	}
-	if err := p.RemoveImage(context.Background(), "crewship-cache:aaa"); err != nil || len(removed) != 1 {
+	imageID := "sha256:" + strings.Repeat("a", 64)
+	if err := p.RemoveImage(context.Background(), "crewship-cache:aaa"); err == nil || len(removed) != 0 {
+		t.Fatalf("mutable reference accepted: %v %v", removed, err)
+	}
+	if err := p.RemoveImage(context.Background(), imageID); err != nil || len(removed) != 1 || !strings.HasSuffix(removed[0], "/images/"+imageID) {
 		t.Fatalf("%v %v", removed, err)
 	}
 }

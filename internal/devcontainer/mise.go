@@ -30,8 +30,12 @@ var (
 // MiseConfig represents a mise tool configuration stored as JSON in the DB.
 // It maps tool names to version strings.
 type MiseConfig struct {
-	Tools map[string]string `json:"tools"`         // e.g., {"node": "22", "python": "3.12"}
-	Env   map[string]string `json:"env,omitempty"` // e.g., {"NODE_OPTIONS": "--max-old-space-size=4096"}
+	// AICLICheck is Crewship publication policy, not a native mise setting.
+	// Empty/record retains compatibility; required rejects unqualified builds.
+	AICLICheck string            `json:"ai_cli_check,omitempty"`
+	Lock       *MiseLockBundle   `json:"lock,omitempty"`
+	Tools      map[string]string `json:"tools"`         // e.g., {"node": "22", "python": "3.12"}
+	Env        map[string]string `json:"env,omitempty"` // e.g., {"NODE_OPTIONS": "--max-old-space-size=4096"}
 }
 
 // ParseMiseConfig parses either a JSON or a TOML string into MiseConfig.
@@ -53,6 +57,9 @@ func ParseMiseConfig(data string) (*MiseConfig, error) {
 		var cfg MiseConfig
 		if err := json.Unmarshal([]byte(data), &cfg); err != nil {
 			return nil, fmt.Errorf("mise: invalid JSON: %w", err)
+		}
+		if err := cfg.Lock.Validate(); err != nil {
+			return nil, err
 		}
 		if cfg.Tools == nil {
 			cfg.Tools = make(map[string]string)
@@ -191,6 +198,15 @@ func (c *MiseConfig) ToTOML() string {
 
 // Validate checks that tool names and versions are reasonable.
 func (c *MiseConfig) Validate() error {
+	if c.AICLICheck != "" && c.AICLICheck != "record" && c.AICLICheck != "required" {
+		return fmt.Errorf("mise: ai_cli_check must be record or required")
+	}
+	if err := c.Lock.Validate(); err != nil {
+		return err
+	}
+	if c.Lock != nil && len(c.Tools) == 0 {
+		return fmt.Errorf("mise lock: tools are required")
+	}
 	if len(c.Tools) > 20 {
 		return ErrMiseTooManyTools
 	}
@@ -352,6 +368,9 @@ var miseAgentEnv = func() []string {
 // InstallMiseTools writes the mise config and runs `mise install`.
 // Runs as agent user (user "1001:1001"); mise installs under /opt/mise (see miseRoot).
 func InstallMiseTools(ctx context.Context, containerID string, cfg *MiseConfig, exec ExecFunc) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	if cfg.IsEmpty() {
 		return nil
 	}
@@ -378,6 +397,12 @@ func InstallMiseTools(ctx context.Context, containerID string, cfg *MiseConfig, 
 		return fmt.Errorf("mise: write config exited %d: %s", exitCode, stdout)
 	}
 
+	if cfg.Lock != nil {
+		if err := writeMiseLock(ctx, containerID, cfg.Lock, exec); err != nil {
+			return err
+		}
+	}
+
 	// Hand the mise-owned subtrees to the agent user in full.
 	chown := append([]string{"chown", "-R", "1001:1001"}, miseAgentDirs...)
 	stdout, exitCode, err = exec(ctx, containerID, chown, "0:0", nil)
@@ -389,9 +414,11 @@ func InstallMiseTools(ctx context.Context, containerID string, cfg *MiseConfig, 
 	}
 
 	// Install tools as agent user.
-	stdout, exitCode, err = exec(ctx, containerID, []string{
-		"mise", "install", "--yes",
-	}, "1001:1001", miseAgentEnv)
+	installArgs := []string{"mise", "install", "--yes"}
+	if cfg.Lock != nil {
+		installArgs = append(installArgs, "--locked", "--force")
+	}
+	stdout, exitCode, err = exec(ctx, containerID, installArgs, "1001:1001", miseAgentEnv)
 	if err != nil {
 		return fmt.Errorf("mise: install tools: %v", err)
 	}
