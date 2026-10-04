@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Legacy direct-run probes now refuse uncertain process-group evidence.** Group signals calibrate against the image utility; unsupported options and permission failures stay UNKNOWN. Failed durable-state reads also refuse legacy probes instead of silently continuing.
+
 - **Pilot agent runs can refuse stale CLI selection from persistent home.** An explicit server crew-ID opt-in binds static native Codex launches to immutable build hashes and lock versions, clears inherited loader options, and uses a trusted direct launcher. Static PIE Codex packages are supported; unsupported scripts and dynamic binaries fail closed. Selected crews must recreate runtimes to bind the immutable launcher generation; ordinary crews retain their current behavior. Managed runs retain process-group stop and recovery identity; native mise candidates are recorded separately from legacy PATH-first inventory.
 
 - Managed runs rejected during prompt or command preparation now finalize as errors before workload creation, releasing unresolved run occupancy. Managed launches execute the verified open descriptor and reject tmpfs overlays over trusted code; legacy direct-run probes keep their existing behavior; enabling the launch pilot changes launcher staging for all new crew runtimes.

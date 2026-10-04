@@ -18,13 +18,11 @@ func (o *Orchestrator) managedRunProbe(ctx context.Context, location RunLocation
 		}
 	}
 	legacy := directRunProbe(location.RunID, stop)
-	// Legacy callers do not read durable state or gain new refusal/inspect
-	// behavior. Recovery callers carry the host-persisted Managed marker.
-	if !known {
-		return legacy, nil
-	}
 	denied := errors.New("managed launch: durable run identity unavailable; runtime absence unconfirmed")
 	if o.state == nil {
+		if !known {
+			return legacy, nil
+		}
 		return "", denied
 	}
 	raw, err := o.state.Get(ctx, "agent_runs", location.RunID)
@@ -32,19 +30,25 @@ func (o *Orchestrator) managedRunProbe(ctx context.Context, location RunLocation
 		return "", denied
 	}
 	if len(raw) == 0 {
-		return "", denied
+		if known {
+			return "", denied
+		}
+		return legacy, nil
 	}
 	var state RunState
 	if json.Unmarshal(raw, &state) != nil {
 		return "", denied
 	}
 	if state.ManagedLaunch == nil {
-		return "", denied
+		if known {
+			return "", denied
+		}
+		return legacy, nil
 	}
 	if state.ID != location.RunID || state.ContainerID != location.ContainerID || state.AgentSlug != location.AgentSlug {
 		return "", denied
 	}
 	// A missing or unreadable PID file is UNKNOWN, never tmux ABSENT. A
 	// positively inspected stopped/removed container can still prove absence.
-	return managedDirectRunProbe(location.RunID, stop) + "echo UNKNOWN; exit; ", nil
+	return legacy + "echo UNKNOWN; exit; ", nil
 }
