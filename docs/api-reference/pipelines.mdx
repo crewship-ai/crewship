@@ -287,7 +287,7 @@ The run status values are:
 | `COMPLETED` | The routine finished successfully. |
 | `FAILED` | Execution or validation failed; inspect `error_message` and `failed_at_step`. |
 | `CANCELLED` | The run was cancelled by an operator. |
-| `WAITING` | The run is parked at a human approval waitpoint; this is not a failure. |
+| `WAITING` | The run is parked at an approval or event wait; this is not a failure. |
 | `DEDUPED` | An idempotency key matched an existing run; `run_id` identifies the original. |
 | `IN_PROGRESS` | `202` under `Prefer: respond-async`: the run has started and `run_id` is its handle; poll the run for the outcome. |
 | `SCHEDULED` | `202` for a deferred start (`delay_seconds`, `debounce_key` or `fire_at`); no run exists yet, `pending_id` is the handle. |
@@ -578,6 +578,12 @@ run.
 
 **Response:** `200 OK` — `{ "ok": true, "delivered": true }`. A durable
 delivery write failure is `500`.
+
+Event waits retain their original `timeout_seconds` deadline across restart and
+resume (one hour by default). Delivery must commit before that deadline; expiry
+resumes normal timeout/failure handling. A previously delivered payload remains
+valid after the deadline. Expired or cancelled subscriptions reject per-run
+signals with `404` and are excluded from topic delivery counts.
 
 #### `POST /api/v1/workspaces/{workspaceId}/signals`
 

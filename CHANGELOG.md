@@ -23,6 +23,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Unsupported `k8s` startup wiring could return no container provider.** Container initialization now refuses it with supported provider choices; ordinary configuration validation continues to reject Kubernetes.
 
+- **Routines could wait forever for an event despite a step timeout.** Persisted event waits now retain their original deadline across retries and restarts, expire through normal timeout/failure handling, and preserve signals delivered before the deadline. Cancelled runs reject late signals, and event recovery workers drain during shutdown.
+
 - Concurrent egress-fence installation retries incomplete rule reads without reinstalling or accepting a fence that fails verification. Checks reject results spanning a ruleset generation change.
 
 - **Importing a Crew YAML could silently disable required AI CLI checks.** The creation wizard preserves the typed policy, including configurations without explicit tools, and rejects unsupported policy values.

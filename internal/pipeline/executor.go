@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -937,6 +938,16 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 		}
 		defer release()
 		ctx = regCtx
+	}
+
+	if in.resume && e.runStore != nil {
+		rec, err := e.runStore.Get(ctx, preallocRunID)
+		if err != nil {
+			return nil, err
+		}
+		if rec.Status != RunStatusQueued && rec.Status != RunStatusRunning && rec.Status != RunStatusWaiting {
+			return &RunResult{RunID: rec.ID, PipelineID: rec.PipelineID, Status: strings.ToUpper(string(rec.Status))}, nil
+		}
 	}
 
 	hookSlug := ""

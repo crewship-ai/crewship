@@ -205,76 +205,95 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 		return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("waitpoint store does not support decision forms")
 
 	case "event":
-		// Input-stream injection (Wave 4.3): wait for an external caller
-		// to deliver a signal for this (run, event_type) via
-		// POST /pipeline-runs/{id}/signal. The payload becomes the step
-		// output (so downstream steps read {{ steps.<id>.output }}).
-		//
-		// Durability (#1409): a signal delivered while this run's
-		// goroutine isn't live to receive it — process restart, or the
-		// delivery racing ahead of this step even registering — used to
-		// be lost forever (in-memory-only SignalRegistry). Now, when a
-		// SignalWaitStore is wired, the wait durably ARMs before it does
-		// anything else blocking, and checks for an already-delivered
-		// payload FIRST (covers both a resume finding a signal that
-		// arrived during downtime, and the ordinary race where the
-		// signal endpoint's Deliver committed a hair before Register
-		// below would have caught it).
 		eventType := Render(step.Wait.EventType, parentRender)
-		// (ModeDryRun is short-circuited for every wait kind at the top.)
 		if e.signals == nil {
-			return "", 0, time.Since(stepStart).Milliseconds(),
-				fmt.Errorf("wait step %q (event) no signal registry wired", step.ID)
+			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q (event) no signal registry wired", step.ID)
 		}
-		if e.signalWaits != nil {
-			if !in.resume {
-				if err := e.signalWaits.Arm(ctx, in.WorkspaceID, runID, step.ID, eventType); err != nil {
-					return "", 0, time.Since(stepStart).Milliseconds(),
-						fmt.Errorf("wait step %q (event) arm: %w", step.ID, err)
-				}
-			}
-			if payload, ok, cerr := e.signalWaits.ConsumeDelivered(ctx, runID, step.ID); cerr != nil {
-				return "", 0, time.Since(stepStart).Milliseconds(),
-					fmt.Errorf("wait step %q (event) check delivered: %w", step.ID, cerr)
-			} else if ok {
-				return payload, 0, time.Since(stepStart).Milliseconds(), nil
-			}
-		}
-
-		// Async suspend: mirrors wait(approval)'s park (runner_wait.go
-		// case "approval" above) — a top-level foreground run with a
-		// persisted row parks (MarkWaiting + suspendError) instead of
-		// blocking the goroutine, so a process restart re-enters via the
-		// normal resume path (ResumeInterruptedRuns / ResumeAfterSignal)
-		// rather than needing THIS goroutine to still be alive when the
-		// signal lands. Nested/test-only/no-store callers keep the
-		// blocking behaviour below (they have no row to resume and
-		// nobody to return WAITING to).
-		if e.signalWaits != nil && depth == 0 && in.Mode == ModeRun && !in.resume && e.runStore != nil && in.pipeline != nil {
-			if err := e.runStore.MarkWaiting(ctx, runID, step.ID); err != nil {
-				return "", 0, time.Since(stepStart).Milliseconds(),
-					fmt.Errorf("wait step %q (event) mark waiting: %w", step.ID, err)
-			}
-			return "", 0, time.Since(stepStart).Milliseconds(), &suspendError{stepID: step.ID}
-		}
-
-		ch, cancel := e.signals.Register(runID, eventType)
-		defer cancel()
-		// Honor the step timeout (default 1h) so an event that never
-		// arrives doesn't hang the run forever.
 		timeout := time.Duration(step.TimeoutSec) * time.Second
 		if timeout <= 0 {
 			timeout = time.Hour
 		}
+		deadline := stepStart.Add(timeout)
+		timeoutError := func() (string, float64, int64, error) {
+			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q (event %q) timed out after %s", step.ID, eventType, timeout)
+		}
+		// SQL is the arbiter: delivery must commit before the original deadline;
+		// a delivered row takes precedence even when consumed after downtime.
+		check := func() (string, bool, error) {
+			if e.signalWaits == nil {
+				return "", false, nil
+			}
+			for {
+				if payload, ok, err := e.signalWaits.ConsumeDelivered(ctx, runID, step.ID); err != nil || ok {
+					return payload, ok, err
+				}
+				status, err := e.signalWaits.Resolve(ctx, runID, step.ID)
+				if err != nil {
+					return "", false, err
+				}
+				switch status {
+				case "delivered":
+					continue // delivery raced our first consume
+				case "timed_out":
+					return "", false, fmt.Errorf("wait step %q (event %q) timed out after %s", step.ID, eventType, timeout)
+				case "cancelled":
+					return "", false, context.Canceled
+				case "consumed":
+					if in.resume {
+						payload, err := e.signalWaits.ReplayConsumed(ctx, runID, step.ID)
+						return payload, err == nil, err
+					}
+					return "", false, fmt.Errorf("wait step %q (event) already consumed", step.ID)
+				default:
+					return "", false, nil
+				}
+			}
+		}
+		if e.signalWaits != nil {
+			var err error
+			deadline, err = e.signalWaits.ArmWithTimeout(ctx, in.WorkspaceID, runID, step.ID, eventType, timeout)
+			if err != nil {
+				return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q (event) arm: %w", step.ID, err)
+			}
+			if payload, ok, err := check(); err != nil || ok {
+				return payload, 0, time.Since(stepStart).Milliseconds(), err
+			}
+		}
+		// Pending resumed waits re-park as well. Neither retries nor restart
+		// renew the deadline, and no idle wait owns a goroutine or registry slot.
+		if e.signalWaits != nil && depth == 0 && in.Mode == ModeRun && e.runStore != nil && in.pipeline != nil {
+			if err := e.runStore.MarkWaiting(ctx, runID, step.ID); err != nil {
+				return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q (event) mark waiting: %w", step.ID, err)
+			}
+			return "", 0, time.Since(stepStart).Milliseconds(), &suspendError{stepID: step.ID}
+		}
+		ch, cancel := e.signals.Register(runID, eventType)
+		defer cancel()
+		// Close delivery-before-registration for blocking/nested callers too.
+		if payload, ok, err := check(); err != nil || ok {
+			return payload, 0, time.Since(stepStart).Milliseconds(), err
+		}
+		timer := time.NewTimer(time.Until(deadline))
+		defer timer.Stop()
 		select {
 		case payload := <-ch:
+			if e.signalWaits != nil {
+				if output, ok, err := check(); err != nil || ok {
+					return output, 0, time.Since(stepStart).Milliseconds(), err
+				}
+				// The in-memory wake is advisory when a durable store is wired.
+				return timeoutError()
+			}
 			return payload, 0, time.Since(stepStart).Milliseconds(), nil
-		case <-time.After(timeout):
-			return "", 0, time.Since(stepStart).Milliseconds(),
-				fmt.Errorf("wait step %q (event %q) timed out after %s", step.ID, eventType, timeout)
+		case <-timer.C:
+			if payload, ok, err := check(); err != nil || ok {
+				return payload, 0, time.Since(stepStart).Milliseconds(), err
+			}
+			return timeoutError()
 		case <-ctx.Done():
 			return "", 0, time.Since(stepStart).Milliseconds(), ctx.Err()
 		}
+
 	}
 
 	return "", 0, time.Since(stepStart).Milliseconds(),

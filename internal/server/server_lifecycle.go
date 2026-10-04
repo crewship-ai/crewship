@@ -709,6 +709,23 @@ func (s *Server) Shutdown() error {
 	return firstErr
 }
 
+// RegisterBackgroundStop attaches an idempotent stop-and-join function to
+// server shutdown, before verdict/journal teardown. Register before Start;
+// late registrations after cancellation stop immediately.
+func (s *Server) RegisterBackgroundStop(stop func()) {
+	if stop == nil {
+		return
+	}
+	s.bgStopsMu.Lock()
+	if s.bgCtx != nil && s.bgCtx.Err() != nil {
+		s.bgStopsMu.Unlock()
+		stop()
+		return
+	}
+	s.bgStops = append(s.bgStops, stop)
+	s.bgStopsMu.Unlock()
+}
+
 // StopBackground cancels server-owned background goroutines that were
 // launched by New() (rather than Start()) — currently the devcontainer
 // catalog refresh and mise runtime refresh tickers — and waits for them
@@ -723,6 +740,12 @@ func (s *Server) Shutdown() error {
 func (s *Server) StopBackground() {
 	if s.bgCancel != nil {
 		s.bgCancel()
+	}
+	s.bgStopsMu.Lock()
+	stops := append([]func(){}, s.bgStops...)
+	s.bgStopsMu.Unlock()
+	for _, stop := range stops {
+		stop()
 	}
 	s.bgWg.Wait()
 }

@@ -25,6 +25,19 @@ type SignalWaitStore interface {
 	// transaction is even visible — is a no-op, not an error.
 	Arm(ctx context.Context, workspaceID, runID, stepID, eventType string) error
 
+	// ArmWithTimeout preserves the first arm's deadline, including on resume.
+	ArmWithTimeout(ctx context.Context, workspaceID, runID, stepID, eventType string, timeout time.Duration) (time.Time, error)
+
+	Status(ctx context.Context, runID, stepID string) (string, error)
+
+	// Resolve expires only pending rows; a committed delivery always wins.
+	Resolve(ctx context.Context, runID, stepID string) (status string, err error)
+
+	// ReplayConsumed recovers the consume-to-step-output crash window. Only a
+	// resume executing an unrestored step may replay; live consumer claims stay
+	// exactly once through ConsumeDelivered.
+	ReplayConsumed(ctx context.Context, runID, stepID string) (string, error)
+
 	// Deliver persists payload against the oldest PENDING wait matching
 	// (runID, eventType) and marks it delivered. Returns armed=false
 	// when no pending row matches — the caller's signal (wrong
@@ -63,37 +76,80 @@ type SQLSignalWaitStore struct {
 }
 
 // NewSQLSignalWaitStore returns a store backed by the given DB handle.
-// The handle must already be migrated to v154+.
+// The handle must already have the event-deadline migration (#2903).
 func NewSQLSignalWaitStore(db *sql.DB) *SQLSignalWaitStore {
 	return &SQLSignalWaitStore{db: db}
 }
 
 func (s *SQLSignalWaitStore) Arm(ctx context.Context, workspaceID, runID, stepID, eventType string) error {
-	now := tsformat.Format(time.Now().UTC()) // fixed-width so created_at ORDER BY sorts correctly (#990)
-	id := "sigwait_" + runID + "_" + stepID
-	_, err := s.db.ExecContext(ctx, `
-INSERT INTO pipeline_signal_waits (id, workspace_id, run_id, step_id, event_type, status, created_at)
-VALUES (?, ?, ?, ?, ?, 'pending', ?)
-ON CONFLICT (run_id, step_id) DO NOTHING`,
-		id, workspaceID, runID, stepID, eventType, now,
-	)
-	if err != nil {
-		return fmt.Errorf("signal_waits: arm: %w", err)
+	_, err := s.ArmWithTimeout(ctx, workspaceID, runID, stepID, eventType, time.Hour)
+	return err
+}
+
+// ArmWithTimeout is idempotent even across retries/restarts. For pre-deadline
+// schema rows, recover from the original created_at rather than from now.
+func (s *SQLSignalWaitStore) ArmWithTimeout(ctx context.Context, workspaceID, runID, stepID, eventType string, timeout time.Duration) (time.Time, error) {
+	if timeout <= 0 {
+		timeout = time.Hour
 	}
-	return nil
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO pipeline_signal_waits (id, workspace_id, run_id, step_id, event_type, status, created_at, timeout_at)
+VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+ON CONFLICT (run_id, step_id) DO NOTHING`,
+		"sigwait_"+runID+"_"+stepID, workspaceID, runID, stepID, eventType, tsformat.Format(now), tsformat.Format(now.Add(timeout)))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("signal_waits: arm: %w", err)
+	}
+	var created string
+	var deadline sql.NullString
+	if err := s.db.QueryRowContext(ctx, `SELECT created_at, timeout_at FROM pipeline_signal_waits WHERE run_id=? AND step_id=?`, runID, stepID).Scan(&created, &deadline); err != nil {
+		return time.Time{}, err
+	}
+	if !deadline.Valid {
+		original, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("signal_waits: original arm time: %w", err)
+		}
+		// COALESCE prevents competing recovery attempts from renewing it.
+		if _, err := s.db.ExecContext(ctx, `UPDATE pipeline_signal_waits SET timeout_at=COALESCE(timeout_at,?) WHERE run_id=? AND step_id=?`, tsformat.Format(original.Add(timeout)), runID, stepID); err != nil {
+			return time.Time{}, err
+		}
+		if err := s.db.QueryRowContext(ctx, `SELECT timeout_at FROM pipeline_signal_waits WHERE run_id=? AND step_id=?`, runID, stepID).Scan(&deadline); err != nil {
+			return time.Time{}, err
+		}
+	}
+	return time.Parse(time.RFC3339Nano, deadline.String)
+}
+
+func (s *SQLSignalWaitStore) Resolve(ctx context.Context, runID, stepID string) (string, error) {
+	// The UPDATE and delivery both predicate on pending. Delivered rows never
+	// expire, even if recovery cannot process their payload until much later.
+	if _, err := s.db.ExecContext(ctx, `UPDATE pipeline_signal_waits SET status='timed_out'
+ WHERE run_id=? AND step_id=? AND status='pending' AND timeout_at <= ?`, runID, stepID, tsformat.Format(time.Now())); err != nil {
+		return "", err
+	}
+	return s.Status(ctx, runID, stepID)
+}
+
+func (s *SQLSignalWaitStore) Status(ctx context.Context, runID, stepID string) (string, error) {
+	var status string
+	err := s.db.QueryRowContext(ctx, `SELECT status FROM pipeline_signal_waits WHERE run_id=? AND step_id=?`, runID, stepID).Scan(&status)
+	return status, err
 }
 
 func (s *SQLSignalWaitStore) Deliver(ctx context.Context, runID, eventType, payload string) (bool, error) {
-	now := tsformat.Format(time.Now().UTC()) // fixed-width for consistency with created_at (#990)
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_signal_waits
-SET status = 'delivered', payload = ?, delivered_at = ?
+SET status = 'delivered', payload = ?, delivered_at = strftime('%Y-%m-%dT%H:%M:%f000000Z','now')
 WHERE id = (
     SELECT id FROM pipeline_signal_waits
     WHERE run_id = ? AND event_type = ? AND status = 'pending'
+      AND (timeout_at IS NULL OR timeout_at > strftime('%Y-%m-%dT%H:%M:%f000000Z','now'))
+      AND NOT EXISTS (SELECT 1 FROM pipeline_runs r WHERE r.id = pipeline_signal_waits.run_id AND r.status IN ('completed','failed','cancelled','interrupted','dry_run'))
     ORDER BY created_at ASC LIMIT 1
 )`,
-		payload, now, runID, eventType,
+		payload, runID, eventType,
 	)
 	if err != nil {
 		return false, fmt.Errorf("signal_waits: deliver: %w", err)
@@ -123,7 +179,6 @@ func (s *SQLSignalWaitStore) DeliverTopic(ctx context.Context, workspaceID, even
 	if workspaceID == "" || eventType == "" {
 		return nil, fmt.Errorf("signal_waits: deliver topic: workspace_id and event_type are required")
 	}
-	now := tsformat.Format(time.Now().UTC()) // fixed-width for consistency with created_at (#990)
 	runIDs := make([]string, 0, 4)
 	seen := make(map[string]bool, 4)
 	for i := 0; i < maxTopicFanout; i++ {
@@ -138,14 +193,16 @@ func (s *SQLSignalWaitStore) DeliverTopic(ctx context.Context, workspaceID, even
 		var runID string
 		err := s.db.QueryRowContext(ctx, `
 UPDATE pipeline_signal_waits
-SET status = 'delivered', payload = ?, delivered_at = ?
+SET status = 'delivered', payload = ?, delivered_at = strftime('%Y-%m-%dT%H:%M:%f000000Z','now')
 WHERE id = (
     SELECT id FROM pipeline_signal_waits
     WHERE workspace_id = ? AND event_type = ? AND status = 'pending'
+      AND (timeout_at IS NULL OR timeout_at > strftime('%Y-%m-%dT%H:%M:%f000000Z','now'))
+      AND NOT EXISTS (SELECT 1 FROM pipeline_runs r WHERE r.id = pipeline_signal_waits.run_id AND r.status IN ('completed','failed','cancelled','interrupted','dry_run'))
     ORDER BY created_at ASC LIMIT 1
 )
 RETURNING run_id`,
-			payload, now, workspaceID, eventType,
+			payload, workspaceID, eventType,
 		).Scan(&runID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return runIDs, nil
@@ -170,33 +227,19 @@ RETURNING run_id`,
 
 func (s *SQLSignalWaitStore) ConsumeDelivered(ctx context.Context, runID, stepID string) (string, bool, error) {
 	var payload sql.NullString
-	err := s.db.QueryRowContext(ctx, `
-SELECT payload FROM pipeline_signal_waits
-WHERE run_id = ? AND step_id = ? AND status = 'delivered'`,
-		runID, stepID,
-	).Scan(&payload)
+	err := s.db.QueryRowContext(ctx, `UPDATE pipeline_signal_waits SET status='consumed', consumed_at=?
+ WHERE run_id=? AND step_id=? AND status='delivered' RETURNING payload`, tsformat.Format(time.Now()), runID, stepID).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("signal_waits: consume read: %w", err)
-	}
-	now := tsformat.Format(time.Now().UTC()) // fixed-width for consistency with created_at (#990)
-	res, err := s.db.ExecContext(ctx, `
-UPDATE pipeline_signal_waits SET status = 'consumed', consumed_at = ?
-WHERE run_id = ? AND step_id = ? AND status = 'delivered'`,
-		now, runID, stepID,
-	)
-	if err != nil {
-		return "", false, fmt.Errorf("signal_waits: consume update: %w", err)
-	}
-	// A concurrent consumer could have claimed it between our read and
-	// this update (live goroutine racing a resume) — in that race only
-	// one caller sees RowsAffected==1 and a non-empty payload; the loser
-	// reports ok=false rather than double-delivering the same payload.
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return "", false, nil
+		return "", false, fmt.Errorf("signal_waits: consume: %w", err)
 	}
 	return payload.String, true, nil
+}
+
+func (s *SQLSignalWaitStore) ReplayConsumed(ctx context.Context, runID, stepID string) (string, error) {
+	var payload sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT payload FROM pipeline_signal_waits WHERE run_id=? AND step_id=? AND status='consumed'`, runID, stepID).Scan(&payload)
+	return payload.String, err
 }
