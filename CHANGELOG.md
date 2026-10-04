@@ -26,6 +26,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Routines could wait forever for an event despite a step timeout.** ⚠️ **Behaviour change:** Existing parked waits older than their configured timeout (one hour when omitted) expire on upgrade and run their failure hooks. Persisted event waits now retain their original deadline across retries and restarts, expire through normal timeout/failure handling, and preserve signals delivered before the deadline. Cancelled runs reject late signals, and event recovery workers drain during shutdown. Blocking nested waits keep waiting on their original deadline when an advisory wake belongs to a sibling subscription.
 
 - Concurrent egress-fence installation retries incomplete rule reads without reinstalling or accepting a fence that fails verification. Checks reject results spanning a ruleset generation change.
+- ⚠️ **Behaviour change:** Runtime readiness refuses paused Docker containers with an actionable error, including warm-cache hits, preserving their live processes until an operator explicitly unpauses them. (#2860)
 
 - **Importing a Crew YAML could silently disable required AI CLI checks.** The creation wizard preserves the typed policy, including configurations without explicit tools, and rejects unsupported policy values.
 
