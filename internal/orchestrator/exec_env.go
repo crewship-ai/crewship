@@ -31,14 +31,17 @@ func baseAgentEnv(req AgentRunRequest) []string {
 		// one shared tree every run of this agent writes to — see run_paths.go
 		// for why that one thing stays shared while the rest does not.
 		"HOME=" + agentHomeDir(req.AgentSlug, req.RunID),
-		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
+		"DISABLE_AUTOUPDATER=1",
 		"CREWSHIP_AGENT_ID=" + req.AgentID,
 		"CREWSHIP_CREW_ID=" + req.CrewID,
 		"CREWSHIP_CHAT_ID=" + req.ChatID,
 		"CREWSHIP_CREW_SHARED=/crew/shared",
 	}
 	if req.CLIAdapter == "OPENCODE" {
-		env = append(env, "XDG_DATA_HOME="+agentHomeDir(req.AgentSlug, req.RunID)+"/.local/share")
+		env = append(env, "XDG_DATA_HOME="+agentHomeDir(req.AgentSlug, req.RunID)+"/.local/share", "OPENCODE_DISABLE_AUTOUPDATE=1")
+	}
+	if req.CLIAdapter == "GEMINI_CLI" {
+		env = append(env, "GEMINI_CLI_SYSTEM_SETTINGS_PATH="+agentHomeDir(req.AgentSlug, req.RunID)+"/"+managedGeminiSettingsFile)
 	}
 	return env
 }

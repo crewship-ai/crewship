@@ -298,6 +298,11 @@ func execCommandPayload(req AgentRunRequest, journalCmd journalCmdView, phase st
 	payload["model"] = bound(req.LLMModel)
 	payload["tool_profile"] = bound(req.ToolProfile)
 	payload["container_id"] = shortID(req.ContainerID)
+	if req.runtimeImageID != "" {
+		payload["runtime_image_id"] = req.runtimeImageID
+	} else {
+		delete(payload, "runtime_image_id")
+	}
 	payload["prompt"] = promptRef(req)
 	payload["truncated"] = truncated
 	return payload

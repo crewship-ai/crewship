@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/moby/moby/client"
 )
 
@@ -166,22 +167,34 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 	//    workspaces (no workspace filter — an image referenced by another
 	//    tenant's crew must never be deleted).
 	rows, err := h.db.QueryContext(ctx,
-		`SELECT DISTINCT cached_image FROM crews
+		`SELECT DISTINCT cached_image, 1 FROM crews
 		 WHERE cached_image IS NOT NULL AND cached_image != ''
-		       AND deleted_at IS NULL`)
+		       AND deleted_at IS NULL
+		 UNION ALL
+		 SELECT image_id, 0 FROM environment_revisions`)
 	if err != nil {
 		h.logger.Warn("orphan cache-image GC: query failed", "error", err)
 		return
 	}
 	defer rows.Close()
 	referenced := make(map[string]struct{})
+	// Published revisions identify artifacts even after a same-definition
+	// rebuild moves the tag. History records provenance, not a retention pin:
+	// only current crew selections keep the bytes alive. Unknown dangling
+	// images remain outside this collector's ownership.
+	knownArtifacts := make(map[string]struct{})
 	for rows.Next() {
 		var tag string
-		if err := rows.Scan(&tag); err != nil {
+		var selected bool
+		if err := rows.Scan(&tag, &selected); err != nil {
 			h.logger.Warn("orphan cache-image GC: scan failed", "error", err)
 			return
 		}
-		referenced[tag] = struct{}{}
+		if selected {
+			referenced[tag] = struct{}{}
+		} else if dockerutil.IsLocalImageID(tag) {
+			knownArtifacts[tag] = struct{}{}
+		}
 	}
 	// Critical: if iteration died mid-stream, `referenced` is incomplete and
 	// using it to decide orphans could delete a still-live cache image.
@@ -195,7 +208,7 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 	//    The age floor closes the race between ContainerCommit and the DB
 	//    UPDATE inside Provision() — a freshly-committed image legitimately
 	//    looks "unreferenced" until the caller persists the link.
-	imgs, err := h.listLocalImagesCached(ctx)
+	listed, err := h.gcClient.ImageList(ctx, client.ImageListOptions{})
 	if err != nil {
 		h.logger.Warn("orphan cache-image GC: image list failed", "error", err)
 		return
@@ -204,30 +217,30 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 		os.Getenv(cacheGCAutoDeleteEnv) == "1"
 
 	safeCutoff := time.Now().Add(-cacheImageMinAge).Unix()
-	orphans := make([]string, 0, len(imgs))
+	// Delete the inspected ID, never a moving tag. Docker refuses non-force
+	// removal when another alias or a container still uses the artifact.
+	orphans := make([]string, 0, len(listed.Items))
 	tooYoung := 0
-	for _, img := range imgs {
-		for _, tag := range img.RepoTags {
-			// Intermediate BuildKit feature images are regenerable and never
-			// referenced by a crew row — always orphan candidates (the age
-			// floor still protects an image mid-provision). crewship-cache:*
-			// images are orphans only when no crew points at them.
-			isFeat := strings.HasPrefix(tag, devcontainer.FeatureImageTagPrefix)
-			isCache := strings.HasPrefix(tag, cacheImagePrefix)
-			if !isFeat && !isCache {
-				continue
-			}
-			if isCache {
-				if _, ok := referenced[tag]; ok {
-					continue
-				}
-			}
-			if img.Created > safeCutoff {
-				tooYoung++
-				continue
-			}
-			orphans = append(orphans, tag)
+	for _, img := range listed.Items {
+		if img.ID == "" {
+			continue
 		}
+		_, inUse := referenced[img.ID]
+		_, managed := knownArtifacts[img.ID]
+		for _, tag := range img.RepoTags {
+			if _, ok := referenced[tag]; ok {
+				inUse = true
+			}
+			managed = managed || strings.HasPrefix(tag, devcontainer.FeatureImageTagPrefix) || strings.HasPrefix(tag, cacheImagePrefix)
+		}
+		if inUse || !managed {
+			continue
+		}
+		if img.Created > safeCutoff {
+			tooYoung++
+			continue
+		}
+		orphans = append(orphans, img.ID)
 	}
 	if len(orphans) == 0 {
 		h.logger.Debug("orphan cache-image GC: nothing to report", "skipped_too_young", tooYoung)
@@ -239,9 +252,9 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 		return
 	}
 	removed := 0
-	for _, tag := range orphans {
-		if _, err := h.gcClient.ImageRemove(ctx, tag, client.ImageRemoveOptions{Force: false, PruneChildren: true}); err != nil {
-			h.logger.Warn("orphan cache-image GC: remove failed", "tag", tag, "error", err)
+	for _, imageID := range orphans {
+		if _, err := h.gcClient.ImageRemove(ctx, imageID, client.ImageRemoveOptions{Force: false, PruneChildren: true}); err != nil {
+			h.logger.Warn("orphan cache-image GC: remove failed", "image_id", imageID, "error", err)
 			continue
 		}
 		removed++

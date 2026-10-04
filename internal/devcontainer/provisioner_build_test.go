@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -489,4 +490,35 @@ func (b *appearingBuilder) Build(ctx context.Context, dir, tag string, onLog fun
 
 func (b *appearingBuilder) ImageExists(_ context.Context, _ string) (bool, error) {
 	return b.built, nil
+}
+
+// Explicit rebuilds must neither reuse the old final image nor let the engine
+// reuse installation layers containing floating tool selectors.
+func TestProvisionByBuild_ExplicitRebuild(t *testing.T) {
+	for _, failBuild := range []bool{false, true} {
+		t.Run(fmt.Sprint("failure=", failBuild), func(t *testing.T) {
+			b := &freshRecordingBuilder{probingBuilder: probingBuilder{recordingBuilder: recordingBuilder{available: true}, exists: true}}
+			if failBuild {
+				b.err = fmt.Errorf("installation failed")
+			}
+			p := NewBuildOnlyProvisioner(b, nil, slog.Default())
+			_, err := p.ProvisionByBuild(context.Background(), "debian:12", &Config{Image: "debian:12"}, "", WithForceRebuild(true))
+			if (err != nil) != failBuild {
+				t.Fatalf("error = %v, failing build = %v", err, failBuild)
+			}
+			if b.calls != 1 || !b.noCache {
+				t.Fatalf("rebuild calls=%d noCache=%v", b.calls, b.noCache)
+			}
+		})
+	}
+}
+
+type freshRecordingBuilder struct {
+	probingBuilder
+	noCache bool
+}
+
+func (b *freshRecordingBuilder) BuildWithoutCache(ctx context.Context, dir, tag string, log func(string)) error {
+	b.noCache = true
+	return b.Build(ctx, dir, tag, log)
 }

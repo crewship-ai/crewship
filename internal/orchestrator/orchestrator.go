@@ -48,6 +48,12 @@ var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]*$`)
 var ErrExecRefused = errors.New("agent exec refused at the creation gate; no process was created")
 
 type AgentRunRequest struct {
+	// RuntimeUse pins the concrete container acquired by the caller. RunAgent
+	// retains its own handle, so callers may release theirs after RunAgent
+	// returns even when a detached process still needs the container.
+	RuntimeUse *provider.RuntimeUse
+	// Set by RunAgent from provider inspection, never a caller's desired image.
+	runtimeImageID string
 	// ExecGate, when set, is asked SYNCHRONOUSLY immediately before the
 	// agent's exec is created, and nothing external happens between its
 	// answer and the creation. It is the authoritative "a process is about
@@ -388,13 +394,18 @@ func (c Credential) loginMode() string {
 // RunState tracks the runtime state of an active agent run, persisted in the
 // state provider for crash recovery.
 type RunState struct {
-	ID          string    `json:"id"`
-	AgentID     string    `json:"agent_id"`
-	ChatID      string    `json:"chat_id"`
-	Status      string    `json:"status"`
-	StartedAt   time.Time `json:"started_at"`
-	ContainerID string    `json:"container_id"`
-	ExecID      string    `json:"exec_id"`
+	// WorkspaceID preserves the original history scope even without run.started.
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	// RuntimeImageID is source-image evidence, not the mutable filesystem or
+	// proof of the binary eventually selected by PATH. Empty means unknown.
+	RuntimeImageID string    `json:"runtime_image_id,omitempty"`
+	ID             string    `json:"id"`
+	AgentID        string    `json:"agent_id"`
+	ChatID         string    `json:"chat_id"`
+	Status         string    `json:"status"`
+	StartedAt      time.Time `json:"started_at"`
+	ContainerID    string    `json:"container_id"`
+	ExecID         string    `json:"exec_id"`
 	// AgentSlug names the run's tmux session together with ID. Recorded so a
 	// run outliving its server process can still be stopped by location
 	// after the agent row's slug was released for reuse.
@@ -404,8 +415,9 @@ type RunState struct {
 	// StopJournalPending is a durable outbox for confirmed stops without a
 	// process-local completion owner. The server drains it without overriding
 	// work-owned outcomes or already terminal journal entries.
-	StopOrigin         string `json:"stop_origin,omitempty"`
-	StopJournalPending bool   `json:"stop_journal_pending,omitempty"`
+	StopJournalPending bool `json:"stop_journal_pending,omitempty"`
+	// StopOrigin distinguishes detected absence from an explicit user stop.
+	StopOrigin string `json:"stop_origin,omitempty"`
 }
 
 // AgentEvent is a streaming event emitted during an agent run, such as text
@@ -478,7 +490,7 @@ type ContainerBusyProbe func(ctx context.Context, crewID, containerID string) bo
 type StatsRegisterFunc func(containerID, crewID, workspaceID string)
 
 type Orchestrator struct {
-	runRecoveryMu          sync.Mutex // serializes activity projection with local admission
+	runRecoveryMu          sync.Mutex // serializes recovered publication with local admission
 	agentRuns              sync.Map   // run id -> *agentRunControl; independent of credential HOME cleanup
 	userModelReader        func(context.Context, string, string) (string, error)
 	personalizationAllowed func(context.Context, string, string) (bool, error)

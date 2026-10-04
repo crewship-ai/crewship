@@ -355,14 +355,30 @@ function parseDevcontainerConfig(jsonStr: string): {
   return { image: full.image, features: full.features }
 }
 
-function parseMiseConfig(jsonStr: string): Record<string, string> {
-  if (!jsonStr) return {}
+// The visual editor models only a JSON object with string tool selectors.
+// Preserve every other existing format rather than silently replacing it.
+function visualMiseDocument(value: string): Record<string, unknown> | null {
+  if (!value.trim()) return {}
   try {
-    const parsed = JSON.parse(jsonStr)
-    return parsed.tools || {}
+    const parsed: unknown = JSON.parse(value)
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
+    const document = parsed as Record<string, unknown>
+    if (document.tools !== undefined) {
+      if (!document.tools || typeof document.tools !== "object" || Array.isArray(document.tools)) return null
+      if (Object.values(document.tools).some(version => typeof version !== "string")) return null
+    }
+    return document
   } catch {
-    return {}
+    return null
   }
+}
+
+function isVisualMiseConfig(value: string): boolean {
+  return visualMiseDocument(value) !== null
+}
+
+function parseMiseConfig(value: string): Record<string, string> {
+  return (visualMiseDocument(value)?.tools ?? {}) as Record<string, string>
 }
 
 
@@ -411,10 +427,16 @@ function buildDevcontainerJSON(
   return JSON.stringify(config, null, 2)
 }
 
-function buildMiseJSON(tools: Record<string, string>): string {
-  if (Object.keys(tools).length === 0) return ""
-  return JSON.stringify({ tools }, null, 2)
+function buildMiseJSON(tools: Record<string, string>, previous = ""): string {
+  const document = visualMiseDocument(previous)
+  if (document === null) return previous
+  // Tool edits must not silently unlock the environment or erase its env.
+  const extras = { ...document }
+  delete extras.tools
+  if (Object.keys(tools).length === 0 && Object.keys(extras).length === 0) return ""
+  return JSON.stringify({ ...extras, tools }, null, 2)
 }
+
 
 // ---- Component ------------------------------------------------------------
 
@@ -426,6 +448,7 @@ export {
   BASE_IMAGES,
   parseDevcontainerConfig,
   parseMiseConfig,
+  isVisualMiseConfig,
   buildDevcontainerJSON,
   buildMiseJSON,
 }

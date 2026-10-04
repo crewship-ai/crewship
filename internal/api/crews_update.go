@@ -76,7 +76,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req updateCrewRequest
-	if err := readJSON(r, &req); err != nil {
+	if err := readCrewConfigJSON(r, &req); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
@@ -121,10 +121,6 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "devcontainer_config exceeds 100KB limit")
 		return
 	}
-	if req.MiseConfig != nil && len(*req.MiseConfig) > 10240 {
-		replyError(w, http.StatusBadRequest, "mise_config exceeds 10KB limit")
-		return
-	}
 	if req.DevcontainerConfig != nil && *req.DevcontainerConfig != "" {
 		cfg, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig))
 		if err != nil {
@@ -145,7 +141,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.MiseConfig != nil && *req.MiseConfig != "" {
-		if _, err := devcontainer.ParseMiseConfig(*req.MiseConfig); err != nil {
+		if err := devcontainer.ValidateMiseConfigInput(*req.MiseConfig); err != nil {
 			replyError(w, http.StatusBadRequest, "invalid mise_config: "+err.Error())
 			return
 		}

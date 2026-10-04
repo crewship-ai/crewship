@@ -9,6 +9,58 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Importing a Crew YAML could silently disable required AI CLI checks.** The creation wizard preserves the typed policy, including configurations without explicit tools, and rejects unsupported policy values.
+
+- Recovery and explicit stop now share atomic runtime updates: an OOM-killed or missing container can leave RUNNING, concurrent completion is preserved, and a stop also closes the controls of runs discovered during ownership inspection.
+
+- **Confirmed stops from direct agent starts no longer wait forever for a missing start event.** Recovery retains the run's workspace, publishes the confirmed terminal event without inventing a start, and preserves dispatcher-owned outcomes and conflicting or unknown tenant identities.
+
+
+- **Runs that survive a server restart no longer rely on the startup probe alone.** Background recovery follows only the original recovered identities, preserves new admissions and unknown runtime states, and retries terminal history publication after confirmed process absence. It does not infer a successful exit from missing processes.
+
+
+- **An interrupted container run could remain RUNNING after a server restart.** Startup now checks eligible persisted runtime identities and reconciles confirmed absence, while preserving live or unverified work and dispatcher-owned outcomes.
+
+- **Repeated environment rebuilds left untagged images outside cache cleanup.** The orphan sweeper now recognizes published artifacts from revision history while preserving images selected by live crews and unknown untagged images. The existing opt-in deletion policy and age floor still apply.
+- **Editing an environment during a build could fail waiting messages.** Superseded builds retry the current definition within the original job budget; obsolete CLI qualification cannot prevent that retry, and unchanged definitions still enforce their required checks.
+
+- Runtime editing preserves existing TOML and unsupported mise shapes instead of erasing tool pins; rejected raw edits no longer partially apply other settings.
+
+- Crew runtime settings show requested and built AI CLI versions with image-bound startup-check status, explicit unknown evidence, and refresh after build events.
+- Idle cache eviction preserves images selected by live crews and removes unselected artifacts by immutable ID; unknown database references keep images.
+- Offline AI CLI qualification disables inherited image healthchecks, keeping the sandbox limited to its lifetime keeper and explicit probes.
+
+- Required AI CLI checks reject a build whose observed CLI version differs from its explicit mise pin; requested tool status now gives explicit mise selectors precedence over overlapping features.
+
+- `crew provision lock-apply` validates a reviewed native update proposal against unchanged selectors and lock inputs, preserving other configuration fields and emitting updated JSON without deployment.
+
+- Managed environment definitions can require image-bound offline AI CLI checks before publishing a replacement; failed or unavailable checks preserve the selected image.
+
+- Agent run state and execution events retain the actual container source image ID when available, independently of later environment updates.
+
+- Mise lock resolution now reports proposed native tool versions and deterministic selector/bundle hashes, distinguishing version changes from other lock changes.
+
+- Managed runs disable Gemini/OpenCode automatic update controls; missing Gemini system settings now fail preflight before launching the CLI.
+
+- Crew create/update accept bounded native mise lock bundles without expanding the 10 KiB non-lock configuration budget; large escaped locks are no longer truncated by the request reader.
+
+- `crew provision lock-resolve` creates or updates complete native mise lock bundles in a disposable Docker builder, preserving exact pins and reporting the resolver image/platform/version.
+
+- Managed mise builds accept complete native lock bundles, enforce locked reinstall, and preserve lock inputs through manifest and visual tool edits; `crew provision lock-pack` packages local lock files.
+- **New environment images wait for current work and activate when the runtime is confirmed idle.** Managed Docker admission reserves the container through preparation and execution; image activation and idle expiry share that reservation. Recovered runs, external occupants and background processes prevent automatic replacement. Unknown occupancy requires an explicit stop; crash-loop recovery remains available.
+
+- Environment provisioning records immutable build history and refuses to publish a build after its definition changes. Inspect the latest records with `crewship crew provision revisions`.
+- Built AI CLI toolchains receive an offline startup/version qualification through a runtime-neutral sandbox port; results distinguish unavailable and failed checks from authenticated provider tests.
+
+- **Provisioning status now distinguishes requested CLI selectors from observed versions.** New builds record bounded CLI version/path observations in the image. Docker inspections use the immutable image ID without starting the image; old or unreadable evidence stays unknown. The CLI status command shows built versions. This does not claim that a running, modified environment still matches its image.
+
+
+- **Explicit crew rebuilds could keep stale agent CLIs.** Rebuild now bypasses the provisioned-image and installation-layer caches while retaining configured version pins. Claude background updates and Codex startup update checks are disabled for Crewship-managed runs; rejected concurrent rebuilds preserve the existing cache.
+
+- Concurrent starts can no longer fork installation identities by observing a partially written nonce owner; owner publication is atomic and malformed records fail without re-keying.
+- **Old stop markers could keep agents RUNNING across later restarts.** Manual and dispatcher-owned stops now release their projection markers; pending history protects only its own trace. Atomic state updates preserve concurrent terminal results.
+
+- **Restarted agents could remain RUNNING after their container disappeared, and a concurrent stop could miss a newly tracked invocation.** Recovery now confirms container absence, and stop closes the live invocation gate before reporting success.
 - **AI operation discovery now ranks multiword searches** — generated API prose and ranked token search replace whole-query substring matching. Public descriptions omit internal handler comments; resource reads, nested creates and named actions receive clearer labels. MCP splits read/write tools, classifies audited POST reads, restricts admin writes and supports tag filters and optional client human approval. Workspace path selectors can no longer override the configured workspace.
 
 - **AI clients can connect directly to the Crewship binary.** Bundled `mcp serve` exposes paginated API discovery, focused schemas, a built-in Agent Skill and guarded JSON requests. `ai connect` registers Codex/Claude Code, `ai config` emits credential-free client snippets, and `ai skill` exports the embedded guide. Mutations require startup opt-in plus per-call acknowledgment; identity, redirect and size guards are shared with the CLI.
@@ -32,6 +84,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change:** Restricted routine, Page and assigned-issue runs now use the shared work ledger and dispatcher. Interrupted runs with uncertain effects show “Needs review” and require reconciliation before outputs are released or new work repeats; legacy running jobs are adopted into this state.
 
 ### Fixed
+
+- Docker environment builds publish immutable local image references, so another rebuild cannot silently replace a selected artifact. Failed explicit rebuilds keep the previous reference; cache inventory and ordinary cleanup recognize image-ID references. The build cache key advances once to avoid retagging legacy references.
+- Confirmed stops recovered after restart now retain a durable journal retry until history and agent state are recorded; retries preserve existing outcomes and leave work-owned settlement to the dispatcher.
+- Confirmed stops recovered after restart now retain a durable journal retry until history and agent state are recorded; retries preserve existing outcomes and leave work-owned settlement to the dispatcher. Another durable running invocation keeps the agent RUNNING even before its journal start is visible.
+- Agent runtime diagnostics now find runs by their durable run IDs, prefer an active invocation, and report unavailable state instead of inventing an idle result.
+- Restart recovery preserves the exact live run while closing older orphan traces, and leaves work-owned outcomes to the durable dispatcher. Legacy agent-keyed runtime records remain conservatively protected.
+- Runtime reconciliation uses the latest container inspection rather than an older list snapshot, avoiding stopped-container reuse or removal of a newly running container.
+- Agent stop recovers durable runtime identities after a server restart and refuses to confirm process absence when the signal tool is unavailable.
+- Crew restore skips empty sections and prepares missing shared memory directories, preserves file modes and timestamps, and verifies the shared permissions before writing payloads. Off-site fetch registers downloaded bundles in the local catalog without overwriting another fetch.
+- CLI Page actions accept `--expected-intent-hash`; restricted routine receipts support structured output and `--wait`, including delayed runs. Backup creation honors machine output formats. Agentless runtime removal and failed legacy pruning report their actual outcome. (#2777)
 - **Resource grants showed raw ids for the kind not selected in the add-grant picker** (#2863). In a member's restricted resource access, the grant list resolved names only from the directory of the currently selected kind, so with "Project" selected every agent grant showed its id (and vice versa). Both the agent and project directories now load, and each grant is named from its own kind's directory.
 - **Agent Stop hid a stop the runtime did not confirm** (#2864). On a phone, the agent header's Stop swallowed every failure, so a `502` from `POST /api/v1/agents/{id}/stop` (`runtime stop not confirmed` / `runtime stop unavailable`) looked like success; the agent canvas showed only `HTTP 502`, and its request also omitted `workspace_id`, so the route refused it before trying. Both buttons now share one stop call: a failure shows an error toast saying the agent may still be running and leaves its status as it was; only a confirmed stop shows `STOPPED`.
 - **The crew service quota editor said backups of quota disks are refused.** Since format v4 (#2745) crew, workspace and instance backups include quota-service disks whenever the server's quota helper is configured. The editor's warning and the service disk quota guide now say so: backups are refused only without the helper, and an interrupted backup keeps the service stopped until an admin retries with `--recover-services`. (#2866)

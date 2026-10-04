@@ -34,11 +34,17 @@ import (
 // as a closure from cmd_start. With no resolver wired the caller's config is
 // used as-is, which is the pre-existing fallback.
 func (r *OrchestratorRunner) startCrew(ctx context.Context, cfg provider.CrewConfig, workspaceID string) (string, provider.CrewConfig, error) {
+	use, resolved, err := r.startCrewUse(ctx, cfg, workspaceID)
+	defer use.Release()
+	return use.ContainerID(), resolved, err
+}
+
+func (r *OrchestratorRunner) startCrewUse(ctx context.Context, cfg provider.CrewConfig, workspaceID string) (*provider.RuntimeUse, provider.CrewConfig, error) {
 	var completer crewstart.Completer
 	if r.crewRuntime != nil {
 		completer = crewstart.CompleterFunc(func(ctx context.Context, c provider.CrewConfig) (provider.CrewConfig, error) {
 			return r.crewRuntime(ctx, c.ID, workspaceID)
 		})
 	}
-	return crewstart.New(r.container, completer, r.logger).StartResolved(ctx, cfg, nil)
+	return crewstart.New(r.container, completer, r.logger).StartUse(ctx, cfg, nil)
 }

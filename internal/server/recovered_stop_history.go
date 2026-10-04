@@ -90,10 +90,6 @@ func (s *Server) flushRecoveredStopsBatch(ctx context.Context) error {
 }
 
 func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunState) error {
-	origin, reason, summary, idleStatus := "agent_stop", "confirmed_runtime_stop", "run cancelled after confirmed runtime stop", "STOPPED"
-	if run.StopOrigin == "recovered_absence" {
-		origin, reason, summary, idleStatus = "recovered_absence", "server_restart", "runtime absent after server restart; outcome unverified", "IDLE"
-	}
 	var workspace string
 	var terminal, workOwned, recoveredTerminal bool
 	err := s.db.QueryRowContext(ctx, `SELECT je.workspace_id,
@@ -104,13 +100,38 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
  FROM journal_entries je WHERE je.trace_id=? AND je.agent_id=? AND je.entry_type='run.started' LIMIT 1`, run.ID, run.AgentID).
 		Scan(&workspace, &terminal, &workOwned, &recoveredTerminal)
 	if errors.Is(err, sql.ErrNoRows) {
-		// Runtime absence is already durable. No history exists to project.
-		// A delayed start is handled by normal orphan recovery, not a marker
-		// that would otherwise protect this agent forever.
-		return s.ackRecoveredStop(ctx, run.ID)
+		// Manual IPC runs may never emit run.started. A confirmed stop can
+		// still publish its own terminal event without fabricating a start.
+		workspace, err = s.recoveredStopWorkspace(ctx, run)
+		if err != nil {
+			return err
+		}
+		if workspace == "" {
+			return s.ackRecoveredStop(ctx, run.ID)
+		} // No trustworthy historical scope.
+		var conflicting bool
+		err = s.db.QueryRowContext(ctx, `SELECT
+          EXISTS (SELECT 1 FROM journal_entries WHERE workspace_id=? AND trace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')),
+          EXISTS (SELECT 1 FROM work_attempts WHERE run_id=?),
+          EXISTS (SELECT 1 FROM journal_entries WHERE id=? AND workspace_id=? AND agent_id=?),
+          EXISTS (SELECT 1 FROM journal_entries WHERE trace_id=? AND entry_type IN ('run.started','run.completed','run.failed','run.cancelled','run.timeout') AND (workspace_id<>? OR COALESCE(agent_id,'')<>?))`,
+			workspace, run.ID, run.ID, "recovered-stop:"+run.ID, workspace, run.AgentID, run.ID, workspace, run.AgentID).Scan(&terminal, &workOwned, &recoveredTerminal, &conflicting)
+		if err != nil {
+			return err
+		}
+		if conflicting {
+			return fmt.Errorf("recovered run %s has conflicting journal ownership", run.ID)
+		}
 	}
 	if err != nil {
 		return err
+	}
+	if run.WorkspaceID != "" && run.WorkspaceID != workspace {
+		return fmt.Errorf("recovered run %s workspace disagrees with journal", run.ID)
+	}
+	origin, reason, summary, idleStatus := "agent_stop", "confirmed_runtime_stop", "run cancelled after confirmed runtime stop", "STOPPED"
+	if run.StopOrigin == "recovered_absence" {
+		origin, reason, summary, idleStatus = "recovered_absence", "recovered_runtime_absent", "recovered run ended without a verified outcome", "IDLE"
 	}
 	if !terminal {
 		if workOwned {
@@ -191,4 +212,30 @@ func (s *Server) ackRecoveredStop(ctx context.Context, id string) error {
 		current.StopJournalPending = false
 		return json.Marshal(current)
 	})
+}
+
+func (s *Server) recoveredStopWorkspace(ctx context.Context, run orchestrator.RunState) (string, error) {
+	var agentWorkspace string
+	err := s.db.QueryRowContext(ctx, `SELECT workspace_id FROM agents WHERE id=?`, run.AgentID).Scan(&agentWorkspace)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	workspace := run.WorkspaceID
+	if workspace == "" {
+		workspace = agentWorkspace
+	}
+	if workspace == "" {
+		return "", nil
+	}
+	if agentWorkspace != "" && agentWorkspace != workspace {
+		return "", fmt.Errorf("recovered run %s workspace disagrees with agent", run.ID)
+	}
+	var exists bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM workspaces WHERE id=?)`, workspace).Scan(&exists); err != nil {
+		return "", err
+	}
+	if !exists {
+		return "", nil
+	}
+	return workspace, nil
 }

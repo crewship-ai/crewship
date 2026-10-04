@@ -7,12 +7,26 @@ package api
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
+
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 )
+
+// cacheArtifactReferences joins immutable IDs and legacy tag references. An
+// image may have several aliases; all describe the same underlying artifact.
+func cacheArtifactReferences(refs map[string][]string, img image.Summary) []string {
+	crews := append([]string(nil), refs[img.ID]...)
+	for _, tag := range img.RepoTags {
+		crews = append(crews, refs[tag]...)
+	}
+	slices.Sort(crews)
+	return slices.Compact(crews)
+}
 
 type cachedImageList struct {
 	images    []image.Summary
@@ -128,7 +142,7 @@ func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) 
 				Tag:          tag,
 				Size:         img.Size,
 				CreatedAt:    img.Created,
-				ReferencedBy: refs[tag],
+				ReferencedBy: cacheArtifactReferences(refs, img),
 			})
 		}
 	}
@@ -210,6 +224,7 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 	}
 
 	force := r.URL.Query().Get("force") == "true"
+	removeRef := tag
 
 	if !force {
 		refs, err := h.referencedCacheImages(r.Context())
@@ -224,12 +239,48 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 			})
 			return
 		}
+		// A tag can point at an artifact pinned by ID. Resolve against a fresh
+		// daemon list, not the UI memoization; stale aliases must not hide use.
+		hasPinned := false
+		for ref := range refs {
+			hasPinned = hasPinned || dockerutil.IsLocalImageID(ref)
+		}
+		if hasPinned {
+			images, err := h.gcClient.ImageList(r.Context(), client.ImageListOptions{})
+			if err != nil {
+				replyInternalError(w, h.logger, "resolve cached image identity", err)
+				return
+			}
+			found := false
+			for _, img := range images.Items {
+				if !slices.Contains(img.RepoTags, tag) {
+					continue
+				}
+				found = true
+				if !dockerutil.IsLocalImageID(img.ID) {
+					replyError(w, http.StatusConflict, "cached image identity could not be established")
+					return
+				}
+				if crews := cacheArtifactReferences(refs, img); len(crews) > 0 {
+					writeJSON(w, http.StatusConflict, map[string]any{
+						"error":         "image is referenced by live crews; pass ?force=true to delete anyway",
+						"referenced_by": crews,
+					})
+					return
+				}
+				removeRef = img.ID // do not follow a tag moved after this check
+			}
+			if !found {
+				replyError(w, http.StatusNotFound, "cached image not found")
+				return
+			}
+		}
 	}
 
 	// Use the narrow gcClient interface — same underlying *client.Client, but
 	// keeps the destructive surface aligned with the orphan sweeper for both
 	// readability and test parity.
-	_, err := h.gcClient.ImageRemove(r.Context(), tag, client.ImageRemoveOptions{Force: force, PruneChildren: true})
+	_, err := h.gcClient.ImageRemove(r.Context(), removeRef, client.ImageRemoveOptions{Force: force, PruneChildren: true})
 	if err != nil {
 		h.logger.Error("docker image remove", "tag", tag, "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to remove cached image")

@@ -887,9 +887,56 @@ crewship crew provision status <slug-or-id> --watch
 
 ---
 
+
+### `crewship crew provision lock-resolve`
+
+Resolve a local mise JSON/TOML file in a disposable Docker builder. This command
+requires a trusted local Linux image and registry network access. It changes no
+Crewship server state and does not install or activate the returned bundle.
+
+```bash
+crewship crew provision lock-resolve mise.json --image sha256:<local-image-id>
+crewship crew provision lock-resolve mise.json --image sha256:<local-image-id> --bump
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--image` | `string` | required | Immutable local Docker image ID containing mise and the documented resolver utilities. |
+| `--bump` | `bool` | `false` | Update an existing input lock within its selectors; exact version pins remain exact. |
+
+Output JSON includes `tools` (native previous/resolved versions), selector and
+complete-bundle hashes, `lock_changed`, `lock`, `resolver_image_id`, `platform`
+and `mise_version`. Hashes bind the proposal, not an authorization to apply it.
+Supply the proposed lock through the ordinary manifest/build path. See
+[resolver limits and trust requirements](/guides/devcontainers#resolving-or-updating-a-lock-with-crewship).
+
+---
+
+### `crewship crew provision lock-apply`
+
+Apply a reviewed `lock-resolve` proposal to the unchanged local mise inputs.
+The command checks selectors, the previous complete lock and the proposed
+bundle digest before emitting updated JSON. It preserves current environment,
+policy and unknown JSON fields. It needs no Docker or Crewship server and
+neither modifies input files nor installs or activates an environment.
+
+```bash
+crewship crew provision lock-resolve mise.json --image sha256:<local-image-id> --bump > proposal.json
+# Review proposal.json, including its complete native lock bundle.
+crewship crew provision lock-apply mise.json proposal.json > mise.updated.json
+```
+
+Use a separate output file; shell redirection to either input truncates that
+input before Crewship starts. Review the resulting configuration and send it
+through the ordinary manifest/API build flow. Hashes detect stale inputs and
+accidental corruption, **not** a malicious plan author. Native locked install
+and any required CLI startup checks still run during provisioning.
+
+---
+
 ## `crewship crew rebuild`
 
-Invalidate the crew's cached devcontainer image and re-provision. Use after changing `crewship crew config` values — `provision` alone will reuse the cached layer keyed by the old config hash. Streams live progress unless `--no-watch` is passed.
+Force a new build without reusing the build cache. The previous selected image remains available until the new build succeeds. An input mise lock still pins dependencies; update the lock explicitly to change those versions. This command does not replace a running container. Streams live progress unless `--no-watch` is passed.
 
 ```bash
 crewship crew rebuild <slug-or-id>

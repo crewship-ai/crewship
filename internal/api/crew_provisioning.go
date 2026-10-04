@@ -10,11 +10,14 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 	"github.com/moby/moby/client"
 )
 
 type ProvisioningHandler struct {
+	sandboxRuntime provider.SandboxRuntime // optional qualification backend; set before serving
+
 	db             *sql.DB
 	logger         *slog.Logger
 	catalogFetcher *devcontainer.CatalogFetcher

@@ -365,6 +365,7 @@ func TestHandleFileSave_StorageWriteFailure(t *testing.T) {
 	cfg.Storage.BasePath = t.TempDir()
 	logger := logging.New("error", "json", nil)
 	s := New(cfg, logger, &Deps{DB: openTestDB(t)})
+	t.Cleanup(s.StopBackground)
 	s.startedAt = time.Now()
 	s.storage = failingStorage{}
 	t.Cleanup(func() {
