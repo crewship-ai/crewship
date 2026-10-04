@@ -708,10 +708,9 @@ jobs:
           docker tag alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 alpine:3
       - name: Require executed Docker fixtures
         timeout-minutes: 14
-        # Hosted runners can use UID1001, which is deliberately unsupported
-        # for host launcher ownership. Run this disposable positive gate
-        # under root while keeping all in-container UID/capability controls.
-        run: sudo env "PATH=$PATH" GOTOOLCHAIN=local python3 scripts/ci/managed-environments.py
+        # The runner keeps existing fixtures non-root and elevates only the
+        # managed launcher fixture (UID1001 cannot own the trusted launcher).
+        run: python3 scripts/ci/managed-environments.py
 
   # Required evidence for Pages: no Docker env opt-in can silently skip this lane.
   pages-apps:

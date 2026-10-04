@@ -209,8 +209,8 @@ func main(){for _,e:=range os.Environ(){if strings.HasPrefix(e,"LD_")||strings.H
 				case <-time.After(10 * time.Second):
 					t.Fatal("native did not start")
 				}
-				location := RunLocation{ContainerID: containerID, AgentSlug: "fixture", RunID: req.RunID}
-				// Recover from durable evidence with selection disabled and no mode hint.
+				location := RunLocation{ContainerID: containerID, AgentSlug: "fixture", RunID: req.RunID, Managed: true}
+				// Recover from durable evidence with selection disabled and a recovered durable mode hint.
 				t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "")
 				recovered := New(p, state, slog.New(slog.NewTextHandler(io.Discard, nil)))
 				t.Logf("kernel/probe diagnostic: %s", docker("exec", containerID, "/bin/sh", "-c", `cat /tmp/crewship-direct-real-lifecycle.pid 2>/dev/null; read pid stamp < /tmp/crewship-direct-real-lifecycle.pid; cat /proc/$pid/stat 2>/dev/null; /bin/kill -0 -- "-$pid"; echo group_with_dashdash=$?; /bin/kill -0 "-$pid"; echo group_without_dashdash=$?; ps -o pid,ppid,pgid,args || true`))
@@ -356,6 +356,17 @@ func main(){for _,e:=range os.Environ(){if strings.HasPrefix(e,"LD_")||strings.H
 	t.Cleanup(func() { exec.Command("docker", "rm", "-f", newContainer).Run() })
 	if err := newProvider.AttestManagedLaunch(ctx, newContainer, *d); err != nil {
 		t.Fatal(err)
+	}
+	// Docker stores tmpfs overlays separately from ordinary Mounts on some
+	// engines. Cover both the native executable and trusted launcher parents.
+	for i, destination := range []string{"/opt/native", "/usr/local/bin"} {
+		t.Run(fmt.Sprintf("tmpfs-overlay-%d", i), func(t *testing.T) {
+			id := docker("run", "-d", "--network=none", "--read-only", "--tmpfs", destination+":rw,nosuid,size=16m", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--mount", "type=bind,src="+nextPath+",dst="+managedlaunch.LauncherPath+",readonly", imageID)
+			t.Cleanup(func() { exec.Command("docker", "rm", "-f", id).Run() })
+			if err := newProvider.AttestManagedLaunch(ctx, id, *d); err == nil {
+				t.Fatal("tmpfs overlay above trusted code admitted")
+			}
+		})
 	}
 	_, keys, err := managedlaunch.Environment([]string{"HOME=/home/agent"})
 	if err != nil {

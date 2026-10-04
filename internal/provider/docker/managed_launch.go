@@ -46,6 +46,13 @@ func (p *Provider) AttestManagedLaunch(ctx context.Context, id string, d managed
 		(!slices.Contains(h.SecurityOpt, "no-new-privileges") && !slices.Contains(h.SecurityOpt, "no-new-privileges:true")) {
 		return denied
 	}
+	// Docker can omit HostConfig.Tmpfs destinations from Mounts. They can
+	// obscure trusted code even when the image root is read-only.
+	for destination := range h.Tmpfs {
+		if path.Clean(destination) != destination || !path.IsAbs(destination) || covers(destination, d.Path) || covers(destination, managedlaunch.LauncherPath) {
+			return denied
+		}
+	}
 	launcherBound := false
 	for _, mount := range c.Mounts {
 		if mount.Destination == managedlaunch.LauncherPath {

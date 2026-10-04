@@ -114,7 +114,7 @@ func (c *detachedReplyContainer) ExecInspect(_ context.Context, id string) (bool
 	return id == "agent-exec", 0, nil
 }
 func (c *detachedReplyContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	if strings.Contains(strings.Join(cfg.Cmd, " "), "/bin/kill -TERM $group_separator") {
+	if strings.Contains(strings.Join(cfg.Cmd, " "), "/bin/kill -TERM --") {
 		if c.onStop != nil {
 			c.onStop()
 		}

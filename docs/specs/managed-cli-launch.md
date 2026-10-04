@@ -50,7 +50,8 @@ closed before any legacy launch fallback.
 
 Docker admission checks the exact reserved container, immutable image,
 read-only root, privilege/capability restrictions, the host's read-only launcher
-bind and executable/launcher mount overlap. When the pilot is enabled, Docker
+bind and executable/launcher mount overlap, including HostConfig tmpfs
+destinations. When the pilot is enabled, Docker
 stages the launcher under a full SHA-256 filename using atomic create-if-absent,
 verifies existing bytes and host ownership/permissions, and never replaces that
 path or eagerly deletes old generations. Enabling the pilot stages the same
@@ -66,7 +67,8 @@ before the durable exec creation gate. The reservation survives execution.
 
 The first process is the static host-bound `crewship-sidecar --managed-launch`
 helper. It checks native format, canonical path, ownership/permissions and
-SHA-256 before `execve`, without shell, stdbuf, agent PATH, tmux or writable
+SHA-256 before `execveat(AT_EMPTY_PATH)` of that same open descriptor, without
+shell, stdbuf, agent PATH, tmux or writable
 argument/environment files. The trusted launcher creates a new session and an exclusive 0600
 `/tmp/crewship-direct-<run>.pid` file containing its PID and kernel start time
 before artifact validation. Exec preserves that identity for the existing
@@ -83,9 +85,10 @@ identity in a running container requires operator reconciliation/recreation.
 Same-RunID re-execution refuses an existing identity file, matching legacy
 direct-exec parity: retries must mint a new attempt ID.
 
-Probes read durable run state even for legacy runs; a failed state lookup
-refuses the probe. Process-group calibration also applies to legacy direct runs.
-Process-group signal probing calibrates against the probe's own group using
+Recovered callers carry the durable managed marker even after pilot selection is
+removed. Only known managed probes read and require durable run state; nonpilot
+probes retain the legacy script, state-error behavior and Docker call pattern.
+Managed process-group signal probing calibrates against the probe's own group using
 portable explicit-signal syntax. Unsupported utilities, permission errors and
 failed calibration return UNKNOWN; only a definite no-such-process error
 proves group absence. PID/starttime checks prevent accidental PID reuse. They do not establish an
@@ -112,7 +115,9 @@ This evidence describes admitted artifacts, not successful authentication or a
 successful process start. Refusals before creation emit no CLI output.
 
 The required managed-environment CI suite runs `TestManagedLaunchRealDocker`:
-the production Codex command builder uses the real static launcher against
+only this new fixture runs under sudo on the host; existing Docker fixtures retain
+their non-root host execution. The production Codex command builder uses the
+real static launcher against
 synthetic native executables, with stale CLI/node/tmux in persistent home and
 injected image environment. Wrong hashes exit 126. Unit regressions cover common
 run admission, missing evidence, current-lock drift, tenant scope, mount aliases,
@@ -122,7 +127,7 @@ For explicit upstream packaging qualification, provide a local mise image
 using the test-only selector documented in
 [codex_packaging_integration_test.go](../../internal/devcontainer/codex_packaging_integration_test.go).
 Export that test-only image selector before running the command below.
-A missing selector skips the test and supplies no packaging qualification:
+A missing selector fails this explicit gate and supplies no packaging qualification:
 
 ```sh
 go test -tags=integration ./internal/devcontainer -run '^TestCodexNativePackaging$' -count=1 -timeout 10m
@@ -146,8 +151,10 @@ Artifact validation currently buffers up to 512 MiB per reader; operators must
 budget memory for launcher validation in addition to the native CLI. The bound
 limits individual allocations, not aggregate concurrency or an OOM guarantee.
 Attestation uses a 20-second provider bound within 30-second admission.
-Immutable launcher generations are retained; remove a generation only after
-verifying that no running or stopped container references its host bind source.
+Immutable launcher generations are retained. Conservative collection is tracked
+in [issue #2906](https://github.com/crewship-ai/crewship/issues/2906); it must
+preserve running and stopped container references and coordinate with launcher
+publication and runtime creation before removing any generation.
 Upstream Codex packaging qualification is an explicit opt-in test, separate from
 the required synthetic managed-environment CI gate.
 

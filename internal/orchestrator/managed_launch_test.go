@@ -199,7 +199,7 @@ func TestManagedRunProbePreservesDurableScopeAndMissingState(t *testing.T) {
 func TestManagedRunProbeAfterPilotSelectorDisabled(t *testing.T) {
 	t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "")
 	state := newLockedMemState()
-	location := RunLocation{ContainerID: "c1", AgentSlug: "agent-1", RunID: "managed-recovery"}
+	location := RunLocation{ContainerID: "c1", AgentSlug: "agent-1", RunID: "managed-recovery", Managed: true}
 	raw, _ := json.Marshal(RunState{ID: location.RunID, ContainerID: location.ContainerID, AgentSlug: location.AgentSlug, ManagedLaunch: launchDescriptor()})
 	if err := state.Set(context.Background(), "agent_runs", location.RunID, raw); err != nil {
 		t.Fatal(err)
@@ -258,5 +258,53 @@ func TestManagedLaunchPreExecFailureIsTerminal(t *testing.T) {
 				t.Fatalf("never-started managed run remains nonterminal: status=%q", saved.Status)
 			}
 		})
+	}
+}
+
+type legacyProbeState struct {
+	*lockedMemState
+	reads int
+}
+
+func (s *legacyProbeState) Get(context.Context, string, string) ([]byte, error) {
+	s.reads++
+	return nil, errors.New("unavailable legacy state")
+}
+
+type legacyProbeContainer struct {
+	execStartedProbeContainer
+	inspections int
+	commands    []provider.ExecConfig
+}
+
+func (c *legacyProbeContainer) ContainerStatus(context.Context, string) (*provider.ContainerStatus, error) {
+	c.inspections++
+	return &provider.ContainerStatus{State: "running"}, nil
+}
+func (c *legacyProbeContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	c.commands = append(c.commands, cfg)
+	return &provider.ExecResult{Reader: io.NopCloser(strings.NewReader("ABSENT\n"))}, nil
+}
+
+func TestManagedLaunchLeavesNonpilotProbeBehaviorUnchanged(t *testing.T) {
+	t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "pilot-crew")
+	state := &legacyProbeState{lockedMemState: newLockedMemState()}
+	c := &legacyProbeContainer{}
+	o := New(c, state, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	location := RunLocation{ContainerID: "legacy-container", AgentSlug: "legacy-agent", RunID: "legacy-run"}
+	if alive, err := o.RunIsAliveAt(context.Background(), location); err != nil || alive {
+		t.Fatalf("legacy liveness: %v %v", alive, err)
+	}
+	if gone, err := o.StopRunAt(context.Background(), location); err != nil || !gone {
+		t.Fatalf("legacy stop: %v %v", gone, err)
+	}
+	if state.reads != 0 || c.inspections != 0 || len(c.commands) != 2 {
+		t.Fatalf("legacy acquired state/inspect work: reads=%d inspections=%d execs=%d", state.reads, c.inspections, len(c.commands))
+	}
+	for i, cfg := range c.commands {
+		script := cfg.Cmd[2]
+		if !strings.HasPrefix(script, directRunProbe(location.RunID, i == 1)) || strings.Contains(script, "group_separator") {
+			t.Fatal("legacy probe changed", script)
+		}
 	}
 }

@@ -11,9 +11,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
+	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // Launch runs inside the statically linked, read-only host launcher. Its argv
@@ -76,9 +80,10 @@ func Launch(encoded string, args []string) error {
 		return err
 	}
 	argv := append([]string{d.Path}, args...)
-	// The provider attests read-only root and no covering mounts while retaining
-	// the exact runtime. Those facts close the hash-to-exec replacement window.
-	return syscall.Exec(d.Path, argv, env)
+	// Read-only root and mount attestation prevent in-place inode writes.
+	// Execute the exact descriptor whose bytes were verified, never reopen
+	// its pathname (which could now resolve to a different inode).
+	return execVerifiedFile(f, argv, env)
 }
 
 // Keep the legacy direct-run PID/starttime contract without invoking image
@@ -120,4 +125,32 @@ func establishRunIdentity(runID string) error {
 		return errors.New("managed launch: cannot publish run identity")
 	}
 	return nil
+}
+
+func execVerifiedFile(f *os.File, argv, env []string) error {
+	empty, err := syscall.BytePtrFromString("")
+	if err != nil {
+		return err
+	}
+	argvp, err := syscall.SlicePtrFromStrings(argv)
+	if err != nil {
+		return err
+	}
+	envp, err := syscall.SlicePtrFromStrings(env)
+	if err != nil {
+		return err
+	}
+	// Static ELF needs no interpreter to reopen this CLOEXEC descriptor.
+	// Unsupported kernels/seccomp policies fail closed; no pathname fallback.
+	_, _, errno := unix.RawSyscall6(unix.SYS_EXECVEAT, f.Fd(),
+		uintptr(unsafe.Pointer(empty)), uintptr(unsafe.Pointer(&argvp[0])),
+		uintptr(unsafe.Pointer(&envp[0])), unix.AT_EMPTY_PATH, 0)
+	runtime.KeepAlive(f)
+	runtime.KeepAlive(empty)
+	runtime.KeepAlive(argvp)
+	runtime.KeepAlive(envp)
+	if errno != 0 {
+		return errno
+	}
+	return errors.New("managed launch: execveat unexpectedly returned")
 }

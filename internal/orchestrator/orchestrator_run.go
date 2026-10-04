@@ -1117,7 +1117,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// next run acquiring them. Best-effort and bounded.
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		stopped, stopErr := o.StopRunAt(stopCtx, RunLocation{
-			ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID,
+			ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID, Managed: req.managedLaunch != nil,
 		})
 		stopCancel()
 		switch {

@@ -75,7 +75,7 @@ func TestDirectRun_PreservesStdinAndLiteralArguments(t *testing.T) {
 	}
 }
 
-func TestDirectRun_GroupProbeNeverTreatsUtilityOrPermissionFailureAsAbsence(t *testing.T) {
+func TestManagedDirectRun_GroupProbeNeverTreatsUtilityOrPermissionFailureAsAbsence(t *testing.T) {
 	for _, mode := range []string{"unsupported", "permission", "absent"} {
 		t.Run(mode, func(t *testing.T) {
 			id := fmt.Sprintf("group-probe-%s-%d", mode, time.Now().UnixNano())
@@ -95,7 +95,7 @@ func TestDirectRun_GroupProbeNeverTreatsUtilityOrPermissionFailureAsAbsence(t *t
 			if err := os.WriteFile(utility, []byte(script), 0700); err != nil {
 				t.Fatal(err)
 			}
-			probe := strings.ReplaceAll(directRunProbe(id, false), "/bin/kill", utility)
+			probe := strings.ReplaceAll(managedDirectRunProbe(id, false), "/bin/kill", utility)
 			out, err := exec.Command("sh", "-c", probe).CombinedOutput()
 			if err != nil {
 				t.Fatalf("probe error: %v %s", err, out)
