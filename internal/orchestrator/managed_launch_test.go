@@ -210,3 +210,53 @@ func TestManagedRunProbeAfterPilotSelectorDisabled(t *testing.T) {
 		t.Fatalf("disabled selector bypassed durable managed marker: %q %v", probe, err)
 	}
 }
+
+// Rejected preparation must not leave durable running occupancy for a CLI
+// that never reached the creation gate or obtained a process identity.
+func TestManagedLaunchPreExecFailureIsTerminal(t *testing.T) {
+	t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "pilot-crew")
+	for _, tc := range []struct{ name, slug, prompt, wantError string }{
+		{"oversized-argument", "agent-1", strings.Repeat("x", maxArgStrLen), "argument exceeds execve limit"},
+		{"invalid-slug", "../agent", "offline", "invalid agent slug"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			c := &launchContainer{}
+			state := newLockedMemState()
+			o := New(c, state, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			o.SetManagedLaunchResolver(func(context.Context, string, string, string) (*managedlaunch.Descriptor, error) {
+				return launchDescriptor(), nil
+			})
+			use := provider.NewRuntimeUse("pilot-crew", "c1", func() {})
+			defer use.Release()
+			gate := false
+			req := AgentRunRequest{RuntimeUse: use, RunID: "managed-preexec-" + tc.name, CrewID: "pilot-crew", WorkspaceID: "w1", AgentID: "a1", AgentSlug: tc.slug, ContainerID: "c1", CLIAdapter: "CODEX_CLI", UserMessage: tc.prompt, ExecGate: func(context.Context) error { gate = true; return nil }}
+			err := o.RunAgent(ctx, req, nil)
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("unexpected preparation result: %v", err)
+			}
+			if gate {
+				t.Fatal("rejected preparation reached workload creation gate")
+			}
+			for _, cfg := range c.commands {
+				if len(cfg.Cmd) > 1 && cfg.Cmd[1] == "--managed-launch" || strings.Contains(strings.Join(cfg.Cmd, " "), "tmux new-session") {
+					t.Fatal("rejected preparation executed workload")
+				}
+			}
+			raw, err := state.Get(ctx, "agent_runs", req.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var saved RunState
+			if err := json.Unmarshal(raw, &saved); err != nil {
+				t.Fatal(err)
+			}
+			if saved.ManagedLaunch == nil || saved.ID != req.RunID || saved.ContainerID != req.ContainerID {
+				t.Fatal("missing persisted managed run evidence")
+			}
+			if saved.Status != "error" {
+				t.Fatalf("never-started managed run remains nonterminal: status=%q", saved.Status)
+			}
+		})
+	}
+}

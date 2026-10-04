@@ -513,6 +513,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 
 	if err := o.assembleSystemPrompt(ctx, &req); err != nil {
+		if req.managedLaunch != nil {
+			o.failRun(ctx, req, runState.ID, "error")
+		}
 		return err
 	}
 
@@ -624,6 +627,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 
 	execCfg, err := o.buildExecCommand(ctx, req, cmd, env, workDir)
 	if err != nil {
+		if req.managedLaunch != nil {
+			o.failRun(ctx, req, runState.ID, "error")
+		}
 		return err
 	}
 

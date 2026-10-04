@@ -53,7 +53,10 @@ read-only root, privilege/capability restrictions, the host's read-only launcher
 bind and executable/launcher mount overlap. When the pilot is enabled, Docker
 stages the launcher under a full SHA-256 filename using atomic create-if-absent,
 verifies existing bytes and host ownership/permissions, and never replaces that
-path or eagerly deletes old generations. Old-generation or fixed-name binds
+path or eagerly deletes old generations. Enabling the pilot stages the same
+launcher bytes in a digest-named generation for all newly created crew runtimes,
+including non-pilot crews; existing container binds remain unchanged.
+Old-generation or fixed-name binds
 fail closed. A container archive comparison supplies secondary consistency
 verification; Docker archives can remount the current host source and do **not**
 prove the running bind inode. Read-only overlays are rejected
@@ -70,14 +73,18 @@ before artifact validation. Exec preserves that identity for the existing
 stop, liveness and restart recovery probes; existing files or symlinks refuse
 the attempt rather than overwriting another identity. This writable PID file
 is lifecycle evidence, never authority to launch an executable. The existing
-host-side `RunState.ManagedLaunch` marker must be persisted before exec and is
-retained by restart recovery. If that managed PID file disappears, probes return
+host-side `RunState.ManagedLaunch` marker must be persisted before exec.
+Managed prompt assembly and command preparation failures finalize the run as
+`error` before workload creation; they do not leave unresolved running occupancy.
+The marker is retained by restart recovery. If that managed PID file disappears, probes return
 UNKNOWN and retain the hold instead of falling through to tmux absence; an
 authoritatively stopped or removed container can still prove absence. Lost
 identity in a running container requires operator reconciliation/recreation.
 Same-RunID re-execution refuses an existing identity file, matching legacy
 direct-exec parity: retries must mint a new attempt ID.
 
+Probes read durable run state even for legacy runs; a failed state lookup
+refuses the probe. Process-group calibration also applies to legacy direct runs.
 Process-group signal probing calibrates against the probe's own group using
 portable explicit-signal syntax. Unsupported utilities, permission errors and
 failed calibration return UNKNOWN; only a definite no-such-process error
