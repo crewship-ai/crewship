@@ -1124,7 +1124,7 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 		    SELECT 1 FROM journal_entries je2
 		    WHERE je2.workspace_id = je1.workspace_id
 		      AND je2.trace_id = je1.trace_id
-		      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
+		      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') AND (je2.entry_type<>'run.recovered_stop' OR je2.agent_id=je1.agent_id)
 		  )
 		GROUP BY je1.workspace_id, je1.trace_id`)
 	if err != nil {
@@ -1237,7 +1237,7 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 			    SELECT 1 FROM journal_entries je2
 			    WHERE je2.workspace_id = je1.workspace_id
 			      AND je2.trace_id = je1.trace_id
-			      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
+			      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') AND (je2.entry_type<>'run.recovered_stop' OR je2.agent_id=je1.agent_id)
 			  )
 		)`+guard, args...); err != nil {
 		s.logger.Error("reset agent statuses after recovery", "error", err)
