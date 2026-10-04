@@ -86,6 +86,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change:** Restricted routine, Page and assigned-issue runs now use the shared work ledger and dispatcher. Interrupted runs with uncertain effects show “Needs review” and require reconciliation before outputs are released or new work repeats; legacy running jobs are adopted into this state.
 
 ### Fixed
+- ⚠️ **Behaviour change:** **Confirmed recovery stops with no recorded start now have clear audit history.** Record one `run.recovered_stop` event with explicit ownership checks and no billing, automation or completed-run statistics. Late lifecycle writes for an audited identity are rejected instead of creating an invented run.
 
 - Docker environment builds publish immutable local image references, so another rebuild cannot silently replace a selected artifact. Failed explicit rebuilds keep the previous reference; cache inventory and ordinary cleanup recognize image-ID references. The build cache key advances once to avoid retagging legacy references.
 - Confirmed stops recovered after restart now retain a durable journal retry until history and agent state are recorded; retries preserve existing outcomes and leave work-owned settlement to the dispatcher.

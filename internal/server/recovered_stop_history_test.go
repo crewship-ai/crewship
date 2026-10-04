@@ -22,7 +22,7 @@ func (failedStopAcknowledgement) Set(context.Context, string, string, []byte) er
 
 func seedStoppedOutbox(t *testing.T, s *Server, id string) {
 	t.Helper()
-	raw, err := json.Marshal(orchestrator.RunState{ID: id, AgentID: "a", Status: "cancelled", StopJournalPending: true})
+	raw, err := json.Marshal(orchestrator.RunState{ID: id, AgentID: "a", WorkspaceID: "rw", Status: "cancelled", StopJournalPending: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,14 @@ func TestRecoveredStopHistoryMakesBoundedProgressPastUnresolvedRuns(t *testing.T
 	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
 	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
 	for i := 0; i < 100; i++ {
-		seedStoppedOutbox(t, s, fmt.Sprintf("absent-%03d", i))
+		id := fmt.Sprintf("absent-%03d", i)
+		raw, err := json.Marshal(orchestrator.RunState{ID: id, AgentID: "a", Status: "cancelled", StopJournalPending: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.state.Set(t.Context(), "agent_runs", id, raw); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for i := 0; i < 101; i++ {
 		id := fmt.Sprintf("ready-%03d", i)
@@ -180,10 +187,14 @@ func TestRecoveredStopHistoryMakesBoundedProgressPastUnresolvedRuns(t *testing.T
 	defer cancel()
 	// Three batches of 100 cover every one of these 201 pending runs,
 	// even when unresolved entries retain their durable pending marker.
+	unresolvedErrors := 0
 	for i := 0; i < 3; i++ {
 		if err := s.flushRecoveredStopsBatch(ctx); err != nil {
-			t.Fatal(err)
+			unresolvedErrors++
 		}
+	}
+	if unresolvedErrors == 0 {
+		t.Fatal("fixture did not exercise unresolved ownership")
 	}
 	remaining := 0
 	for i := 0; i < 101; i++ {
@@ -194,11 +205,11 @@ func TestRecoveredStopHistoryMakesBoundedProgressPastUnresolvedRuns(t *testing.T
 	if remaining != 0 {
 		t.Fatalf("%d actionable stops starved behind unresolved entries", remaining)
 	}
-	if pendingStop(t, s, "absent-000") {
-		t.Fatal("manual stop never acknowledged")
+	if !pendingStop(t, s, "absent-000") {
+		t.Fatal("unknown ownership lost its pending marker")
 	}
-	if n := recoveryTerminalCount(t, s, "absent-000"); n != 1 {
-		t.Fatal("confirmed manual stop with known workspace lacks terminal history")
+	if n := recoveryTerminalCount(t, s, "absent-000"); n != 0 {
+		t.Fatalf("unknown ownership published %d history entries", n)
 	}
 }
 
@@ -339,7 +350,7 @@ func TestRecoveredStopHistoryMissingStartScope(t *testing.T) {
 		name, agent, workspace string
 		conflict               bool
 	}{
-		{"captured-after-agent-deletion", "gone", "rw", false},
+		{"captured-after-agent-deletion", "gone", "rw", true},
 		{"agent-scope-conflict", "a", "other", true},
 		{"journal-scope-conflict", "a", "rw", true},
 	} {

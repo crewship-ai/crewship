@@ -34,6 +34,7 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "run.completed",
     "run.failed",
     "run.cancelled",
+    "run.recovered_stop",
     "run.timeout",
     "run.session_init",
     "run.agent_span",
