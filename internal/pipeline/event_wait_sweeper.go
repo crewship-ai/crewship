@@ -163,17 +163,8 @@ func (e *Executor) resumeEventRun(ctx context.Context, runID string, logger *slo
 	if rec.Status != RunStatusWaiting {
 		return
 	}
-	plan, reason := e.buildResumePlan(ctx, rec)
+	plan := e.buildEventResumePlan(ctx, rec, logger)
 	if plan == nil {
-		writer, ok := quiesce.Enter(ctx)
-		if !ok {
-			return
-		}
-		defer writer.Leave()
-		ctx = writer.Context()
-		if err := e.runStore.MarkInterrupted(ctx, runID, "not resumable after event: "+reason); err != nil {
-			logger.Warn("event resume: interrupt write failed", "run_id", runID, "error", err)
-		}
 		return
 	}
 	plan.reason = resumeReasonSignal
@@ -198,4 +189,22 @@ func (e *Executor) resumeEventRun(ctx context.Context, runID string, logger *slo
 		}
 	}
 	e.runResumedRunWithRetry(ctx, plan, logger, waitForSlot, onAdmitted)
+}
+
+// A plan read aborted by shutdown is not evidence that durable state is
+// unresumable. Only a live context may interrupt a genuinely invalid plan.
+func (e *Executor) buildEventResumePlan(ctx context.Context, rec *RunRecord, logger *slog.Logger) *resumePlan {
+	plan, reason := e.buildResumePlan(ctx, rec)
+	if plan != nil || ctx.Err() != nil {
+		return plan
+	}
+	writer, ok := quiesce.Enter(ctx)
+	if !ok {
+		return nil
+	}
+	defer writer.Leave()
+	if err := e.runStore.MarkInterrupted(writer.Context(), rec.ID, "not resumable after event: "+reason); err != nil {
+		logger.Warn("event resume: interrupt write failed", "run_id", rec.ID, "error", err)
+	}
+	return nil
 }

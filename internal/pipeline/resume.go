@@ -378,6 +378,13 @@ func (e *Executor) runResumedRunWithRetry(ctx context.Context, plan *resumePlan,
 		case err == nil:
 			logger.Info("resumed pipeline run finished", "run_id", rec.ID, "status", res.Status)
 			return
+		case ctx.Err() != nil && errors.Is(err, ctx.Err()):
+			// Admission returned the lifecycle cancellation before runDSL
+			// could own execution/terminalization. Leave durable state intact
+			// for the next boot/tick; genuine admission failures still fail.
+			logger.Info("pipeline resume: shutdown during admission; run remains recoverable",
+				"run_id", rec.ID)
+			return
 		case errors.Is(err, ErrDuplicateRunID), errors.Is(err, errResumePlanStale):
 			logger.Info("pipeline resume: another lifetime owns this run; standing down",
 				"run_id", rec.ID, "reason", err)
