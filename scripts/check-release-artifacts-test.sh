@@ -303,6 +303,23 @@ PY
 esac
 EOF
 
+# assert_no_create <scenario> <calls-file> — resolution failures must stop
+# before Docker acquires anything for the affected platform. Explicit if/exit
+# rather than `! grep`: a negated command never trips `set -e`.
+assert_no_create() {
+  local scenario="$1" calls="$2" forbidden
+  case "$scenario" in
+    inspect-failure|malformed) forbidden='^create ' ;;
+    missing|ambiguous|invalid) forbidden='^create --platform linux/arm64 ' ;;
+    *) return 0 ;;
+  esac
+  if grep -E "$forbidden" "$calls" >/dev/null; then
+    echo "TEST FAIL (image $scenario): unexpected create after failed resolution:" >&2
+    grep -E "$forbidden" "$calls" | sed 's/^/    /' >&2
+    return 1
+  fi
+}
+
 for scenario in good inspect-failure missing ambiguous invalid malformed create-failure \
                 tamper-amd64 tamper-arm64 npm-tamper-amd64 npm-tamper-arm64 \
                 npm-missing-arm64 empty-arm64 notice-arm64; do
@@ -333,8 +350,8 @@ for scenario in good inspect-failure missing ambiguous invalid malformed create-
       echo "TEST FAIL ($scenario): falsely verified both platforms" >&2; exit 1
     fi
     case "$scenario" in
-      inspect-failure|malformed) ! grep '^create ' "$TMP/calls" >/dev/null ;;
-      missing|ambiguous|invalid) ! grep '^create --platform linux/arm64 ' "$TMP/calls" >/dev/null ;;
+      inspect-failure|malformed|missing|ambiguous|invalid)
+        assert_no_create "$scenario" "$TMP/calls" || exit 1 ;;
       tamper-*|npm-tamper-*) grep -F 'hash mismatch' <<< "$OUT" >/dev/null ;;
       npm-missing-*) grep -F 'missing npm text' <<< "$OUT" >/dev/null ;;
       empty-*) grep -F 'npm manifest has no rows' <<< "$OUT" >/dev/null ;;
@@ -342,6 +359,37 @@ for scenario in good inspect-failure missing ambiguous invalid malformed create-
     esac
   fi
   echo "ok  image $scenario (exit $rc)"
+done
+
+# Mutant proof for assert_no_create: a resolver that takes the first match and
+# falls back to any linux child (platform confusion). For a missing ARM64 entry
+# the checker still exits 1 (the stubbed create rejects the wrong child), so
+# the exit code alone cannot catch it; the forbidden-create assertion must.
+MUTANT="$TMP/mutant/scripts"
+mkdir -p "$MUTANT/ci"
+cp "$CHECK" "$MUTANT/check-release-artifacts.sh"
+python3 - "$REPO_ROOT/scripts/ci/image-platform.py" "$MUTANT/ci/image-platform.py" <<'PY'
+import sys
+src = open(sys.argv[1]).read()
+needle = "    if len(matches) != 1:"
+assert src.count(needle) == 1, 'image-platform.py changed; update the mutant'
+fallback = ("    matches = (matches or [e for e in manifest['manifests']\n"
+            "                           if e.get('platform', {}).get('os') == os_name])[:1]\n")
+open(sys.argv[2], 'w').write(src.replace(needle, fallback + needle))
+PY
+for scenario in missing ambiguous; do
+  rc=0; : > "$TMP/calls"
+  env SCENARIO="$scenario" CALLS="$TMP/calls" FIXTURE="$TMP/fixture-complete" \
+    PATH="$STUB:$PATH" timeout 20 "$MUTANT/check-release-artifacts.sh" --strict --image "$INDEX" \
+    >/dev/null 2>&1 || rc=$?
+  if [ "$scenario" = missing ] && [ "$rc" -ne 1 ]; then
+    echo "TEST FAIL (mutant $scenario): exit $rc, want 1 (mutant premise broken)" >&2; exit 1
+  fi
+  if assert_no_create "$scenario" "$TMP/calls" 2>/dev/null; then
+    echo "TEST FAIL (mutant $scenario): platform-confused create was not caught" >&2
+    cat "$TMP/calls" >&2; exit 1
+  fi
+  echo "ok  mutant $scenario: unexpected create caught (checker exit $rc)"
 done
 
 echo "check-release-artifacts-test: all regressions pass"
