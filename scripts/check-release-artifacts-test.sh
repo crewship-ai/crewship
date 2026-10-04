@@ -242,4 +242,106 @@ EOF
 expect 1 "image missing project NOTICE fails despite valid dependencies" -- \
   env FIXTURE="$TMP/fixture-complete" PATH="$STUB:$PATH" "$CHECK" --strict --image fixture
 
+# Exercise the actual image checker, including extraction and SHA-256 checks.
+# The stub models the classic store collision if an index is used for create.
+INDEX="fixture/repo@sha256:$(printf 'a%.0s' {1..64})"
+AMD="fixture/repo@sha256:$(printf 'b%.0s' {1..64})"
+ARM="fixture/repo@sha256:$(printf 'c%.0s' {1..64})"
+export INDEX AMD ARM
+cat > "$STUB/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$CALLS"
+case "$1" in
+  manifest)
+    [ "$2" = inspect ] && [ "$3" = "$INDEX" ]
+    [ "$SCENARIO" != inspect-failure ] || exit 1
+    python3 - <<'PY'
+import json, os
+entries = [{'digest': os.environ['AMD'].split('@')[1], 'platform': {'os': 'linux', 'architecture': 'amd64'}},
+           {'digest': os.environ['ARM'].split('@')[1], 'platform': {'os': 'linux', 'architecture': 'arm64'}}]
+case = os.environ['SCENARIO']
+if case == 'missing': entries.pop()
+if case == 'ambiguous': entries.append(entries[-1])
+if case == 'invalid': entries[-1]['digest'] = 'sha256:bad'
+if case == 'malformed': print('{'); raise SystemExit
+print(json.dumps({'manifests': entries}))
+PY
+    ;;
+  create)
+    case "$3:$4" in
+      "linux/amd64:$INDEX") echo amd64 ;; # First index import succeeds.
+      "linux/amd64:$AMD") echo amd64 ;;
+      "linux/arm64:$ARM")
+        [ "$SCENARIO" != create-failure ] || exit 1
+        echo arm64 ;;
+      *) echo 'cannot overwrite digest (index used for create)' >&2; exit 1 ;;
+    esac ;;
+  cp)
+    arch="${2%%:*}"
+    case "$2" in
+      */licenses/go) cp -r "$FIXTURE/LICENSES/go" "$3"
+        if [ "$SCENARIO" = "tamper-$arch" ]; then
+          echo tampered > "$3/example.com/plain/LICENSE"
+        fi ;;
+      */licenses/frontend) cp -r "$FIXTURE/LICENSES/frontend" "$3"
+        if [ "$SCENARIO" = "npm-tamper-$arch" ]; then
+          echo tampered > "$3/texts/@example/scoped-demo@2.0.0/LICENSE"
+        fi
+        if [ "$SCENARIO" = "npm-missing-$arch" ]; then
+          rm "$3/texts/@example/scoped-demo@2.0.0/LICENSE"
+        fi
+        if [ "$SCENARIO" = "empty-$arch" ]; then
+          printf 'name\tversion\tfile\tsha256\n' > "$3/manifest.tsv"
+        fi ;;
+      */LICENSE) cp "$FIXTURE/LICENSE" "$3" ;;
+      */NOTICE) [ "$SCENARIO" != "notice-$arch" ] && cp "$FIXTURE/NOTICE" "$3" ;;
+      *) exit 1 ;;
+    esac ;;
+  rm) exit 0 ;;
+  *) exit 1 ;;
+esac
+EOF
+
+for scenario in good inspect-failure missing ambiguous invalid malformed create-failure \
+                tamper-amd64 tamper-arm64 npm-tamper-amd64 npm-tamper-arm64 \
+                npm-missing-arm64 empty-arm64 notice-arm64; do
+  rc=0; : > "$TMP/calls"
+  OUT="$(env SCENARIO="$scenario" CALLS="$TMP/calls" FIXTURE="$TMP/fixture-complete" \
+    PATH="$STUB:$PATH" timeout 20 "$CHECK" --strict --image "$INDEX" 2>&1)" || rc=$?
+  want=1; [ "$scenario" != good ] || want=0
+  if [ "$rc" -ne "$want" ]; then
+    echo "TEST FAIL (image $scenario): exit $rc, want $want" >&2
+    printf '%s\n' "$OUT" >&2; exit 1
+  fi
+  if grep -F "create --platform linux/amd64 $INDEX" "$TMP/calls" >/dev/null || \
+     grep -F "create --platform linux/arm64 $INDEX" "$TMP/calls" >/dev/null; then
+    echo 'TEST FAIL: create used the index instead of a platform child' >&2; exit 1
+  fi
+  if [ "$scenario" = good ]; then
+    for pair in "linux/amd64 $AMD" "linux/arm64 $ARM"; do
+      grep -F "create --platform $pair /bin/sh" "$TMP/calls" >/dev/null
+      grep -F "image $pair (index $INDEX)" <<< "$OUT" >/dev/null
+    done
+    grep -F "VERIFIED    image $INDEX: legal files + manifest texts hash-match on: linux/amd64 linux/arm64" <<< "$OUT" >/dev/null
+    [ "$(grep -c '2 go texts + 2 npm texts' <<< "$OUT")" -eq 2 ]
+    [ "$(grep -c '^rm ' "$TMP/calls")" -eq 2 ]
+    [ "$(grep -c '^manifest inspect ' "$TMP/calls")" -eq 1 ]
+  else
+    # Resolution/acquisition/content failures cannot claim both platforms.
+    if grep -F 'hash-match on: linux/amd64 linux/arm64' <<< "$OUT" >/dev/null; then
+      echo "TEST FAIL ($scenario): falsely verified both platforms" >&2; exit 1
+    fi
+    case "$scenario" in
+      inspect-failure|malformed) ! grep '^create ' "$TMP/calls" >/dev/null ;;
+      missing|ambiguous|invalid) ! grep '^create --platform linux/arm64 ' "$TMP/calls" >/dev/null ;;
+      tamper-*|npm-tamper-*) grep -F 'hash mismatch' <<< "$OUT" >/dev/null ;;
+      npm-missing-*) grep -F 'missing npm text' <<< "$OUT" >/dev/null ;;
+      empty-*) grep -F 'npm manifest has no rows' <<< "$OUT" >/dev/null ;;
+      notice-*) grep -F 'missing/empty project NOTICE' <<< "$OUT" >/dev/null ;;
+    esac
+  fi
+  echo "ok  image $scenario (exit $rc)"
+done
+
 echo "check-release-artifacts-test: all regressions pass"

@@ -97,4 +97,12 @@ The first actual Nightly run 34649402647 passed binary packaging/signing/scannin
 
 After #2509, the actual Nightly scan passed but its second platform pull failed: classic Docker image stores cannot bind both platform images to the same index digest (`cannot overwrite digest`, run 34656533357). The smoke helper now resolves the requested platform to exactly one child manifest in the immutable index before pulling it; missing/ambiguous platform entries fail closed. Publication and signature verification continue to identify the original index, and each boot still verifies the full embedded source SHA. Local PR image tags and single-platform manifest digests remain supported.
 
+The release/nightly legal checker (`scripts/check-release-artifacts.sh`) also
+resolves each platform child before creating its extraction container. It logs
+both the child and original index, checks the shipped project legal files and
+every Go/npm manifest text by SHA-256, and reports only platforms that passed.
+Descriptor inspection or resolution failures remain UNVERIFIED and fail under
+`--strict`; they cannot bypass either platform's legal/hash checks. Local image
+tags retain their existing behavior.
+
 The manual `PR Image Build` workflow, with `registry_image` and `expected_sha` inputs, replays both architecture boots against one supplied registry digest and expected SHA, without rebuilding or publishing. It can validate a candidate before another publication attempt; success does not promote that candidate. This specifically exercises sequential pulls on the same runner, which independent AMD64/ARM build jobs do not cover.
