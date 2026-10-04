@@ -58,6 +58,10 @@ func managedLaunchResolver(db *sql.DB) orchestrator.ManagedLaunchResolver {
 		if err != nil || len(requested) != 1 || !requested[0].Exact {
 			return nil, denied
 		}
+		locked, err := devcontainer.LockedToolVersion(mise.Lock, cli.MiseTool)
+		if err != nil || locked != strings.TrimPrefix(requested[0].Selector, "v") {
+			return nil, denied
+		}
 		var reqs devcontainer.AggregatedRequirements
 		if json.Unmarshal([]byte(requirements), &reqs) != nil || reqs.Toolchain == nil {
 			return nil, denied
@@ -84,7 +88,7 @@ func managedLaunchResolver(db *sql.DB) orchestrator.ManagedLaunchResolver {
 			if tool.LaunchArtifact == nil || tool.LaunchArtifact.Path != tool.Path {
 				return nil, denied
 			}
-			d := &managedlaunch.Descriptor{Artifact: *tool.LaunchArtifact, ImageID: inventory.ImageID, RevisionID: revisionID, LockSHA256: hex.EncodeToString(sum[:]), Binary: cli.Binary, Version: strings.TrimPrefix(requested[0].Selector, "v")}
+			d := &managedlaunch.Descriptor{Artifact: *tool.LaunchArtifact, ImageID: inventory.ImageID, RevisionID: revisionID, LockSHA256: hex.EncodeToString(sum[:]), Binary: cli.Binary, Version: locked}
 			if d.Validate() != nil {
 				return nil, denied
 			}

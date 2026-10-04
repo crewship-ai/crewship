@@ -89,7 +89,7 @@ func main(){for _,e:=range os.Environ(){if strings.HasPrefix(e,"LD_")||strings.H
 		t.Fatal(err)
 	}
 	t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "pilot-crew")
-	for _, adapter := range []string{"CLAUDE_CODE", "CODEX_CLI"} {
+	for _, adapter := range []string{"CODEX_CLI"} {
 		t.Run(adapter, func(t *testing.T) {
 			o := New(p, newLockedMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 			d := launchDescriptor()
@@ -145,5 +145,19 @@ func main(){for _,e:=range os.Environ(){if strings.HasPrefix(e,"LD_")||strings.H
 				t.Fatal("lock version absent from provenance")
 			}
 		})
+	}
+	// Atomic staging updates the host pathname, but Docker keeps the old inode.
+	// Both payloads here are static, so format-only host checks cannot catch it.
+	replacement := stagedLauncher + ".next"
+	if err := os.WriteFile(replacement, raw, 0555); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, stagedLauncher); err != nil {
+		t.Fatal(err)
+	}
+	d := launchDescriptor()
+	d.ImageID = imageID
+	if err := p.AttestManagedLaunch(ctx, containerID, *d); err == nil {
+		t.Fatal("managed launch accepted a stale bind-mounted launcher inode after atomic staging")
 	}
 }

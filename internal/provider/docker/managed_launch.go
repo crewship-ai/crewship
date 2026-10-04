@@ -1,8 +1,11 @@
 package docker
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path"
 	"slices"
@@ -74,7 +77,28 @@ func (p *Provider) AttestManagedLaunch(ctx context.Context, id string, d managed
 	if err != nil {
 		return denied
 	}
-	if _, err := managedlaunch.Capture("/opt/crewship/launcher", raw); err != nil {
+	hostArtifact, err := managedlaunch.Capture("/opt/crewship/launcher", raw)
+	if err != nil {
+		return denied
+	}
+	// Atomic staging changes the host pathname while old containers retain
+	// their bound inode. Read those actual bytes before authorizing FIRST exec.
+	copied, err := p.client.CopyFromContainer(ctx, id, client.CopyFromContainerOptions{SourcePath: managedlaunch.LauncherPath})
+	if err != nil {
+		return denied
+	}
+	defer copied.Content.Close()
+	limited := &io.LimitedReader{R: copied.Content, N: managedlaunch.MaxArtifactBytes + 8192}
+	tr := tar.NewReader(limited)
+	entry, err := tr.Next()
+	if err != nil || entry.Typeflag != tar.TypeReg || entry.Name != path.Base(managedlaunch.LauncherPath) || entry.Size != int64(len(raw)) {
+		return denied
+	}
+	live, err := io.ReadAll(tr)
+	if err != nil || !bytes.Equal(live, raw) {
+		return denied
+	}
+	if _, err := tr.Next(); err != io.EOF || limited.N <= 0 || !strings.HasPrefix(hostArtifact.SHA256, p.ExpectedSidecarHash()) {
 		return denied
 	}
 	return nil
