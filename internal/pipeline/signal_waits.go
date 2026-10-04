@@ -29,6 +29,7 @@ type SignalWaitStore interface {
 	ArmWithTimeout(ctx context.Context, workspaceID, runID, stepID, eventType string, timeout time.Duration) (time.Time, error)
 
 	Status(ctx context.Context, runID, stepID string) (string, error)
+	Expired(ctx context.Context, runID, stepID string) (bool, error)
 
 	// Resolve expires only pending rows; a committed delivery always wins.
 	Resolve(ctx context.Context, runID, stepID string) (status string, err error)
@@ -242,4 +243,10 @@ func (s *SQLSignalWaitStore) ReplayConsumed(ctx context.Context, runID, stepID s
 	var payload sql.NullString
 	err := s.db.QueryRowContext(ctx, `SELECT payload FROM pipeline_signal_waits WHERE run_id=? AND step_id=? AND status='consumed'`, runID, stepID).Scan(&payload)
 	return payload.String, err
+}
+
+func (s *SQLSignalWaitStore) Expired(ctx context.Context, runID, stepID string) (bool, error) {
+	var expired bool
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(timeout_at<=strftime('%Y-%m-%dT%H:%M:%f000000Z','now'),0) FROM pipeline_signal_waits WHERE run_id=? AND step_id=?`, runID, stepID).Scan(&expired)
+	return expired, err
 }

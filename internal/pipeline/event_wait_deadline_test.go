@@ -429,3 +429,158 @@ func TestEventWaitDeadline_StopJoinsRunningResume(t *testing.T) {
 		t.Fatalf("shutdown did not join running resume: %+v %v", final, err)
 	}
 }
+
+// Opus counterexample: two resumers hold the same E1 plan while admission is
+// busy; A executes a side effect and parks on E2 before B gets its slot.
+func TestEventWaitDeadline_ConcurrentBusyResumersDoNotReplaySideEffect(t *testing.T) {
+	db := openFactoryTestDB(t)
+	defer db.Close()
+	deps := fullExecutorDeps(t, db, newMockRunner())
+	deps.RunVerdict = nil
+	effects := &recordingCodeRunner{}
+	deps.CodeRunner = effects
+	a, b := NewWiredExecutor(deps), NewWiredExecutor(deps)
+	a.WithResumeRetryBackoff(time.Millisecond, time.Millisecond)
+	b.WithResumeRetryBackoff(time.Millisecond, time.Millisecond)
+	p := saveResumePipeline(t, deps.Store, "stale-event-plan", `{"dsl_version":"1.0","name":"stale-event-plan","concurrency_key":"event-gate","max_concurrent":1,"steps":[{"id":"e1","type":"wait","wait":{"kind":"event","event_type":"first"}},{"id":"effect","type":"code","code":{"runtime":"cel","code":"true"}},{"id":"e2","type":"wait","wait":{"kind":"event","event_type":"second"}}]}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	res, err := a.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun})
+	if err != nil || res.Status != "WAITING" {
+		t.Fatalf("park: %+v %v", res, err)
+	}
+	_, release, err := deps.Runs.Acquire(ctx, AcquireOpts{RunID: "blocker", WorkspaceID: "ws_test", ConcurrencyKey: "event-gate", MaxConcurrent: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if ok, err := a.signalWaits.Deliver(ctx, res.RunID, "first", "payload"); err != nil || !ok {
+		t.Fatalf("deliver: %v %v", ok, err)
+	}
+	queuedA, queuedB := make(chan struct{}), make(chan struct{})
+	retryA, retryB := make(chan struct{}), make(chan struct{})
+	a.onResumeSlotBusy = func(string) {
+		close(queuedA)
+		select {
+		case <-retryA:
+		case <-ctx.Done():
+		}
+	}
+	b.onResumeSlotBusy = func(string) {
+		close(queuedB)
+		select {
+		case <-retryB:
+		case <-ctx.Done():
+		}
+	}
+	doneA, doneB := make(chan struct{}), make(chan struct{})
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	go func() { defer close(doneA); a.ResumeEventRun(ctx, res.RunID, logger) }()
+	go func() { defer close(doneB); b.ResumeEventRun(ctx, res.RunID, logger) }()
+	// Both plans are now built from E1 with no restored side-effect output.
+	for _, queued := range []<-chan struct{}{queuedA, queuedB} {
+		select {
+		case <-queued:
+		case <-time.After(time.Second):
+			t.Fatal("resumer did not wait on busy gate")
+		}
+	}
+	release()
+	close(retryA)
+	select {
+	case <-doneA:
+	case <-time.After(time.Second):
+		t.Fatal("first resumer did not finish")
+	}
+	rec, err := deps.RunStore.Get(ctx, res.RunID)
+	if err != nil || rec.Status != RunStatusWaiting || rec.CurrentStepID != "e2" {
+		t.Fatalf("first resume: %+v %v", rec, err)
+	}
+	close(retryB)
+	select {
+	case <-doneB:
+	case <-time.After(time.Second):
+		t.Fatal("second resumer did not finish")
+	}
+	if count := atomic.LoadInt32(&effects.calls); count != 1 {
+		t.Fatalf("stale busy-gate resume replayed side effect %d times, want 1", count)
+	}
+	rec, err = deps.RunStore.Get(ctx, res.RunID)
+	if err != nil || rec.Status != RunStatusWaiting || rec.CurrentStepID != "e2" {
+		t.Fatalf("second resume: %+v %v", rec, err)
+	}
+}
+
+// Busy concurrency keys must not occupy every worker and starve an unrelated
+// expiry. Deterministic IDs put all eight blocked runs before the free run.
+func TestEventWaitDeadline_BusySlotsDoNotStarveOtherExpiry(t *testing.T) {
+	db := openFactoryTestDB(t)
+	defer db.Close()
+	deps := fullExecutorDeps(t, db, newMockRunner())
+	deps.RunVerdict = nil
+	exec := NewWiredExecutor(deps)
+	gated := saveResumePipeline(t, deps.Store, "busy-expiries", `{"dsl_version":"1.0","name":"busy-expiries","concurrency_key":"busy-events","max_concurrent":1,"steps":[{"id":"gate","type":"wait","wait":{"kind":"event","event_type":"approve"}}]}`)
+	free := saveResumePipeline(t, deps.Store, "free-expiry", eventWaitDSL)
+	ctx := context.Background()
+	for i := 0; i < 9; i++ {
+		pipelineID := gated.ID
+		if i == 8 {
+			pipelineID = free.ID
+		}
+		res, err := exec.Run(ctx, RunInput{PipelineID: pipelineID, WorkspaceID: "ws_test", Mode: ModeRun, RunIDOverride: fmt.Sprintf("fair-%02d", i)})
+		if err != nil || res.Status != "WAITING" {
+			t.Fatalf("park %d: %+v %v", i, res, err)
+		}
+	}
+	_, release, err := deps.Runs.Acquire(ctx, AcquireOpts{RunID: "blocker", WorkspaceID: "ws_test", ConcurrencyKey: "busy-events", MaxConcurrent: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if _, err = db.Exec(`UPDATE pipeline_signal_waits SET timeout_at=?`, tsformat.Format(time.Now().Add(-time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	stop := StartEventWaitSweeper(ctx, db, exec, nil, slog.New(slog.NewTextHandler(io.Discard, nil)), 10*time.Millisecond)
+	defer stop()
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		rec, err := deps.RunStore.Get(ctx, "fair-08")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rec.Status == RunStatusFailed {
+			blocked, err := deps.RunStore.Get(ctx, "fair-00")
+			if err != nil || blocked.Status != RunStatusWaiting {
+				t.Fatalf("blocked run: %+v %v", blocked, err)
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("eight busy slots starved an unrelated event expiry")
+}
+
+func TestEventWaitDeadline_SpuriousResumeDoesNotEnterPendingWait(t *testing.T) {
+	db := openFactoryTestDB(t)
+	defer db.Close()
+	deps := fullExecutorDeps(t, db, newMockRunner())
+	deps.RunVerdict = nil
+	exec := NewWiredExecutor(deps)
+	p := saveResumePipeline(t, deps.Store, "spurious-event", eventWaitDSL)
+	ctx := context.Background()
+	res, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun})
+	if err != nil || res.Status != "WAITING" {
+		t.Fatalf("park: %+v %v", res, err)
+	}
+	// A spurious pending wake must not emit a resume or update the run.
+	rec, err := deps.RunStore.Get(ctx, res.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := rec.UpdatedAt
+	exec.ResumeEventRun(ctx, res.RunID, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	rec, err = deps.RunStore.Get(ctx, res.RunID)
+	if err != nil || rec.Status != RunStatusWaiting || rec.UpdatedAt != before {
+		t.Fatalf("spurious resume changed pending run: %+v %v", rec, err)
+	}
+}

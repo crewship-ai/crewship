@@ -32,15 +32,20 @@ func StartEventWaitSweeper(parent context.Context, db *sql.DB, exec *Executor, g
 		defer workers.Wait()
 		var mu sync.Mutex
 		active := make(map[string]bool)
+		cursor := ""
 		sweep := func() {
 			if ctx.Err() != nil || (gate != nil && !gate.IsLeader()) {
 				return
 			}
-			rows, err := db.QueryContext(ctx, `SELECT DISTINCT w.run_id
-    FROM pipeline_signal_waits w JOIN pipeline_runs r ON r.id=w.run_id
-    WHERE r.status='waiting' AND r.current_step_id=w.step_id
-      AND (w.status IN ('delivered','timed_out') OR (w.status='pending' AND w.timeout_at<=?))
-    ORDER BY w.run_id LIMIT 128`, tsformat.Format(time.Now()))
+			rows, err := db.QueryContext(ctx, `
+SELECT w.run_id FROM pipeline_signal_waits w JOIN pipeline_runs r ON r.id=w.run_id
+WHERE r.status='waiting' AND r.current_step_id=w.step_id
+  AND w.status='pending' AND w.timeout_at<=? AND w.run_id>?
+UNION
+SELECT w.run_id FROM pipeline_signal_waits w JOIN pipeline_runs r ON r.id=w.run_id
+WHERE r.status='waiting' AND r.current_step_id=w.step_id
+  AND w.status IN ('delivered','timed_out') AND w.run_id>?
+ORDER BY run_id LIMIT 128`, tsformat.Format(time.Now()), cursor, cursor)
 			if err != nil {
 				if ctx.Err() == nil {
 					logger.Warn("event wait sweep query failed", "error", err)
@@ -63,22 +68,32 @@ func StartEventWaitSweeper(parent context.Context, db *sql.DB, exec *Executor, g
 				logger.Warn("event wait sweep scan failed", "error", err)
 				return
 			}
+			if len(ids) == 0 {
+				cursor = ""
+				return
+			}
 			for _, id := range ids {
 				if ctx.Err() != nil || (gate != nil && !gate.IsLeader()) {
 					return
 				}
 				mu.Lock()
-				if active[id] || len(active) >= 8 {
+				if len(active) >= 8 {
 					mu.Unlock()
+					break
+				}
+				if active[id] {
+					mu.Unlock()
+					cursor = id
 					continue
 				}
 				active[id] = true
+				cursor = id
 				mu.Unlock()
 				workers.Add(1)
 				go func(runID string) {
 					defer workers.Done()
 					defer func() { mu.Lock(); delete(active, runID); mu.Unlock() }()
-					exec.ResumeEventRun(ctx, runID, logger)
+					exec.resumeEventRun(ctx, runID, logger, false)
 				}(id)
 			}
 		}
@@ -102,6 +117,10 @@ func StartEventWaitSweeper(parent context.Context, db *sql.DB, exec *Executor, g
 // Wait for the original run's registry lifetime before loading its durable
 // state: delivery/expiry can race the original MarkWaiting/slot release.
 func (e *Executor) ResumeEventRun(ctx context.Context, runID string, logger *slog.Logger) {
+	e.resumeEventRun(ctx, runID, logger, true)
+}
+
+func (e *Executor) resumeEventRun(ctx context.Context, runID string, logger *slog.Logger, waitForSlot bool) {
 	if e.runStore == nil {
 		return
 	}
@@ -148,9 +167,19 @@ func (e *Executor) ResumeEventRun(ctx context.Context, runID string, logger *slo
 			logger.Warn("event resume: read wait", "run_id", runID, "error", err)
 			return
 		}
-		if status == "timed_out" || status == "pending" {
+		if status == "pending" {
+			expired, err := e.signalWaits.Expired(ctx, runID, rec.CurrentStepID)
+			if err != nil {
+				logger.Warn("event resume: read deadline", "run_id", runID, "error", err)
+				return
+			}
+			if !expired {
+				return
+			} // spurious/obsolete wake cannot resume a new wait
+			plan.reason = resumeReasonEventTimeout
+		} else if status == "timed_out" {
 			plan.reason = resumeReasonEventTimeout
 		}
 	}
-	e.runResumedRun(ctx, plan, logger)
+	e.runResumedRunWithRetry(ctx, plan, logger, waitForSlot)
 }

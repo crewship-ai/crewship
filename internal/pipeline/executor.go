@@ -948,6 +948,17 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 		if rec.Status != RunStatusQueued && rec.Status != RunStatusRunning && rec.Status != RunStatusWaiting {
 			return &RunResult{RunID: rec.ID, PipelineID: rec.PipelineID, Status: strings.ToUpper(string(rec.Status))}, nil
 		}
+		if rec.CurrentStepID != in.resumeCurrentStepID {
+			return nil, errResumePlanStale
+		}
+		// Admission may have waited while another lifetime committed outputs.
+		// Restore again under the registry slot, never execute from a stale map.
+		outputs, err := e.runStore.GetStepOutputs(ctx, preallocRunID)
+		if err != nil {
+			return nil, err
+		}
+		in.restoredOutputs = outputs
+		in.restoredCostUSD = rec.CostUSD
 	}
 
 	hookSlug := ""

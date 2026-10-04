@@ -798,6 +798,13 @@ also checks deadlines that elapsed while the server was offline. A signal
 committed before the deadline takes precedence even if consumed after it;
 late signals cannot satisfy an expired wait. Cancelling a run closes its pending
 subscriptions. Resumed pending event waits park again and release their slot.
+`retry_step` applies its backoff but does not grant a fresh event window: once
+expired, each retry reports the same timeout. Upgrading also applies the original
+deadline to existing parked waits; waits already older than their configured
+(or default one-hour) timeout can fail immediately and run failure hooks.
+Shutdown cancels event-resumed work already executing, matching other
+lifecycle-owned runs; parked waits and expirations awaiting a slot remain
+recoverable at the next boot.
 
 **Async, non-blocking.** Hitting a `kind: approval` gate does **not** hold a goroutine or fail the run. A foreground `crewship routine run` returns promptly with `status: WAITING` (exit 0) and a waitpoint token, and **releases its execution slot** while it waits. Approving **or** rejecting resumes the run from the gate (already-completed steps are restored/skipped); a rejection resolves the run to `FAILED` cleanly rather than stranding it. Parked approvals whose `timeout_sec` elapsed are reconciled at the next boot scan.
 

@@ -31,6 +31,10 @@ import (
 	"time"
 )
 
+// errResumePlanStale means another lifetime progressed this run while the
+// plan waited for admission. Stand down; the current wait owns its next wake.
+var errResumePlanStale = errors.New("pipeline: resume plan superseded")
+
 // ErrResumeDefinitionChanged is returned by Run when a boot-time
 // resume's re-validation (see resumeDefinitionDrift) detects that the
 // pipeline definition changed between the scan-time gate and the
@@ -328,6 +332,10 @@ func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resume
 //   - Anything else (pipeline reload failure, broken inputs) is
 //     permanent for this lifetime → interrupted with the reason.
 func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *slog.Logger) {
+	e.runResumedRunWithRetry(ctx, plan, logger, true)
+}
+
+func (e *Executor) runResumedRunWithRetry(ctx context.Context, plan *resumePlan, logger *slog.Logger, waitForSlot bool) {
 	rec := plan.rec
 	backoff := e.resumeRetryBase
 	if backoff <= 0 {
@@ -369,9 +377,9 @@ func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *
 		case err == nil:
 			logger.Info("resumed pipeline run finished", "run_id", rec.ID, "status", res.Status)
 			return
-		case errors.Is(err, ErrDuplicateRunID):
-			logger.Warn("pipeline resume: run id already live on this process; standing down",
-				"run_id", rec.ID)
+		case errors.Is(err, ErrDuplicateRunID), errors.Is(err, errResumePlanStale):
+			logger.Info("pipeline resume: another lifetime owns this run; standing down",
+				"run_id", rec.ID, "reason", err)
 			return
 		case errors.Is(err, ErrResumeDefinitionChanged):
 			// TOCTOU gate fired: the pipeline was edited between the
@@ -388,6 +396,9 @@ func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *
 				"run_id", rec.ID, "pipeline_slug", rec.PipelineSlug, "error", err)
 			return
 		case errors.Is(err, ErrConcurrencyLimitReached):
+			if !waitForSlot {
+				return
+			} // sweep retries durably on a later tick
 			logger.Info("pipeline resume: concurrency slot busy; will retry",
 				"run_id", rec.ID, "retry_in", backoff)
 			// Test rendezvous (nil in production): the run is now

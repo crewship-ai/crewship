@@ -33,6 +33,9 @@ SET timeout_at = (SELECT strftime('%Y-%m-%dT%H:%M:%f000000Z', created_at,
 CREATE INDEX idx_pipeline_signal_waits_deadlines
     ON pipeline_signal_waits (timeout_at, run_id) WHERE status = 'pending';
 
+CREATE INDEX idx_pipeline_signal_waits_resolved
+    ON pipeline_signal_waits (run_id, step_id) WHERE status IN ('delivered','timed_out');
+
 -- Cancel unresolved subscriptions in the same transaction as terminalizing a
 -- run. A cancelled run must never accept a late signal or become a sweep job.
 CREATE TRIGGER pipeline_signal_waits_run_terminal

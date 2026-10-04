@@ -239,7 +239,7 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 				case "cancelled":
 					return "", false, context.Canceled
 				case "consumed":
-					if in.resume {
+					if in.resume && in.resumeCurrentStepID == step.ID {
 						payload, err := e.signalWaits.ReplayConsumed(ctx, runID, step.ID)
 						return payload, err == nil, err
 					}
