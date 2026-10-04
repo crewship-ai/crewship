@@ -1,8 +1,10 @@
 package devcontainer
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
@@ -21,6 +23,60 @@ func TestToolchainCaptureIsSharedWithBuildOnlyProvisioning(t *testing.T) {
 		if !strings.Contains(steps, want) {
 			t.Fatalf("build recipe missing %q", want)
 		}
+	}
+}
+
+func TestManagedArtifactCaptureRejectsArchiveSubstitution(t *testing.T) {
+	raw := make([]byte, 64)
+	copy(raw, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1})
+	binary.LittleEndian.PutUint16(raw[16:], 2)
+	binary.LittleEndian.PutUint16(raw[18:], 62)
+	binary.LittleEndian.PutUint32(raw[20:], 1)
+	binary.LittleEndian.PutUint16(raw[52:], 64)
+	for _, which := range []string{"valid", "symlink", "agent-owned", "writable", "wrong-name", "script", "duplicate"} {
+		t.Run(which, func(t *testing.T) {
+			var buf bytes.Buffer
+			tw := tar.NewWriter(&buf)
+			data := raw
+			if which == "script" {
+				data = []byte("#!/usr/bin/env node\n")
+			}
+			h := &tar.Header{Name: "claude", Typeflag: tar.TypeReg, Mode: 0555, Size: int64(len(data))}
+			switch which {
+			case "symlink":
+				h.Typeflag = tar.TypeSymlink
+				h.Linkname = "/home/agent/evil"
+				h.Size = 0
+				data = nil
+			case "agent-owned":
+				h.Uid = 1001
+			case "writable":
+				h.Mode = 0777
+			case "wrong-name":
+				h.Name = "../claude"
+			}
+			if err := tw.WriteHeader(h); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tw.Write(data); err != nil {
+				t.Fatal(err)
+			}
+			if which == "duplicate" {
+				tw.WriteHeader(h)
+				tw.Write(data)
+			}
+			if err := tw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			artifact := captureLaunchArtifact("/opt/native/claude", &buf)
+			if which == "valid" {
+				if artifact == nil || len(artifact.SHA256) != 64 {
+					t.Fatal("immutable host hash missing")
+				}
+			} else if artifact != nil {
+				t.Fatal("unsafe archive became launch authority")
+			}
+		})
 	}
 }
 

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Pilot agent runs can refuse stale CLI selection from persistent home.** An explicit server crew-ID opt-in binds static native Claude/Codex launches to immutable build hashes and lock versions, clears inherited loader options, and uses a trusted direct launcher. Unsupported scripts and dynamic binaries fail closed; ordinary crews retain their current behavior.
+
 - **Importing a Crew YAML could silently disable required AI CLI checks.** The creation wizard preserves the typed policy, including configurations without explicit tools, and rejects unsupported policy values.
 
 - Recovery and explicit stop now share atomic runtime updates: an OOM-killed or missing container can leave RUNNING, concurrent completion is preserved, and a stop also closes the controls of runs discovered during ownership inspection.

@@ -50,6 +50,8 @@ public contract here. Superseded a spec? Move it to
 - [Project files](project-files.md): immutable, explicitly selected files and
   read-only restricted native mounts.
 
+- [Managed CLI launch](managed-cli-launch.md): explicit static native pilot, executable hashes and lock-bound admission.
+
 ## Storage and lifecycle
 
 - [Quota service backup](quota-service-backup.md): offline fixed-ext4 snapshots

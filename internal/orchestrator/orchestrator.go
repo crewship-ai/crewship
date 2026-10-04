@@ -14,6 +14,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
+	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/providerlogin"
 	"github.com/crewship-ai/crewship/internal/scrubber"
@@ -54,6 +55,7 @@ type AgentRunRequest struct {
 	RuntimeUse *provider.RuntimeUse
 	// Set by RunAgent from provider inspection, never a caller's desired image.
 	runtimeImageID string
+	managedLaunch  *managedlaunch.Descriptor
 	// ExecGate, when set, is asked SYNCHRONOUSLY immediately before the
 	// agent's exec is created, and nothing external happens between its
 	// answer and the creation. It is the authoritative "a process is about
@@ -394,6 +396,7 @@ func (c Credential) loginMode() string {
 // RunState tracks the runtime state of an active agent run, persisted in the
 // state provider for crash recovery.
 type RunState struct {
+	ManagedLaunch *managedlaunch.Descriptor `json:"managed_launch,omitempty"`
 	// WorkspaceID preserves the original history scope even without run.started.
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	// RuntimeImageID is source-image evidence, not the mutable filesystem or
@@ -490,6 +493,8 @@ type ContainerBusyProbe func(ctx context.Context, crewID, containerID string) bo
 type StatsRegisterFunc func(containerID, crewID, workspaceID string)
 
 type Orchestrator struct {
+	managedLaunchCrews     map[string]bool
+	managedLaunchResolver  ManagedLaunchResolver
 	runRecoveryMu          sync.Mutex // serializes recovered publication with local admission
 	agentRuns              sync.Map   // run id -> *agentRunControl; independent of credential HOME cleanup
 	userModelReader        func(context.Context, string, string) (string, error)
@@ -1399,6 +1404,7 @@ func New(
 			"warn_threshold", runSemCapWarnThreshold)
 	}
 	return &Orchestrator{
+		managedLaunchCrews:   managedLaunchPilots(),
 		container:            container,
 		state:                state,
 		scrubber:             scrubber.New(),

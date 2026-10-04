@@ -7,6 +7,8 @@ import (
 	"path"
 	"regexp"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/managedlaunch"
 )
 
 const toolchainDirectory = "/opt/crewship/toolchain"
@@ -34,10 +36,11 @@ type ToolchainInventory struct {
 }
 
 type ToolchainTool struct {
-	Binary  string `json:"binary" yaml:"binary"`
-	Version string `json:"version,omitempty" yaml:"version,omitempty"`
-	Path    string `json:"path,omitempty" yaml:"path,omitempty"`
-	Status  string `json:"status" yaml:"status"`
+	LaunchArtifact *managedlaunch.Artifact `json:"launch_artifact,omitempty" yaml:"launch_artifact,omitempty"`
+	Binary         string                  `json:"binary" yaml:"binary"`
+	Version        string                  `json:"version,omitempty" yaml:"version,omitempty"`
+	Path           string                  `json:"path,omitempty" yaml:"path,omitempty"`
+	Status         string                  `json:"status" yaml:"status"`
 }
 
 var toolVersionPattern = regexp.MustCompile(`^v?([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)$`)

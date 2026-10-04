@@ -544,6 +544,7 @@ func (s *Server) mountAPIRouter(
 	orch.SetAgentLiveness(func(ctx context.Context, agentID string) error {
 		return agentMayRun(ctx, deps.DB, agentID)
 	})
+	orch.SetManagedLaunchResolver(managedLaunchResolver(deps.DB))
 	// Episodic embedder resolution. Injection (tests/fakes) wins;
 	// otherwise build an Ollama embedder when Keeper Ollama is
 	// actually configured. Gating on Keeper.Enabled — not just a

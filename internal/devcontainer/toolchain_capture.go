@@ -1,13 +1,18 @@
 package devcontainer
 
 import (
+	"archive/tar"
 	"context"
 	"fmt"
+	"io"
+	"path"
 	"strings"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+
+	"github.com/crewship-ai/crewship/internal/managedlaunch"
 )
 
 // writeToolchainInventory is shared by exec/commit and Dockerfile recording.
@@ -48,7 +53,7 @@ func writeToolchainInventory(ctx context.Context, containerID string, bins []str
 	script := "umask 077\nexport PATH=" + pathExpression + "\n" +
 		"export HOME=/home/agent DISABLE_AUTOUPDATER=1\n" +
 		"for binary in " + strings.Join(quoted, " ") + "; do\n" +
-		"  command -v \"$binary\" > " + toolchainDirectory + "/\"$binary\".path || :\n" +
+		"  executable=$(command -v \"$binary\") && readlink -f \"$executable\" > " + toolchainDirectory + "/\"$binary\".path || :\n" +
 		"  (ulimit -f 8; timeout -k 1 8 \"$binary\" --version > " + toolchainDirectory + "/\"$binary\".version 2>/dev/null)\n" +
 		"  code=$?\n" +
 		"  printf '%s\\n' \"$code\" > " + toolchainDirectory + "/\"$binary\".status || exit 1\n" +
@@ -119,5 +124,38 @@ func (p *Provisioner) inspectToolchain(ctx context.Context, image string, bins [
 		return unknown
 	}
 	inventory.ImageID = inspected.ID
+	for i := range inventory.Tools {
+		tool := &inventory.Tools[i]
+		if tool.Status != "observed" || (tool.Binary != "claude" && tool.Binary != "codex") || !managedlaunch.ImagePath(tool.Path) {
+			continue
+		}
+		artifactCopy, err := copier.CopyFromContainer(ctx, created.ID, client.CopyFromContainerOptions{SourcePath: tool.Path})
+		if err != nil {
+			continue
+		}
+		tool.LaunchArtifact = captureLaunchArtifact(tool.Path, artifactCopy.Content)
+		artifactCopy.Content.Close()
+	}
 	return inventory
+}
+
+// A host read of the stopped, immutable image supplies the hash. Version probe
+// stdout and digest files produced by image programs never authorize launch.
+func captureLaunchArtifact(executable string, reader io.Reader) *managedlaunch.Artifact {
+	limited := &io.LimitedReader{R: reader, N: managedlaunch.MaxArtifactBytes + 8192}
+	tr := tar.NewReader(limited)
+	h, err := tr.Next()
+	if err != nil || h.Typeflag != tar.TypeReg || h.Name != path.Base(executable) || h.Uid != 0 ||
+		h.Mode&0022 != 0 || h.Mode&0111 == 0 || h.Size <= 0 || h.Size > managedlaunch.MaxArtifactBytes {
+		return nil
+	}
+	raw, err := io.ReadAll(tr)
+	if err != nil || int64(len(raw)) != h.Size {
+		return nil
+	}
+	if _, err := tr.Next(); err != io.EOF || limited.N <= 0 {
+		return nil
+	}
+	artifact, _ := managedlaunch.Capture(executable, raw)
+	return artifact
 }
