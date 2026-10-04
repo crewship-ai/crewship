@@ -18,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/sidecar"
+	"github.com/crewship-ai/crewship/internal/stagedstart"
 )
 
 // version is overridden at build time via ldflags (-X main.version=...).
@@ -38,6 +39,14 @@ type sidecarInput struct {
 }
 
 func main() {
+	// Ownership preparation is offline and independent of keeper dispatch.
+	if len(os.Args) > 1 && os.Args[1] == "--staged-init" {
+		if err := stagedstart.Initialize(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(126)
+		}
+		return
+	}
 	// Parse this mode before the sidecar flags: CLI arguments belong to the
 	// admitted native executable, never to a shell or the flag parser.
 	if len(os.Args) > 1 && os.Args[1] == "--managed-launch" {
