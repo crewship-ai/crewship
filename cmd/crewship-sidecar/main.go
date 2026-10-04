@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/runoutput"
 	"github.com/crewship-ai/crewship/internal/sidecar"
 )
 
@@ -37,6 +38,18 @@ type sidecarInput struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "run-launch" || os.Args[1] == "run-execute") {
+		ctx, stop := signal.NotifyContext(context.Background(), runoutput.ExecutionSignals()...)
+		code := runLaunchCommand(ctx, os.Args[1], os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
+		stop()
+		os.Exit(code)
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "run-capture" || os.Args[1] == "run-read" || os.Args[1] == "run-result") {
+		ctx, stop := signal.NotifyContext(context.Background(), runoutput.ExecutionSignals()...)
+		code := runOutputCommand(ctx, os.Args[1], os.Args[2:], os.Stdout, os.Stderr)
+		stop()
+		os.Exit(code)
+	}
 	addr := flag.String("addr", sidecar.DefaultAddr, "listen address")
 	showVersion := flag.Bool("version", false, "print version info and exit")
 	healthCheck := flag.Bool("health-check", false,

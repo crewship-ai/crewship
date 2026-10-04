@@ -144,7 +144,10 @@ func TestAgentLivenessRefusesExecAtTheGate(t *testing.T) {
 	})
 	for id, wantErr := range map[string]bool{"agent-gone": true, "agent-live": false} {
 		req := AgentRunRequest{AgentID: id, AgentSlug: id, RunID: NewRunID(), ContainerID: "c"}
-		ctx, finish := o.trackAgentRun(context.Background(), &req)
+		ctx, finish, trackErr := o.trackAgentRun(context.Background(), &req)
+		if trackErr != nil {
+			t.Fatal(trackErr)
+		}
 		err := req.ExecGate(ctx)
 		finish()
 		if (err != nil) != wantErr {
@@ -164,7 +167,10 @@ func TestAgentLivenessSkipsARunWithoutAnAgentID(t *testing.T) {
 		return errors.New("no such agent")
 	})
 	req := AgentRunRequest{AgentSlug: "s", RunID: NewRunID(), ContainerID: "c"}
-	ctx, finish := o.trackAgentRun(context.Background(), &req)
+	ctx, finish, trackErr := o.trackAgentRun(context.Background(), &req)
+	if trackErr != nil {
+		t.Fatal(trackErr)
+	}
 	defer finish()
 	if err := req.ExecGate(ctx); err != nil || called {
 		t.Fatalf("gate err=%v, liveness called=%v", err, called)

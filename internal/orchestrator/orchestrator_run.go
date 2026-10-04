@@ -148,7 +148,10 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("run agent: %w", err)
 	}
 
-	ctx, finishTrackedRun := o.trackAgentRun(ctx, &req)
+	ctx, finishTrackedRun, trackErr := o.trackAgentRun(ctx, &req)
+	if trackErr != nil {
+		return trackErr
+	}
 	defer func() {
 		if errors.Is(err, context.Canceled) && o.agentStopRequested(req.RunID) {
 			err = fmt.Errorf("%w: %v", ErrAgentStopped, err)
@@ -486,6 +489,17 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		StartedAt:      time.Now(),
 		ContainerID:    req.ContainerID,
 	}
+	if req.DurableOutputDir != "" {
+		directory, err := durableRunDirectory(req)
+		if err != nil {
+			return err
+		}
+		if req.TimeoutSecs <= 0 {
+			return fmt.Errorf("durable execution requires an explicit positive timeout")
+		}
+		req.durableDeadline = time.Now().Add(time.Duration(req.TimeoutSecs) * time.Second)
+		runState.Output = &RunOutputState{Version: 1, Directory: path.Join(directory, "output"), Deadline: req.durableDeadline, Adapter: req.CLIAdapter}
+	}
 
 	cred := o.selectCredential(req.Credentials)
 	if cred != nil {
@@ -495,6 +509,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	stateBytes, _ := json.Marshal(runState)
 	if err := o.state.Set(ctx, "agent_runs", runState.ID, stateBytes); err != nil {
 		o.logger.Error("failed to persist run state", "error", err)
+		if runState.Output != nil {
+			return fmt.Errorf("persist durable execution before launch: %w", err)
+		}
 	}
 
 	if err := o.assembleSystemPrompt(ctx, &req); err != nil {
@@ -1951,6 +1968,9 @@ func shellJoin(args ...string) string {
 // the run. Pure extraction from RunAgent; the only error is the shared E2BIG
 // guard for arg-path adapters.
 func (o *Orchestrator) buildExecCommand(ctx context.Context, req AgentRunRequest, cmd, env []string, workDir string) (provider.ExecConfig, error) {
+	if req.DurableOutputDir != "" {
+		return buildDurableExecCommand(req, cmd, env, workDir)
+	}
 	// Wrap agent CLI command with stdbuf to force line-buffered stdout.
 	// Apple's container runtime buffers exec output which causes choppy
 	// streaming in chat. stdbuf -oL flushes on every newline so JSON
