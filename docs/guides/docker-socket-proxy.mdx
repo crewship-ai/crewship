@@ -101,6 +101,7 @@ or a listed endpoint nobody calls.
 | `ContainerRemove` | `DELETE /containers/{id}` | Tears down crews, temp containers, stranded runtime |
 | `ContainerInspect` | `GET /containers/{id}/json` | State, mounts and network reads; disposable lock-builder audit |
 | `ContainerList` | `GET /containers/json` | Reconciles the crew inventory against what is running |
+| `ContainerLogs` | `GET /containers/{id}/logs` | Reads bounded stderr on trusted offline ownership-initializer failure; reports only whitelisted error categories |
 | `ContainerStats` | `GET /containers/{id}/stats` | Memory and CPU readings behind the admission gate |
 | `ContainerWait` | `POST /containers/{id}/wait` | Blocks on one-shot helpers (secrets sweep, image cache warm) |
 | `ContainerPause` | `POST /containers/{id}/pause` | Quiesces a crew for a consistent backup |

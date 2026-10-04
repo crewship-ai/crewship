@@ -44,11 +44,51 @@ type lifecycleFixture struct {
 	beforeFailure                   func()
 }
 
+// Runtime principals cannot supply the trusted host material needed by the
+// positive lifecycle fixture. Exercise that admission boundary on those hosts,
+// with a distinct scenario name, instead of reporting positive cases as skipped.
+func lifecycleHostSupported(t *testing.T) bool {
+	t.Helper()
+	if os.Geteuid() != 1001 && os.Geteuid() != 1002 {
+		return true
+	}
+	t.Run("unsupported-server-uid", func(t *testing.T) {
+		p := &Provider{cfg: Config{OutputBasePath: t.TempDir(), InstanceID: "lifecycle-installation"}}
+		source := filepath.Join(p.cfg.OutputBasePath, "bootstrap")
+		if e := os.WriteFile(source, []byte("host material"), 0555); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := p.stageTrustedFile(source, 1024); !errors.Is(e, errStagedDenied) {
+			t.Fatalf("runtime UID%d trusted artifact admission: %v", os.Geteuid(), e)
+		}
+		c := container.InspectResponse{Config: &container.Config{Labels: map[string]string{
+			resourcelifecycle.InstanceLabel: p.cfg.InstanceID,
+			crewCrewIDLabel:                 "crew1",
+			stagedEnvLabel:                  newStagedEnvHandle(),
+		}}}
+		c.ID, c.Image = "runtime", lifecycleImage
+		if scope, handle, e := p.stagedEnvScope(c); !errors.Is(e, errStagedDenied) || scope != "" || handle != "" {
+			t.Fatalf("runtime UID%d secret scope admission: scope=%q handle=%q err=%v", os.Geteuid(), scope, handle, e)
+		}
+		if e := p.saveStagedEnv(c, []string{"TOKEN=synthetic"}); !errors.Is(e, errStagedDenied) {
+			t.Fatalf("runtime UID%d secret publication: %v", os.Geteuid(), e)
+		}
+		if _, e := p.loadStagedEnv(c); !errors.Is(e, errStagedDenied) {
+			t.Fatalf("runtime UID%d secret read: %v", os.Geteuid(), e)
+		}
+		if e := p.removeStagedEnv(c); !errors.Is(e, errStagedDenied) {
+			t.Fatalf("runtime UID%d secret cleanup: %v", os.Geteuid(), e)
+		}
+		if _, e := os.Lstat(filepath.Join(p.cfg.OutputBasePath, runtimestage.DirName)); !os.IsNotExist(e) {
+			t.Fatalf("denied admission created host material: %v", e)
+		}
+		t.Logf("UID%d admission denial verified; positive lifecycle scenarios require a supported host UID", os.Geteuid())
+	})
+	return false
+}
+
 func newLifecycleFixture(t *testing.T, existing bool) *lifecycleFixture {
 	t.Helper()
-	if os.Geteuid() == 1001 || os.Geteuid() == 1002 {
-		t.Skip("server UID cannot own staged material; denial covered separately")
-	}
 	cfg := covRTConfig(t)
 	cfg.InstanceID = "lifecycle-installation"
 	cfg.SidecarBinaryPath = filepath.Join(cfg.OutputBasePath, "sidecar")
@@ -255,6 +295,9 @@ func (f *lifecycleFixture) serve(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestStagedLifecycleTagReuse(t *testing.T) {
+	if !lifecycleHostSupported(t) {
+		return
+	}
 	for _, mode := range []string{"cold", "warm", "stopped", "cached-image-wins", "changed-running", "changed-stopped", "retag-warm", "lookup-error", "empty-image-id", "mutable-config-bypass"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newLifecycleFixture(t, true)
@@ -305,6 +348,9 @@ func TestStagedLifecycleTagReuse(t *testing.T) {
 }
 
 func TestStagedLifecycleFailedPreparation(t *testing.T) {
+	if !lifecycleHostSupported(t) {
+		return
+	}
 	for _, failure := range []string{"inspect", "inspect-cancel", "save", "audit", "audit-remove"} {
 		t.Run(failure, func(t *testing.T) {
 			f := newLifecycleFixture(t, false)
@@ -366,6 +412,9 @@ func TestStagedLifecycleFailedPreparation(t *testing.T) {
 }
 
 func TestStagedLifecycleRemovalMaterial(t *testing.T) {
+	if !lifecycleHostSupported(t) {
+		return
+	}
 	for _, mode := range []string{"explicit", "image-recreate", "mount-recreate", "managed-mount-recreate", "backoff", "idle", "prune", "idle-veto", "idle-remove-fails", "prune-remove-fails", "remove-fails", "foreign", "file-symlink", "scope-symlink"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newLifecycleFixture(t, true)

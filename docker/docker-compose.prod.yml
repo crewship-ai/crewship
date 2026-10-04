@@ -74,7 +74,7 @@ services:
       # gates PUT, DELETE and HEAD -- CopyToContainer and Ping issue a HEAD.
       POST: 1
       # /containers -- ContainerCreate/Start/Stop/Remove/Inspect/List/Stats/
-      # Wait/Pause/Unpause, CopyToContainer, CopyFromContainer, ContainerStatPath, and
+      # Wait/Pause/Unpause/Logs, CopyToContainer, CopyFromContainer, ContainerStatPath, and
       # ExecCreate (which posts to /containers/{id}/exec, not /exec).
       CONTAINERS: 1
       # /exec -- ExecStart, ExecAttach, ExecInspect, ExecResize.

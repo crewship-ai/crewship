@@ -108,6 +108,11 @@ var allowList = []Endpoint{
 		Why: "reconciles the crew inventory against what is actually running",
 	},
 	{
+		Method: "ContainerLogs", HTTP: "GET /containers/{id}/logs", ProxyVars: []string{"CONTAINERS"},
+		Tier: TierCore, Packages: []string{"internal/provider/docker"},
+		Why: "reads bounded stderr from the trusted offline ownership initializer on failure; exposes only whitelisted error categories",
+	},
+	{
 		Method: "ContainerPause", HTTP: "POST /containers/{id}/pause", ProxyVars: []string{"CONTAINERS", proxyVarPOST},
 		Tier: TierCore, Packages: []string{"internal/backup"},
 		Why: "quiesces a crew so a backup captures a consistent filesystem",
