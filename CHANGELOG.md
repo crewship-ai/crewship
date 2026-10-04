@@ -26,8 +26,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Routines could wait forever for an event despite a step timeout.** ⚠️ **Behaviour change:** Existing parked waits older than their configured timeout (one hour when omitted) expire on upgrade and run their failure hooks. Persisted event waits now retain their original deadline across retries and restarts, expire through normal timeout/failure handling, and preserve signals delivered before the deadline. Cancelled runs reject late signals, and event recovery workers drain during shutdown. Blocking nested waits keep waiting on their original deadline when an advisory wake belongs to a sibling subscription.
 
 - Concurrent egress-fence installation retries incomplete rule reads without reinstalling or accepting a fence that fails verification. Checks reject results spanning a ruleset generation change.
-- **Waiting for a routine could report uncertain or canceled work as successful.** `wait` now exits 5 for `needs_reconciliation` and 2 for either cancellation spelling; `routine run --wait` reports these outcomes as errors in human and machine formats.
-- **Reconnecting an owned AI client could lose its working registration after a failed add.** Native edits and verification now run against a staged configuration, preserving the prior registration and ownership receipt on failure and refusing concurrent configuration or receipt edits. ⚠️ **Behaviour change:** owned reconnections require a regular client config file; symlinked configs are refused.
 
 - **Importing a Crew YAML could silently disable required AI CLI checks.** The creation wizard preserves the typed policy, including configurations without explicit tools, and rejects unsupported policy values.
 
@@ -97,6 +95,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **A fenced crew can reach its own services.** A restricted crew on the egress-fence pilot that declares `services:` and is on its own network now gets a narrow path to them: each service has a fixed address on the crew network, the fence opens exactly those addresses on their ports, and the names resolve from the runtime's `/etc/hosts` because DNS stays closed. Declaring a service whose name sorts first shifts the others to new addresses: they are re-attached there and the fence follows, also when ensuring the services fails part-way. The same crew on the shared network is still refused. (#1368, #2240)
 
 - Upload encrypted recovery archives through Admin › Backups › Recovery or `crewship admin instance backups upload`, with cancellation, checksum validation, disk-space checks and atomic catalog/audit recording.
+
+- **Waiting for a routine could report uncertain or canceled work as successful.** `wait` now exits 5 for `needs_reconciliation` and 2 for either cancellation spelling; `routine run --wait` reports these outcomes as errors in human and machine formats.
+- **Reconnecting an owned AI client could lose its working registration after a failed add.** Native edits and verification now run against a staged configuration, preserving the prior registration and ownership receipt on failure and refusing concurrent configuration or receipt edits. ⚠️ **Behaviour change:** owned reconnections require a regular client config file; symlinked configs are refused.
 
 ### Changed
 
