@@ -3,21 +3,24 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
+	"testing"
+
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
-	"path/filepath"
-	"testing"
 )
 
-func TestReviewManualStopMarkerIsAcknowledged(t *testing.T) {
+func TestReviewManualStopWithoutOwnershipRetainsMarker(t *testing.T) {
 	s := newTestServerWithDeps(t)
 	seedStoppedOutbox(t, s, "manual")
-	if err := s.flushRecoveredStops(t.Context()); err != nil {
-		t.Fatal(err)
+	// Without an existing agent/workspace this legacy record cannot establish
+	// ownership. Recovery must retain it for reconciliation, not discard it.
+	if err := s.flushRecoveredStops(t.Context()); err == nil {
+		t.Fatal("unconfirmed manual stop ownership accepted")
 	}
-	if pendingStop(t, s, "manual") {
-		t.Fatal("manual stop marker retained forever")
+	if !pendingStop(t, s, "manual") {
+		t.Fatal("unconfirmed manual stop lost its retry marker")
 	}
 	if n := recoveryTerminalCount(t, s, "manual"); n != 0 {
 		t.Fatal("invented manual history")

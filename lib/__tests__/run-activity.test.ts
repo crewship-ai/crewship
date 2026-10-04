@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import type { JournalEntry } from "@/lib/types/journal"
 import {
   humanizeEntry,
+  isRunInFlight,
   humanizeRun,
   formatBytes,
   awaitingApprovalRow,
@@ -373,4 +374,21 @@ it("collapses duplicate lifecycle starts only within the same trace", () => {
     entry({id:"c",entry_type:"assignment.running",trace_id:"run-2"}),
   ])
   expect(rows.map((row) => row.id).sort()).toEqual(["b","c"])
+})
+
+
+describe("recovered stop audit", () => {
+  it("explains the missing start without inventing a normal run outcome", () => {
+    const audit = entry({ entry_type: "run.recovered_stop", summary: "legacy wording", payload: { start_recorded: false } })
+    const row = humanizeEntry(audit)
+    expect(row?.title).toBe("Zastaveno během obnovy, začátek nebyl zaznamenán.")
+    expect(row?.tone).toBe("warn")
+    expect(row?.meta).toBeUndefined()
+    expect(extractVerdict([audit])).toBeNull()
+  })
+  it("never shows an audited identity as running after a delayed start", () => {
+    expect(isRunInFlight(["run.recovered_stop"])).toBe(false)
+    expect(isRunInFlight(["run.recovered_stop", "run.started"])).toBe(false)
+    expect(isRunInFlight(["run.started", "run.recovered_stop"])).toBe(false)
+  })
 })
