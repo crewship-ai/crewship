@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"archive/tar"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -59,6 +60,13 @@ func TestManagedLaunchRejectsRuntimeDriftAndMountAliases(t *testing.T) {
 					}
 					raw, _ := json.Marshal(stat)
 					w.Header().Set("X-Docker-Container-Path-Stat", base64.StdEncoding.EncodeToString(raw))
+					return
+				}
+				if strings.HasSuffix(r.URL.Path, "/archive") {
+					tw := tar.NewWriter(w)
+					tw.WriteHeader(&tar.Header{Name: "crewship-sidecar", Typeflag: tar.TypeReg, Mode: 0555, Size: int64(len(raw))})
+					tw.Write(raw)
+					tw.Close()
 					return
 				}
 				json.NewEncoder(w).Encode(map[string]any{"Id": "c1", "Image": actualImage, "State": map[string]any{"Running": true}, "HostConfig": map[string]any{"ReadonlyRootfs": root, "Privileged": privileged, "SecurityOpt": []string{"no-new-privileges"}}, "Mounts": mounts})

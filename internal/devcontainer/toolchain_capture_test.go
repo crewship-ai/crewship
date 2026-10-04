@@ -69,7 +69,7 @@ func TestManagedArtifactCaptureRejectsArchiveSubstitution(t *testing.T) {
 				t.Fatal(err)
 			}
 			artifact := captureLaunchArtifact("/opt/native/claude", &buf)
-			if which == "valid" {
+			if which == "valid" || which == "agent-owned" {
 				if artifact == nil || len(artifact.SHA256) != 64 {
 					t.Fatal("immutable host hash missing")
 				}
