@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -76,8 +77,16 @@ func TestWaitConsumersTerminalOutcomes(t *testing.T) {
 }
 
 func TestAIReconnectFailurePreservesRegistration(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("shell fixture requires sh")
+	// Keep real client subprocesses without depending on a POSIX shell or its
+	// utilities. Build once, then install the fixture under each client's name.
+	fixturePath := filepath.Join(t.TempDir(), "ai-client.exe")
+	build := exec.Command("go", "build", "-o", fixturePath, "./testdata/ai-reconnect-client")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build reconnect client fixture: %v\n%s", err, output)
+	}
+	fixture, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatal(err)
 	}
 	for _, client := range []string{"claude", "codex"} {
 		for _, mode := range []string{"remove-fails", "add-fails", "verify-fails", "verify-error", "success", "race", "receipt-race", "symlink", "custom", "receipt-fails", "receipt-fails-after-rename", "config-fails-after-rename", "rollback-fails"} {
@@ -121,28 +130,16 @@ func TestAIReconnectFailurePreservesRegistration(t *testing.T) {
 				t.Setenv("FIXTURE_DIR", dir)
 				t.Setenv("FIXTURE_MODE", mode)
 				t.Setenv("FIXTURE_ORIGINAL", path)
-				script := `#!/bin/sh
-if [ "$(basename "$0")" = codex ]; then cfg="$CODEX_HOME/config.toml"; else cfg="$CLAUDE_CONFIG_DIR/.claude.json"; fi
-case "$2" in
- get)
-  if [ ! -s "$cfg" ]; then echo "No MCP server named 'crewship' found." >&2; exit 1; fi
-  cat "$cfg" ;;
- remove)
-  if [ "$FIXTURE_MODE" = remove-fails ]; then exit 1; fi
-  cp "$FIXTURE_DIR/empty.json" "$cfg" ;;
- add)
-  if [ "$FIXTURE_MODE" = add-fails ]; then exit 1; fi
-  if [ "$FIXTURE_MODE" = verify-fails ]; then cp "$FIXTURE_DIR/empty.json" "$cfg"; exit 0; fi
-  if [ "$FIXTURE_MODE" = verify-error ]; then echo '{broken' > "$cfg"; exit 0; fi
-  cp "$FIXTURE_DIR/desired.json" "$cfg"
-  if [ "$FIXTURE_MODE" = receipt-race ]; then echo '{"custom":"concurrent-change"}' > "$FIXTURE_RECEIPT"; fi
-  if [ "$FIXTURE_MODE" = race ]; then echo '{"custom":"concurrent-change"}' > "$FIXTURE_ORIGINAL"; fi ;;
-esac
-`
-				if err = os.WriteFile(filepath.Join(dir, client), []byte(script), 0700); err != nil {
+				fixtureName := client
+				if runtime.GOOS == "windows" {
+					fixtureName += ".exe"
+				}
+				if err = os.WriteFile(filepath.Join(dir, fixtureName), fixture, 0700); err != nil {
 					t.Fatal(err)
 				}
-				t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+				// Only the fixture is available during reconnect: no shell utilities
+				// or installed native client can accidentally satisfy the test.
+				t.Setenv("PATH", dir)
 				entry, found, err := inspectAIEntry(context.Background(), client)
 				if err != nil || !found {
 					t.Fatal(found, err)
