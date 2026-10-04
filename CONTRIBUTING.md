@@ -67,6 +67,10 @@ The `cmd/crewship` suite scrubs every `CREWSHIP_*` variable from its own
 environment before running, so a shell that exports `CREWSHIP_PROFILE` or
 `CREWSHIP_SERVER` for a dev instance can no longer redirect the tests at
 your live server. Tests that need one of those vars set it themselves.
+After that scrub, the harness sets `CREWSHIP_NO_SLUG_CACHE=1` so CLI child
+processes bypass the shared workspace slug cache: an ephemeral test server
+can reuse another fixture's URL and slug with a different workspace ID.
+Disk-cache behavior is tested explicitly in `internal/cli/slugcache_test.go`.
 
 For UI changes, also exercise the affected feature in a browser before
 declaring it done. Type checking and tests verify code correctness, not
