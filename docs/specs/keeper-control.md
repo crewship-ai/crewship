@@ -39,3 +39,9 @@ replay denial and restart generation change; absence or skipping fails CI.
 
 Explicit provider qualification is exercised separately from Ensure activation;
 legacy startup remains in place until the provider selector is activated.
+
+The legacy opt-in pilot selects `CREWSHIP_EGRESS_FENCE_CREWS`. Ensure initializes
+ownership offline, starts only the keeper, then seals before image bootstrap.
+Rejected runtime admission is refused and reported for explicit reconciliation;
+running artifact upgrades defer to verified idle replacement without interruption.
+This pilot does not complete B, sibling-agent isolation or OAuth.

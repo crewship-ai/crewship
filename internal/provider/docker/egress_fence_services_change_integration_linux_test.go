@@ -132,6 +132,9 @@ func reaches(ctx context.Context, t *testing.T, p *Provider, cid, target, want s
 // address (addresses follow the sorted names). The fence must open the new
 // address and close the old one, and the runtime must learn the new address.
 func TestEgressFenceServiceAddressChangeIntegration(t *testing.T) {
+	if !lifecycleHostSupported(t) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 	p, _ := fenceSvcHarness(ctx, t, "fsvc-ipchg", []string{"ipchg"})
@@ -211,6 +214,9 @@ func TestEgressFenceServiceAddressChangeIntegration(t *testing.T) {
 // A service that is down or cannot start: the agent loses that service and
 // gains nothing; the crew stays fenced.
 func TestEgressFenceServiceUnavailableIntegration(t *testing.T) {
+	if !lifecycleHostSupported(t) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	p, _ := fenceSvcHarness(ctx, t, "fsvc-down", []string{"down"})
@@ -254,6 +260,9 @@ func TestEgressFenceServiceUnavailableIntegration(t *testing.T) {
 // move fails halfway. The fenced agent must not reach the service where it
 // still is (the shared network), and the crew gets nothing else.
 func TestEgressFenceServiceMoveFailureIntegration(t *testing.T) {
+	if !lifecycleHostSupported(t) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 	p, shared := fenceSvcHarness(ctx, t, "fsvc-move", nil)
@@ -313,6 +322,9 @@ func TestEgressFenceServiceMoveFailureIntegration(t *testing.T) {
 // Exercise the real daemon boundary repeatedly: Stop must evict the warm
 // cache, and the next Ensure must return a running, fenced runtime.
 func TestEgressFenceStopEnsureIntegration(t *testing.T) {
+	if !lifecycleHostSupported(t) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 	p, _ := fenceSvcHarness(ctx, t, "fsvc-restart", []string{"restart"})

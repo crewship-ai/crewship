@@ -24,6 +24,9 @@ import (
 // address changes, the fence follows: the new address opens and the old one
 // closes (checked by putting a different container on the old address).
 func TestEgressFenceOwnServicesIntegration(t *testing.T) {
+	if !lifecycleHostSupported(t) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	tmp, err := os.MkdirTemp("", "crewship-fence-svc-*")

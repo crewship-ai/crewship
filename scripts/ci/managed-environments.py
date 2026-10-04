@@ -5,22 +5,22 @@ Run from the repository root with Go, Docker and local alpine:3. Creates only
 unique disposable test resources and cleans them up. No provider credentials,
 paid requests, production mounts, registry resolution or global prune. The
 activation fixture mounts only its temporary directories and test executable. CI prepares
-its pinned Alpine fixture separately; run this script as non-root with sudo
-available only for TestManagedLaunchRealDocker; local use never pulls or retags images.
+its pinned Alpine fixture separately; local use never pulls or retags images.
 """
 import json
-import os
 import re
 import subprocess
 import sys
+import time
 
 PREFIX = 'github.com/crewship-ai/crewship/'
 TESTS = {
     'internal/stagedstart': {'TestKeeperControlRealDocker'},
     'internal/orchestrator': {'TestManagedLaunchRealDocker'},
     'internal/provider/docker': {
-        'TestSandboxRuntimeRealDocker',
+        'TestStagedStartRealDocker',
         'TestStagedQualificationRealDocker',
+        'TestSandboxRuntimeRealDocker',
         'TestSandboxDisablesImageHealthcheckRealDocker',
         'TestCacheEvictionRealDockerRetag',
         'TestImageChange_RealHeartbeatSurvivesNewImageAdmission',
@@ -29,12 +29,42 @@ TESTS = {
     'internal/toolchain': {'TestQualificationThroughDockerRuntime'},
     'internal/devcontainer': {'TestProvisionImmutableArtifact_RealRebuild'},
 }
+STAGED_PACKAGE = 'internal/provider/docker'
+STAGED = 'TestStagedStartRealDocker'
+# A green parent cannot replace any mandatory acceptance scenario.
+STAGED_CHILDREN = {
+    'same_identity_positive_control',
+    'controller_restart_environment',
+    'failed_kernel_readback',
+    'restart_races',
+    'unknown_result',
+    'concurrent_controller_reuse',
+    'auto_restart',
+    'legacy_opt_in',
+    'FAIL_BOOTSTRAP',
+    'selector_removed',
+    'HANG_BOOTSTRAP',
+    'unknown_attach_reservation',
+    'workload_material_before_reservation',
+    'delayed_fence',
+    'failing_fence_helper',
+    'mid_bootstrap_restart',
+}
 REQUIRED_TOP_LEVEL = {(PREFIX + package, name) for package, names in TESTS.items() for name in names}
-# Optional explicit child catalog; a green parent cannot replace its evidence.
-CHILDREN = {}
-REQUIRED_CHILDREN = {(PREFIX + package, parent + '/' + child)
-                     for (package, parent), children in CHILDREN.items() for child in children}
+REQUIRED_CHILDREN = {(PREFIX + STAGED_PACKAGE, STAGED + '/' + child)
+                     for child in STAGED_CHILDREN}
 REQUIRED = REQUIRED_TOP_LEVEL | REQUIRED_CHILDREN
+
+
+def commands():
+    # Preserve the original fixtures' three-minute budget. Staged startup has
+    # its own bounded invocation; report elapsed time so its budget is measured
+    # on each qualified runner rather than treating the ceiling as evidence.
+    legacy = REQUIRED_TOP_LEVEL - {(PREFIX + STAGED_PACKAGE, STAGED)}
+    pattern = '^(' + '|'.join(re.escape(name) for _, name in sorted(legacy)) + ')$'
+    common = ['go', 'test', '-tags', 'integration', '-p', '1', '-count=1', '-json']
+    return [common + ['-timeout=3m', '-run', pattern] + ['./' + package for package in TESTS],
+            common + ['-timeout=12m', '-run', '^' + STAGED + '$', './' + STAGED_PACKAGE]]
 
 
 def failures(events, returncode):
@@ -43,7 +73,7 @@ def failures(events, returncode):
         key = (event.get('Package'), event.get('Test'))
         parent = (key[0], (key[1] or '').split('/')[0])
         if key not in REQUIRED:
-            if parent in REQUIRED_TOP_LEVEL and event.get('Action') in ('skip', 'fail'):
+            if parent in REQUIRED and event.get('Action') in ('skip', 'fail'):
                 rejected.add(key)
             continue
         action = event.get('Action')
@@ -61,34 +91,12 @@ def failures(events, returncode):
     return errors
 
 
-def commands():
-    # Preserve the original non-root profile for all existing Docker fixtures.
-    # Only the new launcher fixture needs a host UID distinct from agent 1001.
-    legacy = {package: names for package, names in TESTS.items()
-              if package != 'internal/orchestrator'}
-    result = []
-    for packages, prefix in (
-            (legacy, []),
-            ({'internal/orchestrator': TESTS['internal/orchestrator']},
-             ['sudo', 'env', 'PATH=' + os.environ['PATH'], 'GOTOOLCHAIN=local'])):
-        pattern = '^(' + '|'.join(re.escape(name) for names in packages.values()
-                                 for name in sorted(names)) + ')$'
-        command = prefix + ['go', 'test', '-tags', 'integration', '-p', '1', '-count=1',
-                            '-timeout=3m', '-json', '-run', pattern]
-        command.extend('./' + package for package in packages)
-        result.append(command)
-    return result
-
-
 def main():
-    if os.geteuid() == 0:
-        print('ERROR: run this suite as non-root; only the managed launcher test is elevated.',
-              file=sys.stderr)
-        return True
     events = []
     malformed = False
     code = 0
     for command in commands():
+        started = time.monotonic()
         with subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                               text=True) as process:
             for line in process.stdout:
@@ -101,14 +109,18 @@ def main():
                         events.append(event)
                 except json.JSONDecodeError:
                     malformed = True
-            code = process.wait() or code
+            invocation_code = process.wait()
+        code = code or invocation_code
+        print(f'Managed fixture invocation elapsed_seconds={time.monotonic() - started:.3f} '
+              f'exit_code={invocation_code} command={command!r}', file=sys.stderr, flush=True)
     errors = failures(events, code)
     if malformed:
         errors.append('go test emitted invalid JSON evidence')
     for error in errors:
         print('ERROR: ' + error, file=sys.stderr)
     if not errors:
-        print(f'All {len(REQUIRED)} required managed-environment Docker fixtures passed.')
+        print(f'All {len(REQUIRED_TOP_LEVEL)} required managed-environment Docker fixtures '
+              f'and {len(REQUIRED_CHILDREN)} staged scenarios passed.')
     return bool(errors)
 
 

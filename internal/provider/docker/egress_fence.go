@@ -19,6 +19,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/egressfence"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
+	"github.com/crewship-ai/crewship/internal/stagedstart"
 )
 
 // Network-layer egress fence (#1368, pilot).
@@ -92,9 +93,14 @@ func (p *Provider) egressFenceApplicable(team provider.CrewConfig) error {
 // because it is guaranteed to be present locally.
 func (p *Provider) ensureEgressFence(ctx context.Context, team provider.CrewConfig, containerID, image string) error {
 	if !p.egressFenceWanted(team) {
-		return nil
+		if _, ok := p.fencedCrew.Load(containerID); !ok {
+			return nil
+		}
 	}
-	return p.installEgressFence(ctx, team, containerID, image)
+	if err := p.egressFenceApplicable(team); err != nil {
+		return err
+	}
+	return p.ensureStagedStart(ctx, team, containerID)
 }
 
 // installEgressFence installs the fence for team on containerID unless it is
@@ -337,6 +343,9 @@ func (p *Provider) guardFencedExec(ctx context.Context, containerID string) (fen
 		return fencedExec{}, nil
 	}
 	team := provider.CrewConfig{ID: c.Config.Labels[crewCrewIDLabel], Slug: c.Config.Labels[crewCrewLabel]}
+	if p.egressFenceWanted(team) && c.Config.Labels[stagedstart.Label] != stagedstart.Version {
+		return fencedExec{}, errStagedDenied
+	}
 	// Labels can be missing (pre-label containers) or stale (a renamed
 	// slug); a container this provider has ever fenced stays fenced by id.
 	if crewID, ok := p.fencedCrew.Load(c.ID); ok {
@@ -443,6 +452,17 @@ func containerStartedAt(st *container.State) string {
 // asked for it, and running it unfenced would be the silent downgrade #1368
 // forbids.
 func (p *Provider) stopUnfenced(ctx context.Context, team provider.CrewConfig, containerID string, cause error) {
+	if errors.Is(cause, provider.ErrRuntimeImageUpdatePending) {
+		p.logger.Warn("staged runtime revision pending; active work retained, drain and stop the crew for controlled replacement", "crew_id", team.ID, "container_id", containerID, "error", cause)
+		return
+	}
+	if errors.Is(cause, errStagedDenied) && !errors.Is(cause, errStagedBootstrapFailed) {
+		p.fenced.Delete(containerID)
+		p.stagedVerified.Delete(containerID)
+		p.evictWarm(team.ID)
+		p.logger.Error("staged runtime rejected; workload exec admission refused; runtime retained for explicit ownership inspection and drained recreation", "crew_id", team.ID, "container_id", containerID, "error", cause)
+		return
+	}
 	if ctx.Err() != nil {
 		// The caller's context ended (a cancelled run, a request deadline):
 		// nothing is known to be wrong with the fence, and stopping would kill
@@ -462,6 +482,7 @@ func (p *Provider) stopCrewContainer(ctx context.Context, team provider.CrewConf
 	p.logger.Error("crew requires the egress fence and it is not in place; stopping the crew container",
 		"crew_id", team.ID, "container_id", shortID(containerID), "error", cause)
 	p.fenced.Delete(containerID)
+	p.stagedVerified.Delete(containerID)
 	// Drop the warm entry too: the next EnsureCrewRuntime must take the full
 	// reconcile path (start + fence), not hand back a stopped container.
 	p.evictWarm(team.ID)
