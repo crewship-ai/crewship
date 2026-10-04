@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync/atomic"
@@ -14,8 +15,9 @@ import (
 // armedBlockingPreflight blocks only once armed, modelling any ctx-aware
 // pre-runDSL admission work (preflight reads, pipeline load, quiet window).
 type armedBlockingPreflight struct {
-	armed   atomic.Bool
-	entered chan struct{}
+	armed     atomic.Bool
+	entered   chan struct{}
+	sanitized bool
 }
 
 func (p *armedBlockingPreflight) Check(ctx context.Context, _ PreflightRequest) error {
@@ -27,6 +29,9 @@ func (p *armedBlockingPreflight) Check(ctx context.Context, _ PreflightRequest) 
 	default:
 	}
 	<-ctx.Done()
+	if p.sanitized {
+		return fmt.Errorf("%w: credentials could not be checked: %s", ErrRunPreflightBlocked, ctx.Err().Error())
+	}
 	return ctx.Err()
 }
 
@@ -107,5 +112,37 @@ func TestEventWaitDeadline_CancelledPlanReadKeepsRunRecoverable(t *testing.T) {
 	rec, err = deps.RunStore.Get(ctx, res.RunID)
 	if err != nil || rec.Status != RunStatusInterrupted {
 		t.Fatalf("genuine invalid plan did not interrupt: %+v %v", rec, err)
+	}
+}
+
+func TestEventWaitDeadline_SanitizedPreflightCancellationKeepsRunRecoverable(t *testing.T) {
+	db := openFactoryTestDB(t)
+	defer db.Close()
+	deps := fullExecutorDeps(t, db, newMockRunner())
+	deps.RunVerdict = nil
+	pf := &armedBlockingPreflight{entered: make(chan struct{}, 1), sanitized: true}
+	deps.Preflight = pf
+	exec := NewWiredExecutor(deps)
+	p := saveResumePipeline(t, deps.Store, "sanitized-shutdown", eventWaitDSL)
+	ctx := context.Background()
+	res, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun})
+	if err != nil || res.Status != "WAITING" {
+		t.Fatalf("park: %+v %v", res, err)
+	}
+	if _, err := db.Exec(`UPDATE pipeline_signal_waits SET timeout_at=?`, tsformat.Format(time.Now().Add(-time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	pf.armed.Store(true)
+	stop := StartEventWaitSweeper(ctx, db, exec, nil, slog.New(slog.NewTextHandler(io.Discard, nil)), 10*time.Millisecond)
+	defer stop()
+	select {
+	case <-pf.entered:
+	case <-time.After(time.Second):
+		t.Fatal("sweeper never reached sanitized preflight")
+	}
+	stop()
+	rec, err := deps.RunStore.Get(ctx, res.RunID)
+	if err != nil || rec.Status != RunStatusWaiting {
+		t.Fatalf("sanitized shutdown error terminalized run: %+v %v", rec, err)
 	}
 }
