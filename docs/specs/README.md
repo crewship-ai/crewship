@@ -63,3 +63,5 @@ public contract here. Superseded a spec? Move it to
 
 - [Response shapes](response-shape-contract.md): how generated OpenAPI responses
   are graded; consumed by `cmd/gen-openapi` and `scripts/api-contract`.
+
+- [Keeper control protocol](keeper-control.md): standalone static boot-bound control and workload gates; provider activation is separate.

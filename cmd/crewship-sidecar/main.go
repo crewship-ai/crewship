@@ -60,6 +60,16 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && strings.HasPrefix(os.Args[1], "--staged-") {
+		code, err := stagedstart.Run(os.Args[1:])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			if code == 0 {
+				code = 1
+			}
+		}
+		os.Exit(code)
+	}
 	addr := flag.String("addr", sidecar.DefaultAddr, "listen address")
 	_ = flag.String("managed-launch", "", "internal static-native launch descriptor; followed by CLI arguments")
 	showVersion := flag.Bool("version", false, "print version info and exit")
