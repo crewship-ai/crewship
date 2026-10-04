@@ -948,7 +948,7 @@ func waitForPipelineRun(cmd *cobra.Command, client *cli.Client, runID string, ti
 			return err
 		}
 		switch strings.ToLower(detail.Status) {
-		case "failed", "interrupted", "cancelled":
+		case "failed", "interrupted", "cancelled", "canceled", "needs_reconciliation":
 			return fmt.Errorf("routine run %s", detail.Status)
 		}
 		return nil
@@ -964,8 +964,10 @@ func waitForPipelineRun(cmd *cobra.Command, client *cli.Client, runID string, ti
 		maybeNotifyRunComplete(start, detail.PipelineSlug, "FAILED")
 		fmt.Printf("  failed at step: %s\n  error: %s\n", detail.FailedAtStep, detail.ErrorMessage)
 		return fmt.Errorf("routine run failed")
-	case "cancelled":
+	case "cancelled", "canceled":
 		return fmt.Errorf("routine run cancelled")
+	case "needs_reconciliation":
+		return fmt.Errorf("routine run needs_reconciliation; inspect the run before retrying")
 	}
 	// Success terminal — notify like agent runs do on "done".
 	maybeNotifyRunComplete(start, detail.PipelineSlug, "COMPLETED")

@@ -31,9 +31,10 @@ When neither `--quiet` nor a structured `--format` (`json`/`yaml`/`ndjson`) is s
 |---|---|
 | `0` | `COMPLETED` (or a routine `dry_run`) |
 | `1` | `FAILED` (or a routine `interrupted` by a server restart) |
-| `2` | `CANCELLED` |
+| `2` | `CANCELLED` or `CANCELED` |
 | `3` | `TIMEOUT` — server-reported, or `--timeout` reached |
 | `4` | Network/auth error before any status could be read, or the id matched neither run kind |
+| `5` | `NEEDS_RECONCILIATION` — inspect the uncertain execution outcome before retrying |
 
 <Note>
 `wait` is the one documented exception to the CLI's structured-error contract: because it

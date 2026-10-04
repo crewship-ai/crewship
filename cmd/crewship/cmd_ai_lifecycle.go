@@ -22,6 +22,9 @@ import (
 	"github.com/crewship-ai/crewship/internal/memory"
 )
 
+// A seam for exercising pre- and post-rename failures of durable publication.
+var aiWriteConnectionFile = memory.WriteFileDurable
+
 var aiConnectionDir = func() (string, error) {
 	path, err := cli.DefaultConfigPath()
 	if err != nil {
@@ -158,6 +161,10 @@ func inspectAIEntry(ctx context.Context, client string) (aiEntry, bool, error) {
 	if err != nil {
 		return aiEntry{}, false, err
 	}
+	return inspectAIEntryAt(ctx, client, contextPath)
+}
+
+func inspectAIEntryAt(ctx context.Context, client, contextPath string) (aiEntry, bool, error) {
 	if client == "claude" {
 		f, err := os.Open(contextPath)
 		if os.IsNotExist(err) {
@@ -194,6 +201,7 @@ func inspectAIEntry(ctx context.Context, client string) (aiEntry, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	child := exec.CommandContext(ctx, path, "mcp", "get", "crewship", "--json")
+	child.Env = aiClientEnvironment(client, contextPath)
 	var out, diagnostics aiBoundedBuffer
 	child.Stdout = &out
 	child.Stderr = &diagnostics
@@ -269,7 +277,7 @@ func saveAIReceipt(client string, entry aiEntry) error {
 	if err != nil {
 		return err
 	}
-	return memory.WriteFileDurable(path, data, 0600)
+	return aiWriteConnectionFile(path, data, 0600)
 }
 
 func connectAIClient(cmd *cobra.Command, client, executable string, args, registration []string) error {
@@ -298,27 +306,173 @@ func connectAIClient(cmd *cobra.Command, client, executable string, args, regist
 	if err != nil {
 		return fmt.Errorf("%s is not installed on PATH; use crewship ai config instead", client)
 	}
-	// The native CLI owns config syntax and updates. Only our exact prior entry
-	// may be replaced; custom or subsequently edited entries are never removed.
+	// Stage native edits when replacing an owned entry. Neither a failed add nor
+	// failed verification may destroy the live registration or its receipt.
+	contextPath, err := aiClientContext(client)
+	if err != nil {
+		return err
+	}
+	var snapshot, receiptSnapshot *aiConfigSnapshot
 	if found {
-		if err = removeAIClient(cmd, client); err != nil {
+		receiptPath, err := aiReceiptPath(client)
+		if err != nil {
+			return err
+		}
+		receiptSnapshot, err = snapshotAIConfig(receiptPath)
+		if err != nil {
+			return err
+		}
+		snapshot, err = snapshotAIConfig(contextPath)
+		if err != nil {
+			return err
+		}
+		// Bind the snapshot to the entry inspected above, including client options.
+		stage, err := os.MkdirTemp(filepath.Dir(contextPath), ".crewship-connect-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(stage)
+		contextPath = filepath.Join(stage, filepath.Base(contextPath))
+		if err = memory.WriteFileDurable(contextPath, snapshot.data, 0600); err != nil {
+			return err
+		}
+		staged, ok, err := inspectAIEntryAt(cmd.Context(), client, contextPath)
+		if err != nil || !ok || aiEntryFingerprint(staged) != aiEntryFingerprint(existing) {
+			return fmt.Errorf("client configuration changed before reconnect; no changes applied")
+		}
+		argv := []string{"mcp", "remove", "crewship"}
+		if client == "claude" {
+			argv = []string{"mcp", "remove", "--scope", "user", "crewship"}
+		}
+		if err = runAIRegistration(cmd, path, client, contextPath, argv); err != nil {
 			return err
 		}
 	}
-	childCtx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
-	defer cancel()
-	child := exec.CommandContext(childCtx, path, registration...)
-	child.Stdin = cmd.InOrStdin()
-	child.Stdout = cmd.ErrOrStderr()
-	child.Stderr = cmd.ErrOrStderr()
-	if err = child.Run(); err != nil {
+	if err = runAIRegistration(cmd, path, client, contextPath, registration); err != nil {
 		return err
 	}
-	actual, found, err := inspectAIEntry(cmd.Context(), client)
+	actual, found, err := inspectAIEntryAt(cmd.Context(), client, contextPath)
 	if err != nil || !found || actual.Type != "stdio" || actual.Command != desired.Command || !reflect.DeepEqual(actual.Args, desired.Args) || len(actual.Env) > 0 {
 		return fmt.Errorf("client registration could not be verified; inspect the native client configuration")
 	}
+	if snapshot != nil {
+		replacement, err := snapshotAIConfig(contextPath)
+		if err != nil {
+			return err
+		}
+		if !snapshot.unchanged() || !receiptSnapshot.unchanged() || !ownsAIEntry(client, existing) {
+			return fmt.Errorf("client configuration or ownership changed during reconnect; no changes applied")
+		}
+		if err = aiWriteConnectionFile(snapshot.path, replacement.data, snapshot.info.Mode().Perm()); err == nil {
+			err = saveAIReceipt(client, actual)
+		}
+		if err != nil {
+			return rollbackAIConnection(client, actual, snapshot, receiptSnapshot, replacement.data, err)
+		}
+		return nil
+	}
 	return saveAIReceipt(client, actual)
+}
+
+// Durable writes can fail after rename (for example on directory fsync). Check
+// both published files before rolling either back, and never claim restoration
+// if a rollback write itself failed. Unrelated concurrent edits fail closed.
+func rollbackAIConnection(client string, actual aiEntry, config, receipt *aiConfigSnapshot, replacement []byte, cause error) error {
+	contextPath, err := aiClientContext(client)
+	if err != nil {
+		return err
+	}
+	desiredReceipt := aiConnectionReceipt{Client: client, Context: contextPath, Fingerprint: aiEntryFingerprint(actual), Command: actual.Command}
+	receiptData, err := json.MarshalIndent(desiredReceipt, "", "  ")
+	if err != nil {
+		return err
+	}
+	currentConfig, configErr := snapshotAIConfig(config.path)
+	currentReceipt, receiptErr := snapshotAIConfig(receipt.path)
+	if configErr != nil || receiptErr != nil ||
+		(!config.unchanged() && !bytes.Equal(currentConfig.data, replacement)) ||
+		(!receipt.unchanged() && !bytes.Equal(currentReceipt.data, receiptData)) ||
+		!currentConfig.unchanged() || !currentReceipt.unchanged() {
+		return fmt.Errorf("connection update failed and configuration or receipt changed; inspect the native client configuration: %w", cause)
+	}
+	if !config.unchanged() {
+		if err = aiWriteConnectionFile(config.path, config.data, config.info.Mode().Perm()); err != nil {
+			return fmt.Errorf("connection update failed; restoration of previous configuration could not be confirmed: %w", err)
+		}
+	}
+	if !receipt.unchanged() {
+		if err = aiWriteConnectionFile(receipt.path, receipt.data, receipt.info.Mode().Perm()); err != nil {
+			return fmt.Errorf("connection update failed; restoration of previous receipt could not be confirmed: %w", err)
+		}
+	}
+	return fmt.Errorf("connection update failed; previous configuration and receipt restored: %w", cause)
+}
+
+// Native clients select their user configuration through these directory vars.
+// Override them only in child processes; the live client context stays pinned.
+func aiClientEnvironment(client, contextPath string) []string {
+	if livePath, err := aiClientContext(client); err == nil && contextPath == livePath {
+		return os.Environ()
+	}
+	key := "CODEX_HOME"
+	if client == "claude" {
+		key = "CLAUDE_CONFIG_DIR"
+	}
+	env := []string{}
+	for _, value := range os.Environ() {
+		if !strings.HasPrefix(value, key+"=") {
+			env = append(env, value)
+		}
+	}
+	return append(env, key+"="+filepath.Dir(contextPath))
+}
+
+func runAIRegistration(cmd *cobra.Command, path, client, contextPath string, argv []string) error {
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, path, argv...)
+	child.Env = aiClientEnvironment(client, contextPath)
+	child.Stdin = cmd.InOrStdin()
+	child.Stdout = cmd.ErrOrStderr()
+	child.Stderr = cmd.ErrOrStderr()
+	return child.Run()
+}
+
+type aiConfigSnapshot struct {
+	path string
+	info os.FileInfo
+	data []byte
+}
+
+func snapshotAIConfig(path string) (*aiConfigSnapshot, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > 4<<20 {
+		return nil, fmt.Errorf("refusing non-regular or oversized client configuration")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil || !os.SameFile(info, opened) {
+		return nil, fmt.Errorf("client configuration changed while reading")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, (4<<20)+1))
+	if err != nil || len(data) > 4<<20 {
+		return nil, fmt.Errorf("client configuration unreadable or too large")
+	}
+	return &aiConfigSnapshot{path: path, info: info, data: data}, nil
+}
+
+func (s *aiConfigSnapshot) unchanged() bool {
+	current, err := snapshotAIConfig(s.path)
+	return err == nil && os.SameFile(s.info, current.info) &&
+		s.info.Mode() == current.info.Mode() && s.info.ModTime().Equal(current.info.ModTime()) &&
+		bytes.Equal(s.data, current.data)
 }
 
 func removeAIClient(cmd *cobra.Command, client string) error {
