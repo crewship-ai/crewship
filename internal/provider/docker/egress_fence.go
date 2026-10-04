@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"sort"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/egressfence"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
 // Network-layer egress fence (#1368, pilot).
@@ -149,7 +151,14 @@ func (p *Provider) installEgressFence(ctx context.Context, team provider.CrewCon
 
 // runFenceHelper runs the one-shot helper. A non-zero exit is an error.
 func (p *Provider) runFenceHelper(ctx context.Context, team provider.CrewConfig, containerID, image string, dests []egressfence.Dest) (string, error) {
-	cmd := []string{"--fence-apply", "--fence-allow-uids", fenceSidecarUID}
+	return p.runFenceHelperMode(ctx, team, containerID, image, dests, true)
+}
+func (p *Provider) runFenceHelperMode(ctx context.Context, team provider.CrewConfig, containerID, image string, dests []egressfence.Dest, apply bool) (string, error) {
+	mode := "--fence-check"
+	if apply {
+		mode = "--fence-apply"
+	}
+	cmd := []string{mode, "--fence-allow-uids", fenceSidecarUID}
 	if len(dests) > 0 {
 		parts := make([]string, len(dests))
 		for i, d := range dests {
@@ -160,25 +169,52 @@ func (p *Provider) runFenceHelper(ctx context.Context, team provider.CrewConfig,
 	if p.cfg.SidecarBinaryPath == "" {
 		return "", errors.New("no sidecar binary path configured; the helper runs the bind-mounted crewship-sidecar")
 	}
-	// A fixed name per crew container: a helper orphaned by a cancelled
-	// create (the daemon made it, the reply was lost) is removed here before
-	// the next one, instead of accumulating.
+	// Legacy uses its existing fixed helper name. Staged helpers use unique
+	// owned labels/names so concurrent controllers never remove each other.
+	// Unknown creates remain discoverable for explicit scoped cleanup.
+	source := p.cfg.SidecarBinaryPath
+	env := []string(nil)
+	_, stagedKnown := p.fencedCrew.Load(containerID)
+	if p.egressFenceWanted(team) || stagedKnown {
+		qualified, e := p.client.ImageInspect(ctx, image)
+		if e != nil {
+			return "", e
+		}
+		if qualified.ID == "" {
+			return "", errStagedDenied
+		}
+		image = qualified.ID
+		source, _, e = p.stageArtifact(ctx, image)
+		if e != nil {
+			return "", e
+		}
+		img, e := imageEnvMap(ctx, p.client, image)
+		if e != nil {
+			return "", e
+		}
+		env = keeperEnv(nil, img)
+	}
 	helperName := "crewship-fence-" + shortID(containerID)
+	if p.egressFenceWanted(team) || stagedKnown {
+		helperName += "-" + strings.ToLower(rand.Text())
+	}
 	if _, err := p.client.ContainerRemove(ctx, helperName, client.ContainerRemoveOptions{Force: true}); err != nil && !cerrdefs.IsNotFound(err) {
 		p.logger.Debug("stale fence helper not removed", "helper", helperName, "error", err)
 	}
-	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+	helperSpec := client.ContainerCreateOptions{
 		Name: helperName,
 		Config: &container.Config{
-			Image:      image,
-			User:       "0:0",
-			Entrypoint: []string{"/usr/local/bin/crewship-sidecar"},
-			Cmd:        cmd,
-			Labels: map[string]string{
+			Image:       image,
+			Env:         env,
+			Healthcheck: &container.HealthConfig{Test: []string{"NONE"}},
+			User:        "0:0",
+			Entrypoint:  []string{"/usr/local/bin/crewship-sidecar"},
+			Cmd:         cmd,
+			Labels: resourcelifecycle.WithInstanceLabel(map[string]string{
 				"managed-by":     "crewship",
 				fenceHelperLabel: "true",
 				crewCrewIDLabel:  team.ID,
-			},
+			}, p.cfg.InstanceID),
 		},
 		HostConfig: &container.HostConfig{
 			NetworkMode:    container.NetworkMode("container:" + containerID),
@@ -189,12 +225,16 @@ func (p *Provider) runFenceHelper(ctx context.Context, team provider.CrewConfig,
 			Runtime:        "runc",
 			Mounts: []mount.Mount{{
 				Type:     mount.TypeBind,
-				Source:   p.cfg.SidecarBinaryPath,
+				Source:   source,
 				Target:   "/usr/local/bin/crewship-sidecar",
 				ReadOnly: true,
 			}},
 		},
-	})
+	}
+	if p.stagedFenceHelperTestHook != nil {
+		p.stagedFenceHelperTestHook(helperSpec.Config, helperSpec.HostConfig)
+	}
+	created, err := p.client.ContainerCreate(ctx, helperSpec)
 	if err != nil {
 		return "", fmt.Errorf("create helper: %w", err)
 	}
@@ -210,6 +250,11 @@ func (p *Provider) runFenceHelper(ctx context.Context, team provider.CrewConfig,
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, fenceHelperTimeout)
 	defer cancel()
+	if p.stagedTestHook != nil && (p.egressFenceWanted(team) || stagedKnown) {
+		if e := p.stagedTestHook(mode+"-started", containerID); e != nil {
+			return "", e
+		}
+	}
 	wait := p.client.ContainerWait(waitCtx, created.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
 	var code int64
 	select {
@@ -443,7 +488,7 @@ func (p *Provider) forgetFenced(containerID string) {
 	if containerID == "" {
 		return
 	}
-	for _, m := range []*sync.Map{&p.fenced, &p.fenceLocks, &p.fencedCrew} {
+	for _, m := range []*sync.Map{&p.fenced, &p.fenceLocks, &p.fencedCrew, &p.stagedVerified} {
 		m.Range(func(k, _ any) bool {
 			if id := k.(string); id == containerID || strings.HasPrefix(id, containerID) {
 				m.Delete(k)
@@ -470,7 +515,29 @@ func (p *Provider) GuardExternalExec(ctx context.Context, containerID string) (b
 	if err != nil {
 		return nil, nil, err
 	}
+	if _, stagedKnown := p.fencedCrew.Load(f.containerID); stagedKnown {
+		return nil, nil, fmt.Errorf("%w: staged external exec requires PrepareExternalExec", errStagedDenied)
+	}
+
 	return func(ctx context.Context) error { return p.fenceBeforeStart(ctx, f) },
+		func(ctx context.Context) error { return p.fenceAfterStart(ctx, f) }, nil
+}
+
+// PrepareExternalExec combines admission and wrapping for external clients.
+// A nonpilot command uses only the existing guard's inspect. The returned
+// checks still bind Docker exec to that exact inspected start.
+func (p *Provider) PrepareExternalExec(ctx context.Context, id string, cmd, env []string) ([]string, []string, func(context.Context) error, func(context.Context) error, error) {
+	f, err := p.guardFencedExec(ctx, id)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if f.active() || p.stagedDiscoveryPending.Load() {
+		cmd, env, err = p.WrapExternalExec(ctx, id, cmd, env)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+	}
+	return cmd, env, func(ctx context.Context) error { return p.fenceBeforeStart(ctx, f) },
 		func(ctx context.Context) error { return p.fenceAfterStart(ctx, f) }, nil
 }
 

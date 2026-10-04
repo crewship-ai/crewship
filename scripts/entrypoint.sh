@@ -20,7 +20,11 @@ fi
 # NOT abort the script before `exec sleep infinity` below — that would kill
 # PID 1 and take the whole container down, failing every exec (including
 # concurrent lead + sub-agent runs) with exit 137.
-mkdir -p /home/agent/.claude /home/agent/.local/bin /home/agent/.ssh 2>/dev/null || true
+if [ "${1:-}" = "--bootstrap-only" ]; then
+    mkdir -p /home/agent/.claude /home/agent/.local/bin /home/agent/.ssh
+else
+    mkdir -p /home/agent/.claude /home/agent/.local/bin /home/agent/.ssh 2>/dev/null || true
+fi
 chmod 700 /home/agent/.ssh 2>/dev/null || true
 
 # Ensure crew tools directory is usable.
@@ -33,6 +37,9 @@ export PATH="/opt/crew-tools/bin:/home/agent/.local/bin:$PATH"
 touch /workspace/.ready
 
 # PID 1: keep container alive for Docker exec pattern.
+if [ "${1:-}" = "--bootstrap-only" ]; then
+    exit 0
+fi
 exec sleep infinity
 
 # NOTE: The sidecar binary is started via Docker exec (by the orchestrator)

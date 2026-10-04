@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -108,7 +109,11 @@ type Provider struct {
 	// and does not always pass through EnsureCrewRuntime).
 	fenceTeams sync.Map
 	// fenceLocks serialises fence installs per container id.
-	fenceLocks sync.Map
+	fenceLocks                sync.Map
+	stagedTestHook            func(string, string) error
+	stagedFenceHelperTestHook func(*container.Config, *container.HostConfig)
+	stagedDiscoveryPending    atomic.Bool
+	stagedVerified            sync.Map
 	// fenceDests maps a fenced container id to the service endpoint set its
 	// fence was installed with (serviceTargets.key).
 	fenceDests sync.Map
