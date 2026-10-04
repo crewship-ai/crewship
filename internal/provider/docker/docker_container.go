@@ -839,7 +839,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					if state == nil || state.Running || state.Paused || state.Restarting || (state.Status != "exited" && state.Status != "created") {
 						return "", false, &provider.RuntimeImageUpdatePendingError{ContainerID: c.ID, CurrentImageID: inspect.Image, DesiredImage: desiredImage}
 					}
-					if _, err := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: true}); err != nil {
+					if err := p.removeCrewContainer(ctx, c.ID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: true}); err != nil {
 						if cerrdefs.IsConflict(err) {
 							return "", false, fmt.Errorf("%w: runtime changed while removing stopped container", provider.ErrRuntimeImageUpdatePending)
 						}
@@ -1693,7 +1693,7 @@ func (p *Provider) runByoiSidecarCheck(ctx context.Context, containerID, image s
 func (p *Provider) forceTeardown(ctx context.Context, containerID, crewID string) {
 	timeout := 10
 	_, _ = p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout})
-	_, _ = p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+	_ = p.removeCrewContainer(ctx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
 	p.evictWarm(crewID)
 	p.forgetFenced(containerID)
 }
@@ -1839,7 +1839,7 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
 	p.forgetFenced(containerID)
 	p.evictWarmContainer(containerID)
-	if _, err := p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
+	if err := p.removeCrewContainer(ctx, containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
 		return fmt.Errorf("remove crew runtime %s: %w", provider.ShortID(containerID), err)
 	}
 	return nil

@@ -17,6 +17,9 @@ import (
 
 type ProvisioningHandler struct {
 	sandboxRuntime provider.SandboxRuntime // optional qualification backend; set before serving
+	// removeCrewRuntime uses the active provider's force-removal and owned
+	// secret cleanup. Nil preserves legacy standalone-handler behavior.
+	removeCrewRuntime func(context.Context, string) error
 
 	db             *sql.DB
 	logger         *slog.Logger

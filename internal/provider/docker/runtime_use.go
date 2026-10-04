@@ -86,7 +86,7 @@ func (p *Provider) removeForReconcile(ctx context.Context, containerID, crewID s
 	if state == nil || state.Running || state.Paused || state.Restarting || (state.Status != "exited" && state.Status != "created") {
 		return &provider.RuntimeImageUpdatePendingError{ContainerID: containerID, CurrentImageID: c.Image}
 	}
-	if _, err := p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: true}); err != nil {
+	if err := p.removeCrewContainer(ctx, containerID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: true}); err != nil {
 		return fmt.Errorf("remove inactive runtime for reconciliation: %w", err)
 	}
 	p.evictWarm(crewID)
