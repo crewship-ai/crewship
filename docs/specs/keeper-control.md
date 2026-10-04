@@ -45,3 +45,8 @@ ownership offline, starts only the keeper, then seals before image bootstrap.
 Rejected runtime admission is refused and reported for explicit reconciliation;
 running artifact upgrades defer to verified idle replacement without interruption.
 This pilot does not complete B, sibling-agent isolation or OAuth.
+
+Backup exec uses combined static preparation when the provider offers it.
+The pilot admits UID1001/UID1002 commands; root backup self-test commands are
+refused with exit126. Drain the pilot and return to a legacy runtime for
+workflows requiring root until a separately qualified root mechanism exists.
