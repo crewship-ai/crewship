@@ -266,3 +266,76 @@ describe("useEngineStatus", () => {
     expect(rendered.result.current.status).toBe("checking")
   })
 })
+
+describe("engine polling across workspace lifetimes", () => {
+  beforeEach(() => {
+    mockApiFetch.mockReset()
+    vi.useFakeTimers()
+    vi.spyOn(Math, "random").mockReturnValue(0.5)
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  it.each(["ws-2", null])("clears the previous workspace status when selecting %s", async (next) => {
+    mockApiFetch.mockResolvedValueOnce(ok("old uptime")).mockReturnValue(new Promise(() => {}))
+    const { result, rerender, unmount } = renderHook(({ id }) => useEngineStatus(id), { initialProps: { id: "ws-1" as string | null } })
+    await act(async () => {})
+    expect(result.current).toEqual({ status: "connected", uptime: "old uptime" })
+    const signal = mockApiFetch.mock.calls[0][1]?.signal
+    rerender({ id: next })
+    expect(signal?.aborted).toBe(true)
+    expect(result.current).toEqual({ status: "checking", uptime: null })
+    expect(mockApiFetch).toHaveBeenCalledTimes(next ? 2 : 1)
+    unmount()
+  })
+
+  it("treats throttling in a newly selected workspace as an initial degraded check", async () => {
+    mockApiFetch.mockResolvedValueOnce(ok("old uptime")).mockResolvedValue(fail(429))
+    const { result, rerender, unmount } = renderHook(({ id }) => useEngineStatus(id), { initialProps: { id: "ws-1" } })
+    await act(async () => {})
+    rerender({ id: "ws-2" })
+    await act(async () => {})
+    expect(result.current).toEqual({ status: "degraded", uptime: null })
+    unmount()
+  })
+
+  it("ignores a response that arrives after switching workspace", async () => {
+    let resolve!: (response: Response) => void
+    mockApiFetch.mockReturnValueOnce(new Promise<Response>((done) => { resolve = done })).mockResolvedValue(ok("new uptime"))
+    const { result, rerender, unmount } = renderHook(({ id }) => useEngineStatus(id), { initialProps: { id: "old" } })
+    rerender({ id: "new & workspace" })
+    await act(async () => {})
+    await act(async () => { resolve(ok("stale uptime")) })
+    expect(result.current).toEqual({ status: "connected", uptime: "new uptime" })
+    expect(mockApiFetch.mock.calls[1][0]).toContain("new%20%26%20workspace")
+    unmount()
+  })
+
+  it("ignores JSON parsing completed after switching workspace", async () => {
+    let resolve!: (body: { uptime: string }) => void
+    const body = new Promise<{ uptime: string }>((done) => { resolve = done })
+    mockApiFetch.mockResolvedValueOnce({ ok: true, json: () => body } as Response).mockResolvedValue(ok("new uptime"))
+    const { result, rerender, unmount } = renderHook(({ id }) => useEngineStatus(id), { initialProps: { id: "old" } })
+    await act(async () => {})
+    rerender({ id: "new" })
+    await act(async () => { resolve({ uptime: "stale uptime" }) })
+    expect(result.current).toEqual({ status: "connected", uptime: "new uptime" })
+    unmount()
+  })
+
+  it("does not schedule another poll after an in-flight timer finishes on an unmounted hook", async () => {
+    let reject!: (reason: Error) => void
+    mockApiFetch.mockResolvedValueOnce(ok()).mockReturnValueOnce(new Promise<Response>((_, fail) => { reject = fail }))
+    const { unmount } = renderHook(() => useEngineStatus("ws-1"))
+    await act(async () => {})
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(mockApiFetch).toHaveBeenCalledTimes(2)
+    unmount()
+    await act(async () => { reject(new Error("late network failure")) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(mockApiFetch).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})

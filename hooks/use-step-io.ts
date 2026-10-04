@@ -31,6 +31,7 @@ export function useStepIO(
     }
     const ctrl = new AbortController()
     abortRef.current = ctrl
+    setSpans(undefined)
     setLoading(true)
     apiFetch(
       `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-runs/${encodeURIComponent(runId)}?io_step=${encodeURIComponent(stepId)}`,

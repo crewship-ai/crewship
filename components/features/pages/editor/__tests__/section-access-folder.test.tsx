@@ -145,4 +145,27 @@ describe("From folder", () => {
     )
     expect(screen.queryByRole("button", { name: "Open folder sharing…" })).toBeNull()
   })
+
+  it("does not infer private sharing when a successful folder list omits this folder", async () => {
+    mount(FILED, { folders: json(200, { folders: [] }), me: json(503, { error: "Access service unavailable" }) })
+    await waitFor(() => expect(document.querySelector('[data-slot="folder-sharing-marker"]')).toHaveTextContent("Sharing could not be determined"))
+    await waitFor(() => expect(document.querySelector('[data-slot="own-paths"]')).toHaveTextContent("Your own access could not be read:"))
+    expect(screen.queryByRole("button", { name: "Open folder sharing…" })).toBeNull()
+  })
+
+  it("reports an ACL service failure without treating it as a privacy or management decision", async () => {
+    const { calls } = mount(FILED, { acl: json(503, { error: "Permissions service unavailable" }) })
+    await screen.findByText("Permissions service unavailable")
+    expect(screen.getByText("Ops · could not read")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Open folder sharing…" })).toBeNull()
+    expect(document.querySelector('[data-slot="folder-sharing-marker"]')).toBeNull()
+    expect(calls.some((url) => url.includes("/access/me?"))).toBe(false)
+  })
+
+  it.each([{ acl: [] }, { acl: [{ subject_type: "crew", subject_id: "c-support", label: "Support", can_read: true, can_write: false }] }])("handles an empty or single-entry authoritative sharing list", async ({ acl }) => {
+    mount(FILED, { acl: json(200, { acl_version: 5, acl }) })
+    await screen.findByText(`Ops · ${acl.length} ${acl.length === 1 ? "entry" : "entries"}`)
+    expect(document.querySelectorAll('[data-slot="folder-acl-readonly"] > div')).toHaveLength(acl.length)
+    expect(screen.getByRole("button", { name: "Open folder sharing…" })).toBeEnabled()
+  })
 })

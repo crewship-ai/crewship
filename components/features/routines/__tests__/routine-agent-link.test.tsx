@@ -19,4 +19,18 @@ describe("routine agent identity", () => {
     expect(screen.getByRole("link", { name: "review agent" })).toHaveAttribute("href", "/crews?agent=review%20agent")
     expect(screen.queryByTestId("avatar")).not.toBeInTheDocument()
   })
+
+  it("prefers the agent's style over its crew and derives an absent seed from its name", () => {
+    render(<RoutineAgentLink slug="review/a?b" agent={{ id: "a", slug: "review/a?b", name: "Reviewer", avatar_style: "lorelei", crew: { avatar_style: "bottts" } }} />)
+    expect(screen.getByRole("link", { name: "Reviewer" })).toHaveAttribute("href", "/crews?agent=review%2Fa%3Fb")
+    expect(screen.getByTestId("avatar")).toHaveAttribute("data-seed", "Reviewer")
+    expect(screen.getByTestId("avatar")).toHaveAttribute("data-style", "lorelei")
+  })
+
+  it("keeps an unnamed saved agent navigable when no crew or avatar style is available", () => {
+    render(<RoutineAgentLink slug="reviewer" agent={{ id: "a", slug: "reviewer", name: "" }} />)
+    expect(screen.getByRole("link", { name: "reviewer" })).toHaveAttribute("title", "Open reviewer")
+    expect(screen.getByTestId("avatar")).toHaveAttribute("data-agent", "a")
+    expect(screen.getByTestId("avatar")).not.toHaveAttribute("data-style")
+  })
 })

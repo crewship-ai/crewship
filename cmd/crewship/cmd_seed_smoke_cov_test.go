@@ -44,6 +44,19 @@ func TestMain(m *testing.M) {
 	// The developer's shell may export CREWSHIP_* for their own dev instance;
 	// those beat the config a test just wrote (#1305). See testenv_test.go.
 	scrubAmbientCrewshipEnv()
+	// go test -cover supplies its own GOCOVERDIR. Keep child-process artifacts
+	// in the explicitly requested directory, outside go test's temporary tree.
+	if dir := os.Getenv("TEST_CREWSHIP_CLI_COVERAGE_DIR"); dir != "" {
+		info, err := os.Stat(dir)
+		if err != nil || !filepath.IsAbs(dir) || !info.IsDir() {
+			fmt.Fprintln(os.Stderr, "TEST_CREWSHIP_CLI_COVERAGE_DIR must be an existing absolute directory")
+			os.Exit(2)
+		}
+		if err := os.Setenv("GOCOVERDIR", dir); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
 	// Acceptance servers are ephemeral: a reused URL and slug can refer to
 	// another fixture's workspace. Their CLI children must not consult or
 	// populate the developer's shared disk cache. Cache behavior has its own

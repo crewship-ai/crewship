@@ -55,8 +55,8 @@ export function useUserPreference<T>(
     apiFetch("/api/v1/me/preferences")
       .then((r) => (r.ok ? r.json() : null))
       .then((data: Record<string, unknown> | null) => {
-        if (cancelled || !data) return
-        if (key in data) {
+        if (cancelled) return
+        if (data && key in data) {
           const remote = data[key] as T
           // Compare by JSON to dodge object identity; cheap for our
           // use case (small primitives + small objects).

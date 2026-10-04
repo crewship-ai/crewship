@@ -120,6 +120,10 @@ func Apply(s Spec) error {
 // each rule's per-rule marker AND its expressions as read back from the
 // kernel.
 func Check(s Spec) (State, error) {
+	return checkStable(s)
+}
+
+func checkOnce(s Spec) (State, error) {
 	c, err := nftables.New()
 	if err != nil {
 		return State{}, fmt.Errorf("egressfence: netlink: %w", err)

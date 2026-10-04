@@ -697,12 +697,13 @@ func (r *runRegistry) compact() {
 		return
 	}
 
-	tmp := j.path + ".compact"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	// Exclusive staging avoids following a preexisting temporary symlink.
+	f, err := os.CreateTemp(filepath.Dir(j.path), filepath.Base(j.path)+".compact-*")
 	if err != nil {
 		j.fail("open compaction temp", err)
 		return
 	}
+	tmp := f.Name()
 	w := bufio.NewWriter(f)
 	for _, rec := range snapshot {
 		line, err := json.Marshal(rec)

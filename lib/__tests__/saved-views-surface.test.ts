@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { isJournalView, issueViews, journalViews } from "@/lib/saved-views"
+import { applySavedView, parseSavedViews, isJournalView, issueViews, journalViews } from "@/lib/saved-views"
 import type { SavedView } from "@/lib/types/mission"
 
 // =============================================================================
@@ -58,5 +58,29 @@ describe("saved-view surface discriminator", () => {
     const all = [journal, board]
     expect(journalViews(all).map((v) => v.id)).toEqual(["j"])
     expect(issueViews(all).map((v) => v.id)).toEqual(["b"])
+  })
+})
+
+describe("saved-view API compatibility", () => {
+  it.each([null, undefined, 0, "text", {}, { views: null }, { views: {} }])("ignores malformed list %j", raw => {
+    expect(parseSavedViews(raw)).toEqual([])
+  })
+  it.each([false, true])("accepts only named identified rows (wrapped=%s)", wrapped => {
+    const valid = view()
+    const rows = [null, false, "x", {}, { id: 1, name: "x" }, { id: "x", name: 2 }, valid]
+    expect(parseSavedViews(wrapped ? { views: rows } : rows)).toEqual([valid])
+  })
+  it.each([undefined, "", "{broken", "null", "{}", '{"project_id":1,"crew_id":false,"assignee_id":[],"search":{}}'])("uses neutral filters for %s", filters_json => {
+    expect(applySavedView(view({ filters_json }))).toEqual({ projectId: null, crewId: null, agentId: null, search: "" })
+  })
+  it.each([
+    { project_id: "p", crew_id: "c", assignee_id: "a", search: "find" },
+    { projectId: "p", crewId: "c", assigneeId: "a", query: "find" },
+    { project_id: null, projectId: "p", crew_id: null, crewId: "c", assignee_id: null, assigneeId: null, agent_id: "a", search: null, query: "find" },
+  ])("maps supported filter vocabulary %j", filters => {
+    expect(applySavedView(view({ filters_json: JSON.stringify(filters) }))).toEqual({ projectId: "p", crewId: "c", agentId: "a", search: "find" })
+  })
+  it("prefers explicit snake-case values, including empty strings", () => {
+    expect(applySavedView(view({ filters_json: JSON.stringify({ project_id: "", projectId: "ignored", crew_id: "c", crewId: "ignored", assignee_id: "a", assigneeId: "ignored", agent_id: "ignored", search: "", query: "ignored" }) }))).toEqual({ projectId: "", crewId: "c", agentId: "a", search: "" })
   })
 })

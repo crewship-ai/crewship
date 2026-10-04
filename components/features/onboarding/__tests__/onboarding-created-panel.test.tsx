@@ -1,4 +1,4 @@
-import { render, screen, waitFor, cleanup } from "@testing-library/react"
+import { act, render, screen, waitFor, cleanup } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
@@ -7,6 +7,8 @@ import { apiFetch as apiFetchImport } from "@/lib/api-fetch"
 import { OnboardingCreatedPanel } from "../onboarding-created-panel"
 
 const apiFetch = vi.mocked(apiFetchImport)
+beforeEach(() => { apiFetch.mockReset() })
+afterEach(() => { cleanup(); vi.useRealTimers() })
 
 function jsonOk(body: unknown) {
   return { ok: true, json: async () => body } as unknown as Response
@@ -31,7 +33,7 @@ describe("OnboardingCreatedPanel", () => {
   beforeEach(() => {
     apiFetch.mockReset()
   })
-  afterEach(() => cleanup())
+  afterEach(() => { cleanup(); vi.useRealTimers() })
 
   it("renders nothing when the workspace is still empty", async () => {
     routeTo({})
@@ -115,4 +117,60 @@ describe("OnboardingCreatedPanel", () => {
     await waitFor(() => expect(screen.getByTestId("onboarding-created-page")).toBeTruthy())
     expect(screen.queryAllByTestId("onboarding-created-routine")).toHaveLength(0)
   })
+})
+
+it("reads wrapped lists, tolerates malformed rows and falls back to slugs and counts", async () => {
+  apiFetch.mockImplementation(async (input) => {
+    const url = String(input)
+    if (url.startsWith("/api/v1/crews")) return jsonOk({ items: [null, 4, [], { id: "c", slug: "solo", agents: [{}] }, { slug: "empty" }] })
+    if (url.includes("pipelines")) return jsonOk({ items: [{ slug: "timer", status: "active" }] })
+    return jsonOk({ items: [{ slug: "one", panelCount: 1 }, { slug: "empty-page" }] })
+  })
+  render(<OnboardingCreatedPanel workspaceId="ws/space" />)
+  expect(await screen.findByText("solo")).toBeVisible()
+  expect(screen.getByText("1 agent")).toBeVisible(); expect(screen.getByText("1 panel")).toBeVisible()
+  expect(screen.getByText("empty-page")).toBeVisible(); expect(screen.getByText("timer")).toBeVisible()
+  expect(apiFetch).toHaveBeenCalledWith("/api/v1/workspaces/ws%2Fspace/pipelines?workspace_id=ws%2Fspace")
+})
+it.each(["network", "http", "json", "shape"])("retains known inventory and count after a %s poll failure", async (kind) => {
+  vi.useFakeTimers()
+  routeTo({ crews: [{ slug: "known", agentCount: 2 }], routines: [{ slug: "routine" }], pages: [{ slug: "page" }] })
+  const report = vi.fn()
+  await act(async () => { render(<OnboardingCreatedPanel workspaceId="ws" onCrewsFound={report} />) })
+  expect(report).toHaveBeenLastCalledWith(1)
+  apiFetch.mockImplementation(async () => {
+    if (kind === "network") throw new Error("offline")
+    if (kind === "http") return { ok: false } as Response
+    if (kind === "json") return { ok: true, json: async () => { throw new Error("bad JSON") } } as unknown as Response
+    return jsonOk({ items: "invalid" })
+  })
+  await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
+  expect(screen.getByText("known")).toBeVisible(); expect(screen.getByText("routine")).toBeVisible(); expect(screen.getByText("page")).toBeVisible()
+  expect(report).toHaveBeenLastCalledWith(1)
+  routeTo({}); await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
+  expect(screen.queryByTestId("onboarding-created-panel")).toBeNull(); expect(report).toHaveBeenLastCalledWith(0)
+  cleanup(); vi.useRealTimers()
+})
+it("ignores old workspace responses and clears inventory when scope disappears", async () => {
+  let finish!: (response: Response) => void
+  const pending = new Promise<Response>((resolve) => { finish = resolve })
+  apiFetch.mockReturnValue(pending)
+  const report = vi.fn(); const view = render(<OnboardingCreatedPanel workspaceId="old" onCrewsFound={report} />)
+  routeTo({ crews: [{ slug: "new-crew" }] }); view.rerender(<OnboardingCreatedPanel workspaceId="new" onCrewsFound={report} />)
+  await screen.findByText("new-crew")
+  await act(async () => { finish(jsonOk([{ slug: "stale" }])) })
+  expect(screen.queryByText("stale")).toBeNull(); expect(screen.getByText("new-crew")).toBeVisible()
+  view.rerender(<OnboardingCreatedPanel workspaceId={null} onCrewsFound={report} />)
+  expect(screen.queryByTestId("onboarding-created-panel")).toBeNull(); expect(report).toHaveBeenLastCalledWith(0)
+})
+it("does not overlap slow polls or publish after unmount", async () => {
+  vi.useFakeTimers(); let finish!: (response: Response) => void
+  apiFetch.mockReturnValue(new Promise<Response>((resolve) => { finish = resolve }))
+  const report = vi.fn(); const view = render(<OnboardingCreatedPanel workspaceId="ws" onCrewsFound={report} />)
+  await act(async () => { await vi.advanceTimersByTimeAsync(12000) })
+  expect(apiFetch).toHaveBeenCalledTimes(3)
+  view.unmount(); report.mockClear()
+  await act(async () => { finish(jsonOk([{ slug: "late" }])); await vi.advanceTimersByTimeAsync(8000) })
+  expect(report).not.toHaveBeenCalled(); expect(apiFetch).toHaveBeenCalledTimes(3)
+  vi.useRealTimers()
 })
