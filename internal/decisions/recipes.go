@@ -30,12 +30,12 @@ func TriageRequest(text string) Request {
 }
 
 type TriageSuggestion struct {
-	Recipe      string   `json:"recipe"`
-	Area        string   `json:"area"`
-	NeedsReview bool     `json:"needs_review"`
-	Reason      string   `json:"reason"`
-	Threshold   float64  `json:"threshold"`
-	Response    Response `json:"response"`
+	Recipe      string   `json:"recipe" yaml:"recipe"`
+	Area        string   `json:"area" yaml:"area"`
+	NeedsReview bool     `json:"needs_review" yaml:"needs_review"`
+	Reason      string   `json:"reason" yaml:"reason"`
+	Threshold   float64  `json:"threshold" yaml:"threshold"`
+	Response    Response `json:"response" yaml:"response"`
 }
 
 // Threshold is an experimental coverage knob, not an accuracy guarantee.
@@ -76,13 +76,13 @@ func SuggestTriage(req Request, resp Response, threshold float64) (TriageSuggest
 }
 
 type Candidate struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
+	ID   string `json:"id" yaml:"id"`
+	Text string `json:"text" yaml:"text"`
 }
 
 type RerankInput struct {
-	Query      string      `json:"query"`
-	Candidates []Candidate `json:"candidates"`
+	Query      string      `json:"query" yaml:"query"`
+	Candidates []Candidate `json:"candidates" yaml:"candidates"`
 }
 
 // RerankRequest only handles already-authorized candidates supplied by the
@@ -116,10 +116,10 @@ func RerankRequest(in RerankInput) (Request, error) {
 }
 
 type RankedCandidate struct {
-	ID               string  `json:"id"`
-	OriginalPosition int     `json:"original_position"`
-	Score            float64 `json:"score"`
-	Confidence       float64 `json:"confidence"`
+	ID               string  `json:"id" yaml:"id"`
+	OriginalPosition int     `json:"original_position" yaml:"original_position"`
+	Score            float64 `json:"score" yaml:"score"`
+	Confidence       float64 `json:"confidence" yaml:"confidence"`
 }
 
 // Rank never filters or deletes a candidate; ties preserve retrieval order.

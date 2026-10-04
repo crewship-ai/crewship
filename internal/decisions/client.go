@@ -23,39 +23,39 @@ const (
 )
 
 type Question struct {
-	Type         string          `json:"type"`
-	Instructions string          `json:"instructions"`
-	Criteria     json.RawMessage `json:"criteria,omitempty"`
+	Type         string          `json:"type" yaml:"type"`
+	Instructions string          `json:"instructions" yaml:"instructions"`
+	Criteria     json.RawMessage `json:"criteria,omitempty" yaml:"criteria,omitempty"`
 }
 
 type Request struct {
-	Model     string              `json:"model"`
-	State     json.RawMessage     `json:"state"`
-	Questions map[string]Question `json:"questions"`
+	Model     string              `json:"model" yaml:"model"`
+	State     json.RawMessage     `json:"state" yaml:"state"`
+	Questions map[string]Question `json:"questions" yaml:"questions"`
 }
 
 type Answer struct {
-	Type          string              `json:"type"`
-	Choice        string              `json:"choice,omitempty"`
-	Noul          *float64            `json:"noul,omitempty"`
-	Score         *float64            `json:"score,omitempty"`
-	Confidence    *float64            `json:"confidence,omitempty"`
-	Probabilities map[string]*float64 `json:"probabilities,omitempty"`
-	Legend        map[string]string   `json:"legend,omitempty"`
+	Type          string              `json:"type" yaml:"type"`
+	Choice        string              `json:"choice,omitempty" yaml:"choice,omitempty"`
+	Noul          *float64            `json:"noul,omitempty" yaml:"noul,omitempty"`
+	Score         *float64            `json:"score,omitempty" yaml:"score,omitempty"`
+	Confidence    *float64            `json:"confidence,omitempty" yaml:"confidence,omitempty"`
+	Probabilities map[string]*float64 `json:"probabilities,omitempty" yaml:"probabilities,omitempty"`
+	Legend        map[string]string   `json:"legend,omitempty" yaml:"legend,omitempty"`
 }
 
 type Usage struct {
-	InputTokens  *int64   `json:"input_tokens"`
-	OutputTokens *int64   `json:"output_tokens"`
-	Cost         *float64 `json:"cost,omitempty"` // Provider-reported; nil is unknown, not free.
+	InputTokens  *int64   `json:"input_tokens" yaml:"input_tokens"`
+	OutputTokens *int64   `json:"output_tokens" yaml:"output_tokens"`
+	Cost         *float64 `json:"cost,omitempty" yaml:"cost,omitempty"` // Provider-reported; nil is unknown, not free.
 }
 
 type Response struct {
-	ID       string            `json:"id,omitempty"`
-	Model    string            `json:"model"`
-	Provider string            `json:"provider,omitempty"`
-	Answers  map[string]Answer `json:"answers"`
-	Usage    Usage             `json:"usage"`
+	ID       string            `json:"id,omitempty" yaml:"id,omitempty"`
+	Model    string            `json:"model" yaml:"model"`
+	Provider string            `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Answers  map[string]Answer `json:"answers" yaml:"answers"`
+	Usage    Usage             `json:"usage" yaml:"usage"`
 }
 
 type Evaluator interface {

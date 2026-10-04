@@ -24,7 +24,8 @@ func newDecisionsCommand() *cobra.Command {
 	var threshold float64
 	var dryRun bool
 	cmd := &cobra.Command{Use: "decisions", Short: "Experimental typed decisions: evaluate, suggest triage, or rerank supplied text", Long: `Opt-in Jev pilot. Sends only the supplied input to TypeSafe or OpenRouter.
-Successful results are JSON. Suggestions do not execute actions or change server state.
+Results support the global output format; the default view is JSON.
+Suggestions do not execute actions or change server state.
 Use TYPESAFE_API_KEY or OPENROUTER_API_KEY in the environment; never in arguments.
 --dry-run prints the request without a credential or network call.`}
 	cmd.PersistentFlags().StringVar(&provider, "provider", "typesafe", "typesafe or openrouter")
@@ -109,10 +110,10 @@ Use TYPESAFE_API_KEY or OPENROUTER_API_KEY in the environment; never in argument
 			if len(encoded) > decisions.MaxRequestBytes {
 				return errors.New("decision request exceeds byte limit")
 			}
-			enc := json.NewEncoder(cmd.OutOrStdout())
-			enc.SetIndent("", "  ")
+			formatter := resolvedFormatter(cmd)
+			formatter.Writer = cmd.OutOrStdout()
 			if dryRun {
-				return enc.Encode(req)
+				return formatter.JSON(req)
 			}
 			keyName := "TYPESAFE_API_KEY"
 			if provider == "openrouter" {
@@ -146,7 +147,7 @@ Use TYPESAFE_API_KEY or OPENROUTER_API_KEY in the environment; never in argument
 			if err != nil {
 				return err
 			}
-			return enc.Encode(struct {
+			return writeDecisionResult(cmd, struct {
 				Mode      string  `json:"mode" yaml:"mode"`
 				LatencyMS float64 `json:"latency_ms" yaml:"latency_ms"`
 				Result    any     `json:"result" yaml:"result"`
@@ -155,4 +156,18 @@ Use TYPESAFE_API_KEY or OPENROUTER_API_KEY in the environment; never in argument
 		cmd.AddCommand(sub)
 	}
 	return cmd
+}
+
+// Structured decisions have no useful identifier-only quiet view. Preserve the
+// complete document for the default human view and honor explicit formats.
+func writeDecisionResult(cmd *cobra.Command, result any) error {
+	f := resolvedFormatter(cmd)
+	f.Writer = cmd.OutOrStdout()
+	if f.Format == "quiet" {
+		return nil
+	}
+	if f.RoutesToHuman() {
+		return f.JSON(result)
+	}
+	return f.Auto(result, nil, nil)
 }

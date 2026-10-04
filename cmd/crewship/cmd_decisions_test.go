@@ -6,10 +6,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
+
 	"github.com/crewship-ai/crewship/internal/decisions"
 )
 
 func TestDecisionsDryRun(t *testing.T) {
+	guardCLIState(t)
+	flagFormat = "yaml" // Dry runs remain reusable provider JSON documents.
 	for _, tc := range []struct {
 		mode, input, provider, model string
 		n                            int
@@ -38,6 +43,7 @@ func TestDecisionsDryRun(t *testing.T) {
 	}
 }
 func TestDecisionsMissingKeyAndInvalidInput(t *testing.T) {
+	guardCLIState(t)
 	t.Setenv("TYPESAFE_API_KEY", "")
 	for _, tc := range []struct {
 		args        []string
@@ -57,5 +63,52 @@ func TestDecisionsMissingKeyAndInvalidInput(t *testing.T) {
 		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Fatalf("want %q, got %v", tc.want, err)
 		}
+	}
+}
+
+func TestDecisionsResultFormats(t *testing.T) {
+	guardCLIState(t)
+	tokens := int64(12)
+	score := 0.75
+	result := decisions.Response{Model: "test", Usage: decisions.Usage{InputTokens: &tokens}, Answers: map[string]decisions.Answer{"q": {Type: "score", Score: &score}}}
+	for _, format := range []string{"table", "json", "yaml", "ndjson", "quiet"} {
+		t.Run(format, func(t *testing.T) {
+			flagFormat = format
+			cmd := &cobra.Command{}
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			if err := writeDecisionResult(cmd, result); err != nil {
+				t.Fatal(err)
+			}
+			if format == "quiet" {
+				if out.Len() != 0 {
+					t.Fatal("quiet emitted a result")
+				}
+				return
+			}
+			var got struct {
+				Usage struct {
+					InputTokens int64 `json:"input_tokens" yaml:"input_tokens"`
+				} `json:"usage" yaml:"usage"`
+				Answers map[string]struct {
+					Score float64 `json:"score" yaml:"score"`
+				} `json:"answers" yaml:"answers"`
+			}
+			var err error
+			if format == "yaml" {
+				err = yaml.Unmarshal(out.Bytes(), &got)
+			} else {
+				err = json.Unmarshal(out.Bytes(), &got)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Usage.InputTokens != tokens || got.Answers["q"].Score != score {
+				t.Fatalf("lost typed values: %s", out.String())
+			}
+			if format == "ndjson" && strings.Count(out.String(), "\n") != 1 {
+				t.Fatal("NDJSON must be one record")
+			}
+		})
 	}
 }

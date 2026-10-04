@@ -11,7 +11,9 @@ tag: Experimental
 Evaluate explicitly supplied text using Jev through TypeSafe or OpenRouter.
 This local pilot needs no running Crewship server. It returns suggestions and
 never assigns work, executes actions, changes permissions, or deletes memory.
-Successful output is JSON, regardless of the global `--format` setting.
+Results support `--format json`, `yaml`, and `ndjson`; `quiet` suppresses results.
+The default view prints the complete JSON document. A `--dry-run` always prints
+the provider request as JSON for inspection or reuse, regardless of format.
 Errors follow the CLI's global error formatting.
 
 Set `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` securely in the environment.
