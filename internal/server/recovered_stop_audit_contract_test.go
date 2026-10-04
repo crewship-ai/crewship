@@ -166,6 +166,59 @@ func TestRecoveredStopAuditWithoutStartContract(t *testing.T) {
 
 }
 
+func TestRecoveredStopAuditBootRetainsStatusForUnconfirmedOwnership(t *testing.T) {
+	for _, workspace := range []string{"", "other"} {
+		t.Run("workspace="+workspace, func(t *testing.T) {
+			s := newTestServerWithDeps(t)
+			mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw'),('other','Other','other')`)
+			mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING'),('unrelated','rw','Unrelated','unrelated','RUNNING')`)
+			run := orchestrator.RunState{ID: "unconfirmed-stop", AgentID: "a", WorkspaceID: workspace, Status: "cancelled", StopJournalPending: true}
+			raw, err := json.Marshal(run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = s.state.Set(t.Context(), "agent_runs", run.ID, raw); err != nil {
+				t.Fatal(err)
+			}
+			seedRecoveryTrace(t, s, "older-orphan", "a")
+			s.recoverOrphanedRuns(t.Context())
+			if count := recoveryTerminalCount(t, s, "older-orphan"); count != 1 {
+				t.Errorf("pending stop blocked unrelated trace cleanup: terminal entries=%d", count)
+			}
+			var status string
+			if err = s.db.QueryRow(`SELECT status FROM agents WHERE id='a'`).Scan(&status); err != nil {
+				t.Fatal(err)
+			}
+			if status != "RUNNING" {
+				t.Errorf("boot ownership refusal changed agent status: %s", status)
+			}
+			if err = s.db.QueryRow(`SELECT status FROM agents WHERE id='unrelated'`).Scan(&status); err != nil {
+				t.Fatal(err)
+			}
+			if status != "IDLE" {
+				t.Errorf("unrelated agent recovery was blocked: %s", status)
+			}
+			states, err := s.state.List(t.Context(), "agent_runs")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = json.Unmarshal(states[run.ID], &run); err != nil {
+				t.Fatal(err)
+			}
+			if !run.StopJournalPending {
+				t.Error("unconfirmed stop lost its retry marker")
+			}
+			var count int
+			if err = s.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE trace_id=?`, run.ID).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Errorf("unconfirmed stop published %d history entries", count)
+			}
+		})
+	}
+}
+
 func TestRecoveredStopAuditRequiresConfirmedOwnership(t *testing.T) {
 	for _, tc := range []struct{ name, agent, workspace string }{
 		{"missing-agent", "gone", "rw"}, {"missing-workspace", "a", ""},

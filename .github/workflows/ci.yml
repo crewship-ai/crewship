@@ -1659,44 +1659,19 @@ jobs:
   go-race:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.go == 'true'
-    name: Go Race
+    name: Go Race (shard ${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     runs-on: ubuntu-latest
-    # BLOCKING, with no continue-on-error. A red run means a race landed —
-    # or a package belongs on the exclusion list above, held to the same
-    # justification bar as the one already there (structural incompatibility,
-    # not "it's slow" and not "the race is inconvenient to fix").
-    #
-    # Same invariant as the `go` job: cap MUST exceed overhead + the
-    # `go test -timeout` below, so Go's goroutine-dumping panic wins the
-    # race against GitHub's opaque cancel. -timeout is 25m; overhead is
-    # ~2.5 min of checkout + setup-go + race-compiling the dependency graph
-    # (measured on job 90981983760: script start 19:33:23, first binary
-    # under way by ~19:36). 35m clears 25m + overhead with room.
-    #
-    # Whole job measures 17m53s with the shard split out, slowest binary
-    # cmd/crewship at 940.9s. The 25m -timeout is ~1.6x headroom for that
-    # one package, not an expectation.
-    #
-    # 35 -> 55 (2026-09-09). That 17m53s measurement stopped holding: five
-    # runs on 2026-09-09 ended at 35m0s, 35m16s (x2), 35m17s and 35m18s —
-    # GitHub's cancel, not a test. One of them had already logged its test
-    # step as successful when the wrapper was killed, which is what makes
-    # this a wall-clock problem rather than a hung binary: `-timeout` is per
-    # test binary, so `go test ./...` can spend more than 35m in total
-    # without any single package coming near 25m.
-    #
-    # 55 matches the internal/api shard below. It does NOT weaken the
-    # property this number was chosen for: `-timeout` stays at 25m, so a
-    # genuinely stuck binary still panics with its goroutine dump long
-    # before the job cap, and the log still says which package hung. What
-    # changes is only that a slow runner no longer kills a passing suite
-    # and reports it as a failure nobody can diagnose from the log.
-    # 55 -> 75 (2026-10-01, combined Harbor integration). Run 36855862178
-    # finished 160 of 174 race packages with no failures before the job cap
-    # killed still-progressing server/work/usermodel tests and the final
-    # script packages. The larger schema makes DB-backed fixtures slower.
-    # Keep the per-package 35m hang deadline below unchanged; this increases
-    # only the whole-suite allowance, not what any individual test may do.
+    # Run 37145916427 needed 61m22s for this package group. Two balanced
+    # groups keep internal/backup (2028.5s) and internal/access (1725.3s)
+    # on separate runners. Fresh go list inventory includes new packages;
+    # timings affect placement only, never whether a package executes.
+    # Keep the 35m per-binary hang bound and 75m job cap unchanged. The
+    # structural database exclusion and dedicated API/CLI coverage above
+    # retain their distinct meanings; stale exclusions fail enumeration.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1711,72 +1686,15 @@ jobs:
         # No -shuffle here on purpose: `go-shuffle` owns order-dependence
         # detection. Keeping this job's ordering fixed means a race report
         # is reproducible from the log without also having to replay a seed.
-        run: |
-          set -euo pipefail
-          # Two lists, two different meanings — kept as separate files so
-          # nobody has to infer the difference from a comment:
-          #
-          #   race-deny.txt  → NOT race-tested anywhere. Needs the
-          #                    structural justification in the job comment.
-          #   race-shard.txt → race-tested by the explicit API/CLI jobs. Covered,
-          #                    just not from this binary's timeout budget.
-          #
-          # cmd/crewship was the second deny entry and is back under -race
-          # as of #1610. It was a real race, not a cost exclusion, and
-          # putting the package under -race is what found it: resetCLIState
-          # (clistate_test.go) restores process-wide CLI globals from
-          # t.Cleanup while a parallel test reads them through
-          # shellPromptString. Exactly one of the package's 189 parallel
-          # tests reached a state-mutating helper, so the fix was to make
-          # that one serial; clistate_parallel_guard_test.go now fails the
-          # build if the pairing comes back.
-          #
-          # A stale entry in either (renamed/removed package) fails loudly
-          # rather than silently covering less than the comment claims.
-          denyfile="${RUNNER_TEMP:-/tmp}/race-deny.txt"
-          cat > "$denyfile" <<'DENY'
-          github.com/crewship-ai/crewship/internal/database
-          DENY
-          shardfile="${RUNNER_TEMP:-/tmp}/race-shard.txt"
-          cat > "$shardfile" <<'SHARD'
-          github.com/crewship-ai/crewship/internal/api
-          github.com/crewship-ai/crewship/cmd/crewship
-          SHARD
-          nheld="$(cat "$denyfile" "$shardfile" | grep -c .)"
-          total="$(go list ./... | grep -c .)"
-          pkgs="$(go list ./... | grep -Fxv -f "$denyfile" | grep -Fxv -f "$shardfile")"
-          n="$(printf '%s\n' "$pkgs" | grep -c .)"
-          # Every entry must remove exactly one real package. If the count
-          # doesn't balance, either an entry is stale (a rename silently
-          # re-includes a known-bad package, or silently drops a sharded one
-          # from BOTH jobs) or `go list` collapsed — which would otherwise
-          # look like a truncated-but-green run, the uncounted-t.Skip
-          # failure mode again.
-          if [ "$((total - n))" -ne "$nheld" ]; then
-            echo "::error::race lists hold back $((total - n)) packages but have $nheld entries. One is stale — reconcile against 'go list ./...'."
-            cat "$denyfile" "$shardfile"
-            exit 1
-          fi
-          echo "Race-testing $n of $total packages (1 excluded, 2 sharded to dedicated jobs; see job comment)."
-          # -timeout 25m per test binary. Was 20m, which cmd/crewship
-          # cleared by only 97 seconds (1102.8s then, 940.9s now that the
-          # shard is not competing for the same 4 vCPUs) — that was luck,
-          # not headroom. Everything here except cmd/crewship and
-          # internal/backup finishes in under two minutes, so this is
-          # generosity for two packages, not a general bump. It only ever
-          # bounds a hang, and a hang here should produce Go's goroutine
-          # dump rather than a GitHub cancel.
-          # shellcheck disable=SC2086
-          # #2472: the 4,032-test CLI binary reached the 25m package cap while
-          # starting TestSetOptIn_FreshDB_DoesNotPanic (0s), with no race report.
-          # Keep the goroutine-dumping deadline inside the existing 55m job cap.
-          bash scripts/ci/go-test.sh $pkgs -race -count=1 -timeout 35m
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: python3 scripts/ci/general-race-shard.py run "$SHARD_INDEX" 2 2100
 
       - name: Upload test timings and event stream
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: timings-${{ github.job }}-${{ github.sha }}
+          name: timings-${{ github.job }}-${{ matrix.shard }}-${{ github.sha }}
           path: .ci-results/
           include-hidden-files: true
           if-no-files-found: warn
@@ -1802,206 +1720,77 @@ jobs:
   # go-race's list guard will not catch that, because from its side the
   # package is legitimately held back either way.
 
-  go-race-api:
+  go-race-api-shards:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.go == 'true'
-    name: Go Race (internal/api)
+    name: Go Race (internal/api shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
-    # BLOCKING, same as go-race.
-    #
-    # ── The budget (#2031) ──
-    #
-    # This job's `-timeout` used to be a hand-written 30m, documented as
-    # "~1.7x" a 1056.5s measurement carrying no date. By 2026-08-20 the
-    # gate was panicking on PRs that touched no Go at all, with no
-    # `--- FAIL` and no `WARNING: DATA RACE` to say otherwise — which reads
-    # exactly like the author's own regression.
-    #
-    # Measured, on `main`, green, `ok … Ns` straight from each job log:
-    #
-    #   run           sha        binary seconds
-    #   32265046451   750805de       1528.9
-    #   32297961942   01354cf4       1708.1
-    #   32356542793   74abd726       1155.7
-    #   32366381186   39a4ea4b       1626.9
-    #   32384479926   7f0a8e1f       1549.2
-    #
-    # Two things that table settles. First, growth is real but slower than
-    # it looked: 1056.5s at the split, ~1550s median now. Second — and this
-    # is what actually broke the gate — the SPREAD on essentially the same
-    # tree is 1.48x (1155.7 vs 1626.9, two hours apart on the same day, two
-    # commits apart). Runner-to-runner variance, not the diff under test,
-    # is the dominant term. A cap at 1.16x the median was never going to
-    # survive it, and re-measuring the median more often would not have
-    # helped: the number that matters is the slow tail.
-    #
-    # So the budget is now derived from ONE maintained number,
-    # RACE_API_BASELINE_SECONDS, instead of three claims in prose that can
-    # each rot independently. See the test step for the derivation and for
-    # the alarm that fires when the margin erodes again.
-    #
-    # This cap only ever bounds a hang. It must stay above the derived
-    # `-timeout` plus job overhead — and the step CHECKS that before it
-    # starts a single test, rather than trusting this comment.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    # Preserve the existing 2x full-package hang bound while measuring the
+    # new partitions. The aggregate below retains the full-package erosion
+    # alarm over SUMMED durations, including each process's setup/cleanup.
     timeout-minutes: 85
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Go test (race, internal/api)
-        # No -shuffle, for the same reason as go-race: go-shuffle owns
-        # order-dependence, and a fixed order keeps a race report
-        # reproducible from the log without replaying a seed.
+      - name: Go test (race, internal/api partition)
+        # go-shuffle retains full-package order-dependence coverage. Each
+        # race parent and its subtests execute in exactly one partition.
         env:
-          # ── The one number to maintain ──
-          #
-          # Binary seconds for this package on a TYPICAL ubuntu-latest
-          # runner, re-measured after #2031 lowered the test binary's
-          # bcrypt cost.
-          #
-          #   measured:  2026-09-14
-          #   value:     2291-2358s over four consecutive `main` runs
-          #              (34828855474, 34833070262, 34835848487,
-          #              34840188893: 2313.9 / 2291.0 / 2357.8 / 2339.4s),
-          #              rounded down to 2300. The growth from the previous
-          #              1400 came with #2490 (durable work dispatch): it
-          #              added the vertical HTTP webhook/dispatch suites, the
-          #              memory mutation and canonical-read families and the
-          #              run-status tests to internal/api, all of which
-          #              exercise real timers under the race detector. The
-          #              old baseline's erosion alarm (2240s) then fired on
-          #              every push to main from 9c47bad6 on, while the same
-          #              job on the PR only warned. Sharding the package
-          #              (#2031) is the durable fix; this re-measure restores
-          #              a truthful budget in the meantime.
-          #
-          #   previous:  2026-08-20, 1405.3s rounded to 1400 — run
-          #              32395823919, job 96512768782, the first green run
-          #              carrying the lowered test-binary bcrypt cost.
-          #
-          # It is a point estimate and cannot be anything else: the spread
-          # between two runners on the same tree is 1.48x, so no number of
-          # re-measurements produces a "true" value. That is why the
-          # multipliers below are sized to absorb the spread rather than to
-          # sit just above the last observation, which is the mistake this
-          # budget made before.
-          #
-          # Everything below is derived from it, so no multiplier can be
-          # true in a comment and false in the YAML:
-          #
-          #   -timeout      = 2.0x baseline   the hang bound
-          #   erosion alarm = 1.6x baseline   above the 1.48x runner spread,
-          #                                   so a slow runner alone is not
-          #                                   enough to trip it
-          #   job cap       > -timeout + JOB_OVERHEAD_MINUTES  (checked)
-          #
-          # To re-measure: take `ok … Ns` off a few green `main` runs of
-          # this job — the step prints it into the run summary for exactly
-          # this purpose — and update the three lines above together.
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_COUNT: "4"
           RACE_API_BASELINE_SECONDS: "2300"
-          JOB_CAP_MINUTES: "85"       # MUST equal timeout-minutes above
-          JOB_OVERHEAD_MINUTES: "6"   # checkout + toolchain + race build
+          JOB_CAP_MINUTES: "85"
+          JOB_OVERHEAD_MINUTES: "6"
         run: |
           set -euo pipefail
-          pkg=github.com/crewship-ai/crewship/internal/api
-          # The shard is only coverage if the package it names still
-          # exists. A rename would otherwise leave this job green and
-          # testing nothing, while go-race keeps holding the old path back.
-          #
-          # `go list` into a variable, NOT through a pipe into `grep -q`.
-          # `-q` exits at the first match, the producer then takes SIGPIPE,
-          # and under `pipefail` that makes the pipeline non-zero — so the
-          # guard fired precisely BECAUSE the package resolved, and early
-          # enough in the list that grep left while `go list` was still
-          # writing. It read as "this shard is testing nothing" on a tree
-          # where every other Go job compiled the same module, and it was
-          # timing-dependent, so a re-run usually buried it.
-          #
-          # Assigning first also makes a REAL `go list` failure abort the
-          # step through `set -e`, with go's own message, instead of being
-          # relabelled as a stale shard entry.
-          pkgs="$(go list ./...)"
-          if ! printf '%s\n' "$pkgs" | grep -Fxq "$pkg"; then
-            echo "::error::$pkg does not resolve against 'go list ./...'. This shard is testing nothing — reconcile it and go-race's race-shard.txt together."
-            exit 1
-          fi
-
-          baseline="$RACE_API_BASELINE_SECONDS"
-          timeout_s=$(( baseline * 2 ))        # 2.0x — the hang bound
-          alarm_s=$(( baseline * 16 / 10 ))    # 1.6x — above the 1.48x runner spread
-
-          # The cap invariant, checked rather than asserted. Raising the
-          # baseline without raising timeout-minutes would silently hand the
-          # kill back to GitHub, whose cancel produces no goroutine dump —
-          # the exact ambiguity this job's budget exists to remove.
+          timeout_s=$(( RACE_API_BASELINE_SECONDS * 2 ))
           if [ $(( timeout_s + JOB_OVERHEAD_MINUTES * 60 )) -ge $(( JOB_CAP_MINUTES * 60 )) ]; then
-            echo "::error::Budget does not fit its job cap: -timeout ${timeout_s}s + ${JOB_OVERHEAD_MINUTES}m overhead >= timeout-minutes ${JOB_CAP_MINUTES}. Raise timeout-minutes (and JOB_CAP_MINUTES with it) or lower RACE_API_BASELINE_SECONDS."
+            echo "::error::API race timeout plus overhead exceeds the job cap."
             exit 1
           fi
-
-          echo "internal/api race budget: baseline ${baseline}s, -timeout ${timeout_s}s, erosion alarm ${alarm_s}s."
-
-          log="${RUNNER_TEMP:-/tmp}/race-api.log"
-          status=0
-          bash scripts/ci/go-test.sh "$pkg" -race -count=1 -timeout "${timeout_s}s" 2>&1 | tee "$log" || status=$?
-
-          # `ok  <pkg>  1155.745s` on success, `FAIL <pkg> 1800.087s` on a
-          # timeout panic — both carry the number, so the budget is reported
-          # on the run that blew it too, which is the run that needs it.
-          secs="$(grep -aoE 'internal/api[[:space:]]+[0-9]+\.[0-9]+s$' "$log" | tail -1 | grep -oE '[0-9]+\.[0-9]+' || true)"
-
-          if [ -n "$secs" ]; then
-            ratio="$(awk -v s="$secs" -v b="$baseline" 'BEGIN{printf "%.2f", s/b}')"
-            {
-              echo "### Go Race (internal/api) — budget"
-              echo ""
-              echo "| | seconds |"
-              echo "|---|---:|"
-              echo "| measured (\`ok … Ns\`) | ${secs} |"
-              echo "| baseline | ${baseline} |"
-              echo "| erosion alarm | ${alarm_s} |"
-              echo "| \`-timeout\` | ${timeout_s} |"
-              echo ""
-              echo "Measured / baseline = **${ratio}x**. Re-measure from a few green \`main\` runs when this drifts."
-            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-            echo "internal/api race binary: ${secs}s (${ratio}x baseline ${baseline}s)."
-          fi
-
-          if [ "$status" -ne 0 ]; then
-            if grep -qa 'panic: test timed out' "$log"; then
-              echo "::error::internal/api hit its ${timeout_s}s -timeout. A timeout panic prints a goroutine dump and NO 'WARNING: DATA RACE' and NO '--- FAIL' — it is not evidence that this PR broke anything. Check the log for 'WARNING: DATA RACE' first; if there is none, this is the budget (#2031), and RACE_API_BASELINE_SECONDS needs re-measuring against green 'main' runs."
-            fi
-            exit "$status"
-          fi
-
-          if [ -n "$secs" ] && [ "${secs%%.*}" -gt "$alarm_s" ]; then
-            # On a PR this is a warning: the observed runner-to-runner
-            # spread is 1.48x, so one slow runner must never be able to turn
-            # somebody's frontend-only diff red — that misattribution is the
-            # whole of #2031. On `main` the same reading is an error,
-            # because there the subject really is the repo.
-            msg="internal/api took ${secs}s, over the ${alarm_s}s erosion alarm (${ratio}x the ${baseline}s baseline). This is about the package's size and the runner, not about any one diff. Re-measure RACE_API_BASELINE_SECONDS from green 'main' runs and re-size, or shard the package (see #2031)."
-            if [ "${GITHUB_EVENT_NAME:-}" = "push" ]; then
-              echo "::error::${msg}"
-              exit 1
-            fi
-            echo "::warning::${msg}"
-          fi
-
-      - name: Upload test timings and event stream
+          python3 scripts/ci/api-race-shard.py run "$SHARD_INDEX" "$SHARD_COUNT" "$timeout_s"
+      - name: Upload test timings and partition evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: timings-${{ github.job }}-${{ github.sha }}
+          name: timings-go-race-api-${{ matrix.shard }}-${{ github.sha }}
           path: .ci-results/
           include-hidden-files: true
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
+
+  go-race-api:
+    needs: [changes, go-race-api-shards]
+    if: always() && needs.changes.outputs.go == 'true'
+    name: Go Race (internal/api)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every API partition
+        env:
+          SHARD_RESULT: ${{ needs.go-race-api-shards.result }}
+        run: test "$SHARD_RESULT" = success
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: timings-go-race-api-*-${{ github.sha }}
+          path: .ci-api-shards/
+      - name: Verify complete API coverage and combined budget
+        # Full-package baseline measured 2026-09-14: 2291–2358 seconds in
+        # main runs 34828855474,34833070262,34835848487,34840188893.
+        # Keep the 1.6x alarm and PR-warning/main-failure policy from #2031.
+        # Summing partitions is conservative: it repeats package setup.
+        run: python3 scripts/ci/api-race-shard.py report .ci-api-shards 4 2300
 
 
   # ── Go: cross-platform test matrix ──
@@ -2282,7 +2071,7 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [release-rehearsal, image, changes, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
+    needs: [release-rehearsal, image, changes, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:

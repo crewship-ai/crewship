@@ -1092,6 +1092,31 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	if err := s.flushRecoveredStops(ctx); err != nil {
 		s.logger.Warn("project boot runtime absence", "error", err)
 	}
+	// A rejected or deferred stop projection must not change its agent's
+	// status through the generic reset below. Read back the outbox: successful
+	// projections acknowledged their markers and already own status updates.
+	// This guard leaves unrelated orphan traces eligible for cleanup.
+	if s.state != nil {
+		states, err := s.state.List(ctx, "agent_runs")
+		if err != nil {
+			s.logger.Error("inspect pending boot stop projections", "error", err)
+			return
+		}
+		for _, raw := range states {
+			var run orchestrator.RunState
+			if err := json.Unmarshal(raw, &run); err != nil {
+				s.logger.Error("decode pending boot stop ownership", "error", err)
+				if owner := orchestrator.RuntimeRecordAgent(raw); owner != "" {
+					protectedAgents[owner] = true
+					continue
+				}
+				return
+			}
+			if run.Status == "cancelled" && run.StopJournalPending && run.AgentID != "" {
+				protectedAgents[run.AgentID] = true
+			}
+		}
+	}
 	if s.journalWriter == nil {
 		// Without a journal writer we can't write the cancel entries —
 		// but we can still reset agents to IDLE since their status is

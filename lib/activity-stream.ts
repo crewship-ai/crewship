@@ -53,6 +53,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "run.completed",
       "run.failed",
       "run.cancelled",
+      "run.recovered_stop",
       "run.timeout",
       "exec.command",
       "exec.output_chunk",
