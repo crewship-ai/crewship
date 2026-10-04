@@ -20,6 +20,7 @@ TESTS = {
     'internal/orchestrator': {'TestManagedLaunchRealDocker'},
     'internal/provider/docker': {
         'TestStagedStartRealDocker',
+        'TestStagedBackupRealDocker',
         'TestStagedQualificationRealDocker',
         'TestSandboxRuntimeRealDocker',
         'TestSandboxDisablesImageHealthcheckRealDocker',
@@ -54,6 +55,8 @@ STAGED_CHILDREN = {
 REQUIRED_TOP_LEVEL = {(PREFIX + package, name) for package, names in TESTS.items() for name in names}
 REQUIRED_CHILDREN = {(PREFIX + STAGED_PACKAGE, STAGED + '/' + child)
                      for child in STAGED_CHILDREN}
+REQUIRED_CHILDREN.add((PREFIX + STAGED_PACKAGE,
+                       'TestStagedBackupRealDocker/external_backup_ready_and_restart_race'))
 REQUIRED = REQUIRED_TOP_LEVEL | REQUIRED_CHILDREN
 
 

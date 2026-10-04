@@ -142,10 +142,37 @@ type MobyDockerOps struct {
 	// exec starts. Any error refuses the exec. The server wires it to the
 	// container provider; nil means no guard (no provider, tests).
 	Guard ExecGuard
+	// Prepare optionally combines boot-bound argv/environment preparation with
+	// the existing fence guard, so a nonpilot exec needs no second inspection.
+	// It supersedes Guard for this exec and preserves the same start checks.
+	Prepare ExecPreparation
 }
 
 // ExecGuard is MobyDockerOps.Guard. beforeStart and afterStart may be nil.
 type ExecGuard func(ctx context.Context, containerID string) (beforeStart, afterStart func(context.Context) error, err error)
+
+// ExecPreparation prepares command/env and the checks bracketing exec start.
+// A provider owning the current boot's admission implements this capability.
+type ExecPreparation func(context.Context, string, []string, []string) ([]string, []string, func(context.Context) error, func(context.Context) error, error)
+
+func (m *MobyDockerOps) prepare(ctx context.Context, id string, cmd []string) ([]string, []string, func(context.Context) error, func(context.Context) error, error) {
+	if m.Prepare == nil {
+		before, after, err := m.guard(ctx, id)
+		return cmd, nil, before, after, err
+	}
+	cmd, env, before, after, err := m.Prepare(ctx, id, cmd, nil)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("backup: exec into %s refused: %w", id, err)
+	}
+	noop := func(context.Context) error { return nil }
+	if before == nil {
+		before = noop
+	}
+	if after == nil {
+		after = noop
+	}
+	return cmd, env, before, after, nil
+}
 
 // guard resolves Guard for one exec. The order around it is: guard →
 // ExecCreate → beforeStart → ExecAttach (which starts the exec) → afterStart.
@@ -337,12 +364,13 @@ func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID string, 
 		cmd = append(cmd, "--touch")
 	}
 	cmd = append(cmd, "-f", "-", "-C", dstPath)
-	beforeStart, afterStart, err := m.guard(ctx, containerID)
+	cmd, env, beforeStart, afterStart, err := m.prepare(ctx, containerID, cmd)
 	if err != nil {
 		return err
 	}
 	exec, err := m.Client.ExecCreate(ctx, containerID, client.ExecCreateOptions{
 		Cmd:          cmd,
+		Env:          env,
 		User:         user,
 		AttachStdin:  true,
 		AttachStdout: true,
@@ -427,12 +455,13 @@ func (m *MobyDockerOps) Exec(ctx context.Context, containerID string, cmd []stri
 
 // ExecAs implements DockerOps.
 func (m *MobyDockerOps) ExecAs(ctx context.Context, containerID, user string, cmd []string) (int, []byte, error) {
-	beforeStart, afterStart, err := m.guard(ctx, containerID)
+	cmd, env, beforeStart, afterStart, err := m.prepare(ctx, containerID, cmd)
 	if err != nil {
 		return -1, nil, err
 	}
 	exec, err := m.Client.ExecCreate(ctx, containerID, client.ExecCreateOptions{
 		Cmd:          cmd,
+		Env:          env,
 		User:         user,
 		AttachStdout: true,
 		AttachStderr: true,
