@@ -23,6 +23,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Repeated environment rebuilds left untagged images outside cache cleanup.** The orphan sweeper now recognizes published artifacts from revision history while preserving images selected by live crews and unknown untagged images. The existing opt-in deletion policy and age floor still apply.
 - **Editing an environment during a build could fail waiting messages.** Superseded builds retry the current definition within the original job budget; obsolete CLI qualification cannot prevent that retry, and unchanged definitions still enforce their required checks.
+- **`crewship crew rebuild` and its documentation claimed the cached image is discarded up front.** The CLI help text, its `--no-watch` message and four documentation pages described a cache-marker wipe the code never performs: the bypass belongs to the admitted build job, the previous image stays selected until the new build succeeds, and a failed rebuild leaves it in place.
 
 - Runtime editing preserves existing TOML and unsupported mise shapes instead of erasing tool pins; rejected raw edits no longer partially apply other settings.
 
