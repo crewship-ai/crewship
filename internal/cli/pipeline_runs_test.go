@@ -14,7 +14,7 @@ import (
 const testWorkspaceCUID = "cworkspace12345678901234"
 
 func TestPipelineRunDetail_IsTerminal(t *testing.T) {
-	terminal := []string{"completed", "failed", "cancelled", "interrupted", "dry_run", "COMPLETED", "Failed"}
+	terminal := []string{"completed", "failed", "cancelled", "canceled", "needs_reconciliation", "interrupted", "dry_run", "COMPLETED", "Failed"}
 	for _, s := range terminal {
 		d := &PipelineRunDetail{Status: s}
 		if !d.IsTerminal() {
