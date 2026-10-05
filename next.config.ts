@@ -37,7 +37,7 @@ const nextConfig: NextConfig = {
 }
 
 // The Sentry 11 build wrapper has a separate entry point from the runtime SDK.
-// Source maps are removed from the export; symbol upload remains optional.
+// Delete generated source maps after upload; symbol upload remains optional.
 // Debug logging is stripped for webpack builds (Turbopack has no equivalent).
 const sentryBuildOptions = {
   // Empty org/project on purpose. The plugin still installs the

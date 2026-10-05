@@ -36,6 +36,11 @@ const EXCEPTIONS = {
   // tarball; package.json declares MIT, but no package license is included.
   // build/THIRD-PARTY-LICENSES.txt covers vendored dependencies only.
   "@sentry/server-utils@11.4.0": "package.json declares MIT",
+  // Same exact-tarball review for newly introduced native parser bindings
+  // and runtime injection: MIT declarations, no package license texts.
+  "@oxc-parser/binding-linux-x64-gnu@0.152.0": "package.json declares MIT",
+  "@oxc-parser/binding-linux-x64-musl@0.152.0": "package.json declares MIT",
+  "@sentry/server-runtime-injection@11.4.0": "package.json declares MIT",
   // Dependency refresh (2026-09-30): inspected each exact installed package
   // in node_modules/.pnpm. These versions still omit license files and
   // declare the same license as their previously reviewed versions below.
