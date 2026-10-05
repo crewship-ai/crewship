@@ -582,6 +582,11 @@ func buildCrewshipBinary(t *testing.T) string {
 		}
 		out := filepath.Join(buildDir, "crewship")
 		args := []string{"build", "-o", out}
+		// Only the dedicated subprocess race lane opts in. The ordinary
+		// acceptance suite keeps its native build and runtime costs.
+		if os.Getenv("TEST_CREWSHIP_CLI_RACE") == "1" {
+			args = append(args, "-race")
+		}
 		// Acceptance tests run a separate process. Ordinary go test coverage
 		// cannot see it; opt in when collecting GOCOVERDIR artifacts for the
 		// CLI package, then merge them with go tool covdata textfmt.
