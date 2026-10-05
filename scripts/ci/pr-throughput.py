@@ -104,6 +104,15 @@ def attempt_metrics(run, jobs):
             'job_conclusions': {j['name']: j['conclusion'] for j in jobs}}
 
 
+def row_run_counts(attempts):
+    unique = {(a['run_id'], a['attempt']): a for a in attempts}
+    ci = [a for a in unique.values() if Path(a['workflow'].split('@')[0]).name == 'ci.yml']
+    return {'ci_runs': len({a['run_id'] for a in ci}),
+            'ci_rerun_attempts': sum(a['attempt'] > 1 for a in ci),
+            'required_workflow_runs': len({a['run_id'] for a in unique.values()}),
+            'required_workflow_rerun_attempts': sum(a['attempt'] > 1 for a in unique.values())}
+
+
 class GitHub:
     def __init__(self, max_requests):
         self.count = 0
@@ -192,6 +201,8 @@ def collect(args):
                                          'new_run_substantive_or_unclassified_push')})
         if run['run_attempt'] > args.max_attempts:
             warnings.append(f'Run {run["id"]}: attempts truncated at {args.max_attempts}')
+    for row in rows:
+        row.update(row_run_counts(row['attempts']))
     unique = {(a['run_id'], a['attempt']): a for row in rows for a in row['attempts']}
     summary = {'sample_prs': len(rows), 'api_requests': github.count, 'warnings': warnings,
                'workflow_runs': len({a['run_id'] for a in unique.values()}),
