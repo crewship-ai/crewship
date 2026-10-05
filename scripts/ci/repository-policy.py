@@ -105,14 +105,32 @@ def gh_api(endpoint, payload=None):
 def make_plan(ruleset, repo, ruleset_id, auto_merge, code_scanning_only=False):
     identity(ruleset, repo, ruleset_id)
     before = shape(ruleset)
+    warnings = []
+    if before['bypass_actors']:
+        warnings.append('Preserved emergency bypass actors can override required checks and '
+                        'merge queue; review their use separately.')
+    if auto_merge is False and not code_scanning_only:
+        warnings.append('Repository allow_auto_merge is false; an operator must enable it '
+                        'before activating the queue procedure. This plan does not change it.')
     return {'schema_version': 1, 'repo': repo, 'ruleset_id': ruleset_id,
             'expected_sha256': digest(before), 'before': before,
             'code_scanning_only': code_scanning_only,
             'proposed': proposed(before, code_scanning_only),
-            'allow_auto_merge_observed': auto_merge}
+            'allow_auto_merge_observed': auto_merge, 'warnings': warnings}
 
 
-def apply_plan(plan, documentation_commit, api=gh_api):
+def main_ancestor(repo, commit, label, api):
+    if not re.fullmatch(r'[0-9a-f]{40}', commit or ''):
+        raise ValueError(f'{label} prerequisite requires a full commit SHA')
+    comparison = api(f'repos/{repo}/compare/{commit}...main')
+    if (not isinstance(comparison, dict) or not isinstance(comparison.get('base_commit'), dict)
+            or comparison['base_commit'].get('sha') != commit):
+        raise ValueError(f'{label} comparison does not match the reviewed commit SHA')
+    if comparison.get('status') not in ('ahead', 'identical'):
+        raise ValueError(f'{label} commit is not an ancestor of current main')
+
+
+def apply_plan(plan, documentation_commit, analysis_commit, api=gh_api):
     repo, ruleset_id = plan['repo'], plan['ruleset_id']
     if plan.get('schema_version') != 1 or digest(plan['before']) != plan['expected_sha256']:
         raise ValueError('invalid saved plan fingerprint')
@@ -121,11 +139,17 @@ def apply_plan(plan, documentation_commit, api=gh_api):
     security_only = plan.get('code_scanning_only', False)
     if proposed(plan['before'], security_only) != plan['proposed']:
         raise ValueError('saved proposed policy differs from the preservation-first transformation')
-    # An operator names the documentation commit after verifying its content.
+    # SHAs attest operator review of the source/canaries and queue procedure.
+    # Ancestry verifies presence on main, not those commits' actual content.
+    if security_only and documentation_commit is not None:
+        raise ValueError('documentation commit is only valid for queue activation')
+    if not re.fullmatch(r'[0-9a-f]{40}', analysis_commit or ''):
+        raise ValueError('analysis prerequisite requires a full commit SHA')
+    if not security_only and not re.fullmatch(r'[0-9a-f]{40}', documentation_commit or ''):
+        raise ValueError('documentation prerequisite requires a full commit SHA')
+    main_ancestor(repo, analysis_commit, 'analysis', api)
     if not security_only:
-        comparison = api(f'repos/{repo}/compare/{documentation_commit}...main')
-        if comparison.get('status') not in ('ahead', 'identical'):
-            raise ValueError('documentation commit is not an ancestor of current main')
+        main_ancestor(repo, documentation_commit, 'documentation', api)
     endpoint = f'repos/{repo}/rulesets/{ruleset_id}'
     current = api(endpoint)
     identity(current, repo, ruleset_id)
@@ -135,9 +159,15 @@ def apply_plan(plan, documentation_commit, api=gh_api):
     if shape(current) == plan['proposed']:
         return {'changed': False, 'sha256': digest(shape(current))}
     updated = api(endpoint, plan['proposed'])
-    identity(updated, repo, ruleset_id)
-    if shape(updated) != plan['proposed']:
-        raise ValueError('update returned an unexpected policy; inspect live ruleset before continuing')
+    try:
+        if not isinstance(updated, dict):
+            raise ValueError('update returned a malformed policy')
+        identity(updated, repo, ruleset_id)
+        if shape(updated) != plan['proposed']:
+            raise ValueError('update returned an unexpected policy')
+    except ValueError as error:
+        raise ValueError('update response differs from the reviewed policy; live policy may '
+                         'have changed; inspect live ruleset before continuing') from error
     return {'changed': True, 'sha256': digest(shape(updated))}
 
 
@@ -151,6 +181,7 @@ def main():
     parser.add_argument('--apply', action='store_true', help='explicitly apply the reviewed saved plan')
     parser.add_argument('--plan', type=Path, help='saved plan required for --apply')
     parser.add_argument('--documentation-commit', help='full SHA of reviewed queue documentation already on main')
+    parser.add_argument('--analysis-commit', help='full SHA of reviewed PR analysis workflow already on main')
     args = parser.parse_args()
     if not re.fullmatch(r'[\w.-]+/[\w.-]+', args.repo) or args.ruleset_id < 1:
         parser.error('expected owner/repo and positive ruleset id')
@@ -158,14 +189,18 @@ def main():
         if not args.plan or args.code_scanning_only:
             parser.error('--apply requires --plan; scope is read from the saved plan')
         plan = json.loads(args.plan.read_text())
+        if not re.fullmatch(r'[0-9a-f]{40}', args.analysis_commit or ''):
+            parser.error('all policy activation requires a full --analysis-commit SHA')
+        if plan.get('code_scanning_only', False) and args.documentation_commit is not None:
+            parser.error('--documentation-commit is only valid for queue activation')
         if not plan.get('code_scanning_only', False) and not re.fullmatch(r'[0-9a-f]{40}', args.documentation_commit or ''):
             parser.error('queue activation requires a full --documentation-commit SHA')
         if plan.get('repo') != args.repo or plan.get('ruleset_id') != args.ruleset_id:
             parser.error('saved plan target differs from command target')
-        print(json.dumps(apply_plan(plan, args.documentation_commit), indent=2))
+        print(json.dumps(apply_plan(plan, args.documentation_commit, args.analysis_commit), indent=2))
         return
-    if args.plan or args.documentation_commit:
-        parser.error('--plan/--documentation-commit only accompany --apply')
+    if args.plan or args.documentation_commit or args.analysis_commit:
+        parser.error('--plan/--documentation-commit/--analysis-commit only accompany --apply')
     ruleset = gh_api(f'repos/{args.repo}/rulesets/{args.ruleset_id}')
     repo = gh_api(f'repos/{args.repo}')
     if repo.get('default_branch') != 'main':
