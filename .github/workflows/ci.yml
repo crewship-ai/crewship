@@ -1795,13 +1795,6 @@ jobs:
   # would just vanish from its effect, and in the shard's case would take its
   # coverage with it while both jobs stayed green. The step below fails if
   # any entry in either list stops resolving against `go list ./...`.
-  # The CLI package has its own race runner after repeated aggregate 25m
-  # timeouts on September 10 (run 34466543067, both attempts). The same
-  # package passed in 1163.213s on C's retry (run 34460363617). Its isolated
-  # fresh-database regression passes in 45–51s locally. Keep the full suite
-  # and its 25m bound; remove competition with other package binaries.
-  # CI Result requires this shard directly; the other race shard runs in
-  # parallel. A dependency between the two adds their durations together.
   cli-subprocess-race:
     name: CLI subprocess race boundaries
     needs: [merge-conflict-markers, changes]
@@ -1823,9 +1816,18 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: cli-subprocess-race-${{ github.sha }}
-          path: .ci-results/cli-subprocess-race.jsonl
+          path: .ci-results/cli-subprocess-race*
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 7
 
+  # The CLI package has its own race runner after repeated aggregate 25m
+  # timeouts on September 10 (run 34466543067, both attempts). The same
+  # package passed in 1163.213s on C's retry (run 34460363617). Its isolated
+  # fresh-database regression passes in 45–51s locally. Keep the full suite
+  # and its 25m bound; remove competition with other package binaries.
+  # CI Result requires this shard directly; the other race shard runs in
+  # parallel. A dependency between the two adds their durations together.
   go-race-cli:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.go == 'true'
