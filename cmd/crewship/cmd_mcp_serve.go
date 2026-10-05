@@ -390,7 +390,21 @@ restart to change the target or fetch a newer catalog.`, RunE: func(cmd *cobra.C
 			if err != nil {
 				return apiValidation("cannot load selected credential configuration")
 			}
-			cliCfg = cfg.WithActiveProfile(flagProfile)
+			selected := cfg.WithActiveProfile(flagProfile)
+			profile, entry := selected.ActiveProfile(flagProfile)
+			if profile != "" && (entry == nil || strings.TrimSpace(entry.Server) == "") {
+				return apiValidation("selected profile is not configured")
+			}
+			// An explicit file must establish its own target, rather than losing
+			// the selected login to CREWSHIP_SERVER or the localhost default.
+			server := flagServer
+			if server == "" {
+				server = selected.Server
+			}
+			if _, err := validatedAPIServer(server); err != nil {
+				return apiValidation("selected credential configuration has no valid server")
+			}
+			cliCfg = selected
 		}
 		timeout, _ := cmd.Flags().GetDuration("timeout")
 		limit, _ := cmd.Flags().GetInt64("max-response-bytes")

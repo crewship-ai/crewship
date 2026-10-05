@@ -315,8 +315,11 @@ still responsible for that. Global endpoints retain their global scope.
 
 The server catalog is loaded at startup; restart MCP to pick up schema changes.
 Stored credentials refresh per request, while environment tokens require a restart.
-An explicitly selected `--credential-config` file must exist and parse at startup;
-a missing file fails before selecting a fallback server or sending credentials.
+An explicitly selected `--credential-config` file must exist and parse at startup.
+Its selected profile must exist and provide a valid server; without a profile,
+the file must provide a valid server unless a valid `--server` is supplied.
+Missing, empty or serverless files fail before replacing the active CLI state,
+loading a catalog or sending credentials to an environment/default fallback.
 Stable symlinks survive upgrades only when the installer preserves that path.
 Native client commands do not provide atomic compare-and-remove: avoid editing
 the same registration concurrently with connect or disconnect.
@@ -326,6 +329,11 @@ retry. The final configuration check and rename are separate operations: a write
 in that window can be overwritten. Active-session concurrency has not been
 accepted by the isolated native-client checks. Skill content and its hash receipt
 are likewise separate publications, not an atomic transaction; after a partial
-failure, inspect both files before explicitly repairing a stale receipt.
+failure, inspect both files before explicitly repairing a stale receipt. Receipt
+recovery is manual: connect and disconnect refuse a registration whose ownership
+fingerprint no longer matches, including after a native client upgrade changes
+its reported configuration. Inspect the registration, remove it with the native
+client if appropriate, and reconnect; there is no automatic receipt repair.
 Hosted MCP with OAuth is not included. Client registration tests are not model
-task evaluations; no model success-rate or token-saving claim is made.
+task evaluations; no model success-rate, token-saving or speedup claim is made
+for 1.0. Comparable model workflow benchmarks are deferred to 1.1.
