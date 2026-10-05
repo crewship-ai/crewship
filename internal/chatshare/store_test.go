@@ -4,26 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 func shareTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	d, err := database.Open("file:" + filepath.Join(t.TempDir(), "share.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = d.Close() })
-	if err := database.Migrate(context.Background(), d.DB, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatal(err)
-	}
+	d := testutil.MigratedDB(t)
 	for _, statement := range []string{
 		`INSERT INTO users(id,email) VALUES ('owner','owner@t.test'),('peer','peer@t.test'),('admin','admin@t.test')`,
 		`INSERT INTO workspaces(id,name,slug) VALUES ('ws','Test','test')`,
