@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- Container initialization explicitly rejects the unsupported `k8s` backend with supported provider choices instead of returning no container provider; configuration validation continues to reject Kubernetes.
+- **Unsupported `k8s` startup wiring could return no container provider.** Container initialization now refuses it with supported provider choices; ordinary configuration validation continues to reject Kubernetes.
 
 - Concurrent egress-fence installation retries incomplete rule reads without reinstalling or accepting a fence that fails verification. Checks reject results spanning a ruleset generation change.
 
