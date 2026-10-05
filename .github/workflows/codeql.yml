@@ -8,10 +8,10 @@ name: CodeQL
 # coded crypto material, untrusted-input flows that the others miss.
 #
 # Findings land in the Security tab (Code scanning alerts) as SARIF.
-# We intentionally do NOT fail PRs on CodeQL findings yet — the first
-# pass against an established codebase typically surfaces dozens of
-# medium-severity hits that need triage. Promote `fail-on-severity`
-# once the baseline is clean.
+# CodeQL Result proves execution. The reviewed native code_scanning ruleset
+# can block eligible new High/Critical findings independently of historical
+# alerts. Native findings protection excludes merge queue groups; their
+# CodeQL Result remains execution evidence (see the CI/CD policy runbook).
 
 on:
   merge_group:
@@ -131,9 +131,8 @@ jobs:
         with:
           category: "/language:${{ matrix.language }}"
           # upload: defaults to true; explicit for clarity. SARIF results
-          # go to the Security tab regardless of `fail-on-severity` so
-          # findings are visible without blocking the PR while the
-          # baseline gets triaged.
+          # go to the Security tab for native ruleset evaluation; the
+          # workflow aggregate below checks execution, not finding severity.
           upload: always
 
   result:
@@ -153,6 +152,6 @@ jobs:
           n = json.loads(os.environ['RESULTS'])
           assert n['changes']['result'] == 'success', 'language detection failed'
           plan = json.loads(n['changes']['outputs']['include'])
-          expected = 'success' if plan else 'skipped'
-          assert n['analyze']['result'] == expected, f"CodeQL expected {expected}, got {n['analyze']['result']}"
+          assert sorted((p['language'], p['build-mode']) for p in plan) == [('go', 'manual'), ('javascript-typescript', 'none')], 'both required CodeQL languages must run'
+          assert n['analyze']['result'] == 'success', f"CodeQL analyses did not succeed: {n['analyze']['result']}"
           PY

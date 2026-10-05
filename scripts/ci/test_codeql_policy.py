@@ -38,3 +38,19 @@ class CodeQLPolicyTests(unittest.TestCase):
         self.assertNotRegex(workflow, r'(?m)^\s+paths(?:-ignore)?:', 'required tool cannot skip docs-only PRs')
         self.assertIn('  merge_group:', workflow)
         self.assertIn('  pull_request:', workflow)
+
+    def test_actual_result_rejects_skipped_missing_or_single_language_analysis(self):
+        workflow = (ROOT / '.github/workflows/codeql.yml').read_text()
+        result = workflow.split('  result:\n', 1)[1]
+        script = textwrap.dedent(result.split("python3 - <<'PY'\n", 1)[1].rsplit('          PY', 1)[0])
+        both = [{'language': 'go', 'build-mode': 'manual'},
+                {'language': 'javascript-typescript', 'build-mode': 'none'}]
+        for plan, status, expected in [(both, 'success', 0), (both[:1], 'success', 1),
+                                       ([], 'skipped', 1), (both, 'failure', 1),
+                                       (both, 'skipped', 1)]:
+            with self.subTest(plan=plan, status=status):
+                needs = {'changes': {'result': 'success', 'outputs': {'include': json.dumps(plan)}},
+                         'analyze': {'result': status}}
+                run = subprocess.run(['python3', '-c', script], env={**os.environ, 'RESULTS': json.dumps(needs)},
+                                     capture_output=True)
+                self.assertEqual(bool(run.returncode), bool(expected))
