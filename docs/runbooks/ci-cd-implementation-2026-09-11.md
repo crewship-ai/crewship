@@ -109,6 +109,53 @@ The manual `PR Image Build` workflow, with `registry_image` and `expected_sha` i
 
 ## Review and apply repository policy (#2932)
 
+### Staged activation
+
+Treat the CI optimization changes as a first tranche until hosted measurements
+show the end-to-end improvement. Before merging overlapping workflow/verdict
+changes, require a combined integration PR to pass CI, Security and CodeQL for
+its reviewed head and current base. Keep one reviewed combined version of
+`CONTRIBUTING.md` and `scripts/README.md` when reconciling conflicts. For the
+first tranche, the overlapping source PR order is #2938 (planner and verdict),
+then #2939 (CLI child race), then #2944 (Vitest partitions and aggregate).
+Re-run workflow/verdict contracts after each reconciliation. A successful
+integration run does not satisfy strict checks for different intermediate
+heads: each separately merged PR still requires its own current-base checks
+and review. Do not use an admin bypass to avoid that requirement.
+
+Merge the reviewed policy source and perform the actual PR canaries described
+below before enabling either setting. Activate CodeQL with
+`--code-scanning-only` first; inspect its live rule and canary behavior. Observe
+it separately for approximately one day before queue activation so a new
+blocker can be attributed to one setting. Preserve strict checks throughout.
+
+Before queue activation, save a bounded throughput baseline with the merged
+collector, including its raw response evidence, time window, collector SHA,
+current main SHA and the live ruleset. Store captured reports outside the
+public source tree. Keep an earlier pre-CodeQL snapshot where available;
+separate CodeQL and queue rollout periods when comparing results. For example:
+
+```bash
+python3 scripts/ci/pr-throughput.py --since YYYY-MM-DD --until YYYY-MM-DD \
+  --limit 10 --max-requests 300 \
+  --output /tmp/crewship-pre-queue.json \
+  --raw-output /tmp/crewship-pre-queue-raw.json
+```
+
+Record missing push-time evidence, failures, cancellations and collection
+limits; do not compare only successful runs or substitute commit timestamps
+for actual pushes. Enable repository auto-merge, review a fresh queue plan,
+then activate the one-entry queue after its merged procedure, canaries and
+baseline are verified. Main-push exact-SHA publication verification remains.
+
+Access provenance scaling and repeated migrations in the remaining CLI tests
+are unresolved performance work. The access benchmark preserves its existing
+155-turn test; the fixture changes accelerate only the selected telemetry
+tests. Individual KDF timings and local shard durations do not prove that a
+hosted pipeline meets the 15–20 minute target. Capture the full Backup race,
+Access and CLI job durations, including failed runs, before declaring that
+target achieved.
+
 `python3 scripts/ci/repository-policy.py --output /tmp/crewship-policy-plan.json`
 is read-only by default. The plan records the existing policy fingerprint and
 proposes a one-PR merge queue: ALLGREEN, SQUASH, one build/group entry, no batch

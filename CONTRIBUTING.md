@@ -227,6 +227,10 @@ Historical bot tooling remains available for old PR investigations only; see
 
 ## Merge through the queue
 
+This is the procedure for an activated merge queue. Source changes alone do
+not enable it; follow the staged activation and measurement gates in
+[the policy runbook](docs/runbooks/ci-cd-implementation-2026-09-11.md#staged-activation).
+
 After recording the review and validation, enqueue with
 `gh pr merge <PR> --auto --squash`. GitHub CLI enables auto-merge while required
 checks are pending and adds an eligible PR to a required merge queue. Do not
@@ -235,7 +239,7 @@ queue tests its candidate against the current base. Use
 `--match-head-commit <SHA>` when submitting a reviewed head to prevent a concurrent push from
 changing the candidate.
 
-The queue uses one PR per merge group. `CI Result`, `Security Result` and
+The initial queue configuration uses one PR per merge group. `CI Result`, `Security Result` and
 `CodeQL Result` execute on `merge_group`; a planned skip must still match the
 change plan. Main pushes retain the full exact-SHA verification required by
 publication. Queueing is not permission to remove those checks.
@@ -248,6 +252,9 @@ Measure changes with [the read-only PR throughput collector](scripts/ci/pr-throu
 Compare complete PR open-to-merge time, evidenced final substantive push-to-merge
 time, workflow queue/execution, failure rate and reruns. A new run after a push
 or automatic branch update is not a rerun attempt.
+Save the collector output and raw evidence before activating the queue. A
+combined integration PR tests that candidate; it does not replace strict
+required checks on separately merged PR heads against their current base.
 
 ## Issues
 
