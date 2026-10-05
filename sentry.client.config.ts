@@ -68,6 +68,12 @@ export function scrubEvent(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
   // metadata is more than we want to ship for a v0.1 beta.
   event.user = undefined
 
+  // HttpContext can still attach the current page URL in Sentry 11 even
+  // with dataCollection.urlQueryParams disabled. Drop browser request
+  // metadata at the final boundary so URL tokens and other request data
+  // cannot escape through that integration.
+  event.request = undefined
+
   // Modules is the bundled-deps list — not strictly PII but reveals the
   // customer's exact JS toolchain inventory. Release tag covers the same
   // triage need. The field is present on the runtime event shape but not

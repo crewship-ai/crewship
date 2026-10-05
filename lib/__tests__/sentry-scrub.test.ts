@@ -60,6 +60,19 @@ describe("scrubEvent (frontend Sentry BeforeSend)", () => {
     expect(event.user).toBeUndefined()
   })
 
+  it("drops request metadata including page URL tokens from HttpContext", () => {
+    const event = scrubEvent({
+      request: {
+        url: "https://example.com/chat?customerToken=secret#private",
+        headers: { Authorization: "Bearer secret" },
+        cookies: "session=secret",
+        data: "private body",
+        query_string: "customerToken=secret",
+      },
+    } as ErrorEvent)
+    expect(event.request).toBeUndefined()
+  })
+
   it("clears breadcrumb.data but keeps breadcrumb.message", () => {
     const event = scrubEvent(newLeakyEvent())
     expect(event.breadcrumbs).toHaveLength(1)

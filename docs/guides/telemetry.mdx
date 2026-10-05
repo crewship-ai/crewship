@@ -136,6 +136,10 @@ When telemetry is enabled:
 
 ## What is never sent
 
+The browser also removes request metadata in `beforeSend`, because the SDK's
+HTTP context integration can attach the page URL despite the query parameter
+collection setting. This prevents page URL tokens from reaching error reports.
+
 The JavaScript SDK uses an explicit crash-only `dataCollection` policy in
 the browser, Node and Edge configurations. Sentry 11's broader defaults are
 disabled: user identifiers, cookies, HTTP headers and bodies, URL query
