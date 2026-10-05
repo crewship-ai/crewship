@@ -13,8 +13,8 @@ from parity import TESTS, missing_tests
 class GateTests(unittest.TestCase):
     def test_routing(self):
         for paths, expected in [
-            (['docs/guide.mdx'], {'code': False, 'go': False}),
-            (['components/button.tsx', 'docs/guide.mdx'], {'code': True, 'go': False}),
+            (['docs/guide.mdx'], {'code': False, 'go': False, 'docs_inventory': True}),
+            (['components/button.tsx', 'docs/guide.mdx'], {'code': True, 'go': False, 'docs_inventory': True}),
             (['internal/api/foo.go'], {'code': True, 'go': True}),
             (['internal/skills/bundled/tool/SKILL.md'], {'code': True, 'go': True}),
             (['pnpm-lock.yaml'], {'code': True, 'go': True}),
@@ -22,7 +22,7 @@ class GateTests(unittest.TestCase):
             (['new-runtime/config.toml'], {'code': True, 'go': True}),
         ]:
             with self.subTest(paths=paths):
-                self.assertEqual(classify(paths), {**expected, 'go_parity': False, 'frontend_parity': False})
+                self.assertEqual(classify(paths), {'docs_inventory': False, **expected, 'go_parity': False, 'frontend_parity': False})
 
     def test_documentation_allowlist_and_unknown_inputs(self):
         for path in ['docs/guide.md', 'docs/guide.mdx', 'docs/llms.txt',
@@ -31,6 +31,7 @@ class GateTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(classify([path]), {
                     'code': False, 'go': False, 'go_parity': False, 'frontend_parity': False,
+                    'docs_inventory': path in {'docs/guide.md', 'docs/guide.mdx'},
                 })
         for path in ['docs/config.json', 'docs/task.go', 'docs/example.ts',
                      'docs/workflow.yaml', 'docs/check.sh', 'docs/extensionless',
@@ -48,7 +49,7 @@ class GateTests(unittest.TestCase):
                 self.assertFalse(plan['go'])
                 self.assertTrue(plan['go_parity'])
         self.assertEqual(classify(['docs/api-reference/websocket.mdx']), {
-            'code': False, 'go': False, 'go_parity': False, 'frontend_parity': True,
+            'code': False, 'go': False, 'go_parity': False, 'frontend_parity': True, 'docs_inventory': True,
         })
         # Mixed changes already run the full owning suite; do not add a
         # redundant parity lane or lose evidence when both docs change.
@@ -61,6 +62,20 @@ class GateTests(unittest.TestCase):
         plan = classify(['docs/configuration/providers.mdx', 'docs/api-reference/websocket.mdx'])
         self.assertTrue(plan['go_parity'])
         self.assertTrue(plan['frontend_parity'])
+
+    def test_telemetry_docs_and_cli_inventory_are_not_skipped(self):
+        plan = classify(['docs/guides/chat-telemetry.mdx'])
+        self.assertTrue(plan['frontend_parity'])
+        self.assertTrue(plan['docs_inventory'])
+        self.assertFalse(plan['code'])
+        for path in ['docs/cli/commands.mdx', 'docs/api-reference/agents.mdx', 'CONTRIBUTING.md']:
+            with self.subTest(path=path):
+                plan = classify([path])
+                self.assertTrue(plan['docs_inventory'])
+                self.assertFalse(plan['go'])
+        self.assertFalse(classify(['docs/images/icon.svg'])['docs_inventory'])
+        self.assertFalse(classify(['README.md'])['docs_inventory'])
+        self.assertFalse(classify(['docs/cli/commands.mdx', 'internal/api/example.go'])['docs_inventory'])
 
     def test_source_rename_to_docs_retains_deleted_input(self):
         # Exercise git, not an invented name-only list: rename detection
@@ -130,6 +145,7 @@ class GateTests(unittest.TestCase):
                 self.assertEqual(result['release'], name == 'workflow_dispatch')
                 self.assertFalse(result['go_parity'])
                 self.assertFalse(result['frontend_parity'])
+                self.assertFalse(result['docs_inventory'])
 
     def test_parity_named_execution_evidence(self):
         events = [
@@ -147,7 +163,7 @@ class GateTests(unittest.TestCase):
 
     def results(self, code='true', go='true'):
         needs = {n: {'result': 'success'} for n in ALWAYS | CODE | GO}
-        needs['changes']['outputs'] = {'code': code, 'go': go, 'release': 'false', 'go_parity': 'false', 'frontend_parity': 'false'}
+        needs['changes']['outputs'] = {'code': code, 'go': go, 'release': 'false', 'go_parity': 'false', 'frontend_parity': 'false', 'docs_inventory': 'false'}
         needs.update({name: {'result': 'skipped'} for name in PARITY})
         needs['release-rehearsal'] = {'result': 'skipped'}
         for n in CODE if code == 'false' else []:

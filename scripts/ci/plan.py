@@ -15,12 +15,17 @@ def release_changed(paths):
 # safe to skip; an unknown extension under docs/ is still an unknown input.
 DOC_EXTENSIONS = {'.md', '.mdx', '.txt', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.ico'}
 DOC_ROOT_FILES = {'README.md', 'CHANGELOG.md', 'LICENSE', 'CONTRIBUTING.md', 'AGENTS.md', 'CODEX.md'}
+GO_DOC_TESTS = {'docs/configuration/providers.mdx': 'cmd/crewship/cmd_start_provider_order_test.go'}
+FRONTEND_DOC_TESTS = {
+    'docs/api-reference/websocket.mdx': 'hooks/__tests__/realtime-allowlist-docs-parity.test.ts',
+    'docs/guides/chat-telemetry.mdx': 'lib/__tests__/telemetry-call-sites.test.ts',
+}
 GO_PARITY_INPUTS = {
-    'docs/configuration/providers.mdx',
+    *GO_DOC_TESTS,
     'lib/crew-icons.ts', 'lib/colors.ts', 'lib/notification-categories.ts',
     'components/features/admin/backups/backups-model.ts',
 }
-FRONTEND_PARITY_INPUTS = {'docs/api-reference/websocket.mdx'}
+FRONTEND_PARITY_INPUTS = set(FRONTEND_DOC_TESTS)
 
 
 def changed_paths(base, head):
@@ -48,6 +53,9 @@ def classify(paths):
         # cross-language evidence only when the full owning suite is skipped.
         'go_parity': not go and bool(set(paths) & GO_PARITY_INPUTS),
         'frontend_parity': not code and bool(set(paths) & FRONTEND_PARITY_INPUTS),
+        'docs_inventory': not go and any(
+            (path.startswith('docs/') and PurePosixPath(path).suffix.lower() in {'.md', '.mdx'})
+            or path == 'CONTRIBUTING.md' for path in paths),
     }
 
 
