@@ -25,7 +25,10 @@ observation counts.
 - **Final substantive push to merge:** an actual `commit.pushedDate` or
   `HeadRefForcePushedEvent.createdAt` for the last substantive commit in the PR
   commit order. The tool excludes multi-parent commits only when API ancestry
-  comparisons prove a parent belongs to main before the PR's merge commit.
+  comparisons prove every non-first parent belongs to main before the PR's
+  merge commit. The first parent belongs to the PR branch and never proves
+  main synchronization. Feature merges with main as first parent and mixed
+  octopus merges remain substantive.
   The anchor is that merge commit's first parent; a retained PR commit at that
   anchor or incomplete parent data leaves provenance unknown and push latency
   null. Custom synchronization headlines work; a headline mentioning main is
@@ -36,7 +39,10 @@ observation counts.
   ancestry is proven, independently of actor. This deliberately retains useful
   automated code changes rather than treating every github-actions commit as
   non-substantive. Squash/rebase synchronization without a multi-parent main
-  merge remains substantive; ambiguous rebase anchors remain unknown. Changes removed by force-push cannot always be reconstructed.
+  merge remains substantive; ambiguous rebase anchors remain unknown. A proven main synchronization can still contain manual conflict resolutions;
+  those changes cannot be attributed from parent ancestry alone. The classification
+  says main synchronization, not automatic or human-free synchronization.
+  Changes removed by force-push cannot always be reconstructed.
   A missing final push timestamp produces null, never an author/committer date
   or workflow creation proxy. Earlier commits with known timestamps cannot
   replace a final commit whose push timestamp is unknown. An observed repush
@@ -49,8 +55,8 @@ observation counts.
   Three workflows at the same head are not three CI runs. The Actions API
   cannot reliably distinguish human rerun-button use from automation requesting
   a rerun; attempt counts are observed reruns without human attribution. Each row
-  retains head SHA, an evidenced automatic-main-sync trigger classification and
-  PR automatic-main-sync commit count for interpretation. Unknown historical
+  retains head SHA, an evidenced main-sync trigger classification and
+  PR main-sync commit count for interpretation. Unknown historical
   push kinds stay unclassified; separate Security/CodeQL/CI runs at one head
   are not reported as three pushes.
 - **Workflow queue:** first executed job start minus workflow creation, for
