@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- Managed launcher descriptors reject duplicate or noncanonical JSON fields before creating process identity; the native launcher core now includes a standalone conformance entrypoint, parser fuzz targets and documented measurement limits.
+- **Ambiguous managed-launch descriptors could overwrite earlier fields.** The launcher rejects duplicate or noncanonical JSON fields before creating process identity; its native core now includes a standalone conformance entrypoint, parser fuzz targets and documented measurement limits.
 
 - **Webhook and scheduled managed runs could falsely confirm a stop after losing their PID file.** Their creation gates now retain the persisted managed identity after the agent invocation returns, including when pilot selection is disabled; missing managed PID files remain UNKNOWN.
 
