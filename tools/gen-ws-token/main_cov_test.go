@@ -132,3 +132,15 @@ func TestMain_SuccessIssuesValidWSTicket(t *testing.T) {
 		t.Errorf("claims.Sid = %q, want %q", claims.Sid, "s_abc")
 	}
 }
+
+func TestMain_WeakSecretRefusesTicket(t *testing.T) {
+	stderr, code := runTool(t, map[string]string{
+		"NEXTAUTH_SECRET": "too-short", "USER_ID": "demo-user", "SESSION_ID": "demo-session",
+	})
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1: %s", code, stderr)
+	}
+	if !strings.Contains(stderr, "too short") || !strings.Contains(stderr, "NEXTAUTH_SECRET") {
+		t.Fatalf("weak-secret refusal did not explain how to fix the configuration: %s", stderr)
+	}
+}

@@ -30,6 +30,9 @@ import { playSoundOnce } from "@/lib/notification-sound-coordinator"
 import { useChat, type ChatTurn, type HistoryPart } from "@/hooks/use-chat"
 import { useSession } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useAccessMode } from "@/hooks/use-access-mode"
+import { WsUnavailableError } from "@/hooks/use-websocket"
+import { messagesSignature, useRestrictedChatPoll } from "@/hooks/use-restricted-chat-poll"
 import { useDrawerStore } from "@/stores/drawer-store"
 
 import { Shimmer } from "@/components/ai-elements/shimmer"
@@ -272,9 +275,12 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   //     schedules the next backoff retry instead of evicting the user.
   // Conflating these two used to bounce users to /login on any
   // ws-token 5xx during a backend hiccup.
+  //   - 404: the session has no realtime at all (restricted allowlist).
+  //     Terminal and not an auth failure: no retry loop, no logout.
   const getWsToken = useCallback(async (): Promise<string | null> => {
     const res = await apiFetch("/api/v1/ws-token")
     if (res.status === 401 || res.status === 403) return null
+    if (res.status === 404) throw new WsUnavailableError("ws-token returned 404")
     if (!res.ok) throw new Error(`ws-token fetch failed: ${res.status}`)
     const data = await res.json() // throws on malformed JSON — also transient
     if (typeof data?.token !== "string") {
@@ -285,11 +291,15 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
   const session = useSession()
   const currentUserId = session.data?.user?.id ?? null
+  // A restricted account has no WebSocket in any workspace (#2861).
+  const sessionRealtime = useAccessMode() === "trusted"
 
   // Bumped to force a history refetch when the server can't replay an in-flight
   // run (resume_reset — the replay buffer overflowed). Rare; a safety net.
   const [historyReloadNonce, setHistoryReloadNonce] = useState(0)
   const requestHistoryReload = useCallback(() => setHistoryReloadNonce((n) => n + 1), [])
+  // Signature of the history last loaded, for the no-WebSocket poll below.
+  const historySignatureRef = useRef<string | null>(null)
 
   const soundScopeRef = useRef<string | null>(null)
   const soundScope = currentUserId && workspaceId ? JSON.stringify([currentUserId, workspaceId]) : null
@@ -335,6 +345,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   }, [sessionId,workspaceId])
 
   const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, resubscribeSession, isStreaming, connectionStatus } = useChat({
+    realtimeEnabled: sessionRealtime,
     executionProfile,
     getExecutionProfile: () => executionProfileRef.current,
     workspaceId,
@@ -396,6 +407,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     // endpoint 400s ("workspace_id is required") and history silently stays
     // empty. useWorkspace() resolves asynchronously, so wait for it (the effect
     // re-runs when workspaceId arrives) rather than firing a doomed request.
+    historySignatureRef.current = null
     if (!sessionId || !workspaceId) return
     let cancelled = false
 
@@ -458,10 +470,13 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         // (every seq'd event would buffer unseen behind the closed gate).
         markHistoryUnavailable()
         setHistoryLoading(false)
+        // Unknown: any list the poll reads differs, so it retries the load.
+        historySignatureRef.current = "unavailable"
         return
       }
 
       const { messages } = result
+      historySignatureRef.current = messagesSignature(messages)
       // Messages exist ⇒ the chat they belong to exists. This is the one
       // reading of a history response that is safe, and it is what lets a
       // conversation the user is coming back to skip the create POST.
@@ -482,6 +497,19 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     void run()
     return () => { cancelled = true }
   }, [sessionId, workspaceId, loadHistory, markHistoryUnavailable, historyReloadNonce])
+
+  // No WebSocket for this chat — a restricted chat never opens one, and a
+  // restricted account has none at all — so messages this tab did not send
+  // (another participant, another tab) arrive by a bounded poll of the
+  // allowlisted history endpoint instead (#2861).
+  useRestrictedChatPoll({
+    enabled: executionProfile === "restricted" || (executionProfile === "trusted" && !sessionRealtime),
+    sessionId,
+    workspaceId,
+    paused: isStreaming,
+    getKnownSignature: () => historySignatureRef.current,
+    onChange: requestHistoryReload,
+  })
 
   // Group-chat participants → display-name map for author attribution. Empty
   // for a private 1:1 chat (the endpoint returns no participants), so the

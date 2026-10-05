@@ -268,6 +268,8 @@ func (s *Store) expireRawBodyBatch(ctx context.Context, due []rawBodyCandidate, 
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	var expired, retained int
+	var bytesFreed int64
 	for i, c := range due {
 		out, err := tx.ExecContext(ctx, `
 			UPDATE webhook_deliveries
@@ -296,15 +298,18 @@ func (s *Store) expireRawBodyBatch(ctx context.Context, due []rawBodyCandidate, 
 			// The guard refused it. That is the correct outcome, not an error:
 			// the work is no longer terminal, or another sweeper got there
 			// first.
-			res.RawBodiesRetained++
+			retained++
 			continue
 		}
-		res.RawBodiesExpired += int(n)
-		res.RawBodyBytesFreed += c.bodyBytes
+		expired += int(n)
+		bytesFreed += c.bodyBytes
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("work: commit raw body expiry: %w", err)
 	}
+	res.RawBodiesExpired += expired
+	res.RawBodiesRetained += retained
+	res.RawBodyBytesFreed += bytesFreed
 	res.Batches++
 	return nil
 }

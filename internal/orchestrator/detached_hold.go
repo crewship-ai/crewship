@@ -110,7 +110,7 @@ func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
 			ticks++
 			ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
 			alive, err := o.RunIsAliveAt(ctx, RunLocation{
-				ContainerID: h.containerID, AgentSlug: h.agentSlug, RunID: h.runID,
+				ContainerID: h.containerID, AgentSlug: h.agentSlug, RunID: h.runID, Managed: h.req.managedLaunch != nil,
 			})
 			cancel()
 			switch {
@@ -141,7 +141,7 @@ func (o *Orchestrator) restopDetachedHold(h *detachedHold) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
 	defer cancel()
 	stopped, err := o.StopRunAt(ctx, RunLocation{
-		ContainerID: h.containerID, AgentSlug: h.agentSlug, RunID: h.runID,
+		ContainerID: h.containerID, AgentSlug: h.agentSlug, RunID: h.runID, Managed: h.req.managedLaunch != nil,
 	})
 	switch {
 	case err != nil:

@@ -1040,17 +1040,8 @@ func (h *WebhookHandler) runWebhookAgent(
 			// that moment refuses the creation; a creation admitted here is
 			// recorded durably on the attempt before it happens.
 			if err == nil && len(launch) > 0 {
-				gates := launch
 				req.ExecGate = func(ctx context.Context) error {
-					for _, g := range gates {
-						if g == nil {
-							continue
-						}
-						if gerr := g.RequestCreation(ctx); gerr != nil {
-							return gerr
-						}
-					}
-					return nil
+					return requestWebhookCreation(ctx, h.orch, location, launch...)
 				}
 			}
 			if err == nil {

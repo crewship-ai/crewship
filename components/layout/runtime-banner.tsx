@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { AlertTriangle, X } from "lucide-react"
 import Link from "next/link"
 import { apiFetch } from "@/lib/api-fetch"
@@ -8,15 +8,20 @@ import { apiFetch } from "@/lib/api-fetch"
 export function RuntimeBanner() {
   const [visible, setVisible] = useState(false)
   const [dismissed, setDismissed] = useState(false)
+  const request = useRef<AbortController | null>(null)
 
   const check = useCallback(async () => {
+    request.current?.abort()
+    const controller = new AbortController()
+    request.current = controller
     try {
       // apiFetch instead of raw fetch — without it, an expired session
       // returns 401 every 30s, the user never gets redirected to /login,
       // and the toolbar/banner sit on stale state forever.
-      const res = await apiFetch("/api/v1/system/runtime")
-      if (!res.ok) return
+      const res = await apiFetch("/api/v1/system/runtime", { signal: controller.signal })
+      if (!res.ok || controller.signal.aborted) return
       const data = await res.json()
+      if (controller.signal.aborted) return
       setVisible(!data.available)
       if (data.available) setDismissed(false)
     } catch {
@@ -30,6 +35,7 @@ export function RuntimeBanner() {
     const onFocus = () => check()
     window.addEventListener("focus", onFocus)
     return () => {
+      request.current?.abort()
       clearInterval(interval)
       window.removeEventListener("focus", onFocus)
     }

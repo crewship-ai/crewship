@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { AlertTriangle } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
@@ -114,6 +114,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
     // not a security boundary (auditor catch round 4).
     return abilities.can("manage", "Crew")
   }, [canEdit, abilities])
+  const scopeRef = useRef<AbortController | null>(null)
   const [policy, setPolicy] = useState<PolicyResponse | null>(null)
   // max_ephemeral_agents lives on the crew row (not the policy table),
   // so we fetch it separately from GET /crews/{id} and PATCH it via
@@ -134,6 +135,8 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
   const [reason, setReason] = useState("")
 
   const load = useCallback(async () => {
+    const scope = scopeRef.current
+    if (!scope || scope.signal.aborted || !crewId || !workspaceId) return
     setLoading(true)
     setErr(null)
     try {
@@ -146,13 +149,16 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
       // if it failed); quota silently defaults to 10 if its fetch
       // tripped, matching the server-side default.
       const [policyResult, crewResult] = await Promise.allSettled([
-        apiFetch(`/api/v1/crews/${crewId}/policy`, {
+        apiFetch(`/api/v1/crews/${encodeURIComponent(crewId)}/policy`, {
           headers: { "X-Workspace-ID": workspaceId },
+          signal: scope.signal,
         }),
-        apiFetch(`/api/v1/crews/${crewId}`, {
+        apiFetch(`/api/v1/crews/${encodeURIComponent(crewId)}`, {
           headers: { "X-Workspace-ID": workspaceId },
+          signal: scope.signal,
         }),
       ])
+      if (scope.signal.aborted) return
       if (policyResult.status === "rejected") {
         setErr(policyResult.reason instanceof Error ? policyResult.reason.message : "Failed to load policy")
         return
@@ -162,9 +168,11 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
         return
       }
       const body = (await policyResult.value.json()) as PolicyResponse
+      if (scope.signal.aborted) return
       setPolicy(body)
       if (crewResult.status === "fulfilled" && crewResult.value.ok) {
-        const crewBody = (await crewResult.value.json()) as { max_ephemeral_agents?: number }
+        const crewBody = (await crewResult.value.json().catch(() => ({}))) as { max_ephemeral_agents?: number }
+        if (scope.signal.aborted) return
         setMaxEphemeral(typeof crewBody.max_ephemeral_agents === "number" ? crewBody.max_ephemeral_agents : 10)
       } else {
         // Quota fetch failed (network or non-2xx); fall back to the
@@ -172,15 +180,27 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
         setMaxEphemeral(10)
       }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to load policy")
+      if (!scope.signal.aborted) setErr(e instanceof Error ? e.message : "Failed to load policy")
     } finally {
-      setLoading(false)
+      if (!scope.signal.aborted) setLoading(false)
     }
   }, [crewId, workspaceId])
 
   useEffect(() => {
+    const scope = new AbortController()
+    scopeRef.current = scope
+    setPolicy(null)
+    setMaxEphemeral(null)
+    setPendingAutonomy(null)
+    setPendingBehavior(null)
+    setPendingMaxEphemeral(null)
+    setReason("")
+    setSaving(false)
+    setErr(null)
+    setLoading(Boolean(crewId && workspaceId))
     void load()
-  }, [load])
+    return () => scope.abort()
+  }, [load, crewId, workspaceId])
 
   const targetAutonomy = pendingAutonomy ?? policy?.autonomy_level ?? "guided"
   const targetBehavior = pendingBehavior ?? policy?.behavior_mode ?? "warn"
@@ -207,7 +227,8 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
   const dirty = policyFieldDirty || quotaDirty
 
   const save = useCallback(async () => {
-    if (!policy || forbiddenCombination || quotaInvalid) return
+    const scope = scopeRef.current
+    if (!scope || scope.signal.aborted || !effectiveCanEdit || saving || !policy || forbiddenCombination || quotaInvalid) return
     // Reason is required only when the policy table is being mutated
     // (audit trail lives there); a pure quota bump is a column edit on
     // the crew row and doesn't need an explainer per PRD §6 F2.
@@ -230,8 +251,9 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
       // now this ordering keeps the dangerous failure mode (silent
       // partial governance change) off the table.
       if (policyFieldDirty) {
-        const res = await apiFetch(`/api/v1/crews/${crewId}/policy`, {
+        const res = await apiFetch(`/api/v1/crews/${encodeURIComponent(crewId)}/policy`, {
           method: "PUT",
+          signal: scope.signal,
           headers: {
             "Content-Type": "application/json",
             "X-Workspace-ID": workspaceId,
@@ -242,6 +264,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
             reason: reason.trim(),
           }),
         })
+        if (scope.signal.aborted) return
         if (!res.ok) {
           let msg = `HTTP ${res.status}`
           try {
@@ -250,24 +273,27 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
           } catch {
             /* keep status-only message */
           }
-          toast.error(`Failed to update policy: ${msg}`)
+          if (!scope.signal.aborted) toast.error(`Failed to update policy: ${msg}`)
           return
         }
         const body = (await res.json()) as PolicyResponse
+        if (scope.signal.aborted) return
         setPolicy(body)
         setPendingAutonomy(null)
         setPendingBehavior(null)
       }
 
       if (quotaDirty && parsedQuota.value !== null) {
-        const qRes = await apiFetch(`/api/v1/crews/${crewId}`, {
+        const qRes = await apiFetch(`/api/v1/crews/${encodeURIComponent(crewId)}`, {
           method: "PATCH",
+          signal: scope.signal,
           headers: {
             "Content-Type": "application/json",
             "X-Workspace-ID": workspaceId,
           },
           body: JSON.stringify({ max_ephemeral_agents: parsedQuota.value }),
         })
+        if (scope.signal.aborted) return
         if (!qRes.ok) {
           let msg = `HTTP ${qRes.status}`
           try {
@@ -276,6 +302,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
           } catch {
             /* keep status-only message */
           }
+          if (scope.signal.aborted) return
           if (policyFieldDirty) {
             toast.error(`Policy saved, but quota update failed: ${msg}. Quota left at previous value; re-try the quota change in isolation.`)
           } else {
@@ -284,6 +311,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
           return
         }
         const crewBody = (await qRes.json()) as { max_ephemeral_agents?: number }
+        if (scope.signal.aborted) return
         if (typeof crewBody.max_ephemeral_agents === "number") {
           setMaxEphemeral(crewBody.max_ephemeral_agents)
         }
@@ -299,11 +327,11 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
             : "Quota updated",
       )
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update policy")
+      if (!scope.signal.aborted) toast.error(e instanceof Error ? e.message : "Failed to update policy")
     } finally {
-      setSaving(false)
+      if (!scope.signal.aborted) setSaving(false)
     }
-  }, [crewId, workspaceId, policy, targetAutonomy, targetBehavior, reason, forbiddenCombination, quotaDirty, quotaInvalid, parsedQuota.value, policyFieldDirty])
+  }, [crewId, workspaceId, effectiveCanEdit, saving, policy, targetAutonomy, targetBehavior, reason, forbiddenCombination, quotaDirty, quotaInvalid, parsedQuota.value, policyFieldDirty])
 
   if (loading) {
     return (
@@ -456,7 +484,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
             <button
               type="button"
               onClick={() => { void save() }}
-              disabled={!dirty || forbiddenCombination || quotaInvalid || (policyFieldDirty && reason.trim() === "") || saving}
+              disabled={!effectiveCanEdit || !dirty || forbiddenCombination || quotaInvalid || (policyFieldDirty && reason.trim() === "") || saving}
               className={cn(
                 "text-xs px-3 py-1.5 rounded border transition-colors",
                 // hover capped at /25: text-primary-hover on primary/30 over card is

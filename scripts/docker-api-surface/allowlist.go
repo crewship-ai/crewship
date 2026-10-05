@@ -148,9 +148,14 @@ var allowList = []Endpoint{
 		Why: "blocks on one-shot helper containers (secrets sweep, image cache warm)",
 	},
 	{
+		Method: "ContainerStatPath", HTTP: "HEAD /containers/{id}/archive", ProxyVars: []string{"CONTAINERS", proxyVarPOST},
+		Tier: TierCore, Packages: []string{"internal/provider/docker"},
+		Why: "rejects writable-path symlink aliases before managed CLI launch without executing image code",
+	},
+	{
 		Method: "CopyFromContainer", HTTP: "GET /containers/{id}/archive", ProxyVars: []string{"CONTAINERS"},
-		Tier: TierCore, Packages: []string{"internal/backup", "internal/devcontainer"},
-		Why: "streams crew backups and bounded built-toolchain inventory from stopped inspection containers",
+		Tier: TierCore, Packages: []string{"internal/backup", "internal/devcontainer", "internal/provider/docker"},
+		Why: "streams crew backups, bounded built-toolchain inventory and the managed launcher archive consistency evidence",
 	},
 	{
 		Method: "CopyToContainer", HTTP: "HEAD + PUT /containers/{id}/archive", ProxyVars: []string{"CONTAINERS", proxyVarPOST},

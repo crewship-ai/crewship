@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # throwaway-server.sh — a disposable Crewship server that cleans up after itself.
 #
-#   scripts/throwaway-server.sh run   NAME [--binary PATH] [--port N] -- CMD [ARGS...]
-#   scripts/throwaway-server.sh start NAME [--binary PATH] [--port N]
+#   scripts/throwaway-server.sh run   NAME [--binary PATH] [--port N] [--env NAME=VALUE]... [--page-projects [DIR]] -- CMD [ARGS...]
+#   scripts/throwaway-server.sh start NAME [--binary PATH] [--port N] [--env NAME=VALUE]... [--page-projects [DIR]]
 #   scripts/throwaway-server.sh stop  NAME
 #   scripts/throwaway-server.sh list
+#
+# `--env` accepts only optional feature settings (see THROWAWAY_ENV_ALLOWLIST)
+# and `--page-projects` configures Page project storage under this instance's
+# own state dir, so teardown removes it with everything else.
 #
 # `run` starts the server, runs CMD with CREWSHIP_SERVER/CREWSHIP_CONFIG
 # pointing at it, and tears everything down when CMD ends — success, failure
@@ -84,13 +88,70 @@ instance_id() { # data dir
   return 1
 }
 
+# Optional settings `--env` may pass through the `env -i` below. This is an
+# ALLOWLIST, not a denylist: anything that names the server's identity, data,
+# network or lifecycle (CREWSHIP_DATA_DIR/HOST/PORT/CONTAINER_PREFIX/CONFIG,
+# DATABASE_URL, HOME, PATH, …) is refused, because overriding one of those
+# makes the "throwaway" server run on live data while the manifest still
+# names this dir — exactly the leak the teardown contract exists to prevent.
+# Keep this list to optional feature configuration only.
+THROWAWAY_ENV_ALLOWLIST=(
+  CREWSHIP_PAGE_BUILD_IMAGE
+  CREWSHIP_PAGE_RUNTIME_ORIGIN
+  CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN
+  CREWSHIP_RESTRICTED_RUNTIME_IMAGE
+  CREWSHIP_RESTRICTED_NATIVE_IMAGE
+  CREWSHIP_RATELIMIT_DISABLED
+  CREWSHIP_SKIP_SIDECAR
+  CREWSHIP_ALLOW_SIGNUP
+  CREWSHIP_NEXTJS_URL
+)
+
 cmd_start() {
   local name="$1"; shift
-  local binary="" port=""
+  local binary="" port="" page_projects=""
+  local -a extra_env=()
   while (($#)); do
     case "$1" in
       --binary) binary="$2"; shift 2 ;;
       --port) port="$2"; shift 2 ;;
+      # Pass one optional feature setting to the server process. The key
+      # must be on the allowlist above (see its comment for why anything
+      # else is refused). Repeatable; NAME=VALUE form only.
+      --env)
+        [[ "${2:-}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || die "--env expects NAME=VALUE, got '${2:-}'"
+        local key="${2%%=*}"
+        local ok=0
+        local allowed
+        for allowed in "${THROWAWAY_ENV_ALLOWLIST[@]}"; do
+          [[ "$key" == "$allowed" ]] && { ok=1; break; }
+        done
+        [[ "$ok" -eq 1 ]] || die "--env: '$key' is not an optional feature setting; allowed: ${THROWAWAY_ENV_ALLOWLIST[*]}"
+        extra_env+=("$2")
+        shift 2
+        ;;
+      # Configure CREWSHIP_PAGE_PROJECTS_PATH under this throwaway's own
+      # state dir, so the server gets real Page project storage AND teardown
+      # provably removes it (config requires the path outside crew storage,
+      # so it cannot live under data/; anywhere else would be leaked). The
+      # optional argument is a single path component (default
+      # "page-projects"); absolute paths and traversal are refused.
+      --page-projects)
+        page_projects="page-projects"
+        if [[ "${2:-}" != "" && "$2" != --* ]]; then
+          page_projects="$2"
+          shift
+        fi
+        [[ "$page_projects" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,40}$ ]] \
+          || die "--page-projects expects a simple directory name, got '$page_projects'"
+        # Names this script itself keeps in the instance dir (data would put
+        # the projects path ON the data dir, which config refuses at boot).
+        case "$page_projects" in
+          data|server.log|server.pid|manifest.json|cli-config.yaml)
+            die "--page-projects: '$page_projects' is reserved for the instance's own files" ;;
+        esac
+        shift
+        ;;
       *) die "unknown option $1" ;;
     esac
   done
@@ -109,6 +170,13 @@ cmd_start() {
 
   mkdir -p "$dir/data"
   chmod 700 "$dir"
+  if [[ -n "$page_projects" ]]; then
+    # Owned by this instance: under $dir (so remove_state deletes it) but
+    # outside $dir/data (config forbids the overlap with crew storage).
+    mkdir -p "$dir/$page_projects"
+    chmod 700 "$dir/$page_projects"
+    extra_env+=("CREWSHIP_PAGE_PROJECTS_PATH=$dir/$page_projects")
+  fi
   cat >"$dir/manifest.json" <<EOF
 {
   "name": "$name",
@@ -119,6 +187,7 @@ cmd_start() {
   "prefix": "$prefix",
   "data_dir": "$dir/data",
   "database": "$dir/data/crewship.db",
+  "page_projects_dir": "${page_projects:+$dir/$page_projects}",
   "pid": "",
   "instance_id": ""
 }
@@ -128,6 +197,7 @@ EOF
     env -i HOME="$HOME" PATH="$PATH" \
       CREWSHIP_DATA_DIR="$dir/data" CREWSHIP_HOST=127.0.0.1 CREWSHIP_PORT="$port" \
       CREWSHIP_CONTAINER_PREFIX="$prefix" \
+      ${extra_env[@]+"${extra_env[@]}"} \
       setsid "$binary" start >"$dir/server.log" 2>&1 &
     echo $! >"$dir/server.pid"
   )

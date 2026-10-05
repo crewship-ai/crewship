@@ -62,6 +62,29 @@ func TestLoadOrGenerate_PersistFailureSurfaces(t *testing.T) {
 	if !strings.Contains(err.Error(), "persist to") {
 		t.Errorf("err = %v, want persist-step breadcrumb", err)
 	}
+	for _, m := range managed {
+		if os.Getenv(m.EnvVar) != "" {
+			t.Errorf("failed persistence published %s to the process", m.EnvVar)
+		}
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadOrGenerate(t.Context(), dir, silentLogger()); err != nil {
+		t.Fatalf("persistence retry: %v", err)
+	}
+	values, err := ReadPersisted(SecretsFilePath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range managed {
+		if values[m.EnvVar] == "" || values[m.EnvVar] != os.Getenv(m.EnvVar) {
+			t.Errorf("retry acknowledged an unpersisted %s", m.EnvVar)
+		}
+		if Source(m.EnvVar) != SourceGenerated {
+			t.Errorf("retry mislabeled generated %s as external", m.EnvVar)
+		}
+	}
 }
 
 func TestWriteFile_CancelledContext(t *testing.T) {

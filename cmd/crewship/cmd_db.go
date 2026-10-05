@@ -138,7 +138,7 @@ binary until the snapshot is restored.
   crewship db restore-snapshot <file>.bak    # restore a specific snapshot
 
 Stop crewshipd before restoring — a running server holds the database open.
-The current database is copied aside to "<db>.before-restore-<ts>" first, so
+The current database is copied aside to "<db>.before-restore-<ts>-<unique>" first, so
 the restore is itself reversible.
 
 Before overwriting, and again immediately before the swap, the command checks

@@ -60,6 +60,29 @@ We **do not** trust:
 - The agent's own output, until the scrubber has run over it.
 - Network destinations the agent wants to reach.
 
+## Opt-in managed executable boundary (A1)
+
+The Codex-only managed-launch pilot narrows an additional attack: replacing a
+CLI, shim, shell hook or loader setting in persistent agent home before the
+next dispatch. Host admission binds an image-native static ELF to the exact
+native mise lock, immutable build revision and host-captured hash. A static,
+read-only host launcher checks that evidence and executes the same verified
+open file descriptor. Writable mount and tmpfs overlays, scripts, dynamic ELF,
+unknown or duplicate descriptor fields are refused. Unselected image
+environment is discarded. This depends on a trusted host, kernel, Docker metadata, image capture
+and immutable launcher staging. It is not a claim that all image programs are
+trustworthy.
+
+The pilot is explicitly selected per Codex-only crew and requires a host UID
+other than agent 1001 or sidecar 1002. It does not change the shared-UID sibling
+boundary, authenticate PID files against a malicious sibling, move credentials
+out of agents, contain egress, qualify OAuth/model calls, or support Claude's
+dynamic packaging. The official UID-1001 server container cannot use this
+pilot. Validation buffers executable bytes; an individual 512 MiB bound is
+not an aggregate concurrency or OOM guarantee. See the
+[managed CLI launch contract](../specs/managed-cli-launch.md) for activation,
+compatibility, independent component conformance, and measurement limits.
+
 ## Layer 1 — Container isolation
 
 Every **crew** runs in one Linux container. All agents in that crew execute in

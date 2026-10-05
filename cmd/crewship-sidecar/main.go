@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/sidecar"
 )
 
@@ -37,7 +38,21 @@ type sidecarInput struct {
 }
 
 func main() {
+	// Parse this mode before the sidecar flags: CLI arguments belong to the
+	// admitted native executable, never to a shell or the flag parser.
+	if len(os.Args) > 1 && os.Args[1] == "--managed-launch" {
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "managed launch: descriptor and CLI arguments required")
+			os.Exit(126)
+		}
+		if err := managedlaunch.Launch(os.Args[2], os.Args[3:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(126)
+		}
+		return
+	}
 	addr := flag.String("addr", sidecar.DefaultAddr, "listen address")
+	_ = flag.String("managed-launch", "", "internal static-native launch descriptor; followed by CLI arguments")
 	showVersion := flag.Bool("version", false, "print version info and exit")
 	healthCheck := flag.Bool("health-check", false,
 		"probe a already-running sidecar's /health endpoint and exit 0 (healthy) or 1")

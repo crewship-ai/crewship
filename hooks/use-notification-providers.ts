@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 import type {
   NotificationProvider,
@@ -33,19 +33,29 @@ export function useNotificationProviders(workspaceId: string | null | undefined)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const abortRef = useRef<AbortController | null>(null)
+
   const refresh = useCallback(async () => {
+    abortRef.current?.abort()
+    setError(null)
     if (!workspaceId) {
       setProviders([])
+      setCategories(FALLBACK_CATEGORIES)
       setLoading(false)
       return
     }
+    const controller = new AbortController()
+    abortRef.current = controller
     setLoading(true)
     try {
       const res = await apiFetch(
         `/api/v1/notification-providers?workspace_id=${encodeURIComponent(workspaceId)}`,
+        { signal: controller.signal },
       )
+      if (controller.signal.aborted) return
       if (!res.ok) throw new Error(`load providers: ${res.status}`)
       const body = await res.json()
+      if (controller.signal.aborted) return
       setProviders(Array.isArray(body?.providers) ? body.providers : [])
       // An older server sends no `categories`; keep the built-in order rather
       // than collapsing every provider into one unnamed section.
@@ -56,15 +66,19 @@ export function useNotificationProviders(workspaceId: string | null | undefined)
       )
       setError(null)
     } catch (e) {
+      if (controller.signal.aborted) return
       setError(e instanceof Error ? e.message : "failed to load providers")
       setProviders([])
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }, [workspaceId])
 
   useEffect(() => {
+    setProviders([])
+    setCategories(FALLBACK_CATEGORIES)
     void refresh()
+    return () => abortRef.current?.abort()
   }, [refresh])
 
   return { providers, categories, loading, error, refresh }

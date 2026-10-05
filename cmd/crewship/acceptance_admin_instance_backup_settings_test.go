@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -104,10 +105,16 @@ func TestAcceptance_AdminInstanceBackupSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(router)
-	defer srv.Close()
 	s3 := &miniS3{objects: map[string][]byte{}, sums: map[string]string{}}
 	s3srv := httptest.NewServer(s3)
-	defer s3srv.Close()
+	defer func() {
+		// Stop requests before joining their backup work. Keep S3 available
+		// until that work finishes, and stop router workers before DB cleanup.
+		srv.Close()
+		router.BackupPlans().Wait()
+		router.Shutdown()
+		s3srv.Close()
+	}()
 
 	tmp := t.TempDir()
 	cfg := filepath.Join(tmp, "cli.yaml")
@@ -233,6 +240,9 @@ func TestAcceptance_AdminInstanceBackupSettings(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &runs); err != nil || len(runs) != 1 || runs[0].Status != "done" {
 		t.Fatalf("run: %v\n%s", err, raw)
 	}
+	// The persisted terminal status precedes the service's after-run work.
+	// Join the fixture's spawned work before exercising the DELETE guards.
+	router.BackupPlans().Wait()
 	var offsitePhase string
 	for _, p := range runs[0].Phases {
 		if p.Name == "off-site" {
@@ -250,11 +260,25 @@ func TestAcceptance_AdminInstanceBackupSettings(t *testing.T) {
 	}
 
 	// The key and the destination cannot go while the plan uses them.
-	if out, err := run(cli("recipients", "remove", rec.ID)...); err == nil || !strings.Contains(out, "Nightly") {
-		t.Fatalf("a key in use was removed:\n%s", out)
+	logFailureSnapshot := func() {
+		t.Helper()
+		stacks := make([]byte, 64<<10)
+		n := runtime.Stack(stacks, true)
+		t.Logf("snapshot-after-failure (not proof of prior state): DB stats=%+v; goroutine stacks (bounded to %d bytes):\n%s", db.Stats(), len(stacks), stacks[:n])
 	}
-	if out, err := run(cli("destinations", "remove", created.Destination.ID)...); err == nil || !strings.Contains(out, "Nightly") {
-		t.Fatalf("a destination in use was removed:\n%s", out)
+	if out, err := run(cli("recipients", "remove", rec.ID)...); err == nil {
+		logFailureSnapshot()
+		t.Fatalf("removing a key in use unexpectedly succeeded:\n%s", out)
+	} else if !strings.Contains(out, "Nightly") {
+		logFailureSnapshot()
+		t.Fatalf("key removal failed without the expected refusal naming Nightly: %v\n%s", err, out)
+	}
+	if out, err := run(cli("destinations", "remove", created.Destination.ID)...); err == nil {
+		logFailureSnapshot()
+		t.Fatalf("removing a destination in use unexpectedly succeeded:\n%s", out)
+	} else if !strings.Contains(out, "Nightly") {
+		logFailureSnapshot()
+		t.Fatalf("destination removal failed without the expected refusal naming Nightly: %v\n%s", err, out)
 	}
 
 	// ── Incidents: a good run leaves none open.

@@ -97,6 +97,9 @@ func validateHex32(v string) error {
 
 func validateMinLen(min int) func(string) error {
 	return func(v string) error {
+		if strings.IndexByte(v, 0) >= 0 {
+			return fmt.Errorf("value contains a NUL byte and cannot be exported")
+		}
 		if len(v) < min {
 			return fmt.Errorf("expected at least %d characters, got %d", min, len(v))
 		}
@@ -214,6 +217,11 @@ func LoadOrGenerate(ctx context.Context, dataDir string, logger *slog.Logger) er
 	}
 
 	generated := false
+	// Publish only after the whole set validates and fresh values are durable.
+	// Otherwise a failed bootstrap leaves generated values in the environment,
+	// and a retry mistakes those unpersisted values for external secrets.
+	pendingEnv := make(map[string]string, len(managed))
+	pendingSources := make(map[string]string, len(managed))
 	for _, m := range managed {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("secrets bootstrap: %w", err)
@@ -227,7 +235,7 @@ func LoadOrGenerate(ctx context.Context, dataDir string, logger *slog.Logger) er
 			if err := m.Validate(v); err != nil {
 				return fmt.Errorf("secrets: env %s is invalid: %w", m.EnvVar, err)
 			}
-			recordSource(m.EnvVar, SourceExternal)
+			pendingSources[m.EnvVar] = SourceExternal
 			continue
 		}
 
@@ -241,12 +249,10 @@ func LoadOrGenerate(ctx context.Context, dataDir string, logger *slog.Logger) er
 			if err := m.Validate(v); err != nil {
 				return fmt.Errorf("secrets: persisted %s in secrets.env is invalid: %w (delete the entry to regenerate, or restore from backup)", m.EnvVar, err)
 			}
-			if err := os.Setenv(m.EnvVar, v); err != nil {
-				return fmt.Errorf("secrets: setenv %s: %w", m.EnvVar, err)
-			}
+			pendingEnv[m.EnvVar] = v
 			// Loaded from the persisted file: it was auto-generated on some
 			// earlier boot and still sits next to the database.
-			recordSource(m.EnvVar, SourceGenerated)
+			pendingSources[m.EnvVar] = SourceGenerated
 			continue
 		}
 
@@ -261,11 +267,9 @@ func LoadOrGenerate(ctx context.Context, dataDir string, logger *slog.Logger) er
 			return fmt.Errorf("secrets: generated %s failed validation (generator bug): %w", m.EnvVar, err)
 		}
 		persisted[m.EnvVar] = v
-		if err := os.Setenv(m.EnvVar, v); err != nil {
-			return fmt.Errorf("secrets: setenv %s: %w", m.EnvVar, err)
-		}
+		pendingEnv[m.EnvVar] = v
 		generated = true
-		recordSource(m.EnvVar, SourceGenerated)
+		pendingSources[m.EnvVar] = SourceGenerated
 		logger.Info("first-run secret generated", "key", m.EnvVar, "bytes", m.Bytes)
 	}
 
@@ -274,6 +278,16 @@ func LoadOrGenerate(ctx context.Context, dataDir string, logger *slog.Logger) er
 			return fmt.Errorf("secrets: persist to %s: %w", path, err)
 		}
 		logger.Info("first-run secrets persisted", "path", path)
+	}
+	for _, m := range managed {
+		if v, ok := pendingEnv[m.EnvVar]; ok {
+			if err := os.Setenv(m.EnvVar, v); err != nil {
+				return fmt.Errorf("secrets: setenv %s: %w", m.EnvVar, err)
+			}
+		}
+	}
+	for _, m := range managed {
+		recordSource(m.EnvVar, pendingSources[m.EnvVar])
 	}
 
 	// E2 (master-key ops): an auto-generated ENCRYPTION_KEY lives in

@@ -108,4 +108,53 @@ describe("useIssueBoardRealtime", () => {
     expect(realtime.subs.has("mission.updated")).toBe(false)
     expect(realtime.subs.has("task.updated")).toBe(false)
   })
+  it("cancels pending refreshes when callbacks switch to a different workspace", () => {
+    const oldFetch = vi.fn()
+    const oldRefresh = vi.fn()
+    const freshFetch = vi.fn()
+    const freshRefresh = vi.fn()
+    const { rerender } = renderHook(
+      (props) => useIssueBoardRealtime(props),
+      { initialProps: { filterCrewId: null, fetchIssues: oldFetch, onRefresh: oldRefresh } },
+    )
+    emit("issue.created", { id: "old", crew_id: "crew-1" })
+    rerender({ filterCrewId: null, fetchIssues: freshFetch, onRefresh: freshRefresh })
+    vi.advanceTimersByTime(200)
+    expect(oldFetch).not.toHaveBeenCalled()
+    expect(oldRefresh).not.toHaveBeenCalled()
+    expect(freshFetch).not.toHaveBeenCalled()
+    emit("issue.created", { id: "fresh", crew_id: "crew-2" })
+    vi.advanceTimersByTime(200)
+    expect(freshFetch).toHaveBeenCalledTimes(1)
+    expect(freshRefresh).toHaveBeenCalledTimes(1)
+  })
+
+  it("discards pending refreshes on unmount", () => {
+    const fetchIssues = vi.fn()
+    const onRefresh = vi.fn()
+    const { unmount } = renderHook(() => useIssueBoardRealtime({ filterCrewId: null, fetchIssues, onRefresh }))
+    emit("issue.updated", { id: "old", crew_id: "crew-1" })
+    unmount()
+    vi.advanceTimersByTime(500)
+    expect(fetchIssues).not.toHaveBeenCalled()
+    expect(onRefresh).not.toHaveBeenCalled()
+  })
+
+  it("cancels a queued event when the crew filter changes with stable callbacks", () => {
+    const fetchIssues = vi.fn()
+    const onRefresh = vi.fn()
+    const { rerender } = renderHook(
+      ({ crew }) => useIssueBoardRealtime({ filterCrewId: crew, fetchIssues, onRefresh }),
+      { initialProps: { crew: "crew-1" } },
+    )
+    emit("issue.created", { id: "old", crew_id: "crew-1" })
+    rerender({ crew: "crew-2" })
+    vi.advanceTimersByTime(200)
+    expect(fetchIssues).not.toHaveBeenCalled()
+    emit("issue.created", { id: "fresh", crew_id: "crew-2" })
+    vi.advanceTimersByTime(200)
+    expect(fetchIssues).toHaveBeenCalledTimes(1)
+    expect(onRefresh).toHaveBeenCalledTimes(1)
+  })
+
 })

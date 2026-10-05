@@ -181,3 +181,110 @@ describe("usePageReview", () => {
     expect(apiFetch).not.toHaveBeenCalled()
   })
 })
+
+describe("review refresh respects source availability", () => {
+  it("does not fetch a pruned baseline when refreshing the review", async () => {
+    route({ snapshot: { ...snapshot, baseline: { ...snapshot.baseline, source_available: false, source_revision: null } } })
+    const { result } = renderHook(() => usePageReview("ws1", "ops", true), { wrapper: wrapper(newQueryClient()) })
+    await waitFor(() => expect(result.current.candidate.isSuccess).toBe(true))
+    apiFetch.mockClear()
+    result.current.refresh()
+    await waitFor(() => expect(apiFetch.mock.calls.some(c => String(c[0]).includes("/project/review"))).toBe(true))
+    expect(apiFetch.mock.calls.some(c => String(c[0]).includes("/project/history/"))).toBe(false)
+    expect(result.current.baseline.data).toBeUndefined()
+  })
+
+  it("does not start any reads when refreshed while disabled", async () => {
+    route()
+    const { result } = renderHook(() => usePageReview("ws1", "ops", false), { wrapper: wrapper(newQueryClient()) })
+    result.current.refresh()
+    await Promise.resolve()
+    expect(apiFetch).not.toHaveBeenCalled()
+  })
+})
+
+describe("review error and publication boundaries", () => {
+  it.each([
+    ["review", "Could not load the review of this application."],
+    ["source", "Could not read the candidate's source."],
+    ["history", "Could not read the source of the live publication."],
+  ])("reports unreadable %s without inventing source evidence", async (kind, message) => {
+    route()
+    const fallback = apiFetch.getMockImplementation()!
+    apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      const target = kind === "review" ? url.includes("/review?") : kind === "history" ? url.includes("/history/") : url.includes("/project/source?")
+      if (target) return { ok: false, status: 503, json: async () => { throw new SyntaxError("not JSON") } }
+      return fallback(url, init)
+    })
+    const { result } = renderHook(() => usePageReview("ws1", "ops", true), { wrapper: wrapper(newQueryClient()) })
+    await waitFor(() => {
+      const query = kind === "review" ? result.current.snapshot : kind === "history" ? result.current.baseline : result.current.candidate
+      expect(query.error).toMatchObject({ message, status: 503 })
+      expect(query.data).toBeUndefined()
+    })
+    if (kind === "history") expect(result.current.baselineUnavailable).toBe(message)
+  })
+
+  it.each([
+    [{ source_available: false, source_unavailable_reason: null }, false, "The source retained for the live publication can no longer be read."],
+    [{ source_available: true, source_revision: null }, false, "The live publication does not record which source revision produced it."],
+    [{ source_available: false }, true, null],
+  ])("explains missing baseline metadata %#", async (baseline, initial, message) => {
+    route({ snapshot: { ...snapshot, initial_publication: initial, baseline: { ...snapshot.baseline, ...baseline } } })
+    const { result } = renderHook(() => usePageReview("ws1", "ops", true), { wrapper: wrapper(newQueryClient()) })
+    await waitFor(() => expect(result.current.snapshot.isSuccess).toBe(true))
+    expect(result.current.baselineUnavailable).toBe(message)
+    expect(result.current.baseline.data).toBeUndefined()
+    expect(apiFetch.mock.calls.some(c => String(c[0]).includes("/history/"))).toBe(false)
+  })
+
+  it("refuses publication before any candidate has loaded", async () => {
+    route()
+    const { result } = renderHook(() => usePageReview("ws1", "ops", false), { wrapper: wrapper(newQueryClient()) })
+    await expect(result.current.publish.mutateAsync()).rejects.toThrow("There is no candidate to publish.")
+    expect(apiFetch).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [null, { error: "A base you reviewed changed before this publication was applied." }],
+    [{ error: "", conflict: "unknown", routines: [1, null] }, { error: "A base you reviewed changed before this publication was applied." }],
+    [{ error: "changed", conflict: "draft", routines: [null, "r1", 9] }, { error: "changed", conflict: "draft", routines: ["r1"] }],
+  ])("normalizes incomplete conflict bodies %#", async (body, expected) => {
+    route()
+    const { result } = renderHook(() => usePageReview("ws1", "ops", true), { wrapper: wrapper(newQueryClient()) })
+    await waitFor(() => expect(result.current.candidate.isSuccess).toBe(true))
+    const fallback = apiFetch.getMockImplementation()!
+    apiFetch.mockImplementation(async (url: string, init?: RequestInit) => url.includes("/publish?") ? json(body, 409) : fallback(url, init))
+    await expect(result.current.publish.mutateAsync()).rejects.toMatchObject({ name: "PublishFenceError" })
+    await waitFor(() => expect(result.current.conflict).toEqual(expected))
+  })
+
+  it.each([true, false])("preserves publication failure and status with JSON=%s", async validJSON => {
+    route({ snapshot: { ...snapshot, candidate: { ...snapshot.candidate!, build: null } } })
+    const { result } = renderHook(() => usePageReview("ws1", "ops", true), { wrapper: wrapper(newQueryClient()) })
+    await waitFor(() => expect(result.current.candidate.isSuccess).toBe(true))
+    const fallback = apiFetch.getMockImplementation()!
+    apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (!url.includes("/publish?")) return fallback(url, init)
+      expect(JSON.parse(String(init?.body))).not.toHaveProperty("build_id")
+      return validJSON ? json({ error: "permission denied" }, 403) : { ok: false, status: 403, json: async () => { throw new SyntaxError("HTML") } }
+    })
+    await expect(result.current.publish.mutateAsync()).rejects.toMatchObject({ message: validJSON ? "permission denied" : "Publication failed.", status: 403 })
+  })
+
+  it("refreshes available source sides and clears an earlier publication error", async () => {
+    route()
+    const fallback = apiFetch.getMockImplementation()!
+    apiFetch.mockImplementation(async (url: string, init?: RequestInit) => url.includes("/publish?") ? json(null, 409) : fallback(url, init))
+    const { result } = renderHook(() => usePageReview("ws1", "ops", true), { wrapper: wrapper(newQueryClient()) })
+    await waitFor(() => expect(result.current.baseline.isSuccess).toBe(true))
+    await expect(result.current.publish.mutateAsync()).rejects.toThrow()
+    await waitFor(() => expect(result.current.conflict).not.toBeNull())
+    apiFetch.mockClear()
+    result.current.refresh()
+    await waitFor(() => expect(result.current.conflict).toBeNull())
+    for (const path of ["/project/review?", "/project/source?", "/project/history/4/source?"]) {
+      expect(apiFetch.mock.calls.some(c => String(c[0]).includes(path))).toBe(true)
+    }
+  })
+})

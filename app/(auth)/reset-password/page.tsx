@@ -55,7 +55,7 @@ function ResetForm() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError(data.error ?? "Reset failed. The link may have expired.")
+        setError(data?.error ?? "Reset failed. The link may have expired.")
         setLoading(false)
         return
       }

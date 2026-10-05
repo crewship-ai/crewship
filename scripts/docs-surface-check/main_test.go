@@ -98,11 +98,11 @@ func TestServedCheckReportsDeployedDrift(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := checkServed(srv.URL, make([]string, 2)); err != nil {
+	if _, err := checkServed(srv.URL, []string{"one", "two"}); err != nil {
 		t.Fatalf("checkServed with a caught-up index = %v, want nil", err)
 	}
 
-	served, err := checkServed(srv.URL, make([]string, 5))
+	served, err := checkServed(srv.URL, []string{"one", "two", "three", "four", "five"})
 	if err == nil {
 		t.Fatal("checkServed with a lagging index = nil, want an error")
 	}

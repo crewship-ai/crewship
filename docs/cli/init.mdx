@@ -24,13 +24,20 @@ This is the unauthenticated counterpart to `crewship setup`. Typical order on a 
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `--server <url>` | `http://localhost:8080` | URL of the Crewship server to initialise. |
+| `--server <url>` / `-s <url>` | resolved CLI target | URL of the Crewship server to initialise. |
 | `--email <email>` | (required) | Admin email address. Becomes the OWNER user. |
 | `--name "<full name>"` | (required) | Admin full name (display name in the UI). |
 | `--password <pw>` | (prompted, hidden input) | Admin password. Minimum 8 characters. When omitted, the command reads it from the terminal without echo. |
 | `--password-stdin` | `false` | Read admin password from stdin (preferred for CI / scripts — avoids argv leak). |
 
 `--email` and `--name` are hard-required. `--password` is prompted when missing; passing it on the command line is convenient for scripted installs but leaks into shell history — prefer the prompt or pipe via `--password "$(cat secret.txt)"`.
+
+The server uses the same selection order as other CLI commands: explicit
+`--server` → active profile (`--profile` / `CREWSHIP_PROFILE`, directory binding,
+or persisted `current`) → `CREWSHIP_SERVER` → `server:` in CLI config →
+`http://localhost:8080`. An active profile takes precedence over a stale
+`CREWSHIP_SERVER`. A selected profile without a server URL fails before sending
+a bootstrap request; configure that profile or pass an explicit `--server`.
 
 ## Example
 

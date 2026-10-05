@@ -28,8 +28,13 @@ func NewPipelineTagStore(db *sql.DB) *PipelineTagStore {
 // Add tags a routine. Tags are normalized + de-duped (PK ignores dups).
 // Rejects the batch if it would push the routine past MaxPipelineTags.
 func (s *PipelineTagStore) Add(ctx context.Context, workspaceID, pipelineID string, tags []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback is best-effort after commit
 	var existing int
-	if err := s.db.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM pipeline_tags WHERE pipeline_id = ?`, pipelineID).Scan(&existing); err != nil {
 		return err
 	}
@@ -39,10 +44,7 @@ func (s *PipelineTagStore) Add(ctx context.Context, workspaceID, pipelineID stri
 		if t == "" {
 			continue
 		}
-		if existing+added >= MaxPipelineTags {
-			return ErrTooManyTags
-		}
-		res, err := s.db.ExecContext(ctx,
+		res, err := tx.ExecContext(ctx,
 			`INSERT INTO pipeline_tags (pipeline_id, workspace_id, tag) VALUES (?, ?, ?)
              ON CONFLICT(pipeline_id, tag) DO NOTHING`,
 			pipelineID, workspaceID, t)
@@ -51,9 +53,12 @@ func (s *PipelineTagStore) Add(ctx context.Context, workspaceID, pipelineID stri
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
 			added++
+			if existing+added > MaxPipelineTags {
+				return ErrTooManyTags
+			}
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // Remove untags a routine.

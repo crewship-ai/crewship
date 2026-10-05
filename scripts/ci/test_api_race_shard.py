@@ -1,6 +1,8 @@
 """Partition completeness, real runner evidence, failure propagation and budgets."""
 import copy
+from contextlib import redirect_stdout
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -118,10 +120,14 @@ sys.exit(int(os.environ['TEST_EXIT']))
                 directory.mkdir()
                 (directory / 'api-race-shard.json').write_text(json.dumps(manifest))
             for event, expected in [('pull_request', 0), ('merge_group', 0), ('push', 1)]:
-                with patch.dict(os.environ, GITHUB_EVENT_NAME=event, GITHUB_STEP_SUMMARY=os.devnull):
+                output = io.StringIO()
+                with patch.dict(os.environ, GITHUB_EVENT_NAME=event, GITHUB_STEP_SUMMARY=os.devnull), redirect_stdout(output):
                     self.assertEqual(shard.report(root, 4, 20), expected)
-            with patch.dict(os.environ, GITHUB_EVENT_NAME='push', GITHUB_STEP_SUMMARY=os.devnull):
+                self.assertIn('::error::' if event == 'push' else '::warning::', output.getvalue())
+            output = io.StringIO()
+            with patch.dict(os.environ, GITHUB_EVENT_NAME='push', GITHUB_STEP_SUMMARY=os.devnull), redirect_stdout(output):
                 self.assertEqual(shard.report(root, 4, 100), 0)
+            self.assertNotIn('::error::', output.getvalue())
 
 
 if __name__ == '__main__':

@@ -41,7 +41,7 @@ type agentRunControl struct {
 
 func (o *Orchestrator) trackAgentRun(ctx context.Context, req *AgentRunRequest) (context.Context, func()) {
 	ctx, cancel := context.WithCancel(ctx)
-	c := &agentRunControl{agentID: req.AgentID, location: RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID}, cancel: cancel, done: make(chan struct{})}
+	c := &agentRunControl{agentID: req.AgentID, location: RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID, Managed: o.managedLaunchCrews[req.CrewID]}, cancel: cancel, done: make(chan struct{})}
 	prior := req.ExecGate
 	live := o.agentLiveness()
 	agentID := req.AgentID
@@ -200,7 +200,7 @@ func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
 func (o *Orchestrator) stopRecoveredAgentRun(ctx context.Context, state RunState) error {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	location := RunLocation{ContainerID: state.ContainerID, AgentSlug: state.AgentSlug, RunID: state.ID}
+	location := RunLocation{ContainerID: state.ContainerID, AgentSlug: state.AgentSlug, RunID: state.ID, Managed: state.ManagedLaunch != nil}
 	for {
 		stopped, err := o.StopRunAt(ctx, location)
 		if err != nil {

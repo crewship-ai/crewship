@@ -30,6 +30,12 @@ func (d provisionDefinition) hash() string {
 	return hex.EncodeToString(sum[:])
 }
 
+// EnvironmentDefinitionHash shares the immutable revision binding with runtime
+// admission; edits to selectors/lock/config cannot reuse old build authority.
+func EnvironmentDefinitionHash(cfg, mise, runtime string, adapters []string) string {
+	return (provisionDefinition{Config: cfg, Mise: mise, Runtime: runtime, Adapters: adapters}).hash()
+}
+
 type EnvironmentRevision struct {
 	ID             string                           `json:"id" yaml:"id"`
 	DefinitionHash string                           `json:"definition_hash" yaml:"definition_hash"`

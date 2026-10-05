@@ -46,6 +46,9 @@ export function useEngineStatus(workspaceId: string | null) {
   const statusRef = useRef<EngineStatus>("checking")
 
   useEffect(() => {
+    statusRef.current = "checking"
+    setStatus("checking")
+    setUptime(null)
     if (!workspaceId) return
 
     let cancelled = false

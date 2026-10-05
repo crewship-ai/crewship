@@ -6,7 +6,7 @@ import { PanelLeft, PanelLeftClose, PanelLeftDashed, type LucideIcon } from "luc
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { navSections, isHiddenForRole } from "@/lib/nav-sections"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
-import { useWorkspace } from "@/hooks/use-workspace"
+import { useAccessMode, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useIsInstanceAdmin } from "@/hooks/use-auth"
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher"
@@ -51,8 +51,10 @@ export function AppSidebar() {
   const instanceAdmin = useIsInstanceAdmin()
   // Live unread count for the Inbox tile — shared with the top-bar bell so
   // they stay in lockstep without two pollers.
-  const { workspaceId } = useWorkspace()
-  const inboxUnread = useInboxUnreadCount(workspaceId)
+  // /inbox/count and /system/* are not on the restricted allowlist.
+  const trustedWorkspaceId = useTrustedWorkspaceId()
+  const trusted = useAccessMode() === "trusted"
+  const inboxUnread = useInboxUnreadCount(trustedWorkspaceId)
 
   return (
     <Sidebar variant="sidebar" collapsible="icon">
@@ -108,7 +110,7 @@ export function AppSidebar() {
         </SidebarMenu>
         <SidebarSeparator className="mx-0" />
         <SidebarMenu>
-          <SidebarVersion />
+          {trusted && <SidebarVersion />}
         </SidebarMenu>
       </SidebarFooter>
       <SidebarRail />

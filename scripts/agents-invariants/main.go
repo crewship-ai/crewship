@@ -122,7 +122,12 @@ func sidecarAndAgentUIDsUnchanged(root string) []violation {
 	}
 	seen := map[string]bool{}
 	for _, path := range goFiles(root) {
-		if !strings.Contains(path, "orchestrator") && !strings.Contains(path, "sidecar") && !strings.Contains(path, "provider") {
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			continue
+		}
+		relative = filepath.ToSlash(relative)
+		if !strings.HasPrefix(relative, "internal/orchestrator/") && !strings.HasPrefix(relative, "internal/sidecar/") && !strings.HasPrefix(relative, "internal/provider/") {
 			continue
 		}
 		body, err := os.ReadFile(path)

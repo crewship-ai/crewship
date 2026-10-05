@@ -100,4 +100,35 @@ describe("useCatalog", () => {
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1))
     expect(result.current.error).toBeNull()
   })
+
+it.each([
+  [new DOMException("blocked by browser policy", "SecurityError"), "blocked by browser policy"],
+  ["transport refused", "transport refused"],
+])("reports non-abort failures without leaving catalog loading", async (failure, message) => {
+  mockFetch.mockRejectedValue(failure)
+  const { result, unmount } = renderHook(() => useCatalog<Item>("/api/catalog-errors", extract))
+  await waitFor(() => expect(result.current.loading).toBe(false))
+  expect(result.current.error?.message).toBe(message)
+  expect(result.current.data).toEqual([])
+  unmount()
+})
+
+
+it.each(["success", "failure"])("ignores obsolete catalog %s after the URL changes", async outcome => {
+  let resolve!: (value: unknown) => void
+  let reject!: (reason: Error) => void
+  const pending = new Promise((yes, no) => { resolve = yes; reject = no })
+  mockFetch.mockReturnValueOnce(pending).mockResolvedValueOnce({ ok: true, json: async () => ({ items: [{ id: "current" }] }) })
+  const view = renderHook(({ url }) => useCatalog<Item>(url, extract), { initialProps: { url: "/api/old" } })
+  const oldSignal = mockFetch.mock.calls[0][1].signal as AbortSignal
+  view.rerender({ url: "/api/current" })
+  await waitFor(() => expect(view.result.current.data).toEqual([{ id: "current" }]))
+  expect(oldSignal.aborted).toBe(true)
+  await act(async () => {
+    if (outcome === "success") resolve({ ok: true, json: async () => ({ items: [{ id: "obsolete" }] }) })
+    else reject(new Error("obsolete failure"))
+  })
+  expect(view.result.current).toMatchObject({ data: [{ id: "current" }], error: null, loading: false })
+  view.unmount()
+})
 })
