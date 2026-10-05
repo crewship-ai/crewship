@@ -75,7 +75,7 @@ type PipelineHandler struct {
 	// must not cancel an in-flight run server-side.
 	lifecycleCtx context.Context
 
-	// webhookDispatchWG tracks the async FireWebhook run goroutines,
+	// webhookDispatchWG tracks async webhook and signal-resume goroutines,
 	// mirroring AssignmentHandler.dispatchWG — graceful shutdown (and
 	// tests) drain in-flight dispatches via WaitWebhookDispatches
 	// instead of orphaning them mid-write.
@@ -286,7 +286,7 @@ func (h *PipelineHandler) webhookDispatchContext() context.Context {
 	return context.Background()
 }
 
-// WaitWebhookDispatches blocks until every async webhook run goroutine
+// WaitWebhookDispatches blocks until every async webhook/signal run goroutine
 // spawned so far has finished. Called during graceful shutdown after
 // the listener stops (and before the journal writer closes, so
 // terminal run entries still land); tests use it to drain

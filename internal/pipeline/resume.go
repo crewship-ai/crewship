@@ -31,6 +31,10 @@ import (
 	"time"
 )
 
+// errResumePlanStale means another lifetime progressed this run while the
+// plan waited for admission. Stand down; the current wait owns its next wake.
+var errResumePlanStale = errors.New("pipeline: resume plan superseded")
+
 // ErrResumeDefinitionChanged is returned by Run when a boot-time
 // resume's re-validation (see resumeDefinitionDrift) detects that the
 // pipeline definition changed between the scan-time gate and the
@@ -235,52 +239,9 @@ func (e *Executor) ResumeAfterApproval(runID string, logger *slog.Logger) {
 // scan (which reaches the same wait step and finds the same delivered
 // row — no signal is lost either way). Safe to call for non-resumable
 // rows — it no-ops with a logged reason rather than erroring.
+// Lifecycle owners should use synchronous ResumeEventRun and track/join it.
 func (e *Executor) ResumeAfterSignal(runID string, logger *slog.Logger) {
-	if e.runStore == nil {
-		return
-	}
-	// The decision can commit before MarkWaiting, or while the parked run
-	// still owns its registry entry. Wait for that lifetime to finish before
-	// reading its durable state and attempting to acquire its slot again.
-	if e.runs != nil {
-		if released := e.runs.released(runID); released != nil {
-			go func() {
-				<-released
-				e.ResumeAfterSignal(runID, logger)
-			}()
-			return
-		}
-	}
-	if logger == nil {
-		logger = slog.Default()
-	}
-	ctx := context.Background()
-	rec, err := e.runStore.Get(ctx, runID)
-	if err != nil || rec == nil {
-		logger.Warn("signal resume: run not found", "run_id", runID, "error", err)
-		return
-	}
-	if rec.Status != RunStatusWaiting {
-		// Not parked (already resumed, completed, or a non-suspend run) —
-		// nothing to do. Avoids double-execution if the signal endpoint
-		// somehow fires twice for the same delivery.
-		logger.Info("signal resume: run not in waiting state; skipping",
-			"run_id", runID, "status", rec.Status)
-		return
-	}
-	plan, reason := e.buildResumePlan(ctx, rec)
-	if plan != nil {
-		plan.reason = resumeReasonSignal
-	}
-	if plan == nil {
-		markCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = e.runStore.MarkInterrupted(markCtx, rec.ID, "not resumable after signal: "+reason)
-		cancel()
-		logger.Warn("signal resume: not resumable", "run_id", runID, "reason", reason)
-		return
-	}
-	logger.Info("resuming pipeline run after signal delivery", "run_id", runID, "pipeline_slug", rec.PipelineSlug)
-	go e.runResumedRun(ctx, plan, logger)
+	go e.ResumeEventRun(context.Background(), runID, logger)
 }
 
 // buildResumePlan validates that a run's persisted state is
@@ -371,6 +332,10 @@ func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resume
 //   - Anything else (pipeline reload failure, broken inputs) is
 //     permanent for this lifetime → interrupted with the reason.
 func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *slog.Logger) {
+	e.runResumedRunWithRetry(ctx, plan, logger, true, nil)
+}
+
+func (e *Executor) runResumedRunWithRetry(ctx context.Context, plan *resumePlan, logger *slog.Logger, waitForSlot bool, onAdmitted func()) {
 	rec := plan.rec
 	backoff := e.resumeRetryBase
 	if backoff <= 0 {
@@ -398,6 +363,7 @@ func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *
 			// compares the stamped hash against the pinned definition.
 			PinnedVersion:   rec.PipelineVersion,
 			resume:          true,
+			resumeAdmitted:  onAdmitted,
 			resumeReason:    plan.reason,
 			restoredOutputs: plan.restored,
 			restoredCostUSD: rec.CostUSD,
@@ -412,9 +378,16 @@ func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *
 		case err == nil:
 			logger.Info("resumed pipeline run finished", "run_id", rec.ID, "status", res.Status)
 			return
-		case errors.Is(err, ErrDuplicateRunID):
-			logger.Warn("pipeline resume: run id already live on this process; standing down",
+		case ctx.Err() != nil:
+			// Preflight may sanitize a lifecycle cancellation into a different
+			// error. Trust the parent context, leave durable state intact for
+			// revalidation next boot/tick; live-context failures still fail.
+			logger.Info("pipeline resume: shutdown during admission; run remains recoverable",
 				"run_id", rec.ID)
+			return
+		case errors.Is(err, ErrDuplicateRunID), errors.Is(err, errResumePlanStale):
+			logger.Info("pipeline resume: another lifetime owns this run; standing down",
+				"run_id", rec.ID, "reason", err)
 			return
 		case errors.Is(err, ErrResumeDefinitionChanged):
 			// TOCTOU gate fired: the pipeline was edited between the
@@ -431,6 +404,9 @@ func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *
 				"run_id", rec.ID, "pipeline_slug", rec.PipelineSlug, "error", err)
 			return
 		case errors.Is(err, ErrConcurrencyLimitReached):
+			if !waitForSlot {
+				return
+			} // sweep retries durably on a later tick
 			logger.Info("pipeline resume: concurrency slot busy; will retry",
 				"run_id", rec.ID, "retry_in", backoff)
 			// Test rendezvous (nil in production): the run is now
