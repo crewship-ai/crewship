@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,8 +30,19 @@ func TestOperationsCollectorPayloads(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Substitute only the cgroup mount in this fixture; execute the embedded source.
+	var fleetRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fleetRequests.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	// Execute the embedded source with owned cgroup and unavailable-fleet fixtures.
 	source := strings.ReplaceAll(string(Collector), "/sys/fs/cgroup/", filepath.ToSlash(dir)+"/")
+	const fleetURL = "http://127.0.0.1:9119/crews/telemetry"
+	if count := strings.Count(source, fleetURL); count != 1 {
+		t.Fatalf("expected exactly one fleet endpoint in embedded collector, got %d", count)
+	}
+	source = strings.Replace(source, fleetURL, server.URL, 1)
 	run := func(t *testing.T) ([]byte, []byte, error) {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -52,11 +64,15 @@ func TestOperationsCollectorPayloads(t *testing.T) {
 	}
 	assertRejected := func(t *testing.T) {
 		t.Helper()
+		requestsBefore := fleetRequests.Load()
 		out, stderr, err := run(t)
 		var exitErr *exec.ExitError
 		const wantError = "Container resource sample failed; retaining the previous Page snapshot."
 		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 || len(out) != 0 || strings.TrimSpace(string(stderr)) != wantError {
 			t.Fatalf("accounting rejection must exit 1 with the collector diagnostic and no snapshot: process=%v, stdout=%q, stderr=%q", err, out, stderr)
+		}
+		if requestsAfter := fleetRequests.Load(); requestsAfter != requestsBefore {
+			t.Fatalf("invalid accounting fetched fleet telemetry: requests before=%d, after=%d", requestsBefore, requestsAfter)
 		}
 	}
 	out, stderr, err := run(t)
@@ -66,6 +82,39 @@ func TestOperationsCollectorPayloads(t *testing.T) {
 	var payload map[string]json.RawMessage
 	if err = json.Unmarshal(out, &payload); err != nil {
 		t.Fatal(err)
+	}
+	if requests := fleetRequests.Load(); requests != 1 {
+		t.Fatalf("valid accounting must fetch fleet telemetry exactly once, got %d", requests)
+	}
+	var fleet struct {
+		Rows []json.RawMessage `json:"rows"`
+	}
+	if err = json.Unmarshal(payload["fleet"], &fleet); err != nil || len(fleet.Rows) != 0 {
+		t.Fatalf("unavailable fleet must have no rows: %+v, error=%v", fleet, err)
+	}
+	var services struct {
+		Items []struct {
+			Name  string `json:"name"`
+			State string `json:"state"`
+			Label string `json:"label"`
+		} `json:"items"`
+	}
+	if err = json.Unmarshal(payload["services"], &services); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Crews in workspace", "Running containers"} {
+		found := false
+		for _, item := range services.Items {
+			if item.Name == name {
+				found = true
+				if item.State != "warning" || item.Label != "Unavailable" {
+					t.Fatalf("unavailable fleet service %q = %+v", name, item)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("missing fleet service %q", name)
+		}
 	}
 	for panel, schema := range map[string]pages.PanelSchema{"services": "status.v1", "memory": "metric.v1", "fleet": "table.v1"} {
 		if _, err := pages.ValidatePayload(schema, payload[panel]); err != nil {
