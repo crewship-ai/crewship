@@ -25,13 +25,51 @@ def percentile(values, fraction):
 
 
 def substantive(commit):
-    # Exclude an explicit main synchronization, never all bot-authored changes.
-    message = commit['messageHeadline']
-    return not (commit['parents']['totalCount'] >= 2 and re.match(
-        r"^Merge (?:branch 'main'|remote-tracking branch 'origin/main'|.*\bmain\b.* into )", message))
+    # Main synchronization is proven by parents, never author or commit headline.
+    return commit.get('main_parent_provenance') != 'verified_main_parent'
+
+
+def annotate_main_parents(pr, repo, github, warnings, cache):
+    commits = [n['commit'] for n in pr['commits']['nodes']]
+    known = {c['oid'] for c in commits}
+    merge = pr.get('mergeCommit') or {}
+    base_parents = merge.get('parents', {}).get('nodes', [])
+    base = base_parents[0]['oid'] if base_parents else None
+    # A retained/rebased PR commit as the base parent is not independent main evidence.
+    if base in known:
+        base = None
+    pr['main_provenance_base_sha'] = base
+    for commit in commits:
+        parents = commit['parents']
+        if parents['totalCount'] < 2:
+            commit['main_parent_provenance'] = 'single_parent'
+            continue
+        nodes = parents.get('nodes', [])
+        if not base or len(nodes) != parents['totalCount']:
+            commit['main_parent_provenance'] = 'unknown: missing independent main base or complete parents'
+            warnings.append(f"PR {pr['number']} commit {commit['oid']}: main parent provenance unavailable")
+            continue
+        statuses = []
+        for parent in nodes:
+            pair = (parent['oid'], base)
+            if pair not in cache:
+                comparison = github.request(f'repos/{repo}/compare/{parent["oid"]}...{base}')
+                cache[pair] = comparison.get('status')
+            statuses.append(cache[pair])
+        if any(status in ('ahead', 'identical') for status in statuses):
+            commit['main_parent_provenance'] = 'verified_main_parent'
+        elif all(status in ('behind', 'diverged') for status in statuses):
+            commit['main_parent_provenance'] = 'verified_no_main_parent'
+        else:
+            commit['main_parent_provenance'] = 'unknown: unexpected ancestry comparison'
+            warnings.append(f"PR {pr['number']} commit {commit['oid']}: main ancestry comparison unknown")
 
 
 def push_evidence(pr):
+    if any(n['commit']['parents']['totalCount'] >= 2 and
+           n['commit'].get('main_parent_provenance', 'unknown').startswith('unknown')
+           for n in pr['commits']['nodes']):
+        return None, 'unavailable: unknown main-parent provenance'
     commits = [n['commit'] for n in pr['commits']['nodes'] if substantive(n['commit'])]
     if pr['commits']['pageInfo']['hasNextPage'] or pr['timelineItems']['pageInfo']['hasNextPage']:
         return None, 'unavailable: commit/timeline pagination cap reached'
@@ -102,14 +140,16 @@ def collect(args):
         '--search', f'merged:{args.since}..{args.until}', '--json', 'number,createdAt,mergedAt,url'], timeout=90))
     raw = {'prs': [], 'runs': [], 'attempts': [], 'warnings': warnings}
     rows = []
+    ancestry_cache = {}
     for item in prs:
         query = '''query { repository(owner:%s,name:%s) { pullRequest(number:%d) {
-          number createdAt mergedAt headRefOid commits(first:100) { pageInfo { hasNextPage }
-          nodes { commit { oid messageHeadline pushedDate parents(first:2) { totalCount } } } }
+          number createdAt mergedAt headRefOid mergeCommit { oid parents(first:1) { nodes { oid } } } commits(first:100) { pageInfo { hasNextPage }
+          nodes { commit { oid messageHeadline pushedDate parents(first:10) { totalCount nodes { oid } } } } }
           timelineItems(first:100,itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT]) { pageInfo { hasNextPage }
           nodes { ... on HeadRefForcePushedEvent { createdAt beforeCommit { oid } afterCommit { oid } } } }
         } } }''' % (json.dumps(owner), json.dumps(name), item['number'])
         pr = github.request('graphql', query)['data']['repository']['pullRequest']
+        annotate_main_parents(pr, args.repo, github, warnings, ancestry_cache)
         raw['prs'].append(pr)
         push, source = push_evidence(pr)
         rows.append({**item, 'open_to_merge_seconds': seconds(item['createdAt'], item['mergedAt']),
