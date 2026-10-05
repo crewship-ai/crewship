@@ -169,6 +169,17 @@ contributor entrypoint also retain the strict API/CLI documentation inventory
 when the Go lint job is skipped.
 Unknown paths trigger the full suite, as do main pushes.
 
+Frontend tests run in four isolated partitions. Type checking runs once; the
+`Frontend Test` gate requires all partition artifacts, checks that each
+discovered test file appears exactly once in the results, and applies the
+unchanged global coverage thresholds to the merged report. Local
+`pnpm test:coverage` remains
+the equivalent single-invocation entrypoint. Partition summaries report actual
+passed, pending and todo counts; complete file discovery does not imply every
+assertion executed. Native Vitest blobs retain absolute paths, so all
+partitions and their merge must use the same checkout path (as the Ubuntu
+workflow jobs do).
+
 The root Dockerfile builds and boots on every code PR through the reusable
 `pr-image-build.yml` job. It tests `linux/amd64` without pushing; publication
 checks both amd64 and arm64. `scripts/pr-image-build-paths.sh` verifies that
