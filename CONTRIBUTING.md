@@ -180,6 +180,9 @@ passed, pending and todo counts; complete file discovery does not imply every
 assertion executed. Native Vitest blobs retain absolute paths, so all
 partitions and their merge must use the same checkout path (as the Ubuntu
 workflow jobs do).
+Each partition must include the configured coverage baseline discovered by
+the locked V8 provider. Imported nested modules can differ between partitions;
+the merged report must preserve their full union as well as the baseline.
 
 The root Dockerfile builds and boots on every code PR through the reusable
 `pr-image-build.yml` job. It tests `linux/amd64` without pushing; publication

@@ -61,6 +61,16 @@ def run(index, count, directory, config, max_workers=None):
     if not 1 <= index <= count:
         raise ValueError('Partition index must be between 1 and count')
     directory.mkdir(parents=True, exist_ok=True)
+    # Invalidate a previous pass before either discovery or execution can fail.
+    # Only remove this helper's named outputs; the directory may contain other
+    # local evidence. Never follow a coverage-output symlink during cleanup.
+    for filename in ('metadata.json', 'blob.json', 'report.json', 'inventory.json'):
+        (directory / filename).unlink(missing_ok=True)
+    coverage_directory = directory / 'coverage'
+    if coverage_directory.is_symlink():
+        coverage_directory.unlink()
+    elif coverage_directory.exists():
+        shutil.rmtree(coverage_directory)
     root = str(Path.cwd())
     command('list', '--config', config, '--filesOnly', '--json=' + str(directory / 'inventory.json'))
     expected = inventory(directory / 'inventory.json', root)
@@ -85,13 +95,15 @@ def run(index, count, directory, config, max_workers=None):
     (directory / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
 
 
-def validate(directory, count, expected, sha, merge_root=None):
+def validate(directory, count, expected, sha, coverage_expected, merge_root=None):
     metadata_paths = sorted(directory.glob('*/metadata.json'))
     if len(metadata_paths) != count:
         raise ValueError(f'Expected {count} partition artifacts, found {len(metadata_paths)}')
     seen = Counter()
     indices = set()
-    coverage_inventory = None
+    coverage_inventory = set()
+    if not coverage_expected:
+        raise ValueError('Independently discovered coverage baseline is empty')
     blobs = []
     totals = Counter()
     merge_root = Path.cwd() if merge_root is None else merge_root
@@ -117,23 +129,30 @@ def validate(directory, count, expected, sha, merge_root=None):
         totals.update(counts)
         if files != meta['files'] or coverage != meta['coverage']:
             raise ValueError('Partition evidence differs from its report')
-        if coverage_inventory is not None and coverage != coverage_inventory:
-            raise ValueError('Partition coverage source inventories differ')
-        coverage_inventory = coverage
+        missing_sources = set(coverage_expected) - set(coverage)
+        if missing_sources:
+            raise ValueError(f'Partition lost configured coverage source baseline: {sorted(missing_sources)}')
+        # Native Vitest adds matching nested modules when imported, beyond its
+        # rooted uncovered-file glob. Keep every such source from every shard.
+        coverage_inventory.update(coverage)
         seen.update(files)
         blobs.append(blob)
     if set(seen) != set(expected) or any(occurrences != 1 for occurrences in seen.values()):
         raise ValueError(f'Incomplete/duplicate test-file coverage: missing={sorted(set(expected) - set(seen))}; '
                          f'unexpected={sorted(set(seen) - set(expected))}; '
                          f'duplicate={sorted(path for path, occurrences in seen.items() if occurrences != 1)}')
-    return blobs, coverage_inventory, dict(totals)
+    return blobs, sorted(coverage_inventory), dict(totals)
 
 
 def merge(directory, count, output, config):
     output.mkdir(parents=True, exist_ok=True)
     command('list', '--config', config, '--filesOnly', '--json=' + str(output / 'inventory.json'))
     expected = inventory(output / 'inventory.json', Path.cwd())
-    blobs, coverage_inventory, counts = validate(directory, count, expected, source_sha())
+    coverage_inventory_path = output / 'coverage-inventory.json'
+    subprocess.run(['node', str(Path(__file__).with_name('vitest-coverage-inventory.mjs')),
+                    config, str(coverage_inventory_path)], check=True)
+    coverage_expected = inventory(coverage_inventory_path, Path.cwd())
+    blobs, coverage_inventory, counts = validate(directory, count, expected, source_sha(), coverage_expected)
     blob_dir = output / 'blobs'
     if blob_dir.exists():
         shutil.rmtree(blob_dir)

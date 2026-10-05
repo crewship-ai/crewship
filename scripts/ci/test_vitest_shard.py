@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+import subprocess
 
 SPEC = importlib.util.spec_from_file_location('vitest_shard', Path(__file__).with_name('vitest-shard.py'))
 SHARD = importlib.util.module_from_spec(SPEC)
@@ -37,7 +39,8 @@ class VitestPartitions(unittest.TestCase):
         (directory / 'metadata.json').write_text(json.dumps(metadata))
 
     def validate(self):
-        return SHARD.validate(self.root, 4, self.expected, 'source-sha', merge_root=self.root)
+        return SHARD.validate(self.root, 4, self.expected, 'source-sha',
+                              ['logic.ts', 'untested.ts'], merge_root=self.root)
 
     def change_metadata(self, **updates):
         path = self.root / 'shard-1/metadata.json'
@@ -59,6 +62,46 @@ class VitestPartitions(unittest.TestCase):
         (self.root / 'shard-1/blob.json').unlink()
         with self.assertRaises(FileNotFoundError):
             self.validate()
+
+    def test_failed_rerun_invalidates_previous_pass_and_preserves_other_outputs(self):
+        directory = self.root / 'shard-1'
+        (directory / 'inventory.json').write_text('old inventory')
+        (directory / 'coverage').mkdir()
+        (directory / 'coverage/old.json').write_text('old coverage')
+        (directory / 'unrelated.txt').write_text('keep local evidence')
+        sibling_report = (self.root / 'shard-2/report.json').read_bytes()
+
+        def fail_execution(*args):
+            if args[0] == 'list':
+                (directory / 'inventory.json').write_text(json.dumps([
+                    {'file': str(Path.cwd() / name)} for name in self.expected
+                ]))
+                return
+            raise subprocess.CalledProcessError(1, ['vitest', *args])
+
+        with patch.object(SHARD, 'command', side_effect=fail_execution):
+            with self.assertRaises(subprocess.CalledProcessError):
+                SHARD.run(1, 4, directory, 'vitest.config.ts')
+        for filename in ('metadata.json', 'blob.json', 'report.json', 'coverage'):
+            self.assertFalse((directory / filename).exists(), filename)
+        self.assertEqual((directory / 'unrelated.txt').read_text(), 'keep local evidence')
+        self.assertEqual((self.root / 'shard-2/report.json').read_bytes(), sibling_report)
+        with self.assertRaisesRegex(ValueError, 'Expected 4 partition artifacts, found 3'):
+            self.validate()
+
+    def test_failed_discovery_cleans_owned_outputs_without_following_coverage_symlink(self):
+        directory = self.root / 'shard-1'
+        (directory / 'inventory.json').write_text('old inventory')
+        external = self.root / 'other-evidence'
+        external.mkdir()
+        (external / 'keep.json').write_text('preserve')
+        (directory / 'coverage').symlink_to(external, target_is_directory=True)
+        with patch.object(SHARD, 'command', side_effect=subprocess.CalledProcessError(1, ['vitest', 'list'])):
+            with self.assertRaises(subprocess.CalledProcessError):
+                SHARD.run(1, 4, directory, 'vitest.config.ts')
+        for filename in ('metadata.json', 'blob.json', 'report.json', 'inventory.json', 'coverage'):
+            self.assertFalse((directory / filename).exists(), filename)
+        self.assertEqual((external / 'keep.json').read_text(), 'preserve')
 
     def test_source_count_inventory_and_duplicate_index_fail(self):
         for updates in [{'sha': 'other-source'}, {'count': 3}, {'index': 2}, {'index': 5},
@@ -104,7 +147,7 @@ class VitestPartitions(unittest.TestCase):
             with self.subTest(filename=filename), self.assertRaises(ValueError):
                 self.validate()
 
-    def test_coverage_denominator_must_match_each_partition(self):
+    def test_configured_coverage_baseline_is_required_in_each_partition(self):
         path = self.root / 'shard-1/report.json'
         report = json.loads(path.read_text())
         del report['coverageMap'][str(self.root / 'untested.ts')]
@@ -112,6 +155,26 @@ class VitestPartitions(unittest.TestCase):
         self.save_metadata(1)
         with self.assertRaises(ValueError):
             self.validate()
+
+    def test_baseline_cannot_disappear_from_every_partition(self):
+        for index in range(1, 5):
+            path = self.root / f'shard-{index}/report.json'
+            report = json.loads(path.read_text())
+            del report['coverageMap'][str(self.root / 'untested.ts')]
+            path.write_text(json.dumps(report))
+            self.save_metadata(index)
+        with self.assertRaisesRegex(ValueError, 'lost configured coverage source baseline'):
+            self.validate()
+
+    def test_imported_nested_sources_are_preserved_in_full_union(self):
+        for index, filename in [(2, 'nested/hooks/imported.ts'), (4, 'nested/lib/other.ts')]:
+            path = self.root / f'shard-{index}/report.json'
+            report = json.loads(path.read_text())
+            report['coverageMap'][str(self.root / filename)] = {}
+            path.write_text(json.dumps(report))
+            self.save_metadata(index)
+        _, coverage, _ = self.validate()
+        self.assertEqual(coverage, ['logic.ts', 'nested/hooks/imported.ts', 'nested/lib/other.ts', 'untested.ts'])
 
     def test_empty_failed_and_uncovered_reports_fail(self):
         report = json.loads((self.root / 'shard-1/report.json').read_text())

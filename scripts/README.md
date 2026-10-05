@@ -65,6 +65,7 @@ commands. They may publish or remove release/package artifacts.
 | [ci/cli-subprocess-race.py](ci/cli-subprocess-race.py) | Runs named authentication, conversation and stream boundaries with both the outer tests and shared CLI subprocess instrumented; rejects missing/skipped tests and preserves JSON execution evidence |
 | [ci/general-race-shard.py](ci/general-race-shard.py) | `python3 scripts/ci/general-race-shard.py run INDEX COUNT TIMEOUT_SECONDS`: runs a complete package partition under the race detector; checked-in measured costs balance work, while fresh `go list` inventory determines coverage; writes the partition record to `.ci-results/` |
 | [ci/api-race-shard.py](ci/api-race-shard.py) | `python3 scripts/ci/api-race-shard.py run INDEX COUNT TIMEOUT_SECONDS`: runs an API test partition; `report ARTIFACT_DIRECTORY COUNT BASELINE_SECONDS` validates and summarizes all shard records |
+| [ci/vitest-coverage-inventory.mjs](ci/vitest-coverage-inventory.mjs) | Internal Vitest merge helper: independently discovers the configured uncovered-source baseline through the locked V8 provider, without running tests or cleaning reports; unsupported provider API changes fail closed |
 
 Go checker directories are run with `go run ./scripts/<directory>` unless their
 local instructions say otherwise. Companion `*-test.sh`, `*-test.mjs` and
