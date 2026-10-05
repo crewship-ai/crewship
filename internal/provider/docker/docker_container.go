@@ -1742,8 +1742,8 @@ func (p *Provider) runByoiSidecarCheck(ctx context.Context, containerID, image s
 
 // forceTeardown stops a crew container with a 10-second grace period,
 // force-removes it and drops the crew's warm-cache entry. Stop/remove errors
-// are deliberately ignored: every caller falls through to create a fresh
-// container regardless.
+// do not prevent callers from attempting replacement; failed removal is
+// reported and retains the old runtime's mandatory execution gate.
 //
 // RemoveVolumes is set so the anonymous, bind-backed noexec volumes for
 // /workspace, /output and /crew (see noexecBindMount, #1400) are cleaned up
@@ -1755,9 +1755,10 @@ func (p *Provider) runByoiSidecarCheck(ctx context.Context, containerID, image s
 func (p *Provider) forceTeardown(ctx context.Context, containerID, crewID string) {
 	timeout := 10
 	_, _ = p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout})
-	_ = p.removeCrewContainer(ctx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+	if err := p.removeCrewContainer(ctx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}); err != nil {
+		p.logger.Warn("crew runtime teardown incomplete; retained runtime remains guarded", "container_id", shortID(containerID), "error", err)
+	}
 	p.evictWarm(crewID)
-	p.forgetFenced(containerID)
 }
 
 // waitExecExit polls ContainerExecInspect for execID every 50ms until the
@@ -1907,7 +1908,6 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 
 // RemoveCrewRuntime forcefully removes a crew container.
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
-	p.forgetFenced(containerID)
 	p.evictWarmContainer(containerID)
 	if err := p.removeCrewContainer(ctx, containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
 		return fmt.Errorf("remove crew runtime %s: %w", provider.ShortID(containerID), err)
