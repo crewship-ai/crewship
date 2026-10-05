@@ -3,17 +3,12 @@
 package managedlaunch
 
 import (
-	"bytes"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
-	"strings"
 	"syscall"
 	"unsafe"
 
@@ -26,21 +21,9 @@ func Launch(encoded string, args []string) error {
 	if len(encoded) > 64<<10 || len(args) == 0 {
 		return errors.New("managed launch: invalid launcher arguments")
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	d, err := DecodeDescriptor(encoded)
 	if err != nil {
-		return errors.New("managed launch: invalid descriptor encoding")
-	}
-	var d Descriptor
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&d) != nil || decoder.Decode(new(any)) != io.EOF {
-		return errors.New("managed launch: invalid descriptor encoding")
-	}
-	if err := d.Validate(); err != nil {
 		return err
-	}
-	if !ValidRunID(d.RunID) {
-		return errors.New("managed launch: valid run identity required")
 	}
 	// Establish identity before potentially expensive artifact validation so
 	// stop and restart reconciliation can also locate the trusted launcher.
@@ -99,21 +82,11 @@ func establishRunIdentity(runID string) error {
 	if err != nil {
 		return errors.New("managed launch: process identity unavailable")
 	}
-	end := strings.LastIndexByte(string(raw), ')')
-	if end < 0 {
-		return errors.New("managed launch: invalid process identity")
-	}
-	fields := strings.Fields(string(raw[end+1:]))
-	// Some container runtimes already create the exec process as a session
-	// leader. EPERM is safe only when kernel evidence confirms this process
-	// owns both the session and group; never borrow a caller-supplied identity.
-	pid := strconv.Itoa(os.Getpid())
-	if len(fields) < 20 || fields[2] != pid || fields[3] != pid {
-		return errors.New("managed launch: invalid process identity")
-	}
-	stamp, err := strconv.ParseUint(fields[19], 10, 64)
-	if err != nil || stamp == 0 {
-		return errors.New("managed launch: invalid process identity")
+	// EPERM from setsid is safe only when kernel evidence says this
+	// process already owns both its session and process group.
+	stamp, err := processStartIdentity(raw, os.Getpid())
+	if err != nil {
+		return err
 	}
 	f, err := os.OpenFile(DirectRunPIDFile(runID), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {

@@ -1,8 +1,6 @@
 package docker
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -127,18 +125,11 @@ func (p *Provider) attestManagedLaunch(ctx context.Context, id string, d managed
 		return denied
 	}
 	defer copied.Content.Close()
-	limited := &io.LimitedReader{R: copied.Content, N: managedlaunch.MaxArtifactBytes + 8192}
-	tr := tar.NewReader(limited)
-	entry, err := tr.Next()
-	if err != nil || entry.Typeflag != tar.TypeReg || entry.Name != path.Base(managedlaunch.LauncherPath) || entry.Size != int64(len(raw)) {
-		return denied
-	}
-	live, err := io.ReadAll(tr)
-	if err != nil || !bytes.Equal(live, raw) {
+	if managedlaunch.VerifyArchive(copied.Content, path.Base(managedlaunch.LauncherPath), raw) != nil {
 		return denied
 	}
 	expected := p.ExpectedSidecarHash()
-	if _, err := tr.Next(); err != io.EOF || limited.N <= 0 || expected == "" || !strings.HasPrefix(hostArtifact.SHA256, expected) {
+	if expected == "" || !strings.HasPrefix(hostArtifact.SHA256, expected) {
 		return denied
 	}
 	return nil

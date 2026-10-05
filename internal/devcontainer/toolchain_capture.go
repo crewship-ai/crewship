@@ -1,11 +1,9 @@
 package devcontainer
 
 import (
-	"archive/tar"
 	"context"
 	"fmt"
 	"io"
-	"path"
 	"strings"
 	"time"
 
@@ -148,23 +146,6 @@ func (p *Provisioner) inspectToolchain(ctx context.Context, image string, bins [
 // A host read of the stopped, immutable image supplies the hash. Version probe
 // stdout and digest files produced by image programs never authorize launch.
 func captureLaunchArtifact(executable string, reader io.Reader) *managedlaunch.Artifact {
-	if path.Base(executable) != "codex" && path.Base(executable) != "claude" {
-		return nil
-	}
-	limited := &io.LimitedReader{R: reader, N: managedlaunch.MaxArtifactBytes + 8192}
-	tr := tar.NewReader(limited)
-	h, err := tr.Next()
-	if err != nil || h.Typeflag != tar.TypeReg || h.Name != path.Base(executable) || (h.Uid != 0 && h.Uid != 1001) ||
-		h.Mode&0022 != 0 || h.Mode&0111 == 0 || h.Size <= 0 || h.Size > managedlaunch.MaxArtifactBytes {
-		return nil
-	}
-	raw, err := io.ReadAll(tr)
-	if err != nil || int64(len(raw)) != h.Size {
-		return nil
-	}
-	if _, err := tr.Next(); err != io.EOF || limited.N <= 0 {
-		return nil
-	}
-	artifact, _ := managedlaunch.Capture(executable, raw)
+	artifact, _ := managedlaunch.CaptureArchive(executable, reader)
 	return artifact
 }
