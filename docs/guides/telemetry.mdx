@@ -136,6 +136,19 @@ When telemetry is enabled:
 
 ## What is never sent
 
+The JavaScript SDK uses an explicit crash-only `dataCollection` policy in
+the browser, Node and Edge configurations. Sentry 11's broader defaults are
+disabled: user identifiers, cookies, HTTP headers and bodies, URL query
+parameters, AI inputs and outputs, GraphQL documents and variables, database
+payloads, queue arguments, local stack variables and source context lines.
+`lib/__tests__/sentry-config-privacy.test.ts` verifies the actual initialization
+options and the browser's consent gate. Tracing and session replay stay off.
+This does not redact arbitrary text embedded in an error message; the
+free-form-string limitation below still applies.
+
+Sentry 11 supports Safari 15 and newer and requires Sentry self-hosted
+26.4.2 or newer. The Go SDK has its own compatibility requirements.
+
 The client-side `BeforeSend` hook in `internal/crashreport/sentry_adapter.go`
 strips the following before the event leaves the process:
 

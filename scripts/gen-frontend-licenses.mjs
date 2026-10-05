@@ -32,6 +32,10 @@ const pnpmDir = "node_modules/.pnpm";
 // Adding an entry requires citing where the declaration is observable and a
 // review note; versions not listed here fail hard.
 const EXCEPTIONS = {
+  // Sentry 11 migration (2026-10-05): inspected the exact published 11.4.0
+  // tarball; package.json declares MIT, but no package license is included.
+  // build/THIRD-PARTY-LICENSES.txt covers vendored dependencies only.
+  "@sentry/server-utils@11.4.0": "package.json declares MIT",
   // Dependency refresh (2026-09-30): inspected each exact installed package
   // in node_modules/.pnpm. These versions still omit license files and
   // declare the same license as their previously reviewed versions below.

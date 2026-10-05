@@ -26,6 +26,7 @@
 // beta budget is a crash-only signal, not a session-replay quota burn.
 
 import * as Sentry from "@sentry/nextjs"
+import { crashDataCollection } from "./lib/sentry-data-collection"
 
 // Narrow shape for the legacy `modules` field that some Sentry
 // integrations still attach to events but is not part of the
@@ -124,6 +125,7 @@ void (async () => {
 
   Sentry.init({
     dsn: DSN,
+    dataCollection: crashDataCollection,
     release: process.env.NEXT_PUBLIC_CREWSHIP_VERSION || undefined,
     environment: classifyEnv(process.env.NEXT_PUBLIC_CREWSHIP_VERSION ?? ""),
 
