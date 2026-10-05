@@ -34,11 +34,12 @@ func TestInitServerSelection(t *testing.T) {
 		t.Error("init must inherit the root server flag instead of shadowing it")
 	}
 	for _, tc := range []struct {
-		name    string
-		profile string
-		env     bool
-		flag    string
-		missing bool
+		name       string
+		profile    string
+		env        bool
+		flag       string
+		missing    bool
+		serverless bool
 	}{
 		{name: "config"},
 		{name: "env_over_config", env: true},
@@ -48,6 +49,7 @@ func TestInitServerSelection(t *testing.T) {
 		{name: "explicit_server_over_profile_and_env", profile: "flag", env: true, flag: "--server"},
 		{name: "short_server_over_profile_and_env", profile: "flag", env: true, flag: "-s"},
 		{name: "unknown_profile_fails_closed", profile: "flag", env: true, missing: true},
+		{name: "serverless_profile_fails_closed", profile: "flag", env: true, serverless: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resetCLIState()
@@ -118,6 +120,9 @@ func TestInitServerSelection(t *testing.T) {
 			if tc.missing {
 				delete(cfg.Servers, "fixture")
 			}
+			if tc.serverless {
+				cfg.Servers["fixture"].Server = ""
+			}
 			if err := cli.SaveConfig(cfg); err != nil {
 				t.Fatal(err)
 			}
@@ -143,9 +148,9 @@ func TestInitServerSelection(t *testing.T) {
 				return root.Execute()
 			}
 			output, err := captureStderrCov(t, run)
-			if tc.missing {
-				if err == nil || strings.Contains(err.Error(), "blocked non-fixture") || calls.Load() != 0 {
-					t.Fatalf("unknown profile must fail without selecting a fallback: err=%v calls=%d", err, calls.Load())
+			if tc.missing || tc.serverless {
+				if err == nil || !strings.Contains(err.Error(), `profile "fixture" has no server URL`) || calls.Load() != 0 {
+					t.Fatalf("selected profile must report its missing server URL without selecting a fallback: err=%v calls=%d", err, calls.Load())
 				}
 				return
 			}
