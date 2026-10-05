@@ -80,7 +80,9 @@ samples. PR listing is a separate bounded CLI call. Workflow pagination starts
 at the earliest sampled PR creation, so long-lived PRs can reach the cap even
 when the merge-date window is short.
 
-Matching uses GitHub PR associations or a known current/force-pushed head SHA.
+Matching prefers explicit GitHub PR associations. Only runs without associations
+fall back to a known current/force-pushed head SHA, within the PR lifetime; shared
+commits in stacked branches cannot override an explicit association to another PR.
 Deleted ordinary push history without associations can be unavailable. Run
 pagination warnings mean run counts and percentiles are incomplete; do not
 use such a sample to assert throughput improved. GitHub commonly returns null

@@ -104,6 +104,16 @@ def attempt_metrics(run, jobs):
             'job_conclusions': {j['name']: j['conclusion'] for j in jobs}}
 
 
+def matches_pr(run, pr, shas):
+    if not (timestamp(pr['createdAt']) <= timestamp(run['created_at']) <= timestamp(pr['mergedAt'])):
+        return False
+    associations = run.get('pull_requests', [])
+    if associations:
+        # Shared commits in stacked branches must not override explicit PR identity.
+        return any(item['number'] == pr['number'] for item in associations)
+    return run['head_sha'] in shas
+
+
 def row_run_counts(attempts):
     unique = {(a['run_id'], a['attempt']): a for a in attempts}
     ci = [a for a in unique.values() if Path(a['workflow'].split('@')[0]).name == 'ci.yml']
@@ -183,7 +193,7 @@ def collect(args):
             shas = {n['commit']['oid'] for n in pr['commits']['nodes']} | {pr['headRefOid']}
             for event in pr['timelineItems']['nodes']:
                 shas.update(c['oid'] for c in [event.get('beforeCommit'), event.get('afterCommit')] if c)
-            if (any(p['number'] == pr['number'] for p in run.get('pull_requests', [])) or run['head_sha'] in shas) and timestamp(run['created_at']) <= timestamp(pr['mergedAt']):
+            if matches_pr(run, pr, shas):
                 matches.append(row)
         if not matches:
             continue
