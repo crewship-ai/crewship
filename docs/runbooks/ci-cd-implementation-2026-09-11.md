@@ -117,14 +117,23 @@ merge protection while preserving stronger existing CodeQL thresholds and all
 other tools, rules, bypass actors, review settings and strict required checks.
 Unexpected targets, incomplete protections and duplicate rules fail closed.
 `allow_auto_merge` is reported separately; this helper does not change it.
+Plans warn that preserved emergency bypass actors can override required checks
+and merge queue. They also warn when queue activation is planned while
+`allow_auto_merge` is false; an operator must enable it before activating the
+queue procedure. Emergency actors remain available and require separate review.
 
-Review the saved before/proposed payload. Merge the contributor queue procedure
-and helper documentation into main before activation. Then an authorized
-operator can apply that reviewed plan, naming the full documentation SHA:
+Before either activation scope, merge and review the CodeQL workflow source
+that analyzes both languages on every PR. Run actual documentation-only and
+single-language PR canaries and inspect both analyses for their current revisions.
+Review the saved before/proposed payload. Queue activation also requires the
+contributor queue procedure and helper documentation on main. An authorized
+operator names the full reviewed source and documentation SHAs:
 
 ```bash
 python3 scripts/ci/repository-policy.py --apply \
-  --plan /tmp/crewship-policy-plan.json --documentation-commit FULL_MAIN_SHA
+  --plan /tmp/crewship-policy-plan.json \
+  --analysis-commit FULL_ANALYSIS_MAIN_SHA \
+  --documentation-commit FULL_QUEUE_DOCUMENTATION_MAIN_SHA
 ```
 
 The helper verifies main ancestry, reads the current policy again and refuses a
@@ -132,10 +141,12 @@ stale or modified plan before PUT. It checks the returned policy after PUT.
 GitHub does not provide a documented atomic compare-and-swap for this endpoint;
 a concurrent change between the last read and PUT remains possible. Coordinate
 policy edits and inspect the live ruleset afterwards. Regenerate/review a stale
-plan rather than replacing somebody else's change. The SHA is an operator
-attestation that the named commit contains the reviewed procedure; ancestry
-alone does not inspect its documentation content. Enable repository auto-merge
-separately only when the queue procedure and required checks are ready.
+plan rather than replacing somebody else's change. The analysis SHA is an
+operator attestation of reviewed workflow source and actual canary evidence;
+the documentation SHA attests the reviewed queue procedure. Ancestry establishes
+only that those exact commits are on main: it does not inspect their contents
+or verify the canary results. A mismatched response after PUT means live policy
+may have changed; inspect it before continuing.
 
 **Code scanning limitation:** GitHub's native code-scanning merge protection
 **does not apply to merge queue groups**. It checks eligible PR-diff findings,
@@ -150,12 +161,15 @@ Scope and exclusions: [GitHub code scanning merge protection](https://docs.githu
 
 CodeQL merge protection can be activated independently before the queue process
 is merged. This scope preserves any existing queue without changing it and does
-not require a queue documentation SHA:
+not require a queue documentation SHA. It still requires the reviewed analysis
+source on main and the actual PR canaries described above. Supplying a queue
+documentation SHA for this scope is rejected:
 
 ```bash
 python3 scripts/ci/repository-policy.py --code-scanning-only --output /tmp/codeql-policy.json
 # Review the before/proposed policy; only the CodeQL rule should change.
-python3 scripts/ci/repository-policy.py --apply --plan /tmp/codeql-policy.json
+python3 scripts/ci/repository-policy.py --apply --plan /tmp/codeql-policy.json \
+  --analysis-commit FULL_ANALYSIS_MAIN_SHA
 ```
 
 The CodeQL workflow now plans both Go and JavaScript/TypeScript on every PR,
