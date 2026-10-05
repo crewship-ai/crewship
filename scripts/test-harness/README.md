@@ -13,6 +13,11 @@ memory, a routine run's outcome being **observable** afterwards, recipe
 
 ## Which of these run in CI
 
+The separate [offline Messages fixture preparation](runtime-messages.md) is
+not connected to CI yet. Its Python contract tests do not execute a crew agent;
+a successful real container scenario remains required before it can become a
+runtime gate.
+
 The CI workflow now has two distinct harness protections. The shell job runs
 `scripts/test-harness-integrity.sh` (ShellCheck plus helper-call resolution)
 and its negative test, plus `scripts/test-harness-pr-subset-test.sh`, which

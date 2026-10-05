@@ -75,6 +75,8 @@ name as proof that it never contacts a server.
 | [ci/managed-environments.py](ci/managed-environments.py) | Requires local Docker `alpine:3`; runs five named synthetic environment fixtures with isolated resources; fails on skipped/missing tests; no provider credentials or global cleanup |
 | [api-contract/](api-contract/README.md) | API contract/fuzz checks; use its isolation, authentication and pacing instructions |
 | [test-harness/](test-harness/) | CLI-driven acceptance scenarios; may create and delete resources on the selected server |
+| [ci/native-runtime.py](ci/native-runtime.py) | Restricted Codex live acceptance against an approved released GHCR digest; see [prerequisites and evidence](ci/native-runtime.md). Not enabled in CI yet. |
+| [test-harness/test-runtime-messages.py](test-harness/test-runtime-messages.py) | CLI assertions and scenario preparation for an owned offline Anthropic crew fixture; see [setup and current limits](test-harness/runtime-messages.md). Requires a preprovisioned fixture; contract tests alone are not runtime evidence. |
 | [test-pages-apps.sh](test-pages-apps.sh) | Pages application acceptance checks; inspect required build/runtime setup |
 | [demo/](demo/), [setup-shipfast.sh](setup-shipfast.sh) | Creates/configures demo resources; some scenarios run agents and use provider credits |
 | [validate-flow.sh](validate-flow.sh) | CLI → API → Docker flow; includes an optional provider-backed agent run and cleanup |
