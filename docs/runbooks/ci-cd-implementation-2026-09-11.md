@@ -106,3 +106,44 @@ Descriptor inspection or resolution failures remain UNVERIFIED and fail under
 tags retain their existing behavior.
 
 The manual `PR Image Build` workflow, with `registry_image` and `expected_sha` inputs, replays both architecture boots against one supplied registry digest and expected SHA, without rebuilding or publishing. It can validate a candidate before another publication attempt; success does not promote that candidate. This specifically exercises sequential pulls on the same runner, which independent AMD64/ARM build jobs do not cover.
+
+## Review and apply repository policy (#2932)
+
+`python3 scripts/ci/repository-policy.py --output /tmp/crewship-policy-plan.json`
+is read-only by default. The plan records the existing policy fingerprint and
+proposes a one-PR merge queue: ALLGREEN, SQUASH, one build/group entry, no batch
+wait and a 120-minute check deadline. It adds CodeQL High/Critical security
+merge protection while preserving stronger existing CodeQL thresholds and all
+other tools, rules, bypass actors, review settings and strict required checks.
+Unexpected targets, incomplete protections and duplicate rules fail closed.
+`allow_auto_merge` is reported separately; this helper does not change it.
+
+Review the saved before/proposed payload. Merge the contributor queue procedure
+and helper documentation into main before activation. Then an authorized
+operator can apply that reviewed plan, naming the full documentation SHA:
+
+```bash
+python3 scripts/ci/repository-policy.py --apply \
+  --plan /tmp/crewship-policy-plan.json --documentation-commit FULL_MAIN_SHA
+```
+
+The helper verifies main ancestry, reads the current policy again and refuses a
+stale or modified plan before PUT. It checks the returned policy after PUT.
+GitHub does not provide a documented atomic compare-and-swap for this endpoint;
+a concurrent change between the last read and PUT remains possible. Coordinate
+policy edits and inspect the live ruleset afterwards. Regenerate/review a stale
+plan rather than replacing somebody else's change. The SHA is an operator
+attestation that the named commit contains the reviewed procedure; ancestry
+alone does not inspect its documentation content. Enable repository auto-merge
+separately only when the queue procedure and required checks are ready.
+
+**Code scanning limitation:** GitHub's native code-scanning merge protection
+**does not apply to merge queue groups**. It checks eligible PR-diff findings,
+not every historical alert or a findings-based queue candidate gate. `CodeQL
+Result` on `merge_group` still proves analysis execution only. A queue-specific
+findings gate would require separate implementation and validation; do not
+claim this policy supplies one. Existing alerts remain remediation work; this
+helper neither dismisses alerts nor establishes that the baseline is clean.
+
+Schema: [GitHub repository rules REST API](https://docs.github.com/en/rest/repos/rules).
+Scope and exclusions: [GitHub code scanning merge protection](https://docs.github.com/en/code-security/concepts/code-scanning/merge-protection).
