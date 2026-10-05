@@ -27,12 +27,35 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
-COPY . .
+# Generate types and legal inventory before app sources: a UI edit must not
+# redo work determined solely by Prisma inputs or the locked dependency tree.
+# .npmrc stays after install, matching the existing install configuration.
+COPY .npmrc prisma.config.ts ./
+COPY prisma/ ./prisma/
 RUN pnpm prisma generate
+COPY scripts/gen-frontend-licenses.mjs ./scripts/
 # License texts of the embedded frontend's npm dependencies, from the
 # lockfile-installed tree (no network). Collected in-stage so every docker
 # build path — PR image build, release, nightly, local — is self-contained.
 RUN node scripts/gen-frontend-licenses.mjs /licenses-frontend
+
+# Backend-only sources leave these COPY layers cached. VERSION still forces
+# a fresh static export when the build identity changes.
+# Root TS configs and e2e sources remain inputs because tsconfig.json includes
+# them in Next's type check. The source contract tests guard new TS inputs.
+COPY *.ts *.json *.mjs ./
+COPY app/ ./app/
+COPY components/ ./components/
+COPY hooks/ ./hooks/
+COPY lib/ ./lib/
+COPY stores/ ./stores/
+COPY public/ ./public/
+# Shared JSON contracts are imported by the UI; exclude their Go sources.
+COPY config/*.json ./config/
+COPY schemas/*.json ./schemas/
+COPY e2e/ ./e2e/
+COPY scripts/prepare-pdf-assets.mjs scripts/check-control-accessibility.tsx ./scripts/
+COPY tools/pages-build/sdk.ts ./tools/pages-build/
 ARG VERSION=dev
 ARG NEXT_PUBLIC_SENTRY_DSN=""
 ENV NEXT_PUBLIC_CREWSHIP_VERSION=$VERSION
