@@ -23,6 +23,8 @@ class WorkflowContracts(unittest.TestCase):
         lane = self.job(ci, 'cli-subprocess-race')
         self.assertIn('python3 scripts/ci/cli-subprocess-race.py', lane)
         self.assertNotIn('continue-on-error:', lane)
+        self.assertIn('include-hidden-files: true', lane)
+        self.assertIn('if-no-files-found: error', lane)
         helper = (ROOT / 'cmd/crewship/cmd_model_test.go').read_text()
         self.assertIn('TEST_CREWSHIP_CLI_RACE', helper)
         self.assertIn('args = append(args, "-race")', helper)
