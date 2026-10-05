@@ -39,6 +39,7 @@ running the full suite with a deliberately adjusted timeout. Mutation tests
 | [gen-frontend-licenses.mjs](gen-frontend-licenses.mjs) | Collects scoped and unscoped npm dependency texts from the installed locked tree; checks coverage and writes a SHA-256 manifest |
 | [check-release-artifacts.sh](check-release-artifacts.sh) | Asserts built archives, deb, rpm and the image actually contain the legal files (`--strict` fails on unverifiable channels); run by release/nightly after packaging |
 | [entrypoint.sh](entrypoint.sh) | Agent-container startup; distinct from the server entrypoint under `docker/` |
+| [ci/hosted-classic-store-probe.sh](ci/hosted-classic-store-probe.sh) | Disposable branch-only hosted Docker 28 classic overlay2 RED/GREEN probe; anonymous immutable pulls, create/copy only, no boot or publication; receipts under runner temp; called only by experimental registry dispatch |
 | [ci/](ci/) | CI planning/verdict, test budgets, browser report comparison, release smoke and publishing helpers; callers in `.github/workflows/` define their environment |
 
 Publishing helpers under `ci/` are workflow components, not general local test

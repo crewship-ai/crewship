@@ -119,27 +119,35 @@ jobs:
           EXPECTED_SHA: ${{ github.sha }}
         run: bash scripts/ci/smoke-image.sh crewship:pr-build "$EXPECTED_SHA" "$PLATFORM"
 
+  # Disposable acceptance experiment only; never merge into the production PR.
   registry-smoke:
-    name: Smoke existing registry image (both platforms)
+    name: Hosted classic-store legal probe (${{ matrix.checker }})
     if: github.event_name == 'workflow_dispatch' && inputs.registry_image != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        checker: [old, fixed]
     env:
       IMAGE: ${{ inputs.registry_image }}
       SHA: ${{ inputs.expected_sha }}
+      CHECKER: ${{ matrix.checker }}
     steps:
-      - name: Validate immutable identity
-        shell: bash
-        run: |
-          [[ "$IMAGE" =~ ^ghcr\.io/crewship-ai/crewship@sha256:[0-9a-f]{64}$ ]]
-          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          fetch-depth: 0
           persist-credentials: false
-      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1
+      - name: Acquire and copy legal artifacts without booting containers
+        shell: bash
+        run: bash scripts/ci/hosted-classic-store-probe.sh
+      - name: Preserve probe receipts even on BLOCKED or UNVERIFIED
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          platforms: arm64
-      - name: Boot both platforms from the same immutable index
-        run: |
-          bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/amd64
-          bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/arm64
+          name: classic-store-${{ matrix.checker }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/classic-store-probe/
+          if-no-files-found: error
+          retention-days: 7
