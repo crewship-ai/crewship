@@ -133,7 +133,7 @@ function PipelineRunNodeImpl({ data }: NodeProps) {
 
       {/* Step progress + tier + cost row. Each chip omitted if data is absent. */}
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
-        {typeof d.stepIndex === "number" && typeof d.stepCount === "number" && (
+        {typeof d.stepIndex === "number" && typeof d.stepCount === "number" && d.stepIndex >= 0 && d.stepCount >= 0 && (
           <span className="rounded-sm bg-muted/40 px-1.5 py-0.5 font-mono">
             {d.stepIndex}/{d.stepCount} steps
           </span>

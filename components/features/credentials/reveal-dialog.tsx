@@ -71,28 +71,34 @@ function RevealDialogSession({
   const [error, setError] = React.useState<string | null>(null)
   const [value, setValue] = React.useState<string | null>(null)
   const [copied, setCopied] = React.useState(false)
+  const [copying, setCopying] = React.useState(false)
+  const copyAttempt = React.useRef(0)
   const request = React.useRef<AbortController | null>(null)
-  React.useEffect(() => () => request.current?.abort(), [])
+  React.useEffect(() => () => { request.current?.abort(); copyAttempt.current++ }, [])
 
   React.useEffect(() => {
     if (value === null) return
-    const hide = () => { setValue(null); setReason(""); setCopied(false) }
+    const hide = () => { copyAttempt.current++; setValue(null); setReason(""); setCopied(false); setCopying(false); setError(null) }
     const timer = window.setTimeout(hide, REVEAL_VISIBLE_MS)
     const visibility = () => { if (document.hidden) hide() }
     document.addEventListener("visibilitychange", visibility)
     return () => { window.clearTimeout(timer); document.removeEventListener("visibilitychange", visibility) }
   }, [value])
 
-  // Nothing about a completed reveal survives the dialog closing — not the
-  // value, not the reason that justified it.
-  React.useEffect(() => {
-    if (open) return
-    setReason("")
+  async function copyValue(revealedValue: string) {
+    const attempt = ++copyAttempt.current
+    setCopying(true)
     setError(null)
-    setValue(null)
-    setCopied(false)
-    setSubmitting(false)
-  }, [open])
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable")
+      await navigator.clipboard.writeText(revealedValue)
+      if (attempt === copyAttempt.current) setCopied(true)
+    } catch {
+      if (attempt === copyAttempt.current) setError("Could not copy the value. Check your browser’s clipboard permissions.")
+    } finally {
+      if (attempt === copyAttempt.current) setCopying(false)
+    }
+  }
 
   const reasonTooShort = reason.trim().length < MIN_REVEAL_REASON_LENGTH
 
@@ -238,10 +244,8 @@ function RevealDialogSession({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(value)
-                  setCopied(true)
-                }}
+                onClick={() => copyValue(value)}
+                disabled={copying}
               >
                 {copied ? <Check className="mr-1.5 h-3 w-3" /> : <Copy className="mr-1.5 h-3 w-3" />}
                 {copied ? "Copied" : "Copy"}
@@ -250,6 +254,7 @@ function RevealDialogSession({
                 Done
               </Button>
             </div>
+            {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
           </div>
         )}
       </DialogContent>

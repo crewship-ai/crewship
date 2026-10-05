@@ -198,19 +198,19 @@ export function OnboardingSetupChat({
 }: OnboardingSetupChatProps) {
   const [session, setSession] = useState<SetupAgentSession | null>(null)
   const [starting, setStarting] = useState(true)
-  const startedRef = useRef(false)
+  const startRequestRef = useRef<ReturnType<typeof startSetupAgentSession> | null>(null)
 
-  // Start exactly once per mount, guarded by a ref rather than relying on an
+  // Start exactly once per mount, retaining the promise rather than relying on an
   // empty dependency array alone: React 18 Strict Mode runs an effect twice
   // in development, and standing up the setup agent's session is a WRITE
   // (PRD §5.3 — it provisions a crew). A second, discarded session per mount
-  // would be a second container nobody uses.
+  // would be a second container nobody uses. Each effect setup subscribes to
+  // the same promise so Strict Mode cleanup cannot strand the loading screen.
   useEffect(() => {
-    if (startedRef.current) return
-    startedRef.current = true
+    startRequestRef.current ??= startSetupAgentSession()
     let cancelled = false
     void (async () => {
-      const outcome = await startSetupAgentSession()
+      const outcome = await startRequestRef.current!
       if (cancelled) return
       setStarting(false)
       if (!outcome.ok) {
@@ -480,7 +480,7 @@ function ConnectedSetupChat({
   // only thing the guard was ever for. Nothing is created without a Create
   // click, and Apply is idempotent per proposal id server-side, so an extra
   // PENDING row is the entire cost of being wrong here.
-  const processedSuggestionTurnRef = useRef<string | null>(null)
+  const proposalRequestRef = useRef<{ turnId: string; workspaceId: string; promise: Promise<OnboardingProposal> } | null>(null)
 
   // What the user most recently sent — the only record of it, since a
   // message deferred by provisioning is never persisted before the server
@@ -551,23 +551,31 @@ function ConnectedSetupChat({
       }
     }
     if (!suggestion || !suggestionTurnId) return
-    if (processedSuggestionTurnRef.current === suggestionTurnId) return
-    processedSuggestionTurnRef.current = suggestionTurnId
-    setProposal(null)
-    onProposalPrepared?.(null)
-    setProposalPrepError(null)
-    setProposalLoading(true)
+    let cancelled = false
+    let request = proposalRequestRef.current
+    if (!request || request.turnId !== suggestionTurnId || request.workspaceId !== workspaceId) {
+      request = { turnId: suggestionTurnId, workspaceId, promise: createOnboardingProposal(suggestion, workspaceId) }
+      proposalRequestRef.current = request
+      setProposal(null)
+      onProposalPrepared?.(null)
+      setProposalPrepError(null)
+      setProposalLoading(true)
+    }
+    // Reuse an in-flight preview when only the transcript array changes,
+    // but never publish a superseded suggestion or a result after unmount.
     void (async () => {
       try {
-        const created = await createOnboardingProposal(suggestion!, workspaceId)
+        const created = await request.promise
+        if (cancelled) return
         setProposal(created)
         onProposalPrepared?.(created)
       } catch (err) {
-        setProposalPrepError(err instanceof Error ? err.message : "Could not prepare the proposal")
+        if (!cancelled) setProposalPrepError(err instanceof Error ? err.message : "Could not prepare the proposal")
       } finally {
-        setProposalLoading(false)
+        if (!cancelled) setProposalLoading(false)
       }
     })()
+    return () => { cancelled = true }
   }, [turns, workspaceId, onProposalPrepared])
 
   // Manual fallback only — see PendingResume's doc comment for why this is

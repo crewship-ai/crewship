@@ -5,6 +5,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useUrlSegment } from "@/lib/use-url-segment"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { PagesLayout } from "@/components/features/pages/pages-layout"
+import { RestrictedPages } from "@/components/features/pages/restricted-pages"
+import { useAccessMode } from "@/hooks/use-access-mode"
 
 // /pages/<slug> — one page's panel grid (docs/specs/pages.md §9).
 //
@@ -23,8 +25,11 @@ export function PageDetailClient() {
   // mount and is the repo's existing answer to exactly this bug class; the
   // issue, skill, mission and chat detail routes all had it first.
   const slug = useUrlSegment(PAGE_PATH_RE)
+  // A restricted session cannot open the Studio page view (its endpoints are
+  // not on the allowlist); it gets the same declared-actions surface as /pages.
+  const accessMode = useAccessMode()
 
-  if (wsLoading || !workspaceId || !slug) {
+  if (wsLoading || !workspaceId || !slug || accessMode === "loading") {
     return (
       <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col gap-3 p-4">
         <Skeleton className="h-9 w-full" />
@@ -36,5 +41,6 @@ export function PageDetailClient() {
     )
   }
 
+  if (accessMode === "restricted") return <RestrictedPages key={workspaceId} workspaceId={workspaceId} />
   return <PagesLayout workspaceId={workspaceId} slug={slug} />
 }

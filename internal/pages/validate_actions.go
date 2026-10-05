@@ -33,6 +33,7 @@ package pages
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -482,7 +483,7 @@ func validateInputDefault(p *PanelSpec, a *PanelAction, in *PanelInput, typ stri
 			"panel %q action %q input %q defaults to %q, which is not one of its options",
 			p.ID, a.ID, in.Name, in.Default)
 	case "number":
-		if _, err := strconv.ParseFloat(in.Default, 64); err != nil {
+		if number, err := strconv.ParseFloat(in.Default, 64); err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
 			return newError(CodeInvalidSpec, p.Schema,
 				"panel %q action %q input %q is a number and defaults to %q", p.ID, a.ID, in.Name, in.Default)
 		}
@@ -647,25 +648,31 @@ func coerceInput(actionID string, in *PanelInput, v any) (any, error) {
 		}
 		return refuse("expected a boolean, got %T", v)
 	case "number":
+		var number float64
 		switch t := v.(type) {
 		case float64:
-			return t, nil
+			number = t
 		case int:
-			return float64(t), nil
+			number = float64(t)
 		case json.Number:
 			f, err := t.Float64()
 			if err != nil {
 				return refuse("%q is not a number", t.String())
 			}
-			return f, nil
+			number = f
 		case string:
 			f, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
 			if err != nil {
 				return refuse("%q is not a number", t)
 			}
-			return f, nil
+			number = f
+		default:
+			return refuse("expected a number, got %T", v)
 		}
-		return refuse("expected a number, got %T", v)
+		if math.IsNaN(number) || math.IsInf(number, 0) {
+			return refuse("expected a finite number")
+		}
+		return number, nil
 	case "select":
 		s, ok := v.(string)
 		if !ok {

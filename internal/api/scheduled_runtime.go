@@ -144,7 +144,9 @@ func (rt *ScheduledRuntime) Run(ctx context.Context, a dispatch.Assignment, star
 		}
 		return err
 	}
-	req.ExecGate = launch.RequestCreation
+	req.ExecGate = func(ctx context.Context) error {
+		return requestWebhookCreation(ctx, h.orch, location, launch)
+	}
 
 	var logBuf *logcollector.OutputBuffer
 	if h.logWriter != nil {

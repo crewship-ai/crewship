@@ -3,6 +3,9 @@ package toolchain
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -66,5 +69,37 @@ func TestQualificationBindsImageAndCleansEveryOutcome(t *testing.T) {
 func TestQualificationUnavailableDoesNotInventPass(t *testing.T) {
 	if got := Qualify(context.Background(), nil, nil, ""); got.Status != "unavailable" {
 		t.Fatal(got)
+	}
+}
+
+type shimQualificationRuntime struct{ qualificationRuntime }
+
+func (r *shimQualificationRuntime) ExecSandbox(ctx context.Context, _ provider.SandboxRef, s provider.SandboxExec) (provider.SandboxExecResult, error) {
+	command := exec.CommandContext(ctx, s.Command[0], s.Command[1:]...)
+	command.Env = append([]string{"PATH=/usr/bin:/bin"}, s.Env...)
+	out, err := command.CombinedOutput()
+	return provider.SandboxExecResult{Output: string(out)}, err
+}
+func TestQualificationPreservesShimInvocation(t *testing.T) {
+	dir := t.TempDir()
+	mise := filepath.Join(dir, "mise")
+	shim := filepath.Join(dir, "codex")
+	source := `#!/bin/sh
+case "$0" in */codex) echo codex-cli 0.160.0;; *) echo mise 2026.10.0;; esac
+`
+	if err := os.WriteFile(mise, []byte(source), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(mise, shim); err != nil {
+		t.Fatal(err)
+	}
+	inventory := &devcontainer.ToolchainInventory{ImageID: "fixture-image", Tools: []devcontainer.ToolchainTool{{Binary: "codex", Path: shim, Version: "0.160.0", Status: "observed"}}}
+	runtime := &shimQualificationRuntime{}
+	if got := Qualify(context.Background(), runtime, inventory, ""); got.Status != "passed" {
+		t.Fatalf("raw shim path failed: %+v", got)
+	}
+	inventory.Tools[0].Path = mise
+	if got := Qualify(context.Background(), runtime, inventory, ""); got.Status != "failed" || got.Tools[0].Status != "version_mismatch" {
+		t.Fatalf("fixture did not detect readlink regression: %+v", got)
 	}
 }

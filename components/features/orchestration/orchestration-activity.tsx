@@ -103,6 +103,7 @@ const statusFilters = ["ALL", "IN_PROGRESS", "COMPLETED", "FAILED", "BLOCKED"] a
 type StatusFilter = (typeof statusFilters)[number]
 
 const statusColors: Record<string, { dot: string; pulse?: string; pill: string }> = {
+  DONE:        { dot: "bg-success", pill: "bg-success/15 text-success border-success/20" },
   COMPLETED:   { dot: "bg-success", pill: "bg-success/15 text-success border-success/20" },
   IN_PROGRESS: { dot: "bg-primary", pulse: "bg-primary", pill: "bg-primary/15 text-primary border-primary/20" },
   FAILED:      { dot: "bg-destructive", pill: "bg-destructive/15 text-destructive border-destructive/20" },
@@ -155,7 +156,7 @@ export function OrchestrationActivity({ missions, highlightSlugs }: Orchestratio
   const events = useMemo(() => {
     let filtered = allEvents
     if (statusFilter !== "ALL") {
-      filtered = filtered.filter((e) => e.status === statusFilter)
+      filtered = filtered.filter((e) => e.status === statusFilter || (statusFilter === "COMPLETED" && e.status === "DONE"))
     }
     if (agentFilter !== "all") {
       filtered = filtered.filter((e) => e.agentSlug === agentFilter)

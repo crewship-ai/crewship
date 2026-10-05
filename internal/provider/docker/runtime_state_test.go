@@ -39,7 +39,11 @@ func TestEnsureCrewRuntime_UsesInspectedState(t *testing.T) {
 			}
 			f.inspectBody = string(body)
 			id, err := p.EnsureCrewRuntime(context.Background(), covTeam())
-			if err != nil {
+			if tc.inspected == "paused" {
+				if err == nil || !strings.Contains(err.Error(), "paused") {
+					t.Fatalf("expected actionable paused error: %v", err)
+				}
+			} else if err != nil {
 				t.Fatal(err)
 			}
 			f.mu.Lock()
@@ -48,10 +52,8 @@ func TestEnsureCrewRuntime_UsesInspectedState(t *testing.T) {
 			for _, id := range f.starts {
 				startedOld = startedOld || id == "old-cid"
 			}
-			// For paused runtimes, this regression protects only against
-			// destructive drift reconciliation. Correct pause recovery is a
-			// separate issue (#2860); do not require ContainerStart on a paused runtime.
-			if tc.inspected != "paused" && startedOld != tc.wantStart {
+			// Paused containers are preserved without start or teardown.
+			if startedOld != tc.wantStart {
 				t.Errorf("started old container = %v, want %v (starts %v)", startedOld, tc.wantStart, f.starts)
 			}
 			if got := len(f.creates) > 0; got != tc.wantRecreate {
@@ -60,7 +62,7 @@ func TestEnsureCrewRuntime_UsesInspectedState(t *testing.T) {
 			if got := len(f.deletes) > 0; got != tc.wantRecreate {
 				t.Errorf("removed old container = %v, want %v", got, tc.wantRecreate)
 			}
-			if !tc.wantRecreate && id != "old-cid" {
+			if !tc.wantRecreate && tc.inspected != "paused" && id != "old-cid" {
 				t.Errorf("id = %q, want old-cid", id)
 			}
 		})

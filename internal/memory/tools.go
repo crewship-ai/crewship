@@ -815,10 +815,13 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 		// appending to for months keeps its bytes.
 		mreq.Import = true
 	}
-	if strings.TrimSpace(mreq.OperationID) == "" {
+	if strings.TrimSpace(mreq.OperationID) == "" && d.profile != ProfileGuaranteed {
 		// §8 requires an operation id on every write. The tool schema makes
 		// it optional because the model has been calling memory.write
-		// without one since the tool shipped, and refusing those calls would
+		// without one since the tool shipped. The guaranteed profile must
+		// instead preserve an absent caller ID for its admission check;
+		// inventing one would make a retry indistinguishable from a new write.
+		// Refusing legacy calls would
 		// break every agent to buy idempotency none of them asked for. A
 		// synthesised id is random, not content-derived: two legitimate
 		// appends of the same line are two writes, and deduplicating them

@@ -228,7 +228,7 @@ func ValidateURLForEndpoint(raw string, allowPrivate bool, allowSchemes ...strin
 	if strings.EqualFold(host, "localhost") {
 		return nil, fmt.Errorf("%w: localhost not allowed", ErrInvalidURL)
 	}
-	if ip := net.ParseIP(host); ip != nil && IsBlockedIPForEndpoint(ip, allowPrivate) {
+	if ip := ParseIPStripZone(host); ip != nil && IsBlockedIPForEndpoint(ip, allowPrivate) {
 		return nil, fmt.Errorf("%w: literal private/internal IP %s not allowed", ErrInvalidURL, ip)
 	}
 	return u, nil

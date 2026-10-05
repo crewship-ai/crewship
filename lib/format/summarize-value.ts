@@ -23,18 +23,19 @@ export function summarizeValue(v: unknown, opts: SummarizeOptions = {}): string 
   // unchanged, which silently breaks the cap contract. Caller can
   // still pass huge values to disable truncation effectively.
   const max = Math.max(8, opts.maxChars ?? 80)
+  const truncate = (text: string, limit = max) =>
+    text.length > limit ? text.slice(0, limit - 1) + "…" : text
   if (v === undefined) return ""
   if (v === null) return "null"
   if (typeof v === "string") {
-    const truncated = v.length > max ? v.slice(0, max - 1) + "…" : v
+    const truncated = truncate(v, opts.quoteStrings ? max - 2 : max)
     return opts.quoteStrings ? `"${truncated}"` : truncated
   }
-  if (typeof v === "number" || typeof v === "boolean") return String(v)
+  if (typeof v === "number" || typeof v === "boolean") return truncate(String(v))
   // Objects + arrays — compact JSON, capped.
   try {
-    const s = JSON.stringify(v)
-    return s.length > max ? s.slice(0, max - 1) + "…" : s
+    return truncate(JSON.stringify(v) ?? String(v))
   } catch {
-    return String(v)
+    return truncate(String(v))
   }
 }

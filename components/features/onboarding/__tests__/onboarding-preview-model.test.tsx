@@ -1,8 +1,11 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
+const motionPreference = vi.hoisted(() => ({ reduced: false }))
+vi.mock("motion/react", async (original) => ({ ...await original<typeof import("motion/react")>(), useReducedMotion: () => motionPreference.reduced }))
+beforeEach(() => { motionPreference.reduced = false })
 import { OnboardingPreview, TEMPLATES, type CrewTemplateSlug } from "../onboarding-preview"
 import { getModelLabel } from "@/lib/cli-adapters"
 
@@ -85,4 +88,23 @@ describe("onboarding preview — the model name it shows", () => {
     expect(getModelLabel(id!)).not.toBe(id)
     expect(SOURCE).toMatch(/getModelLabel\(TEMPLATE_MODEL_ID\)/)
   })
+})
+
+it("introduces an empty workspace and browser handoff before a crew is selected", () => {
+  motionPreference.reduced = true
+  render(<OnboardingPreview workspaceName="" crewSlug={null} mode="browser" />)
+  expect(screen.getByText("Your crew lands here once you pick one")).toBeInTheDocument()
+  expect(screen.getByRole("status")).toHaveTextContent("Ready to launch in the browser.")
+  expect(screen.queryByAltText("Scraper Lead")).toBeNull()
+})
+it("previews the selected model and toolchain for browser chat", () => {
+  motionPreference.reduced = true
+  render(<OnboardingPreview workspaceName="Example" crewSlug="blank" mode="browser" adapterKey="CLAUDE_CODE" model="claude-haiku-4-5" />)
+  expect(screen.getByRole("status")).toHaveTextContent("Claude Haiku 4.5 · Chat in browser")
+  expect(screen.getByRole("status")).toHaveTextContent("Ready to launch with Claude Code in the browser.")
+})
+it.each([true, false])("distinguishes pending and completed CLI pairing (pending=%s)", (pending) => {
+  render(<OnboardingPreview workspaceName="Example" crewSlug={null} mode="cli" pairingPending={pending} adapterKey="CLAUDE_CODE" />)
+  expect(screen.getByRole("status")).toHaveTextContent(pending ? "Waiting for your local CLI to connect…" : "Paired with your local CLI.")
+  expect(screen.getByRole("status")).toHaveTextContent(pending ? "Waiting for CLI" : "Ready")
 })

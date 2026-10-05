@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import {
   AlertTriangle, Check, Circle, Loader2, Package, Play, RotateCcw, Terminal, X,
@@ -134,51 +134,42 @@ function ProvisioningRow({
   onAcknowledge?: () => void
 }) {
   const [busy, setBusy] = useState(false)
+  const scopeRef = useRef<AbortController | null>(null)
+  useEffect(() => {
+    const scope = new AbortController()
+    scopeRef.current = scope
+    setBusy(false)
+    return () => scope.abort()
+  }, [workspaceId, crew.id])
   const pendingRestart = crew.agentsPendingRestart ?? 0
   const isPendingRestart = crew.status === "completed" && pendingRestart > 0
 
-  const trigger = useCallback(async () => {
-    if (!workspaceId) return
+  const perform = useCallback(async (action: "build" | "restart") => {
+    const scope = scopeRef.current
+    if (!workspaceId || !scope || scope.signal.aborted || busy) return
     setBusy(true)
+    const restarting = action === "restart"
     try {
       const r = await apiFetch(
-        `/api/v1/crews/${crew.id}/provision?workspace_id=${encodeURIComponent(workspaceId)}`,
-        { method: "POST" },
+        `/api/v1/crews/${encodeURIComponent(crew.id)}/${restarting ? "restart-agents" : "provision"}?workspace_id=${encodeURIComponent(workspaceId)}`,
+        { method: "POST", signal: scope.signal },
       )
+      if (scope.signal.aborted) return
       if (!r.ok) {
         const text = await r.text()
-        toast.error(`Build failed to start: ${text.slice(0, 200)}`)
+        if (!scope.signal.aborted) toast.error(`${restarting ? "Restart failed" : "Build failed to start"}: ${text.slice(0, 200)}`)
+      } else if (restarting) {
+        const data = (await r.json().catch(() => ({}))) as { restarted?: number }
+        if (!scope.signal.aborted) toast.success(`${data.restarted ?? 0} agent${data.restarted === 1 ? "" : "s"} restarted in ${crew.name}`)
       } else {
         toast.success(`Building ${crew.name}…`)
       }
     } catch (err) {
-      toast.error(`Build failed: ${err instanceof Error ? err.message : String(err)}`)
+      if (!scope.signal.aborted) toast.error(`${restarting ? "Restart failed" : "Build failed"}: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
-      setBusy(false)
+      if (!scope.signal.aborted) setBusy(false)
     }
-  }, [crew.id, crew.name, workspaceId])
-
-  const restart = useCallback(async () => {
-    if (!workspaceId) return
-    setBusy(true)
-    try {
-      const r = await apiFetch(
-        `/api/v1/crews/${crew.id}/restart-agents?workspace_id=${encodeURIComponent(workspaceId)}`,
-        { method: "POST" },
-      )
-      if (!r.ok) {
-        const text = await r.text()
-        toast.error(`Restart failed: ${text.slice(0, 200)}`)
-      } else {
-        const data = (await r.json().catch(() => ({}))) as { restarted?: number }
-        toast.success(`${data.restarted ?? 0} agent${data.restarted === 1 ? "" : "s"} restarted in ${crew.name}`)
-      }
-    } catch (err) {
-      toast.error(`Restart failed: ${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      setBusy(false)
-    }
-  }, [crew.id, crew.name, workspaceId])
+  }, [busy, crew.id, crew.name, workspaceId])
 
   // A lingering completed recent on an otherwise-clean crew shows "ready · built
   // 34s ago" so even a sub-minute build is visible after the fact.
@@ -276,7 +267,7 @@ function ProvisioningRow({
         <div className="flex justify-end mt-2">
           <button
             type="button"
-            onClick={isPendingRestart ? restart : trigger}
+            onClick={() => void perform(isPendingRestart ? "restart" : "build")}
             disabled={busy || !workspaceId}
             className={`text-xs px-2.5 py-1 rounded border flex items-center gap-1.5 transition-colors ${
               crew.status === "failed"

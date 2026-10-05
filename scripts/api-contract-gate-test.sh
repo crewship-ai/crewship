@@ -153,9 +153,9 @@ env_assignment='^[[:space:]]*CREWSHIP_(RATELIMIT_DISABLED|DISABLE_RATELIMIT):'
 # instance that has no limiter of its own; anywhere else it converts a slow
 # run into 429s that Schemathesis reports as contract failures.
 gate_throttle_off=0
-printf '%s\n' "$GATE_STEP" | grep -qE 'API_CONTRACT_RATE_LIMIT:[[:space:]]*"?(off|none)"?' && gate_throttle_off=1
+grep -qE 'API_CONTRACT_RATE_LIMIT:[[:space:]]*"?(off|none)"?' <<<"$GATE_STEP" && gate_throttle_off=1
 job_limiter_off=0
-printf '%s\n' "$JOB_SRC" | grep -qE "$env_assignment" && job_limiter_off=1
+grep -qE "$env_assignment" <<<"$JOB_SRC" && job_limiter_off=1
 
 if [[ "$gate_throttle_off" -eq 1 && "$job_limiter_off" -eq 0 ]]; then
   fail "API_CONTRACT_RATE_LIMIT=off is paired with a limiter-less server" \
@@ -177,7 +177,7 @@ else
     "found $wf_hits occurrence(s) across .github/workflows, $boot_hits of them in that step"
 fi
 
-if printf '%s\n' "$JOB_SRC" | grep -q 'CREWSHIP_RATELIMIT_DISABLED.*>>.*GITHUB_ENV'; then
+if grep -q 'CREWSHIP_RATELIMIT_DISABLED.*>>.*GITHUB_ENV' <<<"$JOB_SRC"; then
   fail "the limiter flag is not exported to later steps" "written to \$GITHUB_ENV"
 else
   pass "the limiter flag is not exported to later steps"
@@ -217,9 +217,9 @@ fi
 #   - the evidence must survive. "Advisory" means "does not fail the job",
 #     not "reports less".
 gate_advisory=0
-printf '%s\n' "$GATE_STEP" | grep -qE 'API_CONTRACT_ADVISORY:[[:space:]]*"?[^"[:space:]]+"?' && gate_advisory=1
+grep -qE 'API_CONTRACT_ADVISORY:[[:space:]]*"?[^"[:space:]]+"?' <<<"$GATE_STEP" && gate_advisory=1
 
-if printf '%s\n' "$GATE_STEP" | grep -qE '^[[:space:]]*continue-on-error:[[:space:]]*true'; then
+if grep -qE '^[[:space:]]*continue-on-error:[[:space:]]*true' <<<"$GATE_STEP"; then
   fail "the gate step does not use continue-on-error" \
     "that swallows infrastructure failures too — advisory must come from run.sh classifying findings"
 else
@@ -227,7 +227,7 @@ else
 fi
 
 if [[ "$gate_advisory" -eq 1 ]]; then
-  if printf '%s\n' "$JOB_SRC" | grep -q '#1815'; then
+  if grep -q '#1815' <<<"$JOB_SRC"; then
     pass "the advisory exemption names the issue that ends it (#1815)"
   else
     fail "the advisory exemption names the issue that ends it (#1815)" \
@@ -242,14 +242,14 @@ UPLOAD_STEP="$(printf '%s\n' "$JOB_SRC" | awk '
   inside && /^      - (name|uses):/ { inside = 0 }
   inside { print }
 ')"
-if [[ -n "$UPLOAD_STEP" ]] && printf '%s\n' "$UPLOAD_STEP" | grep -q 'if: always()'; then
+if [[ -n "$UPLOAD_STEP" ]] && grep -q 'if: always()' <<<"$UPLOAD_STEP"; then
   pass "the evidence upload still runs unconditionally"
 else
   fail "the evidence upload still runs unconditionally" \
     "advisory means 'does not fail the job', not 'produces less evidence'"
 fi
 
-if printf '%s\n' "$GATE_STEP" | grep -q 'API_CONTRACT_ARTIFACT_DIR'; then
+if grep -q 'API_CONTRACT_ARTIFACT_DIR' <<<"$GATE_STEP"; then
   pass "the gate still writes its artifacts"
 else
   fail "the gate still writes its artifacts" "no API_CONTRACT_ARTIFACT_DIR on the step"
@@ -271,6 +271,14 @@ JSON
 cat >"$STUB_BIN/schemathesis" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >"$STUB_ARGV_FILE"
+# Keep the config run.sh handed us: its run directory is deleted by the
+# EXIT trap before the test can read the overlay.
+prev=""
+for arg in "$@"; do
+  [[ "$prev" == "--config-file" && -n "${STUB_CONFIG_COPY:-}" ]] && cp "$arg" "$STUB_CONFIG_COPY"
+  [[ "$prev" == "run" && -n "${STUB_SCHEMA_COPY:-}" ]] && cp "$arg" "$STUB_SCHEMA_COPY"
+  prev="$arg"
+done
 # Write a JUnit report where the real thing would. That report is how
 # run.sh tells "graded N operations and found M things" from "never got
 # far enough to grade anything" — the distinction advisory mode turns on.
@@ -739,6 +747,284 @@ else
         "the document declares only application/json on the 2xx responses of ${offenders[*]} — by the list's own entry criterion this is an ordinary JSON route and excluding it drops a real probe"
     fi
   done
+fi
+
+# ---------------------------------------------------------------------------
+# Part 7 — the #1815 bucket-3 fixture wiring
+# ---------------------------------------------------------------------------
+# Run 37216610199 graded 13 operations against a server that could not
+# exercise them: nine /pages/{slug}/project* operations answered the designed
+# 503 ("Page project storage is not configured") because the ephemeral server
+# booted without CREWSHIP_PAGE_PROJECTS_PATH, and three restricted-workflow
+# operations answered the designed 404 because the restricted runtime is
+# wired only when CREWSHIP_RESTRICTED_RUNTIME_IMAGE (or _NATIVE_IMAGE) names
+# an immutable local digest. Those findings measured the fixture, not the
+# product (triage §5).
+#
+# The wiring is a build step plus five env assignments, and every piece can
+# rot silently: drop one env line and operations quietly go back to grading
+# a designed-unconfigured response; move the projects path under
+# CREWSHIP_STORAGE_BASE_PATH and the server refuses to boot; rename the
+# image step output and both image settings expand empty — the server
+# boots with the features OFF and every check below still passes, which is
+# why the export and its consumers are tied together here.
+#
+# None of this proves the fixture WORKS (see the file header); it pins the
+# wiring so the working state cannot rot into a silently-disabled one.
+
+# Values must be non-empty: `KEY: ""` passes a presence grep but config
+# treats the empty string as unset, so the feature is off.
+for key in CREWSHIP_PAGE_PROJECTS_PATH CREWSHIP_PAGE_BUILD_IMAGE CREWSHIP_RESTRICTED_RUNTIME_IMAGE CREWSHIP_PAGE_RUNTIME_ORIGIN CREWSHIP_ALLOW_SIGNUP; do
+  value="$(printf '%s\n' "$BOOT_STEP" | sed -n "s/^[[:space:]]*${key}:[[:space:]]*//p" | tr -d '"' | head -1)"
+  if grep -qE '^[[:space:]]*[^[:space:]]' <<<"$value"; then
+    pass "the ephemeral server step sets $key"
+  else
+    fail "the ephemeral server step sets $key" \
+      "absent or empty — config treats it as unset and the operation family it configures grades a designed-unconfigured response (#1815 bucket 3)"
+  fi
+done
+
+# The runtime origin must be a GENUINELY different browser site from the
+# Studio origin, without the development same-origin escape hatch:
+# internal/pagebuild/runtime.go's site() returns IP literals verbatim, so
+# 127.0.0.1 vs localhost is a different site, and loopback is the only place
+# plain HTTP is allowed. The dev flag must NOT appear — using it here would
+# quietly waive the isolation rule this fixture is supposed to exercise
+# under (tools/pages-build/README.md marks it development-only).
+runtime_origin="$(printf '%s\n' "$BOOT_STEP" | sed -n 's/.*CREWSHIP_PAGE_RUNTIME_ORIGIN:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}.*/\1/p' | head -1)"
+nextjs_url="$(printf '%s\n' "$BOOT_STEP" | sed -n 's/.*CREWSHIP_NEXTJS_URL:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}.*/\1/p' | head -1)"
+if grep -qE '^[[:space:]]*CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN:' <<<"$BOOT_STEP"; then
+  fail "the runtime origin is a separate site without the development opt-in" \
+    "CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN is set — the fixture must exercise the real different-site rule, not waive it"
+elif [[ -n "$runtime_origin" && -n "$nextjs_url" && "$runtime_origin" != "$nextjs_url" && "$runtime_origin" == http://127.0.0.1:* ]]; then
+  pass "the runtime origin is a separate site without the development opt-in"
+else
+  fail "the runtime origin is a separate site without the development opt-in" \
+    "origin='$runtime_origin' studio='$nextjs_url' — need a different site (IP literal vs hostname), loopback HTTP"
+fi
+
+# The projects path must not live under (or contain) the crew storage base
+# path — validatePageProjectPath rejects the overlap at boot, which would
+# fail the whole job, not just the gate. Both values share the
+# ${{ github.workspace }} prefix here; compare what follows it.
+projects_suffix="$(printf '%s\n' "$BOOT_STEP" | sed -n 's/.*CREWSHIP_PAGE_PROJECTS_PATH:[[:space:]]*"\{0,1\}\${{ github.workspace }}\([^"]*\)"\{0,1\}.*/\1/p' | head -1)"
+storage_suffix="$(printf '%s\n' "$BOOT_STEP" | sed -n 's/.*CREWSHIP_STORAGE_BASE_PATH:[[:space:]]*"\{0,1\}\${{ github.workspace }}\([^"]*\)"\{0,1\}.*/\1/p' | head -1)"
+if [[ -z "$projects_suffix" || -z "$storage_suffix" ]]; then
+  fail "the fixture paths are comparable" "could not read CREWSHIP_PAGE_PROJECTS_PATH/CREWSHIP_STORAGE_BASE_PATH relative to \${{ github.workspace }}"
+elif [[ "$projects_suffix" == "$storage_suffix" || "$projects_suffix" == "$storage_suffix"/* || "$storage_suffix" == "$projects_suffix"/* ]]; then
+  fail "the page projects path is outside the crew storage base path" \
+    "config's validatePageProjectPath refuses the overlap — the server would not boot at all"
+else
+  pass "the page projects path is outside the crew storage base path"
+fi
+
+# The image settings must consume the ONE value the build step emits. The
+# build step gives it an `id` and writes `image=…` to $GITHUB_OUTPUT; both
+# image settings reference `steps.<id>.outputs.image`. A rename on either
+# side leaves the expression expanding empty: config treats "" as unset, the
+# server boots with both features silently OFF, and a presence-only check
+# still passes because the `${{ … }}` string itself is non-empty. So tie the
+# three names together: the step id, the output key it writes, and what the
+# consumers read.
+build_step="$(printf '%s\n' "$JOB_SRC" | awk '
+  /^      - name: .*[Pp]ages toolchain image[[:space:]]*$/ { inside = 1; print; next }
+  inside && /^      - (name|uses):/ { inside = 0 }
+  inside { print }
+')"
+image_step_id="$(printf '%s\n' "$build_step" | sed -n 's/^        id:[[:space:]]*\([A-Za-z0-9_-]\{1,\}\)[[:space:]]*$/\1/p' | head -1)"
+image_output_key="$(printf '%s\n' "$build_step" | sed -n 's/.*echo "\([A-Za-z_][A-Za-z0-9_]*\)=.*GITHUB_OUTPUT.*/\1/p' | head -1)"
+if [[ -z "$build_step" ]]; then
+  fail "the Pages toolchain image build step exists" "no step named '… Pages toolchain image' in harness-pr"
+elif [[ -z "$image_step_id" || -z "$image_output_key" ]]; then
+  fail "the toolchain build emits its image id as a step output" \
+    "need an 'id:' on the step and a '\"KEY=… >> \$GITHUB_OUTPUT\"' line (id='$image_step_id' key='$image_output_key')"
+else
+  consumers="$(printf '%s\n' "$BOOT_STEP" | grep -cE "^[[:space:]]*CREWSHIP_(PAGE_BUILD|RESTRICTED_RUNTIME)_IMAGE:[[:space:]]*\\$\{\{ steps\\.${image_step_id}\\.outputs\\.${image_output_key} \}\}[[:space:]]*\$" || true)"
+  if [[ "$consumers" -eq 2 ]]; then
+    pass "both image settings consume steps.$image_step_id.outputs.$image_output_key"
+  else
+    fail "both image settings consume steps.$image_step_id.outputs.$image_output_key" \
+      "$consumers of 2 consumers read it — the others expand empty and the feature boots off"
+  fi
+fi
+
+# The build must come BEFORE the server step: a later step's output is empty
+# when the server step's env is evaluated.
+build_line="$(printf '%s\n' "$JOB_SRC" | grep -n -E '^      - name: .*[Pp]ages toolchain image[[:space:]]*$' | head -1 | cut -d: -f1)"
+boot_line="$(printf '%s\n' "$JOB_SRC" | grep -n -E '^      - name: Start ephemeral server[[:space:]]*$' | head -1 | cut -d: -f1)"
+if [[ -n "$build_line" && -n "$boot_line" && "$build_line" -lt "$boot_line" ]]; then
+  pass "the Pages toolchain image is built before the ephemeral server starts"
+else
+  fail "the Pages toolchain image is built before the ephemeral server starts" \
+    "build step at line '${build_line:-none}', server step at line '${boot_line:-none}' (relative to the job)"
+fi
+
+# The image id must stay out of $GITHUB_ENV — it is for the server step
+# only — and no CREWSHIP_* fixture setting may be exported there either.
+if grep -qE '(CREWSHIP_(PAGE_PROJECTS_PATH|PAGE_BUILD_IMAGE|RESTRICTED_RUNTIME_IMAGE|PAGE_RUNTIME_ORIGIN|ALLOW_SIGNUP)|PAGES_BUILD_IMAGE)[^ ]*=[^ ]*>>.*GITHUB_ENV' <<<"$JOB_SRC"; then
+  fail "the fixture env is not exported to later steps" "a fixture setting or the image id is written to \$GITHUB_ENV"
+else
+  pass "the fixture env is not exported to later steps"
+fi
+
+# Signup must be open for the restricted-member fixture, on this server only.
+if grep -qE '^[[:space:]]*CREWSHIP_ALLOW_SIGNUP:[[:space:]]*"?true"?[[:space:]]*$' <<<"$BOOT_STEP"; then
+  pass "the ephemeral server step opens signup for the restricted-member fixture"
+else
+  fail "the ephemeral server step opens signup for the restricted-member fixture" \
+    "CREWSHIP_ALLOW_SIGNUP is not 'true' — restricted_fixture.py cannot place its member"
+fi
+
+# The fixture step must run after the seed (it needs seeded Pages, crews and
+# integrations) and before the gate that consumes its files; and the gate
+# step must name the same two files the fixture step writes.
+FIXTURE_STEP="$(job_step "API contract fixture")"
+fixture_line="$(printf '%s\n' "$JOB_SRC" | grep -n -E '^      - name: API contract fixture[[:space:]]*$' | head -1 | cut -d: -f1)"
+seed_line="$(printf '%s\n' "$JOB_SRC" | grep -n -E '^      - name: Seed clean control-plane fixture' | head -1 | cut -d: -f1)"
+gate_line="$(printf '%s\n' "$JOB_SRC" | grep -n -E '^      - name: Run deterministic API contract gate' | head -1 | cut -d: -f1)"
+if [[ -n "$FIXTURE_STEP" && -n "$seed_line" && -n "$fixture_line" && -n "$gate_line" && "$seed_line" -lt "$fixture_line" && "$fixture_line" -lt "$gate_line" ]]; then
+  pass "the fixture step runs after the seed and before the gate"
+else
+  fail "the fixture step runs after the seed and before the gate" \
+    "seed=$seed_line fixture=$fixture_line gate=$gate_line (step missing or misordered)"
+fi
+for script in fixture_probes.py restricted_fixture.py; do
+  if grep -q "scripts/api-contract/$script" <<<"$FIXTURE_STEP"; then
+    pass "the fixture step runs $script"
+  else
+    fail "the fixture step runs $script" "not invoked — its operation family goes back to grading a fixture gap"
+  fi
+done
+if grep -q 'add-mask::\$(cat "\$fixture_dir/restricted.token")' <<<"$FIXTURE_STEP"; then
+  pass "the restricted member token is masked in CI output"
+else
+  fail "the restricted member token is masked in CI output" "no ::add-mask:: for the token file's contents in the fixture step"
+fi
+pair_out="$(printf '%s\n' "$FIXTURE_STEP" | sed -n 's|.*--write-pair "\$fixture_dir/\([^"]*\)".*|\1|p' | head -1)"
+token_out="$(printf '%s\n' "$FIXTURE_STEP" | sed -n 's|.*restricted_fixture.py .* "\$fixture_dir/\([^"]*\)"$|\1|p' | head -1)"
+gate_pair="$(printf '%s\n' "$GATE_STEP" | sed -n 's|.*API_CONTRACT_PAIR_FILE:.*api-contract-fixture/\(.*\)$|\1|p' | head -1)"
+gate_token="$(printf '%s\n' "$GATE_STEP" | sed -n 's|.*API_CONTRACT_RESTRICTED_TOKEN_FILE:.*api-contract-fixture/\(.*\)$|\1|p' | head -1)"
+if [[ -n "$pair_out" && "$pair_out" == "$gate_pair" && -n "$token_out" && "$token_out" == "$gate_token" ]]; then
+  pass "the gate reads exactly the files the fixture step writes ($pair_out, $token_out)"
+else
+  fail "the gate reads exactly the files the fixture step writes" \
+    "fixture writes pair='$pair_out' token='$token_out'; gate reads pair='$gate_pair' token='$gate_token'"
+fi
+
+# The seed step has its own cap now that the seed builds + publishes one
+# Docker-compiled app per catalogue page: without it a wedged build is
+# reaped by the job budget and reported as cancelled, the exact failure
+# shape Part 1 exists to prevent for the gate step.
+SEED_STEP="$(job_step "Seed clean control-plane fixture")"
+seed_timeout="$(printf '%s\n' "$SEED_STEP" | awk '/^        timeout-minutes:/ { print $2; exit }')"
+if [[ -n "$seed_timeout" && "$seed_timeout" -lt "$JOB_TIMEOUT" ]]; then
+  pass "the seed step has its own timeout-minutes ($seed_timeout m) below the job budget"
+else
+  fail "the seed step has its own timeout-minutes below the job budget" \
+    "got '${seed_timeout:-none}' — a wedged app build would be reaped as 'cancelled', not a named step failure"
+fi
+
+# ---------------------------------------------------------------------------
+# Part 8 — fixture-correlated operation parameters (run.sh overlay)
+# ---------------------------------------------------------------------------
+# Without the two optional files the runner must be byte-for-byte what it was
+# (the base config, no overlay). With them it appends per-operation sections
+# to a COPY: the bound pair for the ONE tools operation (never a global
+# substitution), and the restricted member's token — by ${CREWSHIP_*}
+# interpolation, never as a literal — for the restricted-workflow routes.
+overlay_dir="$TMP_ROOT/overlay"
+mkdir -p "$overlay_dir"
+printf '{"crew_id":"crewABC123","integration_id":"intXYZ789"}' >"$overlay_dir/pair.json"
+printf 'restricted-secret-token-value\n' >"$overlay_dir/restricted.token"
+
+plain_cfg="$overlay_dir/plain.toml"
+run_runner "$TMP_ROOT/argv-plain" STUB_CONFIG_COPY="$plain_cfg" >/dev/null
+if [[ -f "$plain_cfg" ]] && ! grep -q '^\[\[operations\]\]' "$plain_cfg"; then
+  pass "without fixture files the runner adds no per-operation overlay"
+else
+  fail "without fixture files the runner adds no per-operation overlay" "overlay present, or the config was not captured"
+fi
+
+# Part 8 needs the four fixture operations in the served catalog; restore the
+# one-operation document afterwards so nothing else depends on this.
+cp "$DOCROOT/openapi.json" "$overlay_dir/openapi.orig.json"
+python3 - "$DOCROOT/openapi.json" <<'PY'
+import json, sys
+def op(params):
+    return {"get": {"parameters": [{"in": "path", "name": n, "required": True, "schema": {"type": "string"}} for n in params],
+                    "responses": {"200": {"description": "ok"}}}}
+doc = {"openapi": "3.0.3", "paths": {
+    "/api/v1/crews/{crewId}/integrations/{integrationId}/tools": op(["crewId", "integrationId"]),
+    "/api/v1/workspaces/{workspaceId}/restricted-routines": op(["workspaceId"]),
+    "/api/v1/workspaces/{workspaceId}/restricted-routine-runs": op(["workspaceId"]),
+    "/api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}": op(["workspaceId", "runId"]),
+    "/api/v1/other/{workspaceId}": op(["workspaceId"])}}
+json.dump(doc, open(sys.argv[1], "w"))
+PY
+overlay_cfg="$overlay_dir/overlay.toml"
+overlay_schema="$overlay_dir/pinned.json"
+rc="$(run_runner "$TMP_ROOT/argv-overlay" STUB_CONFIG_COPY="$overlay_cfg" STUB_SCHEMA_COPY="$overlay_schema" \
+  API_CONTRACT_PAIR_FILE="$overlay_dir/pair.json" API_CONTRACT_RESTRICTED_TOKEN_FILE="$overlay_dir/restricted.token")"
+if [[ "$rc" == 0 && -f "$overlay_cfg" ]]; then
+  pass "the runner accepts the fixture files"
+else
+  fail "the runner accepts the fixture files" "rc=$rc; $(tail -3 "$TMP_ROOT/runner.err")"
+fi
+if grep -q 'include-path = "/api/v1/crews/{crewId}/integrations/{integrationId}/tools"' "$overlay_cfg" 2>/dev/null \
+   && grep -q 'parameters = { crewId = "crewABC123", integrationId = "intXYZ789" }' "$overlay_cfg"; then
+  pass "the bound pair is applied to the tools operation only"
+else
+  fail "the bound pair is applied to the tools operation only" "overlay: $(grep -A3 operations "$overlay_cfg" 2>/dev/null | head -8)"
+fi
+if [[ "$(grep -c 'include-path = "/api/v1/workspaces/{workspaceId}/restricted-routine' "$overlay_cfg" 2>/dev/null)" == 3 ]] \
+   && grep -q 'Authorization = "Bearer \${CREWSHIP_RESTRICTED_TOKEN}"' "$overlay_cfg" \
+   && grep -q 'parameters = { workspaceId = "stub-workspace" }' "$overlay_cfg"; then
+  pass "the restricted operations use the member's token via interpolation and the real workspace id"
+else
+  fail "the restricted operations use the member's token via interpolation and the real workspace id" "overlay: $(grep -A4 restricted "$overlay_cfg" 2>/dev/null | head -8)"
+fi
+if grep -q 'restricted-secret-token-value' "$overlay_cfg" "$TMP_ROOT/runner.out" "$TMP_ROOT/runner.err" 2>/dev/null; then
+  fail "the restricted token is never written to the config or the output" "literal token found"
+else
+  pass "the restricted token is never written to the config or the output"
+fi
+operations_count="$(grep -c '^\[\[operations\]\]' "$overlay_cfg" 2>/dev/null || true)"
+if [[ "$operations_count" == 4 ]]; then
+  pass "exactly four per-operation sections are added (one tools pair, three restricted routes)"
+else
+  fail "exactly four per-operation sections are added (one tools pair, three restricted routes)" "got $operations_count"
+fi
+
+if ! grep -q 'include-method' "$overlay_cfg" 2>/dev/null; then
+  pass "overlay sections use one selector (include-path + include-method are OR'd and would match every GET)"
+else
+  fail "overlay sections use one selector (include-path + include-method are OR'd and would match every GET)" "include-method present"
+fi
+pinned="$(jq -c '[.paths["/api/v1/crews/{crewId}/integrations/{integrationId}/tools"].get.parameters[].schema.enum[0],
+  .paths["/api/v1/workspaces/{workspaceId}/restricted-routines"].get.parameters[0].schema.enum[0],
+  .paths["/api/v1/workspaces/{workspaceId}/restricted-routine-runs"].get.parameters[0].schema.enum[0],
+  (.paths["/api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}"].get.parameters[] | select(.name=="workspaceId") | .schema.enum[0]),
+  (.paths["/api/v1/other/{workspaceId}"].get.parameters[0].schema | has("enum"))]' "$overlay_schema" 2>/dev/null)"
+if [[ "$pinned" == '["crewABC123","intXYZ789","stub-workspace","stub-workspace","stub-workspace",false]' ]]; then
+  pass "the ids are pinned by single-value enums in the generation schema, other operations untouched"
+else
+  fail "the ids are pinned by single-value enums in the generation schema, other operations untouched" "got $pinned"
+fi
+cp "$overlay_dir/openapi.orig.json" "$DOCROOT/openapi.json"
+
+# A fixture file that is wrong must FAIL the run, not silently grade without it.
+printf '{"crew_id":"bad id; rm -rf /","integration_id":"x"}' >"$overlay_dir/badpair.json"
+rc="$(run_runner "$TMP_ROOT/argv-badpair" API_CONTRACT_PAIR_FILE="$overlay_dir/badpair.json")"
+if [[ "$rc" != 0 && ! -f "$TMP_ROOT/argv-badpair" ]]; then
+  pass "an unsafe pair file fails the run before Schemathesis starts"
+else
+  fail "an unsafe pair file fails the run before Schemathesis starts" "rc=$rc"
+fi
+rc="$(run_runner "$TMP_ROOT/argv-nofile" API_CONTRACT_RESTRICTED_TOKEN_FILE="$overlay_dir/absent.token")"
+if [[ "$rc" != 0 && ! -f "$TMP_ROOT/argv-nofile" ]]; then
+  pass "a missing restricted token file fails the run before Schemathesis starts"
+else
+  fail "a missing restricted token file fails the run before Schemathesis starts" "rc=$rc"
 fi
 
 printf '\n'

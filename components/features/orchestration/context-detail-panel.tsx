@@ -328,7 +328,6 @@ function MissionLogs({ mission }: { mission: Mission }) {
   }
 
   const entries = tasks
-    .filter((t) => t.started_at || t.error_message || t.result_summary)
     .flatMap((t) => {
       const items: { time: string; level: string; message: string }[] = []
       if (t.started_at) items.push({ time: t.started_at, level: "info", message: `[${t.agent_slug ?? "?"}] Started: ${t.title}` })
@@ -414,9 +413,12 @@ function TraceTimeline({ tasks, missionStatus: _missionStatus }: { tasks: Missio
 export function ContextDetailPanel({ context, onTaskAction, onClose }: ContextDetailPanelProps) {
   const [activeDetailTab, setActiveDetailTab] = useState("detail")
 
+  const contextId = context.type === "task" ? context.task.id
+    : context.type === "crew" ? context.crew.id
+      : context.type === "mission" ? context.mission.id : null
   useEffect(() => {
     setActiveDetailTab("detail")
-  }, [context])
+  }, [context.type, contextId])
 
   return (
     <div className="h-full flex flex-col bg-card border-l border-border">

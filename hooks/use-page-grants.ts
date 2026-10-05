@@ -262,7 +262,7 @@ export function toPageOwner(page: WirePageDetail | null): PageOwner | null {
   const cut = raw.indexOf("/")
   const kind = cut >= 0 ? raw.slice(0, cut) : ""
   const ref = cut >= 0 ? raw.slice(cut + 1) : raw
-  if (kind === "crew") return { kind: "crew", ref: ref || raw, label: crewName ?? ref ?? raw }
+  if (kind === "crew") return { kind: "crew", ref: ref || raw, label: crewName ?? (ref || raw) }
   if (kind === "user") return { kind: "user", ref: ref || raw, label: ref || raw }
   return { kind: "unknown", ref: raw, label: raw }
 }

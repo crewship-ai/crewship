@@ -2,7 +2,6 @@
 
 // Unified credential form — the single source of truth for how users
 // type a credential into Crewship. Used by:
-//   * AddCredentialDialog       (mode="create")
 //   * EditCredentialDialog      (mode="edit")
 //   * CredentialDetailSheet     (inline value rewrite, mode="edit")
 //

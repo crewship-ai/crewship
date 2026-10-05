@@ -191,6 +191,13 @@ func (s *ProjectStore) PinCheckpoint(ctx context.Context, ws, page, commit strin
 	if err != nil {
 		return err
 	}
+	kind, err := runProjectGit(ctx, repo, nil, "cat-file", "-t", commit)
+	if err != nil {
+		return fmt.Errorf("validate checkpoint: %w", err)
+	}
+	if strings.TrimSpace(string(kind)) != "commit" {
+		return errors.New("checkpoint is not a commit")
+	}
 	_, err = runProjectGit(ctx, repo, nil, "update-ref", "refs/checkpoints/"+commit, commit)
 	return err
 }

@@ -1176,6 +1176,28 @@ var startCmd = &cobra.Command{
 				}
 			}
 
+			// Event waits have their own original deadline (#2903). The worker
+			// owns its resumes, uses the scheduler leadership/quiet-window gate,
+			// and joins before the server's DB and journal teardown.
+			if deps.DB != nil && runStore != nil {
+				ph := srv.APIRouter().PipelinesHandler
+				if ph.Runner() != nil {
+					eventResumeExec := pipeline.NewWiredExecutor(pipeline.ExecutorDeps{
+						Store: pipeline.NewStore(deps.DB), Resolver: pipeline.NewResolver(deps.DB),
+						Runner: ph.Runner(), Emitter: ph.Emitter(), DB: deps.DB,
+						Waitpoints: pipelineWaitpoints, WS: pipelineWS, Runs: runRegistry,
+						RunStore: runStore, CodeRunner: codeRunner, ScriptRunner: ph.ScriptRunner(),
+						Signals: signalRegistry, RunVerdict: srv.APIRouter().RunVerdict,
+						Preflight: ph.RunPreflight(), Crewship: ph.CrewshipActions(),
+						VerdictWG: ph.VerdictWaitGroup(),
+					})
+					stopEventWaits := pipeline.StartEventWaitSweeper(ctx, deps.DB, eventResumeExec,
+						quiesce.QueueGate(schedulerLease), logger, time.Second)
+					srv.RegisterBackgroundStop(stopEventWaits)
+					defer stopEventWaits()
+				}
+			}
+
 			// pipeline_runs retention sweep (#1407) — mirrors the memory
 			// consolidation worker started in server_lifecycle.go: one
 			// background ticker, daily by default, per-workspace override
@@ -1716,6 +1738,9 @@ func initProviders(ctx context.Context, cfg *config.Config, gate provider.Admiss
 	deps := &server.Deps{}
 
 	switch cfg.Container.Provider {
+	case "k8s":
+		return nil, fmt.Errorf("container.provider %q is not implemented; use docker, apple, or auto", cfg.Container.Provider)
+
 	case providerDocker:
 		if skipDocker {
 			logger.Info("docker provider disabled via --no-docker")
@@ -1752,7 +1777,7 @@ func initProviders(ctx context.Context, cfg *config.Config, gate provider.Admiss
 		}
 
 	default:
-		if cfg.Container.Provider != "" && cfg.Container.Provider != "k8s" {
+		if cfg.Container.Provider != "" {
 			logger.Warn("unknown container provider", "provider", cfg.Container.Provider)
 		}
 	}

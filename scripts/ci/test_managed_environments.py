@@ -33,3 +33,17 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         events[-1]['Package'] = 'unrelated/package'
         self.assertTrue(managed.failures(events, 0))
         self.assertTrue(managed.failures([e for e in self.passing() if e['Action'] == 'pass'], 0))
+
+    def test_sudo_is_limited_to_managed_launcher_fixture(self):
+        legacy, launcher = managed.commands()
+        self.assertEqual(legacy[0], 'go')
+        self.assertNotIn('sudo', legacy)
+        self.assertNotIn('./internal/orchestrator', legacy)
+        self.assertEqual(launcher[:2], ['sudo', 'env'])
+        self.assertEqual(launcher[-1], './internal/orchestrator')
+        self.assertEqual(launcher[launcher.index('-run') + 1], '^(TestManagedLaunchRealDocker)$')
+        for package, names in managed.TESTS.items():
+            for name in names:
+                command = launcher if package == 'internal/orchestrator' else legacy
+                self.assertIn(name, command[command.index('-run') + 1])
+                self.assertIn('./' + package, command)

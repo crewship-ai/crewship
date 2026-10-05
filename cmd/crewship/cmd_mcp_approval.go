@@ -24,7 +24,31 @@ type mcpApprovalGate struct {
 	pending map[string]mcpPendingApproval
 }
 
-func (g *mcpApprovalGate) approve(req *mcp.CallToolRequest, in mcpRequestInput) (*mcp.CallToolResult, error) {
+// approvalSnapshot pins the credentials checked by the approval gate through
+// execution. A login change while the form is pending invalidates its receipt.
+func (s *cliMCP) approvalSnapshot() (*cliMCP, [32]byte, error) {
+	client := s.client
+	if s.refreshClient != nil {
+		var err error
+		client, err = s.refreshClient()
+		if err != nil {
+			return nil, [32]byte{}, err
+		}
+	} else if s.authenticate != nil {
+		if err := s.authenticate(); err != nil {
+			return nil, [32]byte{}, err
+		}
+	}
+	snapshot := *s
+	clientCopy := *client
+	snapshot.client = &clientCopy
+	snapshot.refreshClient = nil
+	snapshot.authenticate = func() error { return nil }
+	raw, _ := json.Marshal([]string{clientCopy.BaseURL, clientCopy.WorkspaceID, clientCopy.Token})
+	return &snapshot, sha256.Sum256(raw), nil
+}
+
+func (g *mcpApprovalGate) approve(req *mcp.CallToolRequest, in mcpRequestInput, credentialRevision [32]byte) (*mcp.CallToolResult, error) {
 	capabilities := req.Session.InitializeParams().Capabilities
 	if capabilities == nil || capabilities.Elicitation == nil || (capabilities.Elicitation.Form == nil && capabilities.Elicitation.URL != nil) {
 		return nil, apiValidation("human approval unavailable; operation was not executed")
@@ -33,7 +57,7 @@ func (g *mcpApprovalGate) approve(req *mcp.CallToolRequest, in mcpRequestInput) 
 	if err != nil {
 		return nil, err
 	}
-	digest := sha256.Sum256(raw)
+	digest := sha256.Sum256(append(raw, credentialRevision[:]...))
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.pending == nil {

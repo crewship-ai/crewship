@@ -114,9 +114,11 @@ type Server struct {
 	// initial catalog HTTP fetch lands on disk under the test's TempDir
 	// AFTER cleanup walked the children but BEFORE the final unlinkat —
 	// surfaces as "directory not empty" under -race -count=3.
-	bgCtx    context.Context
-	bgCancel context.CancelFunc
-	bgWg     sync.WaitGroup
+	bgCtx     context.Context
+	bgCancel  context.CancelFunc
+	bgWg      sync.WaitGroup
+	bgStopsMu sync.Mutex
+	bgStops   []func()
 
 	// fileJournalPtr is the pointer the file-watcher closure dereferences
 	// to emit file.written entries. Stored on the struct (instead of a
@@ -544,6 +546,7 @@ func (s *Server) mountAPIRouter(
 	orch.SetAgentLiveness(func(ctx context.Context, agentID string) error {
 		return agentMayRun(ctx, deps.DB, agentID)
 	})
+	orch.SetManagedLaunchResolver(managedLaunchResolver(deps.DB))
 	// Episodic embedder resolution. Injection (tests/fakes) wins;
 	// otherwise build an Ollama embedder when Keeper Ollama is
 	// actually configured. Gating on Keeper.Enabled — not just a
