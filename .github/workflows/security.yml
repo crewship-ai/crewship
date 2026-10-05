@@ -84,9 +84,9 @@ jobs:
               - ".github/actions/**"
               - 'go.mod'
               - 'go.sum'
-              - 'package.json'
-              - 'pnpm-lock.yaml'
-              - 'pnpm-workspace.yaml'
+              - '**/package.json'
+              - '**/pnpm-lock.yaml'
+              - '**/pnpm-workspace.yaml'
 
   # ── Secret scan: gitleaks ──
   # Uses the gitleaks CLI binary directly (free, MIT licensed) instead of
@@ -407,6 +407,7 @@ jobs:
           osv-scanner \
             --lockfile=go.mod \
             --lockfile=pnpm-lock.yaml \
+            --lockfile=tools/pages-build/pnpm-lock.yaml \
             > /tmp/osv.log 2>&1
           exit_code=$?
           cat /tmp/osv.log

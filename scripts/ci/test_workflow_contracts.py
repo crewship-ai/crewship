@@ -37,6 +37,23 @@ class WorkflowContracts(unittest.TestCase):
             for name in names:
                 self.assertRegex(source, r'func ' + re.escape(name) + r'\(t \*testing.T\)')
 
+    def test_osv_covers_every_shipped_npm_lockfile(self):
+        security = self.text('security.yml')
+        osv = self.job(security, 'osv-scan')
+        scanned = set(re.findall(r'--lockfile=([^\s\\]+)', osv))
+        # Both the application and its isolated Pages compiler ship npm code.
+        # Discover their locks so a future nested compiler cannot silently lose
+        # scanning when someone edits the workflow.
+        shipped = {'pnpm-lock.yaml'} | {
+            str(p.relative_to(ROOT)) for p in (ROOT / 'tools' / 'pages-build').rglob('pnpm-lock.yaml')
+            if 'node_modules' not in p.parts
+        }
+        self.assertTrue(shipped - {'pnpm-lock.yaml'})
+        self.assertLessEqual(shipped | {'go.mod'}, scanned)
+        router = self.job(security, 'changes')
+        for pattern in ('**/package.json', '**/pnpm-lock.yaml', '**/pnpm-workspace.yaml'):
+            self.assertIn("'" + pattern + "'", router)
+
     def test_race_shards_are_parallel_and_required(self):
         ci = self.text('ci.yml')
         race = self.job(ci, 'go-race')
