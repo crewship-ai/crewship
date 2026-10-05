@@ -50,15 +50,18 @@ def annotate_main_parents(pr, repo, github, warnings, cache):
             warnings.append(f"PR {pr['number']} commit {commit['oid']}: main parent provenance unavailable")
             continue
         statuses = []
-        for parent in nodes:
+        # The first parent is the PR branch, not the synchronized main branch.
+        # Every additional parent must come from main: mixed feature merges
+        # and octopus merges must remain substantive.
+        for parent in nodes[1:]:
             pair = (parent['oid'], base)
             if pair not in cache:
                 comparison = github.request(f'repos/{repo}/compare/{parent["oid"]}...{base}')
                 cache[pair] = comparison.get('status')
             statuses.append(cache[pair])
-        if any(status in ('ahead', 'identical') for status in statuses):
+        if statuses and all(status in ('ahead', 'identical') for status in statuses):
             commit['main_parent_provenance'] = 'verified_main_parent'
-        elif all(status in ('behind', 'diverged') for status in statuses):
+        elif any(status in ('behind', 'diverged') for status in statuses):
             commit['main_parent_provenance'] = 'verified_no_main_parent'
         else:
             commit['main_parent_provenance'] = 'unknown: unexpected ancestry comparison'
@@ -174,7 +177,7 @@ def collect(args):
         rows.append({**item, 'open_to_merge_seconds': seconds(item['createdAt'], item['mergedAt']),
                      'latest_substantive_push_at': push, 'push_evidence': source,
                      'push_to_merge_seconds': seconds(push, item['mergedAt']),
-                     'automatic_main_sync_commits': sum(not substantive(n['commit']) for n in pr['commits']['nodes']),
+                     'main_sync_commits': sum(not substantive(n['commit']) for n in pr['commits']['nodes']),
                      'attempts': []})
     # Start at earliest PR creation to include all sampled PR runs, not just merge-day runs.
     earliest = min((p['createdAt'] for p in prs), default=args.since)
@@ -207,7 +210,7 @@ def collect(args):
                 sync_shas = {n['commit']['oid'] for pr in raw['prs'] if pr['number'] == row['number']
                              for n in pr['commits']['nodes'] if not substantive(n['commit'])}
                 row['attempts'].append({**metric, 'trigger_kind': 'rerun' if number > 1 else
-                                        ('automatic_main_sync' if run['head_sha'] in sync_shas else
+                                        ('main_sync' if run['head_sha'] in sync_shas else
                                          'new_run_substantive_or_unclassified_push')})
         if run['run_attempt'] > args.max_attempts:
             warnings.append(f'Run {run["id"]}: attempts truncated at {args.max_attempts}')
