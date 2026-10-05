@@ -13,14 +13,21 @@ import (
 )
 
 const productionKDFProbeArg = "--crewship-production-kdf-probe"
+const productionKDFProbePlaintext = "production AGE compatibility probe"
 
 func TestMain(m *testing.M) {
 	// The child exercises package initialization before the test-only override.
 	// This argument exists only in the test binary, never in the shipped CLI.
 	if len(os.Args) == 2 && os.Args[1] == productionKDFProbeArg {
+		// Refuse an unexpected initializer before allocating an unbounded KDF
+		// working set. The parent also verifies the actual emitted stanza.
+		if passphraseWorkFactor != 18 {
+			fmt.Fprintf(os.Stderr, "unexpected production scrypt factor: %d\n", passphraseWorkFactor)
+			os.Exit(1)
+		}
 		w, err := EncryptStreamPassphrase(os.Stdout, "production-default-probe")
 		if err == nil {
-			_, err = io.WriteString(w, "production AGE compatibility probe")
+			_, err = io.WriteString(w, productionKDFProbePlaintext)
 		}
 		if err == nil {
 			err = w.Close()
@@ -62,7 +69,21 @@ func TestProductionPassphraseWorkFactor(t *testing.T) {
 		t.Fatalf("production recipient stanza: %q", scanner.Text())
 	}
 	factor, err := strconv.Atoi(fields[3])
-	if err != nil || factor < 18 {
-		t.Fatalf("production scrypt factor %q is below 18: %v", fields[3], err)
+	if err != nil || factor != 18 {
+		t.Fatalf("production scrypt factor %q must remain 18: %v", fields[3], err)
+	}
+	// A strength check alone can accept output above the decryptor's supported
+	// work factor. Read the full plaintext to verify production compatibility
+	// and AGE payload authentication, not merely recipient/header parsing.
+	reader, err := DecryptStreamPassphrase(bytes.NewReader(ciphertext), "production-default-probe")
+	if err != nil {
+		t.Fatalf("decrypt production AGE output: %v", err)
+	}
+	plaintext, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read production AGE plaintext: %v", err)
+	}
+	if string(plaintext) != productionKDFProbePlaintext {
+		t.Fatalf("production AGE plaintext mismatch: %q", plaintext)
 	}
 }
