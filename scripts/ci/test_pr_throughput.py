@@ -25,9 +25,27 @@ class ThroughputTests(unittest.TestCase):
 
     def test_automatic_main_sync_does_not_reset_substantive_push(self):
         pr = self.pr([self.commit(pushed='2026-10-05T10:00:00Z'),
-                      self.commit("Merge branch 'main' into fix/test", '2026-10-05T11:00:00Z', 2)])
+                      {**self.commit('sync trunk', '2026-10-05T11:00:00Z', 2),
+                       'main_parent_provenance': 'verified_main_parent'}])
         self.assertEqual(m.push_evidence(pr)[0], '2026-10-05T10:00:00Z')
         self.assertTrue(m.substantive(self.commit('chore(deps): update dependencies')))
+
+    def test_main_parent_proof_overrides_headline(self):
+        for message, status, expected in [('sync trunk', 'ahead', False),
+                                           ("Merge branch 'main'", 'diverged', True)]:
+            commit = self.commit(message, parents=2)
+            commit['parents']['nodes'] = [{'oid': 'feature'}, {'oid': 'parent'}]
+            pr = self.pr([commit])
+            pr.update(number=1, mergeCommit={'parents': {'nodes': [{'oid': 'base'}]}})
+            class API:
+                def request(self, endpoint):
+                    return {'status': status}
+            m.annotate_main_parents(pr, 'test/repo', API(), [], {})
+            self.assertEqual(m.substantive(commit), expected)
+
+    def test_unavailable_parent_proof_cannot_produce_push_latency(self):
+        pr = self.pr([self.commit('sync trunk', '2026-10-05T11:00:00Z', 2)])
+        self.assertIsNone(m.push_evidence(pr)[0])
 
     def test_final_substantive_commit_needs_its_own_evidence(self):
         pr = self.pr([self.commit('fix: old', '2026-10-05T10:00:00Z'), self.commit('fix: new')])

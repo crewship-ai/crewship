@@ -24,11 +24,19 @@ observation counts.
   review and human waiting time.
 - **Final substantive push to merge:** an actual `commit.pushedDate` or
   `HeadRefForcePushedEvent.createdAt` for the last substantive commit in the PR
-  commit order. The tool excludes explicit multi-parent merges of main. It
-  does not exclude all bot commits: dependency and automated code changes are
-  substantive. GitHub's update-branch merge of main fits the merge exclusion;
-  squash/rebase synchronization with no identifiable main merge remains
-  substantive. Changes removed by force-push cannot always be reconstructed.
+  commit order. The tool excludes multi-parent commits only when API ancestry
+  comparisons prove a parent belongs to main before the PR's merge commit.
+  The anchor is that merge commit's first parent; a retained PR commit at that
+  anchor or incomplete parent data leaves provenance unknown and push latency
+  null. Custom synchronization headlines work; a headline mentioning main is
+  insufficient evidence. The collector requests up to ten parents per commit.
+  Ancestry comparisons share the bounded API budget and cache repeated pairs.
+  It does not exclude all bot commits: dependency and automated code changes are
+  substantive. GitHub Actions and update-branch synchronization are excluded when main
+  ancestry is proven, independently of actor. This deliberately retains useful
+  automated code changes rather than treating every github-actions commit as
+  non-substantive. Squash/rebase synchronization without a multi-parent main
+  merge remains substantive; ambiguous rebase anchors remain unknown. Changes removed by force-push cannot always be reconstructed.
   A missing final push timestamp produces null, never an author/committer date
   or workflow creation proxy. Earlier commits with known timestamps cannot
   replace a final commit whose push timestamp is unknown. An observed repush
@@ -77,5 +85,5 @@ unpublished pushes. It also cannot measure true rerun enqueue latency from
 the Actions API's reused creation timestamp.
 
 Unit tests run in the existing `scripts/ci/test_*.py` discovery suite. They check
-missing timestamps, substantive commits, automatic main merges, forced pushes,
+missing timestamps, substantive commits, main-parent ancestry, deceptive/custom headlines, forced pushes,
 truncation, rerun timestamp semantics, timeout evidence and percentile handling.
