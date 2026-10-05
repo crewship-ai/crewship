@@ -513,6 +513,8 @@ func TestEventWaitDeadline_ConcurrentBusyResumersDoNotReplaySideEffect(t *testin
 
 // Busy concurrency keys must not occupy every worker and starve an unrelated
 // expiry. Deterministic IDs put all eight blocked runs before the free run.
+// A preflight barrier fills every admission permit before any attempt returns;
+// the concurrency blocker stays held until after every assertion.
 func TestEventWaitDeadline_BusySlotsDoNotStarveOtherExpiry(t *testing.T) {
 	db := openFactoryTestDB(t)
 	defer db.Close()
@@ -540,24 +542,79 @@ func TestEventWaitDeadline_BusySlotsDoNotStarveOtherExpiry(t *testing.T) {
 	if _, err = db.Exec(`UPDATE pipeline_signal_waits SET timeout_at=?`, tsformat.Format(time.Now().Add(-time.Minute))); err != nil {
 		t.Fatal(err)
 	}
-	stop := StartEventWaitSweeper(ctx, db, exec, nil, slog.New(slog.NewTextHandler(io.Discard, nil)), 10*time.Millisecond)
+	// Start the watchdog only after fixture setup. This is a liveness bound,
+	// not a latency requirement: race instrumentation and the fixture's single
+	// SQLite connection can delay the eight plans and their admission reads.
+	sweepCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	pf := &fairnessAdmissionPreflight{entered: make(chan string, 8), release: make(chan struct{})}
+	exec.WithRunPreflight(pf)
+	stop := StartEventWaitSweeper(sweepCtx, db, exec, nil, slog.New(slog.NewTextHandler(io.Discard, nil)), 10*time.Millisecond)
 	defer stop()
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		rec, err := deps.RunStore.Get(ctx, "fair-08")
+	for i := 0; i < 8; i++ {
+		select {
+		case pipelineID := <-pf.entered:
+			if pipelineID != gated.ID {
+				t.Fatalf("unrelated run entered before eight busy admissions: %s", pipelineID)
+			}
+		case <-sweepCtx.Done():
+			t.Fatalf("only %d of eight busy admissions reached preflight: %v", i, sweepCtx.Err())
+		}
+	}
+	close(pf.release)
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		rec, err := deps.RunStore.Get(sweepCtx, "fair-08")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("read unrelated expiry: %v", err)
 		}
 		if rec.Status == RunStatusFailed {
-			blocked, err := deps.RunStore.Get(ctx, "fair-00")
-			if err != nil || blocked.Status != RunStatusWaiting {
-				t.Fatalf("blocked run: %+v %v", blocked, err)
+			if !strings.Contains(rec.ErrorMessage, "timed out") {
+				t.Fatalf("unrelated run failed without expiring: %+v", rec)
+			}
+			for i := 0; i < 8; i++ {
+				blocked, err := deps.RunStore.Get(sweepCtx, fmt.Sprintf("fair-%02d", i))
+				if err != nil || blocked.Status != RunStatusWaiting {
+					t.Fatalf("blocked run %d: %+v %v", i, blocked, err)
+				}
 			}
 			return
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-ticker.C:
+		case <-sweepCtx.Done():
+			t.Fatalf("eight busy slots starved an unrelated event expiry (last status=%s): %v", rec.Status, sweepCtx.Err())
+		}
 	}
-	t.Fatal("eight busy slots starved an unrelated event expiry")
+}
+
+// fairnessAdmissionPreflight lets the test fill the sweeper's eight permits
+// without depending on goroutine scheduling speed. Once released it is a no-op;
+// the registry's real concurrency gate still declines every busy run.
+type fairnessAdmissionPreflight struct {
+	entered chan string
+	release chan struct{}
+}
+
+func (p *fairnessAdmissionPreflight) Check(ctx context.Context, req PreflightRequest) error {
+	select {
+	case <-p.release:
+		return nil
+	default:
+	}
+	select {
+	case p.entered <- req.PipelineID:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-p.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func TestEventWaitDeadline_SpuriousResumeDoesNotEnterPendingWait(t *testing.T) {
