@@ -1716,6 +1716,9 @@ func initProviders(ctx context.Context, cfg *config.Config, gate provider.Admiss
 	deps := &server.Deps{}
 
 	switch cfg.Container.Provider {
+	case "k8s":
+		return nil, fmt.Errorf("container.provider %q is not implemented; use docker, apple, or auto", cfg.Container.Provider)
+
 	case providerDocker:
 		if skipDocker {
 			logger.Info("docker provider disabled via --no-docker")
@@ -1752,7 +1755,7 @@ func initProviders(ctx context.Context, cfg *config.Config, gate provider.Admiss
 		}
 
 	default:
-		if cfg.Container.Provider != "" && cfg.Container.Provider != "k8s" {
+		if cfg.Container.Provider != "" {
 			logger.Warn("unknown container provider", "provider", cfg.Container.Provider)
 		}
 	}
