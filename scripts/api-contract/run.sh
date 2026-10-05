@@ -337,6 +337,98 @@ if [[ -n "$DEADLINE" ]]; then
   deadline_args=(timeout "$DEADLINE")
 fi
 
+# Fixture-correlated operation parameters (#1815 bucket 3).
+#
+# Schemathesis generates path parameters from the schema alone, so the gate
+# pairs ids the fixture never bound (a crew from one listing with an
+# integration from another: AC1815-184's designed 404) and grades the
+# restricted-workflow routes as the OWNER, who is always the designed 404.
+# Those are findings about the fixture, not the product. CI resolves real,
+# correlated values with fixture_probes.py / restricted_fixture.py and hands
+# them here as FILES — optional, so a live or nightly run without a fixture is
+# byte-for-byte unchanged:
+#
+#   API_CONTRACT_PAIR_FILE              {"crew_id","integration_id"}: the
+#       fixture-BOUND pair, applied to the one tools operation only (never a
+#       global substitution — every other crew/integration route keeps its
+#       generated ids);
+#   API_CONTRACT_RESTRICTED_TOKEN_FILE  the restricted member's own token: the
+#       three restricted-workflow operations are graded as that member, the
+#       only actor that can reach their success branch.
+#
+# The overlay is appended to a COPY of schemathesis.toml in the run
+# directory. Secrets are referenced as ${CREWSHIP_*} interpolations, never
+# written into the file.
+CONFIG_FILE="$SCRIPT_DIR/schemathesis.toml"
+PAIR_FILE="${API_CONTRACT_PAIR_FILE:-}"
+RESTRICTED_TOKEN_FILE="${API_CONTRACT_RESTRICTED_TOKEN_FILE:-}"
+if [[ -n "$PAIR_FILE" || -n "$RESTRICTED_TOKEN_FILE" ]]; then
+  CONFIG_FILE="$RUN_DIR/schemathesis.toml"
+  cp "$SCRIPT_DIR/schemathesis.toml" "$CONFIG_FILE"
+fi
+if [[ -n "$PAIR_FILE" ]]; then
+  [[ -s "$PAIR_FILE" ]] || die "API_CONTRACT_PAIR_FILE=$PAIR_FILE is missing or empty"
+  pair_crew="$(jq -er '.crew_id | select(type == "string" and test("^[A-Za-z0-9_-]+$"))' "$PAIR_FILE")" \
+    || die "API_CONTRACT_PAIR_FILE needs a safe crew_id string"
+  pair_integration="$(jq -er '.integration_id | select(type == "string" and test("^[A-Za-z0-9_-]+$"))' "$PAIR_FILE")" \
+    || die "API_CONTRACT_PAIR_FILE needs a safe integration_id string"
+  {
+    printf '\n[[operations]]\n'
+    printf 'include-path = "/api/v1/crews/{crewId}/integrations/{integrationId}/tools"\n'
+    printf 'parameters = { crewId = "%s", integrationId = "%s" }\n' "$pair_crew" "$pair_integration"
+  } >>"$CONFIG_FILE"
+fi
+if [[ -n "$RESTRICTED_TOKEN_FILE" ]]; then
+  [[ -s "$RESTRICTED_TOKEN_FILE" ]] || die "API_CONTRACT_RESTRICTED_TOKEN_FILE=$RESTRICTED_TOKEN_FILE is missing or empty"
+  export CREWSHIP_RESTRICTED_TOKEN
+  CREWSHIP_RESTRICTED_TOKEN="$(tr -d '[:space:]' <"$RESTRICTED_TOKEN_FILE")"
+  [[ "$WORKSPACE" =~ ^[A-Za-z0-9_-]+$ ]] || die "restricted overlay needs a workspace ID/slug of [A-Za-z0-9_-]"
+  # One section per EXACT path, with ONE selector each. Do not add
+  # `include-method` beside `include-path`: Schemathesis registers each
+  # include-* key with a separate include() call, which is an OR, so a
+  # section with both matched EVERY GET operation — measured on a live run:
+  # 485 requests of unrelated operations carried the restricted token, the
+  # Pages slug harvest broke and findings went 91 -> 209.
+  for restricted_path in \
+    "/api/v1/workspaces/{workspaceId}/restricted-routines" \
+    "/api/v1/workspaces/{workspaceId}/restricted-routine-runs" \
+    "/api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}"; do
+    {
+      printf '\n[[operations]]\n'
+      printf 'include-path = "%s"\n' "$restricted_path"
+      # shellcheck disable=SC2016 # literal ${…}: Schemathesis interpolates at run time; the token must never be expanded into the file
+      printf 'headers = { Authorization = "Bearer ${CREWSHIP_RESTRICTED_TOKEN}", "X-Workspace-ID" = "${CREWSHIP_WORKSPACE}" }\n'
+      printf 'parameters = { workspaceId = "%s" }\n' "$WORKSPACE"
+    } >>"$CONFIG_FILE"
+  done
+fi
+
+# Pin the correlated ids in the schema Schemathesis GENERATES from, not only
+# in the config. Measured: a config `parameters` pin loses to ids Schemathesis
+# harvests from other operations' responses — /workspaces lists the
+# restricted member's own signup workspace, and the catalog route was graded
+# on that foreign id. A single-value enum on the path parameter cannot be
+# outvoted. The pinned copy feeds Schemathesis only; $SCHEMA_FILE (counted
+# and archived as evidence) stays exactly what the server published.
+SCHEMA_RUN_FILE="$SCHEMA_FILE"
+if [[ -n "$PAIR_FILE" || -n "$RESTRICTED_TOKEN_FILE" ]]; then
+  SCHEMA_RUN_FILE="$RUN_DIR/openapi-pinned.json"
+  pin_filter='def pin($path; $name; $val): if .paths[$path].get then .paths[$path].get.parameters |= map(if .in == "path" and .name == $name then .schema = {type: "string", enum: [$val]} else . end) else . end; .'
+  if [[ -n "$PAIR_FILE" ]]; then
+    pin_filter+=' | pin("/api/v1/crews/{crewId}/integrations/{integrationId}/tools"; "crewId"; $crew) | pin("/api/v1/crews/{crewId}/integrations/{integrationId}/tools"; "integrationId"; $integration)'
+  fi
+  if [[ -n "$RESTRICTED_TOKEN_FILE" ]]; then
+    for restricted_path in \
+      "/api/v1/workspaces/{workspaceId}/restricted-routines" \
+      "/api/v1/workspaces/{workspaceId}/restricted-routine-runs" \
+      "/api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}"; do
+      pin_filter+=" | pin(\"$restricted_path\"; \"workspaceId\"; \$ws)"
+    done
+  fi
+  jq --arg crew "${pair_crew:-}" --arg integration "${pair_integration:-}" --arg ws "$WORKSPACE" "$pin_filter" "$SCHEMA_FILE" >"$SCHEMA_RUN_FILE" \
+    || die "cannot pin the fixture ids into the schema copy"
+fi
+
 # `${arr[@]+"${arr[@]}"}` rather than a bare `"${arr[@]}"`: these two
 # arrays can be empty, and bash 3.2 (what macOS ships) treats an empty
 # array expansion as an unbound variable under `set -u`.
@@ -344,8 +436,8 @@ fi
 # Keep the output contract small and bounded. The full Schemathesis log stays
 # in the temporary directory only long enough for summary.py to classify it.
 ${deadline_args[@]+"${deadline_args[@]}"} \
-  schemathesis --config-file "$SCRIPT_DIR/schemathesis.toml" run \
-  "$SCHEMA_FILE" "${phase_args[@]}" "${safe_method_args[@]}" "${scope_args[@]}" \
+  schemathesis --config-file "$CONFIG_FILE" run \
+  "$SCHEMA_RUN_FILE" "${phase_args[@]}" "${safe_method_args[@]}" "${scope_args[@]}" \
   "${security_negative_args[@]}" \
   ${rate_limit_args[@]+"${rate_limit_args[@]}"} \
   --max-examples 10 \

@@ -306,6 +306,16 @@ jobs:
       # close.
       - name: api-contract summary classifier
         run: python3 scripts/api-contract/summary_test.py
+      # The #1815 fixture scripts decide whether the gate's bucket-3
+      # operations are graded against real data. Their logic (exit only when
+      # every probe passed, a preserved HTTP status, token written only after
+      # the proofs) is stdlib-only and server-free, so it is pinned here
+      # rather than only exercised by the harness job that needs a server.
+      - name: api-contract fixture probes + restricted member fixture
+        run: |
+          set -euo pipefail
+          python3 scripts/api-contract/fixture_probes_test.py
+          python3 scripts/api-contract/restricted_fixture_test.py
 
       # Skip budget ratchet. `go test ./...` prints `ok` for a package whose
       # every test called t.Skip, so a skip is indistinguishable from a pass
@@ -414,6 +424,46 @@ jobs:
             echo "NEXTAUTH_SECRET=$nextauth"
             echo "ENCRYPTION_KEY=$enckey"
           } >> "$GITHUB_ENV"
+      # ── #1815 bucket-3 fixture: configure the optional surfaces ──
+      #
+      # Run 37216610199 graded 13 operations this job's server could not
+      # exercise: nine /pages/{slug}/project* operations answered the
+      # designed 503 "Page project storage is not configured" (the router
+      # wires projectStore only behind CREWSHIP_PAGE_PROJECTS_PATH) and
+      # three restricted-workflow operations answered the designed 404
+      # because the restricted runtime registers only when
+      # CREWSHIP_RESTRICTED_RUNTIME_IMAGE names an immutable local digest.
+      # Those findings measured the fixture, not the product.
+      #
+      # The Pages toolchain image is built from THIS checkout so the
+      # compiler and the server under test are the same release — the rule
+      # tools/pages-build/README.md states for operators. Its sha256 image
+      # ID is immutable by construction and serves both settings:
+      #
+      #   - CREWSHIP_PAGE_BUILD_IMAGE: the offline Page compiler the seed's
+      #     app publication path needs (seedPageApp builds + checks +
+      #     publishes one app per catalogue page; without a build worker
+      #     that path 503s and the seed step fails);
+      #   - CREWSHIP_RESTRICTED_RUNTIME_IMAGE: registration-only
+      #     substitution. The manager needs a locally-present immutable
+      #     digest so the three restricted-workflow GET operations reach the
+      #     registered service. This is NOT a real restricted runner image
+      #     (that is cmd/crewship-restricted-runner): the GETs the gate and
+      #     restricted_fixture.py issue never start a restricted container,
+      #     and nothing here may execute one against this image. The image
+      #     id travels as a step OUTPUT, not $GITHUB_ENV, so it reaches only
+      #     the server step that names it.
+      - name: Build Pages toolchain image
+        id: pages-image
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          image="$(docker build -q tools/pages-build)"
+          case "$image" in
+            sha256:*) ;;
+            *) echo "unexpected image reference: $image" >&2; exit 1 ;;
+          esac
+          echo "image=$image" >> "$GITHUB_OUTPUT"
       #
       # ⚠ CREWSHIP_RATELIMIT_DISABLED is set HERE and nowhere else.
       #
@@ -444,6 +494,31 @@ jobs:
       - name: Start ephemeral server
         env:
           CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
+          # Outside CREWSHIP_STORAGE_BASE_PATH on purpose: config's
+          # validatePageProjectPath refuses an overlap at boot.
+          CREWSHIP_PAGE_PROJECTS_PATH: ${{ github.workspace }}/.crewship-page-projects
+          CREWSHIP_PAGE_BUILD_IMAGE: ${{ steps.pages-image.outputs.image }}
+          # Registration-only substitution (see the build step above): the
+          # restricted-runtime manager needs a locally-present immutable
+          # digest for the three restricted GET operations to reach the
+          # registered service instead of the unwired-404 guard. Wiring alone
+          # proves nothing — the OWNER token still gets the designed
+          # restricted-membership 404; the positive branch is installed by
+          # the "API contract fixture" step below (a real restricted member
+          # and its own token).
+          CREWSHIP_RESTRICTED_RUNTIME_IMAGE: ${{ steps.pages-image.outputs.image }}
+          # The publish/check path refuses to run without a runtime origin
+          # (pages_project_publish.go gates on pageRuntimeOrigin), and the
+          # seed's app publication needs it. A genuine different browser
+          # site, not the development same-origin escape hatch: site()
+          # (internal/pagebuild/runtime.go) returns IP literals verbatim, so
+          # 127.0.0.1 is a different site from the Studio origin's
+          # localhost, and loopback is the one place plain HTTP is allowed.
+          CREWSHIP_PAGE_RUNTIME_ORIGIN: http://127.0.0.1:8080
+          # The restricted-member fixture invites + signs up one account
+          # (the signup route gates on this flag). Hermetic server, deleted
+          # with the runner; POST /auth/signup is excluded from the gate.
+          CREWSHIP_ALLOW_SIGNUP: "true"
           CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
           CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
           DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
@@ -461,7 +536,15 @@ jobs:
           done
           cat /tmp/crewship-pr-harness.log >&2
           exit 1
+      # Seed with its own step cap: with Page storage configured the seed
+      # builds + checks + publishes one app per catalogue page (one Docker
+      # build each, ≤120 s in-container deadline per build), so a wedged
+      # build must be a named step failure, not a job-level `cancelled` —
+      # the same deadline-ordering rule the gate step below follows. The
+      # retry loop stays: a transient Docker hiccup on one attempt should
+      # not red an unrelated PR.
       - name: Seed clean control-plane fixture
+        timeout-minutes: 10
         env:
           CREWSHIP_SERVER: http://localhost:8080
         run: |
@@ -472,6 +555,51 @@ jobs:
           done
           cat /tmp/crewship-pr-harness.log >&2
           exit 1
+      # #1815 bucket-3 fixture: correlated ids + a restricted member.
+      #
+      # Observed against this fixture (Schemathesis 4.24.3): the gate builds
+      # path ids from generation plus values it harvests from other
+      # operations' responses, so (a) it paired a crew with an integration
+      # that was never bound to it (AC1815-184's 404), (b) it graded the
+      # restricted-workflow routes as the seeded OWNER, who is always denied,
+      # and (c) it sent generated revision 0 to the history routes. This step
+      # installs the missing preconditions through the product's own
+      # surfaces and PROVES them over HTTP before run.sh pins the pair and the
+      # member into the gate. Blocking: a fixture that silently lost its
+      # binding, its project history or its restricted member must fail the
+      # PR here, not turn into unexplained gate findings. For Pages the
+      # gate's own grading is harvest-dependent; these probes are the
+      # positive evidence.
+      #
+      #   fixture_probes.py      every read branch of /pages/{slug}/project*
+      #                          answers 200 on a real draft, a real revision
+      #                          is fetched, revision 0 is 400 and an absent
+      #                          revision 404; the bound (crew, integration)
+      #                          pair answers 200 and an unbound pair 404.
+      #                          Writes the bound pair for run.sh.
+      #   restricted_fixture.py  a real restricted member (invite + signup +
+      #                          access policy, its own token): 200 lists for
+      #                          it, the designed 404 for the owner. Writes
+      #                          the member's token (0600) for run.sh.
+      #
+      # Stdlib-only Python, same shape as response_shapes.py. The files live
+      # in RUNNER_TEMP, outside the uploaded artifact directory.
+      - name: API contract fixture
+        timeout-minutes: 3
+        env:
+          CREWSHIP_SERVER: http://localhost:8080
+        run: |
+          set -euo pipefail
+          fixture_dir="$RUNNER_TEMP/api-contract-fixture"
+          mkdir -m 700 "$fixture_dir"
+          tok="$(./crewship token create api-contract-fixture --quiet)"
+          echo "::add-mask::$tok"
+          ws="$(./crewship whoami --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace"]["id"])')"
+          python3 scripts/api-contract/fixture_probes.py http://localhost:8080 "$tok" "$ws" --write-pair "$fixture_dir/pair.json"
+          python3 scripts/api-contract/restricted_fixture.py http://localhost:8080 "$tok" "$ws" "$PWD/crewship" "$fixture_dir/restricted.token"
+          # Defence in depth: the member token lives only in that 0600 file,
+          # but mask it so no later step's output can ever print it.
+          echo "::add-mask::$(cat "$fixture_dir/restricted.token")"
       # HARNESS_SUITE_TIMEOUT (480s) < this step's cap (12m) < the job's (30m).
       # The suite's own deadline is the innermost, so a wedged suite is named
       # by the harness rather than reaped anonymously — the #1998 audit found
@@ -602,6 +730,11 @@ jobs:
           # a limited instance this buys 429s reported as contract
           # failures, not speed. The pairing is a tested invariant.
           API_CONTRACT_RATE_LIMIT: "off"
+          # Fixture-correlated parameters from the step above (see run.sh):
+          # the bound pair for the one tools operation, and the restricted
+          # member's token for the three restricted-workflow operations.
+          API_CONTRACT_PAIR_FILE: ${{ runner.temp }}/api-contract-fixture/pair.json
+          API_CONTRACT_RESTRICTED_TOKEN_FILE: ${{ runner.temp }}/api-contract-fixture/restricted.token
         run: |
           set -euo pipefail
           tok="$(./crewship token create api-contract-pr --quiet)"
