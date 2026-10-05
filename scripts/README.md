@@ -16,6 +16,7 @@ it is safe against a shared development instance.
 | Full pre-push entrypoint | `bash scripts/verify.sh full` | Adds frontend lint, types, coverage and static export build |
 | Whole frontend coverage audit | `pnpm test:coverage:full` | Measures handwritten application routes, components, hooks, libraries and stores; writes `coverage/full-frontend/` and fails when any measured file has less than 90% lines or branches. This broader audit is separate from the historical shared-module CI gate and currently reports outstanding coverage debt. |
 | CLI subprocess coverage | Set `TEST_CREWSHIP_CLI_COVERAGE_DIR` to an existing absolute output directory when running `go test ./cmd/crewship` | Instruments the shared acceptance-test binary for `cmd/crewship`. Export its counters with `go tool covdata textfmt -i="$TEST_CREWSHIP_CLI_COVERAGE_DIR" -o=cli-subprocess.out`; combine matching statement blocks with the ordinary test profile. The subprocess report alone does not include in-process unit tests. |
+| PR throughput evidence | `python3 scripts/ci/pr-throughput.py --since YYYY-MM-DD --output /tmp/throughput.json --raw-output /tmp/throughput-raw.json` | Read-only bounded GitHub queries for merged PR latency, workflow attempts, failures and queue/execution; see [metric definitions and limitations](ci/pr-throughput.md) |
 | Documentation inventory | `make docs-inventory:strict` | Checks documented API/CLI references and writes ignored inventory reports |
 | Browser tests | See [e2e/README.md](../e2e/README.md) | Selects the appropriate suite and target instance |
 

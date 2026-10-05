@@ -91,6 +91,13 @@ validation in the PR. Keep required CI checks green; skipped checks are not
 execution evidence. A self-review must be labelled as such, not presented as
 an independent review. See [CONTRIBUTING.md](CONTRIBUTING.md#review-before-merge).
 
+**Merge queue:** after review, submit with `gh pr merge <PR> --auto --squash`
+(and `--match-head-commit <SHA>` for the reviewed head). Let the queue check the
+current base; do not repeatedly update branches to chase main. Do not use
+`--admin` or a REST bypass except a recorded emergency with the responsible
+operator, reason, reviewed SHA and successful exact-SHA required checks.
+See [CONTRIBUTING.md → Merge through the queue](CONTRIBUTING.md#merge-through-the-queue).
+
 ## Architecture map (`internal/`)
 
 ```text
