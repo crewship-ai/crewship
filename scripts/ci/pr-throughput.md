@@ -43,7 +43,12 @@ observation counts.
   of the final substantive SHA counts as its latest evidenced push.
 - **Workflow run versus rerun:** different run IDs are separate runs, even at
   the same SHA. `run_attempt > 1` is a rerun; each attempt is fetched separately.
-  New pushes and branch updates cause new runs, not rerun attempts. Each row
+  New pushes and branch updates cause new runs, not rerun attempts. Per-PR
+  `ci_runs`/`ci_rerun_attempts` count only CI; `required_workflow_runs` and
+  `required_workflow_rerun_attempts` count all three required workflows.
+  Three workflows at the same head are not three CI runs. The Actions API
+  cannot reliably distinguish human rerun-button use from automation requesting
+  a rerun; attempt counts are observed reruns without human attribution. Each row
   retains head SHA, an evidenced automatic-main-sync trigger classification and
   PR automatic-main-sync commit count for interpretation. Unknown historical
   push kinds stay unclassified; separate Security/CodeQL/CI runs at one head

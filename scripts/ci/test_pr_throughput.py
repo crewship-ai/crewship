@@ -74,6 +74,15 @@ class ThroughputTests(unittest.TestCase):
         self.assertEqual(result['timed_out_jobs'], 1)
         self.assertEqual(result['attempt'], 2)
 
+    def test_per_pr_run_counts_do_not_mix_workflows_or_new_runs_with_reruns(self):
+        attempts = [{'run_id': 1, 'attempt': 1, 'workflow': '.github/workflows/ci.yml'},
+                    {'run_id': 1, 'attempt': 2, 'workflow': '.github/workflows/ci.yml'},
+                    {'run_id': 2, 'attempt': 1, 'workflow': '.github/workflows/security.yml'},
+                    {'run_id': 3, 'attempt': 1, 'workflow': '.github/workflows/ci.yml'}]
+        self.assertEqual(m.row_run_counts(attempts + [attempts[0]]), {
+            'ci_runs': 2, 'ci_rerun_attempts': 1, 'required_workflow_runs': 3,
+            'required_workflow_rerun_attempts': 1})
+
     def test_request_budget_fails_before_another_api_call(self):
         api = m.GitHub(1)
         with patch.object(m.subprocess, 'check_output', return_value=b'{}') as call:
