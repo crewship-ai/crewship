@@ -157,3 +157,14 @@ python3 scripts/ci/repository-policy.py --code-scanning-only --output /tmp/codeq
 # Review the before/proposed policy; only the CodeQL rule should change.
 python3 scripts/ci/repository-policy.py --apply --plan /tmp/codeql-policy.json
 ```
+
+The CodeQL workflow now plans both Go and JavaScript/TypeScript on every PR,
+including documentation-only and single-language changes. This intentional
+latency tradeoff supplies results for the current PR revision before enabling a native
+required-tool rule: a green aggregate over skipped analyses cannot establish
+that evidence. It removes the previous language/path optimization, preserves
+analysis permissions and query exclusions, and leaves all main/merge-group
+analyses running. Run an actual documentation-only and single-language PR
+canary and inspect both analyses before activating the native rule. Native
+merge-queue-group exclusions still apply; this change does not add a
+findings-based queue verdict.
