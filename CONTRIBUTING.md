@@ -159,6 +159,12 @@ tick the boxes that apply and remove rows that don't.
 CI classifies the actual Git diff. Code changes run the frontend, embedded
 server, browser and Docker checks; frontend-only changes skip the Go matrix.
 Documentation-only PRs retain the workflow/invariant and security verdicts.
+Documentation skips are limited to prose and image extensions; unknown inputs
+under `docs/` run the full suite. Provider-order and WebSocket documentation
+changes retain their Go/frontend parity tests, and frontend vocabulary changes
+retain the corresponding Go mirror checks even when the Go matrix is skipped.
+Renames are classified as deletion plus addition so moving source into docs
+cannot hide a runtime change.
 Unknown paths trigger the full suite, as do main pushes.
 
 The root Dockerfile builds and boots on every code PR through the reusable

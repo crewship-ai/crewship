@@ -1,6 +1,6 @@
 // Command docs-surface-check verifies the agent-readable Mintlify surface.
 //
-// Every pass is hermetic and runs on each pull request, in the order main
+// Each local pass is hermetic and runs when this command is invoked, in the order main
 // prints them: frontmatter description quality, stability labels, navigation
 // reachability in both directions, internal prose links and their anchors,
 // deprecated terminology, code spans wrapped onto a `<` line, headings with an
