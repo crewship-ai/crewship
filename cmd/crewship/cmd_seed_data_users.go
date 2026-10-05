@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 )
@@ -51,7 +52,7 @@ var demoUsers = []demoUser{
 // non-fatal — a user the fixture can't place is reported and the loop
 // continues so the rest of the fixture lands.
 //
-// The flow is invite-then-signup, not signup-then-add-member. Signup
+// New accounts use invite-then-signup. Signup
 // answers 202 with a generic body whether or not the address was free
 // (it was de-enumerated in #1254), so it can no longer hand back the
 // new account's id — and there is deliberately no endpoint that maps an
@@ -59,8 +60,11 @@ var demoUsers = []demoUser{
 // oracle behind an OWNER/ADMIN gate. What exists instead is the
 // invitation the server redeems inside the signup transaction: create
 // the invitation for the address with the fixture role first, then sign
-// the user up, and they land in this workspace already pinned. Both
-// steps are idempotent, so re-seeding is a no-op.
+// the user up, and they land in this workspace already pinned. Existing
+// global accounts survive workspace nuke: when the roster still lacks one,
+// authenticate its documented fixture credentials, read its own ID, and add
+// that ID through the caller's normal workspace-member authorization. Existing
+// workspace members and their roles/passwords are left unchanged.
 func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -144,13 +148,23 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 			fmt.Fprintf(os.Stderr, "  X %s: roster lookup failed: %v\n", u.Email, lerr)
 			continue
 		}
+		if gotRole == "" {
+			// Workspace nuke intentionally keeps global accounts. Signup for
+			// those accounts remains a non-enumerating no-op, so recover only
+			// after proving ownership with the documented fixture password.
+			// The caller then uses the ordinary guarded member-add endpoint;
+			// neither signup nor authentication gains a privileged bypass.
+			if err := placeExistingSeedUser(ctx, client, wsID, u); err != nil {
+				fmt.Fprintf(os.Stderr, "  X %s: existing fixture account recovery failed: %v (passwords are never reset)\n", u.Email, err)
+				continue
+			}
+			_, gotRole, lerr = findWorkspaceMemberByEmail(client, wsID, u.Email)
+			if lerr != nil || gotRole == "" {
+				fmt.Fprintf(os.Stderr, "  X %s: recovered membership could not be verified\n", u.Email)
+				continue
+			}
+		}
 		switch {
-		case gotRole == "":
-			// The address exists but isn't in this workspace: it had an
-			// account before the seed ran, so signup was a no-op and the
-			// invitation is still pending for its owner to redeem.
-			fmt.Fprintf(os.Stderr, "  ↻ %s: account predates this seed; invitation left pending (re-run with --nuke for fresh state)\n", u.Email)
-			continue
 		case !strings.EqualFold(gotRole, u.Role):
 			// No role-update endpoint for workspace members, so drift
 			// from an earlier fixture is a warning, not a fix.
@@ -192,6 +206,65 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 	fmt.Fprintln(os.Stderr, "    crewship login  # interactive prompt for email + password above")
 	fmt.Fprintln(os.Stderr, "")
 	return nil
+}
+
+// placeExistingSeedUser obtains an ID only through authenticated self identity,
+// never a global email lookup. Login does not save CLI configuration or mint a
+// persistent CLI token, and the original account/password remain unchanged.
+func placeExistingSeedUser(ctx context.Context, owner *cli.Client, wsID string, user demoUser) error {
+	login := cli.NewClient(owner.BaseURL, "", "").WithContext(ctx)
+	session, err := exchangeCredentialsForSession(login, owner.BaseURL, user.Email, user.Password)
+	if err != nil {
+		return fmt.Errorf("authenticate documented fixture credentials: %w", err)
+	}
+	self := cli.NewClient(owner.BaseURL, session, "").WithContext(ctx)
+	defer closeTransientSeedSession(ctx, self, session)
+	resp, err := self.Get("/api/v1/auth/cli-token/validate")
+	if err != nil {
+		return fmt.Errorf("read authenticated account identity: %w", err)
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return fmt.Errorf("read authenticated account identity: %w", err)
+	}
+	var identity struct {
+		UserID string `json:"user_id"`
+		Email  string `json:"user_email"`
+	}
+	if err := cli.ReadJSON(resp, &identity); err != nil {
+		return fmt.Errorf("read authenticated account identity: %w", err)
+	}
+	if identity.UserID == "" || !strings.EqualFold(identity.Email, user.Email) {
+		return fmt.Errorf("authenticated account identity does not match fixture email")
+	}
+	resp, err = owner.Post(fmt.Sprintf("/api/v1/workspaces/%s/members", wsID), map[string]string{"user_id": identity.UserID, "role": user.Role})
+	if err != nil {
+		return fmt.Errorf("place authenticated fixture account: %w", err)
+	}
+	// A concurrent seed may have already placed it. The caller always reads
+	// back the actual workspace roster rather than trusting this status.
+	if resp.StatusCode == http.StatusConflict {
+		resp.Body.Close()
+		return nil
+	}
+	defer resp.Body.Close()
+	return cli.CheckError(resp)
+}
+
+func closeTransientSeedSession(ctx context.Context, self *cli.Client, session string) {
+	// Cancellation must stop seed work, while still allowing a bounded attempt
+	// to close only the login session it created. Other sessions stay active.
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	logout := self.WithContext(cleanupCtx).WithHeader("Cookie", "authjs.session-token="+session+"; __Secure-authjs.session-token="+session)
+	resp, err := logout.Post("/api/auth/signout", nil)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "  ! Could not close transient fixture login session")
+		return
+	}
+	defer resp.Body.Close()
+	if cli.CheckError(resp) != nil {
+		fmt.Fprintln(os.Stderr, "  ! Could not close transient fixture login session")
+	}
 }
 
 // serverAllowsSignup reads the public first-run gate (GET
