@@ -101,3 +101,13 @@ class ThroughputTests(unittest.TestCase):
     def test_percentiles_include_slow_failures_and_ignore_unknown(self):
         self.assertEqual(m.percentile([1, 2, 3, 100, None], .9), 100)
         self.assertIsNone(m.percentile([None], .5))
+
+    def test_stacked_shared_sha_does_not_override_explicit_pr_identity(self):
+        pr = {'number': 1, 'createdAt': '2026-10-05T10:00:00Z', 'mergedAt': '2026-10-05T12:00:00Z'}
+        run = {'head_sha': 'shared', 'created_at': '2026-10-05T11:00:00Z',
+               'pull_requests': [{'number': 2}]}
+        self.assertFalse(m.matches_pr(run, pr, {'shared'}))
+        run['pull_requests'] = []
+        self.assertTrue(m.matches_pr(run, pr, {'shared'}))
+        run['created_at'] = '2026-10-05T09:00:00Z'
+        self.assertFalse(m.matches_pr(run, pr, {'shared'}))
