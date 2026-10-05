@@ -62,6 +62,7 @@ commands. They may publish or remove release/package artifacts.
 | [check-control-accessibility.tsx](check-control-accessibility.tsx) | Renders controls in Chromium and writes measurements/screenshots into a fresh private directory under the OS temporary directory (printed on stderr and retained for inspection); requires browser dependencies |
 | [cli-command-smoke.sh](cli-command-smoke.sh), [cli-exit-code-contract.sh](cli-exit-code-contract.sh) | Built CLI parser/help and exit-code contracts |
 | [test-harness-integrity.sh](test-harness-integrity.sh) | Checks the acceptance harness itself |
+| [ci/cli-subprocess-race.py](ci/cli-subprocess-race.py) | Runs named authentication, conversation and stream boundaries with both the outer tests and shared CLI subprocess instrumented; rejects missing/skipped tests and preserves JSON execution evidence |
 | [ci/general-race-shard.py](ci/general-race-shard.py) | `python3 scripts/ci/general-race-shard.py run INDEX COUNT TIMEOUT_SECONDS`: runs a complete package partition under the race detector; checked-in measured costs balance work, while fresh `go list` inventory determines coverage; writes the partition record to `.ci-results/` |
 | [ci/api-race-shard.py](ci/api-race-shard.py) | `python3 scripts/ci/api-race-shard.py run INDEX COUNT TIMEOUT_SECONDS`: runs an API test partition; `report ARTIFACT_DIRECTORY COUNT BASELINE_SECONDS` validates and summarizes all shard records |
 

@@ -1802,6 +1802,30 @@ jobs:
   # and its 25m bound; remove competition with other package binaries.
   # CI Result requires this shard directly; the other race shard runs in
   # parallel. A dependency between the two adds their durations together.
+  cli-subprocess-race:
+    name: CLI subprocess race boundaries
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Require instrumented CLI and named acceptance scenarios
+        timeout-minutes: 15
+        run: python3 scripts/ci/cli-subprocess-race.py
+      - name: Preserve executed subprocess race evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cli-subprocess-race-${{ github.sha }}
+          path: .ci-results/cli-subprocess-race.jsonl
+          retention-days: 7
+
   go-race-cli:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.go == 'true'
@@ -2244,7 +2268,7 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [go-parity, frontend-parity, release-rehearsal, image, changes, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
+    needs: [go-parity, frontend-parity, release-rehearsal, image, changes, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli, cli-subprocess-race, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
