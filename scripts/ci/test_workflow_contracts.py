@@ -22,12 +22,14 @@ class WorkflowContracts(unittest.TestCase):
         from parity import TESTS
         ci = self.text('ci.yml')
         changes = self.job(ci, 'changes')
-        for name, flag in [('go-parity', 'go_parity'), ('frontend-parity', 'frontend_parity')]:
+        for name, flag in [('go-parity', 'go_parity'), ('frontend-parity', 'frontend_parity'), ('docs-inventory', 'docs_inventory')]:
             self.assertIn(f'{flag}: ${{{{ steps.plan.outputs.{flag} }}}}', changes)
             job = self.job(ci, name)
             self.assertIn(f"if: needs.changes.outputs.{flag} == 'true'", job)
             self.assertNotIn('continue-on-error', job)
         self.assertIn('python3 scripts/ci/parity.py', self.job(ci, 'go-parity'))
+        self.assertIn('go run ./scripts/docs-inventory -strict', self.job(ci, 'docs-inventory'))
+        self.assertIn('lib/__tests__/telemetry-call-sites.test.ts', self.job(ci, 'frontend-parity'))
         self.assertIn('vitest run hooks/__tests__/realtime-allowlist-docs-parity.test.ts',
                       self.job(ci, 'frontend-parity'))
         # Renaming/deleting a contract requires updating its runner, rather
@@ -67,6 +69,33 @@ class WorkflowContracts(unittest.TestCase):
         conversation = (ROOT / 'cmd/crewship/cmd_conversation_test.go').read_text()
         self.assertIn('return buildCrewshipBinary(t)', conversation)
         self.assertNotIn('exec.Command("go", "build"', conversation)
+
+    def test_test_files_reading_docs_have_routing_contracts(self):
+        from plan import GO_DOC_TESTS, FRONTEND_DOC_TESTS
+        declared = {(doc, test) for mapping in [GO_DOC_TESTS, FRONTEND_DOC_TESTS]
+                    for doc, test in mapping.items()}
+        discovered = set()
+        # Conservative literal discovery covers direct fs reads and constants
+        # passed to reads. New computed paths need an explicit reviewed map.
+        for root in ['cmd', 'internal', 'app', 'components', 'hooks', 'lib', 'stores']:
+            for path in (ROOT / root).rglob('*'):
+                if not path.name.endswith(('_test.go', '.test.ts', '.test.tsx')):
+                    continue
+                source = path.read_text()
+                if not re.search(r'os\.ReadFile\(|readFileSync\(', source):
+                    continue
+                for doc in re.findall(r'[\"\'](?:\.\./)*(docs/[^\"\']+\.mdx?)[\"\']', source, re.I):
+                    discovered.add((doc, path.relative_to(ROOT).as_posix()))
+        # This literal is synthetic JSON in a seed-pack fixture; its fs read
+        # targets a Python script. There is no product document to route.
+        fixture = ('docs/x.mdx', 'cmd/crewship/seeddata/packs_test.go')
+        self.assertIn(fixture, discovered)
+        self.assertFalse((ROOT / fixture[0]).exists())
+        discovered.remove(fixture)
+        self.assertEqual(discovered, declared, 'Map new test-read documentation into its required parity lane')
+        frontend = self.job(self.text('ci.yml'), 'frontend-parity')
+        for path in FRONTEND_DOC_TESTS.values():
+            self.assertIn(path, frontend)
 
     def test_race_shards_are_parallel_and_required(self):
         ci = self.text('ci.yml')
