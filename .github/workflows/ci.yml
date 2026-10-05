@@ -348,6 +348,15 @@ jobs:
       - name: onboarding journey is gated on PRs
         run: bash scripts/onboarding-gate-test.sh
 
+      # Same "a green check that never ran" shape, one gate over: #2874's
+      # restricted-member shell spec was classified nightly-only, so the PR
+      # that introduced it executed the spec zero times (run 37212203211,
+      # job 111468832143) with every check green. This step is what goes red
+      # if the PR-side step, its config selection or the spec's core
+      # assertions quietly disappear.
+      - name: restricted member shell is gated on PRs
+        run: bash scripts/restricted-shell-gate-test.sh
+
       # Three compiled binaries have reached main by the same route — `go build
       # ./scripts/<tool>` with no -o writes into the repo root, `git add -A`
       # sweeps it in — and each time the remedy was one more .gitignore line.
@@ -882,6 +891,9 @@ jobs:
   # Five deterministic checks are selected in playwright.pr.config.ts. The
   # provider-backed chat send/receive path and the remaining specs stay in the
   # explicit nightly buckets; they are not silently treated as PR coverage.
+  # Three further isolated-fixture suites run against the static export with
+  # every API response mocked: credential reveal, provider account groups and
+  # the restricted member shell (#2861 part 1).
   playwright-pr:
     needs: [merge-conflict-markers, changes, binary]
     if: needs.changes.outputs.code == 'true'
@@ -995,6 +1007,13 @@ jobs:
       - name: Verify account group UI and role gating
         timeout-minutes: 3
         run: pnpm exec playwright test --config=playwright.pool-ui.config.ts --output=pool-ui-test-results
+      - name: Verify restricted member shell UI
+        # #2861 part 1. Fully mocked (page.route) and provider-free, like the
+        # reveal/pool-ui fixtures beside it. PR #2874 classified the spec into
+        # nightly GATE_SPECS only, so the PR run 37212203211 executed it zero
+        # times while every check stayed green.
+        timeout-minutes: 3
+        run: pnpm exec playwright test --config=playwright.restricted.config.ts --output=restricted-test-results
       - name: Upload Playwright PR evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -1005,6 +1024,7 @@ jobs:
             test-results/
             reveal-test-results/
             pool-ui-test-results/
+            restricted-test-results/
           if-no-files-found: warn
       - name: Dump browser server log on failure
         if: failure()
