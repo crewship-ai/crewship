@@ -10,7 +10,24 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/crashreport"
+	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
+
+// telemetryDBFixture supplies an isolated current schema. Fresh bootstrap and
+// refusal to upgrade old schemas are covered in cmd_telemetry_migrate_guard_test.
+func telemetryDBFixture(t *testing.T) {
+	t.Helper()
+	t.Setenv("CREWSHIP_DATA_DIR", t.TempDir())
+	dir, err := database.DefaultDataDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := testutil.MigratedDBAt(t, dir.DatabasePath())
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestDsnEndpointHostCov(t *testing.T) {
 	cases := []struct {
@@ -33,11 +50,11 @@ func TestDsnEndpointHostCov(t *testing.T) {
 }
 
 // TestSetTelemetry_RoundTrip drives setTelemetry against a throwaway
-// data dir (CREWSHIP_DATA_DIR override) — migrations run on the fresh
-// SQLite file, then the consent flag is written and read back via
+// data dir (CREWSHIP_DATA_DIR override) with a current isolated schema.
+// The consent flag is written and read back via
 // crashreport.Status, proving the on/off path actually persists.
 func TestSetTelemetry_RoundTrip(t *testing.T) {
-	t.Setenv("CREWSHIP_DATA_DIR", t.TempDir())
+	telemetryDBFixture(t)
 	t.Setenv("CREWSHIP_SENTRY_DSN", "https://key@host.example/1")
 	ctx := context.Background()
 
@@ -99,7 +116,7 @@ func TestSetTelemetry_RoundTrip(t *testing.T) {
 // TestTelemetryStatusRunE covers the status subcommand's three display
 // branches against the same temp data dir.
 func TestTelemetryStatusRunE(t *testing.T) {
-	t.Setenv("CREWSHIP_DATA_DIR", t.TempDir())
+	telemetryDBFixture(t)
 	t.Setenv("CREWSHIP_SENTRY_DSN", "https://key@host.example/1")
 	ctx := context.Background()
 	// RunE consults cmd.Context(), which is nil unless Execute() ran.
@@ -200,7 +217,7 @@ func TestTelemetryStatusRunE_StableBuildUnconfiguredMessage(t *testing.T) {
 // branch when no DSN is available (test builds compile none in and the
 // env override is empty) — consent recorded, nothing would be sent.
 func TestTelemetryStatusRunE_EnabledWithoutDSNWarns(t *testing.T) {
-	t.Setenv("CREWSHIP_DATA_DIR", t.TempDir())
+	telemetryDBFixture(t)
 	t.Setenv("CREWSHIP_SENTRY_DSN", "")
 	ctx := context.Background()
 	telemetryStatusCmd.SetContext(ctx)
@@ -231,7 +248,7 @@ func TestTelemetryStatusRunE_EnabledWithoutDSNWarns(t *testing.T) {
 
 // TestTelemetryOnOffCmds drives the `on` / `off` RunE wrappers.
 func TestTelemetryOnOffCmds(t *testing.T) {
-	t.Setenv("CREWSHIP_DATA_DIR", t.TempDir())
+	telemetryDBFixture(t)
 	t.Setenv("CREWSHIP_SENTRY_DSN", "")
 	telemetryOnCmd.SetContext(context.Background())
 	telemetryOffCmd.SetContext(context.Background())
