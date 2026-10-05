@@ -108,7 +108,7 @@ ON CONFLICT (run_id, step_id) DO NOTHING`,
 		return time.Time{}, err
 	}
 	if !deadline.Valid {
-		original, err := time.Parse(time.RFC3339Nano, created)
+		original, err := time.Parse(time.RFC3339Nano, created) // tsformat:allow: read-only parse; recovered deadline is written with tsformat.Format
 		if err != nil {
 			return time.Time{}, fmt.Errorf("signal_waits: original arm time: %w", err)
 		}
@@ -120,7 +120,7 @@ ON CONFLICT (run_id, step_id) DO NOTHING`,
 			return time.Time{}, err
 		}
 	}
-	return time.Parse(time.RFC3339Nano, deadline.String)
+	return time.Parse(time.RFC3339Nano, deadline.String) // tsformat:allow: read-only parse of stored deadline, no SQL write
 }
 
 func (s *SQLSignalWaitStore) Resolve(ctx context.Context, runID, stepID string) (string, error) {
