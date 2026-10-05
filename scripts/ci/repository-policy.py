@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Plan a preservation-first main ruleset update; writes require an explicit saved plan."""
+import argparse
+from copy import deepcopy
+import hashlib
+import json
+from pathlib import Path
+import re
+import subprocess
+
+FIELDS = ('name', 'target', 'enforcement', 'conditions', 'bypass_actors', 'rules')
+CHECKS = {'CI Result', 'Security Result', 'CodeQL Result'}
+QUEUE = {'check_response_timeout_minutes': 120, 'grouping_strategy': 'ALLGREEN',
+         'max_entries_to_build': 1, 'max_entries_to_merge': 1, 'merge_method': 'SQUASH',
+         'min_entries_to_merge': 1, 'min_entries_to_merge_wait_minutes': 0}
+SECURITY = ('none', 'critical', 'high_or_higher', 'medium_or_higher', 'all')
+ALERTS = ('none', 'errors', 'errors_and_warnings', 'all')
+
+
+def shape(ruleset):
+    if any(field not in ruleset for field in FIELDS):
+        raise ValueError('ruleset is missing a writable policy field')
+    return deepcopy({field: ruleset[field] for field in FIELDS})
+
+
+def digest(policy):
+    return hashlib.sha256(json.dumps(policy, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def validate(policy):
+    if policy['target'] != 'branch' or policy['enforcement'] != 'active':
+        raise ValueError('expected an active branch ruleset')
+    if policy['conditions'] != {'ref_name': {'include': ['refs/heads/main'], 'exclude': []}}:
+        raise ValueError('expected main-only conditions without exclusions')
+    rules = policy['rules']
+    types = [r['type'] for r in rules]
+    if len(types) != len(set(types)):
+        raise ValueError('duplicate rule types require manual review')
+    by_type = {r['type']: r for r in rules}
+    checks = by_type.get('required_status_checks', {}).get('parameters', {})
+    if checks.get('strict_required_status_checks_policy') is not True:
+        raise ValueError('strict required checks must remain enabled')
+    configured = checks.get('required_status_checks', [])
+    for name in CHECKS:
+        matches = [c for c in configured if c.get('context') == name]
+        if len(matches) != 1 or matches[0].get('integration_id') != 15368:
+            raise ValueError(f'missing or unexpected GitHub Actions required check: {name}')
+    review = by_type.get('pull_request', {}).get('parameters', {})
+    if review.get('required_approving_review_count', 0) < 1:
+        raise ValueError('an approving review is required')
+    for flag in ('dismiss_stale_reviews_on_push', 'require_last_push_approval',
+                 'required_review_thread_resolution'):
+        if review.get(flag) is not True:
+            raise ValueError(f'review protection missing: {flag}')
+    if 'squash' not in review.get('allowed_merge_methods', []):
+        raise ValueError('existing pull-request policy does not allow squash')
+    return by_type
+
+
+def proposed(before):
+    result = shape(before)
+    by_type = validate(result)
+    if 'merge_queue' in by_type:
+        parameters = by_type['merge_queue']['parameters']
+        # Preserve future fields instead of replacing the whole parameters object.
+        parameters.update(QUEUE)
+    else:
+        result['rules'].append({'type': 'merge_queue', 'parameters': deepcopy(QUEUE)})
+    if 'code_scanning' not in by_type:
+        result['rules'].append({'type': 'code_scanning', 'parameters': {'code_scanning_tools': []}})
+    tools = next(r for r in result['rules'] if r['type'] == 'code_scanning')['parameters']['code_scanning_tools']
+    matches = [tool for tool in tools if tool.get('tool') == 'CodeQL']
+    if len(matches) > 1:
+        raise ValueError('duplicate CodeQL policies require manual review')
+    if not matches:
+        tools.append({'tool': 'CodeQL', 'alerts_threshold': 'none',
+                      'security_alerts_threshold': 'high_or_higher'})
+    else:
+        tool = matches[0]
+        if tool.get('alerts_threshold') not in ALERTS or tool.get('security_alerts_threshold') not in SECURITY:
+            raise ValueError('unknown CodeQL threshold; refusing to weaken policy')
+        # none disables ordinary-quality alerts. Existing blocking settings stay intact.
+        current = tool['security_alerts_threshold']
+        if SECURITY.index(current) < SECURITY.index('high_or_higher'):
+            tool['security_alerts_threshold'] = 'high_or_higher'
+    return result
+
+
+def identity(ruleset, repo, ruleset_id):
+    if (ruleset.get('id') != ruleset_id or ruleset.get('source_type') != 'Repository'
+            or ruleset.get('source') != repo):
+        raise ValueError('ruleset identity/source does not match the requested repository')
+
+
+def gh_api(endpoint, payload=None):
+    command = ['gh', 'api', endpoint, '-H', 'X-GitHub-Api-Version: 2026-03-10']
+    if payload is not None:
+        command += ['--method', 'PUT', '--input', '-']
+    return json.loads(subprocess.check_output(command, input=None if payload is None else
+                                            json.dumps(payload).encode(), timeout=90))
+
+
+def make_plan(ruleset, repo, ruleset_id, auto_merge):
+    identity(ruleset, repo, ruleset_id)
+    before = shape(ruleset)
+    return {'schema_version': 1, 'repo': repo, 'ruleset_id': ruleset_id,
+            'expected_sha256': digest(before), 'before': before, 'proposed': proposed(before),
+            'allow_auto_merge_observed': auto_merge}
+
+
+def apply_plan(plan, documentation_commit, api=gh_api):
+    repo, ruleset_id = plan['repo'], plan['ruleset_id']
+    if plan.get('schema_version') != 1 or digest(plan['before']) != plan['expected_sha256']:
+        raise ValueError('invalid saved plan fingerprint')
+    if proposed(plan['before']) != plan['proposed']:
+        raise ValueError('saved proposed policy differs from the preservation-first transformation')
+    # An operator names the documentation commit after verifying its content.
+    comparison = api(f'repos/{repo}/compare/{documentation_commit}...main')
+    if comparison.get('status') not in ('ahead', 'identical'):
+        raise ValueError('documentation commit is not an ancestor of current main')
+    endpoint = f'repos/{repo}/rulesets/{ruleset_id}'
+    current = api(endpoint)
+    identity(current, repo, ruleset_id)
+    validate(shape(current))
+    if digest(shape(current)) != plan['expected_sha256']:
+        raise ValueError('live policy changed since planning; regenerate and review the plan')
+    if shape(current) == plan['proposed']:
+        return {'changed': False, 'sha256': digest(shape(current))}
+    updated = api(endpoint, plan['proposed'])
+    identity(updated, repo, ruleset_id)
+    if shape(updated) != plan['proposed']:
+        raise ValueError('update returned an unexpected policy; inspect live ruleset before continuing')
+    return {'changed': True, 'sha256': digest(shape(updated))}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--repo', default='crewship-ai/crewship')
+    parser.add_argument('--ruleset-id', type=int, default=16547292)
+    parser.add_argument('--output', type=Path, help='save dry-run plan (otherwise print it)')
+    parser.add_argument('--apply', action='store_true', help='explicitly apply the reviewed saved plan')
+    parser.add_argument('--plan', type=Path, help='saved plan required for --apply')
+    parser.add_argument('--documentation-commit', help='full SHA of reviewed queue documentation already on main')
+    args = parser.parse_args()
+    if not re.fullmatch(r'[\w.-]+/[\w.-]+', args.repo) or args.ruleset_id < 1:
+        parser.error('expected owner/repo and positive ruleset id')
+    if args.apply:
+        if not args.plan or not re.fullmatch(r'[0-9a-f]{40}', args.documentation_commit or ''):
+            parser.error('--apply requires --plan and a full --documentation-commit SHA')
+        plan = json.loads(args.plan.read_text())
+        if plan.get('repo') != args.repo or plan.get('ruleset_id') != args.ruleset_id:
+            parser.error('saved plan target differs from command target')
+        print(json.dumps(apply_plan(plan, args.documentation_commit), indent=2))
+        return
+    if args.plan or args.documentation_commit:
+        parser.error('--plan/--documentation-commit only accompany --apply')
+    ruleset = gh_api(f'repos/{args.repo}/rulesets/{args.ruleset_id}')
+    repo = gh_api(f'repos/{args.repo}')
+    if repo.get('default_branch') != 'main':
+        raise ValueError('repository default branch is not main')
+    plan = make_plan(ruleset, args.repo, args.ruleset_id, repo.get('allow_auto_merge'))
+    rendered = json.dumps(plan, indent=2) + '\n'
+    if args.output:
+        args.output.write_text(rendered)
+        print(f'Dry-run plan saved to {args.output}; no settings changed.')
+    else:
+        print(rendered, end='')
+
+
+if __name__ == '__main__':
+    main()
