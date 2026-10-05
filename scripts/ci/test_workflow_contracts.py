@@ -18,6 +18,18 @@ class WorkflowContracts(unittest.TestCase):
     def job(self, text, name):
         return re.search(r'^  ' + re.escape(name) + r':\n(.*?)(?=^  [a-z][\w-]*:\n|\Z)', text, re.M | re.S).group(1)
 
+    def test_cli_subprocess_race_instruments_the_actual_artifact(self):
+        ci = self.text('ci.yml')
+        lane = self.job(ci, 'cli-subprocess-race')
+        self.assertIn('python3 scripts/ci/cli-subprocess-race.py', lane)
+        self.assertNotIn('continue-on-error:', lane)
+        helper = (ROOT / 'cmd/crewship/cmd_model_test.go').read_text()
+        self.assertIn('TEST_CREWSHIP_CLI_RACE', helper)
+        self.assertIn('args = append(args, "-race")', helper)
+        conversation = (ROOT / 'cmd/crewship/cmd_conversation_test.go').read_text()
+        self.assertIn('return buildCrewshipBinary(t)', conversation)
+        self.assertNotIn('exec.Command("go", "build"', conversation)
+
     def test_race_shards_are_parallel_and_required(self):
         ci = self.text('ci.yml')
         race = self.job(ci, 'go-race')
