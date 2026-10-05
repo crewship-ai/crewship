@@ -257,16 +257,34 @@ check_image() {
     note_unverified image "docker not installed"
     return 0
   fi
+  # Classic Docker stores cannot import both architectures under one index
+  # digest. Resolve children from the supplied immutable index, retaining
+  # IMAGE as the publication/signature identity. Local tags remain supported.
+  local manifest="$WORK/image-index.json"
+  if [[ "$IMAGE" == *@* ]]; then
+    if ! timeout 120 docker manifest inspect "$IMAGE" > "$manifest"; then
+      note_unverified image "cannot inspect immutable image $IMAGE"
+      return 0
+    fi
+  fi
   local platforms="linux/amd64 linux/arm64"
   local p verified=""
   for p in $platforms; do
+    local platform_image="$IMAGE"
+    if [[ "$IMAGE" == *@* ]]; then
+      if ! platform_image="$(python3 "$(dirname "$0")/ci/image-platform.py" "$IMAGE" "$p" < "$manifest")"; then
+        note_unverified "image $p" "cannot resolve platform from $IMAGE"
+        continue
+      fi
+      echo "    image $p $platform_image (index $IMAGE)"
+    fi
     local cid="" errout
     errout="$WORK/create-err-$RANDOM"
-    if ! cid="$(timeout 120 docker create --platform "$p" "$IMAGE" /bin/sh 2>"$errout")" || [ -z "$cid" ]; then
+    if ! cid="$(timeout 120 docker create --platform "$p" "$platform_image" /bin/sh 2>"$errout")" || [ -z "$cid" ]; then
       # docker create only resolves the platform manifest; failure usually
       # means the reference has no such platform (e.g. a local single-arch
       # tag) or the pull failed — the stderr above says which.
-      echo "UNVERIFIED  image: $p unavailable for $IMAGE:" >&2
+      echo "UNVERIFIED  image: $p unavailable for $platform_image (source $IMAGE):" >&2
       sed 's/^/    /' "$errout" >&2 || true
       if [ "$STRICT" -eq 1 ]; then FAIL=1; fi
       continue
