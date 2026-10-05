@@ -17,6 +17,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Managed runs rejected during prompt or command preparation now finalize as errors before workload creation, releasing unresolved run occupancy. Managed launches execute the verified open descriptor and reject tmpfs overlays over trusted code; legacy direct-run probes keep their existing behavior; enabling the launch pilot changes launcher staging for all new crew runtimes.
 
+- Container initialization explicitly rejects the unsupported `k8s` backend with supported provider choices instead of returning no container provider; configuration validation continues to reject Kubernetes.
+
 - Concurrent egress-fence installation retries incomplete rule reads without reinstalling or accepting a fence that fails verification. Checks reject results spanning a ruleset generation change.
 
 - **Importing a Crew YAML could silently disable required AI CLI checks.** The creation wizard preserves the typed policy, including configurations without explicit tools, and rejects unsupported policy values.
