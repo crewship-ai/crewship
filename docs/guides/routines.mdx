@@ -802,6 +802,9 @@ For blocking nested waits, an in-memory wake is advisory: if a sibling receives
 the durable signal, the pending own wait keeps its original timer and remains
 cancellable until its own delivery or deadline. This does not change the shared
 run/event identity used by nested waits.
+When nested waits share a run and event type, another waiter can receive the
+in-memory wake, so the intended waiter may not consume its durable payload until
+its original deadline; the deadline is never extended.
 `retry_step` applies its backoff but does not grant a fresh event window: once
 expired, each retry reports the same timeout. Upgrading also applies the original
 deadline to existing parked waits; waits already older than their configured
