@@ -2339,7 +2339,7 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [docs-inventory, go-parity, frontend-parity, release-rehearsal, image, changes, merge-conflict-markers, shell, frontend, frontend-test-types, frontend-test-shards, frontend-test, binary, go, go-race, go-race-cli, cli-subprocess-race, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
+    needs: [release-rehearsal, image, changes, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test-types, frontend-test-shards, frontend-test, binary, go, go-race, go-race-cli, cli-subprocess-race, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
