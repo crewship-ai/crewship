@@ -43,6 +43,19 @@ class ThroughputTests(unittest.TestCase):
             m.annotate_main_parents(pr, 'test/repo', API(), [], {})
             self.assertEqual(m.substantive(commit), expected)
 
+    def test_feature_merge_with_main_first_parent_is_substantive(self):
+        for statuses in [('ahead', 'diverged'), ('ahead', 'ahead', 'diverged')]:
+            commit = self.commit('merge features', parents=len(statuses))
+            commit['parents']['nodes'] = [{'oid': str(i)} for i in range(len(statuses))]
+            pr = self.pr([commit])
+            pr.update(number=1, mergeCommit={'parents': {'nodes': [{'oid': 'base'}]}})
+            class API:
+                def request(self, endpoint):
+                    parent = endpoint.split('/compare/')[1].split('...')[0]
+                    return {'status': statuses[int(parent)]}
+            m.annotate_main_parents(pr, 'test/repo', API(), [], {})
+            self.assertTrue(m.substantive(commit))
+
     def test_unavailable_parent_proof_cannot_produce_push_latency(self):
         pr = self.pr([self.commit('sync trunk', '2026-10-05T11:00:00Z', 2)])
         self.assertIsNone(m.push_evidence(pr)[0])
