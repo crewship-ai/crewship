@@ -139,6 +139,8 @@ When telemetry is enabled:
 The browser also removes request metadata in `beforeSend`, because the SDK's
 HTTP context integration can attach the page URL despite the query parameter
 collection setting. This prevents page URL tokens from reaching error reports.
+Automatic browser release-health sessions are disabled as well; this avoids
+sending session counts and browser user-agent data alongside crash reports.
 
 The JavaScript SDK uses an explicit crash-only `dataCollection` policy in
 the browser, Node and Edge configurations. Sentry 11's broader defaults are

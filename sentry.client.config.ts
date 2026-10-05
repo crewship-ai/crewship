@@ -163,6 +163,7 @@ void (async () => {
         return ![
           "Modules", // dependency list shipping → scrubbed anyway
           "ContextLines", // local source context (paths can carry usernames)
+          "BrowserSession", // release-health sessions are outside crash-only reporting
         ].includes(integration.name)
       }),
 

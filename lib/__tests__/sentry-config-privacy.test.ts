@@ -42,6 +42,13 @@ describe("Sentry initialization privacy", () => {
       dataCollection: collection, tracesSampleRate: 0,
       replaysSessionSampleRate: 0, replaysOnErrorSampleRate: 0,
     })
+    const integrations = init.mock.calls[0][0].integrations([
+      { name: "BrowserSession" }, { name: "Modules" }, { name: "ContextLines" },
+      { name: "BrowserApiErrors" }, { name: "HttpContext" },
+    ])
+    expect(integrations.map((integration: { name: string }) => integration.name)).toEqual([
+      "BrowserApiErrors", "HttpContext",
+    ])
   })
 
   it.each(["denied", "failed", "offline"])("keeps the browser disabled when consent is %s", async (state) => {
