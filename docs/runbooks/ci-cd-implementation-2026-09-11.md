@@ -147,3 +147,13 @@ helper neither dismisses alerts nor establishes that the baseline is clean.
 
 Schema: [GitHub repository rules REST API](https://docs.github.com/en/rest/repos/rules).
 Scope and exclusions: [GitHub code scanning merge protection](https://docs.github.com/en/code-security/concepts/code-scanning/merge-protection).
+
+CodeQL merge protection can be activated independently before the queue process
+is merged. This scope preserves any existing queue without changing it and does
+not require a queue documentation SHA:
+
+```bash
+python3 scripts/ci/repository-policy.py --code-scanning-only --output /tmp/codeql-policy.json
+# Review the before/proposed policy; only the CodeQL rule should change.
+python3 scripts/ci/repository-policy.py --apply --plan /tmp/codeql-policy.json
+```

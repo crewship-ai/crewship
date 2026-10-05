@@ -109,3 +109,24 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(m.digest(m.shape(before)), old)
         before['rules'].reverse()
         self.assertNotEqual(m.digest(m.shape(before)), old)
+
+    def test_security_only_never_changes_queue_or_requires_documentation(self):
+        for has_queue in (False, True):
+            before = fixture()
+            if has_queue:
+                before['rules'].append({'type': 'merge_queue', 'parameters': {'future': 'preserve'}})
+            plan = m.make_plan(before, 'test/repo', 7, False, code_scanning_only=True)
+            self.assertEqual(plan['proposed']['rules'][:-1], before['rules'])
+            calls = []
+            def api(endpoint, payload=None):
+                calls.append((endpoint, payload))
+                self.assertNotIn('/compare/', endpoint)
+                return before if payload is None else {**before, **payload}
+            self.assertTrue(m.apply_plan(plan, None, api)['changed'])
+            self.assertEqual(len(calls), 2)
+
+    def test_security_only_scope_cannot_be_forged(self):
+        plan = m.make_plan(fixture(), 'test/repo', 7, False)
+        plan['code_scanning_only'] = True
+        with self.assertRaisesRegex(ValueError, 'differs'):
+            m.apply_plan(plan, None, lambda *args: self.fail('unexpected request'))
