@@ -798,6 +798,10 @@ also checks deadlines that elapsed while the server was offline. A signal
 committed before the deadline takes precedence even if consumed after it;
 late signals cannot satisfy an expired wait. Cancelling a run closes its pending
 subscriptions. Resumed pending event waits park again and release their slot.
+For blocking nested waits, an in-memory wake is advisory: if a sibling receives
+the durable signal, the pending own wait keeps its original timer and remains
+cancellable until its own delivery or deadline. This does not change the shared
+run/event identity used by nested waits.
 `retry_step` applies its backoff but does not grant a fresh event window: once
 expired, each retry reports the same timeout. Upgrading also applies the original
 deadline to existing parked waits; waits already older than their configured

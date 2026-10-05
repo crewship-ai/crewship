@@ -275,23 +275,27 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 		}
 		timer := time.NewTimer(time.Until(deadline))
 		defer timer.Stop()
-		select {
-		case payload := <-ch:
-			if e.signalWaits != nil {
+		for {
+			select {
+			case payload := <-ch:
+				if e.signalWaits != nil {
+					if output, ok, err := check(); err != nil || ok {
+						return output, 0, time.Since(stepStart).Milliseconds(), err
+					}
+					// A sibling wait can receive the durable delivery while this
+					// shared run/event channel wakes us. Pending own state keeps
+					// waiting on the same original timer; the wake is advisory.
+					continue
+				}
+				return payload, 0, time.Since(stepStart).Milliseconds(), nil
+			case <-timer.C:
 				if output, ok, err := check(); err != nil || ok {
 					return output, 0, time.Since(stepStart).Milliseconds(), err
 				}
-				// The in-memory wake is advisory when a durable store is wired.
 				return timeoutError()
+			case <-ctx.Done():
+				return "", 0, time.Since(stepStart).Milliseconds(), ctx.Err()
 			}
-			return payload, 0, time.Since(stepStart).Milliseconds(), nil
-		case <-timer.C:
-			if payload, ok, err := check(); err != nil || ok {
-				return payload, 0, time.Since(stepStart).Milliseconds(), err
-			}
-			return timeoutError()
-		case <-ctx.Done():
-			return "", 0, time.Since(stepStart).Milliseconds(), ctx.Err()
 		}
 
 	}
