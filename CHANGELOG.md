@@ -104,6 +104,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change:** Restricted routine, Page and assigned-issue runs now use the shared work ledger and dispatcher. Interrupted runs with uncertain effects show “Needs review” and require reconciliation before outputs are released or new work repeats; legacy running jobs are adopted into this state.
 
 ### Fixed
+
+- **Removing a backup key or off-site destination could time out when the database connection pool was full.** Deletion now reuses its transaction for in-use checks, preserving named refusals and allowing unused keys and destinations to be removed. (#2924)
+
 - ⚠️ **Behaviour change:** **Confirmed recovery stops with no recorded start now have clear audit history.** Record one `run.recovered_stop` event with explicit ownership checks and no billing, automation or completed-run statistics. Late lifecycle writes for an audited identity are rejected instead of creating an invented run.
 
 - **A corrupt notification channel could stop healthy workspace deliveries.** Unreadable channels now remain available for administration but are excluded from delivery and test sends.
