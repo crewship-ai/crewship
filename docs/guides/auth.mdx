@@ -290,6 +290,22 @@ curl -X POST https://crewship.example.com/api/v1/auth/reset \
 
 If the mailer is `mailer.Disabled`, step 2 never happens — the user must go through host-level [Admin CLI](/guides/admin-cli) recovery instead.
 
+### Development seed accounts
+
+`crewship seed --with-users` creates the documented development RBAC accounts.
+`--nuke` removes workspace fixtures but retains global accounts. When a retained
+account is missing from the target workspace, the seed signs in with its
+documented fixture password, reads that authenticated account's own ID, and adds
+it through the caller's normal workspace-member permissions. The seed attempts
+to sign out the temporary login session afterward, including after cancellation,
+with a two-second cleanup limit; it does not mint a CLI token for that account.
+
+Existing account IDs, passwords, other workspace memberships, and existing
+target-workspace roles stay unchanged. If an account's password has changed,
+the seed refuses to place that account and reports the authentication failure;
+another `--nuke` does not reset it. These fixed passwords are for development
+fixtures only.
+
 ## Examples
 
 ### Onboarding a team without SSO

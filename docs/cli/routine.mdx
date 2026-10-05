@@ -348,6 +348,11 @@ crewship routine run nightly-report --async --wait
 | `--expected-hash` | SHA-256 of the definition shown in the preview. For an immediate HEAD start, the server returns `409` if HEAD changed and pins the verified version before execution. Combine with `--version` to check an archived version. Mutable step overrides are skipped so they cannot alter the reviewed recipe. Unsupported for delayed/debounced/one-time starts and batch runs. |
 | `--async` | Send `Prefer: respond-async`: the server answers `202 {run_id, status: "IN_PROGRESS"}` as soon as the run row is durable instead of holding the connection for the whole run. Prints the run id and the `crewship wait --routine` / `routine result` follow-ups; combine with `--wait` to poll it to a terminal status |
 
+When `--wait` polls an existing run, `failed`, `interrupted`, `cancelled`, `canceled`, and
+`needs_reconciliation` terminate polling with a nonzero exit in both human and
+machine formats. Reconciliation requires inspecting the execution outcome before
+retrying; it is never reported as successful completion.
+
 Output: `run_id`, `status`, `output`, `duration_ms`, `cost_usd`. Immediate runs
 use `COMPLETED`, `FAILED`, or `CANCELLED`; `WAITING` means the run is parked at
 an approval waitpoint and is not a failure; `DEDUPED` means the idempotency key

@@ -29,9 +29,10 @@ import (
 //
 //	0  COMPLETED (or a routine dry_run)
 //	1  FAILED (or a routine interrupted by a server restart)
-//	2  CANCELLED
+//	2  CANCELLED (or CANCELED)
 //	3  TIMEOUT (server-side or --timeout reached)
 //	4  network/auth error, or the id matched neither run kind
+//	5  NEEDS_RECONCILIATION (execution outcome requires operator review)
 var waitCmd = &cobra.Command{
 	Use:   "wait <run-id>",
 	Short: "Wait for an agent or routine run to reach a terminal status",
@@ -52,7 +53,7 @@ terminal — wait keeps polling until the waitpoint is approved/rejected
 and the run finishes, or --timeout fires.
 
 Exit code reflects the terminal status (0 done, 1 failed, 2 cancelled,
-3 timeout, 4 connection error / unknown run id).`,
+3 timeout, 4 connection error / unknown run id, 5 needs reconciliation).`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := requireAuthAndWorkspace()
@@ -164,10 +165,12 @@ Exit code reflects the terminal status (0 done, 1 failed, 2 cancelled,
 			return nil
 		case "FAILED", "INTERRUPTED":
 			os.Exit(1)
-		case "CANCELLED":
+		case "CANCELLED", "CANCELED":
 			os.Exit(2)
 		case "TIMEOUT":
 			os.Exit(3)
+		case "NEEDS_RECONCILIATION":
+			os.Exit(5)
 		}
 		return nil
 	},

@@ -125,11 +125,19 @@ func SaveConfig(cfg *CLIConfig) error {
 	return nil
 }
 
+// LoadConfigFile requires the explicitly selected configuration to exist.
+// It does not change process environment or fall back to an empty configuration.
+func LoadConfigFile(path string) (*CLIConfig, error) { return readConfigFile(path, false) }
+
 // loadConfigFrom loads config from a specific path.
 func loadConfigFrom(path string) (*CLIConfig, error) {
+	return readConfigFile(path, true)
+}
+
+func readConfigFile(path string, missingOK bool) (*CLIConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if missingOK && os.IsNotExist(err) {
 			return &CLIConfig{}, nil
 		}
 		return nil, fmt.Errorf("read config: %w", err)
