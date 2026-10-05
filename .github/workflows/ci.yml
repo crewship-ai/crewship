@@ -708,6 +708,8 @@ jobs:
           docker tag alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 alpine:3
       - name: Require executed Docker fixtures
         timeout-minutes: 14
+        # The runner keeps existing fixtures non-root and elevates only the
+        # managed launcher fixture (UID1001 cannot own the trusted launcher).
         run: python3 scripts/ci/managed-environments.py
 
   # Required evidence for Pages: no Docker env opt-in can silently skip this lane.

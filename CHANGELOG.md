@@ -9,6 +9,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Ambiguous managed-launch descriptors could overwrite earlier fields.** The launcher rejects duplicate or noncanonical JSON fields before creating process identity; its native core now includes a standalone conformance entrypoint, parser fuzz targets and documented measurement limits.
+
+- **Webhook and scheduled managed runs could falsely confirm a stop after losing their PID file.** Their creation gates now retain the persisted managed identity after the agent invocation returns, including when pilot selection is disabled; missing managed PID files remain UNKNOWN.
+
+- **Pilot agent runs can refuse stale CLI selection from persistent home.** An explicit server crew-ID opt-in binds static native Codex launches to immutable build hashes and lock versions, clears inherited loader options, and uses a trusted direct launcher. Static PIE Codex packages are supported; unsupported scripts and dynamic binaries fail closed. Selected crews must recreate runtimes to bind the immutable launcher generation; ordinary crews retain their current behavior. Managed runs retain process-group stop and recovery identity; native mise candidates are recorded separately from legacy PATH-first inventory.
+
+- Managed runs rejected during prompt or command preparation now finalize as errors before workload creation, releasing unresolved run occupancy. Managed launches execute the verified open descriptor and reject tmpfs overlays over trusted code; legacy direct-run probes keep their existing behavior; enabling the launch pilot changes launcher staging for all new crew runtimes.
+
 - Concurrent egress-fence installation retries incomplete rule reads without reinstalling or accepting a fence that fails verification. Checks reject results spanning a ruleset generation change.
 
 - **Importing a Crew YAML could silently disable required AI CLI checks.** The creation wizard preserves the typed policy, including configurations without explicit tools, and rejects unsupported policy values.

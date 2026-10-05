@@ -56,7 +56,7 @@ func (s *Server) recoveredRuntimeAbsent(ctx context.Context, run orchestrator.Ru
 	case "stopped", "error":
 		// No process can survive inside a positively inspected stopped container.
 	case "running", "idle":
-		alive, err := s.orchestrator.RunIsAliveAt(probeCtx, orchestrator.RunLocation{ContainerID: run.ContainerID, AgentSlug: run.AgentSlug, RunID: run.ID})
+		alive, err := s.orchestrator.RunIsAliveAt(probeCtx, orchestrator.RunLocation{ContainerID: run.ContainerID, AgentSlug: run.AgentSlug, RunID: run.ID, Managed: run.ManagedLaunch != nil})
 		if err != nil || alive {
 			return false
 		}
