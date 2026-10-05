@@ -172,6 +172,8 @@ jobs:
       code: ${{ steps.plan.outputs.code }}
       go: ${{ steps.plan.outputs.go }}
       release: ${{ steps.plan.outputs.release }}
+      go_parity: ${{ steps.plan.outputs.go_parity }}
+      frontend_parity: ${{ steps.plan.outputs.frontend_parity }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -1188,6 +1190,42 @@ jobs:
         run: |
           set -uo pipefail
           [ -f /tmp/crewship-onboarding.pid ] && kill "$(cat /tmp/crewship-onboarding.pid)" 2>/dev/null || true
+
+  # Cross-language contracts still run when docs/frontend edits skip Go or
+  # frontend suites. Full owning suites provide the same evidence otherwise.
+  go-parity:
+    name: Go documentation and frontend parity
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go_parity == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Check documented provider order and frontend vocabularies
+        timeout-minutes: 10
+        run: python3 scripts/ci/parity.py
+
+  frontend-parity:
+    name: Frontend documentation parity
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.frontend_parity == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Check documented workspace realtime events
+        timeout-minutes: 3
+        run: pnpm exec vitest run hooks/__tests__/realtime-allowlist-docs-parity.test.ts
 
   # ── Frontend: lint, typecheck, build ──
   frontend:
@@ -2206,7 +2244,7 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [release-rehearsal, image, changes, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
+    needs: [go-parity, frontend-parity, release-rehearsal, image, changes, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:

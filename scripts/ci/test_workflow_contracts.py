@@ -18,6 +18,25 @@ class WorkflowContracts(unittest.TestCase):
     def job(self, text, name):
         return re.search(r'^  ' + re.escape(name) + r':\n(.*?)(?=^  [a-z][\w-]*:\n|\Z)', text, re.M | re.S).group(1)
 
+    def test_cross_language_parity_lanes_remain_required(self):
+        from parity import TESTS
+        ci = self.text('ci.yml')
+        changes = self.job(ci, 'changes')
+        for name, flag in [('go-parity', 'go_parity'), ('frontend-parity', 'frontend_parity')]:
+            self.assertIn(f'{flag}: ${{{{ steps.plan.outputs.{flag} }}}}', changes)
+            job = self.job(ci, name)
+            self.assertIn(f"if: needs.changes.outputs.{flag} == 'true'", job)
+            self.assertNotIn('continue-on-error', job)
+        self.assertIn('python3 scripts/ci/parity.py', self.job(ci, 'go-parity'))
+        self.assertIn('vitest run hooks/__tests__/realtime-allowlist-docs-parity.test.ts',
+                      self.job(ci, 'frontend-parity'))
+        # Renaming/deleting a contract requires updating its runner, rather
+        # than silently selecting zero tests with Go's successful exit code.
+        for path, names in TESTS.items():
+            source = '\n'.join(p.read_text() for p in (ROOT / path).glob('*_test.go'))
+            for name in names:
+                self.assertRegex(source, r'func ' + re.escape(name) + r'\(t \*testing.T\)')
+
     def test_race_shards_are_parallel_and_required(self):
         ci = self.text('ci.yml')
         race = self.job(ci, 'go-race')
