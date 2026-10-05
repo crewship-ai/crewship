@@ -1,0 +1,36 @@
+apiVersion: crewship/v1
+kind: Project
+metadata:
+  name: Demo v2
+  slug: demo-v2
+  description: One feature per step, checked in the UI before release 1.0.
+spec:
+  color: "#8B5CF6"
+  status: planned
+  priority: medium
+
+---
+apiVersion: crewship/v1
+kind: Issue
+metadata:
+  name: Write hello.txt into the crew's shared folder
+  slug: lab-hello-file
+spec:
+  crew_slug: lab
+  assignee_slug: leo
+  project_slug: demo-v2
+  labels: [demo-v2]
+  priority: medium
+  status: todo
+  title: Write hello.txt into the crew's shared folder
+  description: |
+    Create the file `/crew/shared/demo/hello.txt` containing exactly this one
+    line and nothing else:
+
+        hello from Crewship
+
+    Then read the file back and leave one comment on this issue with the
+    file's path and its content. Do not create or change anything else.
+
+    **Done means:** the file exists with that exact line, and your comment
+    is on the issue.
