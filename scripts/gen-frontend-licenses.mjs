@@ -32,6 +32,14 @@ const pnpmDir = "node_modules/.pnpm";
 // Adding an entry requires citing where the declaration is observable and a
 // review note; versions not listed here fail hard.
 const EXCEPTIONS = {
+  // Dependency refresh (2026-10-05): inspected the exact registry tarballs
+  // linked in PR #2915 and checked their package.json license declarations.
+  // None ships a package-level license text; provider-utils only includes a
+  // nested third-party zod3-to-json-schema license, not its Apache-2.0 text.
+  "@ai-sdk/provider-utils@5.0.53": "package.json declares Apache-2.0",
+  "@next/env@16.3.8": "package.json declares MIT",
+  "@next/swc-linux-x64-gnu@16.3.8": "package.json declares MIT",
+  "@next/swc-linux-x64-musl@16.3.8": "package.json declares MIT",
   // Dependency refresh (2026-09-30): inspected each exact installed package
   // in node_modules/.pnpm. These versions still omit license files and
   // declare the same license as their previously reviewed versions below.

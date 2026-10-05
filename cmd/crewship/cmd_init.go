@@ -24,14 +24,14 @@ Example:
   crewship init --server http://localhost:8080 \
     --email admin@crewship.ai --name "Pavel Srba"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		serverURL, _ := cmd.Flags().GetString("server")
+		serverURL := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
 		email, _ := cmd.Flags().GetString("email")
 		name, _ := cmd.Flags().GetString("name")
 		passwordFlag, _ := cmd.Flags().GetString("password")
 		passwordStdin, _ := cmd.Flags().GetBool("password-stdin")
 
 		if serverURL == "" {
-			serverURL = "http://localhost:8080"
+			return fmt.Errorf("profile %q has no server URL; use --server or configure the profile", cli.ActiveProfileName(flagProfile, cliCfg))
 		}
 		if email == "" {
 			return fmt.Errorf("--email is required")
@@ -94,7 +94,6 @@ Example:
 }
 
 func init() {
-	initCmd.Flags().String("server", "", "Crewship server URL (default http://localhost:8080)")
 	initCmd.Flags().String("email", "", "Admin email address (required)")
 	initCmd.Flags().String("name", "", "Admin full name (required)")
 	initCmd.Flags().String("password", "", "Admin password (leaks to shell history; prefer --password-stdin in CI)")

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **`crewship init` could bootstrap the wrong server despite CLI configuration.** It now honors the common server selection order (explicit flag, active profile, environment, config, default), supports `-s`, and prints the selected server in the login hint. ⚠️ **Behaviour change:** a selected profile without a server URL refuses initialization instead of falling back to localhost.
+
 - **Ambiguous managed-launch descriptors could overwrite earlier fields.** The launcher rejects duplicate or noncanonical JSON fields before creating process identity; its native core now includes a standalone conformance entrypoint, parser fuzz targets and documented measurement limits.
 
 - **Webhook and scheduled managed runs could falsely confirm a stop after losing their PID file.** Their creation gates now retain the persisted managed identity after the agent invocation returns, including when pilot selection is disabled; missing managed PID files remain UNKNOWN.
