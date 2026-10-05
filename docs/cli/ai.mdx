@@ -38,10 +38,17 @@ Reconnection requires a regular configuration file (not a symlink).
 Entries created by older versions or changed manually are refused: inspect them
 and remove them explicitly with the client before reconnecting. Other entries
 are untouched. Receipts contain configuration fingerprints, never tokens.
+Codex ownership also fingerprints its complete native JSON inspection output.
+A client upgrade that changes that output can make an unchanged registration
+appear modified; inspect it and remove it with the native client before reconnecting.
 
 `--install-skill` also installs the bundled guide in the client's user skill
 folder, honoring `CODEX_HOME` or `CLAUDE_CONFIG_DIR`. Existing custom content is
-never overwritten. Discovery and the bundled guide work without login.
+never overwritten. A content-hash receipt allows later bundles to update an
+unchanged guide installed by Crewship. The exact pre-workflow bundled guide can
+also be adopted without a receipt; other unowned guides require explicit removal
+or another directory. Symlinked guide files and receipts are refused.
+Discovery and the bundled guide work without login.
 
 The default connection executes catalog-classified reads only, including six
 audited POST reads: conversation and memory search, automation preview, backup
@@ -308,8 +315,17 @@ still responsible for that. Global endpoints retain their global scope.
 
 The server catalog is loaded at startup; restart MCP to pick up schema changes.
 Stored credentials refresh per request, while environment tokens require a restart.
+An explicitly selected `--credential-config` file must exist and parse at startup;
+a missing file fails before selecting a fallback server or sending credentials.
 Stable symlinks survive upgrades only when the installer preserves that path.
 Native client commands do not provide atomic compare-and-remove: avoid editing
 the same registration concurrently with connect or disconnect.
+Active Claude Code sessions can rewrite the shared user configuration and cause
+reconnect to refuse publication. Close those sessions, inspect the changes, then
+retry. The final configuration check and rename are separate operations: a write
+in that window can be overwritten. Active-session concurrency has not been
+accepted by the isolated native-client checks. Skill content and its hash receipt
+are likewise separate publications, not an atomic transaction; after a partial
+failure, inspect both files before explicitly repairing a stale receipt.
 Hosted MCP with OAuth is not included. Client registration tests are not model
 task evaluations; no model success-rate or token-saving claim is made.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/memory"
 )
 
 //go:embed ai/crewship/SKILL.md
@@ -124,8 +126,14 @@ func aiClientConfig(client, executable string, args []string) (string, error) {
 	return string(data) + "\n", err
 }
 
-// Atomic no-clobber installation. A matching file is already installed; a
-// different file (including a symlink) is never replaced by the installer.
+// The pre-workflow bundled guide had no ownership receipt. Only its exact
+// published bytes can be adopted during an upgrade; custom guides cannot.
+const aiLegacySkillSHA256 = "e43d88ec3214b6cd2afa988a0eb417a934d6efa58e394dcfd872e6aaf5526cf1"
+
+const aiSkillReceiptName = ".crewship-skill.sha256"
+
+// New installations do not clobber existing files. Updates require unchanged
+// bundled content bound to a receipt (or the exact legacy bundle).
 func installAISkill(directory string) error {
 	if strings.TrimSpace(directory) == "" {
 		return apiValidation("directory must not be empty")
@@ -134,27 +142,63 @@ func installAISkill(directory string) error {
 		return err
 	}
 	target := filepath.Join(directory, "SKILL.md")
-	if info, err := os.Lstat(target); err == nil {
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("refusing non-regular SKILL.md")
-		}
-		existing, err := os.ReadFile(target)
-		if err != nil {
-			return err
-		}
-		if string(existing) == crewshipAISkill {
-			return nil
-		}
-		return fmt.Errorf("SKILL.md already exists with different content; choose another directory or remove it explicitly")
-	} else if !os.IsNotExist(err) {
+	previous, err := snapshotAIConfig(target)
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	receiptPath := filepath.Join(directory, aiSkillReceiptName)
+	receipt, err := snapshotAIConfig(receiptPath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("cannot read skill ownership receipt: %w", err)
+	}
+	if previous == nil && receipt != nil {
+		return fmt.Errorf("skill ownership receipt exists without SKILL.md; inspect or remove it explicitly")
+	}
+	if previous != nil {
+		hash := fmt.Sprintf("%x", sha256.Sum256(previous.data))
+		owned := receipt != nil && string(receipt.data) == hash+"\n"
+		if receipt != nil && !owned {
+			return fmt.Errorf("skill content differs from its ownership receipt; custom content is preserved")
+		}
+		if string(previous.data) != crewshipAISkill && !owned && hash != aiLegacySkillSHA256 {
+			return fmt.Errorf("SKILL.md already exists with different content; choose another directory or remove it explicitly")
+		}
+		if !previous.unchanged() {
+			return fmt.Errorf("skill changed during installation")
+		}
+	}
+	if receipt != nil && !receipt.unchanged() {
+		return fmt.Errorf("skill ownership changed during installation")
+	}
+	if previous == nil {
+		if err := writeAISkillNoClobber(directory, target, crewshipAISkill); err != nil {
+			return err
+		}
+	} else if string(previous.data) != crewshipAISkill {
+		if err := memory.WriteFileNoFollow(target, []byte(crewshipAISkill), 0600); err != nil {
+			return err
+		}
+	}
+	current := fmt.Sprintf("%x\n", sha256.Sum256([]byte(crewshipAISkill)))
+	if receipt == nil {
+		return writeAISkillNoClobber(directory, receiptPath, current)
+	}
+	if string(receipt.data) == current {
+		return nil
+	}
+	if !receipt.unchanged() {
+		return fmt.Errorf("skill ownership changed during installation; inspect SKILL.md and its receipt")
+	}
+	return memory.WriteFileNoFollow(receiptPath, []byte(current), 0600)
+}
+
+func writeAISkillNoClobber(directory, target, content string) error {
 	f, err := os.CreateTemp(directory, ".crewship-skill-*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(f.Name())
-	if _, err = f.WriteString(crewshipAISkill); err != nil {
+	if _, err = f.WriteString(content); err != nil {
 		f.Close()
 		return err
 	}
