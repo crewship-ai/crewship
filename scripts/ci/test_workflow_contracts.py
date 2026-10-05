@@ -18,6 +18,12 @@ class WorkflowContracts(unittest.TestCase):
     def job(self, text, name):
         return re.search(r'^  ' + re.escape(name) + r':\n(.*?)(?=^  [a-z][\w-]*:\n|\Z)', text, re.M | re.S).group(1)
 
+    def test_actual_tree_passes_reusable_image_gate(self):
+        result = subprocess.run(['bash', 'scripts/pr-image-build-paths.sh'],
+                                cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('Reusable image build is required by CI Result', result.stdout)
+
     def test_cross_language_parity_lanes_remain_required(self):
         from parity import TESTS
         ci = self.text('ci.yml')
