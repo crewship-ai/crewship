@@ -227,8 +227,8 @@ func placeExistingSeedUser(ctx context.Context, owner *cli.Client, wsID string, 
 		return fmt.Errorf("read authenticated account identity: %w", err)
 	}
 	var identity struct {
-		UserID string `json:"user_id"`
-		Email  string `json:"user_email"`
+		UserID string `json:"user_id" yaml:"user_id"`
+		Email  string `json:"user_email" yaml:"user_email"`
 	}
 	if err := cli.ReadJSON(resp, &identity); err != nil {
 		return fmt.Errorf("read authenticated account identity: %w", err)
