@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+import re
 import unittest
 from unittest.mock import patch
 
@@ -9,6 +10,25 @@ spec.loader.exec_module(managed)
 
 
 class ManagedEnvironmentEvidenceTests(unittest.TestCase):
+    def test_only_trusted_host_fixtures_receive_scoped_elevation(self):
+        trusted = {
+            'TestManagedLaunchRealDocker',
+            'TestStagedQualificationRealDocker',
+            'TestStagedStartRealDocker',
+            'TestStagedBackupRealDocker',
+            'TestStagedCleanupDurabilityBarrier',
+        }
+        elevated, ordinary = set(), set()
+        for command in managed.commands():
+            pattern = command[command.index('-run') + 1]
+            names = {name for _, name in managed.REQUIRED_TOP_LEVEL
+                     if re.fullmatch(pattern, name)}
+            (elevated if command[0] == 'sudo' else ordinary).update(names)
+        self.assertEqual(elevated, trusted)
+        self.assertEqual(ordinary, {name for _, name in managed.REQUIRED_TOP_LEVEL} - trusted)
+        self.assertIn('TestKeeperControlRealDocker', ordinary)
+        self.assertIn('TestNativeLauncherConformanceRealDocker', ordinary)
+
     def passing(self):
         return [{'Package': package, 'Test': name, 'Action': action}
                 for package, name in managed.REQUIRED for action in ('run', 'pass')]
@@ -46,17 +66,20 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
             self.assertTrue(managed.failures(events, 0))
 
     def test_staged_invocation_has_separate_bounded_budget(self):
-        legacy, staged = managed.commands()
-        self.assertIn('-timeout=3m', legacy)
+        ordinary, trusted, staged = managed.commands()
+        self.assertIn('-timeout=3m', ordinary)
+        self.assertIn('-timeout=3m', trusted)
         self.assertIn('-timeout=12m', staged)
         self.assertEqual(staged[-1], './' + managed.STAGED_PACKAGE)
         self.assertEqual(staged[staged.index('-run') + 1], '^' + managed.STAGED + '$')
-        legacy_pattern = legacy[legacy.index('-run') + 1]
-        self.assertNotIn(managed.STAGED, legacy_pattern)
+        other_patterns = [command[command.index('-run') + 1] for command in (ordinary, trusted)]
+        self.assertTrue(all(not re.fullmatch(pattern, managed.STAGED) for pattern in other_patterns))
         for package, name in managed.REQUIRED_TOP_LEVEL:
             if name != managed.STAGED:
-                self.assertIn(name, legacy_pattern)
-                self.assertIn('./' + package.removeprefix(managed.PREFIX), legacy)
+                matches = [command for command in (ordinary, trusted)
+                           if re.fullmatch(command[command.index('-run') + 1], name)]
+                self.assertEqual(len(matches), 1, name)
+                self.assertIn('./' + package.removeprefix(managed.PREFIX), matches[0])
 
     def test_deleted_required_staged_child_cannot_pass(self):
         for name in managed.STAGED_CHILDREN:

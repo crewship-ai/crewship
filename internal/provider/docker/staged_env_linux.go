@@ -179,7 +179,9 @@ func (p *Provider) removeStagedEnv(c container.InspectResponse) error {
 	for i, part := range parts {
 		next, e := unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		if errors.Is(e, unix.ENOENT) {
-			return nil
+			// Commit absence of a missing directory before its recovery intent
+			// can disappear, including a retry after interrupted cleanup.
+			return unix.Fsync(fd)
 		}
 		if e != nil {
 			return errStagedDenied
@@ -203,7 +205,7 @@ func (p *Provider) removeStagedEnv(c container.InspectResponse) error {
 	name := handle + ".json"
 	fileFD, err := unix.Openat(fd, name, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if errors.Is(err, unix.ENOENT) {
-		return nil
+		return unix.Fsync(fd)
 	}
 	if err != nil {
 		return errStagedDenied
@@ -226,5 +228,7 @@ func (p *Provider) removeStagedEnv(c container.InspectResponse) error {
 	if err := unix.Unlinkat(fd, name, 0); err != nil && !errors.Is(err, unix.ENOENT) {
 		return err
 	}
-	return nil
+	// The separate cleanup journal must outlive a failed durability barrier.
+	// Sync the same validated directory FD used for unlink, never reopen a path.
+	return unix.Fsync(fd)
 }

@@ -6,8 +6,11 @@ unique disposable test resources and cleans them up. No provider credentials,
 paid requests, production mounts, registry resolution or global prune. The
 activation fixture mounts only its temporary directories and test executable. CI prepares
 its pinned Alpine fixture separately; local use never pulls or retags images.
+Run the catalog as non-root; sudo is limited to the named fixtures publishing
+trusted host artifacts/material, whose host UID must differ from UID1001/1002.
 """
 import json
+import os
 import re
 import subprocess
 import sys
@@ -19,6 +22,7 @@ TESTS = {
     'internal/stagedstart': {'TestKeeperControlRealDocker'},
     'internal/orchestrator': {'TestManagedLaunchRealDocker'},
     'internal/provider/docker': {
+        'TestStagedCleanupDurabilityBarrier',
         'TestStagedStartRealDocker',
         'TestStagedBackupRealDocker',
         'TestStagedQualificationRealDocker',
@@ -58,17 +62,31 @@ REQUIRED_CHILDREN = {(PREFIX + STAGED_PACKAGE, STAGED + '/' + child)
 REQUIRED_CHILDREN.add((PREFIX + STAGED_PACKAGE,
                        'TestStagedBackupRealDocker/external_backup_ready_and_restart_race'))
 REQUIRED = REQUIRED_TOP_LEVEL | REQUIRED_CHILDREN
+TRUSTED_HOST = {
+    (PREFIX + 'internal/orchestrator', 'TestManagedLaunchRealDocker'),
+    *((PREFIX + STAGED_PACKAGE, name) for name in (
+        'TestStagedQualificationRealDocker', 'TestStagedStartRealDocker',
+        'TestStagedBackupRealDocker', 'TestStagedCleanupDurabilityBarrier')),
+}
 
 
 def commands():
     # Preserve the original fixtures' three-minute budget. Staged startup has
     # its own bounded invocation; report elapsed time so its budget is measured
     # on each qualified runner rather than treating the ceiling as evidence.
-    legacy = REQUIRED_TOP_LEVEL - {(PREFIX + STAGED_PACKAGE, STAGED)}
-    pattern = '^(' + '|'.join(re.escape(name) for _, name in sorted(legacy)) + ')$'
     common = ['go', 'test', '-tags', 'integration', '-p', '1', '-count=1', '-json']
-    return [common + ['-timeout=3m', '-run', pattern] + ['./' + package for package in TESTS],
-            common + ['-timeout=12m', '-run', '^' + STAGED + '$', './' + STAGED_PACKAGE]]
+    elevated = ['sudo', 'env', 'PATH=' + os.environ['PATH'], 'GOTOOLCHAIN=local']
+    result = []
+    for tests, prefix, budget in (
+            (REQUIRED_TOP_LEVEL - TRUSTED_HOST, [], '3m'),
+            (TRUSTED_HOST - {(PREFIX + STAGED_PACKAGE, STAGED)}, elevated, '3m'),
+            ({(PREFIX + STAGED_PACKAGE, STAGED)}, elevated, '12m')):
+        names = [re.escape(name) for _, name in sorted(tests)]
+        pattern = '^' + (names[0] if len(names) == 1 else '(' + '|'.join(names) + ')') + '$'
+        packages = sorted({package.removeprefix(PREFIX) for package, _ in tests})
+        result.append(prefix + common + ['-timeout=' + budget, '-run', pattern]
+                      + ['./' + package for package in packages])
+    return result
 
 
 def failures(events, returncode):
@@ -96,6 +114,10 @@ def failures(events, returncode):
 
 
 def main():
+    if os.geteuid() == 0:
+        print('ERROR: run the catalog as non-root; only named trusted-host fixtures are elevated.',
+              file=sys.stderr)
+        return True
     events = []
     malformed = False
     code = 0
