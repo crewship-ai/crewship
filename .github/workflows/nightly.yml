@@ -182,7 +182,7 @@ jobs:
         with:
           cosign-release: v2.6.3
       - name: Install syft
-        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26
+        uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c
         with:
           syft-version: v1.38.0
       - name: Require package signing key
