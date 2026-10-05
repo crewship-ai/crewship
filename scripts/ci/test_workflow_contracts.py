@@ -77,14 +77,27 @@ class WorkflowContracts(unittest.TestCase):
         discovered = set()
         # Conservative literal discovery covers direct fs reads and constants
         # passed to reads. New computed paths need an explicit reviewed map.
-        for root in ['cmd', 'internal', 'app', 'components', 'hooks', 'lib', 'stores']:
+        for root in ['cmd', 'internal', 'app', 'components', 'hooks', 'lib', 'stores', 'scripts']:
             for path in (ROOT / root).rglob('*'):
                 if not path.name.endswith(('_test.go', '.test.ts', '.test.tsx')):
                     continue
                 source = path.read_text()
-                if not re.search(r'os\.ReadFile\(|readFileSync\(', source):
+                if not re.search(r'os\.ReadFile\(|readFileSync\(|readRepoFile\(', source):
                     continue
-                for doc in re.findall(r'[\"\'](?:\.\./)*(docs/[^\"\']+\.mdx?)[\"\']', source, re.I):
+                if root == 'scripts':
+                    # Script tests construct synthetic docFile/report records and
+                    # write temporary pages, sometimes using real page names.
+                    # Discover read arguments and named doc constants instead;
+                    # constants may live in a sibling package source file.
+                    package_source = '\n'.join(p.read_text() for p in path.parent.glob('*.go'))
+                    constants = re.findall(r'const\s+(\w+)\s*=\s*[\"\'](docs/[^\"\']+\.mdx?)[\"\']', package_source)
+                    docs = {doc for name, doc in constants if re.search(r'\b' + re.escape(name) + r'\b', source)}
+                    reads = re.findall(r'(?:os\.ReadFile|readRepoFile)\([^\n]+', source)
+                    for read in reads:
+                        docs.update(re.findall(r'[\"\'](?:\.\./)*(docs/[^\"\']+\.mdx?)[\"\']', read, re.I))
+                else:
+                    docs = re.findall(r'[\"\'](?:\.\./)*(docs/[^\"\']+\.mdx?)[\"\']', source, re.I)
+                for doc in docs:
                     discovered.add((doc, path.relative_to(ROOT).as_posix()))
         # This literal is synthetic JSON in a seed-pack fixture; its fs read
         # targets a Python script. There is no product document to route.

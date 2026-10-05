@@ -15,7 +15,11 @@ def release_changed(paths):
 # safe to skip; an unknown extension under docs/ is still an unknown input.
 DOC_EXTENSIONS = {'.md', '.mdx', '.txt', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.ico'}
 DOC_ROOT_FILES = {'README.md', 'CHANGELOG.md', 'LICENSE', 'CONTRIBUTING.md', 'AGENTS.md', 'CODEX.md'}
-GO_DOC_TESTS = {'docs/configuration/providers.mdx': 'cmd/crewship/cmd_start_provider_order_test.go'}
+GO_DOC_TESTS = {
+    'docs/configuration/providers.mdx': 'cmd/crewship/cmd_start_provider_order_test.go',
+    'docs/api-reference/openapi.mdx': 'scripts/docs-inventory/main_test.go',
+    'docs/guides/docker-socket-proxy.mdx': 'scripts/docker-api-surface/main_test.go',
+}
 FRONTEND_DOC_TESTS = {
     'docs/api-reference/websocket.mdx': 'hooks/__tests__/realtime-allowlist-docs-parity.test.ts',
     'docs/guides/chat-telemetry.mdx': 'lib/__tests__/telemetry-call-sites.test.ts',
