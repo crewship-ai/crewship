@@ -101,13 +101,10 @@ name: Nightly Harness
 
 on:
   workflow_dispatch: {}
-  schedule:
-    # 03:10 UTC — after e2e-devcontainer (02:30) so two heavy nightlies do not
-    # contend for runners, and off the on-the-hour Actions rush.
-    - cron: "10 3 * * *"
+  # Schedule paused (#2512): restore after a configured-provider or verified
+  # mock dispatch actually executes the runtime suites successfully.
 
-# Cron jitter is ±5 min; cancel an in-flight run if a fresh schedule fires
-# rather than queueing duplicate ~15-minute jobs.
+# Cancel an older manual run when the operator starts a replacement.
 concurrency:
   group: nightly-harness-${{ github.ref }}
   cancel-in-progress: true

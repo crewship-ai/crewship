@@ -28,7 +28,8 @@ every non-zero suite (and every `timeout` kill) and prints them in a closing
 summary. `scripts/test-harness-pr-subset-test.sh` drives the real runner
 against stub suites to keep that true.
 
-`nightly-harness.yml` (nightly 03:10 UTC + `workflow_dispatch`) now boots an
+`nightly-harness.yml` (`workflow_dispatch`; schedule paused in #2512 until a
+configured provider or verified mock executes the runtime suites) boots an
 ephemeral instance per matrix square — `crewship start` → `crewship seed
 --skip-issues` → one suite — and files/refreshes a single deduplicated
 `nightly-harness-alert` issue when a square goes red (same containment pattern
