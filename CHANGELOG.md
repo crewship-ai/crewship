@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Repeated crew deletion or idle eviction could accumulate anonymous Docker volumes.** New noexec bind-volume records carry installation ownership and are reaped once unused, preserving host data, home/tools history and other installations; unlabelled historical volumes stay for operator investigation. Runtime recreation now reports container removal failures. (#2970)
+
 - **CI: Vitest runs in four partitions with one merged coverage gate (#2933).** `Frontend Test` keeps its name, requires every partition plus the type checks, verifies that every discovered test file ran exactly once and evaluates the unchanged coverage thresholds on the merged report.
 
 - **CI: the CLI race suite runs in three partitions, internal/api in six and the remaining race packages in four (#2931).** `Go Race (CLI)` and `Go Race (internal/api)` keep their names and now verify that their partitions cover the full test inventory exactly once. The CLI race job took 16–26 minutes as one process; each partition runs about a third of it.
