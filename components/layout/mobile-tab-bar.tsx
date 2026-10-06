@@ -7,7 +7,7 @@ import { Menu } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { phoneTabs } from "@/lib/nav-sections"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
-import { useWorkspace } from "@/hooks/use-workspace"
+import { useTrustedWorkspaceId } from "@/hooks/use-access-mode"
 import { useAppStore } from "@/lib/store"
 
 /**
@@ -26,7 +26,8 @@ import { useAppStore } from "@/lib/store"
  */
 export function MobileTabBar() {
   const pathname = usePathname()
-  const { workspaceId } = useWorkspace()
+  // /inbox/count is not on the restricted allowlist.
+  const workspaceId = useTrustedWorkspaceId()
   const setMobileNavOpen = useAppStore((s) => s.setMobileNavOpen)
   const tabs = phoneTabs()
 

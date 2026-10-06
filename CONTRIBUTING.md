@@ -159,6 +159,15 @@ tick the boxes that apply and remove rows that don't.
 CI classifies the actual Git diff. Code changes run the frontend, embedded
 server, browser and Docker checks; frontend-only changes skip the Go matrix.
 Documentation-only PRs retain the workflow/invariant and security verdicts.
+Documentation skips are limited to prose and image extensions; unknown inputs
+under `docs/` run the full suite. Provider-order, OpenAPI schema figures, Docker
+proxy, WebSocket and telemetry documentation changes retain their Go/frontend
+parity tests, and frontend vocabulary changes
+retain the corresponding Go mirror checks even when the Go matrix is skipped.
+Renames are classified as deletion plus addition so moving source into docs
+cannot hide a runtime change. Prose changes under `docs/` and changes to this
+contributor entrypoint also retain the strict API/CLI documentation inventory
+when the Go lint job is skipped.
 Unknown paths trigger the full suite, as do main pushes.
 
 Frontend tests run in four isolated partitions. Type checking runs once; the

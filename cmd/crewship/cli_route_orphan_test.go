@@ -183,7 +183,6 @@ var browserOrInboundNoCLI = map[string]string{
 	"GET /api/auth/session":               "NextAuth-compat: session read via the browser's cookie",
 	"GET /api/auth/signin":                "NextAuth-compat: browser sign-in page",
 	"POST /api/auth/callback/credentials": "NextAuth-compat: credentials callback the next-auth client posts to",
-	"POST /api/auth/signout":              "NextAuth-compat: browser sign-out, clears the session cookie",
 	"POST /api/auth/token/refresh":        "NextAuth-compat: session-cookie refresh, not a CLI bearer-token flow",
 
 	// OAuth provider redirect target — documented in

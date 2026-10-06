@@ -151,6 +151,7 @@ env:
     e2e/slash-run-routine-chat.spec.ts
     e2e/feedback.spec.ts
     e2e/feedback-ui.spec.ts
+    e2e/restricted-member-shell.spec.ts
   #
   # DRIFT: run, reported, never fatal. Measured locally against a seeded
   # instance (main config, per spec: passed / failed):
