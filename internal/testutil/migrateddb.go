@@ -61,27 +61,6 @@ var (
 	migratedTemplateErr  error
 )
 
-// buildMigratedTemplate migrates one SQLite file and leaves it on disk as the
-// template every later call copies.
-//
-// The template directory is intentionally not registered for cleanup with any
-// single test: the template outlives every individual test in the process, so
-// there is no test whose lifetime it could be tied to. Go's test binary has no
-// "process exit" hook that is safe here either (TestMain belongs to the package
-// under test, not to this helper).
-//
-// So it leaks, and the size is worth stating accurately rather than waving at.
-// A migrated template measures 2,879,488 bytes (2.75 MiB). One is built per
-// test binary, and 23 packages use this helper, so a full `go test ./...`
-// leaves ~63 MiB in os.TempDir() for the OS to reclaim. Before this helper
-// existed the same leak was one template (internal/api's), so this is 23x more
-// of an existing habit, not a new kind of problem — but it is not "a handful of
-// KiB" either, and someone running the suite in a loop will notice.
-//
-// Making the template content-addressed and shared across processes would end
-// the leak and save the per-binary build as well; that is a separate change
-// with its own blast radius and is tracked as follow-up on the PR, not smuggled
-// in here.
 // testSynchronous is the one production pragma the test fixture deliberately
 // does not inherit.
 //
@@ -101,23 +80,62 @@ var (
 // FULL semantics opens its own handle with database.Open and says so.
 var testSynchronous = database.WithSynchronous(database.SynchronousNormal)
 
+// buildMigratedTemplate migrates one SQLite file and leaves it on disk as the
+// template every later call copies.
+//
+// The template directory is intentionally not registered for cleanup with any
+// single test: the template outlives every individual test in the process, so
+// there is no test whose lifetime it could be tied to. Go's test binary has no
+// "process exit" hook that is safe here either (TestMain belongs to the package
+// under test, not to this helper).
+//
+// So it leaks, and the size is worth stating accurately rather than waving at.
+// A migrated template measures 2,879,488 bytes (2.75 MiB). One copy is kept per
+// test binary, and 23 packages use this helper, so a full `go test ./...`
+// leaves ~63 MiB in os.TempDir() for the OS to reclaim. Before this helper
+// existed the same leak was one template (internal/api's), so this is 23x more
+// of an existing habit, not a new kind of problem — but it is not "a handful of
+// KiB" either, and someone running the suite in a loop will notice.
+//
+// The migration run itself is no longer per binary: migrateddb_shared.go keys
+// one template on the source tree and every test process copies it. What still
+// leaks per process is that private copy, kept on purpose so a test that writes
+// to MigratedTemplatePath cannot corrupt a sibling process.
 func buildMigratedTemplate() {
+	// Shared, content-addressed template first (see migrateddb_shared.go):
+	// one migration run per source tree instead of one per test binary. Any
+	// failure there — no module root, no flock, an unwritable temp dir — falls
+	// back to the private per-process build below, which is what this helper
+	// always did, so the shared path can only make a run faster, never fail it.
+	if path, err := sharedMigratedTemplate(); err == nil {
+		migratedTemplatePath = path
+		return
+	}
 	dir, err := os.MkdirTemp("", "crewship-migrated-template-")
 	if err != nil {
 		migratedTemplateErr = err
 		return
 	}
 	path := filepath.Join(dir, "template.db")
-	db, err := database.Open("file:"+path, testSynchronous)
-	if err != nil {
+	if err := migrateTemplateAt(path); err != nil {
 		migratedTemplateErr = err
 		return
+	}
+	migratedTemplatePath = path
+}
+
+// migrateTemplateAt runs the full migration chain into a new SQLite file at
+// path and folds its WAL back into the main file, so the result is one
+// self-contained file that a plain copy reproduces exactly.
+func migrateTemplateAt(path string) error {
+	db, err := database.Open("file:"+path, testSynchronous)
+	if err != nil {
+		return err
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
 		db.Close()
-		migratedTemplateErr = err
-		return
+		return err
 	}
 	// Fold the WAL back into the main file so a plain file copy carries the
 	// complete schema — no -wal/-shm sidecars to copy alongside it.
@@ -134,22 +152,26 @@ func buildMigratedTemplate() {
 	if err := db.DB.QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").
 		Scan(&busy, &walPages, &checkpointed); err != nil {
 		db.Close()
-		migratedTemplateErr = fmt.Errorf("checkpoint template wal: %w", err)
-		return
+		return fmt.Errorf("checkpoint template wal: %w", err)
 	}
 	if busy != 0 {
 		db.Close()
-		migratedTemplateErr = fmt.Errorf(
+		return fmt.Errorf(
 			"checkpoint template wal: busy (log=%d pages, checkpointed=%d) — "+
 				"template would be missing schema still held in the -wal",
 			walPages, checkpointed)
-		return
 	}
 	if err := db.Close(); err != nil {
-		migratedTemplateErr = err
-		return
+		return err
 	}
-	migratedTemplatePath = path
+	// Close leaves empty -wal/-shm sidecars behind; the template is the main
+	// file alone, so drop them rather than let a copy-by-directory pick them up.
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := os.Remove(path + suffix); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove template %s: %w", suffix, err)
+		}
+	}
+	return nil
 }
 
 // MigratedTemplatePath returns the path of the process-wide migrated template
