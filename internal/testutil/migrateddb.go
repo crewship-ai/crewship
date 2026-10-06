@@ -184,6 +184,13 @@ func MigratedTemplatePath(t testing.TB) string {
 // type; reach for .DB when a plain *sql.DB is wanted, or call MigratedSQLDB.
 func MigratedDB(t testing.TB) *database.DB {
 	t.Helper()
+	if p, ok := takePrefetched(); ok {
+		// Same two cleanups, in the same LIFO order, as the synchronous path
+		// below: quiesce the handle first, then remove its directory.
+		registerTestDirCleanup(t, p.dir)
+		t.Cleanup(func() { quiesce(p.db, p.path) })
+		return p.db
+	}
 	return MigratedDBAt(t, filepath.Join(migratedTestDir(t), "test.db"))
 }
 
@@ -259,7 +266,13 @@ func openMigratedCopy(path string) (*database.DB, error) {
 }
 
 func templatePath() (string, error) {
-	migratedTemplateOnce.Do(buildMigratedTemplate)
+	migratedTemplateOnce.Do(func() {
+		if path, ok := inheritedTemplate(); ok {
+			migratedTemplatePath = path
+			return
+		}
+		buildMigratedTemplate()
+	})
 	if migratedTemplateErr != nil {
 		return "", migratedTemplateErr
 	}
@@ -293,6 +306,14 @@ func migratedTestDir(t testing.TB) string {
 	if err != nil {
 		t.Fatalf("testutil: create temp dir: %v", err)
 	}
+	registerTestDirCleanup(t, dir)
+	return dir
+}
+
+// registerTestDirCleanup is migratedTestDir's cleanup contract, shared with
+// the prefetched path so both remove their directory the same way.
+func registerTestDirCleanup(t testing.TB, dir string) {
+	t.Helper()
 	t.Cleanup(func() {
 		if err := os.RemoveAll(dir); err != nil {
 			leftovers, _ := os.ReadDir(dir)
@@ -303,7 +324,6 @@ func migratedTestDir(t testing.TB) string {
 			t.Logf("testutil: test DB temp dir not fully removed (non-fatal): %v; survivors: %v", err, names)
 		}
 	})
-	return dir
 }
 
 // quiesce shuts a test DB down deterministically.

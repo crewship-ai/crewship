@@ -178,7 +178,7 @@ func (p *prefetcher) work() {
 }
 
 func openPrefetched() (prefetchedItem, error) {
-	dir, err := os.MkdirTemp("", "crewship-testdb-")
+	dir, err := newMigratedTestDir()
 	if err != nil {
 		return prefetchedItem{}, err
 	}
