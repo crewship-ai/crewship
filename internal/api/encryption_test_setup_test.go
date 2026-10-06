@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // encKeyOnce ensures ENCRYPTION_KEY is set once at package level so parallel
@@ -32,7 +34,42 @@ var encKeyOnce sync.Once
 func TestMain(m *testing.M) {
 	installTestEncryptionKey()
 	lowerBcryptCostForTests()
-	os.Exit(m.Run())
+	cleanupHome := isolateHomeForTests()
+	// Two workers, four ready copies: enough to keep a sequential run fed on
+	// a four-core CI runner without holding more than a few extra open
+	// databases. See internal/testutil/migrateddb_prefetch.go for why the
+	// per-test open is worth moving off the critical path at all.
+	stopPrefetch := testutil.PrefetchMigratedDBs(2, 4)
+	code := m.Run()
+	stopPrefetch()
+	cleanupHome()
+	os.Exit(code)
+}
+
+// isolateHomeForTests points HOME at an empty directory for the whole test
+// binary and clears CREWSHIP_DATA_DIR, so a handler that resolves the default
+// data directory (database.DefaultDataDir: $CREWSHIP_DATA_DIR, else
+// ~/.crewship) sees an empty one rather than the developer's.
+//
+// Before this, any test that served an admin route through NewRouter without
+// sandboxing HOME itself read the real ~/.crewship. On crewship-dev that is
+// 8.4 GB of backup bundles, and TestAdminFloor_MemberDeniedAdminSurface spent
+// 122 s of a 465 s package run decompressing them to answer GET
+// /api/v1/admin/backups — while DefaultDataDir also created
+// ~/.crewship/{output,chats,logs,skills} as a side effect. On a CI runner the
+// directory is empty, so this changes nothing there except that the result no
+// longer depends on the machine.
+//
+// Tests that need a particular HOME or data dir still t.Setenv their own,
+// which restores this value afterwards.
+func isolateHomeForTests() (cleanup func()) {
+	home, err := os.MkdirTemp("", "crewship-api-test-home-")
+	if err != nil {
+		panic("api tests: create isolated HOME: " + err.Error())
+	}
+	os.Setenv("HOME", home)
+	os.Unsetenv("CREWSHIP_DATA_DIR")
+	return func() { _ = os.RemoveAll(home) }
 }
 
 // lowerBcryptCostForTests is the ONLY write to bcryptCost anywhere, and it
