@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/database"
 )
 
 // Each child has its own sync.Once and process lifetime; copying the compiled
@@ -155,7 +153,7 @@ func TestReclaimFixturesPreservesLiveOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := database.MigrationFingerprint()
+	key, err := fixtureTemplateKey()
 	if err != nil {
 		t.Fatal(err)
 	}

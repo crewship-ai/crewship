@@ -80,28 +80,45 @@ var (
 // FULL semantics opens its own handle with database.Open and says so.
 var testSynchronous = database.WithSynchronous(database.SynchronousNormal)
 
+// Use one immutable template across processes without leaking per-process copies.
+// In a source checkout, include main's full migration dependency closure in the key.
+func fixtureTemplateKey() (string, error) {
+	key, err := database.MigrationFingerprint()
+	if err != nil {
+		return "", err
+	}
+	if os.Getenv("CREWSHIP_TEST_SHARED_TEMPLATE") != "0" {
+		if root, err := findModuleRoot(); err == nil {
+			closure, err := sharedTemplateKey(root)
+			if err != nil {
+				return "", err
+			}
+			key += "-" + closure
+		}
+	}
+	return key, nil
+}
+
 func buildMigratedTemplate() {
 	root, err := fixtureRoot()
 	if err == nil {
 		var key string
-		key, err = database.MigrationFingerprint()
+		key, err = fixtureTemplateKey()
 		if err == nil {
-			migratedTemplatePath, err = sharedTemplate(root, key, migrateTemplateFile)
+			migratedTemplatePath, err = sharedTemplate(root, key, migrateTemplateAt)
 		}
 	}
 	migratedTemplateErr = err
 }
 
-// migrateTemplateFile only returns after the complete schema is in the main
-// file and the connection pool is closed. The caller publishes it atomically.
-func migrateTemplateFile(path string) error {
+func migrateTemplateAt(path string) error {
 	db, err := database.Open("file:"+path, testSynchronous)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
+		db.Close()
 		return err
 	}
 	// Fold the WAL back into the main file so a plain file copy carries the
@@ -118,15 +135,27 @@ func migrateTemplateFile(path string) error {
 	var busy, walPages, checkpointed int
 	if err := db.DB.QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").
 		Scan(&busy, &walPages, &checkpointed); err != nil {
+		db.Close()
 		return fmt.Errorf("checkpoint template wal: %w", err)
 	}
 	if busy != 0 {
+		db.Close()
 		return fmt.Errorf(
 			"checkpoint template wal: busy (log=%d pages, checkpointed=%d) — "+
 				"template would be missing schema still held in the -wal",
 			walPages, checkpointed)
 	}
-	return db.Close()
+	if err := db.Close(); err != nil {
+		return err
+	}
+	// Close leaves empty -wal/-shm sidecars behind; the template is the main
+	// file alone, so drop them rather than let a copy-by-directory pick them up.
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := os.Remove(path + suffix); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove template %s: %w", suffix, err)
+		}
+	}
+	return nil
 }
 
 // MigratedTemplatePath returns the path of the shared migrated template

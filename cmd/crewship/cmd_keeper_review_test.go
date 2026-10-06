@@ -17,9 +17,9 @@ import (
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/cli"
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/llm"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // `crewship keeper review run <slot>` — CLI parity for
@@ -177,16 +177,16 @@ func newReviewBackedServer(t *testing.T) (url, cfgPath string) {
 			reviewSrvErr = err
 			return
 		}
-		d, err := database.Open("file:" + filepath.Join(dir, "review.db"))
+		// A copy of the process-wide migrated template rather than a private
+		// run of the migration chain (~45 s under -race). The teardown is not
+		// registered: like the server it backs, this database lives for the
+		// whole test process.
+		d, _, err := testutil.NewMigratedDB()
 		if err != nil {
 			reviewSrvErr = err
 			return
 		}
 		log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-		if err := database.Migrate(context.Background(), d.DB, log); err != nil {
-			reviewSrvErr = err
-			return
-		}
 		sum := sha256.Sum256([]byte(reviewTestToken))
 		for _, q := range []struct {
 			sql  string

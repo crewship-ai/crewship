@@ -11,6 +11,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/testutil"
+
 	// Embeds the IANA zone database so the TZ this file re-execs with
 	// resolves on a machine with no system tzdata (scratch containers).
 	_ "time/tzdata"
@@ -119,6 +122,10 @@ func TestRecurringIssueCreate_NextRunIsUTC(t *testing.T) {
 		cmd := exec.CommandContext(ctx, os.Args[0],
 			"-test.run=^"+t.Name()+"$", "-test.v", "-test.count=1")
 		cmd.Env = append(os.Environ(), tzChildEnv+"=1", "TZ=Asia/Kolkata")
+		// The child is this same binary: let it copy the migrated template
+		// this process already holds instead of replaying every migration
+		// (~45 s under -race) for one test.
+		cmd.Env = append(cmd.Env, testutil.MigratedTemplateEnv(t)...)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("non-UTC child run failed: %v\n%s", err, out)
