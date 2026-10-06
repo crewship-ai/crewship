@@ -235,10 +235,17 @@ queue tests its candidate against the current base. Use
 `--match-head-commit <SHA>` when submitting a reviewed head to prevent a concurrent push from
 changing the candidate.
 
-The queue uses one PR per merge group. `CI Result`, `Security Result` and
-`CodeQL Result` execute on `merge_group`; a planned skip must still match the
+The queue policy uses one PR per merge group and becomes usable only after
+actual PR and merge-group canaries prove that every required context is emitted.
+`CI Result`, `Security Result`, `CodeQL Result` and `CI Inventory Guard` (once
+required) must execute on `merge_group`; a planned skip must still match the
 change plan. Main pushes retain the full exact-SHA verification required by
 publication. Queueing is not permission to remove those checks.
+
+A PR or merge group that changes protected CI controls also needs a visible,
+exact-SHA exception recorded through the trusted-main inventory guard. A new
+head or group SHA needs fresh review; this exception does not bypass required
+checks or authorize an administrative merge.
 
 Do not use `--admin` or a direct REST merge to bypass the queue. An emergency
 exception requires a recorded reason, responsible operator, reviewed head SHA
