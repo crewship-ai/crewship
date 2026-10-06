@@ -176,7 +176,8 @@
       "postcss>nanoid": "^3.3.18",
       "@prisma/config>deepmerge-ts": "^8.0.0",
       "prisma>mysql2": "^3.23.1",
-      "ajv>fast-uri": "^4.1.5"
+      "ajv>fast-uri": "^4.1.5",
+      "source-map-js": "1.2.2"
     }
   },
   "devDependencies": {
