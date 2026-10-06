@@ -1833,6 +1833,32 @@ jobs:
   # would just vanish from its effect, and in the shard's case would take its
   # coverage with it while both jobs stayed green. The step below fails if
   # any entry in either list stops resolving against `go list ./...`.
+  cli-subprocess-race:
+    name: CLI subprocess race boundaries
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Require instrumented CLI and named acceptance scenarios
+        timeout-minutes: 15
+        run: python3 scripts/ci/cli-subprocess-race.py
+      - name: Preserve executed subprocess race evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cli-subprocess-race-${{ github.sha }}
+          path: .ci-results/cli-subprocess-race*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
   # The CLI package has its own race runner after repeated aggregate 25m
   # timeouts on September 10 (run 34466543067, both attempts). The same
   # package passed in 1163.213s on C's retry (run 34460363617). Its isolated
@@ -2282,7 +2308,7 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [release-rehearsal, image, changes, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
+    needs: [release-rehearsal, image, changes, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli, cli-subprocess-race, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
