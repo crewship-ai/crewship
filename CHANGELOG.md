@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **CI: the full Go suite and the shuffled suite run in three package partitions each.** `Go` keeps vet and the cross-builds; `Go test` and `Go Shuffle` split `go list ./...` largest-first by measured cost and prove every package runs exactly once (a truncated listing still fails).
+
 - **CI: race tests stop re-migrating test databases and skip checkptr inside the transpiled SQLite library.** One migrated template is now shared per source tree across test binaries (it cost 56 s per binary under race), `internal/api` prefetches its per-test database copies, and `cmd/crewship` fixtures start from the template instead of running the migration chain seven more times. Under `-race`, CI compiles `modernc.org/*` with `checkptr` off (migration chain 55 s → 29 s); race detection and checkptr stay on for all Crewship code.
 
 - **CI: Vitest runs in four partitions with one merged coverage gate (#2933).** `Frontend Test` keeps its name, requires every partition plus the type checks, verifies that every discovered test file ran exactly once and evaluates the unchanged coverage thresholds on the merged report.
