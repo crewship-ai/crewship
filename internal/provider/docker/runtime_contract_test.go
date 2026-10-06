@@ -30,6 +30,22 @@ func contractSpec(t *testing.T, p *Provider) (*container.Config, *container.Host
 	return cfg, hostCfg
 }
 
+func TestCrewRuntimeContractDigestIgnoresBindOwnership(t *testing.T) {
+	f := &covRT{}
+	p := f.provider(t, covRTConfig(t))
+	cfg, host := contractSpec(t, p)
+	for i := range host.Mounts {
+		m := &host.Mounts[i]
+		if agentWritableNoexecTargets[m.Target] && m.VolumeOptions != nil {
+			// The pre-change spec had no volume attribution at all.
+			m.VolumeOptions.Labels = nil
+		}
+	}
+	if got, want := p.crewRuntimeContractDigest(), digestCrewSpec(cfg, host); got != want {
+		t.Fatalf("ownership-only upgrade changed runtime contract: %s -> %s", want, got)
+	}
+}
+
 // The property the whole mechanism rests on: every control the builder sets is
 // IN the digest, so a future PR that adds one gets drift detection without
 // having to remember this file exists.

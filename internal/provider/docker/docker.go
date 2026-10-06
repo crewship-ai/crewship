@@ -24,6 +24,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/quota"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
 var _ provider.ContainerProvider = (*Provider)(nil)
@@ -1574,16 +1575,21 @@ const noexecBindMountOpts = "bind,noexec,nosuid"
 // at target with noexec,nosuid (see noexecBindMountOpts). Source is left empty
 // so Docker provisions an anonymous volume record pointing at the host path;
 // removing that record never touches the host data (it's the bind device, not
-// managed storage), and forceTeardown removes it (RemoveVolumes) on recreate
-// so the records don't accumulate. NoCopy is set because there is nothing to
+// managed storage). Ownership labels let cleanup reap unused records even
+// when the container was removed with volumes preserved. NoCopy prevents
 // copy up — the mount fully replaces the target with the host directory, just
 // like the plain bind mount it replaces.
-func noexecBindMount(hostPath, target string) mount.Mount {
+func noexecBindMount(hostPath, target, crewID, instanceID string) mount.Mount {
 	return mount.Mount{
 		Type:   mount.TypeVolume,
 		Target: target,
 		VolumeOptions: &mount.VolumeOptions{
 			NoCopy: true,
+			Labels: map[string]string{
+				resourcelifecycle.InstanceLabel: instanceID,
+				crewCrewIDLabel:                 crewID,
+				crewKindLabel:                   noexecBindVolumeKind,
+			},
 			DriverConfig: &mount.Driver{
 				Name: "local",
 				Options: map[string]string{
@@ -1617,9 +1623,9 @@ func (p *Provider) buildMounts(id, slug, workspacePath, outputPath, crewPath str
 		return nil, err
 	}
 	mounts := []mount.Mount{
-		noexecBindMount(workspacePath, "/workspace"),
-		noexecBindMount(outputPath, "/output"),
-		noexecBindMount(crewPath, "/crew"),
+		noexecBindMount(workspacePath, "/workspace", id, p.cfg.InstanceID),
+		noexecBindMount(outputPath, "/output", id, p.cfg.InstanceID),
+		noexecBindMount(crewPath, "/crew", id, p.cfg.InstanceID),
 	}
 	if slug != "" {
 		mounts = append(mounts,
