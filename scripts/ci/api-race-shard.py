@@ -23,6 +23,7 @@ PACKAGE = os.environ.get('RACE_SHARD_PACKAGE', MODULE + '/internal/api')
 if not PACKAGE.startswith(MODULE + '/') or not re.fullmatch(r'[\w./-]+', PACKAGE) or '..' in PACKAGE:
     raise SystemExit(f'::error::invalid RACE_SHARD_PACKAGE {PACKAGE!r}')
 PACKAGE_DIR = './' + PACKAGE[len(MODULE) + 1:]
+RACE_GCFLAGS = os.environ.get('RACE_GCFLAGS', '-gcflags=modernc.org/...=-d=checkptr=0')
 # Linux limits EACH argv string, independently of total ARG_MAX. Leave room
 # for the terminator and fail clearly as the suite grows, never truncate it.
 MAX_PATTERN_BYTES = 120_000
@@ -84,7 +85,9 @@ def run(index, count, timeout):
     manifest_path.unlink(missing_ok=True)
     # Match build tags/instrumentation to execution, including tests guarded
     # by //go:build race. A failed enumeration must abort the run.
-    inventory = subprocess.check_output(['go', 'test', PACKAGE_DIR, '-race', '-list', '.'],
+    # Same flags as scripts/ci/go-test.sh adds under -race, so the listing
+    # compile is reused by the run instead of rebuilding SQLite.
+    inventory = subprocess.check_output(['go', 'test', PACKAGE_DIR, '-race', RACE_GCFLAGS, '-list', '.'],
                                         cwd=ROOT, text=True)
     names, shards = partition(inventory, count)
     selected = shards[index]
