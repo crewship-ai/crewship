@@ -63,6 +63,10 @@ type prefetcher struct {
 	ready   chan prefetchedItem
 	stop    chan struct{}
 	wg      sync.WaitGroup
+	// mu orders worker start against shutdown: once closed is set no worker
+	// may be added, so shutdown's Wait cannot run before a late Add.
+	mu     sync.Mutex
+	closed bool
 }
 
 var (
@@ -111,6 +115,9 @@ func (p *prefetcher) shutdown() {
 	}
 	prefetchMu.Unlock()
 
+	p.mu.Lock()
+	p.closed = true
+	p.mu.Unlock()
 	close(p.stop)
 	p.wg.Wait()
 	for {
@@ -146,6 +153,11 @@ func (p *prefetcher) startWorkers() {
 	// and every caller falls through to the synchronous path, which reports
 	// the error against the test that asked.
 	if _, err := templatePath(); err != nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
 		return
 	}
 	for i := 0; i < p.workers; i++ {
