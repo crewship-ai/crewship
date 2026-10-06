@@ -8,7 +8,7 @@
 
 `pnpm test:types` type-checks every test file through `tsconfig.tests.json`
 (Vitest globals plus the jest-dom matcher types) and fails on any diagnostic.
-It runs in the Frontend Test CI job. There is no baseline: a harness that
+It runs in the required Frontend test types CI job (`frontend-test-types`). There is no baseline: a harness that
 renders a component without a required prop, or a fixture built to a wire
 shape the product does not have, is a red gate, not a warning (#2493).
 
