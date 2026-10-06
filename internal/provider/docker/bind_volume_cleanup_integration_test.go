@@ -31,7 +31,9 @@ func TestBindVolumeLifecycleRealDocker(t *testing.T) {
 	_, err = d.Ping(pingCtx, client.PingOptions{})
 	stopPing()
 	if err != nil {
-		t.Skipf("Docker daemon unavailable: %v", err)
+		// The integration build tag opts into real Docker; missing prerequisites
+		// must fail rather than report unexecuted lifecycle coverage as success.
+		t.Fatalf("integration requires a live Docker daemon: %v", err)
 	}
 	image, err := d.ImageInspect(ctx, "alpine:3")
 	if err != nil {
