@@ -45,13 +45,21 @@ def validate(policy):
         matches = [c for c in configured if c.get('context') == name]
         if len(matches) != 1 or matches[0].get('integration_id') != 15368:
             raise ValueError(f'missing or unexpected GitHub Actions required check: {name}')
-    review = by_type.get('pull_request', {}).get('parameters', {})
-    if review.get('required_approving_review_count', 0) < 1:
-        raise ValueError('an approving review is required')
+    if 'pull_request' not in by_type:
+        raise ValueError('an existing pull-request rule is required')
+    review = by_type['pull_request'].get('parameters')
+    if not isinstance(review, dict):
+        raise ValueError('pull-request parameters must be an object')
+    count = review.get('required_approving_review_count')
+    if type(count) is not int or count < 0:
+        raise ValueError('approving review count must be a nonnegative integer')
     for flag in ('dismiss_stale_reviews_on_push', 'require_last_push_approval',
                  'required_review_thread_resolution'):
-        if review.get(flag) is not True:
-            raise ValueError(f'review protection missing: {flag}')
+        if type(review.get(flag)) is not bool:
+            raise ValueError(f'review setting must be a boolean: {flag}')
+    for flag in ('require_code_owner_review', 'require_extra_approval_for_unattributed_changes'):
+        if flag in review and type(review[flag]) is not bool:
+            raise ValueError(f'review setting must be a boolean: {flag}')
     if 'squash' not in review.get('allowed_merge_methods', []):
         raise ValueError('existing pull-request policy does not allow squash')
     return by_type

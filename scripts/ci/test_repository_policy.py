@@ -47,6 +47,49 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(result['rules'][-2]['parameters'], m.QUEUE)
         self.assertEqual(m.proposed(result), result)
 
+    def test_preserves_owner_and_stricter_review_settings_in_both_scopes_and_apply(self):
+        for count, last_push in ((0, False), (2, True)):
+            for security_only in (False, True):
+                with self.subTest(count=count, last_push=last_push, security_only=security_only):
+                    before = fixture()
+                    review = before['rules'][2]['parameters']
+                    review.update(required_approving_review_count=count, require_last_push_approval=last_push,
+                                  require_code_owner_review=False,
+                                  require_extra_approval_for_unattributed_changes=True,
+                                  required_reviewers=[], future_setting={'preserve': True})
+                    original = deepcopy(before)
+                    plan = m.make_plan(before, 'test/repo', 7, False, code_scanning_only=security_only)
+                    self.assertEqual(plan['proposed']['rules'][2], before['rules'][2])
+                    self.assertEqual(before, original)
+                    calls = []
+                    def api(endpoint, payload=None):
+                        calls.append((endpoint, payload))
+                        if '/compare/' in endpoint: return comparison(endpoint, 'identical')
+                        return before if payload is None else {**before, **payload}
+                    m.apply_plan(plan, None if security_only else 'd' * 40, 'a' * 40, api)
+                    written = next(payload for _, payload in calls if payload is not None)
+                    self.assertEqual(written['rules'][2], original['rules'][2])
+                    self.assertEqual(written['rules'][3], original['rules'][3])
+
+    def test_missing_or_malformed_pull_request_rule_fails_closed(self):
+        variants = [('required_approving_review_count', value) for value in (-1, True, False, 1.5, '0', None)]
+        variants += [(flag, value) for flag in ('dismiss_stale_reviews_on_push', 'require_last_push_approval',
+                                              'required_review_thread_resolution', 'require_code_owner_review',
+                                              'require_extra_approval_for_unattributed_changes')
+                     for value in (0, 1, 'false', None)]
+        for flag, value in variants:
+            before = fixture(); before['rules'][2]['parameters'][flag] = value
+            with self.subTest(flag=flag, value=value), self.assertRaises(ValueError):
+                m.proposed(before)
+        for mutation in ('missing_rule', 'missing_count', 'missing_flag', 'parameters_not_object'):
+            before = fixture()
+            if mutation == 'missing_rule': before['rules'].pop(2)
+            elif mutation == 'missing_count': del before['rules'][2]['parameters']['required_approving_review_count']
+            elif mutation == 'missing_flag': del before['rules'][2]['parameters']['require_last_push_approval']
+            else: before['rules'][2]['parameters'] = None
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                m.proposed(before)
+
     def test_preserves_stricter_codeql_and_other_tools(self):
         for security in ('medium_or_higher', 'all'):
             before = fixture()
@@ -65,13 +108,13 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(tool['security_alerts_threshold'], 'high_or_higher')
         self.assertEqual(tool['alerts_threshold'], 'errors')
 
-    def test_invalid_target_missing_checks_and_weakened_review_fail(self):
+    def test_invalid_target_missing_checks_and_malformed_review_fail(self):
         for mutation in ('target', 'conditions', 'checks', 'review', 'duplicate'):
             before = fixture()
             if mutation == 'target': before['target'] = 'tag'
             if mutation == 'conditions': before['conditions']['ref_name']['exclude'] = ['refs/heads/main']
             if mutation == 'checks': before['rules'][3]['parameters']['required_status_checks'].pop()
-            if mutation == 'review': before['rules'][2]['parameters']['require_last_push_approval'] = False
+            if mutation == 'review': before['rules'][2]['parameters']['require_last_push_approval'] = 'false'
             if mutation == 'duplicate': before['rules'].append(deepcopy(before['rules'][0]))
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                 m.proposed(before)
