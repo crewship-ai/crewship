@@ -251,3 +251,23 @@ func TestMigratedFixtureCleanup(t *testing.T) {
 		t.Fatalf("explicit cleanup left directory: %v", err)
 	}
 }
+
+// The existing opt-out must still bypass the shared template while retaining
+// ownership metadata needed to reclaim the private copy after process exit.
+func TestSharedTemplateOptOutUsesOwnedPrivateCopy(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := fixtureChild(executable, t.TempDir(), "template")
+	cmd.Env = append(cmd.Env, "CREWSHIP_TEST_SHARED_TEMPLATE=0")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("child: %v\n%s", err, output)
+	}
+	path := strings.Split(string(output), "\n")[0]
+	want := fmt.Sprintf("testdb-%d-", cmd.ProcessState.Pid())
+	if !strings.HasPrefix(filepath.Base(filepath.Dir(path)), want) {
+		t.Fatalf("opt-out used a shared or unowned template: %s", path)
+	}
+}

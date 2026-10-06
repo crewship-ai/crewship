@@ -100,6 +100,17 @@ func fixtureTemplateKey() (string, error) {
 }
 
 func buildMigratedTemplate() {
+	// Preserve main's explicit diagnostic opt-out. The private template is
+	// PID-owned, so a subsequent fixture process can reclaim it after exit.
+	if os.Getenv("CREWSHIP_TEST_SHARED_TEMPLATE") == "0" {
+		dir, err := newMigratedTestDir()
+		if err == nil {
+			migratedTemplatePath = filepath.Join(dir, "template.db")
+			err = migrateTemplateAt(migratedTemplatePath)
+		}
+		migratedTemplateErr = err
+		return
+	}
 	root, err := fixtureRoot()
 	if err == nil {
 		var key string
