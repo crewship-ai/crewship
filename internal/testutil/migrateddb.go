@@ -169,6 +169,14 @@ func MigratedTemplatePath(t testing.TB) string {
 	return path
 }
 
+// MigratedTemplate is MigratedTemplatePath for callers without a testing.TB —
+// a sync.Once-built fixture that derives its own images from the template
+// (cmd/crewship's doctor and ledger fixtures are the live examples). The same
+// read-only rule applies to the returned file.
+func MigratedTemplate() (string, error) {
+	return templatePath()
+}
+
 // MigratedDB returns a fully-migrated SQLite database that belongs to this test
 // alone. It is opened with database.Open, so it carries the production pragmas,
 // and it is closed (and its files removed) when the test finishes.
