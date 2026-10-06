@@ -1941,11 +1941,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1]
+        shard: [0, 1, 2, 3]
     runs-on: ubuntu-latest
     # Run 37145916427 needed 61m22s for this package group. Two balanced
-    # groups keep internal/backup (2028.5s) and internal/access (1725.3s)
-    # on separate runners. Fresh go list inventory includes new packages;
+    # groups kept internal/backup (2028.5s) and internal/access (1725.3s)
+    # on separate runners; with those fixed, each shard was bound by total
+    # work (~90 packages on 4 vCPUs, 30-35 min), so there are now four.
+    # Costs come from main run 37455853260 plus measured post-fix values.
+    # Fresh go list inventory includes new packages;
     # timings affect placement only, never whether a package executes.
     # Keep the 35m per-binary hang bound and 75m job cap unchanged. The
     # structural database exclusion and dedicated API/CLI coverage above
@@ -1966,7 +1969,7 @@ jobs:
         # is reproducible from the log without also having to replay a seed.
         env:
           SHARD_INDEX: ${{ matrix.shard }}
-        run: python3 scripts/ci/general-race-shard.py run "$SHARD_INDEX" 2 2100
+        run: python3 scripts/ci/general-race-shard.py run "$SHARD_INDEX" 4 2100
 
       - name: Upload test timings and event stream
         if: always()

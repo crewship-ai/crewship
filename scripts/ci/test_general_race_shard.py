@@ -44,11 +44,16 @@ class GeneralRaceShardTests(unittest.TestCase):
 
     def test_measured_inventory_is_balanced_and_heaviest_start_first(self):
         baseline = json.loads(Path(__file__).with_name("general-race-costs.json").read_text())
-        groups, totals = SHARD.partition(HELD + list(baseline["packages"]), 2,
-                                         baseline["packages"], baseline["default_seconds"])
-        self.assertEqual([g[0] for g in groups], [P + "internal/backup", P + "internal/access"])
-        self.assertLess(abs(totals[0] - totals[1]), 2)
-        self.assertEqual(sum(map(len, groups)), len(baseline["packages"]))
+        costs = baseline["packages"]
+        eligible = {p: c for p, c in costs.items() if p not in SHARD.DENIED | SHARD.DEDICATED}
+        heaviest = sorted(eligible, key=lambda p: (-max(1, eligible[p]), p))
+        for count in (2, 4):
+            groups, totals = SHARD.partition(HELD + list(costs), count, costs, baseline["default_seconds"])
+            # Largest-first: each shard opens with one of the `count` heaviest packages.
+            self.assertEqual([g[0] for g in groups], heaviest[:count])
+            # LPT bound: no shard exceeds another by more than one package's cost.
+            self.assertLessEqual(max(totals) - min(totals), max(eligible.values()))
+            self.assertEqual(sum(map(len, groups)), len(eligible))
 
     def test_executes_exact_partition_and_propagates_failure(self):
         with tempfile.TemporaryDirectory() as temp:
