@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/crashreport"
+	"github.com/crewship-ai/crewship/internal/database"
 )
 
 func TestDsnEndpointHostCov(t *testing.T) {
@@ -32,13 +33,33 @@ func TestDsnEndpointHostCov(t *testing.T) {
 	}
 }
 
+// installMigratedLocalDB puts an already-migrated database where openLocalDB
+// will look for it (CREWSHIP_DATA_DIR must already be set).
+//
+// The telemetry tests below are about consent: what setTelemetry writes and
+// what status prints. On an empty data dir every one of them also paid for
+// openLocalDB's fresh-install branch — the full migration chain, ~45 s each
+// under -race, which is SQLite re-parsing the schema under checkptr and not
+// I/O. That branch has its own test,
+// TestOpenLocalDB_InitializesAFreshDatabase, which still drives it for real;
+// these start from the database that branch produces instead.
+func installMigratedLocalDB(t *testing.T) {
+	t.Helper()
+	dd, err := database.DefaultDataDir()
+	if err != nil {
+		t.Fatalf("data dir: %v", err)
+	}
+	installMigratedDB(t, dd)
+}
+
 // TestSetTelemetry_RoundTrip drives setTelemetry against a throwaway
-// data dir (CREWSHIP_DATA_DIR override) — migrations run on the fresh
-// SQLite file, then the consent flag is written and read back via
-// crashreport.Status, proving the on/off path actually persists.
+// data dir (CREWSHIP_DATA_DIR override) holding a migrated SQLite file, then
+// the consent flag is written and read back via crashreport.Status, proving
+// the on/off path actually persists.
 func TestSetTelemetry_RoundTrip(t *testing.T) {
 	t.Setenv("CREWSHIP_DATA_DIR", t.TempDir())
 	t.Setenv("CREWSHIP_SENTRY_DSN", "https://key@host.example/1")
+	installMigratedLocalDB(t)
 	ctx := context.Background()
 
 	// Enable — prints success + endpoint host.
@@ -117,6 +138,9 @@ func TestTelemetryStatusRunE(t *testing.T) {
 	}
 
 	// Opt in → ENABLED branch with endpoint host + env-override source.
+	// The database setTelemetry would initialize is installed migrated (see
+	// installMigratedLocalDB); the "no database yet" status above ran first.
+	installMigratedLocalDB(t)
 	if err := setTelemetry(ctx, true); err != nil {
 		t.Fatalf("setTelemetry: %v", err)
 	}
@@ -202,6 +226,7 @@ func TestTelemetryStatusRunE_StableBuildUnconfiguredMessage(t *testing.T) {
 func TestTelemetryStatusRunE_EnabledWithoutDSNWarns(t *testing.T) {
 	t.Setenv("CREWSHIP_DATA_DIR", t.TempDir())
 	t.Setenv("CREWSHIP_SENTRY_DSN", "")
+	installMigratedLocalDB(t)
 	ctx := context.Background()
 	telemetryStatusCmd.SetContext(ctx)
 	if _, err := captureStderrCov(t, func() error {
@@ -233,6 +258,7 @@ func TestTelemetryStatusRunE_EnabledWithoutDSNWarns(t *testing.T) {
 func TestTelemetryOnOffCmds(t *testing.T) {
 	t.Setenv("CREWSHIP_DATA_DIR", t.TempDir())
 	t.Setenv("CREWSHIP_SENTRY_DSN", "")
+	installMigratedLocalDB(t)
 	telemetryOnCmd.SetContext(context.Background())
 	telemetryOffCmd.SetContext(context.Background())
 	stderr, err := captureStderrCov(t, func() error {
