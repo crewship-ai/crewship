@@ -6234,6 +6234,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   re-checks the epoch before caching and skips caching (not an error, just
   a forgone optimization for that one call) if a write landed in between.
 
+- **Repeated crew deletion or idle eviction could accumulate anonymous Docker volumes.** New noexec bind-volume records carry installation ownership and are reaped once unused, preserving host data, home/tools history and other installations; unlabelled historical volumes stay for operator investigation. Runtime recreation now reports container removal failures. (#2970)
+
 ## [1.0.0-rc.1] — 2026-07-12
 
 ### Security
