@@ -33,6 +33,18 @@ hashes and job/dependency additions/removals, exact SHAs, the source comparison
 link and the administrator decision. None of this replaces execution of the
 three required aggregate checks.
 
+After validating the live PR or queue target, each execution first writes a
+`pending` status to that exact head. It then inspects controls and validates any
+administrator exception. A same-head retry with invalid controls or refused
+permission therefore replaces an older green with pending; it cannot reuse the
+old successful report. Final success/failure is written only after a second live
+identity check. If GitHub is unavailable before target validation or rejects the
+pending write, the job cannot revoke an older successful status. That residual
+is explicit: the base-SHA Actions job failure alone does not invalidate a
+head-SHA commit status. Inspect the linked run; this shared-App operational
+guard does not establish the stronger independently controlled status boundary
+needed to eliminate every stale-status or spoofing path.
+
 ## Deliberate control changes
 
 A control-changing PR must include a refreshed candidate inventory. Use the
@@ -58,9 +70,14 @@ After reviewing the exact PR diff and the automatic guard report, a repository
 administrator may dispatch the trusted workflow on **main**:
 
 ```sh
-gh workflow run ci-inventory.yml --ref main \
-  -f pr_number=1234 \
-  -f expected_head_sha=<full-current-PR-head-SHA> \
+guard_repo=crewship-ai/crewship
+guard_pr_number=1234  # Set the actual reviewed canary/control PR number.
+guard_head_sha=$(gh pr view "$guard_pr_number" --repo "$guard_repo" --json headRefOid --jq .headRefOid)
+gh pr diff "$guard_pr_number" --repo "$guard_repo"
+# Review this exact head and the automatic report before dispatching.
+gh workflow run ci-inventory.yml --repo "$guard_repo" --ref main \
+  -f pr_number="$guard_pr_number" \
+  -f expected_head_sha="$guard_head_sha" \
   -f approve_control_changes=true
 ```
 
@@ -97,10 +114,16 @@ Unchanged controls pass. A control-changing group needs its **own** visible
 administrator exception; PR approval is not inherited from labels or artifacts:
 
 ```sh
-gh workflow run ci-inventory.yml --ref main \
-  -f queue_ref=refs/heads/gh-readonly-queue/main/<exact-generated-branch> \
-  -f expected_head_sha=<full-current-group-SHA> \
-  -f expected_base_sha=<full-current-main-SHA> \
+guard_repo=crewship-ai/crewship
+# Copy the actual generated branch from the merge_group event, not an invented ref.
+guard_queue_ref='refs/heads/gh-readonly-queue/main/REPLACE_WITH_ACTUAL_BRANCH'
+guard_head_sha=$(gh api "repos/$guard_repo/git/ref/${guard_queue_ref#refs/}" --jq .object.sha)
+guard_base_sha=$(gh api "repos/$guard_repo/git/ref/heads/main" --jq .object.sha)
+# Review the exact queue head diff and automatic report before dispatching.
+gh workflow run ci-inventory.yml --repo "$guard_repo" --ref main \
+  -f queue_ref="$guard_queue_ref" \
+  -f expected_head_sha="$guard_head_sha" \
+  -f expected_base_sha="$guard_base_sha" \
   -f approve_control_changes=true
 ```
 

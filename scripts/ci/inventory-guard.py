@@ -211,7 +211,7 @@ def verify_queue(api, repo, ref, head, trusted):
         raise Rejected('queue head or current trusted main base changed')
 
 
-def inspect(event, env, api, root=ROOT):
+def inspect(event, env, api, root=ROOT, on_target=None):
     repo = env.get('GITHUB_REPOSITORY')
     if repo != REPOSITORY or event.get('repository', {}).get('full_name') != repo:
         raise Rejected('unexpected repository')
@@ -242,12 +242,6 @@ def inspect(event, env, api, root=ROOT):
             if not isinstance(raw_number, str) or not re.fullmatch(r'[1-9][0-9]{0,8}', raw_number):
                 raise Rejected('dispatch requires an explicit PR number')
             number = int(raw_number)
-        value = inputs.get('approve_control_changes')
-        if type(value) not in (str, bool) or value not in ('true', 'false', True, False):
-            raise Rejected('dispatch requires an explicit approval boolean')
-        approved = value in ('true', True)
-        for actor in set((env.get('GITHUB_ACTOR', ''), env.get('GITHUB_TRIGGERING_ACTOR', ''))):
-            admin(api, repo, actor)
     else:
         raise Rejected('unsupported inventory guard event')
     if not isinstance(head, str) or not SHA.fullmatch(head):
@@ -263,6 +257,17 @@ def inspect(event, env, api, root=ROOT):
         head_repo = pr.get('head', {}).get('repo', {}).get('full_name', '')
         if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}', head_repo):
             raise Rejected('PR head repository unavailable')
+    # Invalidate an old same-head green only after live target identity is proven.
+    # Permission/approval validation follows pending; it still precedes approval.
+    if on_target is not None:
+        on_target(repo, head)
+    if kind == 'workflow_dispatch':
+        value = inputs.get('approve_control_changes')
+        if type(value) not in (str, bool) or value not in ('true', 'false', True, False):
+            raise Rejected('dispatch requires an explicit approval boolean')
+        approved = value in ('true', True)
+        for actor in set((env.get('GITHUB_ACTOR', ''), env.get('GITHUB_TRIGGERING_ACTOR', ''))):
+            admin(api, repo, actor)
     manifest = manifest_data(read_control(root, MANIFEST))
     baseline, candidate, changed, snapshot = {}, {}, [], {}
     protected = manifest['protected_files']
@@ -304,7 +309,12 @@ def inspect(event, env, api, root=ROOT):
 def execute(event, env, api, root=ROOT):
     output = Path('.ci-results/ci-inventory-report.json')
     output.unlink(missing_ok=True)  # A failed local retry must not reuse old success evidence.
-    report = inspect(event, env, api, root)
+    def pending(repo, head):
+        api('repos/' + repo + '/statuses/' + head, {
+            'state': 'pending', 'context': CONTEXT,
+            'description': 'Trusted control inspection in progress; prior result invalidated',
+            'target_url': 'https://github.com/' + repo + '/actions/runs/' + env['GITHUB_RUN_ID']})
+    report = inspect(event, env, api, root, on_target=pending)
     # Recheck live candidate identity immediately before status publication.
     if report['queue_ref']:
         verify_queue(api, report['repository'], report['queue_ref'], report['head_sha'], report['trusted_sha'])

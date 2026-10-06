@@ -233,8 +233,33 @@ class GuardTests(unittest.TestCase):
         (self.root / 'scripts/ci/plan.py').write_text('changed trusted baseline')
         with self.assertRaises(m.Rejected): self.inspect()
 
-    def test_head_change_before_publication_never_posts_status(self):
+    def test_head_change_before_publication_never_posts_success(self):
         self.advance = True
+        with self.assertRaises(m.Rejected): m.execute(self.event, self.env, self.api, self.root)
+        self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending'])
+
+    def test_same_head_invalid_control_retry_invalidates_previous_success(self):
+        import os
+        previous = os.getcwd()
+        try:
+            os.chdir(self.root)
+            self.assertEqual(m.execute(self.event, self.env, self.api, self.root)['state'], 'success')
+            self.calls.clear()
+            self.changes['.github/workflows/ci.yml'] = b'jobs:\n'
+            with self.assertRaises(m.Rejected): m.execute(self.event, self.env, self.api, self.root)
+            self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending'])
+            self.assertFalse((self.root / '.ci-results/ci-inventory-report.json').exists())
+        finally: os.chdir(previous)
+
+    def test_valid_target_pending_precedes_refused_dispatch_authorization(self):
+        self.dispatch(); self.permission = 'write'
+        with self.assertRaises(m.Rejected): m.execute(self.event, self.env, self.api, self.root)
+        writes = [(endpoint, payload) for endpoint, payload in self.calls if payload is not None]
+        self.assertEqual([payload['state'] for _, payload in writes], ['pending'])
+        self.assertTrue(writes[0][0].endswith('/statuses/' + self.head))
+        self.assertFalse(any('/contents/' in endpoint for endpoint, _ in self.calls))
+        self.calls.clear(); self.permission = 'admin'
+        self.event['inputs']['expected_head_sha'] = 'c' * 40
         with self.assertRaises(m.Rejected): m.execute(self.event, self.env, self.api, self.root)
         self.assertFalse(any(payload is not None for _, payload in self.calls))
 
@@ -258,7 +283,7 @@ class GuardTests(unittest.TestCase):
             os.chdir(self.root)
             m.execute(self.event, self.env, self.api, self.root)
         finally: os.chdir(previous)
-        status = next((endpoint, payload) for endpoint, payload in self.calls if payload is not None)
+        status = [(endpoint, payload) for endpoint, payload in self.calls if payload is not None][-1]
         self.assertTrue(status[0].endswith('/statuses/' + self.head))
         self.assertEqual(status[1]['state'], 'success')
         self.assertTrue((self.root / '.ci-results/ci-inventory-report.json').is_file())
@@ -283,7 +308,7 @@ class GuardTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(m.Rejected): self.inspect()
         self.event = original; self.advance = True; self.queue_reads = 0
         with self.assertRaises(m.Rejected): m.execute(self.event, self.env, self.api, self.root)
-        self.assertFalse(any(payload is not None for _, payload in self.calls))
+        self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending'])
 
     def test_workflow_privilege_boundary_never_checks_out_pr_or_installs_dependencies(self):
         workflow = (ROOT / '.github/workflows/ci-inventory.yml').read_text()
