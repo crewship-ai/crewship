@@ -184,3 +184,27 @@ func TestMigratedTemplateEnv_OnlyTheSameBinaryInherits(t *testing.T) {
 		}
 	})
 }
+
+// Stopping concurrently with the first take must leave no worker running,
+// and a take after stop must not hand out a copy.
+func TestPrefetch_StopRacingFirstTakeStartsNoLateWorkers(t *testing.T) {
+	requirePrefetchable(t)
+	stop := PrefetchMigratedDBs(2, 2)
+	prefetchMu.Lock()
+	p := activePrefetch
+	prefetchMu.Unlock()
+	done := make(chan struct{})
+	go func() { p.start.Do(p.startWorkers); close(done) }()
+	stop()
+	<-done
+	p.mu.Lock()
+	closed := p.closed
+	p.mu.Unlock()
+	if !closed {
+		t.Fatal("shutdown did not mark the prefetcher closed")
+	}
+	p.wg.Wait()
+	if _, ok := takePrefetched(); ok {
+		t.Fatal("a copy was handed out after stop")
+	}
+}
