@@ -19,7 +19,23 @@ shard = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(shard)
 
 
+def load_for(package):
+    with patch.dict(os.environ, {'RACE_SHARD_PACKAGE': package}):
+        module_spec = importlib.util.spec_from_file_location('race_shard_for_package', SCRIPT)
+        module = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(module)
+        return module
+
+
 class APIRaceShards(unittest.TestCase):
+    def test_package_selection_defaults_to_api_and_accepts_only_module_packages(self):
+        self.assertEqual(shard.PACKAGE_DIR, './internal/api')
+        cli = load_for('github.com/crewship-ai/crewship/cmd/crewship')
+        self.assertEqual((cli.PACKAGE, cli.PACKAGE_DIR), ('github.com/crewship-ai/crewship/cmd/crewship', './cmd/crewship'))
+        for bad in ['github.com/other/repo/pkg', 'github.com/crewship-ai/crewship/../x', 'github.com/crewship-ai/crewship/a b', './internal/api']:
+            with self.assertRaises(SystemExit):
+                load_for(bad)
+
     def manifests(self, names=None):
         names = names or [f'TestRoute{i:03}' for i in range(81)] + ['ExampleRequest', 'FuzzRoute', 'TestČeský']
         inventory, partitions = shard.partition('\n'.join(reversed(names)) + '\nok package 0.1s\n', 4)

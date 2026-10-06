@@ -128,7 +128,7 @@ class WorkflowContracts(unittest.TestCase):
 
     def test_race_partition_workers_and_complete_evidence_are_required(self):
         ci = self.text('ci.yml')
-        for job, indices in [('go-race', '[0, 1]'), ('go-race-api-shards', '[0, 1, 2, 3]')]:
+        for job, indices in [('go-race', '[0, 1]'), ('go-race-api-shards', '[0, 1, 2, 3, 4, 5]'), ('go-race-cli-shards', '[0, 1, 2]')]:
             worker = self.job(ci, job)
             self.assertIn('fail-fast: false', worker)
             self.assertIn('shard: ' + indices, worker)
@@ -138,7 +138,7 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('name: Go Race (internal/api)', api)
         self.assertIn('needs: [changes, go-race-api-shards]', api)
         self.assertIn('test "$SHARD_RESULT" = success', api)
-        self.assertIn('api-race-shard.py report .ci-api-shards 4 2300', api)
+        self.assertIn('api-race-shard.py report .ci-api-shards 6 2300', api)
         self.assertNotIn('merge-multiple: true', api)
         self.assertIn('path: .ci-api-shards/', api)
         self.assertIn('if: always()', api)
@@ -146,7 +146,7 @@ class WorkflowContracts(unittest.TestCase):
         baseline = int(re.search(r'RACE_API_BASELINE_SECONDS: "(\d+)"', workers).group(1))
         count, report_baseline = map(int, re.search(r'api-race-shard.py report \.ci-api-shards (\d+) (\d+)', api).groups())
         self.assertEqual(baseline, report_baseline)
-        self.assertEqual(count, 4)
+        self.assertEqual(count, 6)
         cap = int(re.search(r'timeout-minutes: (\d+)', workers).group(1))
         env_cap = int(re.search(r'JOB_CAP_MINUTES: "(\d+)"', workers).group(1))
         overhead = int(re.search(r'JOB_OVERHEAD_MINUTES: "(\d+)"', workers).group(1))
