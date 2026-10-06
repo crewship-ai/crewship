@@ -18,6 +18,102 @@ class WorkflowContracts(unittest.TestCase):
     def job(self, text, name):
         return re.search(r'^  ' + re.escape(name) + r':\n(.*?)(?=^  [a-z][\w-]*:\n|\Z)', text, re.M | re.S).group(1)
 
+    def test_osv_covers_every_shipped_npm_lockfile(self):
+        security = self.text('security.yml')
+        osv = self.job(security, 'osv-scan')
+        scanned = set(re.findall(r'--lockfile=([^\s\\]+)', osv))
+        # Both the application and its isolated Pages compiler ship npm code.
+        # Discover their locks so a future nested compiler cannot silently lose
+        # scanning when someone edits the workflow.
+        shipped = {'pnpm-lock.yaml'} | {
+            str(p.relative_to(ROOT)) for p in (ROOT / 'tools' / 'pages-build').rglob('pnpm-lock.yaml')
+            if 'node_modules' not in p.parts
+        }
+        self.assertTrue(shipped - {'pnpm-lock.yaml'})
+        self.assertLessEqual(shipped | {'go.mod'}, scanned)
+        router = self.job(security, 'changes')
+        for pattern in ('**/package.json', '**/pnpm-lock.yaml', '**/pnpm-workspace.yaml'):
+            self.assertIn("'" + pattern + "'", router)
+    def test_cli_subprocess_race_instruments_the_actual_artifact(self):
+        ci = self.text('ci.yml')
+        lane = self.job(ci, 'cli-subprocess-race')
+        self.assertIn('python3 scripts/ci/cli-subprocess-race.py', lane)
+        self.assertNotIn('continue-on-error:', lane)
+        self.assertIn('include-hidden-files: true', lane)
+        self.assertIn('if-no-files-found: error', lane)
+        helper = (ROOT / 'cmd/crewship/cmd_model_test.go').read_text()
+        self.assertIn('TEST_CREWSHIP_CLI_RACE', helper)
+        self.assertIn('args = append(args, "-race")', helper)
+        conversation = (ROOT / 'cmd/crewship/cmd_conversation_test.go').read_text()
+        self.assertIn('return buildCrewshipBinary(t)', conversation)
+        self.assertNotIn('exec.Command("go", "build"', conversation)
+    def test_actual_tree_passes_reusable_image_gate(self):
+        result = subprocess.run(['bash', 'scripts/pr-image-build-paths.sh'],
+                                cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('Reusable image build is required by CI Result', result.stdout)
+
+    def test_cross_language_parity_lanes_remain_required(self):
+        from parity import TESTS
+        ci = self.text('ci.yml')
+        changes = self.job(ci, 'changes')
+        for name, flag in [('go-parity', 'go_parity'), ('frontend-parity', 'frontend_parity'), ('docs-inventory', 'docs_inventory')]:
+            self.assertIn(f'{flag}: ${{{{ steps.plan.outputs.{flag} }}}}', changes)
+            job = self.job(ci, name)
+            self.assertIn(f"if: needs.changes.outputs.{flag} == 'true'", job)
+            self.assertNotIn('continue-on-error', job)
+        self.assertIn('python3 scripts/ci/parity.py', self.job(ci, 'go-parity'))
+        self.assertIn('go run ./scripts/docs-inventory -strict', self.job(ci, 'docs-inventory'))
+        self.assertIn('lib/__tests__/telemetry-call-sites.test.ts', self.job(ci, 'frontend-parity'))
+        self.assertIn('vitest run hooks/__tests__/realtime-allowlist-docs-parity.test.ts',
+                      self.job(ci, 'frontend-parity'))
+        # Renaming/deleting a contract requires updating its runner, rather
+        # than silently selecting zero tests with Go's successful exit code.
+        for path, names in TESTS.items():
+            source = '\n'.join(p.read_text() for p in (ROOT / path).glob('*_test.go'))
+            for name in names:
+                self.assertRegex(source, r'func ' + re.escape(name) + r'\(t \*testing.T\)')
+
+    def test_test_files_reading_docs_have_routing_contracts(self):
+        from plan import GO_DOC_TESTS, FRONTEND_DOC_TESTS
+        declared = {(doc, test) for mapping in [GO_DOC_TESTS, FRONTEND_DOC_TESTS]
+                    for doc, test in mapping.items()}
+        discovered = set()
+        # Conservative literal discovery covers direct fs reads and constants
+        # passed to reads. New computed paths need an explicit reviewed map.
+        for root in ['cmd', 'internal', 'app', 'components', 'hooks', 'lib', 'stores', 'scripts']:
+            for path in (ROOT / root).rglob('*'):
+                if not path.name.endswith(('_test.go', '.test.ts', '.test.tsx')):
+                    continue
+                source = path.read_text()
+                if not re.search(r'os\.ReadFile\(|readFileSync\(|readRepoFile\(', source):
+                    continue
+                if root == 'scripts':
+                    # Script tests construct synthetic docFile/report records and
+                    # write temporary pages, sometimes using real page names.
+                    # Discover read arguments and named doc constants instead;
+                    # constants may live in a sibling package source file.
+                    package_source = '\n'.join(p.read_text() for p in path.parent.glob('*.go'))
+                    constants = re.findall(r'const\s+(\w+)\s*=\s*[\"\'](docs/[^\"\']+\.mdx?)[\"\']', package_source)
+                    docs = {doc for name, doc in constants if re.search(r'\b' + re.escape(name) + r'\b', source)}
+                    reads = re.findall(r'(?:os\.ReadFile|readRepoFile)\([^\n]+', source)
+                    for read in reads:
+                        docs.update(re.findall(r'[\"\'](?:\.\./)*(docs/[^\"\']+\.mdx?)[\"\']', read, re.I))
+                else:
+                    docs = re.findall(r'[\"\'](?:\.\./)*(docs/[^\"\']+\.mdx?)[\"\']', source, re.I)
+                for doc in docs:
+                    discovered.add((doc, path.relative_to(ROOT).as_posix()))
+        # This literal is synthetic JSON in a seed-pack fixture; its fs read
+        # targets a Python script. There is no product document to route.
+        fixture = ('docs/x.mdx', 'cmd/crewship/seeddata/packs_test.go')
+        self.assertIn(fixture, discovered)
+        self.assertFalse((ROOT / fixture[0]).exists())
+        discovered.remove(fixture)
+        self.assertEqual(discovered, declared, 'Map new test-read documentation into its required parity lane')
+        frontend = self.job(self.text('ci.yml'), 'frontend-parity')
+        for path in FRONTEND_DOC_TESTS.values():
+            self.assertIn(path, frontend)
+
     def test_race_shards_are_parallel_and_required(self):
         ci = self.text('ci.yml')
         race = self.job(ci, 'go-race')
