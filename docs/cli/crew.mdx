@@ -49,7 +49,7 @@ crewship crew <subcommand> [flags]
 | `restart-agents` | Drop the runtime container so the next exec rebuilds from the cached image |
 | `image-status` | Report whether the running container is behind its image tag |
 | `refresh-image` | Pull the current image and recycle the container so agents pick it up |
-| `rebuild` | Invalidate the cache and re-provision the container |
+| `rebuild` | Rebuild the image without reusing the build cache; the previous image stays selected until the new build succeeds |
 | `apply-avatar-style` | Apply (or reset) an avatar style across every agent in the crew |
 | `cache list` | List cached devcontainer images (`crewship-cache:*`) |
 | `cache prune` | Remove old or unreferenced cached images |

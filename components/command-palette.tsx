@@ -38,6 +38,7 @@ import {
   CommandItem,
 } from "@/components/ui/command"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useTrustedWorkspaceId } from "@/hooks/use-access-mode"
 import { getCrewDotColor } from "@/lib/entities"
 import { apiFetch } from "@/lib/api-fetch"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -390,6 +391,9 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const router = useRouter()
   const { workspaceId, role } = useWorkspace()
+  // The lists below are not on the restricted allowlist; a restricted (or
+  // not-yet-known) session gets the static rows only.
+  const listWorkspaceId = useTrustedWorkspaceId()
   const { abilities } = useAbilities()
   // Who is looking, for the Recent key only. The lists need no gate on it:
   // every fetch is RBAC-filtered server-side against the session cookie.
@@ -510,7 +514,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   // it stops the in-flight request when a newer keystroke replaces it, and
   // it drops a late response that would otherwise overwrite fresher rows.
   useEffect(() => {
-    if (!open || !workspaceId) return
+    if (!open || !listWorkspaceId) return
     const trimmed = query.trim()
     if (trimmed.length < CONVERSATION_SEARCH_MIN_QUERY) {
       setConversations([])
@@ -518,7 +522,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     }
     const ac = new AbortController()
     const timer = setTimeout(() => {
-      void searchConversations(trimmed, { workspaceId, signal: ac.signal }).then((hits) => {
+      void searchConversations(trimmed, { workspaceId: listWorkspaceId, signal: ac.signal }).then((hits) => {
         if (ac.signal.aborted) return
         setConversations(hits)
         // One event per request that actually ran, so the count is searches
@@ -536,7 +540,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       clearTimeout(timer)
       ac.abort()
     }
-  }, [open, workspaceId, query])
+  }, [open, listWorkspaceId, query])
 
   // Only hits that can actually be opened. A hit whose agent slug did not
   // resolve has nowhere to navigate, and a row that goes nowhere is worse
@@ -565,10 +569,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     setIntegrations([])
     setPages([])
     setPagesLoaded(false)
-    if (!open || !workspaceId || authStatus === "unauthenticated") return
+    if (!open || !listWorkspaceId || authStatus === "unauthenticated") return
     const ac = new AbortController()
-    const qs = `workspace_id=${workspaceId}`
-    const ws = encodeURIComponent(workspaceId)
+    const qs = `workspace_id=${listWorkspaceId}`
+    const ws = encodeURIComponent(listWorkspaceId)
 
     const opts = { signal: ac.signal }
     // Every list is RBAC-filtered server-side, so what comes back is already
@@ -615,7 +619,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     })
 
     return () => ac.abort()
-  }, [open, workspaceId, userId, authStatus])
+  }, [open, listWorkspaceId, userId, authStatus])
 
   function runCommand(fn: () => void) {
     onOpenChange(false)

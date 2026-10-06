@@ -5,6 +5,7 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/moby/moby/api/types/container"
@@ -435,8 +436,8 @@ func TestEnsureCrewRuntime_PausedContainerWithOldContractIsNotTornDown(t *testin
 	}
 	p := f.provider(t, cfg)
 
-	if _, err := p.EnsureCrewRuntime(context.Background(), covTeam()); err != nil {
-		t.Fatalf("EnsureCrewRuntime: %v", err)
+	if _, err := p.EnsureCrewRuntime(context.Background(), covTeam()); err == nil || !strings.Contains(err.Error(), "paused") {
+		t.Fatalf("expected actionable paused error, got %v", err)
 	}
 
 	f.mu.Lock()

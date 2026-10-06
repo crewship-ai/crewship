@@ -172,6 +172,9 @@ jobs:
       code: ${{ steps.plan.outputs.code }}
       go: ${{ steps.plan.outputs.go }}
       release: ${{ steps.plan.outputs.release }}
+      go_parity: ${{ steps.plan.outputs.go_parity }}
+      frontend_parity: ${{ steps.plan.outputs.frontend_parity }}
+      docs_inventory: ${{ steps.plan.outputs.docs_inventory }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -347,6 +350,15 @@ jobs:
       # every other check green; this step is what goes red.
       - name: onboarding journey is gated on PRs
         run: bash scripts/onboarding-gate-test.sh
+
+      # Same "a green check that never ran" shape, one gate over: #2874's
+      # restricted-member shell spec was classified nightly-only, so the PR
+      # that introduced it executed the spec zero times (run 37212203211,
+      # job 111468832143) with every check green. This step is what goes red
+      # if the PR-side step, its config selection or the spec's core
+      # assertions quietly disappear.
+      - name: restricted member shell is gated on PRs
+        run: bash scripts/restricted-shell-gate-test.sh
 
       # Three compiled binaries have reached main by the same route — `go build
       # ./scripts/<tool>` with no -o writes into the repo root, `git add -A`
@@ -882,6 +894,9 @@ jobs:
   # Five deterministic checks are selected in playwright.pr.config.ts. The
   # provider-backed chat send/receive path and the remaining specs stay in the
   # explicit nightly buckets; they are not silently treated as PR coverage.
+  # Three further isolated-fixture suites run against the static export with
+  # every API response mocked: credential reveal, provider account groups and
+  # the restricted member shell (#2861 part 1).
   playwright-pr:
     needs: [merge-conflict-markers, changes, binary]
     if: needs.changes.outputs.code == 'true'
@@ -995,6 +1010,13 @@ jobs:
       - name: Verify account group UI and role gating
         timeout-minutes: 3
         run: pnpm exec playwright test --config=playwright.pool-ui.config.ts --output=pool-ui-test-results
+      - name: Verify restricted member shell UI
+        # #2861 part 1. Fully mocked (page.route) and provider-free, like the
+        # reveal/pool-ui fixtures beside it. PR #2874 classified the spec into
+        # nightly GATE_SPECS only, so the PR run 37212203211 executed it zero
+        # times while every check stayed green.
+        timeout-minutes: 3
+        run: pnpm exec playwright test --config=playwright.restricted.config.ts --output=restricted-test-results
       - name: Upload Playwright PR evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -1005,6 +1027,7 @@ jobs:
             test-results/
             reveal-test-results/
             pool-ui-test-results/
+            restricted-test-results/
           if-no-files-found: warn
       - name: Dump browser server log on failure
         if: failure()
@@ -1188,6 +1211,59 @@ jobs:
         run: |
           set -uo pipefail
           [ -f /tmp/crewship-onboarding.pid ] && kill "$(cat /tmp/crewship-onboarding.pid)" 2>/dev/null || true
+
+  # Cross-language contracts still run when docs/frontend edits skip Go or
+  # frontend suites. Full owning suites provide the same evidence otherwise.
+  go-parity:
+    name: Go documentation and frontend parity
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go_parity == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Check documented provider order and frontend vocabularies
+        timeout-minutes: 10
+        run: python3 scripts/ci/parity.py
+
+  frontend-parity:
+    name: Frontend documentation parity
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.frontend_parity == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Check documented realtime and telemetry events
+        timeout-minutes: 3
+        run: pnpm exec vitest run hooks/__tests__/realtime-allowlist-docs-parity.test.ts lib/__tests__/telemetry-call-sites.test.ts
+
+  docs-inventory:
+    name: API and CLI documentation inventory
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.docs_inventory == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Require documentation contract evidence without the Go matrix
+        timeout-minutes: 10
+        run: timeout --kill-after=30s 8m go run ./scripts/docs-inventory -strict
 
   # ── Frontend: lint, typecheck, build ──
   frontend:
@@ -1757,6 +1833,32 @@ jobs:
   # would just vanish from its effect, and in the shard's case would take its
   # coverage with it while both jobs stayed green. The step below fails if
   # any entry in either list stops resolving against `go list ./...`.
+  cli-subprocess-race:
+    name: CLI subprocess race boundaries
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Require instrumented CLI and named acceptance scenarios
+        timeout-minutes: 15
+        run: python3 scripts/ci/cli-subprocess-race.py
+      - name: Preserve executed subprocess race evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cli-subprocess-race-${{ github.sha }}
+          path: .ci-results/cli-subprocess-race*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
   # The CLI package has its own race runner after repeated aggregate 25m
   # timeouts on September 10 (run 34466543067, both attempts). The same
   # package passed in 1163.213s on C's retry (run 34460363617). Its isolated
@@ -2206,7 +2308,7 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [release-rehearsal, image, changes, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
+    needs: [release-rehearsal, image, changes, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli, cli-subprocess-race, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
