@@ -1,7 +1,7 @@
 package testutil
 
 // migrateddb.go provides a *fully-migrated* SQLite database for tests, built
-// once per test process and handed out as a private per-test copy.
+// once per migration fingerprint across processes and copied privately per test.
 //
 // Why this exists
 // ---------------
@@ -80,53 +80,48 @@ var (
 // FULL semantics opens its own handle with database.Open and says so.
 var testSynchronous = database.WithSynchronous(database.SynchronousNormal)
 
-// buildMigratedTemplate migrates one SQLite file and leaves it on disk as the
-// template every later call copies.
-//
-// The template directory is intentionally not registered for cleanup with any
-// single test: the template outlives every individual test in the process, so
-// there is no test whose lifetime it could be tied to. Go's test binary has no
-// "process exit" hook that is safe here either (TestMain belongs to the package
-// under test, not to this helper).
-//
-// So it leaks, and the size is worth stating accurately rather than waving at.
-// A migrated template measures 2,879,488 bytes (2.75 MiB). One copy is kept per
-// test binary, and 23 packages use this helper, so a full `go test ./...`
-// leaves ~63 MiB in os.TempDir() for the OS to reclaim. Before this helper
-// existed the same leak was one template (internal/api's), so this is 23x more
-// of an existing habit, not a new kind of problem — but it is not "a handful of
-// KiB" either, and someone running the suite in a loop will notice.
-//
-// The migration run itself is no longer per binary: migrateddb_shared.go keys
-// one template on the source tree and every test process copies it. What still
-// leaks per process is that private copy, kept on purpose so a test that writes
-// to MigratedTemplatePath cannot corrupt a sibling process.
-func buildMigratedTemplate() {
-	// Shared, content-addressed template first (see migrateddb_shared.go):
-	// one migration run per source tree instead of one per test binary. Any
-	// failure there — no module root, no flock, an unwritable temp dir — falls
-	// back to the private per-process build below, which is what this helper
-	// always did, so the shared path can only make a run faster, never fail it.
-	if path, err := sharedMigratedTemplate(); err == nil {
-		migratedTemplatePath = path
-		return
-	}
-	dir, err := os.MkdirTemp("", "crewship-migrated-template-")
+// Use one immutable template across processes without leaking per-process copies.
+// In a source checkout, include main's full migration dependency closure in the key.
+func fixtureTemplateKey() (string, error) {
+	key, err := database.MigrationFingerprint()
 	if err != nil {
-		migratedTemplateErr = err
-		return
+		return "", err
 	}
-	path := filepath.Join(dir, "template.db")
-	if err := migrateTemplateAt(path); err != nil {
-		migratedTemplateErr = err
-		return
+	if os.Getenv("CREWSHIP_TEST_SHARED_TEMPLATE") != "0" {
+		if root, err := findModuleRoot(); err == nil {
+			closure, err := sharedTemplateKey(root)
+			if err != nil {
+				return "", err
+			}
+			key += "-" + closure
+		}
 	}
-	migratedTemplatePath = path
+	return key, nil
 }
 
-// migrateTemplateAt runs the full migration chain into a new SQLite file at
-// path and folds its WAL back into the main file, so the result is one
-// self-contained file that a plain copy reproduces exactly.
+func buildMigratedTemplate() {
+	// Preserve main's explicit diagnostic opt-out. The private template is
+	// PID-owned, so a subsequent fixture process can reclaim it after exit.
+	if os.Getenv("CREWSHIP_TEST_SHARED_TEMPLATE") == "0" {
+		dir, err := newMigratedTestDir()
+		if err == nil {
+			migratedTemplatePath = filepath.Join(dir, "template.db")
+			err = migrateTemplateAt(migratedTemplatePath)
+		}
+		migratedTemplateErr = err
+		return
+	}
+	root, err := fixtureRoot()
+	if err == nil {
+		var key string
+		key, err = fixtureTemplateKey()
+		if err == nil {
+			migratedTemplatePath, err = sharedTemplate(root, key, migrateTemplateAt)
+		}
+	}
+	migratedTemplateErr = err
+}
+
 func migrateTemplateAt(path string) error {
 	db, err := database.Open("file:"+path, testSynchronous)
 	if err != nil {
@@ -174,14 +169,15 @@ func migrateTemplateAt(path string) error {
 	return nil
 }
 
-// MigratedTemplatePath returns the path of the process-wide migrated template
-// file, building it on first use. Callers that want their own copy should use
-// MigratedDB / MigratedDBAt instead; this is for the rare test that needs the
-// raw file (e.g. to hand a pre-migrated DB path to a subprocess or to a
+// MigratedTemplatePath returns the path of the shared migrated template
+// file, building it under a cross-process lock on first use. Callers that want
+// their own copy should use MigratedDB / MigratedDBAt instead; this is for the
+// rare test that needs the raw file (e.g. to hand a pre-migrated DB path to a
+// subprocess or to a
 // component that opens the file itself).
 //
 // The returned file must be treated as read-only. Writing to it corrupts every
-// later MigratedDB call in the same process.
+// later MigratedDB call in any process using these migrations.
 func MigratedTemplatePath(t testing.TB) string {
 	t.Helper()
 	path, err := templatePath()
@@ -254,7 +250,7 @@ func NewMigratedDB() (*database.DB, func(), error) {
 	if _, err := templatePath(); err != nil {
 		return nil, nil, err
 	}
-	dir, err := os.MkdirTemp("", "crewship-testdb-")
+	dir, err := newMigratedTestDir()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -321,11 +317,11 @@ func templatePath() (string, error) {
 // path, the failure reappears somewhere else and looks unrelated to the change
 // that caused it. The helper therefore keeps the safe contract everywhere:
 // quiesce properly (see quiesce below), and if something still survives, log
-// what it was instead of failing a bystander. The OS reclaims the directory
-// regardless.
+// what it was instead of failing a bystander. Later fixture-owning processes
+// reclaim survivors once the owning process has exited (see fixturecache.go).
 func migratedTestDir(t testing.TB) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "crewship-testdb-")
+	dir, err := newMigratedTestDir()
 	if err != nil {
 		t.Fatalf("testutil: create temp dir: %v", err)
 	}
