@@ -1605,8 +1605,6 @@ jobs:
       # Execution order stays SOURCE ORDER here, deliberately. -shuffle=on
       # lives in the non-blocking `go-shuffle` job below; see that job for
       # why it is not on the blocking gate yet.
-      - name: Go test
-        run: go test ./... -count=1 -timeout 15m
 
   # ── Go: shuffled execution order ──
   #
@@ -1651,11 +1649,41 @@ jobs:
   #
   # Promoted after six consecutive successful sampled main runs in the
   # 2026-09-11 audit. CI Result requires a real successful shuffle run.
+  # The full non-race suite, split by package (largest-first by measured
+  # cost) so it no longer runs after vet and four builds in one job.
+  # go-package-shard.py proves the partitions cover `go list ./...` exactly
+  # once; costs only decide placement.
+  go-test:
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
+    name: Go test (shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Go test (package partition)
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -timeout 15m
+
   go-shuffle:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.go == 'true'
-    name: Go Shuffle
+    name: Go Shuffle (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     # Same invariant as `go`: cap MUST exceed overhead + `go test -timeout`
     # so Go's goroutine dump wins over GitHub's opaque cancel. Measured at
     # 11m52s for the full suite (job 90889450094) back when internal/api and
@@ -1683,23 +1711,13 @@ jobs:
         # Reproducing needs the WHOLE package — the dependency is on other
         # tests in it, so narrowing with -run will make it pass. That is the
         # tell that you are looking at shared state, not a broken assertion.
-        run: |
-          set -euo pipefail
-          # No skip list any more: every package is shuffled. Resist adding
-          # one back. A package parked here silently loses order-dependence
-          # coverage, and the state that caused it goes on leaking into
-          # whichever test is unlucky — which is the failure mode this job
-          # exists to surface, not to route around.
-          n="$(go list ./... | grep -c .)"
-          # Guard against the list collapsing, same as the `go` job: `go test`
-          # with zero packages exits 0, so a truncated list would look like a
-          # full green run.
-          if [ "$n" -lt 90 ]; then
-            echo "::error::go list returned only $n packages — expected ~108. Refusing to report a pass on a truncated package list."
-            exit 1
-          fi
-          echo "Shuffling all $n packages."
-          go test ./... -count=1 -shuffle=on -timeout 18m
+        # No skip list: every package is shuffled, in exactly one partition.
+        # go-package-shard.py refuses a truncated listing (< 90 packages;
+        # `go test` with zero packages exits 0) and proves the partitions
+        # cover `go list ./...` exactly once.
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -shuffle=on -timeout 18m
 
   # ── Go: race detector ──
   #
@@ -2412,7 +2430,7 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [release-rehearsal, image, changes, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test-types, frontend-test-shards, frontend-test, binary, go, go-race, go-race-cli-shards, go-race-cli, cli-subprocess-race, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
+    needs: [release-rehearsal, image, changes, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test-types, frontend-test-shards, frontend-test, binary, go, go-test, go-race, go-race-cli-shards, go-race-cli, cli-subprocess-race, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
