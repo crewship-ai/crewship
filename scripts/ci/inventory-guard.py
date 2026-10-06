@@ -17,6 +17,11 @@ PROTECTED = ('.github/workflows/ci.yml', '.github/workflows/security.yml', '.git
              'scripts/ci/plan.py', 'scripts/ci/verdict.py')
 WORKFLOWS = dict(zip(PROTECTED[:3], ('CI Result', 'Security Result', 'CodeQL Result')))
 SELF = ('scripts/ci/inventory-guard.py', '.github/workflows/ci-inventory.yml', MANIFEST)
+# Closed namespace: everything a required workflow can execute. Five files
+# carry job inventories; every other file here is compared by Git blob hash,
+# so editing, adding or deleting a helper is a control change too.
+NAMESPACES = ('.github/', 'scripts/ci/')
+SCRIPT_REF = re.compile(r'(?<![\w./-])(scripts/[A-Za-z0-9_./-]+)')
 CONTEXT = 'CI Inventory Guard'
 LIMIT = 256 * 1024
 TREE_LIMIT = 5 * 1024 * 1024
@@ -138,9 +143,11 @@ class API:
             raise Rejected('GitHub API request failed or returned invalid data') from None
 
 
-def candidate_tree(api, repo, sha, paths):
+def candidate_tree(api, repo, sha, paths, namespace=None):
     # Contents can dereference symlinks: require original Git modes separately.
     data = api('repos/' + repo + '/git/trees/' + sha + '?recursive=1')
+    if namespace is not None and isinstance(data, dict) and isinstance(data.get('tree'), list):
+        namespace.extend(data['tree'])
     if (not isinstance(data, dict) or data.get('truncated') is not False
             or not isinstance(data.get('tree'), list) or len(data['tree']) > 30000):
         raise Rejected('candidate Git tree missing, truncated or exceeds entry limit')
@@ -162,6 +169,45 @@ def candidate_tree(api, repo, sha, paths):
     if set(entries) != set(paths):
         raise Rejected('candidate Git tree is missing protected control paths')
     return entries
+
+
+def in_namespace(path, referenced):
+    return path.startswith(NAMESPACES) or path in referenced or any(path.startswith(r.rstrip('/') + '/') for r in referenced)
+
+
+def referenced_scripts(root):
+    refs = set()
+    for workflow in (root / '.github' / 'workflows').glob('*.y*ml'):
+        refs.update(m.rstrip('.') for m in SCRIPT_REF.findall(workflow.read_text(errors='replace')))
+    return refs
+
+
+def trusted_namespace(root, referenced):
+    blobs = {}
+    for top in ('.github', 'scripts'):
+        for path in sorted((root / top).rglob('*')):
+            rel = path.relative_to(root).as_posix()
+            if not in_namespace(rel, referenced) or path.is_dir():
+                continue
+            if path.is_symlink() or not path.is_file():
+                raise Rejected('trusted namespace entry must be a regular file: ' + rel)
+            raw = path.read_bytes()
+            blobs[rel] = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+    return blobs
+
+
+def namespace_changes(tree, root):
+    referenced = referenced_scripts(root)
+    before = trusted_namespace(root, referenced)
+    after = {}
+    for entry in tree:
+        path = entry.get('path') if isinstance(entry, dict) else None
+        if not isinstance(path, str) or entry.get('type') == 'tree' or not in_namespace(path, referenced):
+            continue
+        if entry.get('type') != 'blob' or entry.get('mode') not in ('100644', '100755') or not SHA.fullmatch(str(entry.get('sha'))):
+            raise Rejected('candidate namespace entry must be a regular Git blob: ' + path)
+        after[path] = entry['sha']
+    return sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
 
 
 def content(api, repo, path, sha, entry):
@@ -272,7 +318,8 @@ def inspect(event, env, api, root=ROOT, on_target=None):
     baseline, candidate, changed, snapshot = {}, {}, [], {}
     protected = manifest['protected_files']
     paths = sorted(set(protected) | set(SELF))
-    tree = candidate_tree(api, head_repo, head, paths)
+    whole = []
+    tree = candidate_tree(api, head_repo, head, paths, whole)
     for path in paths:
         if path.startswith('/') or '..' in path.split('/'):
             raise Rejected('invalid trusted control path')
@@ -296,6 +343,9 @@ def inspect(event, env, api, root=ROOT, on_target=None):
             candidate[path]['added_required_jobs'] = sorted(set(candidate[path]['required_jobs']) - set(entry['required_jobs']))
             candidate[path]['removed_jobs'] = sorted(set(baseline[path]['jobs']) - set(candidate[path]['jobs']))
             candidate[path]['added_jobs'] = sorted(set(candidate[path]['jobs']) - set(baseline[path]['jobs']))
+    for path in namespace_changes(whole, root):
+        if path not in changed:
+            changed.append(path)
     candidate_errors = candidate_manifest_errors(snapshot[MANIFEST], snapshot)
     return {'repository': repo, 'pr_number': number, 'head_sha': head,
             'queue_ref': queue_ref, 'trusted_sha': trusted, 'diff_url': 'https://github.com/' + repo + '/compare/' + trusted + '...' + head, 'event': kind, 'actor': env.get('GITHUB_ACTOR'),
@@ -339,7 +389,7 @@ if __name__ == '__main__':
             if destination.is_symlink():
                 raise Rejected('inventory destination must not be a symlink')
             destination.write_text(json.dumps(refreshed(snapshot), indent=2) + '\n')
-            print('Candidate inventory refreshed from five control files as data; no code executed')
+            print('Candidate inventory refreshed from the fixed control files as data; no code executed')
             sys.exit(0)
         if len(sys.argv) != 1:
             raise Rejected('usage: inventory-guard.py [--refresh-inventory CANDIDATE_ROOT]')

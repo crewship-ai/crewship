@@ -1,11 +1,11 @@
 {
   "version": 1,
   "protected_files": {
-    ".github/workflows/ci.yml": "e1645e413ea6323b35adf0f7bbf895c8a08fe4fc4c4aac408dce924e6139d9f9",
+    ".github/workflows/ci.yml": "8de60ed8045cab972b85ef321975c346d1ca0766e43935d43149194e8b3fb0bd",
     ".github/workflows/security.yml": "1270227a2db7f0fbd376021ab4e6e3d24071a448383e6dca2be7d4598779264e",
     ".github/workflows/codeql.yml": "7e37b5e2301b9cf4cb94413cbb882914b39c2d78cfa15ea8eff0bdd256a66e39",
     "scripts/ci/plan.py": "4383e14ede409fff4077013342dd7acb6146d8808ea376c53e4a0202ba1514aa",
-    "scripts/ci/verdict.py": "2800179735b45a620b4901f34313dd5555910d2fea8ed9787603b836d7f43bbd"
+    "scripts/ci/verdict.py": "8b8be020996272e54c39b06822e3d669f7e7b0f435137ed6446d8a4990b9f025"
   },
   "workflows": {
     ".github/workflows/ci.yml": {
@@ -19,6 +19,8 @@
         "frontend",
         "frontend-parity",
         "frontend-test",
+        "frontend-test-shards",
+        "frontend-test-types",
         "go",
         "go-lint",
         "go-parity",
@@ -27,7 +29,9 @@
         "go-race-api",
         "go-race-api-shards",
         "go-race-cli",
+        "go-race-cli-shards",
         "go-shuffle",
+        "go-test",
         "harness-pr",
         "image",
         "managed-environments",

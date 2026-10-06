@@ -22,8 +22,16 @@ inventory against trusted main. A PR changing a workflow condition, matrix,
 aggregate, routing, verdict or the guard itself therefore cannot silently lower
 these controls. Changes to protected files require a separate visible decision,
 including harmless edits: this deliberately conservative guard does not infer
-whether a change weakens coverage. It is not an immutable inventory of every
-product test or every script those workflows invoke.
+whether a change weakens coverage.
+
+Beyond those files the guard holds a closed namespace: every file under
+`.github/` (all workflows and composite actions), every file under
+`scripts/ci/`, and every `scripts/…` path or directory a trusted workflow
+references. From the same recursive tree it compares each file's Git blob hash
+with trusted main, so editing, adding or deleting a helper such as
+`scripts/ci/go-test.sh` or a shard script is a control change requiring the
+same administrator decision; symlinks and non-blob entries fail closed. Product
+tests and code outside this namespace are not inventoried.
 
 For PR-target runs the Actions job belongs to the trusted main SHA. The guard explicitly
 creates the separate `CI Inventory Guard` commit status on the current PR head,

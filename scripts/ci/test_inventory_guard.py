@@ -87,6 +87,34 @@ class GuardTests(unittest.TestCase):
         self.env.update(GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_ACTOR='Srbino', GITHUB_TRIGGERING_ACTOR='Srbino')
         self.event['inputs'] = {'pr_number': '12', 'expected_head_sha': self.head, 'approve_control_changes': approval}
 
+    def blob(self, raw):
+        return dict(mode='100644', type='blob', size=len(raw),
+                    sha=hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest())
+
+    def test_helper_namespace_edit_add_and_delete_are_control_changes(self):
+        helper = self.root / 'scripts/ci/go-test.sh'
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        helper.write_bytes(b'go test "$@"\n')
+        cases = {
+            'unchanged': (lambda t: t['tree'].append(dict(path='scripts/ci/go-test.sh', **self.blob(b'go test "$@"\n'))), []),
+            'edited': (lambda t: t['tree'].append(dict(path='scripts/ci/go-test.sh', **self.blob(b'exit 0\n'))), ['scripts/ci/go-test.sh']),
+            'deleted': (lambda t: None, ['scripts/ci/go-test.sh']),
+            'added': (lambda t: t['tree'].extend([dict(path='scripts/ci/go-test.sh', **self.blob(b'go test "$@"\n')),
+                                                  dict(path='.github/actions/new/action.yml', **self.blob(b'runs: {}\n'))]),
+                      ['.github/actions/new/action.yml']),
+        }
+        for name, (mutate, expected) in cases.items():
+            with self.subTest(name):
+                self.tree_mutation = mutate
+                report = self.inspect()
+                self.assertEqual(report['changed_control_files'], expected)
+                self.assertEqual(report['state'], 'success' if not expected else 'failure')
+
+    def test_namespace_rejects_symlinks_and_non_blob_entries(self):
+        self.tree_mutation = lambda t: t['tree'].append(dict(path='scripts/ci/link.sh', mode='120000', type='blob', size=4, sha='d' * 40))
+        with self.assertRaisesRegex(m.Rejected, 'regular Git blob'):
+            self.inspect()
+
     def test_unchanged_inventory_uses_exact_fork_sha_as_data(self):
         report = self.inspect()
         self.assertEqual(report['state'], 'success')
