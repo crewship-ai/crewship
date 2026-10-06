@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **CI: the CLI race suite runs in three partitions and internal/api in six (#2931).** `Go Race (CLI)` and `Go Race (internal/api)` keep their names and now verify that their partitions cover the full test inventory exactly once. The CLI race job took 16–26 minutes as one process; each partition runs about a third of it.
 - **Restricted conversations built their context 4x slower than necessary as history grew (#2959).** Every prompt re-checks the origin authority of each recalled entry three times, and each check parsed the same SQL again. Those checks now reuse prepared statements within their transaction; queries, arguments, isolation and revocation behaviour are unchanged. A 155-turn conversation drops from 116 ms to 29 ms per turn, and the race-instrumented `internal/access` CI package, previously the pipeline's 25-minute critical path, shrinks accordingly.
 
 - **Repeating `crewship seed --nuke --with-users` could fail to restore RBAC fixtures.** Workspace cleanup preserves global accounts, so the seed now authenticates retained fixture accounts with their documented passwords and restores membership through the normal guarded API. Account IDs, passwords and other sessions are preserved; changed passwords are refused.

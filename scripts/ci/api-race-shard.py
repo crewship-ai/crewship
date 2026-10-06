@@ -16,7 +16,13 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE = 'github.com/crewship-ai/crewship/internal/api'
+MODULE = 'github.com/crewship-ai/crewship'
+# One script partitions every race package that outgrew a single runner.
+# Default stays internal/api so existing invocations keep their meaning.
+PACKAGE = os.environ.get('RACE_SHARD_PACKAGE', MODULE + '/internal/api')
+if not PACKAGE.startswith(MODULE + '/') or not re.fullmatch(r'[\w./-]+', PACKAGE) or '..' in PACKAGE:
+    raise SystemExit(f'::error::invalid RACE_SHARD_PACKAGE {PACKAGE!r}')
+PACKAGE_DIR = './' + PACKAGE[len(MODULE) + 1:]
 # Linux limits EACH argv string, independently of total ARG_MAX. Leave room
 # for the terminator and fail clearly as the suite grows, never truncate it.
 MAX_PATTERN_BYTES = 120_000
@@ -78,14 +84,14 @@ def run(index, count, timeout):
     manifest_path.unlink(missing_ok=True)
     # Match build tags/instrumentation to execution, including tests guarded
     # by //go:build race. A failed enumeration must abort the run.
-    inventory = subprocess.check_output(['go', 'test', './internal/api', '-race', '-list', '.'],
+    inventory = subprocess.check_output(['go', 'test', PACKAGE_DIR, '-race', '-list', '.'],
                                         cwd=ROOT, text=True)
     names, shards = partition(inventory, count)
     selected = shards[index]
     pattern = selection_pattern(selected)
     manifest = {'index': index, 'count': count, 'inventory_count': len(names),
                 'inventory_sha256': fingerprint(names), 'selected': selected}
-    print(f'API race shard {index}/{count}: {len(selected)} of {len(names)} parents', flush=True)
+    print(f'{PACKAGE_DIR} race shard {index}/{count}: {len(selected)} of {len(names)} parents', flush=True)
     result = subprocess.run(['bash', str(ROOT / 'scripts/ci/go-test.sh'), PACKAGE,
                              '-race', '-count=1', '-timeout', f'{timeout}s', '-run', pattern],
                             cwd=ROOT, env=dict(os.environ, CI_RESULTS_DIR=str(directory)))
@@ -129,7 +135,7 @@ def report(directory, count, baseline):
     manifests = [json.loads(path.read_text()) for path in Path(directory).rglob('api-race-shard.json')]
     seconds, total = validate_manifests(manifests, count)
     alarm = baseline * 1.6
-    summary = (f'### Go Race (internal/api) — combined budget\n\n'
+    summary = (f'### Go Race ({PACKAGE_DIR[2:]}) — combined budget\n\n'
                f'{total} top-level tests covered exactly once across {count} shards.\n\n'
                f'Summed package seconds: {seconds:.3f}; full-package baseline: {baseline}s; '
                f'erosion alarm: {alarm:.0f}s ({seconds / baseline:.2f}x baseline).\n'
