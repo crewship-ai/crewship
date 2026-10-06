@@ -128,7 +128,7 @@ class WorkflowContracts(unittest.TestCase):
 
     def test_race_partition_workers_and_complete_evidence_are_required(self):
         ci = self.text('ci.yml')
-        for job, indices in [('go-race', '[0, 1]'), ('go-race-api-shards', '[0, 1, 2, 3, 4, 5]'), ('go-race-cli-shards', '[0, 1, 2]')]:
+        for job, indices in [('go-race', '[0, 1, 2, 3]'), ('go-race-api-shards', '[0, 1, 2, 3, 4, 5]'), ('go-race-cli-shards', '[0, 1, 2]')]:
             worker = self.job(ci, job)
             self.assertIn('fail-fast: false', worker)
             self.assertIn('shard: ' + indices, worker)
