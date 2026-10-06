@@ -62,7 +62,7 @@ commands. They may publish or remove release/package artifacts.
 | [test-harness-integrity.sh](test-harness-integrity.sh) | Checks the acceptance harness itself |
 | [ci/cli-subprocess-race.py](ci/cli-subprocess-race.py) | Runs named authentication, conversation and stream boundaries with both the outer tests and shared CLI subprocess instrumented; rejects missing/skipped tests and preserves JSON execution evidence |
 | [ci/general-race-shard.py](ci/general-race-shard.py) | `python3 scripts/ci/general-race-shard.py run INDEX COUNT TIMEOUT_SECONDS`: runs a complete package partition under the race detector; checked-in measured costs balance work, while fresh `go list` inventory determines coverage; writes the partition record to `.ci-results/` |
-| [ci/api-race-shard.py](ci/api-race-shard.py) | `python3 scripts/ci/api-race-shard.py run INDEX COUNT TIMEOUT_SECONDS`: runs an API test partition; `report ARTIFACT_DIRECTORY COUNT BASELINE_SECONDS` validates and summarizes all shard records |
+| [ci/api-race-shard.py](ci/api-race-shard.py) | `python3 scripts/ci/api-race-shard.py run INDEX COUNT TIMEOUT_SECONDS`: runs one race partition of `RACE_SHARD_PACKAGE` (default `internal/api`; CI also partitions `cmd/crewship`); `report ARTIFACT_DIRECTORY COUNT BASELINE_SECONDS` validates that the shards cover the full inventory exactly once and summarizes their combined budget |
 
 Go checker directories are run with `go run ./scripts/<directory>` unless their
 local instructions say otherwise. Companion `*-test.sh`, `*-test.mjs` and
