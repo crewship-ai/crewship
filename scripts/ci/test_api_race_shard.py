@@ -41,7 +41,8 @@ class APIRaceShards(unittest.TestCase):
         inventory, partitions = shard.partition('\n'.join(reversed(names)) + '\nok package 0.1s\n', 4)
         return [{'index': i, 'count': 4, 'inventory_count': len(inventory),
                  'inventory_sha256': shard.fingerprint(inventory), 'selected': selected,
-                 'seconds': 10} for i, selected in enumerate(partitions)]
+                 'seconds': 10, 'package': shard.PACKAGE, 'source_sha': 'a' * 40}
+                for i, selected in enumerate(partitions)]
 
     def test_complete_disjoint_inventory_includes_new_tests_and_unicode(self):
         manifests = self.manifests()
@@ -67,7 +68,7 @@ class APIRaceShards(unittest.TestCase):
     def test_aggregate_rejects_missing_duplicate_overlap_and_partial_evidence(self):
         good = self.manifests()
         cases = [good[:-1], good + [good[0]]]
-        for mutation in ['index', 'overlap', 'missing', 'hash', 'count', 'duration']:
+        for mutation in ['index', 'overlap', 'missing', 'hash', 'count', 'duration', 'package', 'sha']:
             items = copy.deepcopy(good)
             if mutation == 'index': items[0]['index'] = 1
             if mutation == 'overlap': items[0]['selected'][0] = items[1]['selected'][0]
@@ -75,10 +76,16 @@ class APIRaceShards(unittest.TestCase):
             if mutation == 'hash': items[0]['inventory_sha256'] = 'bad'
             if mutation == 'count': items[0]['count'] = 2
             if mutation == 'duration': items[0]['seconds'] = float('nan')
+            if mutation == 'package':
+                for item in items: item['package'] = 'github.com/crewship-ai/crewship/cmd/crewship'
+            if mutation == 'sha': items[0]['source_sha'] = 'b' * 40
             cases.append(items)
         for items in cases:
             with self.subTest(items=items), self.assertRaises(ValueError):
                 shard.validate_manifests(items, 4)
+        with self.assertRaisesRegex(ValueError, 'this revision'):
+            shard.validate_manifests(good, 4, 'c' * 40)
+        self.assertEqual(shard.validate_manifests(good, 4, 'a' * 40)[1], 84)
 
     def invoke(self, inventory='TestOne\nTestTwo\nTestThree\nTestFour', list_exit=0, test_exit=0, omit=False):
         with tempfile.TemporaryDirectory() as temp:
