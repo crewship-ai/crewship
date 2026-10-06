@@ -30,8 +30,11 @@ func waitPrefetched(t *testing.T, n int) {
 
 func requirePrefetchable(t *testing.T) {
 	t.Helper()
-	if runtime.GOMAXPROCS(0) < 2 {
-		t.Skip("prefetching is disabled at GOMAXPROCS=1 by design")
+	// Prefetching is disabled at GOMAXPROCS=1 by design; run these tests
+	// with two procs instead of skipping them on single-CPU runners.
+	if prev := runtime.GOMAXPROCS(0); prev < 2 {
+		runtime.GOMAXPROCS(2)
+		t.Cleanup(func() { runtime.GOMAXPROCS(prev) })
 	}
 }
 
