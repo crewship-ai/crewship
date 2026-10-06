@@ -5,7 +5,7 @@ import os
 import sys
 
 GO = {'cli-subprocess-race', 'go', 'go-race', 'go-race-cli-shards', 'go-race-cli', 'go-race-api', 'go-race-api-shards', 'go-platforms', 'go-lint', 'go-shuffle', 'managed-environments'}
-CODE = {'image', 'binary', 'frontend', 'frontend-test', 'harness-pr', 'cli-command-smoke', 'onboarding-default-boots', 'pages-apps', 'playwright-pr', 'onboarding-journey'}
+CODE = {'image', 'binary', 'frontend', 'frontend-test', 'frontend-test-types', 'frontend-test-shards', 'harness-pr', 'cli-command-smoke', 'onboarding-default-boots', 'pages-apps', 'playwright-pr', 'onboarding-journey'}
 PARITY = {'go-parity': 'go_parity', 'frontend-parity': 'frontend_parity', 'docs-inventory': 'docs_inventory'}
 ALWAYS = {'changes', 'merge-conflict-markers', 'shell'}
 

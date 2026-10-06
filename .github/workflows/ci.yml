@@ -1356,52 +1356,103 @@ jobs:
           path: out/
           retention-days: 1
 
-  # ── Frontend tests (Vitest) ──
-  frontend-test:
+  # ── Frontend tests: four complete partitions, one global coverage gate ──
+  frontend-test-types:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.code == 'true'
-    name: Frontend Test
+    name: Frontend test types and artifact security
     runs-on: ubuntu-latest
-    # 15, not 10: on 2026-09-04 the job ran 8 min on main under org-wide
-    # runner contention and was cancelled at the 10-min cap on two main
-    # commits and on three PRs whose diffs touched no frontend file, with
-    # every test still passing when the axe fell (the #1998 cancelled-vs-
-    # failure ambiguity, live). Quiet-hours runs take 5-6 min, so this is
-    # headroom for contention, not a licence for a slower suite -- a run
-    # that needs it in quiet hours is a regression to look at.
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-
       - uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
-
-      - name: Type-check tests
+      - name: Type-check tests once
+        timeout-minutes: 9
         run: |
           node --test scripts/typecheck-tests-node-test.mjs
-          pnpm test:types
-
-      # Coverage, not a bare test run: vitest exits non-zero when the
-      # thresholds in vitest.config.ts are not met, which is what makes
-      # that gate real rather than decorative.
-      - name: Test
-        run: pnpm test:coverage
-
+          timeout --kill-after=30s 8m pnpm test:types
       - name: E2E private artifact security tests
+        timeout-minutes: 2
         run: node --test e2e/helpers/private-artifacts.test.mjs
 
-      - name: Upload coverage (lcov)
+  frontend-test-shards:
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.code == 'true'
+    name: Frontend Test (partition ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    # The old single-job 15m cap allowed a 12m measured Vitest run little
+    # daylight. With four partitions expected test time is ~3–4m, but the
+    # install action permits 8m. Keep 8m tool < 9m step, plus setup < 20m job.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Run isolated partition with complete coverage inventory
+        timeout-minutes: 9
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: timeout --kill-after=30s 8m python3 scripts/ci/vitest-shard.py run "$SHARD_INDEX" 4
+      - name: Preserve partition reports and identity
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: vitest-shard-${{ matrix.shard }}-${{ github.sha }}
+          path: .ci-results/vitest/
+          include-hidden-files: true
+          if-no-files-found: error
+          overwrite: true
+          compression-level: 1
+          retention-days: 7
+
+  frontend-test:
+    needs: [changes, frontend-test-types, frontend-test-shards]
+    if: always() && needs.changes.outputs.code == 'true'
+    name: Frontend Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Require every partition and type check
+        env:
+          SHARD_RESULT: ${{ needs.frontend-test-shards.result }}
+          TYPE_RESULT: ${{ needs.frontend-test-types.result }}
+        run: test "$SHARD_RESULT" = success && test "$TYPE_RESULT" = success
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Download every partition from this run
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: vitest-shard-*-${{ github.sha }}
+          path: .ci-results/vitest-downloads/
+      - name: Require complete test union and global coverage thresholds
+        timeout-minutes: 9
+        run: timeout --kill-after=30s 8m python3 scripts/ci/vitest-shard.py merge .ci-results/vitest-downloads 4
+      - name: Upload merged coverage and inventory evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: frontend-coverage-lcov
-          path: coverage/lcov.info
-          if-no-files-found: warn
+          path: |
+            coverage/lcov.info
+            .ci-results/vitest-merge/inventory.json
+          if-no-files-found: error
           retention-days: 14
+          overwrite: true
 
   # ── Go: vet, build, test ──
   go:
@@ -2361,7 +2412,7 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [release-rehearsal, image, changes, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli-shards, go-race-cli, cli-subprocess-race, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
+    needs: [release-rehearsal, image, changes, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test-types, frontend-test-shards, frontend-test, binary, go, go-race, go-race-cli-shards, go-race-cli, cli-subprocess-race, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
