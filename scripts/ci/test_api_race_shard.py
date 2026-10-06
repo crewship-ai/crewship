@@ -144,11 +144,11 @@ sys.exit(int(os.environ['TEST_EXIT']))
                 (directory / 'api-race-shard.json').write_text(json.dumps(manifest))
             for event, expected in [('pull_request', 0), ('merge_group', 0), ('push', 1)]:
                 output = io.StringIO()
-                with patch.dict(os.environ, GITHUB_EVENT_NAME=event, GITHUB_STEP_SUMMARY=os.devnull), redirect_stdout(output):
+                with patch.dict(os.environ, GITHUB_EVENT_NAME=event, GITHUB_STEP_SUMMARY=os.devnull, GITHUB_SHA='a' * 40), redirect_stdout(output):
                     self.assertEqual(shard.report(root, 4, 20), expected)
                 self.assertIn('::error::' if event == 'push' else '::warning::', output.getvalue())
             output = io.StringIO()
-            with patch.dict(os.environ, GITHUB_EVENT_NAME='push', GITHUB_STEP_SUMMARY=os.devnull), redirect_stdout(output):
+            with patch.dict(os.environ, GITHUB_EVENT_NAME='push', GITHUB_STEP_SUMMARY=os.devnull, GITHUB_SHA='a' * 40), redirect_stdout(output):
                 self.assertEqual(shard.report(root, 4, 100), 0)
             self.assertNotIn('::error::', output.getvalue())
 
