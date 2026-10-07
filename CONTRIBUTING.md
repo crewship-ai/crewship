@@ -225,6 +225,37 @@ the failure at the affected boundary (CLI/API, restart, Docker or restore).
 Historical bot tooling remains available for old PR investigations only; see
 [the archived process](docs/development/coderabbit-review-process.md).
 
+## Merge through the queue
+
+After recording the review and validation, enqueue with
+`gh pr merge <PR> --auto --squash`. GitHub CLI enables auto-merge while required
+checks are pending and adds an eligible PR to a required merge queue. Do not
+repeatedly merge main into the branch just to chase other queued merges: the
+queue tests its candidate against the current base. Use
+`--match-head-commit <SHA>` when submitting a reviewed head to prevent a concurrent push from
+changing the candidate.
+
+The queue policy uses one PR per merge group and becomes usable only after
+actual PR and merge-group canaries prove that every required context is emitted.
+`CI Result`, `Security Result`, `CodeQL Result` and `CI Inventory Guard` (once
+required) must execute on `merge_group`; a planned skip must still match the
+change plan. Main pushes retain the full exact-SHA verification required by
+publication. Queueing is not permission to remove those checks.
+
+A PR or merge group that changes protected CI controls also needs a visible,
+exact-SHA exception recorded through the trusted-main inventory guard. A new
+head or group SHA needs fresh review; this exception does not bypass required
+checks or authorize an administrative merge.
+
+Do not use `--admin` or a direct REST merge to bypass the queue. An emergency
+exception requires a recorded reason, responsible operator, reviewed head SHA
+and successful required checks for that exact SHA in the PR before merging.
+
+Measure changes with [the read-only PR throughput collector](scripts/ci/pr-throughput.md).
+Compare complete PR open-to-merge time, evidenced final substantive push-to-merge
+time, workflow queue/execution, failure rate and reruns. A new run after a push
+or automatic branch update is not a rerun attempt.
+
 ## Issues
 
 Use one of the templates in

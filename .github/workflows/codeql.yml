@@ -8,10 +8,10 @@ name: CodeQL
 # coded crypto material, untrusted-input flows that the others miss.
 #
 # Findings land in the Security tab (Code scanning alerts) as SARIF.
-# We intentionally do NOT fail PRs on CodeQL findings yet — the first
-# pass against an established codebase typically surfaces dozens of
-# medium-severity hits that need triage. Promote `fail-on-severity`
-# once the baseline is clean.
+# CodeQL Result proves execution. The reviewed native code_scanning ruleset
+# can block eligible new High/Critical findings independently of historical
+# alerts. Native findings protection excludes merge queue groups; their
+# CodeQL Result remains execution evidence (see the CI/CD policy runbook).
 
 on:
   merge_group:
@@ -47,65 +47,20 @@ permissions:
   actions: read
 
 jobs:
-  # Router: on pull_request, run each language's analysis only when that
-  # language's sources (or its dependency manifests) changed. A Go-only PR
-  # skips the JS pass and vice versa; a workflow/docs-only PR skips both
-  # (~6 runner-minutes saved per PR). push to main and the weekly schedule
-  # always run both, so nothing lands or lingers unanalyzed.
+  # Native required-tool merge protection needs current-PR analysis evidence.
+  # Run both languages even for docs-only PRs; a skipped scan cannot establish
+  # that evidence. This deliberately spends extra analysis time on small PRs.
   changes:
-    name: Detect changed languages
+    name: Plan required languages
     runs-on: ubuntu-latest
     timeout-minutes: 3
     outputs:
       include: ${{ steps.matrix.outputs.include }}
     steps:
-      - id: filter
-        if: github.event_name == 'pull_request'
-        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
-        with:
-          filters: |
-            go:
-              - ".github/workflows/codeql.yml"
-              - ".github/codeql/**"
-              - ".github/actions/**"
-              - '**/*.go'
-              - 'go.mod'
-              - 'go.sum'
-            js:
-              - ".github/workflows/codeql.yml"
-              - ".github/codeql/**"
-              - ".github/actions/**"
-              - '**/*.ts'
-              - '**/*.tsx'
-              - '**/*.js'
-              - '**/*.jsx'
-              - '**/*.mjs'
-              - '**/*.cjs'
-              - 'package.json'
-              - 'pnpm-lock.yaml'
-
-      # Compose the analyze matrix. `matrix` context is not available in a
-      # job-level `if`, so per-language skipping is done by building the
-      # include list dynamically: languages a PR didn't touch never get a
-      # runner at all. Build-mode notes live here now: `manual` + an
-      # explicit Go build gives full control over compilation flags —
-      # CodeQL's autobuild can miss tagged builds; manual mode is what
-      # release.yml uses too.
       - id: matrix
-        env:
-          IS_PR: ${{ github.event_name == 'pull_request' }}
-          GO_CHANGED: ${{ steps.filter.outputs.go }}
-          JS_CHANGED: ${{ steps.filter.outputs.js }}
         run: |
           set -euo pipefail
-          entries=()
-          if [ "$IS_PR" != "true" ] || [ "$GO_CHANGED" = "true" ]; then
-            entries+=('{"language":"go","build-mode":"manual"}')
-          fi
-          if [ "$IS_PR" != "true" ] || [ "$JS_CHANGED" = "true" ]; then
-            entries+=('{"language":"javascript-typescript","build-mode":"none"}')
-          fi
-          include="[$(IFS=,; echo "${entries[*]-}")]"
+          include='[{"language":"go","build-mode":"manual"},{"language":"javascript-typescript","build-mode":"none"}]'
           echo "include=$include" >> "$GITHUB_OUTPUT"
           echo "analyze matrix: $include"
 
@@ -125,7 +80,7 @@ jobs:
     # find out why rather than raising it again.
     timeout-minutes: 45
     needs: changes
-    # Empty include (docs/CI-only PR) would fail matrix expansion — guard it.
+    # Fail-safe guard for malformed/empty planning output; the plan includes both languages.
     if: needs.changes.outputs.include != '[]'
     strategy:
       fail-fast: false
@@ -176,9 +131,8 @@ jobs:
         with:
           category: "/language:${{ matrix.language }}"
           # upload: defaults to true; explicit for clarity. SARIF results
-          # go to the Security tab regardless of `fail-on-severity` so
-          # findings are visible without blocking the PR while the
-          # baseline gets triaged.
+          # go to the Security tab for native ruleset evaluation; the
+          # workflow aggregate below checks execution, not finding severity.
           upload: always
 
   result:
@@ -198,6 +152,6 @@ jobs:
           n = json.loads(os.environ['RESULTS'])
           assert n['changes']['result'] == 'success', 'language detection failed'
           plan = json.loads(n['changes']['outputs']['include'])
-          expected = 'success' if plan else 'skipped'
-          assert n['analyze']['result'] == expected, f"CodeQL expected {expected}, got {n['analyze']['result']}"
+          assert sorted((p['language'], p['build-mode']) for p in plan) == [('go', 'manual'), ('javascript-typescript', 'none')], 'both required CodeQL languages must run'
+          assert n['analyze']['result'] == 'success', f"CodeQL analyses did not succeed: {n['analyze']['result']}"
           PY
