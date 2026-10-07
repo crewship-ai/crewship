@@ -3,7 +3,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react"
 import { usePipelineRuns, type PipelineRun } from "@/hooks/use-pipeline-runs"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
-import { useWorkspace } from "@/hooks/use-workspace"
+import { useTrustedWorkspaceId } from "@/hooks/use-access-mode"
 import { ACTIVE_STATUSES } from "@/lib/activity/run-filters"
 
 // useActiveRoutineRuns — the single workspace-scoped "what routine is
@@ -129,7 +129,9 @@ const EMPTY: ActiveRoutineRunsValue = {
 const ActiveRoutineRunsContext = createContext<ActiveRoutineRunsValue | null>(null)
 
 export function ActiveRoutineRunsProvider({ children }: { children: ReactNode }) {
-  const { workspaceId } = useWorkspace()
+  // Pipeline runs are not on the restricted allowlist: null until the session
+  // is known to be trusted, which keeps the feed (and its poll) off.
+  const workspaceId = useTrustedWorkspaceId()
   // Unfiltered feed at the full 200-row budget: one stream supplies
   // both the live derivation and the RECENT terminal slice (see the
   // header comment for the tradeoff).

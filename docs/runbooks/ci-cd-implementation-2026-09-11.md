@@ -30,7 +30,7 @@ historical test costs are placement estimates, not predicted wall-clock times.
 
 `Security Result` and `CodeQL Result` distinguish planned exclusions from unexpected skipped/cancelled/failed jobs. CodeQL success proves analysis executed, not that all historic SARIF alerts were remediated; the existing alert tracking policy remains. The deterministic API shape checks still block; the broader Schemathesis finding exemption remains explicit and needs its separate API remediation work.
 
-Recommended required contexts are `CI Result`, `Security Result`, `CodeQL Result`, with a pull-request requirement and conversation resolution. Roll out the rules only after these checks exist on the merged workflow. Enabling them while older branches lack the jobs requires those branches to update from main. The required automated review still needs to be read: a throttled green status is not a review. Do not remove the repository's claim/review process.
+Recommended required contexts are `CI Result`, `Security Result`, `CodeQL Result`, with a pull-request requirement and conversation resolution. Roll out the rules only after these checks exist on the merged workflow. Enabling them while older branches lack the jobs requires those branches to update from main. Review the final diff and findings, record concrete evidence, and label self-review honestly; bot reviews are not a merge prerequisite. Do not remove the repository's claim/review process.
 
 ## Image and publication
 
@@ -97,4 +97,91 @@ The first actual Nightly run 34649402647 passed binary packaging/signing/scannin
 
 After #2509, the actual Nightly scan passed but its second platform pull failed: classic Docker image stores cannot bind both platform images to the same index digest (`cannot overwrite digest`, run 34656533357). The smoke helper now resolves the requested platform to exactly one child manifest in the immutable index before pulling it; missing/ambiguous platform entries fail closed. Publication and signature verification continue to identify the original index, and each boot still verifies the full embedded source SHA. Local PR image tags and single-platform manifest digests remain supported.
 
+The release/nightly legal checker (`scripts/check-release-artifacts.sh`) also
+resolves each platform child before creating its extraction container. It logs
+both the child and original index, checks the shipped project legal files and
+every Go/npm manifest text by SHA-256, and reports only platforms that passed.
+Descriptor inspection or resolution failures remain UNVERIFIED and fail under
+`--strict`; they cannot bypass either platform's legal/hash checks. Local image
+tags retain their existing behavior.
+
 The manual `PR Image Build` workflow, with `registry_image` and `expected_sha` inputs, replays both architecture boots against one supplied registry digest and expected SHA, without rebuilding or publishing. It can validate a candidate before another publication attempt; success does not promote that candidate. This specifically exercises sequential pulls on the same runner, which independent AMD64/ARM build jobs do not cover.
+
+## Review and apply repository policy (#2932)
+
+`python3 scripts/ci/repository-policy.py --output /tmp/crewship-policy-plan.json`
+is read-only by default. The plan records the existing policy fingerprint and
+proposes a one-PR merge queue: ALLGREEN, SQUASH, one build/group entry, no batch
+wait and a 120-minute check deadline. It adds CodeQL High/Critical security
+merge protection while preserving stronger existing CodeQL thresholds and all
+other tools, rules, bypass actors, review settings and strict required checks.
+Review settings are copied verbatim, including an owner-selected zero approval
+count and disabled last-push approval; this helper does not impose a reviewer
+requirement or change any existing review setting.
+Unexpected targets, incomplete protections and duplicate rules fail closed.
+`allow_auto_merge` is reported separately; this helper does not change it.
+Plans warn that preserved emergency bypass actors can override required checks
+and merge queue. They also warn when queue activation is planned while
+`allow_auto_merge` is false; an operator must enable it before activating the
+queue procedure. Emergency actors remain available and require separate review.
+
+Before either activation scope, merge and review the CodeQL workflow source
+that analyzes both languages on every PR. Run actual documentation-only and
+single-language PR canaries and inspect both analyses for their current revisions.
+Review the saved before/proposed payload. Queue activation also requires the
+contributor queue procedure and helper documentation on main. An authorized
+operator names the full reviewed source and documentation SHAs:
+
+```bash
+python3 scripts/ci/repository-policy.py --apply \
+  --plan /tmp/crewship-policy-plan.json \
+  --analysis-commit FULL_ANALYSIS_MAIN_SHA \
+  --documentation-commit FULL_QUEUE_DOCUMENTATION_MAIN_SHA
+```
+
+The helper verifies main ancestry, reads the current policy again and refuses a
+stale or modified plan before PUT. It checks the returned policy after PUT.
+GitHub does not provide a documented atomic compare-and-swap for this endpoint;
+a concurrent change between the last read and PUT remains possible. Coordinate
+policy edits and inspect the live ruleset afterwards. Regenerate/review a stale
+plan rather than replacing somebody else's change. The analysis SHA is an
+operator attestation of reviewed workflow source and actual canary evidence;
+the documentation SHA attests the reviewed queue procedure. Ancestry establishes
+only that those exact commits are on main: it does not inspect their contents
+or verify the canary results. A mismatched response after PUT means live policy
+may have changed; inspect it before continuing.
+
+**Code scanning limitation:** GitHub's native code-scanning merge protection
+**does not apply to merge queue groups**. It checks eligible PR-diff findings,
+not every historical alert or a findings-based queue candidate gate. `CodeQL
+Result` on `merge_group` still proves analysis execution only. A queue-specific
+findings gate would require separate implementation and validation; do not
+claim this policy supplies one. Existing alerts remain remediation work; this
+helper neither dismisses alerts nor establishes that the baseline is clean.
+
+Schema: [GitHub repository rules REST API](https://docs.github.com/en/rest/repos/rules).
+Scope and exclusions: [GitHub code scanning merge protection](https://docs.github.com/en/code-security/concepts/code-scanning/merge-protection).
+
+CodeQL merge protection can be activated independently before the queue process
+is merged. This scope preserves any existing queue without changing it and does
+not require a queue documentation SHA. It still requires the reviewed analysis
+source on main and the actual PR canaries described above. Supplying a queue
+documentation SHA for this scope is rejected:
+
+```bash
+python3 scripts/ci/repository-policy.py --code-scanning-only --output /tmp/codeql-policy.json
+# Review the before/proposed policy; only the CodeQL rule should change.
+python3 scripts/ci/repository-policy.py --apply --plan /tmp/codeql-policy.json \
+  --analysis-commit FULL_ANALYSIS_MAIN_SHA
+```
+
+The CodeQL workflow now plans both Go and JavaScript/TypeScript on every PR,
+including documentation-only and single-language changes. This intentional
+latency tradeoff supplies results for the current PR revision before enabling a native
+required-tool rule: a green aggregate over skipped analyses cannot establish
+that evidence. It removes the previous language/path optimization, preserves
+analysis permissions and query exclusions, and leaves all main/merge-group
+analyses running. Run an actual documentation-only and single-language PR
+canary and inspect both analyses before activating the native rule. Native
+merge-queue-group exclusions still apply; this change does not add a
+findings-based queue verdict.

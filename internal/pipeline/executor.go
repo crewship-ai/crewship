@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -939,6 +940,34 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 		ctx = regCtx
 	}
 
+	if in.resume && e.runStore != nil {
+		rec, err := e.runStore.Get(ctx, preallocRunID)
+		if err != nil {
+			return nil, err
+		}
+		if rec.Status != RunStatusQueued && rec.Status != RunStatusRunning && rec.Status != RunStatusWaiting {
+			return &RunResult{RunID: rec.ID, PipelineID: rec.PipelineID, Status: strings.ToUpper(string(rec.Status))}, nil
+		}
+		if rec.CurrentStepID != in.resumeCurrentStepID {
+			return nil, errResumePlanStale
+		}
+		// Admission may have waited while another lifetime committed outputs.
+		// Restore again under the registry slot, never execute from a stale map.
+		outputs, err := e.runStore.GetStepOutputs(ctx, preallocRunID)
+		if err != nil {
+			return nil, err
+		}
+		in.restoredOutputs = outputs
+		in.restoredCostUSD = rec.CostUSD
+	}
+
+	// Sweeper admission is bounded separately from full execution. Release its
+	// permit only after acquiring the run lifetime and fencing stale plans,
+	// before hooks, downstream steps or retry backoff can run indefinitely.
+	if in.resumeAdmitted != nil {
+		in.resumeAdmitted()
+	}
+
 	hookSlug := ""
 	if in.pipeline != nil {
 		hookSlug = in.pipeline.Slug
@@ -1155,6 +1184,9 @@ type RunInput struct {
 	// resumeReasonRestart (boot scan) or resumeReasonApproval
 	// (waitpoint approved in-process). Set only by runResumedRun.
 	resumeReason string
+	// resumeAdmitted releases the sweeper's admission permit. The full Run
+	// lifetime remains tracked by its caller until Run returns.
+	resumeAdmitted func()
 }
 
 // costCapExceededMessage is the single wording for max_cost_usd

@@ -5,6 +5,7 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/moby/moby/api/types/container"
@@ -27,6 +28,22 @@ func contractSpec(t *testing.T, p *Provider) (*container.Config, *container.Host
 		t.Fatalf("assembleCrewSpec: %v", err)
 	}
 	return cfg, hostCfg
+}
+
+func TestCrewRuntimeContractDigestIgnoresBindOwnership(t *testing.T) {
+	f := &covRT{}
+	p := f.provider(t, covRTConfig(t))
+	cfg, host := contractSpec(t, p)
+	for i := range host.Mounts {
+		m := &host.Mounts[i]
+		if agentWritableNoexecTargets[m.Target] && m.VolumeOptions != nil {
+			// The pre-change spec had no volume attribution at all.
+			m.VolumeOptions.Labels = nil
+		}
+	}
+	if got, want := p.crewRuntimeContractDigest(), digestCrewSpec(cfg, host); got != want {
+		t.Fatalf("ownership-only upgrade changed runtime contract: %s -> %s", want, got)
+	}
 }
 
 // The property the whole mechanism rests on: every control the builder sets is
@@ -435,8 +452,8 @@ func TestEnsureCrewRuntime_PausedContainerWithOldContractIsNotTornDown(t *testin
 	}
 	p := f.provider(t, cfg)
 
-	if _, err := p.EnsureCrewRuntime(context.Background(), covTeam()); err != nil {
-		t.Fatalf("EnsureCrewRuntime: %v", err)
+	if _, err := p.EnsureCrewRuntime(context.Background(), covTeam()); err == nil || !strings.Contains(err.Error(), "paused") {
+		t.Fatalf("expected actionable paused error, got %v", err)
 	}
 
 	f.mu.Lock()

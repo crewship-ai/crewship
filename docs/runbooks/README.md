@@ -22,3 +22,5 @@ reports are ignored build output, not an operational procedure.
   release identities. Referenced from
   [CONTRIBUTING.md](../../CONTRIBUTING.md) and
   [RELEASING.md](../../RELEASING.md).
+
+- [Trusted CI control inventory](ci-inventory-guard.md): main-owned metadata guard, explicit administrator exceptions and shared-App enforcement limits.

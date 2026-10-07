@@ -19,13 +19,30 @@ shard = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(shard)
 
 
+def load_for(package):
+    with patch.dict(os.environ, {'RACE_SHARD_PACKAGE': package}):
+        module_spec = importlib.util.spec_from_file_location('race_shard_for_package', SCRIPT)
+        module = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(module)
+        return module
+
+
 class APIRaceShards(unittest.TestCase):
+    def test_package_selection_defaults_to_api_and_accepts_only_module_packages(self):
+        self.assertEqual(shard.PACKAGE_DIR, './internal/api')
+        cli = load_for('github.com/crewship-ai/crewship/cmd/crewship')
+        self.assertEqual((cli.PACKAGE, cli.PACKAGE_DIR), ('github.com/crewship-ai/crewship/cmd/crewship', './cmd/crewship'))
+        for bad in ['github.com/other/repo/pkg', 'github.com/crewship-ai/crewship/../x', 'github.com/crewship-ai/crewship/a b', './internal/api']:
+            with self.assertRaises(SystemExit):
+                load_for(bad)
+
     def manifests(self, names=None):
         names = names or [f'TestRoute{i:03}' for i in range(81)] + ['ExampleRequest', 'FuzzRoute', 'TestČeský']
         inventory, partitions = shard.partition('\n'.join(reversed(names)) + '\nok package 0.1s\n', 4)
         return [{'index': i, 'count': 4, 'inventory_count': len(inventory),
                  'inventory_sha256': shard.fingerprint(inventory), 'selected': selected,
-                 'seconds': 10} for i, selected in enumerate(partitions)]
+                 'seconds': 10, 'package': shard.PACKAGE, 'source_sha': 'a' * 40}
+                for i, selected in enumerate(partitions)]
 
     def test_complete_disjoint_inventory_includes_new_tests_and_unicode(self):
         manifests = self.manifests()
@@ -51,7 +68,7 @@ class APIRaceShards(unittest.TestCase):
     def test_aggregate_rejects_missing_duplicate_overlap_and_partial_evidence(self):
         good = self.manifests()
         cases = [good[:-1], good + [good[0]]]
-        for mutation in ['index', 'overlap', 'missing', 'hash', 'count', 'duration']:
+        for mutation in ['index', 'overlap', 'missing', 'hash', 'count', 'duration', 'package', 'sha']:
             items = copy.deepcopy(good)
             if mutation == 'index': items[0]['index'] = 1
             if mutation == 'overlap': items[0]['selected'][0] = items[1]['selected'][0]
@@ -59,10 +76,16 @@ class APIRaceShards(unittest.TestCase):
             if mutation == 'hash': items[0]['inventory_sha256'] = 'bad'
             if mutation == 'count': items[0]['count'] = 2
             if mutation == 'duration': items[0]['seconds'] = float('nan')
+            if mutation == 'package':
+                for item in items: item['package'] = 'github.com/crewship-ai/crewship/cmd/crewship'
+            if mutation == 'sha': items[0]['source_sha'] = 'b' * 40
             cases.append(items)
         for items in cases:
             with self.subTest(items=items), self.assertRaises(ValueError):
                 shard.validate_manifests(items, 4)
+        with self.assertRaisesRegex(ValueError, 'this revision'):
+            shard.validate_manifests(good, 4, 'c' * 40)
+        self.assertEqual(shard.validate_manifests(good, 4, 'a' * 40)[1], 84)
 
     def invoke(self, inventory='TestOne\nTestTwo\nTestThree\nTestFour', list_exit=0, test_exit=0, omit=False):
         with tempfile.TemporaryDirectory() as temp:
@@ -121,11 +144,11 @@ sys.exit(int(os.environ['TEST_EXIT']))
                 (directory / 'api-race-shard.json').write_text(json.dumps(manifest))
             for event, expected in [('pull_request', 0), ('merge_group', 0), ('push', 1)]:
                 output = io.StringIO()
-                with patch.dict(os.environ, GITHUB_EVENT_NAME=event, GITHUB_STEP_SUMMARY=os.devnull), redirect_stdout(output):
+                with patch.dict(os.environ, GITHUB_EVENT_NAME=event, GITHUB_STEP_SUMMARY=os.devnull, GITHUB_SHA='a' * 40), redirect_stdout(output):
                     self.assertEqual(shard.report(root, 4, 20), expected)
                 self.assertIn('::error::' if event == 'push' else '::warning::', output.getvalue())
             output = io.StringIO()
-            with patch.dict(os.environ, GITHUB_EVENT_NAME='push', GITHUB_STEP_SUMMARY=os.devnull), redirect_stdout(output):
+            with patch.dict(os.environ, GITHUB_EVENT_NAME='push', GITHUB_STEP_SUMMARY=os.devnull, GITHUB_SHA='a' * 40), redirect_stdout(output):
                 self.assertEqual(shard.report(root, 4, 100), 0)
             self.assertNotIn('::error::', output.getvalue())
 

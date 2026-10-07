@@ -172,6 +172,9 @@ jobs:
       code: ${{ steps.plan.outputs.code }}
       go: ${{ steps.plan.outputs.go }}
       release: ${{ steps.plan.outputs.release }}
+      go_parity: ${{ steps.plan.outputs.go_parity }}
+      frontend_parity: ${{ steps.plan.outputs.frontend_parity }}
+      docs_inventory: ${{ steps.plan.outputs.docs_inventory }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -318,6 +321,16 @@ jobs:
       # close.
       - name: api-contract summary classifier
         run: python3 scripts/api-contract/summary_test.py
+      # The #1815 fixture scripts decide whether the gate's bucket-3
+      # operations are graded against real data. Their logic (exit only when
+      # every probe passed, a preserved HTTP status, token written only after
+      # the proofs) is stdlib-only and server-free, so it is pinned here
+      # rather than only exercised by the harness job that needs a server.
+      - name: api-contract fixture probes + restricted member fixture
+        run: |
+          set -euo pipefail
+          python3 scripts/api-contract/fixture_probes_test.py
+          python3 scripts/api-contract/restricted_fixture_test.py
 
       # Skip budget ratchet. `go test ./...` prints `ok` for a package whose
       # every test called t.Skip, so a skip is indistinguishable from a pass
@@ -349,6 +362,15 @@ jobs:
       # every other check green; this step is what goes red.
       - name: onboarding journey is gated on PRs
         run: bash scripts/onboarding-gate-test.sh
+
+      # Same "a green check that never ran" shape, one gate over: #2874's
+      # restricted-member shell spec was classified nightly-only, so the PR
+      # that introduced it executed the spec zero times (run 37212203211,
+      # job 111468832143) with every check green. This step is what goes red
+      # if the PR-side step, its config selection or the spec's core
+      # assertions quietly disappear.
+      - name: restricted member shell is gated on PRs
+        run: bash scripts/restricted-shell-gate-test.sh
 
       # Three compiled binaries have reached main by the same route — `go build
       # ./scripts/<tool>` with no -o writes into the repo root, `git add -A`
@@ -426,6 +448,46 @@ jobs:
             echo "NEXTAUTH_SECRET=$nextauth"
             echo "ENCRYPTION_KEY=$enckey"
           } >> "$GITHUB_ENV"
+      # ── #1815 bucket-3 fixture: configure the optional surfaces ──
+      #
+      # Run 37216610199 graded 13 operations this job's server could not
+      # exercise: nine /pages/{slug}/project* operations answered the
+      # designed 503 "Page project storage is not configured" (the router
+      # wires projectStore only behind CREWSHIP_PAGE_PROJECTS_PATH) and
+      # three restricted-workflow operations answered the designed 404
+      # because the restricted runtime registers only when
+      # CREWSHIP_RESTRICTED_RUNTIME_IMAGE names an immutable local digest.
+      # Those findings measured the fixture, not the product.
+      #
+      # The Pages toolchain image is built from THIS checkout so the
+      # compiler and the server under test are the same release — the rule
+      # tools/pages-build/README.md states for operators. Its sha256 image
+      # ID is immutable by construction and serves both settings:
+      #
+      #   - CREWSHIP_PAGE_BUILD_IMAGE: the offline Page compiler the seed's
+      #     app publication path needs (seedPageApp builds + checks +
+      #     publishes one app per catalogue page; without a build worker
+      #     that path 503s and the seed step fails);
+      #   - CREWSHIP_RESTRICTED_RUNTIME_IMAGE: registration-only
+      #     substitution. The manager needs a locally-present immutable
+      #     digest so the three restricted-workflow GET operations reach the
+      #     registered service. This is NOT a real restricted runner image
+      #     (that is cmd/crewship-restricted-runner): the GETs the gate and
+      #     restricted_fixture.py issue never start a restricted container,
+      #     and nothing here may execute one against this image. The image
+      #     id travels as a step OUTPUT, not $GITHUB_ENV, so it reaches only
+      #     the server step that names it.
+      - name: Build Pages toolchain image
+        id: pages-image
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          image="$(docker build -q tools/pages-build)"
+          case "$image" in
+            sha256:*) ;;
+            *) echo "unexpected image reference: $image" >&2; exit 1 ;;
+          esac
+          echo "image=$image" >> "$GITHUB_OUTPUT"
       #
       # ⚠ CREWSHIP_RATELIMIT_DISABLED is set HERE and nowhere else.
       #
@@ -456,6 +518,31 @@ jobs:
       - name: Start ephemeral server
         env:
           CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
+          # Outside CREWSHIP_STORAGE_BASE_PATH on purpose: config's
+          # validatePageProjectPath refuses an overlap at boot.
+          CREWSHIP_PAGE_PROJECTS_PATH: ${{ github.workspace }}/.crewship-page-projects
+          CREWSHIP_PAGE_BUILD_IMAGE: ${{ steps.pages-image.outputs.image }}
+          # Registration-only substitution (see the build step above): the
+          # restricted-runtime manager needs a locally-present immutable
+          # digest for the three restricted GET operations to reach the
+          # registered service instead of the unwired-404 guard. Wiring alone
+          # proves nothing — the OWNER token still gets the designed
+          # restricted-membership 404; the positive branch is installed by
+          # the "API contract fixture" step below (a real restricted member
+          # and its own token).
+          CREWSHIP_RESTRICTED_RUNTIME_IMAGE: ${{ steps.pages-image.outputs.image }}
+          # The publish/check path refuses to run without a runtime origin
+          # (pages_project_publish.go gates on pageRuntimeOrigin), and the
+          # seed's app publication needs it. A genuine different browser
+          # site, not the development same-origin escape hatch: site()
+          # (internal/pagebuild/runtime.go) returns IP literals verbatim, so
+          # 127.0.0.1 is a different site from the Studio origin's
+          # localhost, and loopback is the one place plain HTTP is allowed.
+          CREWSHIP_PAGE_RUNTIME_ORIGIN: http://127.0.0.1:8080
+          # The restricted-member fixture invites + signs up one account
+          # (the signup route gates on this flag). Hermetic server, deleted
+          # with the runner; POST /auth/signup is excluded from the gate.
+          CREWSHIP_ALLOW_SIGNUP: "true"
           CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
           CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
           DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
@@ -473,7 +560,15 @@ jobs:
           done
           cat /tmp/crewship-pr-harness.log >&2
           exit 1
+      # Seed with its own step cap: with Page storage configured the seed
+      # builds + checks + publishes one app per catalogue page (one Docker
+      # build each, ≤120 s in-container deadline per build), so a wedged
+      # build must be a named step failure, not a job-level `cancelled` —
+      # the same deadline-ordering rule the gate step below follows. The
+      # retry loop stays: a transient Docker hiccup on one attempt should
+      # not red an unrelated PR.
       - name: Seed clean control-plane fixture
+        timeout-minutes: 10
         env:
           CREWSHIP_SERVER: http://localhost:8080
         run: |
@@ -484,6 +579,51 @@ jobs:
           done
           cat /tmp/crewship-pr-harness.log >&2
           exit 1
+      # #1815 bucket-3 fixture: correlated ids + a restricted member.
+      #
+      # Observed against this fixture (Schemathesis 4.24.3): the gate builds
+      # path ids from generation plus values it harvests from other
+      # operations' responses, so (a) it paired a crew with an integration
+      # that was never bound to it (AC1815-184's 404), (b) it graded the
+      # restricted-workflow routes as the seeded OWNER, who is always denied,
+      # and (c) it sent generated revision 0 to the history routes. This step
+      # installs the missing preconditions through the product's own
+      # surfaces and PROVES them over HTTP before run.sh pins the pair and the
+      # member into the gate. Blocking: a fixture that silently lost its
+      # binding, its project history or its restricted member must fail the
+      # PR here, not turn into unexplained gate findings. For Pages the
+      # gate's own grading is harvest-dependent; these probes are the
+      # positive evidence.
+      #
+      #   fixture_probes.py      every read branch of /pages/{slug}/project*
+      #                          answers 200 on a real draft, a real revision
+      #                          is fetched, revision 0 is 400 and an absent
+      #                          revision 404; the bound (crew, integration)
+      #                          pair answers 200 and an unbound pair 404.
+      #                          Writes the bound pair for run.sh.
+      #   restricted_fixture.py  a real restricted member (invite + signup +
+      #                          access policy, its own token): 200 lists for
+      #                          it, the designed 404 for the owner. Writes
+      #                          the member's token (0600) for run.sh.
+      #
+      # Stdlib-only Python, same shape as response_shapes.py. The files live
+      # in RUNNER_TEMP, outside the uploaded artifact directory.
+      - name: API contract fixture
+        timeout-minutes: 3
+        env:
+          CREWSHIP_SERVER: http://localhost:8080
+        run: |
+          set -euo pipefail
+          fixture_dir="$RUNNER_TEMP/api-contract-fixture"
+          mkdir -m 700 "$fixture_dir"
+          tok="$(./crewship token create api-contract-fixture --quiet)"
+          echo "::add-mask::$tok"
+          ws="$(./crewship whoami --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace"]["id"])')"
+          python3 scripts/api-contract/fixture_probes.py http://localhost:8080 "$tok" "$ws" --write-pair "$fixture_dir/pair.json"
+          python3 scripts/api-contract/restricted_fixture.py http://localhost:8080 "$tok" "$ws" "$PWD/crewship" "$fixture_dir/restricted.token"
+          # Defence in depth: the member token lives only in that 0600 file,
+          # but mask it so no later step's output can ever print it.
+          echo "::add-mask::$(cat "$fixture_dir/restricted.token")"
       # HARNESS_SUITE_TIMEOUT (480s) < this step's cap (12m) < the job's (30m).
       # The suite's own deadline is the innermost, so a wedged suite is named
       # by the harness rather than reaped anonymously — the #1998 audit found
@@ -614,6 +754,11 @@ jobs:
           # a limited instance this buys 429s reported as contract
           # failures, not speed. The pairing is a tested invariant.
           API_CONTRACT_RATE_LIMIT: "off"
+          # Fixture-correlated parameters from the step above (see run.sh):
+          # the bound pair for the one tools operation, and the restricted
+          # member's token for the three restricted-workflow operations.
+          API_CONTRACT_PAIR_FILE: ${{ runner.temp }}/api-contract-fixture/pair.json
+          API_CONTRACT_RESTRICTED_TOKEN_FILE: ${{ runner.temp }}/api-contract-fixture/restricted.token
         run: |
           set -euo pipefail
           tok="$(./crewship token create api-contract-pr --quiet)"
@@ -761,6 +906,9 @@ jobs:
   # Five deterministic checks are selected in playwright.pr.config.ts. The
   # provider-backed chat send/receive path and the remaining specs stay in the
   # explicit nightly buckets; they are not silently treated as PR coverage.
+  # Three further isolated-fixture suites run against the static export with
+  # every API response mocked: credential reveal, provider account groups and
+  # the restricted member shell (#2861 part 1).
   playwright-pr:
     needs: [merge-conflict-markers, changes, binary]
     if: needs.changes.outputs.code == 'true'
@@ -874,6 +1022,13 @@ jobs:
       - name: Verify account group UI and role gating
         timeout-minutes: 3
         run: pnpm exec playwright test --config=playwright.pool-ui.config.ts --output=pool-ui-test-results
+      - name: Verify restricted member shell UI
+        # #2861 part 1. Fully mocked (page.route) and provider-free, like the
+        # reveal/pool-ui fixtures beside it. PR #2874 classified the spec into
+        # nightly GATE_SPECS only, so the PR run 37212203211 executed it zero
+        # times while every check stayed green.
+        timeout-minutes: 3
+        run: pnpm exec playwright test --config=playwright.restricted.config.ts --output=restricted-test-results
       - name: Upload Playwright PR evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -884,6 +1039,7 @@ jobs:
             test-results/
             reveal-test-results/
             pool-ui-test-results/
+            restricted-test-results/
           if-no-files-found: warn
       - name: Dump browser server log on failure
         if: failure()
@@ -1068,6 +1224,59 @@ jobs:
           set -uo pipefail
           [ -f /tmp/crewship-onboarding.pid ] && kill "$(cat /tmp/crewship-onboarding.pid)" 2>/dev/null || true
 
+  # Cross-language contracts still run when docs/frontend edits skip Go or
+  # frontend suites. Full owning suites provide the same evidence otherwise.
+  go-parity:
+    name: Go documentation and frontend parity
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go_parity == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Check documented provider order and frontend vocabularies
+        timeout-minutes: 10
+        run: python3 scripts/ci/parity.py
+
+  frontend-parity:
+    name: Frontend documentation parity
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.frontend_parity == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Check documented realtime and telemetry events
+        timeout-minutes: 3
+        run: pnpm exec vitest run hooks/__tests__/realtime-allowlist-docs-parity.test.ts lib/__tests__/telemetry-call-sites.test.ts
+
+  docs-inventory:
+    name: API and CLI documentation inventory
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.docs_inventory == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Require documentation contract evidence without the Go matrix
+        timeout-minutes: 10
+        run: timeout --kill-after=30s 8m go run ./scripts/docs-inventory -strict
+
   # ── Frontend: lint, typecheck, build ──
   frontend:
     needs: [merge-conflict-markers, changes]
@@ -1159,52 +1368,103 @@ jobs:
           path: out/
           retention-days: 1
 
-  # ── Frontend tests (Vitest) ──
-  frontend-test:
+  # ── Frontend tests: four complete partitions, one global coverage gate ──
+  frontend-test-types:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.code == 'true'
-    name: Frontend Test
+    name: Frontend test types and artifact security
     runs-on: ubuntu-latest
-    # 15, not 10: on 2026-09-04 the job ran 8 min on main under org-wide
-    # runner contention and was cancelled at the 10-min cap on two main
-    # commits and on three PRs whose diffs touched no frontend file, with
-    # every test still passing when the axe fell (the #1998 cancelled-vs-
-    # failure ambiguity, live). Quiet-hours runs take 5-6 min, so this is
-    # headroom for contention, not a licence for a slower suite -- a run
-    # that needs it in quiet hours is a regression to look at.
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-
       - uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
-
-      - name: Type-check tests
+      - name: Type-check tests once
+        timeout-minutes: 9
         run: |
           node --test scripts/typecheck-tests-node-test.mjs
-          pnpm test:types
-
-      # Coverage, not a bare test run: vitest exits non-zero when the
-      # thresholds in vitest.config.ts are not met, which is what makes
-      # that gate real rather than decorative.
-      - name: Test
-        run: pnpm test:coverage
-
+          timeout --kill-after=30s 8m pnpm test:types
       - name: E2E private artifact security tests
+        timeout-minutes: 2
         run: node --test e2e/helpers/private-artifacts.test.mjs
 
-      - name: Upload coverage (lcov)
+  frontend-test-shards:
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.code == 'true'
+    name: Frontend Test (partition ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    # The old single-job 15m cap allowed a 12m measured Vitest run little
+    # daylight. With four partitions expected test time is ~3–4m, but the
+    # install action permits 8m. Keep 8m tool < 9m step, plus setup < 20m job.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Run isolated partition with complete coverage inventory
+        timeout-minutes: 9
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: timeout --kill-after=30s 8m python3 scripts/ci/vitest-shard.py run "$SHARD_INDEX" 4
+      - name: Preserve partition reports and identity
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: vitest-shard-${{ matrix.shard }}-${{ github.sha }}
+          path: .ci-results/vitest/
+          include-hidden-files: true
+          if-no-files-found: error
+          overwrite: true
+          compression-level: 1
+          retention-days: 7
+
+  frontend-test:
+    needs: [changes, frontend-test-types, frontend-test-shards]
+    if: always() && needs.changes.outputs.code == 'true'
+    name: Frontend Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Require every partition and type check
+        env:
+          SHARD_RESULT: ${{ needs.frontend-test-shards.result }}
+          TYPE_RESULT: ${{ needs.frontend-test-types.result }}
+        run: test "$SHARD_RESULT" = success && test "$TYPE_RESULT" = success
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Download every partition from this run
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: vitest-shard-*-${{ github.sha }}
+          path: .ci-results/vitest-downloads/
+      - name: Require complete test union and global coverage thresholds
+        timeout-minutes: 9
+        run: timeout --kill-after=30s 8m python3 scripts/ci/vitest-shard.py merge .ci-results/vitest-downloads 4
+      - name: Upload merged coverage and inventory evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: frontend-coverage-lcov
-          path: coverage/lcov.info
-          if-no-files-found: warn
+          path: |
+            coverage/lcov.info
+            .ci-results/vitest-merge/inventory.json
+          if-no-files-found: error
           retention-days: 14
+          overwrite: true
 
   # ── Go: vet, build, test ──
   go:
@@ -1357,8 +1617,6 @@ jobs:
       # Execution order stays SOURCE ORDER here, deliberately. -shuffle=on
       # lives in the non-blocking `go-shuffle` job below; see that job for
       # why it is not on the blocking gate yet.
-      - name: Go test
-        run: go test ./... -count=1 -timeout 15m
 
   # ── Go: shuffled execution order ──
   #
@@ -1403,11 +1661,41 @@ jobs:
   #
   # Promoted after six consecutive successful sampled main runs in the
   # 2026-09-11 audit. CI Result requires a real successful shuffle run.
+  # The full non-race suite, split by package (largest-first by measured
+  # cost) so it no longer runs after vet and four builds in one job.
+  # go-package-shard.py proves the partitions cover `go list ./...` exactly
+  # once; costs only decide placement.
+  go-test:
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
+    name: Go test (shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Go test (package partition)
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -timeout 15m
+
   go-shuffle:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.go == 'true'
-    name: Go Shuffle
+    name: Go Shuffle (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     # Same invariant as `go`: cap MUST exceed overhead + `go test -timeout`
     # so Go's goroutine dump wins over GitHub's opaque cancel. Measured at
     # 11m52s for the full suite (job 90889450094) back when internal/api and
@@ -1435,23 +1723,13 @@ jobs:
         # Reproducing needs the WHOLE package — the dependency is on other
         # tests in it, so narrowing with -run will make it pass. That is the
         # tell that you are looking at shared state, not a broken assertion.
-        run: |
-          set -euo pipefail
-          # No skip list any more: every package is shuffled. Resist adding
-          # one back. A package parked here silently loses order-dependence
-          # coverage, and the state that caused it goes on leaking into
-          # whichever test is unlucky — which is the failure mode this job
-          # exists to surface, not to route around.
-          n="$(go list ./... | grep -c .)"
-          # Guard against the list collapsing, same as the `go` job: `go test`
-          # with zero packages exits 0, so a truncated list would look like a
-          # full green run.
-          if [ "$n" -lt 90 ]; then
-            echo "::error::go list returned only $n packages — expected ~108. Refusing to report a pass on a truncated package list."
-            exit 1
-          fi
-          echo "Shuffling all $n packages."
-          go test ./... -count=1 -shuffle=on -timeout 18m
+        # No skip list: every package is shuffled, in exactly one partition.
+        # go-package-shard.py refuses a truncated listing (< 90 packages;
+        # `go test` with zero packages exits 0) and proves the partitions
+        # cover `go list ./...` exactly once.
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -shuffle=on -timeout 18m
 
   # ── Go: race detector ──
   #
@@ -1636,19 +1914,51 @@ jobs:
   # would just vanish from its effect, and in the shard's case would take its
   # coverage with it while both jobs stayed green. The step below fails if
   # any entry in either list stops resolving against `go list ./...`.
-  # The CLI package has its own race runner after repeated aggregate 25m
-  # timeouts on September 10 (run 34466543067, both attempts). The same
-  # package passed in 1163.213s on C's retry (run 34460363617). Its isolated
-  # fresh-database regression passes in 45–51s locally. Keep the full suite
-  # and its 25m bound; remove competition with other package binaries.
-  # CI Result requires this shard directly; the other race shard runs in
-  # parallel. A dependency between the two adds their durations together.
-  go-race-cli:
+  cli-subprocess-race:
+    name: CLI subprocess race boundaries
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.go == 'true'
-    name: Go Race (CLI)
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Require instrumented CLI and named acceptance scenarios
+        timeout-minutes: 15
+        run: python3 scripts/ci/cli-subprocess-race.py
+      - name: Preserve executed subprocess race evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cli-subprocess-race-${{ github.sha }}
+          path: .ci-results/cli-subprocess-race*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  # The CLI package has its own race runner after repeated aggregate 25m
+  # timeouts on September 10 (run 34466543067, both attempts). The same
+  # package passed in 1163.213s on C's retry (run 34460363617) and 878.8s
+  # on main run 37455853260. It is now partitioned like internal/api: every
+  # top-level test runs in exactly one shard, the aggregate below proves the
+  # union is the full inventory, and "Go Race (CLI)" keeps its name for CI
+  # Result. Separate processes cannot share cobra or process-wide state, so
+  # partitioning removes order coupling rather than adding it; go-shuffle
+  # keeps full-package order-dependence coverage.
+  go-race-cli-shards:
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
+    name: Go Race (CLI shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1656,19 +1966,62 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
-      - name: Go test (race, CLI)
-        run: bash scripts/ci/go-test.sh ./cmd/crewship -race -count=1 -timeout 25m
-
-
-      - name: Upload test timings and event stream
+      - name: Go test (race, CLI partition)
+        env:
+          RACE_SHARD_PACKAGE: github.com/crewship-ai/crewship/cmd/crewship
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_COUNT: "3"
+          # Hang bound per partition: twice the unsplit package's worst
+          # measured run (1100s). No partition legitimately exceeds that.
+          RACE_CLI_TIMEOUT_BASIS_SECONDS: "1100"
+          JOB_CAP_MINUTES: "45"
+          JOB_OVERHEAD_MINUTES: "6"
+        run: |
+          set -euo pipefail
+          timeout_s=$(( RACE_CLI_TIMEOUT_BASIS_SECONDS * 2 ))
+          if [ $(( timeout_s + JOB_OVERHEAD_MINUTES * 60 )) -ge $(( JOB_CAP_MINUTES * 60 )) ]; then
+            echo "::error::CLI race timeout plus overhead exceeds the job cap."
+            exit 1
+          fi
+          python3 scripts/ci/api-race-shard.py run "$SHARD_INDEX" "$SHARD_COUNT" "$timeout_s"
+      - name: Upload test timings and partition evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: timings-${{ github.job }}-${{ github.sha }}
+          name: timings-go-race-cli-${{ matrix.shard }}-${{ github.sha }}
           path: .ci-results/
           include-hidden-files: true
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
+
+  go-race-cli:
+    needs: [changes, go-race-cli-shards]
+    if: always() && needs.changes.outputs.go == 'true'
+    name: Go Race (CLI)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every CLI partition
+        env:
+          SHARD_RESULT: ${{ needs.go-race-cli-shards.result }}
+        run: test "$SHARD_RESULT" = success
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: timings-go-race-cli-*-${{ github.sha }}
+          path: .ci-cli-shards/
+      - name: Verify complete CLI coverage and combined budget
+        # The budget is the SUM of partition package seconds. Each partition
+        # repeats the package's one-time setup (CLI binary build and DB
+        # migration behind sync.Once), so the sum is not the unsplit runtime:
+        # 3 partitions summed 2064.6s on PR run 37475371053 (unsplit main:
+        # 878.8s). Baseline 2100 in that metric; the 1.6x alarm warns on PRs
+        # and fails on main pushes, as for internal/api.
+        env:
+          RACE_SHARD_PACKAGE: github.com/crewship-ai/crewship/cmd/crewship
+        run: python3 scripts/ci/api-race-shard.py report .ci-cli-shards 3 2100
 
   go-race:
     needs: [merge-conflict-markers, changes]
@@ -1677,11 +2030,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1]
+        shard: [0, 1, 2, 3]
     runs-on: ubuntu-latest
     # Run 37145916427 needed 61m22s for this package group. Two balanced
-    # groups keep internal/backup (2028.5s) and internal/access (1725.3s)
-    # on separate runners. Fresh go list inventory includes new packages;
+    # groups kept internal/backup (2028.5s) and internal/access (1725.3s)
+    # on separate runners; with those fixed, each shard was bound by total
+    # work (~90 packages on 4 vCPUs, 30-35 min), so there are now four.
+    # Costs come from main run 37455853260 plus measured post-fix values.
+    # Fresh go list inventory includes new packages;
     # timings affect placement only, never whether a package executes.
     # Keep the 35m per-binary hang bound and 75m job cap unchanged. The
     # structural database exclusion and dedicated API/CLI coverage above
@@ -1702,7 +2058,7 @@ jobs:
         # is reproducible from the log without also having to replay a seed.
         env:
           SHARD_INDEX: ${{ matrix.shard }}
-        run: python3 scripts/ci/general-race-shard.py run "$SHARD_INDEX" 2 2100
+        run: python3 scripts/ci/general-race-shard.py run "$SHARD_INDEX" 4 2100
 
       - name: Upload test timings and event stream
         if: always()
@@ -1742,7 +2098,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5]
     # Preserve the existing 2x full-package hang bound while measuring the
     # new partitions. The aggregate below retains the full-package erosion
     # alarm over SUMMED durations, including each process's setup/cleanup.
@@ -1759,7 +2115,7 @@ jobs:
         # race parent and its subtests execute in exactly one partition.
         env:
           SHARD_INDEX: ${{ matrix.shard }}
-          SHARD_COUNT: "4"
+          SHARD_COUNT: "6"
           RACE_API_BASELINE_SECONDS: "2300"
           JOB_CAP_MINUTES: "85"
           JOB_OVERHEAD_MINUTES: "6"
@@ -1803,8 +2159,9 @@ jobs:
         # Full-package baseline measured 2026-09-14: 2291–2358 seconds in
         # main runs 34828855474,34833070262,34835848487,34840188893.
         # Keep the 1.6x alarm and PR-warning/main-failure policy from #2031.
-        # Summing partitions is conservative: it repeats package setup.
-        run: python3 scripts/ci/api-race-shard.py report .ci-api-shards 4 2300
+        # Summing partitions is conservative: it repeats package setup. Six
+        # partitions summed 3150s on PR run 37475371053 (1.37x, alarm 3680s).
+        run: python3 scripts/ci/api-race-shard.py report .ci-api-shards 6 2300
 
 
   # ── Go: cross-platform test matrix ──
@@ -2085,7 +2442,7 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [release-rehearsal, image, changes, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
+    needs: [release-rehearsal, image, changes, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test-types, frontend-test-shards, frontend-test, binary, go, go-test, go-race, go-race-cli-shards, go-race-cli, cli-subprocess-race, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:

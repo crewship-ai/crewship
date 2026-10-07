@@ -7,7 +7,7 @@ import PagesPage from "@/app/(dashboard)/pages/page"
 const api = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: api }))
 const workspace = vi.hoisted(() => ({ mode: "restricted" }))
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "workspace", workspace: { currentUserAccessMode: workspace.mode }, loading: false }) }))
+vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "workspace", workspace: { currentUserAccessMode: workspace.mode }, workspaces: [{ id: "workspace", currentUserAccessMode: workspace.mode }], loading: false }) }))
 vi.mock("../pages-layout", () => ({ PagesLayout: () => <div>Trusted Page editor</div> }))
 afterEach(() => { cleanup(); api.mockReset(); vi.restoreAllMocks(); Reflect.deleteProperty(window, "confirm"); workspace.mode = "restricted" })
 const catalog = [{ slug: "allowed", name: "Allowed Page", publication: 7, actions: [{ intent_hash: "frozen-intent", panel_id: "panel", id: "work", label: "Allowed action", inputs: [{ name: "task", type: "text", required: true }], confirm: { title: "Confirm work", body: "Run this declared action?" } }] }]

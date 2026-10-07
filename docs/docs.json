@@ -465,7 +465,8 @@
               "cli/tui",
               "cli/completion",
               "cli/copy-prompt",
-              "cli/template"
+              "cli/template",
+              "cli/decisions"
             ]
           }
         ]

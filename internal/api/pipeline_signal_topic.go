@@ -72,7 +72,7 @@ func (h *PipelineHandler) SignalWorkspace(w http.ResponseWriter, r *http.Request
 		if h.signals != nil {
 			h.signals.Signal(runID, body.EventType, body.Payload)
 		}
-		h.newExecutor().ResumeAfterSignal(runID, h.logger)
+		h.resumeAfterSignal(runID)
 	}
 
 	// Zero deliveries is 200, not 404. An internal producer emits an event

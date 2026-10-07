@@ -33,8 +33,17 @@ func (o *Orchestrator) RetainManagedRunLocation(ctx context.Context, location Ru
 	if !known {
 		return location, nil
 	}
+	return o.readManagedRunLocation(ctx, location, true)
+}
+
+// Only legacy lifecycle probes opt into a durable read. Creation gates retain
+// the existing admission behavior for crews outside the managed-launch pilot.
+func (o *Orchestrator) readManagedRunLocation(ctx context.Context, location RunLocation, required bool) (RunLocation, error) {
 	denied := errors.New("managed launch: durable run identity unavailable; runtime absence unconfirmed")
 	if o.state == nil {
+		if !required {
+			return location, nil
+		}
 		return location, denied
 	}
 	raw, err := o.state.Get(ctx, "agent_runs", location.RunID)
@@ -42,6 +51,9 @@ func (o *Orchestrator) RetainManagedRunLocation(ctx context.Context, location Ru
 		return location, denied
 	}
 	if len(raw) == 0 {
+		if !required {
+			return location, nil
+		}
 		return location, denied
 	}
 	var state RunState
@@ -49,6 +61,9 @@ func (o *Orchestrator) RetainManagedRunLocation(ctx context.Context, location Ru
 		return location, denied
 	}
 	if state.ManagedLaunch == nil {
+		if !required {
+			return location, nil
+		}
 		return location, denied
 	}
 	if state.ID != location.RunID || state.ContainerID != location.ContainerID || state.AgentSlug != location.AgentSlug {
@@ -64,7 +79,13 @@ func (o *Orchestrator) managedRunProbe(ctx context.Context, location RunLocation
 		return "", err
 	}
 	if !retained.Managed {
-		return directRunProbe(location.RunID, stop), nil
+		retained, err = o.readManagedRunLocation(ctx, location, false)
+		if err != nil {
+			return "", err
+		}
+		if !retained.Managed {
+			return directRunProbe(location.RunID, stop), nil
+		}
 	}
 	// A missing or unreadable PID file is UNKNOWN, never tmux ABSENT. A
 	// positively inspected stopped/removed container can still prove absence.

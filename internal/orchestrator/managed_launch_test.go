@@ -200,7 +200,7 @@ func TestManagedRunProbePreservesDurableScopeAndMissingState(t *testing.T) {
 func TestManagedRunProbeAfterPilotSelectorDisabled(t *testing.T) {
 	t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "")
 	state := newLockedMemState()
-	location := RunLocation{ContainerID: "c1", AgentSlug: "agent-1", RunID: "managed-recovery", Managed: true}
+	location := RunLocation{ContainerID: "c1", AgentSlug: "agent-1", RunID: "managed-recovery"}
 	raw, _ := json.Marshal(RunState{ID: location.RunID, ContainerID: location.ContainerID, AgentSlug: location.AgentSlug, ManagedLaunch: launchDescriptor()})
 	if err := state.Set(context.Background(), "agent_runs", location.RunID, raw); err != nil {
 		t.Fatal(err)
@@ -287,26 +287,26 @@ func (c *legacyProbeContainer) Exec(_ context.Context, cfg provider.ExecConfig) 
 	return &provider.ExecResult{Reader: io.NopCloser(strings.NewReader("ABSENT\n"))}, nil
 }
 
-func TestManagedLaunchLeavesNonpilotProbeBehaviorUnchanged(t *testing.T) {
-	t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "pilot-crew")
+// Separate legacy policy change: unavailable durable state refuses even a
+// legacy probe, and authoritative runtime inspection cannot prove absence here.
+func TestLegacyProbeRefusesUnavailableDurableState(t *testing.T) {
 	state := &legacyProbeState{lockedMemState: newLockedMemState()}
 	c := &legacyProbeContainer{}
 	o := New(c, state, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	location := RunLocation{ContainerID: "legacy-container", AgentSlug: "legacy-agent", RunID: "legacy-run"}
-	if alive, err := o.RunIsAliveAt(context.Background(), location); err != nil || alive {
-		t.Fatalf("legacy liveness: %v %v", alive, err)
+	// Webhook/scheduled creation calls this helper too. A lifecycle policy
+	// change must not introduce durable reads or refusal at legacy admission.
+	if retained, err := o.RetainManagedRunLocation(context.Background(), location); err != nil || retained != location || state.reads != 0 {
+		t.Fatalf("legacy creation admission changed: %+v err=%v reads=%d", retained, err, state.reads)
 	}
-	if gone, err := o.StopRunAt(context.Background(), location); err != nil || !gone {
-		t.Fatalf("legacy stop: %v %v", gone, err)
+	if _, err := o.RunIsAliveAt(context.Background(), location); err == nil {
+		t.Fatal("unavailable durable state admitted legacy liveness probe")
 	}
-	if state.reads != 0 || c.inspections != 0 || len(c.commands) != 2 {
-		t.Fatalf("legacy acquired state/inspect work: reads=%d inspections=%d execs=%d", state.reads, c.inspections, len(c.commands))
+	if _, err := o.StopRunAt(context.Background(), location); err == nil {
+		t.Fatal("unavailable durable state admitted legacy stop probe")
 	}
-	for i, cfg := range c.commands {
-		script := cfg.Cmd[2]
-		if !strings.HasPrefix(script, directRunProbe(location.RunID, i == 1)) || strings.Contains(script, "group_separator") {
-			t.Fatal("legacy probe changed", script)
-		}
+	if state.reads != 2 || c.inspections != 2 || len(c.commands) != 0 {
+		t.Fatalf("legacy refusal boundary: reads=%d inspections=%d execs=%d", state.reads, c.inspections, len(c.commands))
 	}
 }
 

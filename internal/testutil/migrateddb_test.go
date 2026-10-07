@@ -106,6 +106,13 @@ func TestMigratedDB_ProductionPragmas(t *testing.T) {
 	if mode != "wal" {
 		t.Fatalf("journal_mode = %q, want wal", mode)
 	}
+	var synchronous int
+	if err := db.QueryRow("PRAGMA synchronous").Scan(&synchronous); err != nil {
+		t.Fatalf("read synchronous: %v", err)
+	}
+	if synchronous != 1 {
+		t.Fatalf("synchronous = %d, want NORMAL (1)", synchronous)
+	}
 }
 
 // TestMigratedDB_IsolatedPerCall is the correctness guarantee that makes the

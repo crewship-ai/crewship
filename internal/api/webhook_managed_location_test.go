@@ -125,6 +125,9 @@ func TestWebhookScheduledManagedLocationSurvivesReturn(t *testing.T) {
 				if !ok || launch.location.Managed != managed {
 					t.Fatalf("retained location: %+v", launch)
 				}
+				if !managed && state.reads != 0 {
+					t.Fatalf("legacy creation admission read durable state: %d", state.reads)
+				}
 				pid := filepath.Join("/tmp", "crewship-direct-"+assignment.RunID+".pid")
 				if _, err := os.Stat(pid); !os.IsNotExist(err) {
 					t.Fatalf("fixture must have no PID file: %v", err)
@@ -142,8 +145,8 @@ func TestWebhookScheduledManagedLocationSurvivesReturn(t *testing.T) {
 					if alive || aliveErr != nil || !stopped || stopErr != nil {
 						t.Fatalf("legacy: alive=%v/%v stopped=%v/%v", alive, aliveErr, stopped, stopErr)
 					}
-					if state.reads != 0 {
-						t.Fatalf("legacy state reads: %d", state.reads)
+					if state.reads != 2 {
+						t.Fatalf("legacy liveness/stop durable reads: %d, want 2", state.reads)
 					}
 				}
 				if container.inspections != 0 {

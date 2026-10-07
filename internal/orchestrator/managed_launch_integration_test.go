@@ -209,8 +209,8 @@ func main(){for _,e:=range os.Environ(){if strings.HasPrefix(e,"LD_")||strings.H
 				case <-time.After(10 * time.Second):
 					t.Fatal("native did not start")
 				}
-				location := RunLocation{ContainerID: containerID, AgentSlug: "fixture", RunID: req.RunID, Managed: true}
-				// Recover from durable evidence with selection disabled and a recovered durable mode hint.
+				location := RunLocation{ContainerID: containerID, AgentSlug: "fixture", RunID: req.RunID}
+				// Recover from durable evidence with selection disabled and no mode hint.
 				t.Setenv("CREWSHIP_MANAGED_LAUNCH_CREWS", "")
 				recovered := New(p, state, slog.New(slog.NewTextHandler(io.Discard, nil)))
 				t.Logf("kernel/probe diagnostic: %s", docker("exec", containerID, "/bin/sh", "-c", `cat /tmp/crewship-direct-real-lifecycle.pid 2>/dev/null; read pid stamp < /tmp/crewship-direct-real-lifecycle.pid; cat /proc/$pid/stat 2>/dev/null; /bin/kill -0 -- "-$pid"; echo group_with_dashdash=$?; /bin/kill -0 "-$pid"; echo group_without_dashdash=$?; ps -o pid,ppid,pgid,args || true`))

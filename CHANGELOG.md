@@ -12,6 +12,27 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change: server paths now follow one installation root regardless of DATABASE_URL.** Explicit storage, log, memory, Bolt and socket configuration is respected, including YAML values equal to old defaults. `CREWSHIP_HOME` and `start --data-dir` select the root; startup refuses to abandon existing data in prior locations instead of silently using a new empty store. Relative SQLite URLs retain compatibility. (#2977)
 - ⚠️ **Behaviour change: development data and builds no longer default to shared temporary directories.** `dev.sh` uses a persistent installation outside the checkout, preserves exported configuration over `.env.local`, and refuses unsafe legacy transitions. Existing explicit path pins remain valid. (#2977)
 - ⚠️ **Behaviour change: demo seed requires an explicit server and usable provider credentials before making changes.** `--offline-demo` explicitly creates fixtures without model execution. Bootstrap tokens are saved in the target profile without replacing unrelated defaults. `--with-memory` fails before mutation until full server-side demo provisioning exists, preventing client-side writes to the wrong installation; workflows requesting it need that follow-up. (#2977)
+- **The operations Page collector could linger after failed fleet telemetry.** It now releases rejected HTTP response bodies immediately, keeping the unavailable-fleet snapshot without waiting for request expiry.
+
+- **CI: a trusted-main guard flags any change to CI control files (#2960).** `CI Inventory Guard` runs main's code against PR files as data. Required-job inventories of the CI, Security and CodeQL workflows, the routing and verdict helpers, and a closed namespace (`.github/`, `scripts/ci/`, every `scripts/` path a workflow references) are compared with main; any change needs a separate administrator dispatch for the exact head SHA.
+
+- **CI: the full Go suite and the shuffled suite run in three package partitions each.** `Go` keeps vet and the cross-builds; `Go test` and `Go Shuffle` split `go list ./...` largest-first by measured cost and prove every package runs exactly once (a truncated listing still fails).
+
+- **CI: race tests stop re-migrating test databases and skip checkptr inside the transpiled SQLite library.** One migrated template is now shared per source tree across test binaries (it cost 56 s per binary under race), `internal/api` prefetches its per-test database copies, and `cmd/crewship` fixtures start from the template instead of running the migration chain seven more times. Under `-race`, CI compiles `modernc.org/*` with `checkptr` off (migration chain 55 s → 29 s); race detection and checkptr stay on for all Crewship code.
+
+- **CI: Vitest runs in four partitions with one merged coverage gate (#2933).** `Frontend Test` keeps its name, requires every partition plus the type checks, verifies that every discovered test file ran exactly once and evaluates the unchanged coverage thresholds on the merged report.
+
+- **CI: the CLI race suite runs in three partitions, internal/api in six and the remaining race packages in four (#2931).** `Go Race (CLI)` and `Go Race (internal/api)` keep their names and now verify that their partitions cover the full test inventory exactly once. The CLI race job took 16–26 minutes as one process; each partition runs about a third of it.
+
+- **Restricted conversations built their context 4x slower than necessary as history grew (#2959).** Every prompt re-checks the origin authority of each recalled entry three times, and each check parsed the same SQL again. Those checks now reuse prepared statements within their transaction; queries, arguments, isolation and revocation behaviour are unchanged. A 155-turn conversation drops from 116 ms to 29 ms per turn, and the race-instrumented `internal/access` CI package, previously the pipeline's 25-minute critical path, shrinks accordingly.
+
+- **Repeating `crewship seed --nuke --with-users` could fail to restore RBAC fixtures.** Workspace cleanup preserves global accounts, so the seed now authenticates retained fixture accounts with their documented passwords and restores membership through the normal guarded API. Account IDs, passwords and other sessions are preserved; changed passwords are refused.
+
+- **The contract gate's CI server now has the fixture the 13 bucket-3 operations need (#1815).** The ephemeral server configures Page project storage, a separate Page runtime origin and the restricted runtime; the seed publishes real Page apps (10-minute step cap), and a blocking fixture step proves the bound crew/integration pair, a real project revision and a real restricted member (own token, owner still gets the designed 404) before the gate runs. The gate grades the tools operation on the bound pair and the three restricted routes as that member, the pair and workspace are pinned as single-value enums in the schema copy `run.sh` feeds Schemathesis (`openapi-pinned.json`), with the member's token set by per-path headers; its Pages grading depends on slugs Schemathesis harvests, so the dedicated probes are the positive evidence for Pages storage. This is not 13/13: the two history operations still report the real "revision 0" schema finding, and the restricted run-detail operation has no positive receipt (it needs an admitted restricted run in the real runner image). `throwaway-server.sh` gains an allowlisted `--env` and an owned `--page-projects` directory. No product code changed.
+
+- **`crewship init` could bootstrap the wrong server despite CLI configuration.** It now honors the common server selection order (explicit flag, active profile, environment, config, default), supports `-s`, and prints the selected server in the login hint. ⚠️ **Behaviour change:** a selected profile without a server URL refuses initialization instead of falling back to localhost.
+- **Manual MCP startup could discard the selected login and send an environment token to a fallback server.** Explicit credential files now require a valid selected server before replacing CLI state or loading a catalog; an explicit valid `--server` remains supported without a profile. Unknown profiles fail closed.
+- ⚠️ **Behaviour change:** **Legacy direct-run probes now refuse uncertain process-group evidence.** Group signals calibrate against the image utility; unsupported options and permission failures stay UNKNOWN. Failed durable-state reads also refuse legacy probes instead of silently continuing.
 
 - **Ambiguous managed-launch descriptors could overwrite earlier fields.** The launcher rejects duplicate or noncanonical JSON fields before creating process identity; its native core now includes a standalone conformance entrypoint, parser fuzz targets and documented measurement limits.
 
@@ -23,11 +44,15 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Unsupported `k8s` startup wiring could return no container provider.** Container initialization now refuses it with supported provider choices; ordinary configuration validation continues to reject Kubernetes.
 
+- **Routines could wait forever for an event despite a step timeout.** ⚠️ **Behaviour change:** Existing parked waits older than their configured timeout (one hour when omitted) expire on upgrade and run their failure hooks. Persisted event waits now retain their original deadline across retries and restarts, expire through normal timeout/failure handling, and preserve signals delivered before the deadline. Cancelled runs reject late signals, and event recovery workers drain during shutdown. Blocking nested waits keep waiting on their original deadline when an advisory wake belongs to a sibling subscription.
+
 - Concurrent egress-fence installation retries incomplete rule reads without reinstalling or accepting a fence that fails verification. Checks reject results spanning a ruleset generation change.
 
 - **Importing a Crew YAML could silently disable required AI CLI checks.** The creation wizard preserves the typed policy, including configurations without explicit tools, and rejects unsupported policy values.
 
 - Recovery and explicit stop now share atomic runtime updates: an OOM-killed or missing container can leave RUNNING, concurrent completion is preserved, and a stop also closes the controls of runs discovered during ownership inspection.
+
+- ⚠️ **Behaviour change:** Runtime readiness refuses paused Docker containers with an actionable error, including warm-cache hits, preserving their live processes until an operator explicitly unpauses them. (#2860)
 
 - **Confirmed stops from direct agent starts no longer wait forever for a missing start event.** Recovery retains the run's workspace, publishes the confirmed terminal event without inventing a start, and preserves dispatcher-owned outcomes and conflicting or unknown tenant identities.
 
@@ -39,6 +64,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Repeated environment rebuilds left untagged images outside cache cleanup.** The orphan sweeper now recognizes published artifacts from revision history while preserving images selected by live crews and unknown untagged images. The existing opt-in deletion policy and age floor still apply.
 - **Editing an environment during a build could fail waiting messages.** Superseded builds retry the current definition within the original job budget; obsolete CLI qualification cannot prevent that retry, and unchanged definitions still enforce their required checks.
+- **`crewship crew rebuild` and its documentation claimed the cached image is discarded up front.** The CLI help text, its `--no-watch` message and four documentation pages described a cache-marker wipe the code never performs: the bypass belongs to the admitted build job, the previous image stays selected until the new build succeeds, and a failed rebuild leaves it in place.
 
 - Runtime editing preserves existing TOML and unsupported mise shapes instead of erasing tool pins; rejected raw edits no longer partially apply other settings.
 
@@ -87,9 +113,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **A crew started immediately after stopping could receive a stopped Docker container.** Runtime reconciliation now uses the newer inspect state for reuse and configuration drift decisions, rather than the older container-list snapshot. This also prevents a stale stopped listing from triggering configuration-based removal of a running crew. (#2855)
 
 ### Added
+
+- **Experimental typed decision evaluation from the CLI** — recover the opt-in `crewship decisions evaluate`, `triage` and `rerank` pilot with bounded requests, advisory results and credential-free dry runs. This local command uses explicitly supplied provider keys outside server Paymaster accounting; hosted inference remains unverified.
+- ⚠️ **Behaviour change:** CLI AI connections preserve installation symlinks and support `ai status`, `ai doctor`, ownership-checked `ai disconnect`, and optional bundled skill installation. Registrations created outside the new ownership mechanism, or edited afterward, require explicit native-client removal before reconnecting. MCP refreshes stored login credentials per request, can use the server OpenAPI catalog with an explicit offline fallback, and supports exact operation write allowlists. Focused tools list agents/crews/routines, start and wait for routines with durable receipts, and diagnose runs and crew runtimes.
+
 - **A fenced crew can reach its own services.** A restricted crew on the egress-fence pilot that declares `services:` and is on its own network now gets a narrow path to them: each service has a fixed address on the crew network, the fence opens exactly those addresses on their ports, and the names resolve from the runtime's `/etc/hosts` because DNS stays closed. Declaring a service whose name sorts first shifts the others to new addresses: they are re-attached there and the fence follows, also when ensuring the services fails part-way. The same crew on the shared network is still refused. (#1368, #2240)
 
 - Upload encrypted recovery archives through Admin › Backups › Recovery or `crewship admin instance backups upload`, with cancellation, checksum validation, disk-space checks and atomic catalog/audit recording.
+
+- **Waiting for a routine could report uncertain or canceled work as successful.** `wait` now exits 5 for `needs_reconciliation` and 2 for either cancellation spelling; `routine run --wait` reports these outcomes as errors in human and machine formats.
+- **Reconnecting an owned AI client could lose its working registration after a failed add.** Native edits and verification now run against a staged configuration, preserving the prior registration and ownership receipt on failure and refusing concurrent configuration or receipt edits. ⚠️ **Behaviour change:** owned reconnections require a regular client config file; symlinked configs are refused.
 
 ### Changed
 
@@ -102,6 +135,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change:** Restricted routine, Page and assigned-issue runs now use the shared work ledger and dispatcher. Interrupted runs with uncertain effects show “Needs review” and require reconciliation before outputs are released or new work repeats; legacy running jobs are adopted into this state.
 
 ### Fixed
+
+- **Removing a backup key or off-site destination could time out when the database connection pool was full.** Deletion now reuses its transaction for in-use checks, preserving named refusals and allowing unused keys and destinations to be removed. (#2924)
+
 - ⚠️ **Behaviour change:** **Confirmed recovery stops with no recorded start now have clear audit history.** Record one `run.recovered_stop` event with explicit ownership checks and no billing, automation or completed-run statistics. Late lifecycle writes for an audited identity are rejected instead of creating an invented run.
 
 - **A corrupt notification channel could stop healthy workspace deliveries.** Unreadable channels now remain available for administration but are excluded from delivery and test sends.
@@ -252,6 +288,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - CLI Page actions accept `--expected-intent-hash`; restricted routine receipts support structured output and `--wait`, including delayed runs. Backup creation honors machine output formats. Agentless runtime removal and failed legacy pruning report their actual outcome. (#2777)
 - **Resource grants showed raw ids for the kind not selected in the add-grant picker** (#2863). In a member's restricted resource access, the grant list resolved names only from the directory of the currently selected kind, so with "Project" selected every agent grant showed its id (and vice versa). Both the agent and project directories now load, and each grant is named from its own kind's directory.
 - **Agent Stop hid a stop the runtime did not confirm** (#2864). On a phone, the agent header's Stop swallowed every failure, so a `502` from `POST /api/v1/agents/{id}/stop` (`runtime stop not confirmed` / `runtime stop unavailable`) looked like success; the agent canvas showed only `HTTP 502`, and its request also omitted `workspace_id`, so the route refused it before trying. Both buttons now share one stop call: a failure shows an error toast saying the agent may still be running and leaves its status as it was; only a confirmed stop shows `STOPPED`.
+- **Restricted members saw a permanent "Reconnecting…" banner and a shell full of failing requests** (#2861). Restriction applies to the whole account, but the web app asked for a realtime ticket, the inbox count, system version/runtime/license, engine, crews, provisioning, active runs and the journal lookup, all of which the restricted allowlist refuses with 404, and it retried the ticket forever. The app now works out one access mode per session (any restricted membership makes the session restricted, also in workspaces where the membership is trusted), sends nothing outside the allowlist until that mode is known, and leaves those calls and widgets out of a restricted session. Realtime reports a terminal "unavailable" state with no banner, and a 404 from `/ws-token` is terminal for every session instead of a retry loop. `/routines` and `/pages` pick the restricted screens from the session mode. A restricted chat now checks for messages from other participants or tabs every 10 seconds while visible, since it has no WebSocket. Navigation is not yet filtered; that follows separately.
 - **The crew service quota editor said backups of quota disks are refused.** Since format v4 (#2745) crew, workspace and instance backups include quota-service disks whenever the server's quota helper is configured. The editor's warning and the service disk quota guide now say so: backups are refused only without the helper, and an interrupted backup keeps the service stopped until an admin retries with `--recover-services`. (#2866)
 - ⚠️ **Behaviour change: crew updates no longer confirm guesses of hidden service settings.** Updates that submit `services_json` for a crew whose configuration is redacted now return the same conflict even for an exact plaintext match. Omit `services_json` when retrying unrelated crew edits; private values stay on the server and public service/quota edits remain supported. (#2742)
 - **The Work ledger offered Replay on finished restricted workflow work**, and the click failed with 409. The button is now disabled for restricted workflow items and the page states the server's reason: "Private workflow replay requires a new authorized routine or Page admission." Other domains are unchanged. (#2865)
@@ -6205,6 +6242,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   could otherwise be cached as a permanent false negative — `Dispatch` now
   re-checks the epoch before caching and skips caching (not an error, just
   a forgone optimization for that one call) if a write landed in between.
+
+- **Repeated crew deletion or idle eviction could accumulate anonymous Docker volumes.** New noexec bind-volume records carry installation ownership and are reaped once unused, preserving host data, home/tools history and other installations; unlabelled historical volumes stay for operator investigation. Runtime recreation now reports container removal failures. (#2970)
 
 ## [1.0.0-rc.1] — 2026-07-12
 

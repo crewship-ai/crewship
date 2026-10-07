@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS pipeline_signal_waits (
     created_at   TEXT NOT NULL,
     delivered_at TEXT,
     consumed_at  TEXT,
+    timeout_at   TEXT,
     UNIQUE (run_id, step_id)
 );`); err != nil {
 		t.Fatalf("signal waits schema: %v", err)

@@ -51,14 +51,12 @@ jobs:
       # dropped from that page is an endpoint their proxy will deny, which
       # surfaces as a 403 on their instance rather than a red build on ours.
       #
-      # This IS repeated from ci.yml's Go Lint job, unlike the inventory below,
-      # because ci.yml carries `paths-ignore: docs/**` — a pull request that
-      # only edits the guide skips it entirely, and that is precisely the change
-      # this assertion exists to catch.
+      # CI Result also requires this contract: Go Lint checks code changes,
+      # and the Go parity lane checks guide-only edits. This workflow retains
+      # its independent documentation and scheduled deployment checks.
       - name: Docker API surface matches its published allow-list
         run: go run ./scripts/docker-api-surface
 
-      # The strict reference inventory is NOT repeated here: ci.yml's Go Lint
-      # job already runs it on every pull request with no path filter, which is
-      # strictly stronger than this workflow's docs-only trigger. Two copies
-      # would mean two places to keep in step for no added coverage.
+      # CI Result requires the strict reference inventory through Go Lint
+      # for Go changes or a dedicated inventory lane for documentation changes.
+      # This workflow therefore does not duplicate that required gate.
