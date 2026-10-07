@@ -27,6 +27,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **`crewship init` could bootstrap the wrong server despite CLI configuration.** It now honors the common server selection order (explicit flag, active profile, environment, config, default), supports `-s`, and prints the selected server in the login hint. ⚠️ **Behaviour change:** a selected profile without a server URL refuses initialization instead of falling back to localhost.
 - **Manual MCP startup could discard the selected login and send an environment token to a fallback server.** Explicit credential files now require a valid selected server before replacing CLI state or loading a catalog; an explicit valid `--server` remains supported without a profile. Unknown profiles fail closed.
+- ⚠️ **Behaviour change:** **Legacy direct-run probes now refuse uncertain process-group evidence.** Group signals calibrate against the image utility; unsupported options and permission failures stay UNKNOWN. Failed durable-state reads also refuse legacy probes instead of silently continuing.
 
 - **Ambiguous managed-launch descriptors could overwrite earlier fields.** The launcher rejects duplicate or noncanonical JSON fields before creating process identity; its native core now includes a standalone conformance entrypoint, parser fuzz targets and documented measurement limits.
 

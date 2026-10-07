@@ -110,3 +110,39 @@ func TestManagedDirectRun_GroupProbeNeverTreatsUtilityOrPermissionFailureAsAbsen
 		})
 	}
 }
+
+func TestDirectRun_GroupProbeNeverTreatsUtilityOrPermissionFailureAsAbsence(t *testing.T) {
+	for _, mode := range []string{"unsupported", "permission", "absent"} {
+		t.Run(mode, func(t *testing.T) {
+			id := fmt.Sprintf("group-probe-%s-%d", mode, time.Now().UnixNano())
+			if err := os.WriteFile(directRunPIDFile(id), []byte("999999999 1\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(directRunPIDFile(id))
+			utility := filepath.Join(t.TempDir(), "kill")
+			errorText := "Operation not permitted"
+			if mode == "absent" {
+				errorText = "No such process"
+			}
+			script := "#!/bin/sh\ntarget=\"$2\"; [ \"$target\" = -- ] && target=\"$3\"\nif [ \"$target\" = -999999999 ]; then echo 'kill: " + errorText + "' >&2; exit 1; fi\nexit 0\n"
+			if mode == "unsupported" {
+				script = "#!/bin/sh\ncase \"$2\" in -*) echo 'kill: unsupported group option' >&2; exit 1;; esac\nexit 0\n"
+			}
+			if err := os.WriteFile(utility, []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			probe := strings.ReplaceAll(directRunProbe(id, false), "/bin/kill", utility)
+			out, err := exec.Command("sh", "-c", probe).CombinedOutput()
+			if err != nil {
+				t.Fatalf("probe error: %v %s", err, out)
+			}
+			want := "UNKNOWN"
+			if mode == "absent" {
+				want = "ABSENT"
+			}
+			if strings.TrimSpace(string(out)) != want {
+				t.Fatalf("%s failure inferred absence: %q", mode, out)
+			}
+		})
+	}
+}

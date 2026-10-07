@@ -85,10 +85,9 @@ identity in a running container requires operator reconciliation/recreation.
 Same-RunID re-execution refuses an existing identity file, matching legacy
 direct-exec parity: retries must mint a new attempt ID.
 
-Recovered callers carry the durable managed marker even after pilot selection is
-removed. Only known managed probes read and require durable run state; nonpilot
-probes retain the legacy script, state-error behavior and Docker call pattern.
-Managed process-group signal probing calibrates against the probe's own group using
+Probes read durable run state even for legacy runs; a failed state lookup
+refuses the probe. Process-group calibration also applies to legacy direct runs.
+Process-group signal probing calibrates against the probe's own group using
 portable explicit-signal syntax. Unsupported utilities, permission errors and
 failed calibration return UNKNOWN; only a definite no-such-process error
 proves group absence. PID/starttime checks prevent accidental PID reuse. They do not establish an
