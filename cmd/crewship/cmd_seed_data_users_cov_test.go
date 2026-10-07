@@ -152,8 +152,8 @@ func TestSeedRBACUsers_PreExistingAccountIsReported(t *testing.T) {
 	out := captureStdoutCovCli2(t, func() {
 		err = seedRBACUsers(context.Background(), newSeedClient(stub))
 	})
-	if !strings.Contains(out, "account predates this seed") {
-		t.Errorf("expected pre-existing-account line:\n%s", out)
+	if !strings.Contains(out, "existing fixture account recovery failed") {
+		t.Errorf("expected authenticated recovery refusal:\n%s", out)
 	}
 	// Nobody landed, so the fixture failed — see seedRBACUsers. This used to
 	// be a stderr notice next to a zero exit code (#1829).

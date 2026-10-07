@@ -201,6 +201,33 @@ func (l *webhookLaunch) RequestCreation(ctx context.Context) error {
 	return nil
 }
 
+// requestWebhookCreation retains the persisted launch mode at the admission
+// boundary, before tracking disappears. Scheduled runs share this gate. The
+// optional interface keeps legacy test runners and nonmanaged runs unchanged.
+func requestWebhookCreation(ctx context.Context, runner agentRunner, location orchestrator.RunLocation, gates ...webhookLaunchGate) error {
+	if retained, ok := runner.(interface {
+		RetainManagedRunLocation(context.Context, orchestrator.RunLocation) (orchestrator.RunLocation, error)
+	}); ok {
+		var err error
+		location, err = retained.RetainManagedRunLocation(ctx, location)
+		if err != nil {
+			return err
+		}
+	}
+	for _, gate := range gates {
+		if gate == nil {
+			continue
+		}
+		if err := gate.Launch(location); err != nil {
+			return err
+		}
+		if err := gate.RequestCreation(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Locator is the runtime identity this attempt WILL have.
 //
 // It is derived from the run id alone, which is what lets it be written down

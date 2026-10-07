@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { BookOpen, Sparkles, ExternalLink } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
@@ -33,7 +33,20 @@ interface CrewJournalProps {
  * summarizer (gracefully degrades if the endpoint isn't wired yet).
  */
 export function CrewJournal({ crewId, workspaceId }: CrewJournalProps) {
+  return <ScopedCrewJournal key={JSON.stringify([workspaceId, crewId])} crewId={crewId} workspaceId={workspaceId} />
+}
+
+function ScopedCrewJournal({ crewId, workspaceId }: CrewJournalProps) {
   const [summarizing, setSummarizing] = useState(false)
+  const scope = useRef<AbortController | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    scope.current = controller
+    return () => {
+      controller.abort()
+      scope.current = null
+    }
+  }, [])
 
   // `since` and `queryParams` get memoised so useJournalList /
   // useJournalStream don't see a fresh object identity on every render
@@ -57,12 +70,15 @@ export function CrewJournal({ crewId, workspaceId }: CrewJournalProps) {
   })
 
   async function handleGenerateSummary() {
+    const current = scope.current
+    if (!current || summarizing) return
     setSummarizing(true)
     try {
       const res = await apiFetch(
         `/api/v1/crews/${encodeURIComponent(crewId)}/journal/summarize?workspace_id=${encodeURIComponent(workspaceId)}`,
-        { method: "POST", headers: { "Content-Type": "application/json" } },
+        { method: "POST", headers: { "Content-Type": "application/json" }, signal: current.signal },
       )
+      if (current.signal.aborted) return
       if (res.ok) {
         toast.success("Summary generation started")
         await refresh()
@@ -72,11 +88,12 @@ export function CrewJournal({ crewId, workspaceId }: CrewJournalProps) {
         toast.error(`Summary failed (${res.status})`)
       }
     } catch (err) {
+      if (current.signal.aborted) return
       toast.error("Summary failed", {
         description: err instanceof Error ? err.message : undefined,
       })
     } finally {
-      setSummarizing(false)
+      if (!current.signal.aborted) setSummarizing(false)
     }
   }
 

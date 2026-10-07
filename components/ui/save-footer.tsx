@@ -1,6 +1,7 @@
 "use client"
 
 import { Check, Loader2 } from "lucide-react"
+import { useId } from "react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -58,6 +59,7 @@ export function SaveFooter({
   testId?: string
   className?: string
 }) {
+  const reasonId = useId()
   const saving = status === "saving"
   const saved = status === "saved"
   const failed = status === "error"
@@ -94,10 +96,11 @@ export function SaveFooter({
     >
       {wantsReason && !saved && (
         <div className="space-y-1.5">
-          <label className="block text-[11px] uppercase tracking-wider text-muted-foreground">
+          <label htmlFor={reasonId} className="block text-[11px] uppercase tracking-wider text-muted-foreground">
             {reasonLabel}
           </label>
           <Input
+            id={reasonId}
             value={reason}
             onChange={(e) => onReasonChange(e.target.value)}
             placeholder={reasonPlaceholder}

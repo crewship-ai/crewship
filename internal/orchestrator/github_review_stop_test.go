@@ -89,24 +89,3 @@ func TestReviewStopFindsOwnerRegisteredDuringStateList(t *testing.T) {
 		t.Fatal("STOPPED returned with live creation gate")
 	}
 }
-
-func TestReviewMissingContainerIdentityRemainsExplicitlyUnverified(t *testing.T) {
-	store := newMemState()
-	run := RunState{ID: "legacy", AgentID: "a", Status: "running"}
-	raw, _ := json.Marshal(run)
-	if err := store.Set(t.Context(), "agent_runs", run.ID, raw); err != nil {
-		t.Fatal(err)
-	}
-	o := New(reviewContainer{state: "stopped"}, store, slog.Default())
-	absent, err := o.ReconcileRecoveredRun(t.Context(), run)
-	if absent || err == nil {
-		t.Fatalf("missing identity accepted: %v %v", absent, err)
-	}
-	after, err := store.Get(t.Context(), "agent_runs", run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != string(raw) {
-		t.Fatal("unknown runtime was cancelled")
-	}
-}

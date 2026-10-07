@@ -3,6 +3,7 @@ package lookout
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -26,7 +27,7 @@ type Schema struct {
 	// Only meaningful for Type=="array".
 	Items *Schema `json:"items,omitempty"`
 	// Enum, when non-empty, restricts the value to one of the listed
-	// constants. Comparison is via Go's == on the JSON-decoded value.
+	// constants. Structural comparison also supports JSON objects and arrays.
 	Enum []any `json:"enum,omitempty"`
 	// AdditionalProperties, when set to false, rejects unknown keys on
 	// object inputs. nil means "permissive" (default JSON-Schema behaviour).
@@ -63,9 +64,8 @@ func validateValue(path string, schema Schema, value any) error {
 		if schema.Type != "" && schema.Type != "null" {
 			return &ArgsInvalidError{Path: path, Reason: "value is null"}
 		}
-		return nil
 	}
-	if schema.Type != "" {
+	if schema.Type != "" && value != nil {
 		if err := checkType(path, schema.Type, value); err != nil {
 			return err
 		}
@@ -73,7 +73,7 @@ func validateValue(path string, schema Schema, value any) error {
 	if len(schema.Enum) > 0 {
 		matched := false
 		for _, want := range schema.Enum {
-			if want == value {
+			if reflect.DeepEqual(want, value) {
 				matched = true
 				break
 			}

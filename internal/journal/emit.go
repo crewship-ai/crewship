@@ -70,22 +70,20 @@ type Writer struct {
 	notifyMu sync.Mutex
 	notifyCh chan struct{}
 
-	// commitMu guards commitObs, the observers invoked with the entries that
-	// just durably committed. Two are registered in production: the
-	// journal→WebSocket bridge (internal/server) forwarding feed-relevant
-	// entries onto the opt-in journal WS channel, and the journal→notify
-	// bridge (internal/notifyroute) turning observational events into
-	// external notifications.
+	// commitMu guards downstream automation/notification observers and
+	// read-only live-feed observers. Audit-only stops reach only readers.
 	//
 	// Every observer MUST be cheap and non-blocking (they run on the write
 	// path) and MUST consume the slice synchronously — the backing array is
 	// reused after they return.
 	commitMu  sync.RWMutex
 	commitObs []func([]Entry)
+	readObs   []func([]Entry)
 }
 
 // AddCommitObserver registers fn to be called after each durable commit with
-// the entries that landed. Safe to call at any time; observers run in
+// the entries that landed, excluding audit-only recovered stops. Safe to
+// call at any time; observers run in
 // registration order.
 //
 // This is additive on purpose. It was a single slot until the journal→notify
@@ -104,7 +102,20 @@ func (w *Writer) AddCommitObserver(fn func([]Entry)) {
 	w.commitMu.Unlock()
 }
 
-// SetCommitObserver replaces every registered observer with fn (nil clears
+// AddReadObserver registers a read-only live-feed projection. Unlike outcome
+// consumers registered by AddCommitObserver, readers receive audit-only stops.
+// It must not launch work or send external notifications. The same synchronous,
+// non-blocking slice-lifetime rules apply as for AddCommitObserver.
+func (w *Writer) AddReadObserver(fn func([]Entry)) {
+	if fn == nil {
+		return
+	}
+	w.commitMu.Lock()
+	w.readObs = append(w.readObs, fn)
+	w.commitMu.Unlock()
+}
+
+// SetCommitObserver replaces downstream observers with fn (nil clears
 // them all). Kept for tests that need a known-empty observer set; production
 // wiring uses AddCommitObserver.
 func (w *Writer) SetCommitObserver(fn func([]Entry)) {
@@ -121,17 +132,34 @@ func (w *Writer) SetCommitObserver(fn func([]Entry)) {
 // observer. A panic in one must never corrupt the journal write path NOR
 // prevent the others from running, so each call is contained separately.
 func (w *Writer) notifyObserver(committed []Entry) {
-	if len(committed) == 0 {
+	w.commitMu.RLock()
+	readers, obs := w.readObs, w.commitObs
+	w.commitMu.RUnlock()
+	notifyJournalObservers(readers, committed)
+	// Audit-only stops wake readers, but must never dispatch automations,
+	// approvals or other outcome consumers. Keep the original backing array
+	// untouched: the batcher reuses it, including during poison isolation.
+	for _, e := range committed {
+		if e.Type == EntryRunRecoveredStop {
+			ordinary := make([]Entry, 0, len(committed))
+			for _, candidate := range committed {
+				if candidate.Type != EntryRunRecoveredStop {
+					ordinary = append(ordinary, candidate)
+				}
+			}
+			committed = ordinary
+			break
+		}
+	}
+	notifyJournalObservers(obs, committed)
+}
+
+func notifyJournalObservers(observers []func([]Entry), entries []Entry) {
+	if len(entries) == 0 {
 		return
 	}
-	w.commitMu.RLock()
-	obs := w.commitObs
-	w.commitMu.RUnlock()
-	for _, fn := range obs {
-		func() {
-			defer func() { _ = recover() }()
-			fn(committed)
-		}()
+	for _, fn := range observers {
+		func() { defer func() { _ = recover() }(); fn(entries) }()
 	}
 }
 
@@ -561,7 +589,7 @@ func isPermanentDBError(err error) bool {
 		return false
 	}
 	s := err.Error()
-	return strings.Contains(s, "constraint failed") ||
+	return errors.Is(err, ErrRecoveredStopConflict) || strings.Contains(s, "constraint failed") ||
 		strings.Contains(s, "journal: marshal")
 }
 
@@ -628,6 +656,9 @@ func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 		heads := make(map[string]*chainHead, 4)
 
 		for _, e := range batch {
+			if err := checkRecoveredStopWrite(ctx, tx, e); err != nil {
+				return err
+			}
 			payload, err := e.payloadJSON()
 			if err != nil {
 				return fmt.Errorf("journal: marshal payload: %w", err)

@@ -236,11 +236,13 @@ export function usePageReview(workspaceId: string, slug: string, enabled: boolea
   })
 
   const refresh = useCallback(() => {
-    void snapshot.refetch()
-    void candidate.refetch()
-    void baseline.refetch()
+    if (enabled) {
+      void snapshot.refetch()
+      if (candidateRevision !== null) void candidate.refetch()
+      if (baselineAvailable && baselineRevision !== null) void baseline.refetch()
+    }
     publish.reset()
-  }, [snapshot, candidate, baseline, publish])
+  }, [enabled, candidateRevision, baselineAvailable, baselineRevision, snapshot, candidate, baseline, publish])
 
   return {
     snapshot,

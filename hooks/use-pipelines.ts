@@ -97,6 +97,8 @@ export function usePipelines(workspaceId: string | null | undefined) {
   const refresh = useCallback(async () => {
     if (!workspaceId) {
       setPipelines([])
+      setLoading(false)
+      setError(null)
       return
     }
     abortRef.current?.abort()
@@ -157,6 +159,8 @@ export function usePipelineRuns(workspaceId: string | null | undefined, slug: st
   const refresh = useCallback(async () => {
     if (!workspaceId || !slug) {
       setRuns([])
+      setLoading(false)
+      setError(null)
       return
     }
     abortRef.current?.abort()

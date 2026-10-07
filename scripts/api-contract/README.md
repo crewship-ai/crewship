@@ -121,6 +121,45 @@ download is also a GET; an `/api/auth` route can also be mutating), so
 for the same invocation. It is the complement now, and the shell test pins
 it against a fixture whose answer is known by hand.
 
+## Fixture-correlated operations (#1815)
+
+Schemathesis builds path parameters from the schema, so against a seeded
+instance it pairs a crew with an integration that was never bound to it and
+grades the restricted-workflow routes as the owner (always the designed 404).
+The CI job installs the missing preconditions and hands them to `run.sh`:
+
+| Script | Proves (HTTP, not schema) | Output for `run.sh` |
+| --- | --- | --- |
+| `fixture_probes.py` | every read branch of `/pages/{slug}/project*` answers 200 on a real draft, a real revision is fetched, revision 0 is 400, an absent revision 404; the bound crew/integration pair answers 200 and an unbound pair 404 | `--write-pair FILE` |
+| `restricted_fixture.py` | a real restricted member (invite, signup, access policy, its own token) gets 200 lists while the owner gets the designed 404; an absent run id is 404 | the member's token file (0600) |
+
+`run.sh` reads them only when `API_CONTRACT_PAIR_FILE` and
+`API_CONTRACT_RESTRICTED_TOKEN_FILE` are set; otherwise it behaves exactly as
+before. The overlay is appended to a copy of `schemathesis.toml`: the bound
+pair is applied to the one `.../integrations/{integrationId}/tools` operation
+(never globally), and the token reaches the config only as a
+`${CREWSHIP_RESTRICTED_TOKEN}` interpolation.
+
+What the gate itself proves differs per family. The bound pair and the
+restricted member are PINNED into the gate — ids as single-value enums in the pinned schema copy (`openapi-pinned.json`, fed to Schemathesis only), the member's token by per-path headers in the config overlay — so
+those operations are graded on the proven ids/actor. The nine
+`/pages/{slug}/project*` operations are NOT pinned: Schemathesis harvests
+slugs from other operations' responses, so whether the gate reaches project
+storage depends on that harvest (a run limited to those operations sends
+`slug=0` and gets 404). The positive evidence that Pages project storage and
+real revisions work is `fixture_probes.py`, not the gate. Generated revision
+`0` stays a genuine schema finding (the handler answers 400 "revision must be
+positive"; the schema has no minimum) — this fixture reports it and does not
+fix it.
+
+Limits, stated rather than discovered: a pass proves the routes reach real
+data and answer the right status, not that response bodies are well-formed
+(the gate and `response_shapes.py` do that); the restricted catalog is empty
+in this fixture and no positive `{runId}` receipt exists, because a receipt
+needs an admitted restricted run inside the restricted runner image, which
+this fixture does not start. The restricted runtime image in CI is the Pages
+toolchain image, used for registration only.
+
 ## Pacing and deadlines
 
 Two environment variables tune how the runner spends time. Both default to

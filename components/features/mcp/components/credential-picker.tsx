@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Plus, Check, KeyRound, Type, ExternalLink } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
@@ -40,7 +40,11 @@ type PickerMode = "credential" | "manual" | "create" | "oauth"
 // Component
 // ---------------------------------------------------------------------------
 
-export function CredentialPicker({
+export function CredentialPicker(props: CredentialPickerProps) {
+  return <ScopedCredentialPicker key={JSON.stringify([props.workspaceId, props.envKey])} {...props} />
+}
+
+function ScopedCredentialPicker({
   envKey,
   envValue,
   credentials,
@@ -59,6 +63,16 @@ export function CredentialPicker({
   const [createName, setCreateName] = useState("")
   const [createValue, setCreateValue] = useState("")
   const [creating, setCreating] = useState(false)
+  const creation = useRef<AbortController | null>(null)
+  useEffect(() => () => { creation.current?.abort() }, [])
+
+  function clearCreation() {
+    creation.current?.abort()
+    creation.current = null
+    setCreating(false)
+    setCreateName("")
+    setCreateValue("")
+  }
 
   // Derive current credential ref key (e.g. "GITHUB_TOKEN" from "${GITHUB_TOKEN}")
   const currentRefKey = isCredentialRef(envValue)
@@ -101,15 +115,19 @@ export function CredentialPicker({
   }
 
   async function handleCreate() {
+    if (creation.current) return
     if (!createName.trim() || !createValue.trim()) {
       toast.error("Name and value are required")
       return
     }
 
+    const controller = new AbortController()
+    creation.current = controller
     setCreating(true)
     try {
-      const res = await apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/credentials?workspace_id=${encodeURIComponent(workspaceId)}`, {
         method: "POST",
+        signal: controller.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: createName.trim(),
@@ -118,14 +136,17 @@ export function CredentialPicker({
           scope: "WORKSPACE",
         }),
       })
+      if (controller.signal.aborted) return
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: "Failed to create credential" }))
-        toast.error(typeof data.error === "string" ? data.error : "Failed to create credential")
+        if (controller.signal.aborted) return
+        toast.error(typeof data?.error === "string" ? data.error : "Failed to create credential")
         return
       }
 
       const created: Credential = await res.json()
+      if (controller.signal.aborted) return
       onAddCredential(created)
       toast.success(`Credential "${createName.trim()}" created`)
 
@@ -134,9 +155,12 @@ export function CredentialPicker({
       setCreateName("")
       setCreateValue("")
     } catch {
-      toast.error("Network error creating credential")
+      if (!controller.signal.aborted) toast.error("Network error creating credential")
     } finally {
-      setCreating(false)
+      if (!controller.signal.aborted) {
+        creation.current = null
+        setCreating(false)
+      }
     }
   }
 
@@ -186,6 +210,7 @@ export function CredentialPicker({
       if (isOpen) {
         onFetchCredentials()
       } else {
+        clearCreation()
         if (mode === "oauth" || mode === "create") {
           setMode("credential")
         }
@@ -271,7 +296,7 @@ export function CredentialPicker({
                 variant="ghost"
                 size="sm"
                 className="h-7 text-xs"
-                onClick={() => setMode("credential")}
+                onClick={() => { clearCreation(); setMode("credential") }}
                 disabled={creating}
               >
                 Cancel

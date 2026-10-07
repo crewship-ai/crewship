@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "protected_files": {
+    ".github/workflows/ci.yml": "8de60ed8045cab972b85ef321975c346d1ca0766e43935d43149194e8b3fb0bd",
+    ".github/workflows/security.yml": "1270227a2db7f0fbd376021ab4e6e3d24071a448383e6dca2be7d4598779264e",
+    ".github/workflows/codeql.yml": "91e3fcdb6e886d3d713026e8d9bc9b772225bea34765f1f501db7a6b8cf92f38",
+    "scripts/ci/plan.py": "4383e14ede409fff4077013342dd7acb6146d8808ea376c53e4a0202ba1514aa",
+    "scripts/ci/verdict.py": "8b8be020996272e54c39b06822e3d669f7e7b0f435137ed6446d8a4990b9f025"
+  },
+  "workflows": {
+    ".github/workflows/ci.yml": {
+      "context": "CI Result",
+      "required_jobs": [
+        "binary",
+        "changes",
+        "cli-command-smoke",
+        "cli-subprocess-race",
+        "docs-inventory",
+        "frontend",
+        "frontend-parity",
+        "frontend-test",
+        "frontend-test-shards",
+        "frontend-test-types",
+        "go",
+        "go-lint",
+        "go-parity",
+        "go-platforms",
+        "go-race",
+        "go-race-api",
+        "go-race-api-shards",
+        "go-race-cli",
+        "go-race-cli-shards",
+        "go-shuffle",
+        "go-test",
+        "harness-pr",
+        "image",
+        "managed-environments",
+        "merge-conflict-markers",
+        "onboarding-default-boots",
+        "onboarding-journey",
+        "pages-apps",
+        "playwright-pr",
+        "release-rehearsal",
+        "shell"
+      ]
+    },
+    ".github/workflows/security.yml": {
+      "context": "Security Result",
+      "required_jobs": [
+        "changes",
+        "gitleaks",
+        "govulncheck",
+        "grype",
+        "license-check",
+        "osv-scan"
+      ]
+    },
+    ".github/workflows/codeql.yml": {
+      "context": "CodeQL Result",
+      "required_jobs": [
+        "analyze",
+        "changes"
+      ]
+    }
+  }
+}

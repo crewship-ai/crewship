@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Play, Square, Clock, Coins, CheckCircle2, AlertTriangle,
   Loader2, ChevronRight, RotateCcw, Copy,
@@ -55,6 +55,14 @@ function LiveDuration({ startedAt }: { startedAt: string }) {
 
 export function MissionControlBar({ mission, workspaceId, onMissionChanged }: MissionControlBarProps) {
   const [loading, setLoading] = useState<string | null>(null)
+  const scopeRef = useRef<{ workspaceId: string; crewId: string; missionId: string; controller: AbortController } | null>(null)
+  const hasIdentity = Boolean(workspaceId && mission.crew_id && mission.id)
+  useEffect(() => {
+    const scope = { workspaceId, crewId: mission.crew_id, missionId: mission.id, controller: new AbortController() }
+    scopeRef.current = scope
+    setLoading(null)
+    return () => { scope.controller.abort(); if (scopeRef.current === scope) scopeRef.current = null }
+  }, [workspaceId, mission.crew_id, mission.id])
   const cfg = statusConfig[mission.status] || statusConfig.PLANNING
   const StatusIcon = cfg.icon
 
@@ -77,78 +85,42 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
     }
   }, [mission.tasks])
 
-  const handleAction = useCallback(async (action: "start" | "cancel" | "complete") => {
+  const handleAction = useCallback(async (action: "start" | "cancel" | "complete" | "restart" | "clone") => {
+    const scope = scopeRef.current
+    if (!scope || !hasIdentity || loading !== null || scope.controller.signal.aborted) return
+    const isCurrent = () => scopeRef.current === scope && !scope.controller.signal.aborted
     setLoading(action)
     try {
-      const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-      let res: Response
-      if (action === "start") {
-        res = await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/start${qs}`, {
-          method: "POST",
-        })
-      } else {
-        const newStatus = action === "cancel" ? "CANCELLED" : "DONE"
-        res = await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}${qs}`, {
-          method: "PATCH",
+      const base = `/api/v1/crews/${encodeURIComponent(scope.crewId)}/missions/${encodeURIComponent(scope.missionId)}`
+      const qs = `?workspace_id=${encodeURIComponent(scope.workspaceId)}`
+      const changesStatus = action === "cancel" || action === "complete"
+      const res = await apiFetch(`${base}${changesStatus ? "" : `/${action}`}${qs}`, {
+        method: changesStatus ? "PATCH" : "POST",
+        ...(changesStatus ? {
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: newStatus }),
-        })
-      }
-      if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        toast.error(body?.detail ?? `Failed to ${action} mission`)
-        return
-      }
-      toast.success(action === "start" ? "Mission started" : action === "cancel" ? "Mission cancelled" : "Mission completed")
-      onMissionChanged()
-    } catch {
-      toast.error(`Failed to ${action} mission`)
-    } finally {
-      setLoading(null)
-    }
-  }, [mission.id, mission.crew_id, workspaceId, onMissionChanged])
-
-  const handleRestart = useCallback(async () => {
-    setLoading("restart")
-    try {
-      const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-      const res = await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/restart${qs}`, {
-        method: "POST",
+          body: JSON.stringify({ status: action === "cancel" ? "CANCELLED" : "DONE" }),
+        } : {}),
+        signal: scope.controller.signal,
       })
+      if (!isCurrent()) return
       if (!res.ok) {
         const body = await res.json().catch(() => null)
-        toast.error(body?.detail ?? "Failed to restart mission")
+        if (isCurrent()) toast.error(body?.detail ?? `Failed to ${action} mission`)
         return
       }
-      toast.success("Mission reset to Planning — incomplete tasks requeued")
-      onMissionChanged()
-    } catch {
-      toast.error("Failed to restart mission")
-    } finally {
-      setLoading(null)
-    }
-  }, [mission.id, mission.crew_id, workspaceId, onMissionChanged])
-
-  const handleClone = useCallback(async () => {
-    setLoading("clone")
-    try {
-      const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-      const res = await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/clone${qs}`, {
-        method: "POST",
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        toast.error(body?.detail ?? "Failed to clone mission")
-        return
+      const messages = {
+        start: "Mission started", cancel: "Mission cancelled", complete: "Mission completed",
+        restart: "Mission reset to Planning — incomplete tasks requeued",
+        clone: "Mission cloned — select it from the dropdown",
       }
-      toast.success("Mission cloned — select it from the dropdown")
+      toast.success(messages[action])
       onMissionChanged()
     } catch {
-      toast.error("Failed to clone mission")
+      if (isCurrent()) toast.error(`Failed to ${action} mission`)
     } finally {
-      setLoading(null)
+      if (isCurrent()) setLoading(null)
     }
-  }, [mission.id, mission.crew_id, workspaceId, onMissionChanged])
+  }, [hasIdentity, loading, onMissionChanged])
 
   return (
     <div className="border-b border-border bg-card px-4 py-3">
@@ -205,7 +177,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
             <Button
               size="sm"
               onClick={() => handleAction("start")}
-              disabled={loading !== null || total === 0}
+              disabled={!hasIdentity || loading !== null || total === 0}
               className="gap-1.5 bg-primary hover:bg-primary/90"
             >
               {loading === "start" ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
@@ -217,7 +189,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
               size="sm"
               variant="outline"
               onClick={() => handleAction("complete")}
-              disabled={loading !== null}
+              disabled={!hasIdentity || loading !== null}
               className="gap-1.5 border-success/30 text-success hover:bg-success/10"
             >
               {loading === "complete" ? <Spinner className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
@@ -229,7 +201,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
               size="sm"
               variant="outline"
               onClick={() => handleAction("cancel")}
-              disabled={loading !== null}
+              disabled={!hasIdentity || loading !== null}
               className="gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
             >
               {loading === "cancel" ? <Spinner className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
@@ -241,8 +213,8 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
             <Button
               size="sm"
               variant="outline"
-              onClick={handleRestart}
-              disabled={loading !== null}
+              onClick={() => handleAction("restart")}
+              disabled={!hasIdentity || loading !== null}
               className="gap-1.5 border-warn/30 text-warn hover:bg-warn/10"
             >
               {loading === "restart" ? <Spinner className="h-3.5 w-3.5" /> : <RotateCcw className="h-3.5 w-3.5" />}
@@ -253,8 +225,8 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
           <Button
             size="sm"
             variant="outline"
-            onClick={handleClone}
-            disabled={loading !== null}
+            onClick={() => handleAction("clone")}
+            disabled={!hasIdentity || loading !== null}
             className="gap-1.5 border-border text-muted-foreground hover:bg-accent/50"
           >
             {loading === "clone" ? <Spinner className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}

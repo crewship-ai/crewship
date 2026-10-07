@@ -45,3 +45,25 @@ it("keeps samples while the routine test result updates", () => {
   expect(screen.getByRole("textbox")).toHaveValue("saved sample")
   expect(screen.getByRole("status")).toHaveTextContent("Test passed")
 })
+
+it("prevents validation while busy or without a parsed definition", () => {
+  const onValidate = vi.fn()
+  const view = render(<RoutineTestWorkspace {...props} busy onValidate={onValidate} />)
+  fireEvent.click(screen.getByRole("button", { name: "Testing…" }))
+  expect(onValidate).not.toHaveBeenCalled()
+  view.rerender(<RoutineTestWorkspace {...props} definition={null} onValidate={onValidate} />)
+  expect(screen.getByRole("button", { name: "Test routine" })).toBeDisabled()
+  fireEvent.click(screen.getByRole("button", { name: "Test routine" }))
+  expect(onValidate).not.toHaveBeenCalled()
+})
+
+it("explains a failed validation and opens code to repair a parse error", () => {
+  const onOpenCode = vi.fn()
+  const view = render(<RoutineTestWorkspace {...props} result={{ passed: false, details: "Missing credential: deploy" }} parseError="Invalid YAML" onOpenCode={onOpenCode} />)
+  expect(screen.getByRole("status")).toHaveTextContent("Test needs attention")
+  expect(screen.getByRole("status")).toHaveTextContent("Missing credential: deploy")
+  fireEvent.click(screen.getByRole("button", { name: "Invalid YAML · Open Code" }))
+  expect(onOpenCode).toHaveBeenCalledTimes(1)
+  view.rerender(<RoutineTestWorkspace {...props} parseError="Invalid YAML" onOpenCode={undefined} />)
+  expect(screen.queryByRole("button", { name: /Open Code/ })).not.toBeInTheDocument()
+})

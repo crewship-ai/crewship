@@ -408,6 +408,14 @@ func fenceTestNetnsRun(ctx context.Context, t *testing.T, p *Provider, cid, imag
 	wait := p.client.ContainerWait(ctx, created.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
 	select {
 	case st := <-wait.Result:
+		if st.StatusCode != 0 {
+			logs, err := p.client.ContainerLogs(ctx, created.ID, client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true})
+			if err == nil {
+				out, _ := io.ReadAll(io.LimitReader(logs, 4096))
+				_ = logs.Close()
+				t.Logf("netns runner %v exited %d: %q", args, st.StatusCode, out)
+			}
+		}
 		return st.StatusCode
 	case err := <-wait.Error:
 		t.Fatalf("wait netns runner: %v", err)

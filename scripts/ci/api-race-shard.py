@@ -16,7 +16,14 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE = 'github.com/crewship-ai/crewship/internal/api'
+MODULE = 'github.com/crewship-ai/crewship'
+# One script partitions every race package that outgrew a single runner.
+# Default stays internal/api so existing invocations keep their meaning.
+PACKAGE = os.environ.get('RACE_SHARD_PACKAGE', MODULE + '/internal/api')
+if not PACKAGE.startswith(MODULE + '/') or not re.fullmatch(r'[\w./-]+', PACKAGE) or '..' in PACKAGE:
+    raise SystemExit(f'::error::invalid RACE_SHARD_PACKAGE {PACKAGE!r}')
+PACKAGE_DIR = './' + PACKAGE[len(MODULE) + 1:]
+RACE_GCFLAGS = os.environ.get('RACE_GCFLAGS', '-gcflags=modernc.org/...=-d=checkptr=0')
 # Linux limits EACH argv string, independently of total ARG_MAX. Leave room
 # for the terminator and fail clearly as the suite grows, never truncate it.
 MAX_PATTERN_BYTES = 120_000
@@ -78,14 +85,17 @@ def run(index, count, timeout):
     manifest_path.unlink(missing_ok=True)
     # Match build tags/instrumentation to execution, including tests guarded
     # by //go:build race. A failed enumeration must abort the run.
-    inventory = subprocess.check_output(['go', 'test', './internal/api', '-race', '-list', '.'],
+    # Same flags as scripts/ci/go-test.sh adds under -race, so the listing
+    # compile is reused by the run instead of rebuilding SQLite.
+    inventory = subprocess.check_output(['go', 'test', PACKAGE_DIR, '-race', RACE_GCFLAGS, '-list', '.'],
                                         cwd=ROOT, text=True)
     names, shards = partition(inventory, count)
     selected = shards[index]
     pattern = selection_pattern(selected)
     manifest = {'index': index, 'count': count, 'inventory_count': len(names),
-                'inventory_sha256': fingerprint(names), 'selected': selected}
-    print(f'API race shard {index}/{count}: {len(selected)} of {len(names)} parents', flush=True)
+                'inventory_sha256': fingerprint(names), 'selected': selected,
+                'package': PACKAGE, 'source_sha': os.environ.get('GITHUB_SHA', '')}
+    print(f'{PACKAGE_DIR} race shard {index}/{count}: {len(selected)} of {len(names)} parents', flush=True)
     result = subprocess.run(['bash', str(ROOT / 'scripts/ci/go-test.sh'), PACKAGE,
                              '-race', '-count=1', '-timeout', f'{timeout}s', '-run', pattern],
                             cwd=ROOT, env=dict(os.environ, CI_RESULTS_DIR=str(directory)))
@@ -96,13 +106,19 @@ def run(index, count, timeout):
     return 0
 
 
-def validate_manifests(manifests, count):
+def validate_manifests(manifests, count, expected_sha=None):
     if len(manifests) != count or sorted(m.get('index', -1) for m in manifests) != list(range(count)):
         raise ValueError('missing or duplicate API shard evidence')
     reference = manifests[0]
     combined = []
     seconds = 0
     for manifest in manifests:
+        # Identity: one package and one source revision. Download patterns
+        # already pin both; this keeps a mixed evidence set from validating.
+        if manifest.get('package') != PACKAGE or manifest.get('source_sha') != reference.get('source_sha'):
+            raise ValueError('race shard evidence comes from another package or revision')
+        if expected_sha and manifest.get('source_sha') != expected_sha:
+            raise ValueError('race shard evidence does not match this revision')
         if (manifest.get('count') != count or
                 manifest.get('inventory_count') != reference.get('inventory_count') or
                 manifest.get('inventory_sha256') != reference.get('inventory_sha256')):
@@ -127,11 +143,11 @@ def report(directory, count, baseline):
     if baseline <= 0 or count <= 0:
         raise ValueError('invalid API report budget or shard count')
     manifests = [json.loads(path.read_text()) for path in Path(directory).rglob('api-race-shard.json')]
-    seconds, total = validate_manifests(manifests, count)
+    seconds, total = validate_manifests(manifests, count, os.environ.get('GITHUB_SHA'))
     alarm = baseline * 1.6
-    summary = (f'### Go Race (internal/api) — combined budget\n\n'
+    summary = (f'### Go Race ({PACKAGE_DIR[2:]}) — combined budget\n\n'
                f'{total} top-level tests covered exactly once across {count} shards.\n\n'
-               f'Summed package seconds: {seconds:.3f}; full-package baseline: {baseline}s; '
+               f'Summed package seconds: {seconds:.3f}; baseline (same summed metric): {baseline}s; '
                f'erosion alarm: {alarm:.0f}s ({seconds / baseline:.2f}x baseline).\n'
                'Sum includes each shard’s package setup/cleanup; individual timings remain attached.\n')
     print(summary)

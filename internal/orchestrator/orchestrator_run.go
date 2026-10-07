@@ -483,7 +483,11 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// this row and each terminal status overwrote the other's. RunState keeps
 	// ChatID as its own field, so nothing is lost by the change.
 	req.runtimeImageID = o.observeRunImage(ctx, req.ContainerID)
+	if err := o.admitManagedLaunch(ctx, &req, runtimeUse); err != nil {
+		return err
+	}
 	runState := RunState{
+		ManagedLaunch:  req.managedLaunch,
 		WorkspaceID:    req.WorkspaceID,
 		RuntimeImageID: req.runtimeImageID,
 		ID:             req.RunID,
@@ -502,10 +506,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 
 	stateBytes, _ := json.Marshal(runState)
 	if err := o.state.Set(ctx, "agent_runs", runState.ID, stateBytes); err != nil {
+		if req.managedLaunch != nil {
+			return fmt.Errorf("managed launch: durable run identity persistence failed: %w", err)
+		}
 		o.logger.Error("failed to persist run state", "error", err)
 	}
 
 	if err := o.assembleSystemPrompt(ctx, &req); err != nil {
+		if req.managedLaunch != nil {
+			o.failRun(ctx, req, runState.ID, "error")
+		}
 		return err
 	}
 
@@ -617,6 +627,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 
 	execCfg, err := o.buildExecCommand(ctx, req, cmd, env, workDir)
 	if err != nil {
+		if req.managedLaunch != nil {
+			o.failRun(ctx, req, runState.ID, "error")
+		}
 		return err
 	}
 
@@ -688,6 +701,27 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// authoritative statement of whether a process was requested: the
 	// exec.command entry above is queued telemetry whose persistence and
 	// failure are both invisible to this line. A refusal creates nothing.
+	if req.managedLaunch != nil {
+		// Re-read stored authority after preflight, then attest immediately
+		// before the durable creation gate. A changed build requires a new run.
+		fresh, err := o.managedLaunchResolver(execCtx, req.WorkspaceID, req.CrewID, req.CLIAdapter)
+		if err == nil && (fresh == nil || fresh.ImageID != req.managedLaunch.ImageID || fresh.RevisionID != req.managedLaunch.RevisionID || fresh.LockSHA256 != req.managedLaunch.LockSHA256 || fresh.Artifact != req.managedLaunch.Artifact || fresh.Version != req.managedLaunch.Version || fresh.Binary != req.managedLaunch.Binary) {
+			err = fmt.Errorf("managed launch: build authority changed during preflight")
+		}
+		if err == nil {
+			err = o.attestManagedLaunch(execCtx, req.ContainerID, *req.managedLaunch)
+		}
+		if err != nil {
+			o.failRun(ctx, req, runState.ID, "error")
+			refused := fmt.Errorf("%w: %w", ErrExecRefused, err)
+			_, _ = j.Emit(ctx, JournalEntry{WorkspaceID: req.WorkspaceID, CrewID: req.CrewID, AgentID: req.AgentID, MissionID: req.MissionID,
+				Type: "exec.command", Severity: "warn", ActorType: "agent", ActorID: req.AgentID,
+				Summary: fmt.Sprintf("%s managed exec refused before creation", req.AgentSlug),
+				Payload: execCommandPayload(req, journalCmd, "end", map[string]any{"error": refused.Error(), "refused": true, "duration_ms": time.Since(execStart).Milliseconds()})})
+			o.markAgentOnline(ctx, req, map[string]any{"reason": "exec_refused"})
+			return refused
+		}
+	}
 	if req.ExecGate != nil {
 		if gateErr := req.ExecGate(ctx); gateErr != nil {
 			refused := fmt.Errorf("%w: %w", ErrExecRefused, gateErr)
@@ -1083,7 +1117,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// next run acquiring them. Best-effort and bounded.
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		stopped, stopErr := o.StopRunAt(stopCtx, RunLocation{
-			ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID,
+			ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID, Managed: req.managedLaunch != nil,
 		})
 		stopCancel()
 		switch {
@@ -1959,6 +1993,9 @@ func shellJoin(args ...string) string {
 // the run. Pure extraction from RunAgent; the only error is the shared E2BIG
 // guard for arg-path adapters.
 func (o *Orchestrator) buildExecCommand(ctx context.Context, req AgentRunRequest, cmd, env []string, workDir string) (provider.ExecConfig, error) {
+	if req.managedLaunch != nil {
+		return managedExecConfig(req, cmd, env, workDir)
+	}
 	// Wrap agent CLI command with stdbuf to force line-buffered stdout.
 	// Apple's container runtime buffers exec output which causes choppy
 	// streaming in chat. stdbuf -oL flushes on every newline so JSON

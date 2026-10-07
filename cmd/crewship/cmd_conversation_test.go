@@ -32,36 +32,11 @@ func TestConversationCmdStructure(t *testing.T) {
 	}
 }
 
-// buildConversationBinaryOnce compiles the crewship binary once for the
-// acceptance test so the exec drives the SAME wiring (cobra parsing, config
-// resolution, client.Post, response rendering) a real operator would hit —
-// not a hand-rolled HTTP request.
-var (
-	convBinOnce sync.Once
-	convBinPath string
-	convBinErr  error
-)
-
+// Conversation acceptance uses the shared CLI artifact, including the
+// dedicated subprocess race lane's instrumented build.
 func buildConversationBinary(t *testing.T) string {
 	t.Helper()
-	convBinOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "crewship-conv-bin")
-		if err != nil {
-			convBinErr = err
-			return
-		}
-		convBinPath = filepath.Join(dir, "crewship")
-		cmd := exec.Command("go", "build", "-o", convBinPath, ".")
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			convBinErr = err
-			t.Logf("build output: %s", out)
-		}
-	})
-	if convBinErr != nil {
-		t.Fatalf("build crewship binary: %v", convBinErr)
-	}
-	return convBinPath
+	return buildCrewshipBinary(t)
 }
 
 // TestConversationSearchAcceptance drives the built crewship binary against

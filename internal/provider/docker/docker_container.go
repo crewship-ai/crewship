@@ -503,16 +503,36 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		requestedImage = team.Image
 	}
 	if cid, ok := p.warmHit(team.ID, requestedImage); ok {
-		// A fenced crew pays one inspect here: a restart inside the warm TTL
-		// (daemon, restart policy, operator) drops the fence, and the warm
-		// path would otherwise hand the next step an unfenced container.
-		if err := p.ensureEgressFence(ctx, team, cid, ""); err != nil {
+		// An operator can pause or stop a container during the cache TTL.
+		// Never advertise it ready, undo the pause, or reconcile it destructively.
+		inspected, err := p.client.ContainerInspect(ctx, cid, client.ContainerInspectOptions{})
+		if err != nil {
 			p.evictWarm(team.ID)
-			p.stopUnfenced(ctx, team, cid, err)
-			return "", err
+			return "", fmt.Errorf("inspect cached runtime: %w", err)
 		}
-		emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "warm cache hit"})
-		return cid, nil
+		state := inspected.Container.State
+		if state == nil || state.Status == "" {
+			p.evictWarm(team.ID)
+			return "", fmt.Errorf("inspect cached runtime: missing state")
+		}
+		if state.Paused || state.Status == container.StatePaused {
+			p.evictWarm(team.ID)
+			return "", fmt.Errorf("crew runtime %s is paused; unpause it explicitly before retrying", cid)
+		}
+		if state.Status != container.StateRunning {
+			p.evictWarm(team.ID)
+		} else {
+			// Revalidate the fence too: a restart inside the warm TTL
+			// (daemon, restart policy, operator) drops the fence, and the warm
+			// path would otherwise hand the next step an unfenced container.
+			if err := p.ensureEgressFence(ctx, team, cid, ""); err != nil {
+				p.evictWarm(team.ID)
+				p.stopUnfenced(ctx, team, cid, err)
+				return "", err
+			}
+			emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "warm cache hit"})
+			return cid, nil
+		}
 	}
 
 	p.logger.Debug("EnsureCrewRuntime", "crew_id", team.ID, "crew_slug", team.Slug)
@@ -770,6 +790,13 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					return "", false, fmt.Errorf("%w: inspect existing container %s: missing state", provider.ErrRuntimeImageUpdatePending, containerName)
 				}
 				c.State = inspect.State.Status
+				imageChanged := callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && inspect.Image != desiredImage
+				if inspect.State.Paused || c.State == container.StatePaused {
+					if imageChanged {
+						return "", true, fmt.Errorf("crew runtime %s is paused; unpause it explicitly before retrying: %w", c.ID, &provider.RuntimeImageUpdatePendingError{ContainerID: c.ID, CurrentImageID: inspect.Image, DesiredImage: desiredImage})
+					}
+					return "", true, fmt.Errorf("crew runtime %s is paused; unpause it explicitly before retrying", c.ID)
+				}
 				// Applies with an empty local identity too (cleanup disabled): the
 				// drift paths below tear down with RemoveVolumes, so adopting a
 				// container another installation labelled would destroy its
@@ -828,13 +855,15 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						"container", containerName,
 						"restart_count", inspect.RestartCount,
 					)
-					p.forceTeardown(ctx, c.ID, team.ID)
+					if err := p.forceTeardown(ctx, c.ID, team.ID); err != nil {
+						return "", false, err
+					}
 					break // fall through to create new container
 				}
 				// A new desired image must not destroy work in the existing
 				// runtime. Only a freshly confirmed inactive container may be
 				// replaced. Docker's non-force removal also closes a start race.
-				if callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && inspect.Image != desiredImage {
+				if imageChanged {
 					state := inspect.State
 					if state == nil || state.Running || state.Paused || state.Restarting || (state.Status != "exited" && state.Status != "created") {
 						return "", false, &provider.RuntimeImageUpdatePendingError{ContainerID: c.ID, CurrentImageID: inspect.Image, DesiredImage: desiredImage}
@@ -1679,9 +1708,8 @@ func (p *Provider) runByoiSidecarCheck(ctx context.Context, containerID, image s
 }
 
 // forceTeardown stops a crew container with a 10-second grace period,
-// force-removes it and drops the crew's warm-cache entry. Stop/remove errors
-// are deliberately ignored: every caller falls through to create a fresh
-// container regardless.
+// force-removes it and drops the crew's warm-cache entry. Removal failures
+// stop reconciliation so callers do not report a failed teardown as success.
 //
 // RemoveVolumes is set so the anonymous, bind-backed noexec volumes for
 // /workspace, /output and /crew (see noexecBindMount, #1400) are cleaned up
@@ -1690,12 +1718,21 @@ func (p *Provider) runByoiSidecarCheck(ctx context.Context, containerID, image s
 // the named home/tools volumes are never touched; (b) removing a bind-backed
 // local volume drops only its metadata record, never the host `device`
 // directory, so crew data persists across the recreate.
-func (p *Provider) forceTeardown(ctx context.Context, containerID, crewID string) {
-	timeout := 10
-	_, _ = p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout})
-	_, _ = p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+func (p *Provider) forceTeardown(ctx context.Context, containerID, crewID string) error {
+	// Docker may remove the container but report a volume-cleanup error.
+	// Invalidate readiness even on failure; the next attempt must inspect.
 	p.evictWarm(crewID)
+	timeout := 10
+	if _, err := p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout}); err != nil && !cerrdefs.IsNotFound(err) {
+		// Force removal is still permitted for crash recovery if graceful
+		// stop failed. The remove result decides whether recreation is safe.
+		p.logger.Warn("stop runtime before forced removal failed", "container", containerID, "error", err)
+	}
+	if _, err := p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}); err != nil && !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("remove runtime and anonymous volumes: %w", err)
+	}
 	p.forgetFenced(containerID)
+	return nil
 }
 
 // waitExecExit polls ContainerExecInspect for execID every 50ms until the

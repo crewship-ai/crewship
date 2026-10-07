@@ -162,6 +162,17 @@ func (f *covRT) handler() http.HandlerFunc {
 			id := strings.TrimSuffix(path, "/start")
 			id = id[strings.LastIndex(id, "/")+1:]
 			f.starts = append(f.starts, id)
+			var inspected struct {
+				State struct {
+					Paused bool
+					Status string
+				}
+			}
+			_ = json.Unmarshal([]byte(f.inspectBody), &inspected)
+			if inspected.State.Paused || inspected.State.Status == "paused" {
+				http.Error(w, `{"message":"cannot start a paused container, try unpause"}`, http.StatusConflict)
+				return
+			}
 			st := 204
 			if f.startFn != nil {
 				st = f.startFn(id)

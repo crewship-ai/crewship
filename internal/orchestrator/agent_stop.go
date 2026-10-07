@@ -41,7 +41,7 @@ type agentRunControl struct {
 
 func (o *Orchestrator) trackAgentRun(ctx context.Context, req *AgentRunRequest) (context.Context, func()) {
 	ctx, cancel := context.WithCancel(ctx)
-	c := &agentRunControl{agentID: req.AgentID, location: RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID}, cancel: cancel, done: make(chan struct{})}
+	c := &agentRunControl{agentID: req.AgentID, location: RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID, Managed: o.managedLaunchCrews[req.CrewID]}, cancel: cancel, done: make(chan struct{})}
 	prior := req.ExecGate
 	live := o.agentLiveness()
 	agentID := req.AgentID
@@ -200,7 +200,7 @@ func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
 func (o *Orchestrator) stopRecoveredAgentRun(ctx context.Context, state RunState) error {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	location := RunLocation{ContainerID: state.ContainerID, AgentSlug: state.AgentSlug, RunID: state.ID}
+	location := RunLocation{ContainerID: state.ContainerID, AgentSlug: state.AgentSlug, RunID: state.ID, Managed: state.ManagedLaunch != nil}
 	for {
 		stopped, err := o.StopRunAt(ctx, location)
 		if err != nil {
@@ -283,26 +283,6 @@ func (o *Orchestrator) persistStoppedRunWithOrigin(ctx context.Context, state Ru
 		current.Status, current.LastActivity = "cancelled", time.Now()
 		return json.Marshal(current)
 	})
-}
-
-// ReconcileRecoveredRun clears a stale running identity only when inspecting
-// its exact container proves that the original runtime cannot still exist.
-// Unreachable, creating and running containers remain protected.
-func (o *Orchestrator) ReconcileRecoveredRun(ctx context.Context, run RunState) (bool, error) {
-	if run.Status != "running" || o.container == nil {
-		return false, nil
-	}
-	// RunAgent records the caller's ContainerID; legacy/incomplete requests
-	// can therefore lack it. Do not silently claim successful reconciliation
-	// or guess today's crew container: it may be a replacement.
-	if run.ContainerID == "" {
-		return false, fmt.Errorf("run %s has no recorded container identity; runtime absence requires operator verification", run.ID)
-	}
-	absent, err := o.containerRuntimeAbsent(ctx, run.ContainerID)
-	if err != nil || !absent {
-		return false, err
-	}
-	return true, o.persistStoppedRunWithOrigin(ctx, run, "recovered_absence")
 }
 
 // RuntimeRecordAgent recovers only the ownership field when another field is

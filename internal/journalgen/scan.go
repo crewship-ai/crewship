@@ -121,7 +121,7 @@ func ScanTree(dir string, roots ...string) ([]EntryConst, error) {
 				if name != "." && strings.HasPrefix(name, ".") {
 					return filepath.SkipDir
 				}
-				if name == "testdata" || name == "node_modules" {
+				if name == "testdata" || name == "node_modules" || name == "vendor" {
 					return filepath.SkipDir
 				}
 				return nil
@@ -280,9 +280,9 @@ func scanFile(fset *token.FileSet, file *ast.File) ([]EntryConst, error) {
 				}
 				continue
 			}
-			if specType != nil {
-				lastType = specType
-			}
+			// An explicit initializer starts a new repetition group, even
+			// when its type is inferred rather than written out.
+			lastType = specType
 			if !isEntryTypeType(specType, inJournal) {
 				// Not explicitly typed EntryType — but the value may still
 				// be an EntryType(...) conversion inferring the type, as in

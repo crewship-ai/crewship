@@ -74,8 +74,7 @@ func (p *Provider) AcquireCrewRuntimeUse(ctx context.Context, cfg provider.CrewC
 // removes only freshly inspected inactive containers, without Docker force.
 func (p *Provider) removeForReconcile(ctx context.Context, containerID, crewID string) error {
 	if managed, _ := ctx.Value(managedRuntimeUseKey{}).(bool); !managed {
-		p.forceTeardown(ctx, containerID, crewID)
-		return nil
+		return p.forceTeardown(ctx, containerID, crewID)
 	}
 	inspected, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {

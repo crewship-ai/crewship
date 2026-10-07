@@ -45,6 +45,9 @@ func (r *NativeRunner) execute(ctx context.Context, user, workspace, chat, input
 		return access.ErrDenied
 	}
 	store := r.Authority.Store
+	if store.DB == nil {
+		return access.ErrDenied
+	}
 	var err error
 	if !runOperation {
 		allowed, err := chataudience.CanReadInWorkspace(ctx, store.DB, chat, user, workspace)

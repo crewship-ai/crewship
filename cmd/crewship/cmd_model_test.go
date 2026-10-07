@@ -581,7 +581,20 @@ func buildCrewshipBinary(t *testing.T) string {
 			return
 		}
 		out := filepath.Join(buildDir, "crewship")
-		cmd := exec.Command("go", "build", "-o", out, ".")
+		args := []string{"build", "-o", out}
+		// Only the dedicated subprocess race lane opts in. The ordinary
+		// acceptance suite keeps its native build and runtime costs.
+		if os.Getenv("TEST_CREWSHIP_CLI_RACE") == "1" {
+			args = append(args, "-race")
+		}
+		// Acceptance tests run a separate process. Ordinary go test coverage
+		// cannot see it; opt in when collecting GOCOVERDIR artifacts for the
+		// CLI package, then merge them with go tool covdata textfmt.
+		if os.Getenv("TEST_CREWSHIP_CLI_COVERAGE_DIR") != "" {
+			args = append(args, "-cover", "-covermode=atomic", "-coverpkg=github.com/crewship-ai/crewship/cmd/crewship")
+		}
+		args = append(args, ".")
+		cmd := exec.Command("go", args...)
 		cmd.Env = os.Environ()
 		if combined, err := cmd.CombinedOutput(); err != nil {
 			modelBinErr = err
