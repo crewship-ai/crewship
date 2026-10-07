@@ -243,6 +243,11 @@ var allowList = []Endpoint{
 		Why: "creates the per-crew internal network",
 	},
 	{
+		Method: "NetworkInspect", HTTP: "GET /networks/{id}", ProxyVars: []string{"NETWORKS"},
+		Tier: TierCore, Packages: []string{"internal/provider/docker"},
+		Why: "revalidates network identity and installation ownership before offline reset removal",
+	},
+	{
 		Method: "NetworkList", HTTP: "GET /networks", ProxyVars: []string{"NETWORKS"},
 		Tier: TierCore, Packages: []string{"internal/provider/docker"},
 		Why: "checks whether the crew network already exists",
