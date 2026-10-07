@@ -2,16 +2,16 @@
 
 // Left rail for /activity.
 //
-// The rail is NAVIGATION and nothing else: one line of status segments, then
-// the workflow list. That is the whole column.
+// The rail follows the recipe /issues and /routines already use (#2979): the
+// sidebar-kit toolbar, a collapsible STATUS section in the Routines rail's
+// words, then every run of the window grouped by time, and the two ledgers as
+// rows at the bottom.
 //
-// It used to stack four unrelated things in it — a status bucket list, a crew
-// list, 17 issues, 39 routines — and then the workflows underneath, so a place
-// you go and a way to narrow what you see looked like the same kind of row.
-// "Failed" existed twice (a bucket here, `severity: error` in the popover) and
-// a filter that matched nothing left 56 rows all reading 0. Every narrowing now
-// lives in the filter popover, where a narrowing belongs; the decisions behind
-// that split are pure functions in lib/activity-rail.ts.
+// It used to carry two controls no other page has — a row of lens tabs and a
+// segmented status switch — and it listed only COMPOSED workflows, so a plain
+// run of a routine was hidden and a quiet workspace saw an empty column that
+// said "they are under Routines". Every run is listed now; the lenses are a
+// "Group by" choice behind the View button, where the kit puts grouping.
 //
 // SidebarFilterPopover owns the panel, so a pick never closes it and never
 // clears a sibling facet (#1776).
@@ -30,8 +30,29 @@ import {
   SidebarSection,
   SidebarRow,
   SidebarToolbar,
+  SidebarViewButton,
 } from "@/components/layout/sidebar-kit"
-import { CircleDot, Workflow } from "lucide-react"
+import {
+  Activity,
+  CheckCircle2,
+  CircleDot,
+  ClipboardList,
+  Layers,
+  PauseCircle,
+  Rows3,
+  Webhook,
+  Workflow,
+  XCircle,
+} from "lucide-react"
+
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -54,9 +75,9 @@ import {
   activeFilterCount,
   clearedFilters,
   filterFacets,
-  railSegments,
   railSources,
-  type RailSegment,
+  railStatusRows,
+  type RailScope,
   type TimeRangeKey,
 } from "@/lib/activity-rail"
 import {
@@ -65,7 +86,6 @@ import {
   bucketChains,
   chainScopeCounts,
   chainStatus,
-  isComposed,
   issueLens,
   routineLens,
   workflowHandle,
@@ -172,119 +192,13 @@ function Count({ n, dim }: { n: number; dim?: boolean }) {
   )
 }
 
-/**
- * The status line: All · Running · Waiting · Failed, one line, one choice.
- *
- * This replaces the STATUS section — five full-width rows for what is a single
- * mutually-exclusive pick. The tones are the ones the overview cards already
- * read for the same four buckets (--info / --warn / --destructive / --success),
- * so a failure is one colour across the page; the bucket-list glyphs went with
- * the bucket list.
- *
- * A segment with no number is one this query cannot count, not one holding
- * nothing — see railSegments.
- */
-function ScopeSegments({
-  segments,
-  scope,
-  onScope,
-}: {
-  segments: RailSegment[]
-  scope: FacetState["scope"]
-  onScope: (s: FacetState["scope"]) => void
-}) {
-  return (
-    <div
-      role="group"
-      aria-label="Activity status"
-      className="mx-2 mb-1.5 flex shrink-0 items-center gap-0.5 rounded-md border border-foreground/[0.08] bg-foreground/[0.04] p-0.5"
-    >
-      {segments.map((s) => {
-        const selected = scope === s.key
-        const empty = s.count === 0
-        return (
-          <button
-            key={s.key}
-            type="button"
-            aria-pressed={selected}
-            title={s.hint}
-            onClick={() => onScope(s.key)}
-            className={cn(
-              "flex min-w-0 flex-1 items-center justify-center gap-1 rounded px-1 py-1 text-[11px] transition-colors",
-              selected
-                ? "bg-primary/15 text-primary"
-                : empty
-                  ? "text-foreground/40 hover:bg-foreground/[0.04] hover:text-foreground"
-                  : "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground",
-            )}
-          >
-            <span className="truncate">{s.label}</span>
-            {s.count != null && s.count > 0 && (
-              <span
-                className="shrink-0 font-mono text-[10px] tabular-nums"
-                style={selected ? undefined : { color: `var(${s.token})` }}
-              >
-                {s.count}
-              </span>
-            )}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-/**
- * Which catalogue the rail is listing, and the row grammar for each.
- *
- * The rail listed workflows and nothing else, which answered "which routine
- * ran" and left "what happened to ENG-7" and "what did my agents do" with
- * nowhere to be asked. Before that it stacked four catalogues and 56 rows read
- * 0. The lens is the third option: one list at a time, and each list holds only
- * the members that were ACTIVE in this window — an issue nobody touched today
- * is in /issues, not here. See lib/activity-lenses.
- */
-function LensTabs({
-  lens,
-  counts,
-  onLens,
-}: {
-  lens: LensKey
-  counts: Record<LensKey, number>
-  onLens: (l: LensKey) => void
-}) {
-  return (
-    <div role="tablist" aria-label="Activity lens" className="mx-2 mb-1.5 flex shrink-0 gap-1 border-b border-foreground/[0.06]">
-      {ACTIVITY_LENSES.map((l) => {
-        const on = lens === l.key
-        const n = counts[l.key]
-        return (
-          <button
-            key={l.key}
-            role="tab"
-            type="button"
-            aria-selected={on}
-            title={l.hint}
-            onClick={() => onLens(l.key)}
-            className={cn(
-              "-mb-px flex min-w-0 items-center gap-1 border-b-2 px-1.5 py-1.5 text-[11px] transition-colors",
-              on
-                ? "border-primary font-medium text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <span className="truncate">{l.label}</span>
-            {/* A zero is printed rather than hidden: an empty lens is an answer
-                ("nothing touched an issue today"), and a tab with no number
-                beside three that have one reads as still loading. */}
-            <span className={cn("font-mono text-[10px] tabular-nums", n === 0 && "text-muted-foreground-soft")}>
-              {n}
-            </span>
-          </button>
-        )
-      })}
-    </div>
-  )
+/** The Routines rail's glyph for each status row. */
+const STATUS_ICON: Record<RailScope, React.ComponentType<{ className?: string }>> = {
+  all: Layers,
+  waiting: PauseCircle,
+  active: Activity,
+  done: CheckCircle2,
+  failed: XCircle,
 }
 
 /** Tone token per chain status — the same four the overview cards read. */
@@ -386,6 +300,21 @@ function WorkflowRow({
           {sentence}
         </span>
         <span className="flex items-center gap-1.5 truncate text-[10.5px] text-muted-foreground-soft">
+          {/* The two states a reader acts on are said in words, in their tone,
+              so the row reads without decoding the dot. Same words as the
+              STATUS rows above it. */}
+          {status === "failed" && (
+            <>
+              <span className="text-destructive">could not finish</span>
+              <span aria-hidden>·</span>
+            </>
+          )}
+          {status === "waiting" && (
+            <>
+              <span className="text-warn">waiting for you</span>
+              <span aria-hidden>·</span>
+            </>
+          )}
           <span>{relTime(chain.last_activity)}</span>
           {chain.duration_ms != null && (
             <>
@@ -428,8 +357,6 @@ function WorkflowRow({
 /** What an empty lens needs to say, and the facts that decide which sentence. */
 export interface EmptyLensFacts {
   lens: LensKey
-  /** Chains in the window that composed nothing — the Workflows lens's own case. */
-  bareRuns: number
   /** Rows the index returned before any narrowing. 0 means an empty workspace. */
   loadedChainCount: number
   /** The search box emptied the window. */
@@ -463,11 +390,9 @@ export function emptyLensCopy(f: EmptyLensFacts): string {
   // is an answer about the work rather than about the filters.
   switch (f.lens) {
     case "workflows":
-      return f.bareRuns > 0
-        ? `Nothing composed a process in this window. ${f.bareRuns} ${
-            f.bareRuns === 1 ? "run" : "runs"
-          } happened on their own — they are under Routines.`
-        : "Nothing composed a process in this window."
+      // Every run is listed under Time, so an empty one is a quiet window —
+      // not runs filed somewhere else on the page.
+      return "Nothing ran in this window. Widen the time range in Filter to look further back."
     case "issues":
       return "Nothing touched an issue in this window. Issues with no activity are in Issues, not here."
     case "agents":
@@ -505,7 +430,7 @@ export interface ActivitySidebarProps {
   /**
    * The same window with the search applied but NOT the status segment.
    *
-   * The segments count over this, because a count has to survive its own
+   * The status rows count over this, because a count has to survive its own
    * selection: counting over `chains` would make picking "Failed" render
    * "Failed 3 · Waiting 0 · Running 0" — what is left after the pick rather
    * than what there is to pick.
@@ -552,6 +477,13 @@ export interface ActivitySidebarProps {
    */
   onOpenEntity: (kind: string, id: string, label: string) => void
   onToggleCollapse: () => void
+  /**
+   * Open one of the two ledgers — accepted work and received webhooks.
+   *
+   * They were tabs above the page header. They are places to go, so they are
+   * rows, the way Inbox lists To handle / Updates / History in its rail.
+   */
+  onOpenSection?: (section: "work" | "deliveries") => void
 }
 
 export function ActivitySidebar({
@@ -582,7 +514,9 @@ export function ActivitySidebar({
   onLens,
   onOpenEntity,
   onToggleCollapse,
+  onOpenSection,
 }: ActivitySidebarProps) {
+  const [statusOpen, setStatusOpen] = React.useState(true)
   // See railInventory. Unfocused the popover answers "where is the activity";
   // focused it has to answer "where else can I go", or picking one issue
   // deletes every other option and there is no way back out except the crumb.
@@ -607,13 +541,11 @@ export function ActivitySidebar({
   // about what happened. See ActivitySidebarProps.chains.
   const scopedChains = chains
 
-  // Only composed chains are workflows. A bare run — one routine, invoked,
-  // nothing bound to anything — is a run of that routine and belongs in the
-  // Routines lens, which is where it already appears. Twelve of twenty-one rows
-  // here were that, which is what made this lens read as a worse-named copy of
-  // Routines. See isComposed.
-  const workflowChains = React.useMemo(() => scopedChains.filter(isComposed), [scopedChains])
-  const bareRuns = scopedChains.length - workflowChains.length
+  // Every run of the window. Only COMPOSED chains used to be listed here, and
+  // a plain run of a routine — the commonest thing that happens — fell through
+  // to a sentence pointing at another lens. The rail is where a run is FOUND;
+  // whether it composed anything is something its row and its page show.
+  const workflowChains = scopedChains
 
   const lensIssues = React.useMemo(() => issueLens(scopedChains), [scopedChains])
   const lensAgents = React.useMemo(() => agentLens(scopedChains), [scopedChains])
@@ -637,23 +569,12 @@ export function ActivitySidebar({
   // render, which is a boundary nobody can see and everybody would report.
   const buckets = React.useMemo(() => bucketChains(workflowChains, Date.now()), [workflowChains])
 
-  // The segments count CHAINS, which is what the list under them holds. They
-  // counted journal entries before, so "Failed 9" sat above three failed
-  // workflows — one control, one list, two numbers describing different objects.
-  //
-  // Counted over `chainsBeforeStatus`, i.e. everything the search left, so a
-  // number survives its own selection. Marked complete because the chain index
-  // is fetched independently of the scope facet, so all four buckets of THIS
-  // WINDOW are genuinely held whichever segment is picked — which is a
-  // different claim from "these are all the chains there are", and the one
-  // `chainsHaveMore` is rendered for.
-  const chainCounts = React.useMemo(
-    () => chainScopeCounts(chainsBeforeStatus),
+  // The status rows count CHAINS, which is what the list under them holds,
+  // over everything the search left — so a number survives its own selection
+  // ("Could not finish 3" stays 3 after it is picked).
+  const statusRows = React.useMemo(
+    () => railStatusRows(chainScopeCounts(chainsBeforeStatus), chainsBeforeStatus.length),
     [chainsBeforeStatus],
-  )
-  const segments = React.useMemo(
-    () => railSegments(facets.scope, chainCounts, chainsBeforeStatus.length, true),
-    [facets.scope, chainCounts, chainsBeforeStatus.length],
   )
 
   const facetKeys = filterFacets({
@@ -914,18 +835,81 @@ export function ActivitySidebar({
             </SidebarFacetOption>
           </SidebarFacet>
         </SidebarFilterPopover>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarViewButton aria-label="Group activity by" title="Group by">
+              <Rows3 className="h-3.5 w-3.5" />
+            </SidebarViewButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuLabel className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-muted-foreground">
+              Group by
+            </DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={lens} onValueChange={(v) => onLens(v as LensKey)}>
+              {/* The lenses, behind the kit's View button. They were a second
+                  row of tabs under the toolbar — a control no other rail has —
+                  and grouping is what the View trigger is for. */}
+              {ACTIVITY_LENSES.map((g) => (
+                <DropdownMenuRadioItem key={g.key} value={g.key} title={g.hint} className="text-xs">
+                  {g.label}
+                  {/* Zero is printed: an empty grouping is an answer, and a
+                      choice with no number beside three that have one reads
+                      as still loading. */}
+                  <span className="ml-auto font-mono text-[10px] tabular-nums text-muted-foreground">
+                    {lensCounts[g.key]}
+                  </span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
       </SidebarToolbar>
 
-      <LensTabs lens={lens} counts={lensCounts} onLens={onLens} />
-
-      <ScopeSegments
-        segments={segments}
-        scope={facets.scope}
-        onScope={(s) => onChange({ ...facets, scope: s })}
-      />
-
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+        {/* ── Status ── the same section, rows and count pills as /routines. */}
+        <SidebarSection
+          label="Status"
+          count={statusRows.length}
+          collapsible
+          collapsed={!statusOpen}
+          onToggle={() => setStatusOpen(!statusOpen)}
+          className="border-b border-foreground/[0.06] pb-1"
+        >
+          <div role="region" aria-label="Status">
+            {statusRows.map((r) => {
+              const Icon = STATUS_ICON[r.key]
+              const isSelected = facets.scope === r.key
+              const empty = r.count === 0 && !isSelected
+              return (
+                <SidebarRow
+                  key={r.key}
+                  as="div"
+                  selected={isSelected}
+                  onSelect={() => onChange({ ...facets, scope: r.key })}
+                >
+                  <Icon className={cn("h-3.5 w-3.5 shrink-0", r.tone, empty && "opacity-40")} />
+                  <span className={cn("flex-1 truncate", empty ? "text-muted-foreground-soft" : "text-foreground/80")}>
+                    {r.label}
+                  </span>
+                  <span
+                    className={cn(
+                      "rounded-full px-1.5 py-px text-[10px] tabular-nums",
+                      r.count === 0
+                        ? "text-muted-foreground-soft"
+                        : isSelected
+                          ? "bg-primary/15 text-primary-hover"
+                          : "bg-foreground/[0.05] text-muted-foreground",
+                    )}
+                  >
+                    {r.count}
+                  </span>
+                </SidebarRow>
+              )
+            })}
+          </div>
+        </SidebarSection>
+
         {lensCounts[lens] === 0 ? (
           // Emptiness is measured on THE LENS THAT IS OPEN, not on the chain
           // list behind it. Measuring the chains meant an Issues lens with no
@@ -946,7 +930,6 @@ export function ActivitySidebar({
           <p className="px-3 py-2 text-[11px] leading-snug text-muted-foreground-soft">
             {emptyLensCopy({
               lens,
-              bareRuns,
               loadedChainCount,
               narrowedAway: loadedChainCount > 0 && chainsBeforeStatus.length === 0,
               scopedAway: chainsBeforeStatus.length > 0 && scopedChains.length === 0,
@@ -1059,15 +1042,8 @@ export function ActivitySidebar({
           </SidebarSection>
         )}
 
-        {lens === "workflows" && workflowChains.length > 0 && bareRuns > 0 && (
-          <p className="px-3 pb-1 pt-1.5 text-[10.5px] leading-snug text-muted-foreground-soft">
-            {bareRuns} {bareRuns === 1 ? "run" : "runs"} composed nothing and {bareRuns === 1 ? "is" : "are"}{" "}
-            listed under Routines.
-          </p>
-        )}
-
         {/* The edge of what this column can see, stated where the numbers are.
-            Every count above — four lens tabs, four status segments — is derived
+            Every count above — the status rows and the Group by totals — is derived
             from ONE PAGE of the index, and without this line "Agents 4" over a
             workspace with a thousand workflows reads as a fact about the
             workspace while being a fact about the newest {loadedChainCount}. The
@@ -1084,6 +1060,19 @@ export function ActivitySidebar({
           <p className="px-3 pb-1 pt-1.5 text-[10.5px] leading-snug text-muted-foreground-soft">
             Older runs are not indexed here — the link that would group them was never written.
           </p>
+        )}
+
+        {onOpenSection && (
+          <SidebarSection label="Ledger" className="mt-2 border-t border-foreground/[0.06] pt-1">
+            <SidebarRow as="div" aria-label="Work queue" onSelect={() => onOpenSection("work")}>
+              <ClipboardList className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="flex-1 truncate text-foreground/80">Work queue</span>
+            </SidebarRow>
+            <SidebarRow as="div" aria-label="Webhook deliveries" onSelect={() => onOpenSection("deliveries")}>
+              <Webhook className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="flex-1 truncate text-foreground/80">Webhook deliveries</span>
+            </SidebarRow>
+          </SidebarSection>
         )}
       </div>
     </div>

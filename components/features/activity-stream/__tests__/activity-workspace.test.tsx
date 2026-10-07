@@ -8,7 +8,11 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
   useSearchParams: () => new URLSearchParams(window.location.search),
 }))
-vi.mock("../activity-stream-view", () => ({ ActivityStreamView: () => <p>Execution overview</p> }))
+vi.mock("../activity-stream-view", () => ({
+  ActivityStreamView: ({ onOpenSection }: { onOpenSection: (s: "work" | "deliveries") => void }) => (
+    <><p>Execution overview</p><button onClick={() => onOpenSection("work")}>Rail: Work queue</button></>
+  ),
+}))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mocks.mobile }))
 vi.mock("@/hooks/use-work-items", async (original) => ({
   ...await original<typeof import("@/hooks/use-work-items")>(), useWorkItems: mocks.work,
@@ -33,8 +37,10 @@ afterEach(cleanup)
 it("keeps the overview default and loads the ledger only when requested", () => {
   const view = render(<ActivityWorkspace workspaceId="ws-a" />)
   expect(screen.getByText("Execution overview")).toBeVisible()
+  // No tab strip above the page any more (#2979): the ledgers are rail rows.
+  expect(screen.queryByRole("tablist")).toBeNull()
   expect(mocks.work).not.toHaveBeenCalled()
-  fireEvent.mouseDown(screen.getByRole("tab", { name: "Work" }), { button: 0, ctrlKey: false })
+  fireEvent.click(screen.getByRole("button", { name: "Rail: Work queue" }))
   expect(mocks.push).toHaveBeenCalledWith("/activity?section=work", { scroll: false })
   view.rerender(<ActivityWorkspace workspaceId="ws-a" />)
   expect(screen.getByText("No work in the ledger")).toBeVisible()
@@ -42,12 +48,20 @@ it("keeps the overview default and loads the ledger only when requested", () => 
   expect(mocks.work).toHaveBeenCalledWith("ws-a", { state: null })
 })
 
-it("restores a linked section and keeps legacy run parameters when switching", () => {
+it("restores a linked section and keeps legacy run parameters on the way back", () => {
   window.history.replaceState(null, "", "/activity?run=run-7&section=work")
   render(<ActivityWorkspace workspaceId="ws-a" />)
-  expect(screen.getByRole("tab", { name: "Work" })).toHaveAttribute("aria-selected", "true")
-  fireEvent.mouseDown(screen.getByRole("tab", { name: "Overview" }), { button: 0, ctrlKey: false })
+  expect(screen.getByRole("navigation", { name: "Ledger" })).toBeVisible()
+  expect(screen.getByRole("button", { name: "Work queue" })).toHaveAttribute("aria-current", "page")
+  fireEvent.click(screen.getByRole("button", { name: "Back to activity" }))
   expect(mocks.push).toHaveBeenCalledWith("/activity?run=run-7", { scroll: false })
+})
+
+it("switches between the two ledgers from the back-bar", () => {
+  window.history.replaceState(null, "", "/activity?section=work")
+  render(<ActivityWorkspace workspaceId="ws-a" />)
+  fireEvent.click(screen.getByRole("button", { name: "Webhook deliveries" }))
+  expect(mocks.push).toHaveBeenCalledWith("/activity?section=deliveries", { scroll: false })
 })
 
 it("opens an accepted delivery's work and preserves its detail across the section change", () => {
@@ -59,7 +73,7 @@ it("opens an accepted delivery's work and preserves its detail across the sectio
   const view = render(<ActivityWorkspace workspaceId="ws-a" />)
   fireEvent.click(screen.getByRole("button", { name: /work work-1/ }))
   view.rerender(<ActivityWorkspace workspaceId="ws-a" />)
-  expect(screen.getByRole("tab", { name: "Work" })).toHaveAttribute("aria-selected", "true")
+  expect(screen.getByRole("button", { name: "Work queue" })).toHaveAttribute("aria-current", "page")
   expect(screen.getByText("Detail work-1")).toBeVisible()
 })
 

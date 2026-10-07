@@ -19,7 +19,6 @@ import { emptyLensCopy, type EmptyLensFacts } from "../activity-sidebar"
 
 const facts = (over: Partial<EmptyLensFacts> = {}): EmptyLensFacts => ({
   lens: "workflows",
-  bareRuns: 0,
   loadedChainCount: 10,
   narrowedAway: false,
   scopedAway: false,
@@ -63,14 +62,12 @@ describe("emptyLensCopy", () => {
     expect(emptyLensCopy(facts({ lens: "routines" }))).toMatch(/Routines page/i)
   })
 
-  it("sends the reader to Routines when runs happened but composed nothing", () => {
-    const copy = emptyLensCopy(facts({ lens: "workflows", bareRuns: 3 }))
-    expect(copy).toContain("3 runs")
-    expect(copy).toMatch(/under Routines/i)
-  })
-
-  it("does not invent a count it does not have", () => {
-    expect(emptyLensCopy(facts({ lens: "workflows", bareRuns: 0 }))).not.toMatch(/\d/)
+  it("says plainly that nothing ran when the time view is empty", () => {
+    // The time view lists every run, so an empty one is a quiet window — not
+    // runs hidden somewhere else on the page.
+    const copy = emptyLensCopy(facts({ lens: "workflows" }))
+    expect(copy).toMatch(/Nothing ran in this window/i)
+    expect(copy).not.toMatch(/\d/)
   })
 
   it("never returns an empty string for any reachable state", () => {
@@ -82,7 +79,6 @@ describe("emptyLensCopy", () => {
         { loadedChainCount: 0, chainsHaveUnrecorded: true },
         { narrowedAway: true },
         { scopedAway: true },
-        { bareRuns: 1 },
       ]) {
         expect(emptyLensCopy(facts({ lens, ...over })).length).toBeGreaterThan(0)
       }
@@ -101,7 +97,7 @@ describe("emptyLensCopy", () => {
 // column that this rail was rebuilt to delete.
 // ---------------------------------------------------------------------------
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { vi } from "vitest"
 
 import type { ChainSummary } from "@/hooks/use-chains"
@@ -153,6 +149,7 @@ function mount(over: Partial<ActivitySidebarProps> = {}) {
       onLens={vi.fn()}
       onOpenEntity={vi.fn()}
       onToggleCollapse={vi.fn()}
+      onOpenSection={vi.fn()}
       {...over}
     />,
   )
@@ -188,5 +185,55 @@ describe("ActivitySidebar — an empty lens says so", () => {
   it("says nothing about the window when it holds everything", () => {
     mount({ chainsHaveMore: false })
     expect(screen.queryByText(/Every count on this page describes these/i)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The rail follows the Issues / Routines recipe (#2979): a STATUS section with
+// the Routines vocabulary, every run of the window under it, the lenses behind
+// the View button and the two ledgers as rows — no second row of tabs.
+// ---------------------------------------------------------------------------
+
+describe("ActivitySidebar — the shared sidebar recipe", () => {
+  it("lists a plain run of a routine instead of hiding it", () => {
+    // One run, nothing composed: the rail used to drop it and print "they are
+    // under Routines" over an empty column.
+    const bare = chainRow({ origin: "run_bare", runs: 1, max_chain_depth: 0, routine_slug: "telemetry" })
+    const onSelectChain = vi.fn()
+    mount({ chains: [bare], onSelectChain })
+    fireEvent.click(screen.getByText(/telemetry/))
+    expect(onSelectChain).toHaveBeenCalledWith("run_bare")
+    expect(screen.queryByText(/under Routines/i)).toBeNull()
+  })
+
+  it("draws status as Routines does: one row per bucket with its count", () => {
+    const failed = chainRow({ origin: "run_f", failed: true, failed_runs: 1 })
+    const waiting = chainRow({ origin: "run_w", waiting_runs: 1 })
+    const done = chainRow({ origin: "run_d" })
+    const onChange = vi.fn()
+    mount({ chains: [failed, waiting, done], onChange })
+    const section = screen.getByRole("region", { name: "Status" })
+    const labels = within(section).getAllByRole("button").map((b) => b.textContent)
+    expect(labels).toEqual(["All3", "Waiting for you1", "Running0", "Completed1", "Could not finish1"])
+    fireEvent.click(within(section).getByRole("button", { name: /Could not finish/ }))
+    expect(onChange).toHaveBeenCalledWith({ ...EMPTY_FACETS, scope: "failed" })
+  })
+
+  it("keeps the lenses behind the View button rather than a second tab row", () => {
+    const onLens = vi.fn()
+    mount({ onLens })
+    expect(screen.queryByRole("tablist")).toBeNull()
+    expect(screen.queryByRole("group", { name: "Activity status" })).toBeNull()
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Group activity by" }), { button: 0, ctrlKey: false })
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^Issue/ }))
+    expect(onLens).toHaveBeenCalledWith("issues")
+  })
+
+  it("opens the work and delivery ledgers from the rail", () => {
+    const onOpenSection = vi.fn()
+    mount({ onOpenSection })
+    fireEvent.click(screen.getByRole("button", { name: "Work queue" }))
+    fireEvent.click(screen.getByRole("button", { name: "Webhook deliveries" }))
+    expect(onOpenSection.mock.calls).toEqual([["work"], ["deliveries"]])
   })
 })

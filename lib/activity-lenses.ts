@@ -40,18 +40,20 @@ export interface LensMeta {
 }
 
 /**
- * The four lenses, in reading order.
+ * The four lenses, in reading order — the rail's "Group by" menu (#2979).
  *
- * Workflows first because a causal run is the unit this page is about; the
- * other three are ways of slicing the same runs, and each answers a question a
- * person actually arrives with — "what happened to ENG-7", "what did my agents
- * do", "how is that routine doing".
+ * Time first because a run is the unit this page is about; the other three are
+ * ways of slicing the same runs, and each answers a question a person actually
+ * arrives with — "what happened to ENG-7", "what did my agents do", "how is
+ * that routine doing". The labels finish the sentence "Group by …".
+ *
+ * The key stays `workflows` because it is the `?lens=` value links carry.
  */
 export const ACTIVITY_LENSES: readonly LensMeta[] = [
-  { key: "workflows", label: "Workflows", hint: "One causal run: the rule or person that started it, and everything it caused" },
-  { key: "issues", label: "Issues", hint: "Issues something touched in this window — not the whole backlog" },
-  { key: "agents", label: "Agents", hint: "Agents that took work in this window, and how much" },
-  { key: "routines", label: "Routines", hint: "Routines that RAN in this window — not the catalogue of every routine" },
+  { key: "workflows", label: "Time", hint: "Every run of the window — live ones first, then today, then earlier" },
+  { key: "issues", label: "Issue", hint: "Issues something touched in this window — not the whole backlog" },
+  { key: "agents", label: "Agent", hint: "Agents that took work in this window, and how much" },
+  { key: "routines", label: "Routine", hint: "Routines that RAN in this window — not the catalogue of every routine" },
 ] as const
 
 // ---------------------------------------------------------------------------
@@ -497,60 +499,11 @@ export function narrowChains(
 }
 
 // ---------------------------------------------------------------------------
-// What earns the word "workflow".
+// What a row says.
 // ---------------------------------------------------------------------------
 
 /** How many nouns a workflow's sentence names before it starts eliding. */
 const MAX_REACH_NOUNS = 3
-
-/**
- * Whether a chain COMPOSED anything, or is just one run wearing the word.
- *
- * On the live instance twelve of twenty-one rows in the Workflows lens were
- * `crewship routine run X` — one run, depth 0, no issue touched, no agent
- * dispatched. Nothing was bound to anything. Listing those as workflows makes
- * the word mean "a run", and once it means that the Workflows lens is the
- * Routines lens with worse naming: open "Classify support ticket" in either and
- * you see the same eight runs.
- *
- * A workflow is a process that BINDS two or more Crewship things together. So
- * the test is whether anything was bound:
- *
- *   runs > 1              a routine called another
- *   max_chain_depth > 0   something fired something
- *   agent_count > 0       a routine put an agent to work
- *   issue_count > 0       it reached into the tracker
- *
- * Plus two exceptions that are not about composition at all.
- *
- * The first is a chain that FAILED, is still running, or is waiting on a person.
- * A single run that broke is the reason somebody opened this page, and filing it
- * under its routine would hide exactly what the rail exists to surface.
- *
- * The second is a chain NO OTHER LENS CAN LIST. "It belongs in Routines
- * instead" is the argument this whole predicate rests on, and it holds only
- * while there is a Routines row to hold it: routineLens keys on
- * `routine_slug` and skips a chain without one, which is the honest thing for a
- * catalogue of routines to do. A chain whose root run was swept by retention
- * has no slug — so before this clause it was in the Workflows lens (dropped for
- * composing nothing) and in the Routines lens (dropped for having no routine),
- * which is to say nowhere. An index may cap, elide or defer a row; it may not
- * silently have no place for one.
- *
- * The rule, then, is "compose, or need me, or belong to no catalogue".
- *
- * Nothing is deleted by this — a bare run of a KNOWN routine is still a run, and
- * the Routines lens is where runs live. This only decides which list it is in.
- */
-export function isComposed(c: ChainSummary): boolean {
-  if (c.runs > 1) return true
-  if (c.max_chain_depth > 0) return true
-  if ((c.agent_count ?? 0) > 0) return true
-  if ((c.issue_count ?? 0) > 0) return true
-  if (chainStatus(c) !== "done") return true
-  // No slug means routineLens has no row for it. See above.
-  return !c.routine_slug?.trim()
-}
 
 /**
  * The one line that says what a workflow IS, as opposed to what routine it began

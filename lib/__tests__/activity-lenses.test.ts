@@ -8,7 +8,6 @@ import {
   chainScopeCounts,
   chainStatus,
   chainsInScope,
-  isComposed,
   issueLens,
   matchesQuery,
   narrowChains,
@@ -312,48 +311,6 @@ describe("chainScopeCounts / chainsInScope", () => {
   })
 })
 
-describe("isComposed — what earns the word workflow", () => {
-  it("is false for one manual run that touched nothing", () => {
-    // 12 of 21 rows on the live instance were this: `crewship routine run X`,
-    // one run, depth 0, no issue, no agent. Nothing was composed, so calling it
-    // a workflow makes the word mean "a run" — and then the Workflows lens is
-    // the Routines lens with worse naming.
-    //
-    // The slug is spelled out rather than left to the fixture's default,
-    // because it is load-bearing here and was not: `crewship routine run X`
-    // names a routine, so a chain standing in for that command has one. Without
-    // it this asserted the ORPHAN case — a chain routineLens cannot list — and
-    // passed for a reason the sentence above does not give. See the "nothing
-    // falls out of every list" block.
-    expect(isComposed(chain({ routine_slug: "triage", runs: 1, max_chain_depth: 0 }))).toBe(false)
-  })
-
-  it("is true when something caused something else", () => {
-    expect(isComposed(chain({ max_chain_depth: 1 }))).toBe(true)
-    expect(isComposed(chain({ runs: 2 }))).toBe(true)
-  })
-
-  it("is true when it put an agent to work", () => {
-    expect(isComposed(chain({ agent_count: 1 }))).toBe(true)
-  })
-
-  it("is true when it reached an issue", () => {
-    expect(isComposed(chain({ issue_count: 1 }))).toBe(true)
-  })
-
-  it("is true for a failed single run — a failure crosses into what a person does", () => {
-    // The one exception to "one run is not a workflow". A run that broke is the
-    // reason somebody opened this page, and filing it away under its routine
-    // would hide the thing the rail exists to surface.
-    expect(isComposed(chain({ runs: 1, failed: true, failed_runs: 1 }))).toBe(true)
-  })
-
-  it("is true for a run still going or still asking", () => {
-    expect(isComposed(chain({ runs: 1, running_runs: 1 }))).toBe(true)
-    expect(isComposed(chain({ runs: 1, waiting_runs: 1 }))).toBe(true)
-  })
-})
-
 describe("workflowName — the sentence that is not the routine's name", () => {
   it("names what set it off and what it reached", () => {
     const c = chain({
@@ -446,26 +403,6 @@ describe("narrowChains", () => {
     const nameOf = (slug: string) => (slug === "on-close-file-followup" ? "Follow up on close" : undefined)
     expect(narrowChains(named, "follow up", "all", nameOf).visible).toHaveLength(1)
     expect(narrowChains(named, "follow up", "all").visible).toHaveLength(0)
-  })
-})
-
-describe("isComposed — nothing falls out of every list", () => {
-  it("keeps a finished chain that no routine can list", () => {
-    // routineLens skips a chain with no slug, and that is right: a catalogue of
-    // routines cannot hold a row with no routine. But the Workflows lens was
-    // the only other list, and it dropped this row for composing nothing — so
-    // a chain whose root run was swept by retention was in NEITHER, which is
-    // the one outcome an index must never produce.
-    const orphan = chain({ routine_slug: undefined, runs: 1, max_chain_depth: 0 })
-    expect(routineLens([orphan])).toEqual([])
-    expect(isComposed(orphan)).toBe(true)
-  })
-
-  it("still files a bare run of a known routine under Routines", () => {
-    // The rule is "compose, or need me, or belong to no catalogue" — not
-    // "keep everything". A plain run of a named routine is still a run, and
-    // the Routines lens is where runs live.
-    expect(isComposed(chain({ routine_slug: "triage", runs: 1, max_chain_depth: 0 }))).toBe(false)
   })
 })
 

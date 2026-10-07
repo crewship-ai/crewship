@@ -1,8 +1,7 @@
 /**
  * The decisions the /activity left rail makes, as plain functions.
  *
- * The rail is NAVIGATION: one line of status segments, then the workflow
- * list. Everything else — crews, issues, routines, sources, severities,
+ * The rail is NAVIGATION: a STATUS section, then every run of the window. Everything else — crews, issues, routines, sources, severities,
  * agents, range, telemetry — is a NARROWING and lives in the filter popover.
  * The version before this one stacked all of it in the same column, so a
  * status bucket, a crew, an issue and a workflow all looked like the same
@@ -10,11 +9,11 @@
  * in the popover).
  *
  * These live outside the component because they are the parts worth testing:
- * which segments exist, what a count is allowed to claim, what Clear all is
+ * which status rows exist, what a count is allowed to claim, what Clear all is
  * allowed to touch. Mounting a sidebar to assert those tests React.
  */
 
-import { ACTIVITY_SCOPES, type ActivityScope } from "@/lib/activity-stream"
+import type { ActivityScope } from "@/lib/activity-stream"
 
 /* --------------------------------------------------------------- range */
 
@@ -30,88 +29,48 @@ export type TimeRangeKey = (typeof TIME_RANGES)[number]["key"]
 /** The window the page opens on. Selecting it is not a narrowing. */
 export const DEFAULT_RANGE: TimeRangeKey = "24h"
 
-/* ------------------------------------------------------------ segments */
+/* -------------------------------------------------------------- status */
 
 export type RailScope = ActivityScope | "all"
 
-export interface RailSegment {
+export interface RailStatusRow {
   key: RailScope
-  /** One word — four of these share one 280px line. */
+  /** The Routines rail's word for the same state. */
   label: string
-  /** The full name, for the tooltip and the screen reader. */
-  hint: string
-  /** Tone token from globals.css, the same one the overview cards read. */
-  token: string
-  /**
-   * How many rows are in this bucket — or `null` when the loaded window
-   * cannot answer that, which is not the same as zero. See below.
-   */
-  count: number | null
-}
-
-/** Short names. `ACTIVITY_SCOPES` carries the long ones, and stays the source. */
-const SHORT_LABEL: Record<ActivityScope, string> = {
-  active: "Running",
-  waiting: "Waiting",
-  failed: "Failed",
-  done: "Completed",
-}
-
-/** The segments that are always on the line, in reading order. */
-const FIXED: RailScope[] = ["all", "active", "waiting", "failed"]
-
-/**
- * Does picking this scope narrow the FETCH, or only the rendered list?
- *
- * activity-stream-view turns `active`/`waiting` into an `entry_type` filter
- * and `failed` into `severity=error`, so under those three the window holds
- * one bucket and the others are unloaded rather than empty. `done` has no
- * server-side expression and is filtered client-side, so under it — as under
- * `all` — the whole window is present and every bucket in it is real.
- */
-export function scopeNarrowsFetch(scope: RailScope): boolean {
-  return scope === "active" || scope === "waiting" || scope === "failed"
+  /** Tailwind text tone — the same one the overview cards read. */
+  tone: string
+  count: number
 }
 
 /**
- * The status line at the top of the rail.
+ * The STATUS section at the top of the rail, in the Routines rail's order and
+ * words (#2979).
  *
- * Four segments, mutually exclusive, plus `Completed` when — and only when —
- * that is the current scope: the overview's stat cards can send the page into
- * any scope, and a control that cannot draw the state it was handed shows
- * nothing selected and reads as broken.
+ * It used to be a segmented switch — All · Running · Waiting · Failed on one
+ * 280px line, with Completed appearing only once it was picked — a control no
+ * other page has. /routines draws the same question as a section of rows with
+ * a count each, so this does too: every bucket, always, so a row never moves
+ * because its neighbour emptied.
  *
- * Counts are suppressed (null) for every bucket the current query did not
- * load. Printing the raw 0 is how the old rail told a reader "nothing is
- * running" on the evidence of a query that only asked for failures.
- *
- * `countsAreComplete` overrides that suppression, and exists because the rail
- * stopped counting one thing. Its list is CHAINS, and the chain index is
- * fetched independently of the scope facet — so under scope=failed the caller
- * genuinely holds all four numbers, and blanking them would print "we cannot
- * say" over data it is holding. Suppression stays the default because the
- * journal, which the rest of the page still queries by scope, really cannot
- * answer for the buckets it did not fetch.
+ * The counts are complete. The rail lists CHAINS, and the chain index is
+ * fetched independently of the scope facet, so every bucket of this window is
+ * genuinely held whichever row is picked.
  */
-export function railSegments(
-  scope: RailScope,
-  scopeCounts: Record<ActivityScope, number>,
-  total: number,
-  countsAreComplete = false,
-): RailSegment[] {
-  const keys: RailScope[] = scope === "done" ? [...FIXED, "done"] : FIXED
-  const knowable = countsAreComplete || !scopeNarrowsFetch(scope)
-  return keys.map((key) => {
-    const meta = ACTIVITY_SCOPES.find((s) => s.key === key)
-    const raw = key === "all" ? total : scopeCounts[key as ActivityScope]
-    return {
-      key,
-      label: key === "all" ? "All" : SHORT_LABEL[key as ActivityScope],
-      hint: key === "all" ? "All activity" : (meta?.label ?? key),
-      token: meta?.token ?? "--muted-foreground",
-      count: knowable || key === scope ? raw : null,
-    }
-  })
+const STATUS_ROWS: { key: RailScope; label: string; tone: string }[] = [
+  { key: "all", label: "All", tone: "text-foreground/70" },
+  // Live buckets first, as on /routines: the one state that is waiting for
+  // the person reading it must not sort under three historical outcomes.
+  { key: "waiting", label: "Waiting for you", tone: "text-warn" },
+  { key: "active", label: "Running", tone: "text-primary" },
+  { key: "done", label: "Completed", tone: "text-success" },
+  { key: "failed", label: "Could not finish", tone: "text-destructive" },
+]
+
+export function railStatusRows(scopeCounts: Record<ActivityScope, number>, total: number): RailStatusRow[] {
+  return STATUS_ROWS.map((r) => ({
+    ...r,
+    count: r.key === "all" ? total : scopeCounts[r.key as ActivityScope],
+  }))
 }
 
 /* -------------------------------------------------------------- facets */
@@ -119,7 +78,7 @@ export function railSegments(
 /**
  * Severities the popover offers.
  *
- * `error` is deliberately absent: it IS the Failed segment
+ * `error` is deliberately absent: it IS the Could-not-finish status row
  * (activity-stream-view maps `scope=failed` to `severity=error`), and one
  * filter reachable from two controls is exactly the duplication this rail
  * was rebuilt to remove.
@@ -134,7 +93,7 @@ export const RAIL_SEVERITIES: { key: string; label: string; token: string }[] = 
  * Sources the popover offers.
  *
  * `human` is dropped for the same reason `error` is: it IS the Waiting
- * segment. `scope=waiting` fetches exactly `sourceEntryTypes("human")`, so
+ * status row. `scope=waiting` fetches exactly `sourceEntryTypes("human")`, so
  * the source option was a second control issuing the first one's query —
  * and, sitting in a different facet, one that could quietly contradict it.
  */
@@ -211,7 +170,7 @@ export function activeFilterCount(f: RailFilters, focused: boolean): number {
 /**
  * Clear all — every facet the popover owns, and nothing else.
  *
- * The scope is not in here on purpose: it is the segment you are standing on,
+ * The scope is not in here on purpose: it is the status row you are standing on,
  * not a filter, and clearing filters should not move you somewhere else.
  * (The entity focus is cleared alongside this by the caller, since it is not
  * part of the facet state.)

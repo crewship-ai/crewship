@@ -16,7 +16,7 @@
 
 import * as React from "react"
 import { useSearchParams } from "next/navigation"
-import { Activity, ArrowLeft, ChevronRight, FilterX } from "lucide-react"
+import { Activity, ChevronLeft, ChevronRight, FilterX } from "lucide-react"
 
 import { SubBar } from "@/components/layout/sub-bar"
 import { SidebarActiveChip, SidebarActiveChips, SidebarCollapseButton } from "@/components/layout/sidebar-kit"
@@ -138,7 +138,14 @@ const PAGE_SIZE = 300
  */
 const WAITING_PAGE_SIZE = 500
 
-export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
+export function ActivityStreamView({
+  workspaceId,
+  onOpenSection,
+}: {
+  workspaceId: string
+  /** Open one of the ledgers (work queue, webhook deliveries). See ActivityWorkspace. */
+  onOpenSection?: (section: "work" | "deliveries") => void
+}) {
   const isMobile = useIsMobile()
   const lookup = useJournalLookup()
 
@@ -876,6 +883,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
               // Same rule as onFocus: a row in the rail is where a walk BEGINS.
               onOpenEntity={(kind, id, label) => setPath(selectStop({ kind, id, label }))}
               onToggleCollapse={() => setRailCollapsed(true)}
+              onOpenSection={onOpenSection}
             />
           )}
         </aside>
@@ -885,7 +893,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
               right panel first, and an execution graph does not fit in a
               column — the shape of a run IS the information. */}
           {selected ? (
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="min-h-0 flex-1 overflow-y-auto animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out">
               <ActivityDetail
                 entry={selected}
                 workspaceId={workspaceId}
@@ -908,23 +916,26 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                 column that can be four levels deep and cannot say which level
                 it is on is a place people stop trusting. */}
             {path.stops.length > 0 && (
+              // The Issues back-bar, to the class (#2979): the way out first,
+              // named for where it leads, then every stop on the walk. One
+              // level down it reads "Back to activity" like "Back to issues";
+              // deeper it steps one stop up, and the crumbs jump further.
               <nav
                 aria-label="Activity trail"
-                className="flex shrink-0 items-center gap-1 border-b border-foreground/[0.06] px-3 py-1.5 text-xs"
+                className="flex shrink-0 items-center gap-1 border-b border-border bg-card/40 px-4 py-2 text-xs"
               >
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 gap-1 px-1.5 text-xs text-muted-foreground"
+                <button
+                  type="button"
                   onClick={goBack}
+                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  Back
-                </Button>
-                <span aria-hidden className="mx-1 h-3.5 w-px bg-foreground/10" />
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  {path.stops.length === 1 ? "Back to activity" : "Back"}
+                </button>
+                <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
                 {trail.crumbs.map((c, i) => (
                   <React.Fragment key={c.depth}>
-                    {i > 0 && <ChevronRight aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground/50" />}
+                    {i > 0 && <ChevronRight aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground/40" />}
                     {/* The walk is longer than the trail: stops fell off the
                         front at the depth cap, and a breadcrumb that quietly
                         began in the middle would claim the reader started
@@ -939,7 +950,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                       onClick={() => setPath((p) => jumpTo(p, c.depth))}
                       aria-current={c.current ? "page" : undefined}
                       className={cn(
-                        "max-w-[22ch] truncate rounded px-1.5 py-0.5 hover:bg-foreground/[0.06]",
+                        "max-w-[22ch] truncate rounded px-1.5 py-0.5 transition-colors hover:bg-muted",
                         c.current ? "font-medium text-foreground" : "text-muted-foreground",
                       )}
                     >
@@ -962,7 +973,14 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
               </SidebarActiveChips>
             )}
 
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            {/* Each stop enters the way an opened issue does — 12px in from the
+                right over 0.2s — so moving through runs reads as one surface
+                rather than hard swaps. Keyed on the stop, so the overview's own
+                filter changes do not replay it. */}
+            <div
+              key={stop ? `${stop.kind}:${stop.id}` : "home"}
+              className="min-h-0 flex-1 overflow-y-auto animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out"
+            >
               {/* A routine out of the Routines lens: its runs, by the hour.
                   Placed before every other branch because it is a whole
                   surface, not a narrowing of the feed — the same reason the

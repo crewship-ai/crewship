@@ -291,3 +291,18 @@ it.each(["array", "http", "network"])("handles %s issue metadata responses", asy
   await act(async () => {})
   expect(sidebar().issues).toEqual(kind === "array" ? [{ id: "new" }] : [])
 })
+it("opens a run under the Issues back-bar, whose first button says where it leads", () => {
+  // #2979: /issues and /routines say "‹ Back to issues"; a bare "Back" one
+  // level down from the overview is the same control with less information.
+  show()
+  act(() => sidebar().onSelectChain("r1"))
+  expect(screen.getByRole("navigation", { name: "Activity trail" })).toHaveTextContent("Back to activity")
+  fireEvent.click(screen.getByRole("button", { name: "Back to activity" }))
+  expect(screen.getByText("Overview: e1,e2")).toBeVisible()
+})
+it("hands the ledger opener to the rail", () => {
+  const onOpenSection = vi.fn()
+  render(<ActivityStreamView workspaceId="ws" onOpenSection={onOpenSection} />)
+  sidebar().onOpenSection?.("deliveries")
+  expect(onOpenSection).toHaveBeenCalledWith("deliveries")
+})
