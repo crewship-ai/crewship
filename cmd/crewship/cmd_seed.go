@@ -28,12 +28,16 @@ const devDefaultPassword = "password123"
 
 var seedCmd = &cobra.Command{
 	Use:   "seed",
-	Short: "Seed demo data via the API (replaces prisma/seed.ts)",
+	Short: "Seed demo data into an explicit --server target",
 	Long: `Creates a complete demo environment: admin user, workspace, crews,
 agents with system prompts, credentials, integrations, and sample issues.
 
 On a fresh database, automatically bootstraps the first admin user.
 On an existing database, requires authentication (crewship login).
+
+Requires an explicit --server URL and SEED_ANTHROPIC_API_KEY (API key or
+Claude OAuth token), or a renewable Codex login via --codex-auth-file.
+Use --offline-demo explicitly for UI/control-plane fixtures without model execution.
 
 All data is created through the REST API, ensuring business logic
 (validation, encryption, audit logging) is properly exercised.`,
@@ -41,6 +45,7 @@ All data is created through the REST API, ensuring business logic
 }
 
 func init() {
+	seedCmd.Flags().Bool("offline-demo", false, "Create UI/control-plane fixtures without provider credentials, provisioning, or automatic model execution")
 	seedCmd.Flags().Bool("nuke", false, "Delete all workspace contents before seeding")
 	seedCmd.Flags().Bool("yes", false, "Skip the --nuke confirmation prompt (for CI/scripts). Without it, an interactive nuke requires typing the workspace slug.")
 	seedCmd.Flags().Bool("skip-issues", false, "Skip issue/project/label seeding")
@@ -51,7 +56,7 @@ func init() {
 	seedCmd.Flags().Int("provision-timeout", 900, "Per-crew provisioning timeout (seconds)")
 	seedCmd.Flags().Bool("wait-provision", false, "Block until all crews finish provisioning (default: fire-and-forget, seed returns while provisioning runs in the background)")
 	seedCmd.Flags().Bool("test-backup", false, "After seeding, run a backup/restore round-trip self-test on one crew (implies --wait-provision)")
-	seedCmd.Flags().Bool("with-memory", false, "Pre-seed agent memory tiers (AGENT.md / CREW.md / PERSONA.md / pins.md / daily/{date}.md / learned.md) for the demo workspace; useful for memory-recall demos and live GDPR/RBAC tests")
+	seedCmd.Flags().Bool("with-memory", false, "Unavailable until server-side durable memory provisioning is supported (fails before seeding)")
 	seedCmd.Flags().Bool("with-team-chat", false, "Add six fictional colleagues with real roles, local avatars and human Chat examples; signup is not required")
 	seedCmd.Flags().String("state-dir", "", "Private team-chat credential directory outside Git (isolated per server/workspace)")
 	seedCmd.AddCommand(newSeedTeamChatCmd())
@@ -59,7 +64,9 @@ func init() {
 	seedCmd.Flags().String("codex-auth-file", "", "Absolute path to a private Codex auth.json (0600, outside the repo) that switches the demo agents to Codex CLI; overrides "+seedCodexAuthFileEnv)
 }
 
-// loadDotEnvLocal seeds os.Getenv with values from .env.local in the
+// loadDotEnvLocal is retained for legacy helper tests; runSeed does not call it.
+// Production seeding requires an explicit target and exported credentials.
+// This helper seeds os.Getenv with values from .env.local in the
 // current working directory, but ONLY for keys that aren't already in
 // the process environment. This makes `crewship seed` work the same
 // way whether invoked via `dev.sh seed` (which exports the file) or
@@ -145,12 +152,20 @@ func bridgeServerFromPort() {
 }
 
 func runSeed(cmd *cobra.Command, args []string) error {
-	loadDotEnvLocal()
-	applySeedCodexAuthFlag(cmd)
-	if _, err := resolveSeedCodexLogin(); err != nil {
-		return err // validate before bootstrap or any workspace mutation
+	if err := cmd.Context().Err(); err != nil {
+		return err
+	}
+	if err := seedPreflight(cmd); err != nil {
+		return err
 	}
 	ctx := cmd.Context()
+	if withUsers, _ := cmd.Flags().GetBool("with-users"); withUsers {
+		probe := cli.NewClient(seedTargetServer(), "", "").WithContext(ctx)
+		if open, known := serverAllowsSignup(probe); known && !open {
+			return fmt.Errorf("--with-users: signup is disabled on the target server; enable CREWSHIP_ALLOW_SIGNUP or omit --with-users; no data was created")
+		}
+	}
+	offlineDemo, _ := cmd.Flags().GetBool("offline-demo")
 	nuke, _ := cmd.Flags().GetBool("nuke")
 	skipIssues, _ := cmd.Flags().GetBool("skip-issues")
 	withEvals, _ := cmd.Flags().GetBool("with-evals")
@@ -266,7 +281,13 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	}
 	provisionTimeout := time.Duration(provisionTimeoutSec) * time.Second
 	provisionTargets := collectProvisionTargets(crewIDs)
-	startedTargets, triggerErr := triggerProvisions(ctx, client, provisionTargets, provisionTimeout)
+	var startedTargets []provisionTarget
+	var triggerErr error
+	if !offlineDemo {
+		startedTargets, triggerErr = triggerProvisions(ctx, client, provisionTargets, provisionTimeout)
+	} else {
+		fmt.Fprintln(os.Stderr, "Offline demo: agents are fixtures; model execution is unavailable. No provider credentials or automatic runs will be created.")
+	}
 	// Deliberately do NOT early-return on triggerErr, even in sync mode:
 	// the async design of Phase 2b is "trigger, continue seeding while
 	// images build". Returning here would also skip agents/skills/issues.
@@ -277,7 +298,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	agentIDs, createdAgents, err := seedAgents(ctx, client, crewIDs)
+	agentIDs, createdAgents, err := seedAgents(ctx, client, crewIDs, offlineDemo)
 	if err != nil {
 		return err
 	}
@@ -308,8 +329,10 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := seedCredentials(ctx, client, agentIDs); err != nil {
-		return err
+	if !offlineDemo {
+		if err := seedCredentials(ctx, client, agentIDs); err != nil {
+			return err
+		}
 	}
 	// Demo vault: two inert examples (SMTP and webhook signing). Non-fatal — a
 	// workspace without the demo tour is still a working workspace, and a
@@ -346,8 +369,10 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	keeperEndpoint, keeperModel := seedKeeperEnv()
-	if err := seedKeeper(ctx, client, keeperEndpoint, keeperModel); err != nil {
-		return err
+	if !offlineDemo {
+		if err := seedKeeper(ctx, client, keeperEndpoint, keeperModel); err != nil {
+			return err
+		}
 	}
 
 	// ── Phase 10: Issues ──
@@ -366,7 +391,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := seedPages(ctx, client, waitProvision); err != nil {
+	if err := seedPages(ctx, client, waitProvision, offlineDemo); err != nil {
 		return err
 	}
 	if err := seedLiveCallback(ctx, client, crewIDs); err != nil {
@@ -385,7 +410,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	// we block here so the other seed phases had a chance to run in parallel
 	// with the image build.
 	var waitErr error
-	if waitProvision {
+	if waitProvision && !offlineDemo {
 		// Poll only the targets whose triggers actually succeeded — polling
 		// a crew whose trigger 429'd or errored would just time out idle.
 		// Save the error and fall through; we'll combine it with any
@@ -482,10 +507,10 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		if err := runSmokeTest(ctx, agentIDs, time.Duration(smokeTimeout)*time.Second); err != nil {
 			return err
 		}
-	} else {
+	} else if !offlineDemo {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "To test that agents work end-to-end:")
-		fmt.Fprintln(os.Stderr, "  crewship seed --smoke-test")
+		fmt.Fprintf(os.Stderr, "  crewship seed --server %s --smoke-test\n", seedTargetServer())
 	}
 	return nil
 }
@@ -503,7 +528,8 @@ func runSeed(cmd *cobra.Command, args []string) error {
 // seedTargetServer resolves the server the whole seed flow talks to
 // (bootstrap, nuke confirmation, smoke test, backup warmup). It uses
 // EffectiveServer — NOT ResolveServer — so an explicit --profile /
-// CREWSHIP_PROFILE wins over a shell CREWSHIP_SERVER, matching newAPIClient()
+// CREWSHIP_PROFILE wins over a shell CREWSHIP_SERVER when used by read-only
+// helpers. runSeed requires --server before reaching this helper. This matches newAPIClient()
 // and every authenticated call in the same command.
 //
 // The bug this fixes: seedBootstrap's unauthenticated POST used ResolveServer,
@@ -534,7 +560,10 @@ func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, e
 	// <data_dir>/initial_setup_token with a comment header — read
 	// it and forward in X-Setup-Token so the bootstrap call doesn't
 	// bounce off the 403 gate.
-	setupToken := readSetupTokenFile()
+	setupToken := ""
+	if host := serverHost(server); host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		setupToken = readSetupTokenFile()
+	}
 	if setupToken != "" {
 		fmt.Fprintln(os.Stderr, "  Found initial_setup_token — sending as X-Setup-Token header")
 	}
@@ -559,16 +588,21 @@ func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, e
 		}
 
 		// Save config for future commands. Load the RAW config (not the
-		// profile-overlaid cliCfg) and write the bootstrapped credential to the
-		// active target via WriteCredential, so under a profile the token lands
-		// in cfg.Servers[name] where reads look — not in a top-level slot the
-		// overlay would mask on the next command.
+		// profile-overlaid cliCfg) and write into a profile for this exact URL.
+		// Unrelated defaults and directory mappings must remain unchanged.
 		if raw, lerr := cli.LoadConfig(); lerr != nil {
 			cli.PrintWarning("could not load CLI config to save bootstrap token: " + lerr.Error())
 		} else {
-			raw.WriteCredential(flagProfile, server, result.CLIToken, result.WorkspaceID)
+			previousCurrent := raw.Current
+			profile := saveSeedCredential(raw, server, result.CLIToken, result.WorkspaceID)
 			if err := cli.SaveConfig(raw); err != nil {
 				cli.PrintWarning("could not save CLI config: " + err.Error())
+			} else {
+				selection := "default target unchanged"
+				if previousCurrent == "" && raw.Current == profile {
+					selection = "selected initial profile"
+				}
+				fmt.Fprintf(os.Stderr, "  Saved CLI credentials in profile %s (%s)\n", profile, selection)
 			}
 		}
 
@@ -600,8 +634,8 @@ func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, e
 	}
 
 	// Already initialized — fall back to existing auth
-	if err := requireAuth(); err != nil {
-		return nil, "", fmt.Errorf("DB already initialized. %w", err)
+	if cli.EnvToken() == "" && (cliCfg == nil || strings.TrimSpace(cliCfg.Token) == "") {
+		return nil, "", fmt.Errorf("DB already initialized. not logged in to the explicit seed target; run crewship login for its profile or set CREWSHIP_TOKEN")
 	}
 	if err := requireWorkspace(); err != nil {
 		return nil, "", fmt.Errorf("DB already initialized. %w", err)

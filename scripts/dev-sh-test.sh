@@ -166,6 +166,138 @@ else
 fi
 rm -rf "$ENV_DIR"
 
+echo "dev.sh: environment precedence and installation paths"
+PATH_TEST_DIR="$(mktemp -d)"
+cat > "$PATH_TEST_DIR/defaults.env" <<'ENV'
+export CREWSHIP_HOME="/should-not-win"
+CREWSHIP_PORT=9000
+EMPTY_OVERRIDE=from-file
+SHELL_DEFAULT="quoted value"
+DERIVED_DEFAULT="${SHELL_DEFAULT}/suffix"
+ENV
+loader_snippet="
+export CREWSHIP_HOME='$PATH_TEST_DIR/installation' CREWSHIP_PORT=8082 EMPTY_OVERRIDE=''
+load_env_local '$PATH_TEST_DIR/defaults.env'
+[[ \"\$CREWSHIP_HOME\" == '$PATH_TEST_DIR/installation' ]]
+[[ \"\$CREWSHIP_PORT\" == 8082 && \"\$EMPTY_OVERRIDE\" == '' ]]
+[[ \"\$SHELL_DEFAULT\" == 'quoted value' && \"\$DERIVED_DEFAULT\" == 'quoted value/suffix' ]]
+"
+status=$(run_with_fn load_env_local "$loader_snippet")
+if [[ "$status" == 0 ]]; then pass "exported values and empty values win; shell quoting and expansion work"; else fail "environment loader exited $status"; fi
+paths_snippet="
+unset CREWSHIP_HOME CREWSHIP_DATA_DIR CREWSHIP_STORAGE_BASE_PATH CREWSHIP_LOG_PATH CREWSHIP_BOLT_PATH CREWSHIP_PAGE_PROJECTS_PATH CREWSHIP_SOCKET_PATH DATABASE_URL XDG_RUNTIME_DIR CREWSHIP_PORT XDG_DATA_HOME
+HOME='$PATH_TEST_DIR/user'; PROJECT_DIR='$PATH_TEST_DIR/checkout-a'; GO_PORT=8082
+resolve_dev_paths
+first=\$DEV_HOME
+[[ \"\$DATA_DIR\" == \"\$first/data\" && \"\$DATABASE_URL\" == \"file:\$first/db/crewship.db\" ]]
+[[ \"\$GO_PID_FILE\" == \"\$first/run/go.pid\" && \"\$DEV_BINARY\" == \"\$first/run/bin/crewship\" ]]
+unset CREWSHIP_HOME CREWSHIP_DATA_DIR CREWSHIP_STORAGE_BASE_PATH CREWSHIP_LOG_PATH CREWSHIP_BOLT_PATH CREWSHIP_PAGE_PROJECTS_PATH CREWSHIP_SOCKET_PATH DATABASE_URL
+PROJECT_DIR='$PATH_TEST_DIR/checkout-b'
+resolve_dev_paths
+[[ \"\$DEV_HOME\" != \"\$first\" ]]
+export CREWSHIP_HOME='$PATH_TEST_DIR/explicit' CREWSHIP_DATA_DIR='$PATH_TEST_DIR/explicit'
+export CREWSHIP_STORAGE_BASE_PATH='$PATH_TEST_DIR/override' XDG_RUNTIME_DIR='$PATH_TEST_DIR/runtime'
+resolve_dev_paths
+[[ \"\$DATA_DIR\" == '$PATH_TEST_DIR/override' && \"\$GO_PID_FILE\" == '$PATH_TEST_DIR/runtime/'* ]]
+cd /
+resolve_dev_paths
+[[ \"\$DEV_HOME\" == '$PATH_TEST_DIR/explicit' ]]
+"
+status=$(run_with_fn resolve_dev_paths "$paths_snippet")
+if [[ "$status" == 0 ]]; then pass "durable checkout isolation, explicit override, runtime dir and cwd independence"; else fail "path resolver exited $status"; fi
+mkdir -p "$PATH_TEST_DIR/checkout/child" "$PATH_TEST_DIR/data"
+ln -s "$PATH_TEST_DIR/checkout" "$PATH_TEST_DIR/link"
+cleanup_snippet="
+PROJECT_DIR='$PATH_TEST_DIR/checkout'
+! validate_dev_cleanup_dir '$PATH_TEST_DIR'
+! validate_dev_cleanup_dir '$PATH_TEST_DIR/checkout/child'
+! validate_dev_cleanup_dir '$PATH_TEST_DIR/link'
+validate_dev_cleanup_dir '$PATH_TEST_DIR/data'
+"
+status=$(run_with_fn validate_dev_cleanup_dir "$cleanup_snippet")
+if [[ "$status" == 0 ]]; then pass "cleanup rejects checkout, parent and symlink paths"; else fail "cleanup guards exited $status"; fi
+mkdir -p "$PATH_TEST_DIR/legacy/crewship-test-data"
+printf 'keep' > "$PATH_TEST_DIR/legacy/crewship-test-data/output"
+legacy_snippet="
+S=-test; DATA_DIR='$PATH_TEST_DIR/new/data'; STATE_DIR='$PATH_TEST_DIR/new/state'; PAGE_PROJECTS_DIR='$PATH_TEST_DIR/new/pages'
+! check_legacy_dev_paths '$PATH_TEST_DIR/legacy'
+[[ -f '$PATH_TEST_DIR/legacy/crewship-test-data/output' ]]
+DATA_DIR='$PATH_TEST_DIR/legacy/crewship-test-data'
+check_legacy_dev_paths '$PATH_TEST_DIR/legacy'
+"
+status=$(run_with_fn check_legacy_dev_paths "$legacy_snippet")
+if [[ "$status" == 0 ]]; then pass "legacy data blocks silent path change and remains untouched"; else fail "legacy migration guard exited $status"; fi
+mkdir -p "$PATH_TEST_DIR/proc/$$"
+printf '%s' "$$" > "$PATH_TEST_DIR/old.pid"
+ln -s /tmp/crewship-test-dev "$PATH_TEST_DIR/proc/$$/exe"
+ln -s "$PATH_TEST_DIR/checkout" "$PATH_TEST_DIR/proc/$$/cwd"
+pid_snippet="
+S=-test; PROJECT_DIR='$PATH_TEST_DIR/checkout'
+legacy_dev_server_running '$PATH_TEST_DIR/proc' '$PATH_TEST_DIR/old.pid'
+rm '$PATH_TEST_DIR/proc/$$/exe'
+ln -s /usr/bin/unrelated '$PATH_TEST_DIR/proc/$$/exe'
+! legacy_dev_server_running '$PATH_TEST_DIR/proc' '$PATH_TEST_DIR/old.pid'
+"
+status=$(run_with_fn legacy_dev_server_running "$pid_snippet")
+if [[ "$status" == 0 ]]; then pass "legacy PID must match executable and checkout; reused PIDs ignored"; else fail "legacy PID checks exited $status"; fi
+invalid_paths_snippet="
+PROJECT_DIR='$PATH_TEST_DIR/checkout'; GO_PORT=8082
+export CREWSHIP_HOME='$PATH_TEST_DIR/explicit/' CREWSHIP_DATA_DIR='$PATH_TEST_DIR/explicit'
+unset CREWSHIP_SOCKET_PATH CREWSHIP_STORAGE_BASE_PATH CREWSHIP_LOG_PATH CREWSHIP_BOLT_PATH CREWSHIP_PAGE_PROJECTS_PATH DATABASE_URL
+export XDG_RUNTIME_DIR='$PATH_TEST_DIR/runtime'
+resolve_dev_paths
+[[ \"\$DEV_HOME\" == '$PATH_TEST_DIR/explicit' ]]
+export XDG_RUNTIME_DIR=relative
+! resolve_dev_paths
+export XDG_RUNTIME_DIR='$PATH_TEST_DIR/runtime'
+export CREWSHIP_SOCKET_PATH='/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.sock'
+! resolve_dev_paths
+"
+status=$(run_with_fn resolve_dev_paths "$invalid_paths_snippet")
+if [[ "$status" == 0 ]]; then pass "root aliases normalize trailing slash; relative runtime and long sockets rejected"; else fail "runtime validation exited $status"; fi
+docker_paths_snippet="
+PROJECT_DIR='$PATH_TEST_DIR/checkout'; GO_PORT=8082
+unset CREWSHIP_DATA_DIR CREWSHIP_CONTAINER_PREFIX CREWSHIP_CONTAINER_NETWORK XDG_RUNTIME_DIR CREWSHIP_SOCKET_PATH CREWSHIP_STORAGE_BASE_PATH CREWSHIP_LOG_PATH CREWSHIP_BOLT_PATH CREWSHIP_PAGE_PROJECTS_PATH DATABASE_URL
+export CREWSHIP_HOME='$PATH_TEST_DIR/installation-a'
+resolve_dev_paths
+prefix_a=\$CREWSHIP_CONTAINER_PREFIX; network_a=\$CONTAINER_NETWORK
+unset CREWSHIP_DATA_DIR CREWSHIP_CONTAINER_PREFIX CREWSHIP_CONTAINER_NETWORK
+export CREWSHIP_HOME='$PATH_TEST_DIR/installation-b'
+resolve_dev_paths
+[[ \"\$CREWSHIP_CONTAINER_PREFIX\" != \"\$prefix_a\" && \"\$CONTAINER_NETWORK\" != \"\$network_a\" ]]
+unset CREWSHIP_DATA_DIR CREWSHIP_CONTAINER_PREFIX CREWSHIP_CONTAINER_NETWORK
+export CREWSHIP_HOME='$PATH_TEST_DIR/installation-a'
+resolve_dev_paths
+[[ \"\$CREWSHIP_CONTAINER_PREFIX\" == \"\$prefix_a\" && \"\$CONTAINER_NETWORK\" == \"\$network_a\" ]]
+export CREWSHIP_CONTAINER_PREFIX=explicit-prefix CREWSHIP_CONTAINER_NETWORK=explicit-network
+resolve_dev_paths
+[[ \"\$CREWSHIP_CONTAINER_PREFIX\" == explicit-prefix && \"\$CONTAINER_NETWORK\" == explicit-network ]]
+export CREWSHIP_CONTAINER_PREFIX=''
+! resolve_dev_paths
+"
+status=$(run_with_fn resolve_dev_paths "$docker_paths_snippet")
+if [[ "$status" == 0 ]]; then pass "Docker prefixes and networks isolate installation roots, remain stable and honor explicit values"; else fail "Docker resource isolation exited $status"; fi
+runtime_isolation_snippet="
+PROJECT_DIR='$PATH_TEST_DIR/checkout'; GO_PORT=8082
+unset CREWSHIP_DATA_DIR CREWSHIP_CONTAINER_PREFIX CREWSHIP_CONTAINER_NETWORK CREWSHIP_SOCKET_PATH CREWSHIP_STORAGE_BASE_PATH CREWSHIP_LOG_PATH CREWSHIP_BOLT_PATH CREWSHIP_PAGE_PROJECTS_PATH DATABASE_URL
+export XDG_RUNTIME_DIR='$PATH_TEST_DIR/runtime' CREWSHIP_HOME='$PATH_TEST_DIR/a'
+resolve_dev_paths
+pid_a=\$GO_PID_FILE; socket_a=\$SOCKET_PATH
+unset CREWSHIP_DATA_DIR CREWSHIP_SOCKET_PATH CREWSHIP_CONTAINER_PREFIX CREWSHIP_CONTAINER_NETWORK
+export CREWSHIP_HOME='$PATH_TEST_DIR/b'
+resolve_dev_paths
+[[ \"\$GO_PID_FILE\" != \"\$pid_a\" && \"\$SOCKET_PATH\" != \"\$socket_a\" ]]
+export CREWSHIP_STORAGE_BASE_PATH=relative-data CREWSHIP_LOG_PATH=relative-logs CREWSHIP_BOLT_PATH=relative-state/state.db CREWSHIP_PAGE_PROJECTS_PATH=relative-pages CREWSHIP_SOCKET_PATH=relative.sock CREWSHIP_STORAGE_MEMORY_ROOT=relative-memory
+cd /
+resolve_dev_paths
+[[ \"\$DATA_DIR\" == '$PATH_TEST_DIR/checkout/relative-data' && \"\$LOG_PATH\" == '$PATH_TEST_DIR/checkout/relative-logs' ]]
+[[ \"\$BOLT_PATH\" == '$PATH_TEST_DIR/checkout/relative-state/state.db' && \"\$PAGE_PROJECTS_DIR\" == '$PATH_TEST_DIR/checkout/relative-pages' ]]
+[[ \"\$SOCKET_PATH\" == '$PATH_TEST_DIR/checkout/relative.sock' && \"\$CREWSHIP_STORAGE_MEMORY_ROOT\" == '$PATH_TEST_DIR/checkout/relative-memory' ]]
+"
+status=$(run_with_fn resolve_dev_paths "$runtime_isolation_snippet")
+if [[ "$status" == 0 ]]; then pass "XDG runtime isolates homes; relative overrides anchor to startup checkout from any cwd"; else fail "runtime isolation and relative cleanup paths exited $status"; fi
+rm -rf "$PATH_TEST_DIR"
+
 # deploy_staleness is the sentence behind `status`'s STALE line. It has to
 # fire for both ways a slot serves old code and stay quiet otherwise.
 echo "dev.sh: deploy_staleness"

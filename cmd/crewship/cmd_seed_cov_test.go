@@ -475,6 +475,7 @@ func covSetupRunSeed(t *testing.T, s *clitest.StubServer) {
 	saveCLIState(t)
 	covSeedEnv(t)
 	flagServer = s.URL()
+	t.Setenv("SEED_ANTHROPIC_API_KEY", "sk-ant-test-seed")
 	flagWorkspace = ""
 	cliCfg = &cli.CLIConfig{}
 	seedCmd.SetContext(context.Background())

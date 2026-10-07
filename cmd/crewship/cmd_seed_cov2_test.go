@@ -39,8 +39,7 @@ func TestRunSeedCov2_CanceledContext(t *testing.T) {
 
 // TestRunSeedCov2_NukeWithExtras drives the widest runSeed configuration
 // that stays deterministic without Docker: --nuke --yes wipes (against empty
-// lists), --with-users mints RBAC fixtures, --with-memory fails fast and
-// non-fatally (no CREWSHIP_STORAGE_BASE_PATH), --wait-provision polls a
+// lists), --with-users mints RBAC fixtures, --wait-provision polls a
 // status stub that reports completed immediately, and issues stay ENABLED.
 func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	s := covSeedStub(t)
@@ -98,7 +97,6 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	covSetFlag(t, seedCmd, "nuke", "true")
 	covSetFlag(t, seedCmd, "yes", "true")
 	covSetFlag(t, seedCmd, "with-users", "true")
-	covSetFlag(t, seedCmd, "with-memory", "true")
 	covSetFlag(t, seedCmd, "wait-provision", "true")
 
 	out, err := covCaptureStdout(t, func() error {
@@ -125,11 +123,6 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	// Nuke ran (issue listing consulted) and was gated by --yes.
 	if n := len(s.CallsFor("GET", "/api/v1/issues")); n == 0 {
 		t.Error("nuke never listed issues")
-	}
-	// --with-memory ran: it resolves the storage base path (falls back
-	// under the test-scoped $HOME) and writes the demo tier files there.
-	if !strings.Contains(out, "Seeding agent memory tiers...") {
-		t.Errorf("expected memory phase to run:\n%s", out)
 	}
 	// --with-users placed the whole fixture: one signup per demo user, and
 	// the credential table printed for each.

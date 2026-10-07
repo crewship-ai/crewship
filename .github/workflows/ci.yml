@@ -258,6 +258,18 @@ jobs:
         run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
       - name: AGENTS.md checkable invariants
         run: go run ./scripts/agents-invariants
+      - name: Installation host path boundary
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          go test ./scripts/host-paths -count=1
+          if [[ -n "$BASE_SHA" ]]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            go run ./scripts/host-paths -base "$BASE_SHA"
+          else
+            go run ./scripts/host-paths
+          fi
       - name: dev.sh helpers
         run: bash scripts/dev-sh-test.sh
       - name: security.yml alert-issue + govulncheck allowlist logic
@@ -467,7 +479,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if ./crewship seed --skip-issues --server "$CREWSHIP_SERVER"; then exit 0; fi
+            if ./crewship seed --offline-demo --skip-issues --server "$CREWSHIP_SERVER"; then exit 0; fi
             sleep 5
           done
           cat /tmp/crewship-pr-harness.log >&2
@@ -829,7 +841,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if ./crewship seed --server "$CREWSHIP_SERVER"; then exit 0; fi
+            if ./crewship seed --offline-demo --server "$CREWSHIP_SERVER"; then exit 0; fi
             sleep 5
           done
           tail -300 /tmp/crewship-pr-playwright.log >&2

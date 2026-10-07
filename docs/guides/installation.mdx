@@ -142,7 +142,13 @@ Crewship supports running multiple instances from directories named `crewship_N`
 | `crewship_1` | 8081 | 3011 |
 | `crewship_2` | 8082 | 3012 |
 
-Each instance uses its own SQLite database and state directory. Set `CREWSHIP_CONTAINER_PREFIX` to isolate Docker container names between instances.
+Each checkout defaults to a persistent installation under
+`${XDG_DATA_HOME:-$HOME/.local/share}/crewship/dev/<checkout-checksum>`.
+Set an absolute `CREWSHIP_HOME` to choose its location. Explicit database and
+storage overrides remain supported; exported environment values win over
+`.env.local`. Set `CREWSHIP_CONTAINER_PREFIX` to isolate Docker container names
+between instances. Startup refuses to abandon surviving legacy temporary data;
+pin the old paths or migrate them while stopped.
 
 ## Build Architecture
 
@@ -200,9 +206,9 @@ panel that renders it.
 The `seed` command creates demo crews, agents, skills, and sample issues:
 
 ```bash
-./dev.sh seed
-# Or with an Anthropic API key for functional agents:
 SEED_ANTHROPIC_API_KEY=sk-ant-... ./dev.sh seed
+# Or invoke the CLI with an explicit target and exported provider credential:
+crewship seed --server http://localhost:8080
 ```
 
 This creates:

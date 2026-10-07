@@ -42,6 +42,8 @@ func envBool(name string) (val, ok bool) {
 // Config holds all configuration for the crewship server, including server,
 // IPC, container, storage, state, logging, auth, LLM proxy, Keeper, and license settings.
 type Config struct {
+	pathSources map[string]string // effective explicit path origins, populated while loading
+
 	Server    ServerConfig    `yaml:"server"`
 	IPC       IPCConfig       `yaml:"ipc"`
 	Container ContainerConfig `yaml:"container"`
@@ -316,6 +318,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyEnvOverrides(cfg)
+	capturePathEnvSources(cfg)
 
 	// Autodetect sidecar binary + entrypoint.sh paths when not explicitly set.
 	// Since the legacy agent-runtime image (with baked-in sidecar) has been
@@ -476,6 +479,25 @@ func loadFromFile(cfg *Config, path string) error {
 	}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		return fmt.Errorf("parse path origins %s: %w", path, err)
+	}
+	var values map[string]any
+	if err := document.Decode(&values); err != nil {
+		return fmt.Errorf("decode path origins %s: %w", path, err)
+	}
+	cfg.pathSources = make(map[string]string)
+	for key := range pathEnvironment {
+		parts := strings.Split(key, ".")
+		if section, ok := values[parts[0]].(map[string]any); ok {
+			// Null follows yaml's default-preserving behavior; an explicit
+			// empty string remains explicit (e.g. disabling memory).
+			if value, exists := section[parts[1]]; exists && value != nil {
+				cfg.pathSources[key] = "yaml"
+			}
+		}
 	}
 	return nil
 }

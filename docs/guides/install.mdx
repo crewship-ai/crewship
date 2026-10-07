@@ -388,10 +388,10 @@ crewship.exe start
 
 Windows specifics:
 
-- Data lives under `%USERPROFILE%\.crewship` by default, as on other
-  platforms. Server-style installs that set `DATABASE_URL` explicitly
-  get machine-wide defaults under `%ProgramData%\crewship` (instead of
-  the Unix `/var/lib/crewship`).
+- Data lives under `%USERPROFILE%\.crewship` by default. Use an absolute
+  `CREWSHIP_HOME` or `start --data-dir` to select another installation root.
+  Setting `DATABASE_URL` changes the database only; other data paths still
+  follow the installation root unless explicitly configured.
 - [Hook](/guides/hooks) commands run under `cmd.exe /c` instead of
   `sh -c` — write hook command lines in cmd syntax.
 - `crewship self-update` works: the running `crewship.exe` is parked as

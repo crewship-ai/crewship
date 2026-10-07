@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- ⚠️ **Behaviour change: server paths now follow one installation root regardless of DATABASE_URL.** Explicit storage, log, memory, Bolt and socket configuration is respected, including YAML values equal to old defaults. `CREWSHIP_HOME` and `start --data-dir` select the root; startup refuses to abandon existing data in prior locations instead of silently using a new empty store. Relative SQLite URLs retain compatibility. (#2977)
+- ⚠️ **Behaviour change: development data and builds no longer default to shared temporary directories.** `dev.sh` uses a persistent installation outside the checkout, preserves exported configuration over `.env.local`, and refuses unsafe legacy transitions. Existing explicit path pins remain valid. (#2977)
+- ⚠️ **Behaviour change: demo seed requires an explicit server and usable provider credentials before making changes.** `--offline-demo` explicitly creates fixtures without model execution. Bootstrap tokens are saved in the target profile without replacing unrelated defaults. `--with-memory` fails before mutation until full server-side demo provisioning exists, preventing client-side writes to the wrong installation; workflows requesting it need that follow-up. (#2977)
+
 - **Ambiguous managed-launch descriptors could overwrite earlier fields.** The launcher rejects duplicate or noncanonical JSON fields before creating process identity; its native core now includes a standalone conformance entrypoint, parser fuzz targets and documented measurement limits.
 
 - **Webhook and scheduled managed runs could falsely confirm a stop after losing their PID file.** Their creation gates now retain the persisted managed identity after the agent invocation returns, including when pilot selection is disabled; missing managed PID files remain UNKNOWN.
