@@ -53,6 +53,7 @@ commands. They may publish or remove release/package artifacts.
 | Location | Checks |
 | --- | --- |
 | [agents-invariants/](agents-invariants/) | The machine-checkable repository rules in AGENTS.md |
+| [host-paths/](host-paths/) | AST check for independent host filesystem roots; existing exceptions must remain present, and CI prevents allowlist expansion against the PR base |
 | [docs-inventory/](docs-inventory/), [docs-surface-check/](docs-surface-check/) | API/CLI documentation and documentation surface/link checks |
 | [lint-migrations/](lint-migrations/) | Migration ordering and immutability |
 | [lint-tsformat/](lint-tsformat/) | Timestamp formatting conventions |

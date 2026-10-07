@@ -20,8 +20,10 @@ crewship start [flags]
 
 1. **Configuration resolution.** Reads `--config` if given, else
    defaults from env (`CREWSHIP_*`) and built-in defaults.
-2. **Database open.** Opens SQLite at `~/.crewship/crewship.db` (or
-   `--db` override). Enforces WAL mode, 0600 file perms, foreign keys.
+2. **Database open.** Opens SQLite at `<data-dir>/crewship.db` (or
+   `--db` / `DATABASE_URL` override). Validates the resolved paths and refuses
+   to abandon existing stores before opening the DB. Enforces WAL mode,
+   0600 file perms, foreign keys.
 3. **Pre-migration snapshot.** If any migrations are pending,
    `SnapshotBeforeMigrate` writes a `VACUUM INTO` copy of the live DB
    to `<dbpath>.pre-migrate-vN-to-vM-<UTC>.bak` before any DDL runs.
@@ -63,8 +65,9 @@ Boot typically takes 1–3 seconds on a warm machine; first-ever start
 
 | Flag | Default | Effect |
 |------|---------|--------|
-| `--config <path>` | `$HOME/.crewship/config.yaml` if present | Path to YAML config. CLI flags override config; config overrides env defaults. |
-| `--db <url>` | `file:~/.crewship/crewship.db` | SQLite DSN (`file:...`). PostgreSQL on the v0.2 roadmap. |
+| `--config <path>` | Existing config discovery | Path to YAML config. Explicit environment paths override YAML, then defaults derive from the installation root. |
+| `--data-dir <path>` | `CREWSHIP_HOME`, then `CREWSHIP_DATA_DIR`, then `~/.crewship` | Absolute installation root; the flag overrides both environment aliases. |
+| `--db <url>` | `DATABASE_URL`, then `file:<data-dir>/crewship.db` | Database DSN; selecting a DB does not change other installation paths. Relative SQLite URLs are deprecated. |
 | `--no-docker` | (off) | Skip the Docker provider init. Useful for read-only browse mode or sandboxed CI. |
 | `--verbose`, `-v` | (off) | Switch logger to debug. Default is INFO. (Global root flag, available on every command.) |
 | `--no-color` | (off) | Disable ANSI colors in logs. Auto-detected when stdout is not a TTY. (Global root flag.) |
@@ -84,6 +87,7 @@ Beyond the flags above, `crewship start` respects:
 | Var | Default | Effect |
 |-----|---------|--------|
 | `CREWSHIP_PORT` | `8080` | HTTP listen port. (There is no `--port` flag — set it here.) |
+| `CREWSHIP_HOME` | `~/.crewship` | Absolute server installation root. `CREWSHIP_DATA_DIR` is the compatibility alias; conflicting roots fail. |
 | `CREWSHIP_SOCKET_PATH` | `<data dir>/crewship.sock` — `/tmp/crewship.sock` for the packaged install | IPC socket for sidecar coordination. Follows the resolved data dir, which is `$HOME/.crewship` when `CREWSHIP_DATA_DIR` is unset. See [Environment](/configuration/environment#ipc) for the derivation. |
 | `CREWSHIP_CONTAINER_NETWORK` | `crewship-agents` | Docker bridge name for agent containers. |
 | `CREWSHIP_CONTAINER_PROVIDER` | `docker` | `docker`, `apple`, or `auto`. |
@@ -101,17 +105,19 @@ As of PR #446, `crewship start` auto-bootstraps `NEXTAUTH_SECRET`, `ENCRYPTION_K
 
 Crewship can run multiple instances on one host by suffixing the
 data directory and port. The `dev.sh` script handles this for
-development; for production, point `--db` and `CREWSHIP_PORT` at
-distinct paths:
+development; for production, select separate installation roots, ports
+and Docker namespaces:
 
 ```bash
-CREWSHIP_PORT=8081 crewship start --db file:/opt/crewship-1/crewship.db
-CREWSHIP_PORT=8082 crewship start --db file:/opt/crewship-2/crewship.db
+CREWSHIP_HOME=/opt/crewship-1 CREWSHIP_PORT=8081 \
+  CREWSHIP_CONTAINER_PREFIX=crewship-one CREWSHIP_CONTAINER_NETWORK=crewship-one-agents crewship start
+CREWSHIP_HOME=/opt/crewship-2 CREWSHIP_PORT=8082 \
+  CREWSHIP_CONTAINER_PREFIX=crewship-two CREWSHIP_CONTAINER_NETWORK=crewship-two-agents crewship start
 ```
 
-Each instance is fully isolated — separate DB, separate container
-network (`CREWSHIP_CONTAINER_NETWORK=crewship-agents-1`), separate
-IPC socket (`CREWSHIP_SOCKET_PATH=/tmp/crewship-1.sock`).
+Each root derives separate DB, storage, logs, memory, Bolt and IPC paths.
+Server Docker prefixes and networks still need explicit names as shown;
+`dev.sh` derives those names from the installation root automatically.
 
 Giving each instance its own `CREWSHIP_DATA_DIR` already derives a
 distinct IPC socket and bbolt file under that directory, so the explicit

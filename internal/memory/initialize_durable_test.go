@@ -1,6 +1,7 @@
-package main
+package memory
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -8,7 +9,7 @@ import (
 	"testing"
 )
 
-// TestWriteFileIfAbsent_NeverObservableEmpty is the #2124 regression test
+// TestInitializeFile_NeverObservableEmpty is the #2124 regression test
 // for the seed's memory-file writer, in the shape #1999 used for
 // progress.jsonl.
 //
@@ -26,7 +27,7 @@ import (
 // The invariant asserted: if the path exists it already holds the whole
 // content. Verified to FAIL against the pre-fix os.WriteFile
 // implementation.
-func TestWriteFileIfAbsent_NeverObservableEmpty(t *testing.T) {
+func TestInitializeFile_NeverObservableEmpty(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	const content = "# PERSONA.md — casey voice\n\nTerse, direct, cites line numbers.\n"
@@ -69,7 +70,7 @@ func TestWriteFileIfAbsent_NeverObservableEmpty(t *testing.T) {
 			}
 		}()
 
-		err := writeFileIfAbsent(path, content)
+		_, err := InitializeFile(context.Background(), dir, path, []byte(content))
 		close(stop)
 		wg.Wait()
 		if err != nil {
@@ -80,7 +81,7 @@ func TestWriteFileIfAbsent_NeverObservableEmpty(t *testing.T) {
 	if emptyObservations != 0 {
 		t.Errorf("a seeded memory file was observed existing-but-incomplete in %d/%d writes — "+
 			"the create-then-write window is back; writeFileIfAbsent must publish via "+
-			"memory.WriteFileDurable's atomic rename",
+			"atomic create-if-absent publication",
 			emptyObservations, iterations)
 	}
 

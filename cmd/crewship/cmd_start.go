@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -116,9 +117,75 @@ var startCmd = &cobra.Command{
 		// small file I/O in the data dir, so a multi-second hang is
 		// almost certainly a stuck filesystem and the operator wants a
 		// clean error rather than a wedged startup.
-		dataDir, err := database.DefaultDataDir()
+		rootFlag, _ := cmd.Flags().GetString("data-dir")
+		root, err := database.ResolveDataDirRoot(rootFlag)
+		if err != nil {
+			return fmt.Errorf("resolve data directory: %w", err)
+		}
+		if err := database.CheckResetPending(root); err != nil {
+			return err
+		}
+		dataDir := &database.DataDir{Root: root}
+		// Validate the layout before creating directories, secrets or stores.
+		previewCfg, err := config.Load(configPath)
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		previewPaths, err := config.ResolvePaths(previewCfg, root, dbURL)
+		if err != nil {
+			return err
+		}
+		if err := previewCfg.Validate(); err != nil {
+			return fmt.Errorf("resolved path configuration: %w", err)
+		}
+		if err := previewPaths.CheckLegacyData(); err != nil {
+			return err
+		}
+		// Server-side helpers resolve the same root from the process environment.
+		// Publish it only after validating the previous layout, and restore the
+		// caller's environment when this invocation ends (including test runs).
+		for _, name := range []string{"CREWSHIP_HOME", "CREWSHIP_DATA_DIR"} {
+			previous, existed := os.LookupEnv(name)
+			defer func(name, previous string, existed bool) {
+				if existed {
+					_ = os.Setenv(name, previous)
+				} else {
+					_ = os.Unsetenv(name)
+				}
+			}(name, previous, existed)
+			if err := os.Setenv(name, root); err != nil {
+				return fmt.Errorf("publish installation root: %w", err)
+			}
+		}
+		dataDir, err = database.NewDataDir(root)
 		if err != nil {
 			return fmt.Errorf("failed to create data directory: %w", err)
+		}
+		operationLease, err := database.AcquireInstallationOperation(root)
+		if err != nil {
+			return err
+		}
+		defer operationLease.Close()
+		if err := database.CheckResetPending(root); err != nil {
+			return err
+		}
+		// Isolate server-created temporary work beneath this installation.
+		serverTemp := filepath.Join(root, "run", "tmp")
+		if err := os.MkdirAll(serverTemp, 0700); err != nil {
+			return err
+		}
+		for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+			previous, existed := os.LookupEnv(name)
+			defer func(name, previous string, existed bool) {
+				if existed {
+					_ = os.Setenv(name, previous)
+				} else {
+					_ = os.Unsetenv(name)
+				}
+			}(name, previous, existed)
+			if err := os.Setenv(name, serverTemp); err != nil {
+				return err
+			}
 		}
 		bootCtx, bootCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := secrets.LoadOrGenerate(bootCtx, dataDir.Root, bootstrapLogger); err != nil {
@@ -146,52 +213,33 @@ var startCmd = &cobra.Command{
 		logger := slog.New(ringHandler)
 		slog.SetDefault(logger)
 
-		databaseURL := dbURL
-		if databaseURL == "" {
-			databaseURL = os.Getenv("DATABASE_URL")
+		resolvedPaths, err := config.ResolvePaths(cfg, dataDir.Root, dbURL)
+		if err != nil {
+			return err
 		}
-		if databaseURL == "" {
-			databaseURL = dataDir.DatabaseURL()
-			cfg.Storage.BasePath = dataDir.OutputDir()
-			cfg.Storage.LogPath = dataDir.LogsDir()
-			// Workspace-tier memory lives under DataDir.Root/memory.
-			// Per-workspace subdirs are lazy-created by the
-			// WorkspaceMemoryRegistry on first agent run that asks
-			// for the workspace tier in its prompt.
-			cfg.Storage.MemoryRoot = filepath.Join(dataDir.Root, "memory")
-			// bbolt state lives next to the SQLite DB in the data dir
-			// too. The package default is /var/lib/crewship/state.db,
-			// which a non-root user on a fresh box can't create — and
-			// `crewship start` for end users is decidedly non-root.
-			//
-			// Two narrow predicates protect operator intent:
-			//   * `cfgBoltPathFromEnv()` — env var pin via
-			//     CREWSHIP_BOLT_PATH (applyEnvOverrides ran first and
-			//     already set BoltPath from it).
-			//   * a YAML config can also set state.bolt_path; if that
-			//     value is anything other than the package default
-			//     ("" or "/var/lib/crewship/state.db"), the operator
-			//     made an explicit choice and we leave it alone.
-			//
-			// config.DefaultBoltPath() is the platform default (unix:
-			// /var/lib/crewship/state.db, windows: %ProgramData%). The
-			// unix literal stays as an extra alias so a config file
-			// written on one platform doesn't pin a windows daemon to a
-			// path it can't create.
-			defaulted := cfg.State.BoltPath == "" ||
-				cfg.State.BoltPath == config.DefaultBoltPath() ||
-				cfg.State.BoltPath == "/var/lib/crewship/state.db"
-			if !cfgBoltPathFromEnv() && defaulted {
-				cfg.State.BoltPath = filepath.Join(dataDir.Root, "state.db")
-			}
-			// The IPC socket is the other lock-bearing file, and it has to
-			// follow the SAME resolved root — otherwise an instance whose
-			// bolt file just moved to ~/.crewship still listens on the
-			// shared /tmp/crewship.sock and fights the next one for it.
-			// See startSocketPath for the collision this closes and for why
-			// a packaged install (CREWSHIP_DATA_DIR=/var/lib/crewship) comes
-			// back on /tmp/crewship.sock unchanged.
-			cfg.IPC.SocketPath = startSocketPath(cfg.IPC.SocketPath, dataDir.Root)
+		// Scratch TMPDIR may be longer than sockaddr_un allows. Retain the
+		// short fallback selected before changing temporary-work locations.
+		if resolvedPaths.Sources["ipc.socket_path"] == "derived" {
+			cfg.IPC.SocketPath = previewPaths.Paths["ipc.socket_path"]
+			resolvedPaths.Paths["ipc.socket_path"] = cfg.IPC.SocketPath
+		}
+		// The config file may have changed while secrets were bootstrapped.
+		// Recheck the final values before opening or migrating any store.
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("resolved path configuration: %w", err)
+		}
+		// Retain the legacy baseline from before publishing the root; otherwise
+		// changing CREWSHIP_DATA_DIR could hide the old Bolt default.
+		previewPaths.Paths = resolvedPaths.Paths
+		if err := previewPaths.CheckLegacyData(); err != nil {
+			return err
+		}
+		if err := resolvedPaths.CheckLegacyData(); err != nil {
+			return err
+		}
+		databaseURL := resolvedPaths.DatabaseURL
+		if relativeDatabaseURL(databaseURL) {
+			logger.Warn("relative SQLite DATABASE_URL depends on the working directory and is deprecated; use an absolute file: path or omit DATABASE_URL to use the installation root")
 		}
 
 		// WithManagedWAL turns SQLite's inline autocheckpoint OFF, which is
@@ -1875,6 +1923,21 @@ func printFirstRunWelcome(db *sql.DB, logger *slog.Logger) {
 
 func init() {
 	startCmd.Flags().String("config", "", "Path to config file (YAML)")
-	startCmd.Flags().String("db", "", "Database URL (default: ~/.crewship/crewship.db)")
+	startCmd.Flags().String("db", "", "Database URL (default: <data-dir>/crewship.db)")
+	startCmd.Flags().String("data-dir", "", "Absolute installation data directory (overrides CREWSHIP_HOME and CREWSHIP_DATA_DIR)")
 	startCmd.Flags().Bool("no-docker", false, "Start without Docker (dashboard only)")
+}
+
+// relativeDatabaseURL detects persistent SQLite file URLs whose location still
+// depends on cwd. Keep their behavior for this compatibility release.
+func relativeDatabaseURL(databaseURL string) bool {
+	if !strings.HasPrefix(databaseURL, "file:") {
+		return false
+	}
+	path, query, _ := strings.Cut(strings.TrimPrefix(databaseURL, "file:"), "?")
+	parameters, _ := url.ParseQuery(query)
+	if path == "" || path == ":memory:" || parameters.Get("mode") == "memory" {
+		return false
+	}
+	return !filepath.IsAbs(path)
 }

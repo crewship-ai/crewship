@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -34,177 +35,85 @@ var demoUsers = []demoUser{
 	{Email: "viewer1@crewship.local", FullName: "Ivana Viewer", Password: "viewerpass12", Role: "VIEWER"},
 }
 
-// seedRBACUsers signs up the four demoUsers and pins each to its
-// target role on the workspace. After the seed completes, each user
-// can log in with `crewship login --token` after running
-// `crewship login` (interactive) with their seeded email/password
-// to mint their own CLI token. Seeds do NOT mint tokens for these
-// users because the existing POST /api/v1/auth/cli-token requires
-// session auth as the target user; adding a sideways admin path is
-// out of scope for the seed enhancement.
-//
-// Toggled via `--with-users`. Default off so existing seeds stay
-// byte-identical and operators don't get four extra entries in their
-// admin user list without asking.
-//
-// Requires CREWSHIP_ALLOW_SIGNUP=true on the server (signup endpoint
-// gates on this; bootstrap is the only path otherwise). Errors are
-// non-fatal — a user the fixture can't place is reported and the loop
-// continues so the rest of the fixture lands.
-//
-// New accounts use invite-then-signup. Signup
-// answers 202 with a generic body whether or not the address was free
-// (it was de-enumerated in #1254), so it can no longer hand back the
-// new account's id — and there is deliberately no endpoint that maps an
-// arbitrary email to one, because that would be the same enumeration
-// oracle behind an OWNER/ADMIN gate. What exists instead is the
-// invitation the server redeems inside the signup transaction: create
-// the invitation for the address with the fixture role first, then sign
-// the user up, and they land in this workspace already pinned. Existing
-// global accounts survive workspace nuke: when the roster still lacks one,
-// authenticate its documented fixture credentials, read its own ID, and add
-// that ID through the caller's normal workspace-member authorization. Existing
-// workspace members and their roles/passwords are left unchanged.
+// seedRBACUsers provisions new accounts through the authenticated workspace
+// administration API. Only newly created accounts redeem their setup token;
+// existing accounts require proof of their documented fixture credentials and
+// are never assigned a new password. Public signup need not be enabled.
 func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	client = client.WithContext(ctx)
 	wsID := client.GetWorkspaceID()
 	if wsID == "" {
 		return fmt.Errorf("seedRBACUsers: workspace_id not set on client")
 	}
-	fmt.Fprintln(os.Stderr, "Seeding RBAC fixture (4 users × 4 roles)...")
-	fmt.Fprintln(os.Stderr, "  (requires CREWSHIP_ALLOW_SIGNUP=true on server)")
-
-	// Preflight: the server publishes whether signup is open, so the one
-	// configuration this fixture cannot work under is knowable before we
-	// spend four signups discovering it four times. Advisory by design — a
-	// server that does not answer setup-status must not block the fixture,
-	// and the zero-placed verdict at the bottom still catches it.
-	if open, known := serverAllowsSignup(client); known && !open {
-		return fmt.Errorf(
-			"signup is disabled on this server (allow_signup=false), so all %d RBAC signups "+
-				"would be refused with 403 and the fixture would place nobody. Start the server "+
-				"with CREWSHIP_ALLOW_SIGNUP=true (or auth.allow_signup: true) and re-run",
-			len(demoUsers))
-	}
-
-	var minted []demoUser
-
+	fmt.Fprintln(os.Stderr, "Seeding RBAC fixture through authenticated member provisioning...")
+	placed := 0
 	for _, u := range demoUsers {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		// Step 1: invite the address into this workspace at the fixture
-		// role. 409 means either "already a member" or "an active
-		// invitation is already open" — both are fine on a re-seed, and
-		// both are workspace-scoped answers the caller could already get
-		// from GET /members, so no cross-tenant information leaks here.
-		iResp, err := client.Post(
-			fmt.Sprintf("/api/v1/workspaces/%s/invitations?workspace_id=%s", wsID, wsID),
-			map[string]string{"email": u.Email, "role": u.Role},
-		)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  X %s: invite request failed: %v\n", u.Email, err)
+		if err := provisionSeedUser(ctx, client, wsID, u); err != nil {
+			fmt.Fprintf(os.Stderr, "  X %s: %v\n", u.Email, err)
 			continue
 		}
-		inviteStatus := iResp.StatusCode
-		if inviteStatus != http.StatusConflict {
-			if err := cli.CheckError(iResp); err != nil {
-				fmt.Fprintf(os.Stderr, "  X %s: invite as %s: %v\n", u.Email, u.Role, err)
-				continue
-			}
-		} else {
-			iResp.Body.Close()
+		_, role, err := findWorkspaceMemberByEmail(client, wsID, u.Email)
+		if err != nil || !strings.EqualFold(role, u.Role) {
+			fmt.Fprintf(os.Stderr, "  X %s: fixture role could not be verified (existing roles and passwords preserved)\n", u.Email)
+			continue
 		}
+		placed++
+		fmt.Fprintf(os.Stderr, "  ✓ %s: %s\n", u.Email, u.Role)
+	}
+	if placed != len(demoUsers) {
+		return fmt.Errorf("incomplete RBAC fixture (%d of %d): see per-user failures; existing passwords were never reset", placed, len(demoUsers))
+	}
+	fmt.Fprintln(os.Stderr, "RBAC fixture ready. New accounts use the documented demo credentials; existing accounts retain their passwords.")
+	return nil
+}
 
-		// Step 2: signup. The signup handler doesn't check the caller's
-		// bearer (it gates on allowSignup, not auth), so we can reuse
-		// the same authenticated client. The 202 is deliberately
-		// uninformative — "created" and "already exists" look the same —
-		// so we don't branch on it; step 3 is what tells us whether the
-		// account is actually in the workspace.
-		resp, err := client.Post("/api/v1/auth/signup", map[string]string{
-			"email":     u.Email,
-			"full_name": u.FullName,
-			"password":  u.Password,
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  X %s: signup request failed: %v\n", u.Email, err)
-			continue
-		}
-		signupStatus := resp.StatusCode
+func provisionSeedUser(ctx context.Context, client *cli.Client, wsID string, u demoUser) error {
+	resp, err := client.Post("/api/v1/workspaces/"+url.PathEscape(wsID)+"/members/provision", map[string]any{
+		"email": u.Email, "full_name": u.FullName, "role": u.Role, "create_only": true,
+	})
+	if err != nil {
+		return fmt.Errorf("provision request failed: %w", err)
+	}
+	if resp.StatusCode == http.StatusConflict {
 		resp.Body.Close()
-		if signupStatus != http.StatusAccepted && signupStatus != http.StatusCreated && signupStatus != http.StatusOK {
-			fmt.Fprintf(os.Stderr, "  X %s: signup HTTP %d (is CREWSHIP_ALLOW_SIGNUP=true?)\n", u.Email, signupStatus)
-			continue
-		}
-
-		// Step 3: verify against the roster. This is the only honest
-		// signal we have — signup won't say, and the invitation is only
-		// redeemed when the account was genuinely created.
-		_, gotRole, lerr := findWorkspaceMemberByEmail(client, wsID, u.Email)
-		if lerr != nil {
-			fmt.Fprintf(os.Stderr, "  X %s: roster lookup failed: %v\n", u.Email, lerr)
-			continue
-		}
-		if gotRole == "" {
-			// Workspace nuke intentionally keeps global accounts. Signup for
-			// those accounts remains a non-enumerating no-op, so recover only
-			// after proving ownership with the documented fixture password.
-			// The caller then uses the ordinary guarded member-add endpoint;
-			// neither signup nor authentication gains a privileged bypass.
-			if err := placeExistingSeedUser(ctx, client, wsID, u); err != nil {
-				fmt.Fprintf(os.Stderr, "  X %s: existing fixture account recovery failed: %v (passwords are never reset)\n", u.Email, err)
-				continue
-			}
-			_, gotRole, lerr = findWorkspaceMemberByEmail(client, wsID, u.Email)
-			if lerr != nil || gotRole == "" {
-				fmt.Fprintf(os.Stderr, "  X %s: recovered membership could not be verified\n", u.Email)
-				continue
-			}
-		}
-		switch {
-		case !strings.EqualFold(gotRole, u.Role):
-			// No role-update endpoint for workspace members, so drift
-			// from an earlier fixture is a warning, not a fix.
-			fmt.Fprintf(os.Stderr, "  ! %s: existing workspace role %q ≠ fixture %q (no role-update endpoint; manual fix needed)\n", u.Email, gotRole, u.Role)
-		case inviteStatus == http.StatusConflict:
-			fmt.Fprintf(os.Stderr, "  ↻ %s: already in workspace with role %s; skipping\n", u.Email, u.Role)
-		}
-		minted = append(minted, u)
+		// Even existing members must prove the fixture login still works.
+		// Member-add is idempotent and never resets passwords or roles.
+		return placeExistingSeedUser(ctx, client, wsID, u)
 	}
-
-	// A fixture that placed nobody is a failed fixture. This used to print a
-	// note to stderr and return nil, so `seed --with-users` exited 0 having
-	// created no second identity — and every caller downstream (the nightly
-	// harness matrix above all) proceeded as if it had one, then skipped with
-	// a reason about the wrong thing (#1829). Per-user failures stay
-	// non-fatal, so a partial fixture is still a success; only "none at all"
-	// is a verdict.
-	if len(minted) == 0 {
-		return fmt.Errorf(
-			"no RBAC fixture users were placed (0 of %d): see the per-user lines above. "+
-				"The usual cause is signup disabled on the server — start it with "+
-				"CREWSHIP_ALLOW_SIGNUP=true and re-run",
-			len(demoUsers))
+	if err := cli.CheckError(resp); err != nil {
+		return fmt.Errorf("provision failed: %w", err)
 	}
-
-	// Print the credential table to stderr so the operator can copy
-	// values into a login command without re-reading the DB. Stderr
-	// (not stdout) so any future JSON seed output stays parseable.
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "RBAC fixture credentials (dev only — never use these in production):")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintf(os.Stderr, "  %-26s  %-8s  %s\n", "EMAIL", "ROLE", "PASSWORD")
-	fmt.Fprintln(os.Stderr, "  "+strings.Repeat("─", 64))
-	for _, r := range minted {
-		fmt.Fprintf(os.Stderr, "  %-26s  %-8s  %s\n", r.Email, r.Role, r.Password)
+	var result struct {
+		UserID      string `json:"user_id" yaml:"user_id"`
+		CreatedUser bool   `json:"created_user" yaml:"created_user"`
+		SetupURL    string `json:"setup_url" yaml:"setup_url"`
 	}
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "  Each user can mint a CLI token with:")
-	fmt.Fprintln(os.Stderr, "    crewship login  # interactive prompt for email + password above")
-	fmt.Fprintln(os.Stderr, "")
+	if err := cli.ReadJSON(resp, &result); err != nil {
+		return fmt.Errorf("read provision response: %w", err)
+	}
+	if !result.CreatedUser || result.UserID == "" {
+		return fmt.Errorf("server did not confirm creation of a new account; no password was changed")
+	}
+	link, err := url.Parse(result.SetupURL)
+	if err != nil || link.Query().Get("token") == "" {
+		return fmt.Errorf("server did not return an account setup token")
+	}
+	// Never navigate the returned URL: redeem only against the explicit seed
+	// target. The URL's hostname cannot redirect credentials to a third party.
+	resp, err = client.Post("/api/v1/auth/reset", map[string]string{"token": link.Query().Get("token"), "new_password": u.Password})
+	if err != nil {
+		return fmt.Errorf("new account setup failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		return fmt.Errorf("new account setup failed: %w", err)
+	}
 	return nil
 }
 
@@ -267,35 +176,9 @@ func closeTransientSeedSession(ctx context.Context, self *cli.Client, session st
 	}
 }
 
-// serverAllowsSignup reads the public first-run gate (GET
-// /api/v1/system/setup-status, no auth) and reports whether the server has
-// registration open, plus whether that answer is knowable at all.
-//
-// known=false for anything that is not a clean read — an older build without
-// the route, a proxy in the way, a transport error. Callers must treat an
-// unknown answer as "carry on": this exists to name a cause early, not to add
-// a dependency the fixture did not have.
-func serverAllowsSignup(client *cli.Client) (allow, known bool) {
-	resp, err := client.Get("/api/v1/system/setup-status")
-	if err != nil {
-		return false, false
-	}
-	if err := cli.CheckError(resp); err != nil {
-		return false, false
-	}
-	var status struct {
-		AllowSignup *bool `json:"allow_signup" yaml:"allow_signup"`
-	}
-	if err := cli.ReadJSON(resp, &status); err != nil || status.AllowSignup == nil {
-		return false, false
-	}
-	return *status.AllowSignup, true
-}
-
 // findWorkspaceMemberByEmail resolves an email to (userID, currentRole)
 // for users already in the current workspace's member roster. Used to
-// confirm that signup actually redeemed the invitation and to read back
-// the role that landed.
+// verify provisioning and to read back the role that landed.
 //
 // Returns ("", "", nil) when the email isn't found in this workspace —
 // the user may exist in the global users table but not be a member here,

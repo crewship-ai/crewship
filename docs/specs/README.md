@@ -54,6 +54,8 @@ public contract here. Superseded a spec? Move it to
 
 ## Storage and lifecycle
 
+- [Installation paths](installation-paths.md): explicit path precedence, data-preserving startup checks, dev layout and seed target isolation.
+- [Offline reset](offline-reset.md): explicit targets, lifetime locks, retained identity and management state, label-scoped Docker cleanup and interrupted-reset recovery.
 - [Quota service backup](quota-service-backup.md): offline fixed-ext4 snapshots
   and the explicit restore/recovery release boundary.
 - [Container cleanup](container-cleanup.md): installation labels, cleanup after

@@ -67,10 +67,10 @@ const maxSocketPath = 100
 // derived paths — and that operator is, by definition, the one running more
 // than one instance.
 //
-// Base and Log are NOT derived here: cmd_start already overwrites
-// Storage.BasePath/LogPath from the resolved data dir on every start where it
-// owns the database URL, and neither is a lock-bearing file, so rewriting them
-// here would duplicate that logic without fixing anything.
+// Base and Log retain the historical load-time defaults here. ResolvePaths
+// derives the effective startup paths independently of DATABASE_URL, using
+// explicit key provenance. Keeping these historical defaults also lets its
+// legacy-data guard detect stores that the preceding version would use.
 func defaultPathsFor(goos, programData, tempDir, dataDir string) defaultPaths {
 	relocated := relocatedDataDir(goos, dataDir)
 

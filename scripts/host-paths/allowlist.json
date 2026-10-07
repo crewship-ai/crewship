@@ -1,0 +1,194 @@
+[
+  {
+    "key": "cmd/crewship/cmd_ai_lifecycle.go|aiClientContext|os-root|UserHomeDir|1",
+    "reason": "Upstream client-side AI session configuration; separate from server installation state."
+  },
+  {
+    "key": "cmd/crewship/cmd_ai_lifecycle.go|newAIStatusCommand|os-root|TempDir|1",
+    "reason": "Upstream read-only AI status probe for client session state; existing on trusted main when this boundary was introduced."
+  },
+  {
+    "key": "cmd/crewship/cmd_doctor.go|checkSidecarBinary|os-root|UserHomeDir|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "cmd/crewship/cmd_eval_baseline.go|baselineDir|os-root|UserHomeDir|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "cmd/crewship/cmd_seed.go|readSetupTokenFile|os-root|UserHomeDir|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "cmd/crewship/cmd_seed_codex.go|resolveSeedCodexLogin|os-root|Getwd|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "cmd/crewship/cmd_seed_verify.go|*packVerifier.verifyCitedPaths|os-root|Getwd|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "cmd/crewship/cmd_start.go|startSocketPath|literal|/tmp/crewship.sock|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "cmd/crewship/main.go|package|os-root|Getwd|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "cmd/gen-openapi/main.go|run|os-root|Getwd|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "internal/backup/storage.go|LocalStorageOps.Home|os-root|UserHomeDir|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "internal/backupplan/service.go|*Service.sweepStaging|os-root|TempDir|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "internal/cli/config.go|DefaultConfigDir|os-root|UserHomeDir|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "internal/cli/repl.go|ExpandAtFiles|os-root|UserHomeDir|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "internal/cli/repl.go|atFilePathContained|os-root|Getwd|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "internal/config/config.go|autodetectSidecarPaths|os-root|Getwd|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "internal/devcontainer/dockerfile.go|package|literal|/tmp/devcontainer-features|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/devcontainer/installer.go|*Installer.InstallFeature|literal|/tmp/devcontainer-features|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/devcontainer/mise_resolve.go|ResolveMiseLock|literal|/tmp|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/devcontainer/mise_resolve.go|ResolveMiseLock|literal|/tmp|2",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/devcontainer/mise_resolve.go|ResolveMiseLock|literal|/tmp|3",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/devcontainer/mise_resolve.go|auditMiseResolver|literal|/tmp|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/devcontainer/mise_resolve.go|package|literal|/tmp/crewship-resolver|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/devcontainer/mise_resolve.go|resolverExecWithInput|literal|/tmp|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/journalgen/scan.go|RepoRoot|os-root|Getwd|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "internal/managedlaunch/artifact.go|DirectRunPIDFile|literal|/tmp/crewship-direct-|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/orchestrator/direct_run.go|directRunPIDFile|literal|/tmp/crewship-direct-|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/orchestrator/exec_sidecar.go|package|literal|/tmp/sidecar.log|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/orchestrator/orchestrator_exec_env.go|*Orchestrator.setupTmuxExec|literal|/tmp/%s.args|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/orchestrator/orchestrator_exec_env.go|*Orchestrator.setupTmuxExec|literal|/tmp/%s.env|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/orchestrator/orchestrator_exec_env.go|*Orchestrator.setupTmuxExec|literal|/tmp/%s.exit|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/orchestrator/orchestrator_exec_env.go|*Orchestrator.setupTmuxExec|literal|/tmp/%s.fifo|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/orchestrator/orchestrator_exec_env.go|*Orchestrator.setupTmuxExec|literal|/tmp/%s.sh|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/pipeline/runner_script.go|*OrchestratorRunner.RunScript|literal|/tmp/crewship-script-|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/provider/apple/apple_create_args.go|buildCreateArgs|literal|/tmp|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/provider/docker/docker.go|candidateSockets|os-root|UserHomeDir|1",
+    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+  },
+  {
+    "key": "internal/provider/docker/docker_container.go|*Provider.assembleCrewSpec|literal|/tmp|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/provider/docker/sandbox.go|*Provider.CreateSandbox|literal|/tmp|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/provider/docker/sandbox.go|*Provider.CreateSandbox|literal|/tmp|2",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/provider/docker/sandbox.go|auditOfflineSandbox|literal|/tmp|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/provider/docker/service_quotas.go|applyServiceQuotas|literal|/tmp|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/quota/types.go|ValidateVolume|literal|/tmp|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/restrictedruntime/docker.go|Docker.create|literal|/tmp|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/restrictedruntime/docker.go|privateTmpfs|literal|/tmp|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/sidecar/run_registry.go|package|literal|/tmp/crewship-sidecar-state|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/testutil/fixturecache.go|fixtureRoot|os-root|TempDir|1",
+    "reason": "Test utility cache of migration templates; owned cleanup and source fingerprint isolation are tested separately."
+  },
+  {
+    "key": "internal/testutil/inputcorpus.go|ShellInjectionSamples|literal|/tmp/*|1",
+    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
+  },
+  {
+    "key": "internal/testutil/migrateddb_shared.go|findModuleRoot|os-root|Getwd|1",
+    "reason": "Test utility discovers source identity for shared migration templates; no product data is created from cwd."
+  }
+]

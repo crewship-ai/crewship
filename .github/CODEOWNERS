@@ -2,3 +2,6 @@
 # Owners must be users or teams with write access; an organization alone is
 # not a valid owner. CI validates this file through GitHub's CODEOWNERS API.
 * @Srbino
+
+# Host path exceptions are existing migration debt. CI also enforces shrinking.
+/scripts/host-paths/ @Srbino

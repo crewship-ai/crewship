@@ -19,7 +19,6 @@ type mutationFile struct {
 }
 
 func openMutationFile(storageRoot, path string, create bool) (*mutationFile, error) {
-	file := &mutationFile{path: path}
 	if storageRoot == "" {
 		// Trusted in-process/legacy callers retain their existing path contract.
 		if create {
@@ -27,8 +26,19 @@ func openMutationFile(storageRoot, path string, create bool) (*mutationFile, err
 				return nil, fmt.Errorf("mkdir parent: %w", err)
 			}
 		}
-		return file, nil
+		return &mutationFile{path: path}, nil
 	}
+	return openRootedMutationFile(storageRoot, path, create)
+}
+
+// openRootedMutationFile is the mandatory capability boundary for externally
+// supplied paths. Unlike the trusted legacy wrapper, it has no unconfined I/O
+// branch: all reads, parent creation and publication use pinned root handles.
+func openRootedMutationFile(storageRoot, path string, create bool) (*mutationFile, error) {
+	if storageRoot == "" {
+		return nil, fmt.Errorf("memory mutation requires a storage root")
+	}
+	file := &mutationFile{path: path}
 	base, err := filepath.Abs(storageRoot)
 	if err != nil {
 		return nil, err
@@ -54,6 +64,17 @@ func openMutationFile(storageRoot, path string, create bool) (*mutationFile, err
 		info, err := root.Lstat(part)
 		if errors.Is(err, os.ErrNotExist) && create {
 			err = root.Mkdir(part, 0o775)
+			if err == nil {
+				parent, syncErr := root.Open(".")
+				if syncErr == nil {
+					syncErr = parent.Sync()
+					_ = parent.Close()
+				}
+				if syncErr != nil {
+					_ = root.Close()
+					return nil, syncErr
+				}
+			}
 			if err == nil || errors.Is(err, os.ErrExist) {
 				info, err = root.Lstat(part)
 			}

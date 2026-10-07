@@ -21,6 +21,9 @@ import (
 
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	// Keep the legacy status="ok" response while sharing liveness and writer
+	// ownership checks. The exact route also works before API authentication.
+	s.mux.HandleFunc("GET /api/health", s.handleHealthz)
 	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
 	// /metrics is registered WITHOUT a method so every method reaches the
 	// handler. It answers 404 to an unauthorized caller on purpose (F-003), and

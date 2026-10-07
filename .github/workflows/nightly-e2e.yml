@@ -373,7 +373,7 @@ jobs:
           set -euo pipefail
           for attempt in 1 2 3; do
             echo "--- seed attempt $attempt ---"
-            if ./crewship seed --server "$CREWSHIP_SERVER"; then
+            if ./crewship seed --offline-demo --server "$CREWSHIP_SERVER"; then
               exit 0
             fi
             sleep 5
@@ -494,7 +494,7 @@ jobs:
           set -euo pipefail
           for attempt in 1 2 3; do
             echo "--- seed attempt $attempt ---"
-            if ./crewship seed --skip-issues --server "$CREWSHIP_SERVER"; then
+            if ./crewship seed --offline-demo --skip-issues --server "$CREWSHIP_SERVER"; then
               exit 0
             fi
             sleep 5

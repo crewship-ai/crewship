@@ -14,6 +14,8 @@ package main
 // in main.go's init() instead.
 func init() {
 	rootCmd.AddCommand(startCmd)
+	rootCmd.AddCommand(resetCmd)
+	rootCmd.AddCommand(pathsCmd)
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(telemetryCmd)
 }

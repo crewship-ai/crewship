@@ -142,6 +142,7 @@ API puts exec *creation* under `/containers`, so `EXEC: 0` does not stop it.
 | `NetworkConnect` | `POST /networks/{id}/connect` | Moves an existing crew service onto the crew's network without recreating it |
 | `NetworkDisconnect` | `POST /networks/{id}/disconnect` | Detaches a moved crew service from its previous network |
 | `NetworkCreate` | `POST /networks/create` | Creates the instance network and, for crews listed in `crew_network_crews`, each crew's own network |
+| `NetworkInspect` | `GET /networks/{id}` | Revalidates network identity and installation ownership before offline reset removal |
 | `NetworkList` | `GET /networks` | Checks whether it already exists |
 | `NetworkRemove` | `DELETE /networks/{id}` | Removes the network of a deleted crew once its containers are gone |
 | `VolumeCreate` | `POST /volumes/create` | Creates per-agent home and memory volumes |

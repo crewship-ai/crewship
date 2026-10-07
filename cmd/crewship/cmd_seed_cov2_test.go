@@ -39,8 +39,7 @@ func TestRunSeedCov2_CanceledContext(t *testing.T) {
 
 // TestRunSeedCov2_NukeWithExtras drives the widest runSeed configuration
 // that stays deterministic without Docker: --nuke --yes wipes (against empty
-// lists), --with-users mints RBAC fixtures, --with-memory fails fast and
-// non-fatally (no CREWSHIP_STORAGE_BASE_PATH), --wait-provision polls a
+// lists), --with-users mints RBAC fixtures, --wait-provision polls a
 // status stub that reports completed immediately, and issues stay ENABLED.
 func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	s := covSeedStub(t)
@@ -68,6 +67,7 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	// than a stderr notice next to a zero exit code (#1829) — so this stub is
 	// what makes --with-users actually exercised here instead of tolerated.
 	s.OnGet(adminUsers, clitest.JSONResponse(200, fixtureRoster()))
+	stubSeedUserProvision(s, "/api/v1/workspaces/"+covSeedWSID+"/members/provision")
 	// Page seeding: the spec POST, then one payload PUT per panel. Both are
 	// wildcarded because the panel path carries the page slug and the panel id.
 	s.OnPost("/api/v1/pages", clitest.JSONResponse(201, map[string]string{"slug": "operations"}))
@@ -126,14 +126,9 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	if n := len(s.CallsFor("GET", "/api/v1/issues")); n == 0 {
 		t.Error("nuke never listed issues")
 	}
-	// --with-memory ran: it resolves the storage base path (falls back
-	// under the test-scoped $HOME) and writes the demo tier files there.
-	if !strings.Contains(out, "Seeding agent memory tiers...") {
-		t.Errorf("expected memory phase to run:\n%s", out)
-	}
 	// --with-users placed the whole fixture: one signup per demo user, and
 	// the credential table printed for each.
-	if n := len(s.CallsFor("POST", signupPath)); n != len(demoUsers) {
+	if n := len(s.CallsFor("POST", "/api/v1/workspaces/"+covSeedWSID+"/members/provision")); n != len(demoUsers) {
 		t.Errorf("signups = %d, want %d", n, len(demoUsers))
 	}
 	for _, u := range demoUsers {
@@ -361,7 +356,7 @@ func TestRunSeedCov2_CancelMidPhases(t *testing.T) {
 		// instead of being logged and re-surfacing at the next checkpoint, so
 		// there is no non-fatal line to expect — the wrapped error below is
 		// the signal.
-		{"rbac users", "/api/v1/auth/signup", true, true, ""},
+		{"rbac users", "/api/v1/workspaces/" + covSeedWSID + "/members/provision", true, true, ""},
 		{"skills import", "/api/v1/workspaces/" + covSeedWSID + "/skills/import", false, true, ""},
 		// Routine seeding no longer has its own inter-phase checkpoint
 		// (that used to be Phase 9b: demo schedules, now removed) — the

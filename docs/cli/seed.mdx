@@ -13,15 +13,26 @@ Replaces the old `prisma/seed.ts` script. Creates a demo environment — admin u
 The content is one fictional small business — **Harbor Goods** — told as four connected **business stories**, each run by one crew with local sample data and no third-party accounts: **Sales** (a customer inquiry waiting 26 hours), **Finance** (an overdue invoice among matched payments), **Marketing** (a contact-form submission that never arrived) and **Shipping** (a late parcel inside its claim window). Each story ships a TODO Issue, a Page and three routines — a deterministic **check**, an optional **AI draft** and a **resolution** that waits for a human before it saves anything. **Crewship Lab** adds real workspace telemetry and a bounded live container monitor. Every story can be run again and checked with [`crewship seed verify`](#crewship-seed-verify). The legacy external-source demo packs are no longer installed (see the [demo packs guide](/guides/demo-packs)), and synthetic model-regression routines stay out of the product demo (`--with-evals`).
 
 ```bash
-crewship seed [flags]
+crewship seed --server <url> [flags]
 ```
 
 On a fresh database, seed bootstraps the admin user (`demo@crewship.ai`) itself. On an existing database, it requires authentication (run `crewship login` first) and a selected workspace.
+
+The server target must be explicit; seed does not infer it from `.env.local`,
+the working directory or an active default profile. Export a provider credential
+or pass a supported Codex login before running a functional demo. Use
+`--offline-demo` for an explicit control-plane fixture without model execution.
+The server may still build crew images automatically when their configuration
+is created; this option suppresses seed's explicit provisioning requests and
+automatic model runs, rather than disabling the server's image build queue.
+Bootstrap credentials are stored in a profile for the target server; unrelated
+default selections are preserved.
 
 ## Flags
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
+| `--offline-demo` | `false` | Create a control-plane fixture without model credentials or execution. Incompatible with execution smoke tests, backup self-tests and Codex login. Supports `--with-memory` through the server API. |
 | `--nuke` | `false` | Delete all workspace contents before seeding. Runs *after* auth, so a missing/invalid token won't wipe the wrong workspace. **Prompts for confirmation** — see below. |
 | `--yes` | `false` | Skip the `--nuke` confirmation prompt (for CI/scripts). Without it, an interactive nuke requires typing the workspace slug; a non-interactive session refuses to nuke unless `--yes` is set. |
 | `--skip-issues` | `false` | Skip the issue/project/label phase. Useful when you only need crews + agents and want a faster seed. |
@@ -32,11 +43,11 @@ On a fresh database, seed bootstraps the admin user (`demo@crewship.ai`) itself.
 | `--provision-timeout <s>` | `900` | Per-crew provisioning timeout (seconds). |
 | `--wait-provision` | `false` | Block until all crews finish provisioning. Default is fire-and-forget — seed returns while provisioning runs in the background. |
 | `--test-backup` | `false` | After seeding, run a backup/restore round-trip self-test on one crew. Implies `--wait-provision`. |
-| `--with-memory` | `false` | Pre-seed agent memory tiers (`AGENT.md` / `CREW.md` / `PERSONA.md` / `pins.md` / `daily/{date}.md` / `learned.md`) for the demo workspace; useful for memory-recall demos and live GDPR/RBAC tests. |
+| `--with-memory` | `false` | Initialize all demo memory tiers through the target server's authenticated API before provisioning. Existing files and operator edits are preserved; a requested initialization failure stops the seed. No server memory is written on the CLI host. |
 | `--with-team-chat` | `false` | Add six fictional colleagues with actual workspace roles, bundled portraits, a shared Chat channel and separately authored DMs. Requires OWNER and current create-only provisioning support; signup is not required. |
 | `--state-dir <path>` | User configuration directory | Private owned-account state outside Git, separated by server/workspace. Passwords are random and never printed. |
-| `--with-users` | `false` | Add four extra users (`ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`) to the workspace for RBAC matrix testing. Requires the server to have been started with `CREWSHIP_ALLOW_SIGNUP=true` — seed checks before it starts and **fails** rather than placing nobody. |
-| `--codex-auth-file <path>` | `$SEED_CODEX_AUTH_FILE` | Absolute path to a private Codex `auth.json` (mode `0600`, outside the repo) holding a ChatGPT subscription login. Switches the demo agents from Claude Code to `CODEX_CLI` — see [below](#seed-codex-agents-with-a-chatgpt-login). The flag overrides `SEED_CODEX_AUTH_FILE`; when neither is set, the env var loaded from `.env.local` applies. |
+| `--with-users` | `false` | Add four extra users (`ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`) to the workspace for RBAC matrix testing. Uses authenticated member provisioning; public signup may remain disabled. New accounts redeem their setup token against the explicit target. Existing passwords are preserved. An incomplete four-role fixture fails. |
+| `--codex-auth-file <path>` | `$SEED_CODEX_AUTH_FILE` | Absolute path to a private Codex `auth.json` (mode `0600`, outside the repo) holding a ChatGPT subscription login. Switches the demo agents from Claude Code to `CODEX_CLI` — see [below](#seed-codex-agents-with-a-chatgpt-login). The flag overrides the exported variable; `dev.sh` can supply it from `.env.local`. |
 
 ### Seed Codex agents with a ChatGPT login
 
@@ -257,13 +268,13 @@ satisfies a pack's `env` gate.
 | --- | --- | --- |
 | 1. Bootstrap / auth | Hits `/api/v1/bootstrap` on a fresh DB; falls back to existing CLI token | Fatal |
 | 0. Nuke (if `--nuke`) | Wipes workspace contents | Fatal |
-| 1b. RBAC users (if `--with-users`) | Adds four extra members (`ADMIN`/`MANAGER`/`MEMBER`/`VIEWER`) before crews land | **Fatal if none land**; individual failures are logged and the rest of the fixture continues |
+| 1b. RBAC users (if `--with-users`) | Adds four extra members (`ADMIN`/`MANAGER`/`MEMBER`/`VIEWER`) before crews land | **Fatal if any role is missing**; individual failures are reported, existing passwords and roles are preserved |
 | 2. Crews + members | Creates three crews — Sales & Shipping, Finance & Marketing, Operations (plus the optional Local AI crew) — and links the admin user | Fatal |
 | 2a. Crew connections | All-pairs bidirectional `crew_connections` so missions can hand off | Non-fatal (logs and continues) |
 | 2c. Demo story files | Delivers the business-story scripts and fixtures to each crew's shared volume (`shared/demo/business/…`) plus the Crewship Lab collector (`shared/scripts/…`) — before provisioning, while the host can still write the tree | Fatal; `seed verify` also compares the delivered bytes with the seed |
 | 2b. Provision crews | Triggers devcontainer image builds in parallel | Errors deferred to end |
 | 3. Agents | Inserts agents with system prompts, then a follow-up `PATCH` for the columns `POST /api/v1/agents` does not model — suggested questions and ask forms (see below) | Fatal |
-| 3b. Agent memory (if `--with-memory`) | Pre-seeds each agent's memory tiers | Non-fatal (logs and continues) |
+| 3b. Agent memory (if `--with-memory`) | Initialize every demo tier on the target server before provisioning; existing memory remains unchanged | Fatal on initialization failure |
 | 4–5. Skills + assignments | Workspace skills + per-agent skill bindings | Fatal |
 | 6–7. Credentials + assignments | Model login for the agents (Codex `auth.json` or the Anthropic key; optional Google, GitHub and Ollama credentials) + per-agent bindings, then the demo vault's two inert examples (an SMTP relay and a webhook signing secret) | Fatal for the model login; demo vault entries are non-fatal |
 | 8–9. Integrations + bindings | One `harbor-goods` MCP server per crew — a local stdio connector (`connector.py` on the crew's shared volume) exposing the demo records to agents | Fatal |

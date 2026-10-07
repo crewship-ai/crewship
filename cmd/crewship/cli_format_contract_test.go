@@ -143,6 +143,7 @@ var reportingVerbs = map[string]bool{
 // reportingCommands names the reporting commands whose leaf verb does not say
 // so — the top-level ones mostly, where the noun IS the command.
 var reportingCommands = map[string]bool{
+	"crewship paths": true,
 	// Decision results are advisory reports, never server mutations.
 	"crewship decisions evaluate":      true,
 	"crewship decisions triage":        true,

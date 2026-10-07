@@ -66,7 +66,7 @@ func seedExistingUsersAcceptance(t *testing.T, wrongPasswords bool) (*sql.DB, st
 	if _, err := db.Exec(`INSERT INTO cli_tokens(id,user_id,name,token_hash,created_at) VALUES('seed-owner-token','seed-owner','acceptance',?,datetime('now'))`, sha256HexToken(token)); err != nil {
 		t.Fatal(err)
 	}
-	router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", slog.New(slog.NewTextHandler(io.Discard, nil)), api.WithAllowSignup(true))
+	router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", slog.New(slog.NewTextHandler(io.Discard, nil)), api.WithAllowSignup(false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,17 @@ func runExistingUsersSeedCLI(t *testing.T, cfg string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, buildCrewshipBinary(t), "seed", "--nuke", "--yes", "--with-users", "--skip-issues")
+	raw, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var server string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "server: ") {
+			server = strings.TrimPrefix(line, "server: ")
+		}
+	}
+	cmd := exec.CommandContext(ctx, buildCrewshipBinary(t), "seed", "--server", server, "--offline-demo", "--nuke", "--yes", "--with-users", "--skip-issues")
 	cmd.Dir = t.TempDir() // No workstation .env.local or setup-token files.
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "CREWSHIP_CONFIG=" + cfg, "CREWSHIP_NO_SLUG_CACHE=1", "NO_COLOR=1"}
 	out, err := cmd.CombinedOutput()
@@ -167,7 +177,7 @@ func TestAcceptance_SeedExistingGlobalAccountsRecovery(t *testing.T) {
 func TestAcceptance_SeedExistingAccountsWrongPasswordCannotPlace(t *testing.T) {
 	db, cfg, hashes := seedExistingUsersAcceptance(t, true)
 	out := runExistingUsersSeedCLI(t, cfg)
-	if !strings.Contains(out, "no RBAC fixture users were placed") || strings.Contains(out, "fixture stopped after verified RBAC seed phase") {
+	if !strings.Contains(out, "incomplete RBAC fixture") || strings.Contains(out, "fixture stopped after verified RBAC seed phase") {
 		t.Fatalf("wrong credentials should refuse placement:\n%s", out)
 	}
 	var members int

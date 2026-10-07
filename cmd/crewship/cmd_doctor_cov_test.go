@@ -406,7 +406,10 @@ func TestCheckDsnReachability_EnabledBranches(t *testing.T) {
 func TestRunCheckDataDirPerms_Wrapper(t *testing.T) {
 	dd := tempDataDir(t)
 
-	// DefaultDataDir creates the root 0755 → WARN drift.
+	// Set the drift explicitly: t.TempDir is 0700 and creation honors umask.
+	if err := os.Chmod(dd.Root, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	r := runCheckDataDirPerms()
 	if r.status != "WARN" || !strings.Contains(r.detail, "want 0700") {
 		t.Errorf("0755 root: got %+v", r)
@@ -421,6 +424,9 @@ func TestRunCheckDataDirPerms_Wrapper(t *testing.T) {
 	}
 
 	if err := os.WriteFile(dd.DatabasePath(), []byte("db"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dd.DatabasePath(), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	r3 := runCheckDataDirPerms()

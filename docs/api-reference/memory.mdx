@@ -28,6 +28,7 @@ The Memory API exposes the read surfaces over an agent's episodic and markdown m
 | GET | [`/api/v1/memory/versions/{sha}`](#get-apiv1memoryversionssha) | Raw blob bytes for one historical version |
 | GET | [`/api/v1/memory/export`](#get-apiv1memoryexport) | Export mapped memory documents or an OKF ZIP |
 | POST | [`/api/v1/memory/import`](#post-apiv1memoryimport) | Import mapped memory documents |
+| POST | [`/api/v1/memory/initialize`](#post-apiv1memoryinitialize) | Initialize missing administrative memory documents |
 
 Export and import require `OWNER` or `ADMIN` (the route's `manage` role). The
 workspace is selected by the authenticated session's workspace context;
@@ -171,6 +172,53 @@ failed documents. Prompt-injection findings are reported in `rejected` with
 | `500` | Database, write-policy, or memory-tree failure. |
 
 ---
+
+### `POST /api/v1/memory/initialize`
+
+**Auth:** OWNER or ADMIN in the target workspace. Used by `crewship seed
+--server <url> --with-memory`; all files belong to the server's storage root.
+
+**Request:** `application/json`, capped at 128 KiB:
+
+```json
+{"crew_id":"crew_123","agent_slug":"alex","documents":[{"path":"AGENT.md","body":"# Initial notes\n"}]}
+```
+
+`crew_id` identifies a crew in the authenticated workspace. Optional
+`agent_slug` selects an agent in that crew. `documents` contains 1–8 entries,
+each with `path` and a non-empty `body`. Crew scope accepts `CREW.md` (4 KiB)
+and `learned.md` (8 KiB). Agent scope accepts `AGENT.md` (4 KiB),
+`PERSONA.md` (1536 bytes), `pins.md` (8 KiB), and
+`daily/YYYY-MM-DD.md` (32 KiB).
+
+Every document is validated before writes begin. Each missing file is
+published durably without replacing an existing file; retries preserve
+operator edits. Symlink parents and leaves are refused. The batch is not
+transactional: a storage failure can leave earlier documents initialized;
+retrying safely completes the missing documents. Fresh installation seeding
+initializes memory before container provisioning takes ownership of its tree.
+This endpoint is for host-writable bootstrap storage. A missing document in an
+already provisioned tree owned by the runtime user can return `409`; it does not
+change ownership or permissions. Use the ordinary memory import API for live
+runtime edits.
+
+**Response:** `200 OK`, with counts covering every requested document:
+
+```json
+{"written":1,"existing":0}
+```
+
+| Status | Condition |
+|---|---|
+| `200` | All documents were initialized or already existed as regular files. |
+| `400` | Invalid or oversized JSON, document count, path, duplicate, or body. |
+| `401` | Missing authenticated workspace context. |
+| `403` | Caller is not OWNER or ADMIN. |
+| `404` | Crew or agent is outside the authenticated scope. |
+| `409` | Unsafe path, permissions, or durable storage publication failure. Existing files are preserved. |
+| `422` | Prompt injection or credential content rejected. |
+| `500` | Scope lookup failed. |
+| `503` | Server storage base path is not configured. |
 
 ## Health
 
