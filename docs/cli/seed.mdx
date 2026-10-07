@@ -22,6 +22,9 @@ The server target must be explicit; seed does not infer it from `.env.local`,
 the working directory or an active default profile. Export a provider credential
 or pass a supported Codex login before running a functional demo. Use
 `--offline-demo` for an explicit control-plane fixture without model execution.
+The server may still build crew images automatically when their configuration
+is created; this option suppresses seed's explicit provisioning requests and
+automatic model runs, rather than disabling the server's image build queue.
 Bootstrap credentials are stored in a profile for the target server; unrelated
 default selections are preserved.
 

@@ -45,7 +45,7 @@ All data is created through the REST API, ensuring business logic
 }
 
 func init() {
-	seedCmd.Flags().Bool("offline-demo", false, "Create UI/control-plane fixtures without provider credentials, provisioning, or automatic model execution")
+	seedCmd.Flags().Bool("offline-demo", false, "Create UI/control-plane fixtures without provider credentials or automatic model execution")
 	seedCmd.Flags().Bool("nuke", false, "Delete all workspace contents before seeding")
 	seedCmd.Flags().Bool("yes", false, "Skip the --nuke confirmation prompt (for CI/scripts). Without it, an interactive nuke requires typing the workspace slug.")
 	seedCmd.Flags().Bool("skip-issues", false, "Skip issue/project/label seeding")
