@@ -21,6 +21,10 @@ import (
 func resetFixture(t *testing.T) (string, string) {
 	t.Helper()
 	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []string{"CREWSHIP_HOME", "CREWSHIP_DATA_DIR", "DATABASE_URL", "CREWSHIP_STORAGE_BASE_PATH", "CREWSHIP_LOG_PATH", "CREWSHIP_STORAGE_MEMORY_ROOT", "CREWSHIP_BOLT_PATH", "CREWSHIP_SOCKET_PATH", "CREWSHIP_PAGE_PROJECTS_PATH"} {
 		t.Setenv(name, "")
 	}
@@ -345,5 +349,35 @@ func TestResetPreviewFormatAndSuccessReceiptStreams(t *testing.T) {
 	}
 	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "Application data reset") {
 		t.Fatalf("mutation receipt must only go to stderr: stdout %q, stderr %q", stdout.String(), stderr.String())
+	}
+}
+
+func TestOfflineResetAcceptsSymlinkParentAlias(t *testing.T) {
+	root, id := resetFixture(t)
+	aliasParent := filepath.Join(t.TempDir(), "installation-parent")
+	if err := os.Symlink(filepath.Dir(root), aliasParent); err != nil {
+		t.Fatal(err)
+	}
+	aliasRoot := filepath.Join(aliasParent, filepath.Base(root))
+	plan, err := prepareReset(resetCommand(aliasRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.root != root || plan.dbPath != filepath.Join(root, "crewship.db") {
+		t.Fatalf("alias did not resolve to installation: %+v", plan)
+	}
+	old := resetDockerResources
+	t.Cleanup(func() { resetDockerResources = old })
+	resetDockerResources = func(_ context.Context, instance string) error {
+		if instance != id {
+			t.Fatal("alias gained a different Docker identity")
+		}
+		return nil
+	}
+	if err := runReset(resetCommand(aliasRoot), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CheckResetPending(root); err != nil {
+		t.Fatal(err)
 	}
 }

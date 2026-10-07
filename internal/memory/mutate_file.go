@@ -19,7 +19,6 @@ type mutationFile struct {
 }
 
 func openMutationFile(storageRoot, path string, create bool) (*mutationFile, error) {
-	file := &mutationFile{path: path}
 	if storageRoot == "" {
 		// Trusted in-process/legacy callers retain their existing path contract.
 		if create {
@@ -27,8 +26,19 @@ func openMutationFile(storageRoot, path string, create bool) (*mutationFile, err
 				return nil, fmt.Errorf("mkdir parent: %w", err)
 			}
 		}
-		return file, nil
+		return &mutationFile{path: path}, nil
 	}
+	return openRootedMutationFile(storageRoot, path, create)
+}
+
+// openRootedMutationFile is the mandatory capability boundary for externally
+// supplied paths. Unlike the trusted legacy wrapper, it has no unconfined I/O
+// branch: all reads, parent creation and publication use pinned root handles.
+func openRootedMutationFile(storageRoot, path string, create bool) (*mutationFile, error) {
+	if storageRoot == "" {
+		return nil, fmt.Errorf("memory mutation requires a storage root")
+	}
+	file := &mutationFile{path: path}
 	base, err := filepath.Abs(storageRoot)
 	if err != nil {
 		return nil, err

@@ -17,6 +17,13 @@ func AcquireExistingIdentity(ctx context.Context, root string, db *sql.DB, locat
 	if location == "" {
 		return nil, fmt.Errorf("database location is required")
 	}
+	// Match startup's canonical locator, including aliases such as macOS
+	// /var -> /private/var. A different file still yields a different locator;
+	// this normalization never adopts or rekeys copied database ownership.
+	canonicalLocation, err := DatabaseLocation(location)
+	if err != nil {
+		return nil, fmt.Errorf("resolve existing database location: %w", err)
+	}
 	var nonce string
 	if err := db.QueryRowContext(ctx, `SELECT db_nonce FROM resource_cleanup_installation WHERE id=1`).Scan(&nonce); err != nil {
 		return nil, fmt.Errorf("read existing installation nonce: %w", err)
@@ -25,7 +32,7 @@ func AcquireExistingIdentity(ctx context.Context, root string, db *sql.DB, locat
 		return nil, fmt.Errorf("invalid database nonce")
 	}
 	dir := filepath.Join(root, "installations")
-	sum := sha256.Sum256([]byte(location))
+	sum := sha256.Sum256([]byte(canonicalLocation))
 	expected := hex.EncodeToString(sum[:])
 	owner, err := os.ReadFile(filepath.Join(dir, nonce+".db"))
 	if err != nil {

@@ -19,7 +19,7 @@ func InitializeFile(ctx context.Context, storageRoot, path string, content []byt
 	if storageRoot == "" {
 		return false, fmt.Errorf("memory initialization requires a storage root")
 	}
-	f, err := openMutationFile(storageRoot, path, true)
+	f, err := openRootedMutationFile(storageRoot, path, true)
 	if err != nil {
 		return false, err
 	}

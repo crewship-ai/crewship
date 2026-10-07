@@ -90,3 +90,20 @@ func TestInitializeFileConfinesPaths(t *testing.T) {
 		})
 	}
 }
+
+// The externally callable initializer must never use the legacy unconfined
+// mkdir path, including when a caller accidentally omits its configured root.
+func TestRootedInitializerRejectsMissingRootWithoutCreatingParents(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "not-created", "AGENT.md")
+	if f, err := openRootedMutationFile("", target, true); err == nil {
+		f.close()
+		t.Fatal("strict mutation opener accepted an omitted storage root")
+	}
+	if _, err := InitializeFile(t.Context(), "", target, []byte("notes")); err == nil {
+		t.Fatal("initializer accepted an omitted storage root")
+	}
+	if entries, err := os.ReadDir(base); err != nil || len(entries) != 0 {
+		t.Fatalf("missing-root request created host files: entries=%v err=%v", entries, err)
+	}
+}
