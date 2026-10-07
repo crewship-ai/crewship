@@ -128,6 +128,9 @@ func TestOperationsCollectorPayloads(t *testing.T) {
 	if err = json.Unmarshal(payload["memory"], &memory); err != nil || memory.Value != 50 || len(memory.Samples) != 8 {
 		t.Fatalf("invalid measurement: %+v %v", memory, err)
 	}
+	t.Run("cancels-rejected-body", func(t *testing.T) {
+		testOperationsCollectorCancelsRejectedBody(t, node)
+	})
 	for _, tc := range []struct{ name, file, value, valid string }{
 		{"invalid-memory-limit", "memory.max", "bad", "4294967296"},
 		{"zero-memory-limit", "memory.max", "0", "4294967296"},
@@ -194,5 +197,63 @@ func TestOperationsCollectorFleetTelemetry(t *testing.T) {
 	}
 	if len(payload.Fleet.Rows) != 2 || payload.Fleet.Rows[0].Crew != "Ops" || payload.Fleet.Rows[0].CPU == nil || *payload.Fleet.Rows[0].CPU != "1.3%" || payload.Fleet.Rows[0].Memory == nil || *payload.Fleet.Rows[0].Memory != "50 MB" || payload.Fleet.Rows[1].CPU != nil {
 		t.Fatalf("fleet telemetry = %+v", payload.Fleet.Rows)
+	}
+}
+
+// A rejected response can leave its body open indefinitely. The collector must
+// release it instead of relying on the request's later deadline or GC.
+func testOperationsCollectorCancelsRejectedBody(t *testing.T, node string) {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range map[string]string{"memory.current": "52428800", "memory.max": "4294967296", "cpu.stat": "usage_usec 100000\n", "cpu.max": "200000 100000"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	released := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+		close(released)
+	}))
+	defer server.Close()
+	source := strings.ReplaceAll(string(Collector), "/sys/fs/cgroup/", filepath.ToSlash(dir)+"/")
+	source = strings.Replace(source, "http://127.0.0.1:9119/crews/telemetry", server.URL, 1)
+	// Keep the process budget at ten seconds, but put automatic request expiry
+	// beyond it: expiry must not conceal a rejected-body leak in this fixture.
+	const requestDeadline = "AbortSignal.timeout(8000)"
+	if strings.Count(source, requestDeadline) != 1 {
+		t.Fatal("collector request deadline changed; review the cancellation fixture")
+	}
+	source = strings.Replace(source, requestDeadline, "AbortSignal.timeout(60000)", 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, "--input-type=module")
+	cmd.Stdin = strings.NewReader(source)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil || ctx.Err() != nil || stderr.Len() != 0 {
+		t.Fatalf("rejected body was not released: context=%v process=%v stdout=%q stderr=%q", ctx.Err(), err, out, stderr.String())
+	}
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("collector exited without closing the rejected response")
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pages.ValidatePayload("table.v1", payload["fleet"]); err != nil {
+		t.Fatal(err)
+	}
+	var fleet struct {
+		Rows []json.RawMessage `json:"rows"`
+	}
+	if err := json.Unmarshal(payload["fleet"], &fleet); err != nil || len(fleet.Rows) != 0 {
+		t.Fatalf("failed fleet response changed the fallback: %+v %v", fleet, err)
 	}
 }

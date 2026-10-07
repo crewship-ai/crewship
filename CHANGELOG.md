@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **The operations Page collector could linger after failed fleet telemetry.** It now releases rejected HTTP response bodies immediately, keeping the unavailable-fleet snapshot without waiting for request expiry.
+
 - **CI: a trusted-main guard flags any change to CI control files (#2960).** `CI Inventory Guard` runs main's code against PR files as data. Required-job inventories of the CI, Security and CodeQL workflows, the routing and verdict helpers, and a closed namespace (`.github/`, `scripts/ci/`, every `scripts/` path a workflow references) are compared with main; any change needs a separate administrator dispatch for the exact head SHA.
 
 - **CI: the full Go suite and the shuffled suite run in three package partitions each.** `Go` keeps vet and the cross-builds; `Go test` and `Go Shuffle` split `go list ./...` largest-first by measured cost and prove every package runs exactly once (a truncated listing still fails).
@@ -27,6 +29,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **`crewship init` could bootstrap the wrong server despite CLI configuration.** It now honors the common server selection order (explicit flag, active profile, environment, config, default), supports `-s`, and prints the selected server in the login hint. ⚠️ **Behaviour change:** a selected profile without a server URL refuses initialization instead of falling back to localhost.
 - **Manual MCP startup could discard the selected login and send an environment token to a fallback server.** Explicit credential files now require a valid selected server before replacing CLI state or loading a catalog; an explicit valid `--server` remains supported without a profile. Unknown profiles fail closed.
+- ⚠️ **Behaviour change:** **Legacy direct-run probes now refuse uncertain process-group evidence.** Group signals calibrate against the image utility; unsupported options and permission failures stay UNKNOWN. Failed durable-state reads also refuse legacy probes instead of silently continuing.
 
 - **Ambiguous managed-launch descriptors could overwrite earlier fields.** The launcher rejects duplicate or noncanonical JSON fields before creating process identity; its native core now includes a standalone conformance entrypoint, parser fuzz targets and documented measurement limits.
 

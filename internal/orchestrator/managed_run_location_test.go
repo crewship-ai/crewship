@@ -84,8 +84,8 @@ func TestManagedDetachedHomeWrappersRetainAdmission(t *testing.T) {
 				if alive || aliveErr != nil || !stopped || stopErr != nil {
 					t.Fatalf("legacy HOME probe: alive=%v/%v stopped=%v/%v", alive, aliveErr, stopped, stopErr)
 				}
-				if state.reads != 0 || container.inspections != 0 {
-					t.Fatalf("legacy acquired reads/inspect: %d %d", state.reads, container.inspections)
+				if state.reads != 2 || container.inspections != 0 {
+					t.Fatalf("legacy durable reads/runtime inspection: %d %d", state.reads, container.inspections)
 				}
 			}
 		})

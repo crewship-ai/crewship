@@ -116,7 +116,7 @@ func (c *detachedUsageContainer) ExecInspect(_ context.Context, id string) (bool
 	return id == "exec-agent", 0, nil
 }
 func (c *detachedUsageContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	if strings.Contains(strings.Join(cfg.Cmd, " "), "/bin/kill -TERM --") {
+	if strings.Contains(strings.Join(cfg.Cmd, " "), "/bin/kill -TERM $group_separator") {
 		return &provider.ExecResult{ExecID: "stop", Reader: io.NopCloser(strings.NewReader("ABSENT"))}, nil
 	}
 	return c.orchCovContainer.Exec(ctx, cfg)

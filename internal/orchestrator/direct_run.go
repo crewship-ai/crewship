@@ -20,21 +20,7 @@ exec "$@"`
 // Returns before the tmux probe when a direct-exec identity exists. Missing
 // identity falls through; it must not be interpreted as absent creation.
 func directRunProbe(runID string, stop bool) string {
-	signal := ""
-	if stop {
-		signal = `/bin/kill -TERM -- "-$pid" 2>/dev/null || true; `
-	}
-	return fmt.Sprintf(`if [ -f '%s' ]; then
-if ! [ -x /bin/kill ] || ! /bin/kill -0 "$$" 2>/dev/null; then echo UNKNOWN; exit; fi
-read -r pid stamp < '%s' || { echo UNKNOWN; exit; }
-case "$pid:$stamp" in *[!0-9:]*|:*) echo UNKNOWN; exit;; esac
-[ "$pid" -gt 1 ] 2>/dev/null && [ -n "$stamp" ] || { echo UNKNOWN; exit; }
-current=$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null)
-if [ "$current" = "$stamp" ]; then
-%sif /bin/kill -0 -- "-$pid" 2>/dev/null; then echo PRESENT; else echo ABSENT; fi
-elif /bin/kill -0 -- "-$pid" 2>/dev/null; then echo UNKNOWN; else echo ABSENT; fi
-exit
-fi; `, directRunPIDFile(runID), directRunPIDFile(runID), signal)
+	return managedDirectRunProbe(runID, stop)
 }
 
 // Managed launches calibrate the image utility and fail closed on uncertain group evidence.
