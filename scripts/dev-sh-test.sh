@@ -296,6 +296,40 @@ resolve_dev_paths
 "
 status=$(run_with_fn resolve_dev_paths "$runtime_isolation_snippet")
 if [[ "$status" == 0 ]]; then pass "XDG runtime isolates homes; relative overrides anchor to startup checkout from any cwd"; else fail "runtime isolation and relative cleanup paths exited $status"; fi
+ownership_snippet="
+PROJECT_DIR='$PATH_TEST_DIR/checkout'; DEV_BINARY='$PATH_TEST_DIR/installation/run/bin/crewship'
+GO_PID_FILE='$PATH_TEST_DIR/go.pid'; NEXT_PID_FILE='$PATH_TEST_DIR/next.pid'; S=-test; NEXT_PORT=3001
+rm '$PATH_TEST_DIR/proc/$$/exe'
+ln -s \"\$DEV_BINARY\" '$PATH_TEST_DIR/proc/$$/exe'
+process_is_owned $$ \"\$GO_PID_FILE\" '$PATH_TEST_DIR/proc'
+rm '$PATH_TEST_DIR/proc/$$/exe'
+ln -s /usr/bin/unrelated '$PATH_TEST_DIR/proc/$$/exe'
+! process_is_owned $$ \"\$GO_PID_FILE\" '$PATH_TEST_DIR/proc'
+rm '$PATH_TEST_DIR/proc/$$/exe'
+ln -s /usr/bin/node '$PATH_TEST_DIR/proc/$$/exe'
+printf 'node\\0dev-server.mjs\\0' > '$PATH_TEST_DIR/proc/$$/cmdline'
+process_is_owned $$ \"\$NEXT_PID_FILE\" '$PATH_TEST_DIR/proc'
+printf 'node\\0unrelated.js\\0' > '$PATH_TEST_DIR/proc/$$/cmdline'
+! process_is_owned $$ \"\$NEXT_PID_FILE\" '$PATH_TEST_DIR/proc'
+"
+status=$(run_with_fn process_is_owned "$ownership_snippet")
+if [[ "$status" == 0 ]]; then pass "persistent PID identity accepts owned services and rejects recycled/unrelated processes"; else fail "persistent PID ownership exited $status"; fi
+printf '%s' "$$" > "$PATH_TEST_DIR/recycled.pid"
+stop_unowned_snippet="$(extract_fn process_is_owned)
+$(extract_fn is_running)
+PROJECT_DIR='$PATH_TEST_DIR/checkout'; DEV_BINARY='$PATH_TEST_DIR/installation/run/bin/crewship'
+GO_PID_FILE='$PATH_TEST_DIR/recycled.pid'; NEXT_PID_FILE='$PATH_TEST_DIR/next.pid'; S=-test; NEXT_PORT=3001; TIMEOUT_CMD=''
+port_in_use() { return 0; }
+fuser() { printf '%s' $$; }
+sleep() { :; }
+log() { :; }; warn() { :; }; ok() { :; }
+kill_tree() { printf unexpected >> '$PATH_TEST_DIR/signals'; }
+kill() { if [[ \"\$1\" == -0 ]]; then return 0; fi; printf unexpected >> '$PATH_TEST_DIR/signals'; }
+! stop_service crewship \"\$GO_PID_FILE\" 8082
+[[ ! -e '$PATH_TEST_DIR/signals' ]]
+"
+status=$(run_with_fn stop_service "$stop_unowned_snippet")
+if [[ "$status" == 0 ]]; then pass "stop refuses recycled PID and unrelated port listener without sending signals"; else fail "unowned stop protection exited $status"; fi
 rm -rf "$PATH_TEST_DIR"
 
 # deploy_staleness is the sentence behind `status`'s STALE line. It has to

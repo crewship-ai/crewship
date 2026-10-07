@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -432,6 +433,14 @@ func covSeedStub(t *testing.T) *clitest.StubServer {
 		"workspace_id": covSeedWSID,
 		"cli_token":    "tok-seeded-123",
 	}))
+	s.OnPost("/api/v1/memory/initialize", func(r *http.Request, b []byte) (int, []byte, string) {
+		var request struct {
+			Documents []seedMemoryDocument `json:"documents"`
+		}
+		_ = json.Unmarshal(b, &request)
+		result, _ := json.Marshal(map[string]int{"written": len(request.Documents), "existing": 0})
+		return http.StatusOK, result, "application/json"
+	})
 	covSeedAgentList(s)
 	s.OnGet("/api/v1/issues", clitest.JSONResponse(200, []map[string]any{}))
 	s.OnPost("/api/v1/workspaces/"+covSeedWSID+"/pipelines/save", clitest.JSONResponse(201, map[string]string{"id": "pipeline-demo"}))
@@ -587,5 +596,29 @@ func TestRunSeedCov_NukeRefusedNonInteractive(t *testing.T) {
 		if c.Method == http.MethodDelete {
 			t.Errorf("DELETE issued despite refused confirmation: %s", c.Path)
 		}
+	}
+}
+
+func TestReadSetupTokenInstallationHome(t *testing.T) {
+	root, legacy := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "initial_setup_token"), []byte("new-home-token\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "initial_setup_token"), []byte("legacy-token\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CREWSHIP_HOME", root)
+	t.Setenv("CREWSHIP_DATA_DIR", legacy)
+	t.Setenv("CREWSHIP_STORAGE_BASE_PATH", legacy)
+	if got := readSetupTokenFile(); got != "new-home-token" {
+		t.Fatalf("home precedence: %q", got)
+	}
+	t.Setenv("CREWSHIP_HOME", "relative")
+	if got := readSetupTokenFile(); got != "" {
+		t.Fatalf("relative root leaked token: %q", got)
+	}
+	t.Setenv("CREWSHIP_HOME", t.TempDir())
+	if got := readSetupTokenFile(); got != "" {
+		t.Fatalf("missing home read unrelated token: %q", got)
 	}
 }

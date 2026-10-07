@@ -149,6 +149,7 @@ func finalSpecialDomainSchemaCatalog() map[string]DomainSchema {
 		"POST /api/v1/memory/versions/{sha}/restore":                     {Request: object(map[string]any{"path": str(), "canonical_path": str(), "tier": str()}), Response: object(map[string]any{"workspace_id": str(), "path": str(), "canonical_path": str(), "restored_sha": str(), "new_version_id": str(), "bytes": integer(), "restored_by": str()})},
 		"GET /api/v1/memory/export":                                      {Response: object(map[string]any{"format": str(), "documents": array(memoryDocument), "skipped": array(object(map[string]any{"source": str(), "reason": str()}))})},
 		"POST /api/v1/memory/import":                                     {Request: object(map[string]any{"crew_id": str(), "agent_slug": str(), "documents": array(memoryDocument)}), Response: object(map[string]any{"written": integer(), "rejected": array(anyValue()), "failed": array(anyValue())})},
+		"POST /api/v1/memory/initialize":                                 {Request: object(map[string]any{"crew_id": str(), "agent_slug": str(), "documents": array(object(map[string]any{"path": str(), "body": str()}))}), Response: object(map[string]any{"written": integer(), "existing": integer()})},
 		"POST /api/v1/memory/search/hybrid":                              {Request: object(map[string]any{"query": str(), "limit": integer(), "scope": str(), "crew_id": str()}), Response: object(map[string]any{"query": str(), "count": integer(), "hits": array(memoryHit)})},
 	}
 }

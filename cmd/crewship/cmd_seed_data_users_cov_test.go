@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -13,348 +13,111 @@ import (
 )
 
 const (
-	signupPath      = "/api/v1/auth/signup"
-	invitationsPath = "/api/v1/workspaces/" + covWS + "/invitations"
-	membersPath     = "/api/v1/workspaces/" + covWS + "/members"
-	adminUsers      = "/api/v1/admin/users"
+	signupPath           = "/api/v1/auth/signup"
+	invitationsPath      = "/api/v1/workspaces/" + covWS + "/invitations"
+	membersPath          = "/api/v1/workspaces/" + covWS + "/members"
+	adminUsers           = "/api/v1/admin/users"
+	provisionMembersPath = membersPath + "/provision"
+	setupStatusPath      = "/api/v1/system/setup-status"
 )
 
-// fixtureRoster is what GET /admin/users reports once signup has
-// redeemed the invitations the seed just created.
 func fixtureRoster() []map[string]any {
-	roster := make([]map[string]any, 0, len(demoUsers))
+	var rows []map[string]any
 	for i, u := range demoUsers {
-		roster = append(roster, map[string]any{"id": fmt.Sprintf("u%d", i), "email": u.Email, "role": u.Role})
+		rows = append(rows, map[string]any{"id": fmt.Sprintf("u%d", i), "email": u.Email, "role": u.Role})
 	}
-	return roster
+	return rows
 }
-
+func stubSeedUserProvision(s *clitest.StubServer, path string) {
+	s.OnPost(path, clitest.JSONResponse(201, map[string]any{"user_id": "new-user", "created_user": true, "setup_url": "https://untrusted.invalid/reset-password?token=setup%2Btoken"}))
+	s.OnPost("/api/v1/auth/reset", clitest.JSONResponse(200, map[string]bool{"ok": true}))
+}
 func TestSeedRBACUsers_RequiresWorkspace(t *testing.T) {
-	client := cli.NewClient("http://127.0.0.1:1", "tok", "")
-	err := seedRBACUsers(context.Background(), client)
-	if err == nil || !strings.Contains(err.Error(), "workspace_id not set") {
-		t.Errorf("got %v", err)
+	if err := seedRBACUsers(context.Background(), cli.NewClient("http://127.0.0.1:1", "tok", "")); err == nil || !strings.Contains(err.Error(), "workspace_id") {
+		t.Fatal(err)
 	}
 }
-
 func TestSeedRBACUsers_Canceled(t *testing.T) {
-	client := cli.NewClient("http://127.0.0.1:1", "tok", covWS)
-	if err := seedRBACUsers(canceledCtx(), client); err != context.Canceled {
-		t.Errorf("got %v", err)
+	if err := seedRBACUsers(canceledCtx(), cli.NewClient("http://127.0.0.1:1", "tok", covWS)); err != context.Canceled {
+		t.Fatal(err)
 	}
 }
-
-// The seed must never reach POST /members with an email: there is no
-// endpoint that maps an arbitrary address to a user id, on purpose
-// (#1254 — it would be the enumeration oracle behind an admin gate).
-// Placement goes invitation → signup → roster check.
-func TestSeedRBACUsers_HappyPath(t *testing.T) {
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-	stub.OnPost(invitationsPath, clitest.JSONResponse(201, map[string]string{"id": "inv1"}))
-	// Signup answers the de-enumerated 202 with no account id — the
-	// seed must not need one.
-	stub.OnPost(signupPath, clitest.JSONResponse(202, map[string]any{"ok": true}))
-	stub.OnGet(adminUsers, clitest.JSONResponse(200, fixtureRoster()))
-
-	out := captureStdoutCovCli2(t, func() {
-		if err := seedRBACUsers(context.Background(), newSeedClient(stub)); err != nil {
-			t.Errorf("seedRBACUsers: %v", err)
+func TestSeedRBACUsers_NewAccountsWithoutSignup(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnGet(setupStatusPath, clitest.JSONResponse(200, map[string]bool{"allow_signup": false}))
+	stubSeedUserProvision(s, provisionMembersPath)
+	s.OnGet(adminUsers, clitest.JSONResponse(200, fixtureRoster()))
+	if err := seedRBACUsers(t.Context(), newSeedClient(s)); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.CallsFor("POST", signupPath)) != 0 {
+		t.Fatal("signup dependency returned")
+	}
+	for _, call := range s.CallsFor("POST", provisionMembersPath) {
+		var b map[string]any
+		_ = json.Unmarshal(call.Body, &b)
+		if b["create_only"] != true || b["password"] != nil {
+			t.Fatalf("unsafe provisioning: %s", call.Body)
 		}
-	})
-
-	invites := stub.CallsFor("POST", invitationsPath)
-	if len(invites) != len(demoUsers) {
-		t.Fatalf("invitations = %d, want %d", len(invites), len(demoUsers))
 	}
-	// The invitation is what carries the fixture role.
-	var first map[string]any
-	clitest.MustDecodeJSONBody(invites[0].Body, &first)
-	if first["email"] != demoUsers[0].Email || first["role"] != demoUsers[0].Role {
-		t.Errorf("invitation body = %v", first)
+	resets := s.CallsFor("POST", "/api/v1/auth/reset")
+	if len(resets) != len(demoUsers) {
+		t.Fatalf("reset requests=%d", len(resets))
 	}
-	if n := len(stub.CallsFor("POST", signupPath)); n != len(demoUsers) {
-		t.Fatalf("signups = %d, want %d", n, len(demoUsers))
-	}
-	if n := len(stub.CallsFor("POST", membersPath)); n != 0 {
-		t.Errorf("seed hit POST /members %d times — placement must go through the invitation", n)
-	}
-	// Credential table printed for every minted user.
-	for _, u := range demoUsers {
-		if !strings.Contains(out, u.Email) || !strings.Contains(out, u.Password) {
-			t.Errorf("credential table missing %s:\n%s", u.Email, out)
+	for i, call := range resets {
+		var b map[string]string
+		_ = json.Unmarshal(call.Body, &b)
+		if b["token"] != "setup+token" || b["new_password"] != demoUsers[i].Password {
+			t.Fatalf("incorrect setup redemption")
 		}
 	}
 }
-
-// Re-seeding an instance that already has the fixture: the invitation
-// POST 409s ("already a member"), signup answers the same generic 202,
-// and the roster confirms everyone is where the fixture wants them.
-func TestSeedRBACUsers_InviteConflictIsIdempotent(t *testing.T) {
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-	stub.OnPost(invitationsPath, clitest.ErrorResponse(409, "User is already a member of this workspace"))
-	stub.OnPost(signupPath, clitest.JSONResponse(202, map[string]any{"ok": true}))
-	stub.OnGet(adminUsers, clitest.JSONResponse(200, fixtureRoster()))
-
-	out := captureStdoutCovCli2(t, func() {
-		if err := seedRBACUsers(context.Background(), newSeedClient(stub)); err != nil {
-			t.Errorf("seedRBACUsers: %v", err)
-		}
-	})
-	if !strings.Contains(out, "already in workspace with role "+demoUsers[0].Role) {
-		t.Errorf("expected idempotent re-seed line:\n%s", out)
+func TestSeedRBACUsers_ExistingMembersRequireProof(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnPost(provisionMembersPath, clitest.ErrorResponse(409, "existing account"))
+	s.OnGet(adminUsers, clitest.JSONResponse(200, fixtureRoster()))
+	if err := seedRBACUsers(t.Context(), newSeedClient(s)); err == nil {
+		t.Fatal("existing member without working fixture login accepted")
 	}
-	if !strings.Contains(out, "RBAC fixture credentials") {
-		t.Errorf("expected credential table:\n%s", out)
+	if len(s.CallsFor("POST", "/api/v1/auth/reset")) != 0 {
+		t.Fatal("reset existing password")
 	}
 }
-
-// A role that drifted from the fixture is a warning — there is no
-// role-update endpoint to fix it with.
-func TestSeedRBACUsers_RoleDrift(t *testing.T) {
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-	stub.OnPost(invitationsPath, clitest.ErrorResponse(409, "member exists"))
-	stub.OnPost(signupPath, clitest.JSONResponse(202, map[string]any{"ok": true}))
-	drifted := "VIEWER"
-	if demoUsers[0].Role == drifted {
-		drifted = "MEMBER"
-	}
-	stub.OnGet(adminUsers, clitest.JSONResponse(200, []map[string]any{
-		{"id": "u1", "email": demoUsers[0].Email, "role": drifted},
-	}))
-
-	out := captureStdoutCovCli2(t, func() {
-		if err := seedRBACUsers(context.Background(), newSeedClient(stub)); err != nil {
-			t.Errorf("seedRBACUsers: %v", err)
-		}
-	})
-	if !strings.Contains(out, "≠ fixture") {
-		t.Errorf("expected role-drift warning:\n%s", out)
-	}
-	if !strings.Contains(out, "RBAC fixture credentials") {
-		t.Errorf("expected credential table:\n%s", out)
-	}
-}
-
-// An address that already had an account before the seed ran: signup is
-// a no-op there (it must not redeem invitations for an account whose
-// owner never turned up), so the roster still doesn't know them.
-func TestSeedRBACUsers_PreExistingAccountIsReported(t *testing.T) {
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-	stub.OnPost(invitationsPath, clitest.JSONResponse(201, map[string]string{"id": "inv1"}))
-	stub.OnPost(signupPath, clitest.JSONResponse(202, map[string]any{"ok": true}))
-	stub.OnGet(adminUsers, clitest.JSONResponse(200, []map[string]any{}))
-
-	var err error
-	out := captureStdoutCovCli2(t, func() {
-		err = seedRBACUsers(context.Background(), newSeedClient(stub))
-	})
-	if !strings.Contains(out, "existing fixture account recovery failed") {
-		t.Errorf("expected authenticated recovery refusal:\n%s", out)
-	}
-	// Nobody landed, so the fixture failed — see seedRBACUsers. This used to
-	// be a stderr notice next to a zero exit code (#1829).
-	if err == nil || !strings.Contains(err.Error(), "no RBAC fixture users") {
-		t.Errorf("expected the zero-placed verdict, got %v", err)
-	}
-}
-
-func TestSeedRBACUsers_SignupFailuresAreNonFatal(t *testing.T) {
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-	stub.OnPost(invitationsPath, clitest.JSONResponse(201, map[string]string{"id": "inv1"}))
-	stub.OnPost(signupPath, clitest.ErrorResponse(500, "signup broken"))
-
-	var err error
-	out := captureStdoutCovCli2(t, func() {
-		err = seedRBACUsers(context.Background(), newSeedClient(stub))
-	})
-	// "Non-fatal" describes the LOOP: every user is attempted and reported
-	// individually rather than the first failure aborting the rest. The
-	// verdict at the end is separate, and zero placed is a failure.
-	if !strings.Contains(out, "signup HTTP 500") {
-		t.Errorf("expected per-user failure lines:\n%s", out)
-	}
-	if n := len(stub.CallsFor("POST", signupPath)); n != len(demoUsers) {
-		t.Errorf("signups attempted = %d, want %d — the loop must not abort early", n, len(demoUsers))
-	}
-	if err == nil || !strings.Contains(err.Error(), "no RBAC fixture users") {
-		t.Errorf("expected the zero-placed verdict, got %v", err)
-	}
-}
-
-func TestSeedRBACUsers_InviteErrorSkipsUser(t *testing.T) {
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-	stub.OnPost(invitationsPath, clitest.ErrorResponse(403, "not allowed"))
-
-	var err error
-	out := captureStdoutCovCli2(t, func() {
-		err = seedRBACUsers(context.Background(), newSeedClient(stub))
-	})
-	if !strings.Contains(out, "not allowed") {
-		t.Errorf("expected invite failure lines:\n%s", out)
-	}
-	// Signup never runs for a user we couldn't invite — otherwise we'd
-	// mint an account that lands nowhere.
-	if n := len(stub.CallsFor("POST", signupPath)); n != 0 {
-		t.Errorf("signups = %d after invite failure, want 0", n)
-	}
-	if err == nil || !strings.Contains(err.Error(), "no RBAC fixture users") {
-		t.Errorf("nobody placed → verdict expected, got %v", err)
-	}
-}
-
-func TestSeedRBACUsers_RosterLookupFailureIsNonFatal(t *testing.T) {
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-	stub.OnPost(invitationsPath, clitest.JSONResponse(201, map[string]string{"id": "inv1"}))
-	stub.OnPost(signupPath, clitest.JSONResponse(202, map[string]any{"ok": true}))
-	stub.OnGet(adminUsers, clitest.ErrorResponse(500, "roster broken"))
-
-	var err error
-	out := captureStdoutCovCli2(t, func() {
-		err = seedRBACUsers(context.Background(), newSeedClient(stub))
-	})
-	if !strings.Contains(out, "roster lookup failed") {
-		t.Errorf("expected lookup failure lines:\n%s", out)
-	}
-	if n := len(stub.CallsFor("GET", adminUsers)); n != len(demoUsers) {
-		t.Errorf("roster lookups = %d, want %d — a failed lookup must not abort the loop", n, len(demoUsers))
-	}
-	if err == nil || !strings.Contains(err.Error(), "no RBAC fixture users") {
-		t.Errorf("nobody confirmed placed → verdict expected, got %v", err)
-	}
-}
-
-func TestSeedRBACUsers_TransportErrorsAreNonFatal(t *testing.T) {
-	// Dead server: every invitation POST fails at the transport layer.
-	client := cli.NewClient("http://127.0.0.1:1", "tok", covWS)
-	var err error
-	out := captureStdoutCovCli2(t, func() {
-		err = seedRBACUsers(context.Background(), client)
-	})
-	if !strings.Contains(out, "invite request failed") {
-		t.Errorf("expected per-user transport failure lines:\n%s", out)
-	}
-	if strings.Count(out, "invite request failed") != len(demoUsers) {
-		t.Errorf("every user must be attempted, not just the first:\n%s", out)
-	}
-	if err == nil || !strings.Contains(err.Error(), "no RBAC fixture users") {
-		t.Errorf("expected the zero-placed verdict, got %v", err)
-	}
-}
-
-func TestSeedRBACUsers_SignupTransportErrorSkipsUser(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc(invitationsPath, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(201)
-		_, _ = w.Write([]byte(`{"id":"inv1"}`))
-	})
-	mux.HandleFunc(signupPath, func(w http.ResponseWriter, _ *http.Request) { killConn(w) })
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	var err error
-	out := captureStdoutCovCli2(t, func() {
-		err = seedRBACUsers(context.Background(), cli.NewClient(srv.URL, "tok", covWS))
-	})
-	if !strings.Contains(out, "signup request failed") {
-		t.Errorf("expected signup failure lines:\n%s", out)
-	}
-	if strings.Count(out, "signup request failed") != len(demoUsers) {
-		t.Errorf("every user must be attempted, not just the first:\n%s", out)
-	}
-	if err == nil || !strings.Contains(err.Error(), "no RBAC fixture users") {
-		t.Errorf("expected the zero-placed verdict, got %v", err)
-	}
-}
-
-func TestSeedRBACUsers_MidLoopCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	mux := http.NewServeMux()
-	mux.HandleFunc(invitationsPath, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(201)
-		_, _ = w.Write([]byte(`{"id":"inv1"}`))
-	})
-	mux.HandleFunc(signupPath, func(w http.ResponseWriter, _ *http.Request) {
-		cancel() // first signup lands; second loop iteration sees ctx.Err()
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(202)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	})
-	mux.HandleFunc(adminUsers, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(200)
-		_, _ = w.Write([]byte(`[]`))
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	_ = captureStdoutCovCli2(t, func() {
-		if err := seedRBACUsers(ctx, cli.NewClient(srv.URL, "tok", covWS)); err != context.Canceled {
-			t.Errorf("got %v, want context.Canceled", err)
-		}
-	})
-}
-
-// ─── findWorkspaceMemberByEmail ─────────────────────────────────────
-
-func TestFindWorkspaceMemberByEmail(t *testing.T) {
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-	role := "ADMIN"
-	stub.OnGet(adminUsers, clitest.JSONResponse(200, []map[string]any{
-		{"id": "u1", "email": "Karel@Crewship.Local", "role": role},
-		{"id": "u2", "email": "norole@crewship.local", "role": nil},
-	}))
-	client := newSeedClient(stub)
-
-	// Case-insensitive hit with role.
-	id, gotRole, err := findWorkspaceMemberByEmail(client, covWS, "karel@crewship.local")
-	if err != nil || id != "u1" || gotRole != "ADMIN" {
-		t.Errorf("got id=%q role=%q err=%v", id, gotRole, err)
-	}
-	// Nil role coalesces to "".
-	id, gotRole, err = findWorkspaceMemberByEmail(client, covWS, "norole@crewship.local")
-	if err != nil || id != "u2" || gotRole != "" {
-		t.Errorf("nil role: id=%q role=%q err=%v", id, gotRole, err)
-	}
-	// Miss → empty result, no error.
-	id, gotRole, err = findWorkspaceMemberByEmail(client, covWS, "ghost@crewship.local")
-	if err != nil || id != "" || gotRole != "" {
-		t.Errorf("miss: id=%q role=%q err=%v", id, gotRole, err)
-	}
-	// Query carries the workspace id.
-	calls := stub.CallsFor("GET", adminUsers)
-	if len(calls) == 0 || !strings.Contains(calls[0].Query, "workspace_id="+covWS) {
-		t.Errorf("workspace_id missing from query: %+v", calls)
-	}
-
-	// API error propagates.
-	stub.OnGet(adminUsers, clitest.ErrorResponse(403, "owner only"))
-	if _, _, err := findWorkspaceMemberByEmail(client, covWS, "x@y.z"); err == nil ||
-		!strings.Contains(err.Error(), "owner only") {
-		t.Errorf("API error: got %v", err)
-	}
-
-	// Transport error propagates.
-	dead := cli.NewClient("http://127.0.0.1:1", "tok", covWS)
-	if _, _, err := findWorkspaceMemberByEmail(dead, covWS, "x@y.z"); err == nil {
-		t.Error("expected transport error")
-	}
-}
-
-func TestFindWorkspaceMemberByEmail_ParseError(t *testing.T) {
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-	stub.OnGet(adminUsers, clitest.TextResponse(200, "{not json"))
-	if _, _, err := findWorkspaceMemberByEmail(newSeedClient(stub), covWS, "x@y.z"); err == nil {
-		t.Error("expected parse error")
+func TestSeedRBACUsers_RejectIncompleteFixture(t *testing.T) {
+	for _, which := range []string{"partial", "forbidden", "role-drift", "unsafe-response", "missing-token"} {
+		t.Run(which, func(t *testing.T) {
+			s := clitest.NewStubServer()
+			defer s.Close()
+			stubSeedUserProvision(s, provisionMembersPath)
+			rows := fixtureRoster()
+			switch which {
+			case "partial":
+				n := 0
+				s.OnPost(provisionMembersPath, func(r *http.Request, b []byte) (int, []byte, string) {
+					n++
+					if n == 1 {
+						return clitest.ErrorResponse(500, "broken")(r, b)
+					}
+					return clitest.JSONResponse(201, map[string]any{"user_id": "new", "created_user": true, "setup_url": "/reset-password?token=t"})(r, b)
+				})
+			case "forbidden":
+				s.OnPost(provisionMembersPath, clitest.ErrorResponse(403, "Forbidden"))
+			case "role-drift":
+				rows[0]["role"] = "VIEWER"
+			case "unsafe-response":
+				s.OnPost(provisionMembersPath, clitest.JSONResponse(201, map[string]any{"user_id": "existing", "created_user": false, "setup_url": "/reset-password?token=t"}))
+			case "missing-token":
+				s.OnPost(provisionMembersPath, clitest.JSONResponse(201, map[string]any{"user_id": "new", "created_user": true, "setup_url": "/reset-password"}))
+			}
+			s.OnGet(adminUsers, clitest.JSONResponse(200, rows))
+			if err := seedRBACUsers(t.Context(), newSeedClient(s)); err == nil || !strings.Contains(err.Error(), "incomplete RBAC fixture") {
+				t.Fatal(err)
+			}
+			if (which == "unsafe-response" || which == "missing-token") && len(s.CallsFor("POST", "/api/v1/auth/reset")) != 0 {
+				t.Fatal("unsafe reset")
+			}
+		})
 	}
 }

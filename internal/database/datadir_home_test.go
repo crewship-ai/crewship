@@ -71,3 +71,23 @@ func TestDefaultRootRejectsRelativeUserHome(t *testing.T) {
 		t.Fatalf("relative user home accepted: %v", err)
 	}
 }
+
+func TestInstallationRootAcceptsAliasBeforeCreation(t *testing.T) {
+	base := t.TempDir()
+	real, alias := filepath.Join(base, "real"), filepath.Join(base, "alias")
+	if err := os.Mkdir(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, alias); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	t.Setenv("CREWSHIP_HOME", filepath.Join(alias, "new"))
+	t.Setenv("CREWSHIP_DATA_DIR", filepath.Join(real, "new"))
+	got, err := ResolveDataDirRoot("")
+	if err != nil || got != filepath.Join(alias, "new") {
+		t.Fatalf("equivalent uncreated roots: %q, %v", got, err)
+	}
+	if _, err := os.Stat(got); !os.IsNotExist(err) {
+		t.Fatalf("resolution created directory: %v", err)
+	}
+}

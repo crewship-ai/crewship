@@ -11,7 +11,7 @@ import (
 func TestHealthAndReadinessReportLostWriterOwnership(t *testing.T) {
 	s := newTestServer()
 	s.writerOwnerCheck = func() error { return errors.New("private database path must not leak") }
-	for _, path := range []string{"/healthz", "/readyz"} {
+	for _, path := range []string{"/healthz", "/readyz", "/api/health"} {
 		recorder := httptest.NewRecorder()
 		s.mux.ServeHTTP(recorder, httptest.NewRequest("GET", path, nil))
 		if recorder.Code != http.StatusServiceUnavailable {
@@ -26,5 +26,10 @@ func TestHealthAndReadinessReportLostWriterOwnership(t *testing.T) {
 	s.mux.ServeHTTP(recorder, httptest.NewRequest("GET", "/healthz", nil))
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"writer_ownership":"held"`) {
 		t.Fatal(recorder.Body.String())
+	}
+	recorder = httptest.NewRecorder()
+	s.mux.ServeHTTP(recorder, httptest.NewRequest("GET", "/api/health", nil))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"status":"ok"`) || !strings.Contains(recorder.Body.String(), `"writer_ownership":"held"`) {
+		t.Fatalf("legacy health must preserve status and writer checks: %s", recorder.Body.String())
 	}
 }

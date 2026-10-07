@@ -262,6 +262,8 @@
               "cli/login",
               "cli/version",
               "cli/doctor",
+              "cli/paths",
+              "cli/reset",
               "cli/telemetry",
               "cli/ai-workflows",
               "cli/apply",

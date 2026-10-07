@@ -1,0 +1,40 @@
+---
+title: "crewship paths"
+description: "Inspect effective local installation paths, their sources and legacy layout conflicts without writing files."
+icon: "folder-tree"
+---
+
+# crewship paths
+
+Shows the local server's installation root, database, storage, logs, memory,
+Bolt state, IPC socket and Page projects configuration. It uses the same
+configuration and path resolver as `crewship start` and does not create the
+home, database, secrets or runtime files. Client profiles and the working
+directory do not select a remote server for this command.
+
+```bash
+crewship paths --data-dir /srv/crewship/dev2
+crewship paths --config /etc/crewship/server.yaml --format json
+```
+
+| Flag | Description |
+| --- | --- |
+| `--data-dir` | Absolute installation root; overrides `CREWSHIP_HOME` and the legacy `CREWSHIP_DATA_DIR`. |
+| `--config` | Server YAML configuration file, as accepted by `start`. |
+| `--db` | Database URL override, as accepted by `start`. |
+| `--format`, `-f` | Global output format; `json` emits paths and diagnostic fields. `quiet` emits only the root. |
+
+Each row includes its effective path and source (`flag`, `env`, `yaml` or
+`derived`; the root names its environment variable). Page projects remain
+**disabled** when their path is empty. This command does not enable features.
+Database URL passwords are redacted.
+
+When previous stores contain data that startup would abandon, the report
+includes `startup_blocked: true` and `legacy_conflict`. Successful inspection
+still exits zero: this flag describes startup, not whether the diagnostic ran.
+Errors resolving the root or loading configuration exit nonzero. Sidecar path
+validation is the same as startup; a missing required binary remains an error.
+
+Existing explicit relative storage paths and relative SQLite URLs retain their
+compatibility behavior and may depend on the process working directory. Use
+absolute overrides when comparing configurations from different directories.

@@ -5,6 +5,10 @@ defaults implemented for #2977. It is intended for operators and contributors.
 Client configuration and Docker installation identity have separate ownership;
 this change does not move either of them or migrate existing data automatically.
 
+`crewship paths` reports the effective paths and configuration sources without
+creating an installation or loading client profiles. Local offline reset follows
+[the reset contract](offline-reset.md).
+
 ## Root and precedence
 
 Server startup chooses an absolute root from `start --data-dir`, `CREWSHIP_HOME`,
@@ -35,6 +39,11 @@ path overrides retain their working-directory interpretation for compatibility.
 They are not a portable
 installation configuration; use absolute paths. The socket length fallback and
 packaged socket behavior remain compatible.
+
+During server lifetime, `TMPDIR`, `TMP` and `TEMP` point to `<root>/run/tmp`.
+This contains temporary build, import and backup work; callers' environment is
+restored when startup returns. Update-check caches live under `<root>/cache`.
+The short socket fallback is selected before scratch temporary paths change.
 
 ## Existing data protection
 
@@ -91,12 +100,29 @@ new public installation-ID handshake.
 An explicit offline demo creates control-plane fixtures without claiming usable
 model execution. It does not provision model credentials or run model producers.
 
-The memory-seeding option rejects before mutation until full demo memory
-provisioning is supported by the server API. It does not write remote server memory into the client
-filesystem. Demo users retain the existing signup-dependent behavior; this
-change does not introduce an admin provisioning API or bypass auth rate limits.
-The runtime nightly harness that requests memory seeding remains blocked by this
-explicit limitation; a green control-plane fixture does not verify that workflow.
+Memory seeding uses `POST /api/v1/memory/initialize`, restricted to OWNER/ADMIN
+and scoped to the target workspace's crew and agent records. The server resolves
+the canonical memory roots from its storage configuration; the client supplies
+document bytes only. Fresh memory is initialized before provisioning can change
+ownership of the tree. Known demo tier paths, content checks and size limits are
+validated before writes. Publication is durable and atomic without replacing
+existing files, including operator edits. Partial filesystem failures are fatal
+and retry preserves completed writes. Symlink parents and leaves are refused.
+Already container-owned trees may require the operator to restore host write
+access for missing files; ordinary live memory import retains its container writer.
+Demo users use the existing OWNER/ADMIN member provisioning API with
+`create_only=true`, followed by its single-use account setup token redemption
+against the explicit seed target. Public signup remains disabled if configured
+that way. Existing accounts are never reset: out-of-workspace accounts must
+prove their fixture credentials before membership is restored. Any missing or
+drifted role fails the four-user fixture. No new authentication bypass is added.
+
+## Health compatibility
+
+`/healthz` reports liveness and returns 503 on lost writer ownership. `/readyz`
+also checks database and state readiness. `/api/health` uses the liveness handler,
+including its writer check, and preserves the healthy `status: ok` field.
+This change does not move lease loss to readiness or add a new restart policy.
 
 ## Verification boundaries
 

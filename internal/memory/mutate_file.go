@@ -54,6 +54,17 @@ func openMutationFile(storageRoot, path string, create bool) (*mutationFile, err
 		info, err := root.Lstat(part)
 		if errors.Is(err, os.ErrNotExist) && create {
 			err = root.Mkdir(part, 0o775)
+			if err == nil {
+				parent, syncErr := root.Open(".")
+				if syncErr == nil {
+					syncErr = parent.Sync()
+					_ = parent.Close()
+				}
+				if syncErr != nil {
+					_ = root.Close()
+					return nil, syncErr
+				}
+			}
 			if err == nil || errors.Is(err, os.ErrExist) {
 				info, err = root.Lstat(part)
 			}

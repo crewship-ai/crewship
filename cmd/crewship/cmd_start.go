@@ -122,6 +122,9 @@ var startCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("resolve data directory: %w", err)
 		}
+		if err := database.CheckResetPending(root); err != nil {
+			return err
+		}
 		dataDir := &database.DataDir{Root: root}
 		// Validate the layout before creating directories, secrets or stores.
 		previewCfg, err := config.Load(configPath)
@@ -158,6 +161,32 @@ var startCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to create data directory: %w", err)
 		}
+		operationLease, err := database.AcquireInstallationOperation(root)
+		if err != nil {
+			return err
+		}
+		defer operationLease.Close()
+		if err := database.CheckResetPending(root); err != nil {
+			return err
+		}
+		// Isolate server-created temporary work beneath this installation.
+		serverTemp := filepath.Join(root, "run", "tmp")
+		if err := os.MkdirAll(serverTemp, 0700); err != nil {
+			return err
+		}
+		for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+			previous, existed := os.LookupEnv(name)
+			defer func(name, previous string, existed bool) {
+				if existed {
+					_ = os.Setenv(name, previous)
+				} else {
+					_ = os.Unsetenv(name)
+				}
+			}(name, previous, existed)
+			if err := os.Setenv(name, serverTemp); err != nil {
+				return err
+			}
+		}
 		bootCtx, bootCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := secrets.LoadOrGenerate(bootCtx, dataDir.Root, bootstrapLogger); err != nil {
 			bootCancel()
@@ -187,6 +216,12 @@ var startCmd = &cobra.Command{
 		resolvedPaths, err := config.ResolvePaths(cfg, dataDir.Root, dbURL)
 		if err != nil {
 			return err
+		}
+		// Scratch TMPDIR may be longer than sockaddr_un allows. Retain the
+		// short fallback selected before changing temporary-work locations.
+		if resolvedPaths.Sources["ipc.socket_path"] == "derived" {
+			cfg.IPC.SocketPath = previewPaths.Paths["ipc.socket_path"]
+			resolvedPaths.Paths["ipc.socket_path"] = cfg.IPC.SocketPath
 		}
 		// The config file may have changed while secrets were bootstrapped.
 		// Recheck the final values before opening or migrating any store.

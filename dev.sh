@@ -4,7 +4,7 @@ set -euo pipefail
 # Ensure Go is on PATH when invoked via SSH non-login shell
 export PATH="$PATH:/usr/local/go/bin:$HOME/go/bin"
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd -P "$(dirname "$0")" && pwd -P)"
 
 # --- Multi-instance detection ---
 # crewship_1 -> instance 1, crewship_2 -> instance 2, etc.
@@ -247,12 +247,45 @@ preserve_crash_log() {
   fi
 }
 
+# Persistent PID files can survive a reboot and refer to a reused PID. Verify
+# service identity before reporting it as running or sending any signal.
+process_is_owned() {
+  local pid="$1" pid_file="$2" proc_root="${3:-/proc}" exe cwd command expected=""
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  if [[ "$pid_file" == "$GO_PID_FILE" ]]; then
+    expected="$DEV_BINARY"
+  elif [[ "$pid_file" == "/tmp/crewship${S}-go.pid" ]]; then
+    expected="/tmp/crewship${S}-dev"
+  elif [[ "$pid_file" != "$NEXT_PID_FILE" ]]; then
+    return 1
+  fi
+  if [[ -d "$proc_root/$pid" ]]; then
+    exe=$(readlink "$proc_root/$pid/exe" 2>/dev/null) || return 1
+    cwd=$(readlink "$proc_root/$pid/cwd" 2>/dev/null) || return 1
+    [[ "$cwd" == "$PROJECT_DIR" ]] || return 1
+    if [[ -n "$expected" ]]; then
+      [[ "${exe% (deleted)}" == "$expected" ]]
+    else
+      [[ "${exe##*/}" == node ]] || return 1
+      tr '\0' '\n' < "$proc_root/$pid/cmdline" | grep -Fxq -e dev-server.mjs -e "$PROJECT_DIR/dev-server.mjs"
+    fi
+  else
+    command=$(ps -p "$pid" -o command= 2>/dev/null) || return 1
+    if [[ -n "$expected" ]]; then
+      [[ "$command" == "$expected start"* ]]
+    else
+      [[ "$command" == "node dev-server.mjs $NEXT_PORT"* || "$command" == *"/node dev-server.mjs $NEXT_PORT"* ]]
+    fi
+  fi
+}
+
 is_running() {
   local pid_file="$1"
   if [[ -f "$pid_file" ]]; then
     local pid
     pid=$(cat "$pid_file")
-    if kill -0 "$pid" 2>/dev/null; then
+    if process_is_owned "$pid" "$pid_file"; then
       echo "$pid"
       return 0
     fi
@@ -683,7 +716,7 @@ stop_service() {
       sleep 0.5
       attempts=$((attempts + 1))
     done
-    if kill -0 "$pid" 2>/dev/null; then
+    if process_is_owned "$pid" "$pid_file"; then
       kill -9 "$pid" 2>/dev/null || true
     fi
     rm -f "$pid_file"
@@ -699,7 +732,9 @@ stop_service() {
       orphan_pids=$(lsof -ti:"$port" 2>/dev/null || true)
     fi
     for orphan_pid in $orphan_pids; do
-      kill "$orphan_pid" 2>/dev/null || true
+      if process_is_owned "$orphan_pid" "$pid_file"; then
+        kill "$orphan_pid" 2>/dev/null || true
+      fi
     done
     sleep 1
     if port_in_use "$port"; then
@@ -710,11 +745,17 @@ stop_service() {
         orphan_pids=$(lsof -ti:"$port" 2>/dev/null || true)
       fi
       for orphan_pid in $orphan_pids; do
-        kill -9 "$orphan_pid" 2>/dev/null || true
+        if process_is_owned "$orphan_pid" "$pid_file"; then
+          kill -9 "$orphan_pid" 2>/dev/null || true
+        fi
       done
     fi
   fi
 
+  if port_in_use "$port"; then
+    warn "$name port $port remains occupied; refusing to kill an unverified process. Stop it with its supervisor."
+    return 1
+  fi
   ok "$name stopped"
 }
 

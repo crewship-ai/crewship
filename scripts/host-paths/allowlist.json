@@ -1,5 +1,13 @@
 [
   {
+    "key": "cmd/crewship/cmd_ai_lifecycle.go|aiClientContext|os-root|UserHomeDir|1",
+    "reason": "Upstream client-side AI session configuration; separate from server installation state."
+  },
+  {
+    "key": "cmd/crewship/cmd_ai_lifecycle.go|newAIStatusCommand|os-root|TempDir|1",
+    "reason": "Upstream read-only AI status probe for client session state; existing on trusted main when this boundary was introduced."
+  },
+  {
     "key": "cmd/crewship/cmd_doctor.go|checkSidecarBinary|os-root|UserHomeDir|1",
     "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
   },
@@ -8,19 +16,11 @@
     "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
   },
   {
-    "key": "cmd/crewship/cmd_memory_versions.go|defaultBlobRoot|os-root|UserHomeDir|1",
-    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
-  },
-  {
     "key": "cmd/crewship/cmd_seed.go|readSetupTokenFile|os-root|UserHomeDir|1",
     "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
   },
   {
     "key": "cmd/crewship/cmd_seed_codex.go|resolveSeedCodexLogin|os-root|Getwd|1",
-    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
-  },
-  {
-    "key": "cmd/crewship/cmd_seed_data_memory.go|resolveStorageBasePath|os-root|UserHomeDir|1",
     "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
   },
   {
@@ -180,15 +180,15 @@
     "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
   },
   {
+    "key": "internal/testutil/fixturecache.go|fixtureRoot|os-root|TempDir|1",
+    "reason": "Test utility cache of migration templates; owned cleanup and source fingerprint isolation are tested separately."
+  },
+  {
     "key": "internal/testutil/inputcorpus.go|ShellInjectionSamples|literal|/tmp/*|1",
     "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
   },
   {
-    "key": "internal/update/check.go|cacheFile|os-root|TempDir|1",
-    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
-  },
-  {
-    "key": "internal/update/check.go|cacheFile|os-root|UserHomeDir|1",
-    "reason": "Existing host path resolution; migrate through the shared installation resolver in a scoped follow-up."
+    "key": "internal/testutil/migrateddb_shared.go|findModuleRoot|os-root|Getwd|1",
+    "reason": "Test utility discovers source identity for shared migration templates; no product data is created from cwd."
   }
 ]

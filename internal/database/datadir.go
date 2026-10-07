@@ -124,13 +124,15 @@ func ResolveDataDirRoot(flagRoot string) (string, error) {
 			if err != nil {
 				return "", fmt.Errorf("resolve CREWSHIP_DATA_DIR: %w", err)
 			}
-			homeCanonical, homeErr := filepath.EvalSymlinks(homeRoot)
-			legacyCanonical, legacyErr := filepath.EvalSymlinks(legacyAbs)
-			same := filepath.Clean(homeRoot) == filepath.Clean(legacyAbs)
-			if homeErr == nil && legacyErr == nil {
-				same = homeCanonical == legacyCanonical
+			homeCanonical, err := canonicalDataRoot(homeRoot)
+			if err != nil {
+				return "", fmt.Errorf("resolve CREWSHIP_HOME: %w", err)
 			}
-			if !same {
+			legacyCanonical, err := canonicalDataRoot(legacyAbs)
+			if err != nil {
+				return "", fmt.Errorf("resolve CREWSHIP_DATA_DIR: %w", err)
+			}
+			if homeCanonical != legacyCanonical {
 				return "", fmt.Errorf("CREWSHIP_HOME and CREWSHIP_DATA_DIR name different installations; use one root or set both to the same path")
 			}
 		}
@@ -151,6 +153,31 @@ func ResolveDataDirRoot(flagRoot string) (string, error) {
 		return "", fmt.Errorf("user home must be an absolute path: %s", home)
 	}
 	return filepath.Join(home, defaultDirName), nil
+}
+
+// canonicalDataRoot compares existing ancestors without creating a new root.
+// A dangling symlink is not evidence that two installations are the same.
+func canonicalDataRoot(path string) (string, error) {
+	var suffix []string
+	for candidate := filepath.Clean(path); ; candidate = filepath.Dir(candidate) {
+		resolved, err := filepath.EvalSymlinks(candidate)
+		if err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return resolved, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		if info, statErr := os.Lstat(candidate); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", err
+		}
+		if filepath.Dir(candidate) == candidate {
+			return "", err
+		}
+		suffix = append(suffix, filepath.Base(candidate))
+	}
 }
 
 // NewDataDir creates a DataDir at the given root path, ensuring all

@@ -26,7 +26,7 @@ func seedPreflight(cmd *cobra.Command) error {
 	flagServer = strings.TrimRight(server, "/")
 	offline, _ := cmd.Flags().GetBool("offline-demo")
 	if offline {
-		for _, name := range []string{"smoke-test", "test-backup", "with-memory"} {
+		for _, name := range []string{"smoke-test", "test-backup"} {
 			if value, _ := cmd.Flags().GetBool(name); value {
 				return fmt.Errorf("--offline-demo cannot be combined with --%s", name)
 			}
@@ -42,9 +42,6 @@ func seedPreflight(cmd *cobra.Command) error {
 	}
 	if !offline && login == nil && strings.TrimSpace(os.Getenv("SEED_ANTHROPIC_API_KEY")) == "" {
 		return fmt.Errorf("seed requires SEED_ANTHROPIC_API_KEY (API key or Claude OAuth token), or a renewable Codex login via --codex-auth-file / SEED_CODEX_AUTH_FILE; no data was created")
-	}
-	if withMemory, _ := cmd.Flags().GetBool("with-memory"); withMemory {
-		return fmt.Errorf("--with-memory is unavailable: full demo memory provisioning is unavailable through the supported server API; seed refuses local filesystem writes and no data was created")
 	}
 	// Only credentials belonging to the explicit URL may supply the seed scope.
 	// In particular, a directory-selected profile must never supply its workspace

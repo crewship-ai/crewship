@@ -67,6 +67,7 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	// than a stderr notice next to a zero exit code (#1829) — so this stub is
 	// what makes --with-users actually exercised here instead of tolerated.
 	s.OnGet(adminUsers, clitest.JSONResponse(200, fixtureRoster()))
+	stubSeedUserProvision(s, "/api/v1/workspaces/"+covSeedWSID+"/members/provision")
 	// Page seeding: the spec POST, then one payload PUT per panel. Both are
 	// wildcarded because the panel path carries the page slug and the panel id.
 	s.OnPost("/api/v1/pages", clitest.JSONResponse(201, map[string]string{"slug": "operations"}))
@@ -97,6 +98,7 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	covSetFlag(t, seedCmd, "nuke", "true")
 	covSetFlag(t, seedCmd, "yes", "true")
 	covSetFlag(t, seedCmd, "with-users", "true")
+	covSetFlag(t, seedCmd, "with-memory", "true")
 	covSetFlag(t, seedCmd, "wait-provision", "true")
 
 	out, err := covCaptureStdout(t, func() error {
@@ -126,7 +128,7 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	}
 	// --with-users placed the whole fixture: one signup per demo user, and
 	// the credential table printed for each.
-	if n := len(s.CallsFor("POST", signupPath)); n != len(demoUsers) {
+	if n := len(s.CallsFor("POST", "/api/v1/workspaces/"+covSeedWSID+"/members/provision")); n != len(demoUsers) {
 		t.Errorf("signups = %d, want %d", n, len(demoUsers))
 	}
 	for _, u := range demoUsers {
@@ -354,7 +356,7 @@ func TestRunSeedCov2_CancelMidPhases(t *testing.T) {
 		// instead of being logged and re-surfacing at the next checkpoint, so
 		// there is no non-fatal line to expect — the wrapped error below is
 		// the signal.
-		{"rbac users", "/api/v1/auth/signup", true, true, ""},
+		{"rbac users", "/api/v1/workspaces/" + covSeedWSID + "/members/provision", true, true, ""},
 		{"skills import", "/api/v1/workspaces/" + covSeedWSID + "/skills/import", false, true, ""},
 		// Routine seeding no longer has its own inter-phase checkpoint
 		// (that used to be Phase 9b: demo schedules, now removed) — the

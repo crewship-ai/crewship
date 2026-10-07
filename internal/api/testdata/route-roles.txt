@@ -292,6 +292,7 @@ POST /api/v1/journal/{id}/priority roleManage
 POST /api/v1/labels roleCreate
 POST /api/v1/mcp-registry/sync roleManage
 POST /api/v1/memory/import roleManage
+POST /api/v1/memory/initialize roleManage
 POST /api/v1/memory/search/hybrid roleSelf
 POST /api/v1/memory/versions/{sha}/restore roleManage
 POST /api/v1/missions/{missionId}/checkpoints roleCreate

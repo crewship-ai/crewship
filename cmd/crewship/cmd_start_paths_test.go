@@ -58,6 +58,9 @@ func TestStartDataDirFlagRestoresPublishedEnvironmentOnFailure(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("CREWSHIP_SKIP_SIDECAR", "1")
 	t.Setenv("ENCRYPTION_KEY", "invalid-bootstrap-key")
+	for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(name, "")
+	}
 	for _, name := range []string{"CREWSHIP_STORAGE_BASE_PATH", "CREWSHIP_LOG_PATH", "CREWSHIP_STORAGE_MEMORY_ROOT", "CREWSHIP_BOLT_PATH", "CREWSHIP_SOCKET_PATH"} {
 		t.Setenv(name, "")
 	}
@@ -72,6 +75,11 @@ func TestStartDataDirFlagRestoresPublishedEnvironmentOnFailure(t *testing.T) {
 	}
 	if os.Getenv("CREWSHIP_HOME") != "" || os.Getenv("CREWSHIP_DATA_DIR") != "" {
 		t.Fatal("installation root leaked into caller environment")
+	}
+	for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+		if os.Getenv(name) != "" {
+			t.Fatalf("%s leaked into caller environment", name)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(root, "output")); err != nil {
 		t.Fatal("selected root not provisioned", err)

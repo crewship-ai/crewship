@@ -15,7 +15,7 @@ import (
 )
 
 func TestSeedPreflightRejectsBeforeMutation(t *testing.T) {
-	for _, mode := range []string{"implicit-target", "missing-provider", "local-memory"} {
+	for _, mode := range []string{"implicit-target", "missing-provider"} {
 		t.Run(mode, func(t *testing.T) {
 			guardCLIState(t)
 			saveCLIState(t)
@@ -30,7 +30,7 @@ func TestSeedPreflightRejectsBeforeMutation(t *testing.T) {
 			cliCfg = &cli.CLIConfig{Server: srv.URL, Token: "existing", Workspace: "workspace"}
 			cmd := &cobra.Command{}
 			cmd.SetContext(context.Background())
-			cmd.Flags().Bool("with-memory", mode == "local-memory", "")
+			cmd.Flags().Bool("with-memory", false, "")
 			cmd.Flags().String("codex-auth-file", "", "")
 			if mode == "missing-provider" {
 				if err := os.WriteFile(".env.local", []byte("SEED_ANTHROPIC_API_KEY=from-cwd\nCREWSHIP_SERVER="+srv.URL+"\n"), 0600); err != nil {
@@ -152,6 +152,7 @@ func TestSeedOfflineDemoCreatesFixturesWithoutExecution(t *testing.T) {
 	t.Setenv("SEED_ANTHROPIC_API_KEY", "")
 	t.Setenv(seedCodexAuthFileEnv, "")
 	covSetFlag(t, seedCmd, "offline-demo", "true")
+	covSetFlag(t, seedCmd, "with-memory", "true")
 	covSetFlag(t, seedCmd, "skip-issues", "true")
 	out, err := covCaptureStdout(t, func() error { return runSeed(seedCmd, nil) })
 	if err != nil {
@@ -159,6 +160,9 @@ func TestSeedOfflineDemoCreatesFixturesWithoutExecution(t *testing.T) {
 	}
 	if !strings.Contains(out, "agents are fixtures; model execution is unavailable") {
 		t.Fatal("missing offline execution notice")
+	}
+	if len(s.CallsFor("POST", "/api/v1/memory/initialize")) == 0 {
+		t.Fatal("offline memory was not provisioned on the server")
 	}
 	if len(s.CallsFor("POST", "/api/v1/agents")) == 0 {
 		t.Fatal("no offline UI agents created")
@@ -188,7 +192,7 @@ func TestSeedOfflineDemoCreatesFixturesWithoutExecution(t *testing.T) {
 }
 
 func TestSeedOfflineDemoRejectsExecutionFlags(t *testing.T) {
-	for _, name := range []string{"smoke-test", "test-backup", "with-memory"} {
+	for _, name := range []string{"smoke-test", "test-backup"} {
 		t.Run(name, func(t *testing.T) {
 			guardCLIState(t)
 			saveCLIState(t)
@@ -204,19 +208,18 @@ func TestSeedOfflineDemoRejectsExecutionFlags(t *testing.T) {
 	}
 }
 
-func TestSeedSignupGateBeforeNuke(t *testing.T) {
+func TestSeedUsersWithDisabledSignup(t *testing.T) {
 	s := covSeedStub(t)
 	covSetupRunSeed(t, s)
 	s.OnGet(setupStatusPath, clitest.JSONResponse(200, map[string]bool{"allow_signup": false}))
+	stubSeedUserProvision(s, "/api/v1/workspaces/"+covSeedWSID+"/members/provision")
+	s.OnGet(adminUsers, clitest.JSONResponse(200, fixtureRoster()))
 	covSetFlag(t, seedCmd, "with-users", "true")
-	covSetFlag(t, seedCmd, "nuke", "true")
-	err := runSeed(seedCmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "signup is disabled") {
-		t.Fatalf("signup gate: %v", err)
+	covSetFlag(t, seedCmd, "offline-demo", "true")
+	if err := runSeed(seedCmd, nil); err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range s.Calls() {
-		if c.Method != "GET" {
-			t.Fatalf("signup gate allowed mutation: %s %s", c.Method, c.Path)
-		}
+	if len(s.CallsFor("POST", signupPath)) != 0 {
+		t.Fatal("seed required signup")
 	}
 }

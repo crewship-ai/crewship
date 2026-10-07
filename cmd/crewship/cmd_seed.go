@@ -56,11 +56,11 @@ func init() {
 	seedCmd.Flags().Int("provision-timeout", 900, "Per-crew provisioning timeout (seconds)")
 	seedCmd.Flags().Bool("wait-provision", false, "Block until all crews finish provisioning (default: fire-and-forget, seed returns while provisioning runs in the background)")
 	seedCmd.Flags().Bool("test-backup", false, "After seeding, run a backup/restore round-trip self-test on one crew (implies --wait-provision)")
-	seedCmd.Flags().Bool("with-memory", false, "Unavailable until server-side durable memory provisioning is supported (fails before seeding)")
+	seedCmd.Flags().Bool("with-memory", false, "Initialize demo memory on the target server; preserves existing memory files")
 	seedCmd.Flags().Bool("with-team-chat", false, "Add six fictional colleagues with real roles, local avatars and human Chat examples; signup is not required")
 	seedCmd.Flags().String("state-dir", "", "Private team-chat credential directory outside Git (isolated per server/workspace)")
 	seedCmd.AddCommand(newSeedTeamChatCmd())
-	seedCmd.Flags().Bool("with-users", false, "Add four extra users (ADMIN, MANAGER, MEMBER, VIEWER) to the workspace for RBAC matrix testing; requires CREWSHIP_ALLOW_SIGNUP=true on the server")
+	seedCmd.Flags().Bool("with-users", false, "Add four extra users (ADMIN, MANAGER, MEMBER, VIEWER) to the workspace for RBAC matrix testing; uses authenticated member provisioning (signup may remain disabled)")
 	seedCmd.Flags().String("codex-auth-file", "", "Absolute path to a private Codex auth.json (0600, outside the repo) that switches the demo agents to Codex CLI; overrides "+seedCodexAuthFileEnv)
 }
 
@@ -159,12 +159,6 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	ctx := cmd.Context()
-	if withUsers, _ := cmd.Flags().GetBool("with-users"); withUsers {
-		probe := cli.NewClient(seedTargetServer(), "", "").WithContext(ctx)
-		if open, known := serverAllowsSignup(probe); known && !open {
-			return fmt.Errorf("--with-users: signup is disabled on the target server; enable CREWSHIP_ALLOW_SIGNUP or omit --with-users; no data was created")
-		}
-	}
 	offlineDemo, _ := cmd.Flags().GetBool("offline-demo")
 	nuke, _ := cmd.Flags().GetBool("nuke")
 	skipIssues, _ := cmd.Flags().GetBool("skip-issues")
@@ -283,9 +277,9 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	provisionTargets := collectProvisionTargets(crewIDs)
 	var startedTargets []provisionTarget
 	var triggerErr error
-	if !offlineDemo {
+	if !offlineDemo && !withMemory {
 		startedTargets, triggerErr = triggerProvisions(ctx, client, provisionTargets, provisionTimeout)
-	} else {
+	} else if offlineDemo {
 		fmt.Fprintln(os.Stderr, "Offline demo: agents are fixtures; model execution is unavailable. No provider credentials or automatic runs will be created.")
 	}
 	// Deliberately do NOT early-return on triggerErr, even in sync mode:
@@ -305,16 +299,19 @@ func runSeed(cmd *cobra.Command, args []string) error {
 
 	// ── Phase 3b: Agent memory tiers (optional) ──
 	// Runs AFTER agents are created so we can resolve each agent's
-	// crew_id from the API. Failure here is non-fatal — the rest of
-	// the seed still produces a usable workspace; agents just won't
-	// have boot-time memory context until they write some.
+	// crew_id from the API. Initialize before provisioning takes ownership
+	// of a fresh tree. An explicit memory request must succeed or fail loudly.
 	if withMemory {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if err := seedAgentMemory(ctx, client, crewIDs); err != nil {
-			fmt.Fprintf(os.Stderr, "Memory seeding hit an error (continuing): %v\n", err)
+			return fmt.Errorf("demo memory initialization: %w", err)
 		}
+	}
+
+	if withMemory && !offlineDemo {
+		startedTargets, triggerErr = triggerProvisions(ctx, client, provisionTargets, provisionTimeout)
 	}
 
 	// ── Phase 4–5: Skills + Assignments ──
@@ -765,11 +762,22 @@ func readBody(resp *http.Response) ([]byte, error) {
 // data dir; falls back to ~/.crewship for one-host deployments.
 func readSetupTokenFile() string {
 	candidates := []string{}
-	if base := os.Getenv("CREWSHIP_STORAGE_BASE_PATH"); base != "" {
+	root := strings.TrimSpace(os.Getenv("CREWSHIP_HOME"))
+	if root == "" {
+		root = strings.TrimSpace(os.Getenv("CREWSHIP_DATA_DIR"))
+	}
+	if root != "" {
+		if !filepath.IsAbs(root) {
+			return "" // never resolve bootstrap secrets relative to cwd
+		}
+		candidates = append(candidates, filepath.Join(root, "initial_setup_token"))
+	} else if base := os.Getenv("CREWSHIP_STORAGE_BASE_PATH"); base != "" {
 		candidates = append(candidates, filepath.Join(base, "initial_setup_token"))
 	}
-	if h, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(h, ".crewship", "initial_setup_token"))
+	if root == "" {
+		if h, err := os.UserHomeDir(); err == nil {
+			candidates = append(candidates, filepath.Join(h, ".crewship", "initial_setup_token"))
+		}
 	}
 	for _, p := range candidates {
 		f, err := os.Open(p)

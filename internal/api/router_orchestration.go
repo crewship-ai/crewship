@@ -763,6 +763,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	}
 	r.authedMut("GET", "/api/v1/memory/export", roleManage, mpH.Export)
 	r.authedMut("POST", "/api/v1/memory/import", roleManage, mpH.Import)
+	r.authedMut("POST", "/api/v1/memory/initialize", roleManage, mpH.Initialize)
 
 	// Host-side hybrid search — combines workspace FTS + episodic
 	// vec+BM25 via RRF (memory.HybridSearch primitive). MEMBER+ at
