@@ -44,7 +44,7 @@ To *author* a routine, go to [Routines](/guides/routines). To decide a waitpoint
 | **Sentence** | A workflow row's first line — the *shape*, not the routine's name: `file a follow-up when an issue closes → Follow up on close → riley → ENG-7`. Two runs of one routine render the same name; what they reached differs. |
 | **Handle** | The last 8 characters of the chain origin, on the right of a row. Derived, never generated — it is what tells two runs of one routine apart. |
 | **Status row** | All · Waiting for you · Running · Completed · Could not finish — the Routines rail's words and order. One choice. Counts **chains**, which is what the list under it holds. |
-| **Stop / trail** | Where the reader is standing. Every pick is one stop on a path; the back-bar above the column is the walk — **‹ Back to activity** one level down (**‹ Back** deeper), then a jump to any crumb, styled and animated like the Issues and Routines back-bars. Capped at 6 stops (`ACTIVITY_MAX_DEPTH`), and the trail says when earlier stops fell off. |
+| **Stop / trail** | Where the reader is standing. Every pick is one stop on a path; the back-bar above the column is the walk — **‹ Back to activity** returns to the overview (as **‹ Back to issues** does), and each crumb after it jumps to that stop; `Esc` steps one stop up. Styled and animated like the Issues and Routines back-bars. Capped at 6 stops (`ACTIVITY_MAX_DEPTH`), and the trail says when earlier stops fell off. |
 | **Drill-down** | What a row leads to: a run's steps, an issue's "what reached it", an agent's work, a routine's runs. |
 
 ## The rail

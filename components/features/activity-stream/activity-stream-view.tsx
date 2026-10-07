@@ -916,48 +916,52 @@ export function ActivityStreamView({
                 column that can be four levels deep and cannot say which level
                 it is on is a place people stop trusting. */}
             {path.stops.length > 0 && (
-              // The Issues back-bar, to the class (#2979): the way out first,
-              // named for where it leads, then every stop on the walk. One
-              // level down it reads "Back to activity" like "Back to issues";
-              // deeper it steps one stop up, and the crumbs jump further.
+              // The Issues back-bar, to the class (#2979): "‹ Back to
+              // activity" is the way out, as "‹ Back to issues" is, and the
+              // crumbs after it are only the stops walked — the home crumb
+              // would repeat the button beside it. One stop up is Escape or
+              // the previous crumb.
               <nav
                 aria-label="Activity trail"
                 className="flex shrink-0 items-center gap-1 border-b border-border bg-card/40 px-4 py-2 text-xs"
               >
                 <button
                   type="button"
-                  onClick={goBack}
+                  onClick={() => setPath(ACTIVITY_HOME)}
                   className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
                   <ChevronLeft className="h-3.5 w-3.5" />
-                  {path.stops.length === 1 ? "Back to activity" : "Back"}
+                  Back to activity
                 </button>
-                <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
-                {trail.crumbs.map((c, i) => (
-                  <React.Fragment key={c.depth}>
-                    {i > 0 && <ChevronRight aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground/40" />}
-                    {/* The walk is longer than the trail: stops fell off the
-                        front at the depth cap, and a breadcrumb that quietly
-                        began in the middle would claim the reader started
-                        there. */}
-                    {i === 1 && trail.truncated && (
-                      <span className="text-muted-foreground/60" title="Earlier stops were dropped">
-                        …
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setPath((p) => jumpTo(p, c.depth))}
-                      aria-current={c.current ? "page" : undefined}
-                      className={cn(
-                        "max-w-[22ch] truncate rounded px-1.5 py-0.5 transition-colors hover:bg-muted",
-                        c.current ? "font-medium text-foreground" : "text-muted-foreground",
-                      )}
-                    >
-                      {c.label}
-                    </button>
-                  </React.Fragment>
-                ))}
+                {/* The walk is longer than the trail: stops fell off the front
+                    at the depth cap, and a breadcrumb that quietly began in the
+                    middle would claim the reader started there. */}
+                {trail.truncated && (
+                  <>
+                    <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                    <span className="text-muted-foreground/60" title="Earlier stops were dropped">
+                      …
+                    </span>
+                  </>
+                )}
+                {trail.crumbs
+                  .filter((c) => c.depth > 0)
+                  .map((c) => (
+                    <React.Fragment key={c.depth}>
+                      <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                      <button
+                        type="button"
+                        onClick={() => setPath((p) => jumpTo(p, c.depth))}
+                        aria-current={c.current ? "page" : undefined}
+                        className={cn(
+                          "max-w-[26ch] truncate rounded px-1.5 py-0.5 transition-colors hover:bg-muted",
+                          c.current ? "font-mono text-foreground" : "text-muted-foreground",
+                        )}
+                      >
+                        {c.label}
+                      </button>
+                    </React.Fragment>
+                  ))}
               </nav>
             )}
 

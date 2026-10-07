@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react"
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { JournalEntry } from "@/lib/types/journal"
 import type { ChainSummary } from "@/hooks/use-chains"
@@ -215,14 +215,17 @@ it("walks from workflow through named nodes, back, and breadcrumb jumps", () => 
   for (const [kind, id, label] of [["agent", "a1", "Alice"], ["crew", "c1", "Builders"], ["issue", "m1", "Fix the failing integration i…"], ["routine", "p1", "Triage"], ["step", "step1", "step1"]]) {
     act(() => workflow().onOpenNode(kind, id))
     expect(screen.getByRole("navigation", { name: "Activity trail" })).toHaveTextContent(label)
-    fireEvent.click(screen.getByRole("button", { name: "Back" }))
+    // One stop up is Escape or the previous crumb; the back-bar's button is
+    // the way OUT, as "Back to issues" is on /issues.
+    fireEvent.keyDown(window, { key: "Escape" })
     expect(screen.getByText("Workflow r1")).toBeVisible()
   }
   act(() => workflow().onOpenNode("run", "r1"))
   expect(mock.run.mock.calls.at(-1)![0].routineSlug).toBe("triage")
   fireEvent.keyDown(window, { key: "Escape" })
   expect(screen.getByText("Workflow r1")).toBeVisible()
-  fireEvent.click(screen.getByRole("button", { name: "Overview" }))
+  act(() => workflow().onOpenNode("agent", "a1"))
+  fireEvent.click(screen.getByRole("button", { name: "Back to activity" }))
   expect(screen.getByText("Overview: e1,e2")).toBeVisible()
 })
 
@@ -291,12 +294,14 @@ it.each(["array", "http", "network"])("handles %s issue metadata responses", asy
   await act(async () => {})
   expect(sidebar().issues).toEqual(kind === "array" ? [{ id: "new" }] : [])
 })
-it("opens a run under the Issues back-bar, whose first button says where it leads", () => {
-  // #2979: /issues and /routines say "‹ Back to issues"; a bare "Back" one
-  // level down from the overview is the same control with less information.
+it("opens a run under the Issues back-bar: the way out, then only the stops walked", () => {
+  // #2979: /issues reads "‹ Back to issues › OPS-1". The home crumb would
+  // repeat the button beside it ("Back to activity › Overview › …").
   show()
   act(() => sidebar().onSelectChain("r1"))
-  expect(screen.getByRole("navigation", { name: "Activity trail" })).toHaveTextContent("Back to activity")
+  const trail = screen.getByRole("navigation", { name: "Activity trail" })
+  expect(trail).toHaveTextContent("Back to activity")
+  expect(within(trail).queryByRole("button", { name: "Overview" })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Back to activity" }))
   expect(screen.getByText("Overview: e1,e2")).toBeVisible()
 })
