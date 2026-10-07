@@ -128,6 +128,9 @@ func TestOperationsCollectorPayloads(t *testing.T) {
 	if err = json.Unmarshal(payload["memory"], &memory); err != nil || memory.Value != 50 || len(memory.Samples) != 8 {
 		t.Fatalf("invalid measurement: %+v %v", memory, err)
 	}
+	t.Run("cancels-rejected-body", func(t *testing.T) {
+		testOperationsCollectorCancelsRejectedBody(t, node)
+	})
 	for _, tc := range []struct{ name, file, value, valid string }{
 		{"invalid-memory-limit", "memory.max", "bad", "4294967296"},
 		{"zero-memory-limit", "memory.max", "0", "4294967296"},
@@ -199,12 +202,8 @@ func TestOperationsCollectorFleetTelemetry(t *testing.T) {
 
 // A rejected response can leave its body open indefinitely. The collector must
 // release it instead of relying on the request's later deadline or GC.
-func TestOperationsCollectorCancelsRejectedBody(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		// SKIP-WAIVER(#2472): the Node-equipped CI job exercises the collector.
-		t.Skip("Node required for collector test")
-	}
+func testOperationsCollectorCancelsRejectedBody(t *testing.T, node string) {
+	t.Helper()
 	dir := t.TempDir()
 	for name, content := range map[string]string{"memory.current": "52428800", "memory.max": "4294967296", "cpu.stat": "usage_usec 100000\n", "cpu.max": "200000 100000"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
