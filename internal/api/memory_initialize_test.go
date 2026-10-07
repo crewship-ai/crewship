@@ -123,7 +123,7 @@ func TestMemoryInitializeRefusesSymlinkedCrew(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, filepath.Join(base, "crews", crew)); err != nil {
-		t.Skip(err)
+		t.Fatal(err)
 	}
 	rr := initializeMemoryRequest(t, h, user, ws, "ADMIN", crew, "alex", []memoryDocPayload{{Path: "AGENT.md", Body: "initial"}})
 	if rr.Code != 409 {

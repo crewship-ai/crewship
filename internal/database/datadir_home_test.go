@@ -79,7 +79,7 @@ func TestInstallationRootAcceptsAliasBeforeCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(real, alias); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		t.Fatalf("create symlink fixture: %v", err)
 	}
 	t.Setenv("CREWSHIP_HOME", filepath.Join(alias, "new"))
 	t.Setenv("CREWSHIP_DATA_DIR", filepath.Join(real, "new"))

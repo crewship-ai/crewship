@@ -87,7 +87,7 @@ func TestOfflineResetRetainsIdentityAndManagementFilesAndRetries(t *testing.T) {
 	protected := filepath.Join(outside, "keep")
 	os.WriteFile(protected, []byte("keep"), 0600)
 	if err := os.Symlink(outside, filepath.Join(root, "output", "external")); err != nil {
-		t.Skip(err)
+		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := runReset(resetCommand(root), nil); err != nil {
@@ -175,7 +175,7 @@ func TestResetRefusesHardlinkedDatabase(t *testing.T) {
 	root, _ := resetFixture(t)
 	outside := filepath.Join(t.TempDir(), "shared.db")
 	if err := os.Link(filepath.Join(root, "crewship.db"), outside); err != nil {
-		t.Skip(err)
+		t.Fatal(err)
 	}
 	if _, err := prepareReset(resetCommand(root)); err == nil || !strings.Contains(err.Error(), "linked") {
 		t.Fatal(err)
@@ -293,7 +293,7 @@ func TestResetPreservesManagementFilesAndConfigAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(target, filepath.Join(root, "secrets.env")); err != nil {
-		t.Skip(err)
+		t.Fatal(err)
 	}
 	t.Setenv("CREWSHIP_BOLT_PATH", target)
 	if _, err := prepareReset(resetCommand(root)); err == nil {

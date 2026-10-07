@@ -12,14 +12,14 @@ func TestInstallationOperationRefusesEscapedRunAndLockSymlinks(t *testing.T) {
 			root, outside := t.TempDir(), t.TempDir()
 			if kind == "run" {
 				if err := os.Symlink(outside, filepath.Join(root, "run")); err != nil {
-					t.Skip(err)
+					t.Fatal(err)
 				}
 			} else {
 				if err := os.Mkdir(filepath.Join(root, "run"), 0700); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.Symlink(filepath.Join(outside, "anchor"), filepath.Join(root, "run", "installation.lock")); err != nil {
-					t.Skip(err)
+					t.Fatal(err)
 				}
 			}
 			if lease, err := AcquireInstallationOperation(root); err == nil {

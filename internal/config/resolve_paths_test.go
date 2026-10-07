@@ -131,12 +131,12 @@ func TestLegacyDataGuard(t *testing.T) {
 			}
 			if scenario == "symlink-alias" {
 				if err := os.Symlink(old, next); err != nil {
-					t.Skip(err)
+					t.Fatal(err)
 				}
 			}
 			if scenario == "dangling-symlink" {
 				if err := os.Symlink(filepath.Join(root, "absent"), old); err != nil {
-					t.Skip(err)
+					t.Fatal(err)
 				}
 			}
 			paths := &ResolvedPaths{Paths: map[string]string{"storage.base_path": next}, Legacy: map[string]string{"storage.base_path": old}}

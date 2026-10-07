@@ -61,12 +61,12 @@ func TestInitializeFileConfinesPaths(t *testing.T) {
 			case "leaf-symlink":
 				target = filepath.Join(root, "AGENT.md")
 				if err := os.Symlink(sentinel, target); err != nil {
-					t.Skip(err)
+					t.Fatal(err)
 				}
 			case "parent-symlink":
 				link := filepath.Join(root, "agent")
 				if err := os.Symlink(outside, link); err != nil {
-					t.Skip(err)
+					t.Fatal(err)
 				}
 				target = filepath.Join(link, "AGENT.md")
 			case "in-root-parent-symlink":
@@ -76,7 +76,7 @@ func TestInitializeFileConfinesPaths(t *testing.T) {
 				}
 				link := filepath.Join(root, "agent")
 				if err := os.Symlink(sibling, link); err != nil {
-					t.Skip(err)
+					t.Fatal(err)
 				}
 				target = filepath.Join(link, "AGENT.md")
 			}
