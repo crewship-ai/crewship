@@ -391,8 +391,9 @@ export function emptyLensCopy(f: EmptyLensFacts): string {
   switch (f.lens) {
     case "workflows":
       // Every run is listed under Time, so an empty one is a quiet window —
-      // not runs filed somewhere else on the page.
-      return "Nothing ran in this window. Widen the time range in Filter to look further back."
+      // not runs filed somewhere else on the page. No advice to widen the
+      // range: the run index is not cut by it, so it would change nothing.
+      return "Nothing ran in this window."
     case "issues":
       return "Nothing touched an issue in this window. Issues with no activity are in Issues, not here."
     case "agents":
