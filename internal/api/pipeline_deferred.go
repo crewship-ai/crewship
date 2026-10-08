@@ -199,7 +199,49 @@ func (h *PipelineHandler) deferredInputsFitPin(ctx context.Context, p *pipeline.
 	return nil
 }
 
-// ListPendingRuns returns the workspace's not-yet-fired deferred runs.
+// pendingRunReceipt is a read-only projection, not a replay payload. Fired
+// means claimed/dispatched, not completed; its run ID can still be empty.
+type pendingRunReceipt struct {
+	Inputs           map[string]any `json:"inputs"`
+	PinnedVersion    *int           `json:"pinned_version"`
+	ID               string         `json:"id"`
+	PipelineSlug     string         `json:"pipeline_slug"`
+	DebounceKey      string         `json:"debounce_key,omitempty"`
+	Priority         int            `json:"priority"`
+	FireAt           string         `json:"fire_at"`
+	ExpiresAt        *string        `json:"expires_at"`
+	NextAttemptAt    *string        `json:"next_attempt_at"`
+	Status           string         `json:"status"`
+	RunID            string         `json:"run_id"`
+	DispatchAttempts int            `json:"dispatch_attempts"`
+	LastError        string         `json:"last_error"`
+	CanCancel        bool           `json:"can_cancel"`
+}
+
+func deferredReceipt(pr pipeline.PendingRun, canUpdate bool) (pendingRunReceipt, error) {
+	inputs, err := planPresetInputs(pr.InputsJSON)
+	if err != nil {
+		return pendingRunReceipt{}, err
+	}
+	asString := func(at *time.Time) *string {
+		if at == nil {
+			return nil
+		}
+		text := at.UTC().Format(time.RFC3339Nano)
+		return &text
+	}
+	return pendingRunReceipt{
+		Inputs: inputs, PinnedVersion: pr.PinnedVersion, ID: pr.ID,
+		PipelineSlug: pr.PipelineSlug, DebounceKey: pr.DebounceKey,
+		Priority: pr.Priority, FireAt: pr.FireAt.Format(time.RFC3339Nano),
+		ExpiresAt: asString(pr.ExpiresAt), NextAttemptAt: asString(pr.NextAttemptAt),
+		Status: pr.Status, RunID: pr.FiredRunID, DispatchAttempts: pr.DispatchAttempts,
+		LastError: pr.LastError, CanCancel: pr.Status == "pending" && canUpdate,
+	}, nil
+}
+
+// ListPendingRuns defaults to not-yet-fired rows. status=all includes receipts
+// that have dispatched, expired, failed or been canceled.
 // GET /api/v1/workspaces/{workspaceId}/pipelines/pending
 func (h *PipelineHandler) ListPendingRuns(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -207,39 +249,55 @@ func (h *PipelineHandler) ListPendingRuns(w http.ResponseWriter, r *http.Request
 		replyError(w, http.StatusServiceUnavailable, "db not wired")
 		return
 	}
-	store := pipeline.NewPendingRunStore(h.db)
-	rows, err := store.ListPending(r.Context(), workspaceID, 100)
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		status = "pending"
+	}
+	switch status {
+	case "pending", "fired", "failed", "expired", "cancelled", "all":
+	default:
+		replyError(w, http.StatusBadRequest, "invalid deferred status")
+		return
+	}
+	rows, err := pipeline.NewPendingRunStore(h.db).ListByStatus(r.Context(), workspaceID, status, 100)
 	if err != nil {
 		replyError(w, http.StatusInternalServerError, "list pending runs")
 		return
 	}
-	type dto struct {
-		Inputs        map[string]any `json:"inputs"`
-		PinnedVersion *int           `json:"pinned_version"`
-		ID            string         `json:"id"`
-		PipelineSlug  string         `json:"pipeline_slug"`
-		DebounceKey   string         `json:"debounce_key,omitempty"`
-		Priority      int            `json:"priority"`
-		FireAt        string         `json:"fire_at"`
-	}
-	out := make([]dto, 0, len(rows))
+	out := make([]pendingRunReceipt, 0, len(rows))
 	for _, pr := range rows {
-		inputs, err := planPresetInputs(pr.InputsJSON)
+		dto, err := deferredReceipt(pr, canRole(RoleFromContext(r.Context()), "update"))
 		if err != nil {
 			replyError(w, 500, "read pending inputs")
 			return
 		}
-		out = append(out, dto{
-			Inputs:        inputs,
-			PinnedVersion: pr.PinnedVersion,
-			ID:            pr.ID,
-			PipelineSlug:  pr.PipelineSlug,
-			DebounceKey:   pr.DebounceKey,
-			Priority:      pr.Priority,
-			FireAt:        pr.FireAt.Format(time.RFC3339Nano),
-		})
+		out = append(out, dto)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// GetPendingRun returns an accepted start by ID even after it leaves pending.
+// GET /api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}
+func (h *PipelineHandler) GetPendingRun(w http.ResponseWriter, r *http.Request) {
+	if h.db == nil {
+		replyError(w, http.StatusServiceUnavailable, "db not wired")
+		return
+	}
+	pr, err := pipeline.NewPendingRunStore(h.db).Get(r.Context(), WorkspaceIDFromContext(r.Context()), r.PathValue("pendingId"))
+	if err != nil {
+		replyError(w, http.StatusInternalServerError, "read deferred start")
+		return
+	}
+	if pr == nil {
+		replyError(w, http.StatusNotFound, "deferred start not found")
+		return
+	}
+	dto, err := deferredReceipt(*pr, canRole(RoleFromContext(r.Context()), "update"))
+	if err != nil {
+		replyError(w, 500, "read pending inputs")
+		return
+	}
+	writeJSON(w, http.StatusOK, dto)
 }
 
 // CancelPendingRun cancels a not-yet-fired deferred run.
