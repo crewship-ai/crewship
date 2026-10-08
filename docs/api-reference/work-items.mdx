@@ -76,6 +76,17 @@ vocabularies above — `?state=runnign` is a `400`, not an empty page, because
 A work item belonging to another workspace answers `404`, not `403`: a `403`
 would confirm the id exists to someone who has no business knowing it.
 
+Every item, in the list and the detail, also names its context so a reader
+does not resolve ids by hand:
+
+| Field | Meaning |
+|---|---|
+| `agent` | `{ id, name, slug, avatar_seed, avatar_style }` of the agent that runs the work; `null` once the agent is deleted (`agent_id` stays) |
+| `crew` | `{ id, name, color, icon }` of that agent's crew; `null` when unknown |
+| `event_type` | For webhook work, the event the delivery carried (`issues`, `invoice.overdue`); empty otherwise |
+| `duration_ms` | From the first attempt's start to the last attempt's end; `null` until an attempt has ended |
+| `cost_usd` | The sum of the attempts' cost; `null` when no attempt recorded one |
+
 The detail adds two lists. `attempts[]` carries one entry per attempt —
 `run_id` (the same namespace as the journal's run id), the lease and its
 heartbeat, the `runtime_locator` recovery consults before deciding a process
@@ -150,6 +161,11 @@ signature, which changes with a fresh timestamp for the same logical delivery.
 Passing `?endpoint_id=` **and** `?source_delivery_id=` asks that identity
 question and answers with a page of zero or one. `?source_delivery_id=` on its
 own is a `400`: a sender's delivery id is only unique within an endpoint.
+
+Each delivery also carries `agent` (the endpoint's agent, as above, `null`
+once deleted) and `work_state`, the current state of the work item it became —
+`null` for an ignored delivery. A delivery that was accepted but whose work
+failed reads as such without a second request.
 
 The raw payload is never returned. `raw_body_available` says whether it is
 still held (and therefore whether a replay can work), `raw_body_expires_at`

@@ -7942,6 +7942,56 @@
         },
         "type": "array"
       },
+      "LedgerAgent": {
+        "properties": {
+          "avatar_seed": {
+            "type": "string"
+          },
+          "avatar_style": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "avatar_seed",
+          "avatar_style"
+        ],
+        "type": "object"
+      },
+      "LedgerCrew": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "color",
+          "icon"
+        ],
+        "type": "object"
+      },
       "MCPServerError": {
         "properties": {
           "message": {
@@ -13462,6 +13512,10 @@
       },
       "WebhookDelivery": {
         "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/LedgerAgent",
+            "nullable": true
+          },
           "body_bytes": {
             "type": "integer"
           },
@@ -13535,6 +13589,10 @@
             "nullable": true,
             "type": "string"
           },
+          "work_state": {
+            "nullable": true,
+            "type": "string"
+          },
           "workspace_id": {
             "type": "string"
           }
@@ -13558,7 +13616,9 @@
           "received_at",
           "dedup_expires_at",
           "raw_body_available",
-          "raw_body_expires_at"
+          "raw_body_expires_at",
+          "agent",
+          "work_state"
         ],
         "type": "object"
       },
@@ -13746,6 +13806,10 @@
       },
       "WorkItem": {
         "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/LedgerAgent",
+            "nullable": true
+          },
           "agent_id": {
             "type": "string"
           },
@@ -13762,9 +13826,17 @@
             ],
             "type": "string"
           },
+          "cost_usd": {
+            "nullable": true,
+            "type": "number"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
+          },
+          "crew": {
+            "$ref": "#/components/schemas/LedgerCrew",
+            "nullable": true
           },
           "crew_id": {
             "type": "string"
@@ -13780,8 +13852,15 @@
           "domain_kind": {
             "type": "string"
           },
+          "duration_ms": {
+            "nullable": true,
+            "type": "integer"
+          },
           "eligible_at": {
             "format": "date-time",
+            "type": "string"
+          },
+          "event_type": {
             "type": "string"
           },
           "generation": {
@@ -13879,12 +13958,21 @@
           "replay_reason",
           "created_at",
           "updated_at",
-          "terminal_at"
+          "terminal_at",
+          "agent",
+          "crew",
+          "event_type",
+          "duration_ms",
+          "cost_usd"
         ],
         "type": "object"
       },
       "WorkItemDetail": {
         "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/LedgerAgent",
+            "nullable": true
+          },
           "agent_id": {
             "type": "string"
           },
@@ -13907,9 +13995,17 @@
             ],
             "type": "string"
           },
+          "cost_usd": {
+            "nullable": true,
+            "type": "number"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
+          },
+          "crew": {
+            "$ref": "#/components/schemas/LedgerCrew",
+            "nullable": true
           },
           "crew_id": {
             "type": "string"
@@ -13925,8 +14021,15 @@
           "domain_kind": {
             "type": "string"
           },
+          "duration_ms": {
+            "nullable": true,
+            "type": "integer"
+          },
           "eligible_at": {
             "format": "date-time",
+            "type": "string"
+          },
+          "event_type": {
             "type": "string"
           },
           "events": {
@@ -14031,6 +14134,11 @@
           "created_at",
           "updated_at",
           "terminal_at",
+          "agent",
+          "crew",
+          "event_type",
+          "duration_ms",
+          "cost_usd",
           "attempts",
           "events"
         ],

@@ -55,7 +55,11 @@ crewship work list --agent research-agent -f json
 | `--agent` | (unset) | Filter by agent slug or ID. An unknown slug is refused with suggestions rather than answered with an empty page; a CUID-shaped ID of a deleted agent still filters that agent's historical work. |
 | `--after` | (unset) | Resume from a previous page's cursor |
 
-**Output columns:** ID, STATE, CLASS, SOURCE, AGENT, ATTEMPTS, CREATED
+**Output columns:** ID, STATE, SOURCE, EVENT, AGENT, ATTEMPTS, CREATED
+
+AGENT is the agent's name, or `(deleted) <id>` once the agent is gone. EVENT is
+the webhook event a delivery carried. The capacity class, crew, duration and
+cost are in `-f json`.
 
 A misspelt `--state` is refused rather than answered with an empty page —
 "nothing is running" is the wrong answer to a typo. When more rows remain the
@@ -153,7 +157,10 @@ crewship work deliveries list --endpoint ep_123 --source-id 8f4c1a2e
 | `--event-type` | (unset) | Filter by event type, e.g. `issues` or `push` |
 | `--after` | (unset) | Resume from a previous page's cursor |
 
-**Output columns:** ID, ENDPOINT, PROFILE, EVENT, DECISION, WORK, PAYLOAD, RECEIVED
+**Output columns:** ID, AGENT, PROFILE, EVENT, DECISION, WORK, WORK STATE, PAYLOAD, RECEIVED
+
+WORK STATE is the state of the work item the delivery became, so an accepted
+delivery whose work failed reads as such.
 
 Deliveries the filter rejected are listed too, with their reason and no work
 id: a ping or a filtered event is auditable rather than invisible.

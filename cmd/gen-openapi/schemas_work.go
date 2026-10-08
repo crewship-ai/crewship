@@ -89,6 +89,12 @@ func workLedgerSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 			"created_at":    dateTime(),
 			"updated_at":    dateTime(),
 			"terminal_at":   nullable(dateTime()),
+			// #3012 — who, where and what. agent/crew are null once deleted.
+			"agent":       nullable(ref("LedgerAgent")),
+			"crew":        nullable(ref("LedgerCrew")),
+			"event_type":  str(),
+			"duration_ms": nullable(integer()),
+			"cost_usd":    nullable(number()),
 		}
 	}
 	workItemRequired := []string{
@@ -97,6 +103,7 @@ func workLedgerSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"input_sha256", "target_revision", "state", "state_reason", "generation",
 		"attempt_count", "priority", "eligible_at", "deadline_at", "replay_of",
 		"replay_reason", "created_at", "updated_at", "terminal_at",
+		"agent", "crew", "event_type", "duration_ms", "cost_usd",
 	}
 
 	// The detail is the summary plus the two lists. The summary's counter is
@@ -196,11 +203,20 @@ func workLedgerSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 			"raw_body_available": map[string]any{"type": boolean()["type"],
 				"description": "Whether the payload is still held. False means a replay of the work this produced is unavailable."},
 			"raw_body_expires_at": nullable(dateTime()),
+			// #3012 — the endpoint's agent and the state of the work it became.
+			"agent":      nullable(ref("LedgerAgent")),
+			"work_state": nullable(str()),
 		}, "id", "workspace_id", "endpoint_id", "endpoint_kind", "profile",
 			"source_delivery_id", "event_type", "event_action", "signing_key_id",
 			"body_sha256", "body_bytes", "filter_decision", "filter_reason",
 			"target_revision", "work_id", "received_at", "dedup_expires_at",
-			"raw_body_available", "raw_body_expires_at"),
+			"raw_body_available", "raw_body_expires_at", "agent", "work_state"),
+		"LedgerAgent": object(map[string]any{
+			"id": str(), "name": str(), "slug": str(), "avatar_seed": str(), "avatar_style": str(),
+		}, "id", "name", "slug", "avatar_seed", "avatar_style"),
+		"LedgerCrew": object(map[string]any{
+			"id": str(), "name": str(), "color": str(), "icon": str(),
+		}, "id", "name", "color", "icon"),
 		"WebhookDeliveryPage": object(map[string]any{
 			"items":       map[string]any{"type": "array", "items": ref("WebhookDelivery"), "maxItems": 100},
 			"next_cursor": nullable(str()),

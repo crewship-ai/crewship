@@ -66,6 +66,40 @@ type WorkItemRow struct {
 	CreatedAt          string  `json:"created_at" yaml:"created_at"`
 	UpdatedAt          string  `json:"updated_at" yaml:"updated_at"`
 	TerminalAt         *string `json:"terminal_at" yaml:"terminal_at"`
+	// Who, where and what (#3012). Agent and Crew are null once deleted.
+	Agent      *workLedgerAgent `json:"agent" yaml:"agent"`
+	Crew       *workLedgerCrew  `json:"crew" yaml:"crew"`
+	EventType  string           `json:"event_type" yaml:"event_type"`
+	DurationMS *int64           `json:"duration_ms" yaml:"duration_ms"`
+	CostUSD    *float64         `json:"cost_usd" yaml:"cost_usd"`
+}
+
+type workLedgerAgent struct {
+	ID          string `json:"id" yaml:"id"`
+	Name        string `json:"name" yaml:"name"`
+	Slug        string `json:"slug" yaml:"slug"`
+	AvatarSeed  string `json:"avatar_seed" yaml:"avatar_seed"`
+	AvatarStyle string `json:"avatar_style" yaml:"avatar_style"`
+}
+
+type workLedgerCrew struct {
+	ID    string `json:"id" yaml:"id"`
+	Name  string `json:"name" yaml:"name"`
+	Color string `json:"color" yaml:"color"`
+	Icon  string `json:"icon" yaml:"icon"`
+}
+
+// workAgentCell names the agent, says "deleted" when it is gone, and falls
+// back to the id only when the server sent no name at all.
+func workAgentCell(agent *workLedgerAgent, id string) string {
+	switch {
+	case agent != nil && agent.Name != "":
+		return agent.Name
+	case agent == nil && id != "":
+		return "(deleted) " + id
+	default:
+		return id
+	}
 }
 
 type workAttemptRow struct {
@@ -129,6 +163,9 @@ type workDeliveryRow struct {
 	DedupExpiresAt   string  `json:"dedup_expires_at" yaml:"dedup_expires_at"`
 	RawBodyAvailable bool    `json:"raw_body_available" yaml:"raw_body_available"`
 	RawBodyExpiresAt *string `json:"raw_body_expires_at" yaml:"raw_body_expires_at"`
+	// The endpoint's agent and the state of the work it became (#3012).
+	Agent     *workLedgerAgent `json:"agent" yaml:"agent"`
+	WorkState *string          `json:"work_state" yaml:"work_state"`
 }
 
 type workDeliveryPageBody struct {
@@ -262,11 +299,11 @@ a typo.`,
 		f := resolvedFormatter(cmd)
 		return f.AutoHuman(page, func() {
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tSTATE\tCLASS\tSOURCE\tAGENT\tATTEMPTS\tCREATED")
+			fmt.Fprintln(w, "ID\tSTATE\tSOURCE\tEVENT\tAGENT\tATTEMPTS\tCREATED")
 			for _, item := range page.Items {
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
-					workShortID(f, item.ID), item.State, item.Class, item.Source,
-					item.AgentID, item.AttemptCount, workShortTime(item.CreatedAt))
+					workShortID(f, item.ID), item.State, item.Source, orDash(sanitizeTerminal(item.EventType)),
+					sanitizeTerminal(workAgentCell(item.Agent, item.AgentID)), item.AttemptCount, workShortTime(item.CreatedAt))
 			}
 			_ = w.Flush()
 			if len(page.Items) == 0 {
@@ -511,15 +548,15 @@ id is only unique within an endpoint, so --source-id on its own is refused.`,
 		f := resolvedFormatter(cmd)
 		return f.AutoHuman(page, func() {
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tENDPOINT\tPROFILE\tEVENT\tDECISION\tWORK\tPAYLOAD\tRECEIVED")
+			fmt.Fprintln(w, "ID\tAGENT\tPROFILE\tEVENT\tDECISION\tWORK\tWORK STATE\tPAYLOAD\tRECEIVED")
 			for _, d := range page.Items {
 				payload := "dropped"
 				if d.RawBodyAvailable {
 					payload = "held"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-					workShortID(f, d.ID), d.EndpointID, d.Profile, d.EventType,
-					d.FilterDecision, workShortID(f, workDeref(d.WorkID)), payload,
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					workShortID(f, d.ID), sanitizeTerminal(workAgentCell(d.Agent, d.EndpointID)), d.Profile, sanitizeTerminal(d.EventType),
+					d.FilterDecision, workShortID(f, workDeref(d.WorkID)), orDash(workDeref(d.WorkState)), payload,
 					workShortTime(d.ReceivedAt))
 			}
 			_ = w.Flush()

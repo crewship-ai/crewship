@@ -96,6 +96,15 @@ type workItemView struct {
 	CreatedAt  string  `json:"created_at"`
 	UpdatedAt  string  `json:"updated_at"`
 	TerminalAt *string `json:"terminal_at"`
+
+	// Who, where and what (#3012): the agent and crew by name, null once
+	// deleted; the event a webhook delivery carried; the attempts' wall
+	// clock and summed cost, null until an attempt recorded them.
+	Agent      *ledgerAgentRef `json:"agent"`
+	Crew       *ledgerCrewRef  `json:"crew"`
+	EventType  string          `json:"event_type"`
+	DurationMS *int64          `json:"duration_ms"`
+	CostUSD    *float64        `json:"cost_usd"`
 }
 
 // workAttemptView is one attempt. run_id is the same namespace as
@@ -307,6 +316,10 @@ func (h *WorkItemsHandler) List(w http.ResponseWriter, r *http.Request) {
 		items = items[:100]
 		next = &items[99].ID
 	}
+	if err := attachWorkContext(r.Context(), h.db, WorkspaceIDFromContext(r.Context()), items); err != nil {
+		replyInternalError(w, h.logger, "name work items", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, workItemPage{Items: items, NextCursor: next})
 }
 
@@ -341,7 +354,12 @@ func (h *WorkItemsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "read work history", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, workItemDetailView{workItemView: item, Attempts: attempts, Events: events})
+	one := []workItemView{item}
+	if err := attachWorkContext(r.Context(), h.db, WorkspaceIDFromContext(r.Context()), one); err != nil {
+		replyInternalError(w, h.logger, "name work item", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, workItemDetailView{workItemView: one[0], Attempts: attempts, Events: events})
 }
 
 // readItem fetches one item and fences it to the workspace. A work item in
