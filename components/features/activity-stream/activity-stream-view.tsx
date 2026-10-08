@@ -791,11 +791,29 @@ export function ActivityStreamView({
   // The home is the whole workspace's runs, so it shows only while nothing
   // narrows the page. A crew, an agent, a search or a pinned crumb asks a
   // narrower question, and the filtered list below answers it (#2979).
+  // Narrowings only the journal can express — a source, a severity, the
+  // telemetry switch, a pinned node — get the event list. Chain-level ones —
+  // a crew, an agent, an issue or routine focus, the search — keep the home,
+  // narrowed to the same chains as the rail (#3002).
+  const eventOnlyNarrowing =
+    !!pinned || facets.sources.length > 0 || facets.severities.length > 0 || facets.showTelemetry
+  const chainNarrowing =
+    !!debouncedSearch || facets.crewIDs.length > 0 || facets.agentIDs.length > 0 || !!focus
+  const homeScope = React.useMemo(() => {
+    if (!chainNarrowing) return null
+    const label = [
+      ...facets.crewIDs.map((id) => lookup.crews.get(id)?.name ?? id),
+      ...facets.agentIDs.map((id) => lookup.agents.get(id)?.name ?? id),
+      ...(focus ? [focus.label ?? focus.id] : []),
+      ...(debouncedSearch ? [`“${debouncedSearch}”`] : []),
+    ].join(", ")
+    return { origins: new Set(visibleChains.map((c) => c.origin)), label }
+  }, [chainNarrowing, facets.crewIDs, facets.agentIDs, focus, debouncedSearch, visibleChains, lookup.crews, lookup.agents])
+
   const overviewShown =
     !loading &&
     !error &&
-    !emptyByFilters &&
-    narrowingChips === 0 &&
+    !eventOnlyNarrowing &&
     surface.main === "overview" &&
     facets.scope === "all" &&
     lens === "workflows"
@@ -1197,7 +1215,7 @@ export function ActivityStreamView({
                   </div>
                 ))}
 
-              {surface.main !== "workflow" && !loading && !error && emptyByFilters && (
+              {surface.main !== "workflow" && !loading && !error && emptyByFilters && !overviewShown && (
                 <div className="px-6 py-14">
                   <EmptyState
                     icon={FilterX}
@@ -1253,6 +1271,7 @@ export function ActivityStreamView({
                 <ActivityHome
                   workspaceId={workspaceId}
                   chains={visibleChains}
+                  scope={homeScope}
                   onOpenRun={(id) => openNode("run", id)}
                   onOpenIssue={(id) => openNode("issue", id)}
                 />

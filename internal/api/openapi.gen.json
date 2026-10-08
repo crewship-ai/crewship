@@ -8456,6 +8456,9 @@
       },
       "PipelineRun": {
         "properties": {
+          "chain_origin": {
+            "type": "string"
+          },
           "cost_usd": {
             "type": "number"
           },

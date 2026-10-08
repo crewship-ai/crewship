@@ -104,4 +104,14 @@ describe("ActivityHome", () => {
     const now = screen.getByRole("region", { name: "Right now" })
     expect(await within(now).findByText("in 12 min")).toBeInTheDocument()
   })
+
+  it("narrows to the rail's chains and says so in the heading (#3002)", async () => {
+    mount({ scope: { origins: new Set(["r_ok"]), label: "Operations" } })
+    expect(screen.getByRole("heading", { name: /Today · Operations/ })).toBeInTheDocument()
+    const latest = screen.getByRole("region", { name: "Latest runs" })
+    expect(await within(latest).findByText("Finished in 4.7s")).toBeInTheDocument()
+    expect(within(latest).queryByText("HTTP 502 Bad Gateway")).toBeNull()
+    // The waiting ask belongs to a run outside the scope.
+    expect(within(screen.getByRole("region", { name: "Needs you" })).getByText("Nothing is waiting for you.")).toBeInTheDocument()
+  })
 })

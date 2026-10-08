@@ -21,6 +21,18 @@ export interface HomeRun {
   current_step_id?: string
   triggered_via?: string
   cost_usd?: number
+  /** The chain the run belongs to (#3002); a root run's is its own id. */
+  chain_origin?: string
+}
+
+/**
+ * The runs of the chains the rail shows (#3002). A filter narrows the rail's
+ * chains; the home reads the same set, so the two never disagree. Null keeps
+ * every run.
+ */
+export function scopeRuns(runs: HomeRun[], origins: ReadonlySet<string> | null): HomeRun[] {
+  if (!origins) return runs
+  return runs.filter((r) => origins.has(r.chain_origin || r.id))
 }
 
 /* ------------------------------------------------------------------ *

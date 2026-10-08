@@ -351,6 +351,10 @@ and are distinct from per-run credential **use**, which is not recorded. A
 legacy run's invoking crew/agent ids are shown as recorded and are not
 presented as verified identities.
 
+## Chain origin in the run list
+
+Each row of `GET /api/v1/workspaces/{workspaceId}/pipeline-runs` carries `chain_origin`, the id of the run that began its chain. For a root run that is its own id; for a run from before chain recording it is empty. The Activity home uses it to narrow its runs to the chains the rail shows ([Chains](/api-reference/chains)).
+
 ## Outcome
 
 Both `run-records` rows and `GET /api/v1/workspaces/{wsId}/pipeline-runs/{runId}` carry

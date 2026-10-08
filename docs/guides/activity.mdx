@@ -166,7 +166,9 @@ The time view's home is built from **runs**, not journal events, and answers in 
 | **Outcomes** | Seven days by outcome, with the share that finished. |
 | **Latest runs** | One line per run — what it came to (`HTTP 502 Bad Gateway`, `Finished in 4.7s`, `Waiting for a decision`) and what started it. Admins get a **Raw events in Journal** link. |
 
-The home covers the whole workspace, so it shows only while nothing narrows the page. A crew, an agent, a search or a pinned crumb asks a narrower question, and the filtered event list answers it.
+A crew, an agent, an issue or routine focus, or a search narrows the home to the same chains the rail shows, and the heading names the narrowing (*Today · Operations*). Its runs are the runs of those chains, matched by `chain_origin`. Its asks are the asks of those runs, and *Up next* lists only their routines' schedules.
+
+Narrowings only the journal can express get the filtered event list instead: a source, a severity, the telemetry switch, a pinned crumb.
 
 ### Issues, Agents, Routines
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   activeProblems,
+  scopeRuns,
   headlineParts,
   issueEffects,
   outcomesByDay,
@@ -159,5 +160,17 @@ describe("activeProblems", () => {
     expect(activeProblems(groups, runs)).toEqual([
       { fingerprint: "a", name: "Repair demo delivery", step: "post", error: "HTTP 502", recent: 2, total: 40, latestRunId: "r1" },
     ])
+  })
+})
+
+describe("scopeRuns (#3002)", () => {
+  it("keeps the runs of the rail's chains — a root by its id, the rest by chain_origin", () => {
+    const runs = [
+      run({ id: "root_ops" }),
+      run({ id: "child_ops", chain_origin: "root_ops" }),
+      run({ id: "root_fin" }),
+    ]
+    expect(scopeRuns(runs, new Set(["root_ops"])).map((r) => r.id)).toEqual(["root_ops", "child_ops"])
+    expect(scopeRuns(runs, null)).toHaveLength(3)
   })
 })

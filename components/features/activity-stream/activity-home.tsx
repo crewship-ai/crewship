@@ -43,6 +43,7 @@ import type { PendingWaitpoint } from "@/hooks/use-pending-approval"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import {
   activeProblems,
+  scopeRuns,
   headlineParts,
   issueEffects,
   outcomesByDay,
@@ -67,6 +68,12 @@ const WINDOW_MS: Record<Window, number> = { "24h": 24 * 3_600_000, "7d": 7 * 24 
 export interface ActivityHomeProps {
   workspaceId: string
   chains: ChainSummary[]
+  /**
+   * The chains a filter narrowed the rail to (#3002), and what to call that
+   * narrowing ("Operations", "Casey"). The home then reads the same set, so a
+   * crew filter shows that crew's day instead of the raw event list.
+   */
+  scope?: { origins: ReadonlySet<string>; label: string } | null
   onOpenRun: (runId: string) => void
   onOpenIssue: (issueId: string) => void
 }
@@ -78,7 +85,7 @@ const HEAD_TONE = {
   destructive: "text-destructive",
 } as const
 
-export function ActivityHome({ workspaceId, chains, onOpenRun, onOpenIssue }: ActivityHomeProps) {
+export function ActivityHome({ workspaceId, chains, scope, onOpenRun, onOpenIssue }: ActivityHomeProps) {
   const [win, setWin] = React.useState<Window>("24h")
   const [now, setNow] = React.useState(() => Date.now())
   React.useEffect(() => {
@@ -87,15 +94,21 @@ export function ActivityHome({ workspaceId, chains, onOpenRun, onOpenIssue }: Ac
   }, [])
 
   const runs = useRecentRuns(workspaceId)
-  const { waitpoints, refresh: refreshWaitpoints } = useWorkspaceWaitpoints(workspaceId)
+  const { waitpoints: allWaitpoints, refresh: refreshWaitpoints } = useWorkspaceWaitpoints(workspaceId)
   const spend = useJournalSpend(workspaceId, win)
   const failureGroups = useFailureGroups(workspaceId)
   const calendar = useUpcoming(workspaceId, now)
   const { role } = useAbilities()
 
   const from = now - WINDOW_MS[win]
-  const inWindow = runs.rows.filter((r) => Date.parse(r.started_at) >= from)
-  const active = runs.rows.filter((r) => ["running", "waiting"].includes(runTone(r.status)))
+  const rows = scopeRuns(runs.rows, scope?.origins ?? null)
+  // Narrowed, the asks and the schedules follow the runs: an ask belongs to
+  // its run, a schedule to its routine.
+  const scopedRunIds = new Set(rows.map((r) => r.id))
+  const waitpoints = scope ? allWaitpoints.filter((w) => scopedRunIds.has(w.pipeline_run_id)) : allWaitpoints
+  const scopedSlugs = new Set([...rows.map((r) => r.pipeline_slug), ...chains.map((c) => c.routine_slug ?? "")])
+  const inWindow = rows.filter((r) => Date.parse(r.started_at) >= from)
+  const active = rows.filter((r) => ["running", "waiting"].includes(runTone(r.status)))
   const failedCount = inWindow.filter((r) => runTone(r.status) === "failed").length
   const cost = spend.data?.total_cost_usd ?? null
   const parts = headlineParts({
@@ -106,13 +119,13 @@ export function ActivityHome({ workspaceId, chains, onOpenRun, onOpenIssue }: Ac
     cost,
   })
   const lanes = runLanes(inWindow, { from, to: now })
-  const days = outcomesByDay(runs.rows, 7, now)
+  const days = outcomesByDay(rows, 7, now)
   const finished = days.reduce((n, d) => n + d.done, 0)
   const ended = days.reduce((n, d) => n + d.done + d.failed, 0)
   const effects = issueEffects(chains.filter((c) => Date.parse(c.last_activity) >= from))
-  const latest = [...runs.rows].sort((a, b) => b.started_at.localeCompare(a.started_at)).slice(0, 6)
-  const next = upNext(calendar, now, 3)
-  const problems = activeProblems(failureGroups, runs.rows)
+  const latest = [...rows].sort((a, b) => b.started_at.localeCompare(a.started_at)).slice(0, 6)
+  const next = upNext(scope ? calendar.filter((e) => scopedSlugs.has(e.slug)) : calendar, now, 3)
+  const problems = activeProblems(failureGroups, rows)
 
   return (
     <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
@@ -120,7 +133,10 @@ export function ActivityHome({ workspaceId, chains, onOpenRun, onOpenIssue }: Ac
       <Appear order={0}>
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex min-w-0 flex-col gap-1">
-            <h1 className="text-lg font-semibold tracking-tight">{win === "24h" ? "Today" : "This week"}</h1>
+            <h1 className="text-lg font-semibold tracking-tight">
+              {win === "24h" ? "Today" : "This week"}
+              {scope && <span className="text-muted-foreground"> · {scope.label}</span>}
+            </h1>
             <p className="flex flex-wrap items-center gap-x-1.5 text-xs" aria-label="Summary">
               {parts.map((p, i) => (
                 <React.Fragment key={p.text}>
@@ -156,7 +172,7 @@ export function ActivityHome({ workspaceId, chains, onOpenRun, onOpenIssue }: Ac
           <NeedsYou
             workspaceId={workspaceId}
             waitpoints={waitpoints}
-            runs={runs.rows}
+            runs={rows}
             canDecide={roleAtLeast(role, "MANAGER")}
             onDecided={() => {
               void refreshWaitpoints()

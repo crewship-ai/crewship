@@ -364,6 +364,15 @@ it("keeps the routine focus while one of its runs is open (#2998)", () => {
   act(() => sidebar().onFocusRoutine?.(null))
   expect(sidebar().focusedRoutine).toBeNull()
 })
+it("keeps the home for a crew filter, narrowed to the rail's chains, and the event list for a source (#3002)", () => {
+  show()
+  act(() => sidebar().onChange({ ...EMPTY_FACETS, crewIDs: ["c1"] }))
+  expect(screen.getByText("Activity home")).toBeInTheDocument()
+  expect(home().scope?.label).toBe("Builders")
+  expect([...(home().scope?.origins ?? [])]).toEqual(home().chains.map((c) => c.origin))
+  act(() => sidebar().onChange({ ...EMPTY_FACETS, sources: ["run"] }))
+  expect(screen.queryByText("Activity home")).toBeNull()
+})
 it("opens a run under the Issues back-bar: the way out, then only the stops walked", () => {
   // #2979: /issues reads "‹ Back to issues › OPS-1". The home crumb would
   // repeat the button beside it ("Back to activity › Overview › …").
