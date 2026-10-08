@@ -21,6 +21,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -75,19 +76,71 @@ type WorkItemRow struct {
 }
 
 type workLedgerAgent struct {
-	ID          string `json:"id" yaml:"id"`
-	Name        string `json:"name" yaml:"name"`
-	Slug        string `json:"slug" yaml:"slug"`
-	AvatarSeed  string `json:"avatar_seed" yaml:"avatar_seed"`
-	AvatarStyle string `json:"avatar_style" yaml:"avatar_style"`
-	Deleted     bool   `json:"deleted" yaml:"deleted"`
+	ID          string  `json:"id" yaml:"id"`
+	Name        string  `json:"name" yaml:"name"`
+	Slug        string  `json:"slug" yaml:"slug"`
+	AvatarSeed  string  `json:"avatar_seed" yaml:"avatar_seed"`
+	AvatarStyle string  `json:"avatar_style" yaml:"avatar_style"`
+	AvatarURL   *string `json:"avatar_url" yaml:"avatar_url"`
+	Deleted     bool    `json:"deleted" yaml:"deleted"`
 }
 
 type workLedgerCrew struct {
-	ID    string `json:"id" yaml:"id"`
-	Name  string `json:"name" yaml:"name"`
-	Color string `json:"color" yaml:"color"`
-	Icon  string `json:"icon" yaml:"icon"`
+	ID      string `json:"id" yaml:"id"`
+	Name    string `json:"name" yaml:"name"`
+	Color   string `json:"color" yaml:"color"`
+	Icon    string `json:"icon" yaml:"icon"`
+	Deleted bool   `json:"deleted" yaml:"deleted"`
+}
+
+// workCrewCell names the crew, or falls back to its id.
+func workCrewCell(crew *workLedgerCrew, id string) string {
+	switch {
+	case crew != nil && crew.Deleted:
+		return "(deleted) " + crew.Name
+	case crew != nil:
+		return crew.Name
+	default:
+		return id
+	}
+}
+
+// workEndpointCell names a delivery's endpoint. Only an agent's endpoint can
+// be "deleted": another kind (a routine's) has no agent to name at all.
+func workEndpointCell(agent *workLedgerAgent, kind, id string) string {
+	if agent == nil && kind != "" && kind != "agent" {
+		return kind + " " + id
+	}
+	return workAgentCell(agent, id)
+}
+
+// workSinceParam turns --since (a duration or an RFC3339 time) into the
+// server's since=.
+func workSinceParam(cmd *cobra.Command, query url.Values) error {
+	raw, _ := cmd.Flags().GetString("since")
+	if raw == "" {
+		return nil
+	}
+	t, err := parseSince(raw)
+	if err != nil {
+		return fmt.Errorf("--since %q: want a duration like 24h or 7d, or an RFC3339 time", raw)
+	}
+	query.Set("since", t.UTC().Format(time.RFC3339))
+	return nil
+}
+
+func workDuration(ms *int64) string {
+	if ms == nil {
+		return ""
+	}
+	return (time.Duration(*ms) * time.Millisecond).String()
+}
+
+func workCost(usd *float64) string {
+	if usd == nil {
+		return ""
+	}
+	return fmt.Sprintf("$%.4f", *usd)
 }
 
 // workAgentCell names the agent, says "deleted" when it is gone, and falls
@@ -277,6 +330,12 @@ a typo.`,
 				query.Set(param, value)
 			}
 		}
+		if err := workSinceParam(cmd, query); err != nil {
+			return err
+		}
+		if open, _ := cmd.Flags().GetBool("open"); open {
+			query.Set("open", "true")
+		}
 		if agentRef, _ := cmd.Flags().GetString("agent"); agentRef != "" {
 			agentID, err := resolveAgentID(client, agentRef)
 			if err != nil {
@@ -350,8 +409,11 @@ conversation. Its fingerprint is.`,
 				{"Reason", detail.StateReason},
 				{"Class", detail.Class},
 				{"Source", detail.Source + workSuffix(" ref ", detail.SourceRef)},
-				{"Agent", detail.AgentID},
-				{"Crew", detail.CrewID},
+				{"Agent", sanitizeTerminal(workAgentCell(detail.Agent, detail.AgentID))},
+				{"Crew", sanitizeTerminal(workCrewCell(detail.Crew, detail.CrewID))},
+				{"Event", sanitizeTerminal(detail.EventType)},
+				{"Duration", workDuration(detail.DurationMS)},
+				{"Cost", workCost(detail.CostUSD)},
 				{"Session", detail.SessionID},
 				{"Authorized by", detail.AuthorizedByUserID},
 				{"Input sha256", detail.InputSHA256},
@@ -540,6 +602,9 @@ id is only unique within an endpoint, so --source-id on its own is refused.`,
 				query.Set(param, value)
 			}
 		}
+		if err := workSinceParam(cmd, query); err != nil {
+			return err
+		}
 		path := workspacePath(client, "/webhook-deliveries")
 		if encoded := query.Encode(); encoded != "" {
 			path += "?" + encoded
@@ -558,7 +623,7 @@ id is only unique within an endpoint, so --source-id on its own is refused.`,
 					payload = "held"
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-					workShortID(f, d.ID), sanitizeTerminal(workAgentCell(d.Agent, d.EndpointID)), d.Profile, sanitizeTerminal(d.EventType),
+					workShortID(f, d.ID), sanitizeTerminal(workEndpointCell(d.Agent, d.EndpointKind, d.EndpointID)), d.Profile, sanitizeTerminal(d.EventType),
 					d.FilterDecision, workShortID(f, workDeref(d.WorkID)), orDash(workDeref(d.WorkState)), payload,
 					workShortTime(d.ReceivedAt))
 			}
@@ -668,6 +733,8 @@ func init() {
 	workListCmd.Flags().String("source", "", "Filter by producer: webhook, chat, assignment, schedule, pipeline_step, manual")
 	workListCmd.Flags().String("agent", "", "Filter by agent slug or ID")
 	workListCmd.Flags().String("after", "", "Resume from a previous page's cursor")
+	workListCmd.Flags().String("since", "", "Only work created since then: a duration (24h, 7d) or an RFC3339 time")
+	workListCmd.Flags().Bool("open", false, "Only work not yet finished, however old")
 
 	workReplayCmd.Flags().String("reason", "", "Why this is being replayed; recorded on the new work item")
 	workReplayCmd.Flags().String("target-revision", "", "Replay against a different target revision (default: the original's)")
@@ -677,6 +744,7 @@ func init() {
 	workDeliveriesListCmd.Flags().String("decision", "", "Filter by filter decision: accepted or ignored")
 	workDeliveriesListCmd.Flags().String("event-type", "", "Filter by event type, e.g. issues or push")
 	workDeliveriesListCmd.Flags().String("after", "", "Resume from a previous page's cursor")
+	workDeliveriesListCmd.Flags().String("since", "", "Only deliveries received since then: a duration (24h, 7d) or an RFC3339 time")
 
 	workDeliveriesCmd.AddCommand(workDeliveriesListCmd)
 	workDeliveriesCmd.AddCommand(workDeliveriesGetCmd)

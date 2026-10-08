@@ -7983,6 +7983,9 @@
           "color": {
             "type": "string"
           },
+          "deleted": {
+            "type": "boolean"
+          },
           "icon": {
             "type": "string"
           },
@@ -7997,7 +8000,8 @@
           "id",
           "name",
           "color",
-          "icon"
+          "icon",
+          "deleted"
         ],
         "type": "object"
       },
@@ -153182,6 +153186,14 @@
           },
           {
             "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "source_delivery_id",
             "required": false,
             "schema": {
@@ -153483,6 +153495,22 @@
           {
             "in": "query",
             "name": "class",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "open",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
             "required": false,
             "schema": {
               "type": "string"
