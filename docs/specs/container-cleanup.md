@@ -112,7 +112,11 @@ Opt-in, separate from deletion cleanup, and never acting on deleted owners
 (those are the controller above) or on another installation's containers.
 Enabled by `CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS` and `CREWSHIP_CACHE_EVICTION`
 (`container.idle_runtime_retention_days`, `container.cache_eviction`); runs at
-boot and every 10 minutes while the Docker provider is available.
+boot and every 10 minutes while the Docker provider is available. Cancellation
+is checked before each pass and again after writer admission, before provider
+work. An already-canceled lifecycle starts no cleanup pass; a simultaneously
+ready tick cannot start another pass after cancellation. Unavailable-daemon
+failures remain retryable on later ticks until cancellation.
 
 **Stopped runtimes.** A runtime container (kind `crew`, this installation's
 `crewship.instance-id`) of a crew that is live in this database is removed once

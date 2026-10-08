@@ -104,6 +104,9 @@ func (r *Retention) Run(ctx context.Context) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		r.Tick(ctx)
 		select {
 		case <-ctx.Done():
@@ -118,12 +121,21 @@ func (r *Retention) Tick(ctx context.Context) {
 	if r == nil || r.DB == nil || r.Runtime == nil || r.InstanceID == "" {
 		return
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if ctx.Err() != nil {
+		return
+	}
 	writer, ok := quiesce.Enter(ctx)
 	if !ok {
 		return
 	}
 	defer writer.Leave()
 	ctx = writer.Context()
+	if ctx.Err() != nil {
+		return
+	}
 	if r.RuntimeAfter > 0 {
 		r.runtimes(ctx)
 	}
