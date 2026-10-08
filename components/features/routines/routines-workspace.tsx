@@ -7,6 +7,7 @@ import { ArrowUpRight, Workflow } from "lucide-react"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { usePipelineRuns } from "@/hooks/use-pipeline-runs"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
+import { usePendingStarts } from "@/hooks/use-pending-starts"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { useActiveRoutineRuns, isAwaitingApproval } from "@/hooks/use-active-routine-runs"
 import { InlineEmpty } from "@/components/ui/inline-empty"
@@ -113,6 +114,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
   const tab: ListTab = TABS.includes(selectedTab as ListTab) ? (selectedTab as ListTab) : "routines"
   const { bySlug, runs: activeRuns } = useActiveRoutineRuns()
   const { schedules } = usePipelineSchedules(props.workspaceId)
+  const { starts: pendingStarts } = usePendingStarts(props.workspaceId)
   const { runs: recordedRuns, loading: dashboardRunsLoading } = usePipelineRuns(
     props.workspaceId,
     "all",
@@ -183,6 +185,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                 runs={dashboardRuns}
                 runsLoading={dashboardRunsLoading}
                 coveredSince={coveredSince}
+                pendingStarts={pendingStarts}
                 schedules={schedules}
                 onSelect={props.onSelect}
               />
