@@ -202,6 +202,23 @@ export function chainBranches(graph: BranchGraph, originRunRef: string): RunTree
   return childrenOf(rootId)
 }
 
+/**
+ * The issues a run created: the `produces` edges from the run to an issue
+ * (missions.author_run_id, #2986). Read off the walk, so no five-ref cap
+ * applies, and an issue that was only the run's input is never counted.
+ */
+export function issuesCreatedBy(graph: BranchGraph, runRef: string): { id: string; label: string }[] {
+  const from = `run:${runRef}`
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+  const out: { id: string; label: string }[] = []
+  for (const e of graph.edges) {
+    if (e.from !== from || e.kind !== "produces") continue
+    const n = byId.get(e.to)
+    if (n?.kind === "issue") out.push({ id: n.ref, label: n.label || n.ref })
+  }
+  return out
+}
+
 /* ------------------------------------------------------------------ *
  *  Linked to
  * ------------------------------------------------------------------ */

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   chainBranches,
+  issuesCreatedBy,
   historyStrip,
   linkedEntities,
   runActions,
@@ -199,5 +200,24 @@ describe("runStatusLabel", () => {
     expect(runStatusLabel("interrupted")).toBe("Interrupted")
     expect(runStatusLabel("failed")).toBe("Could not finish")
     expect(runStatusLabel("completed")).toBe("Completed")
+  })
+})
+
+describe("issuesCreatedBy (#2986)", () => {
+  it("reads the issues a run created off its produces edges, not the capped chain refs", () => {
+    const graph = {
+      nodes: [
+        { id: "run:r1", kind: "run", ref: "r1", label: "triage" },
+        { id: "issue:i1", kind: "issue", ref: "i1", label: "OPS-1", key: "OPS-1" },
+        { id: "issue:i2", kind: "issue", ref: "i2", label: "Input issue" },
+        { id: "issue:i3", kind: "issue", ref: "i3", label: "Other run's" },
+      ],
+      edges: [
+        { from: "run:r1", to: "issue:i1", kind: "produces" },
+        { from: "issue:i2", to: "run:r1", kind: "triggers" },
+        { from: "run:r9", to: "issue:i3", kind: "produces" },
+      ],
+    }
+    expect(issuesCreatedBy(graph, "r1")).toEqual([{ id: "i1", label: "OPS-1" }])
   })
 })

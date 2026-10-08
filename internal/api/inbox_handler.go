@@ -56,6 +56,25 @@ type InboxHandler struct {
 //
 // All three handlers (List, UnreadCount, PatchState) call this so the
 // predicate stays consistent across the surface.
+// inboxAudience is inboxVisibilityClause as a predicate over one row's
+// target_user_id and target_role, for readers that meet inbox items outside
+// the inbox query — the chain walk (#2986). It must stay the same rule: an
+// untargeted item, an item addressed to this user, or one addressed to a role
+// at or below the caller's.
+func inboxAudience(userID, role string) func(targetUserID, targetRole string) bool {
+	callerRank := roleRank[role]
+	return func(targetUserID, targetRole string) bool {
+		if targetUserID == "" && targetRole == "" {
+			return true
+		}
+		if userID != "" && targetUserID == userID {
+			return true
+		}
+		rank := roleRank[targetRole]
+		return rank > 0 && rank <= callerRank
+	}
+}
+
 func inboxVisibilityClause(userID, role string) (string, []interface{}) {
 	// Target roles the caller can see = every role at or below the
 	// caller's rank. roleRank[""] is 0, so an empty/unknown caller role

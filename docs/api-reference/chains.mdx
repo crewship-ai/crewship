@@ -404,11 +404,16 @@ Every edge is backed by a real column. Nothing is inferred.
 | routine → run | `runs` | `pipeline_runs.pipeline_id` (FK) |
 | run → run | `triggers` | `triggered_via='call_pipeline'`, `triggered_by_id` = parent run id |
 | issue → assignment | `triggers` | `mission_tasks.assignment_id` |
+| issue → assignment | `triggers` | `assignments.mission_id` — mention, lead-planning and `/assign` work, and tasks re-pointed by a human reply |
+| issue → run | `triggers` | `issue_executions.routine_run_id` |
+| run → issue | `produces` | `missions.author_run_id` — the issue the run created |
 | assignment → assignment | `triggers` | `assignments.parent_assignment_id` |
 | agent → assignment | `executes` | `assignments.assigned_to_id` |
 | agent → run | `executes` | `journal_entries` where `actor_type='agent'` and (`trace_id` = run id OR `run_id` = run id) |
 | run → inbox | `produces` | `inbox_items.kind='waitpoint'` joined through `pipeline_waitpoints.token` = `source_id` |
 | run → inbox | `produces` | `inbox_items.kind='failed_run'`, `payload_json` → `$.run_id` |
+| run → inbox | `produces` | `inbox_items.kind='run_needs_human'`, `source_id` = the pipeline run id |
+| assignment → inbox | `produces` | `inbox_items.kind='run_needs_human'`, `source_id` = the assignment id (issue work) |
 | automation → run | `triggers` | `pipeline_runs.triggered_via='automation'` and `triggered_by_id` = `automations.id` |
 | automation → routine | `triggers` | `automations.action_config_json` → `$.routine_slug`, resolved against `pipelines.slug` in the same workspace |
 | issue ↔ issue | `relates` | `mission_relations` (author-declared, not causal) |
@@ -542,6 +547,16 @@ attributed to any chain — see [What the index does not cover](#what-the-index-
 — so treat it as unattributable rather than as a member. If **no** run node in a
 response carries the field, you are talking to a server older than this field
 and should keep every run rather than drop them all.
+
+### Who sees which inbox items
+
+Inbox nodes follow the inbox's own audience, the same rule as `/inbox`. A caller sees:
+
+- untargeted items;
+- items addressed to them;
+- items addressed to a role at or below theirs.
+
+Anything else is left out of the walk and never named. A hidden item used as the anchor is a `404`, the same as one that does not exist. When the walk withheld items it adds a gap `{"from": "inbox", "to": "viewer"}`. The full link contract is in `docs/specs/activity-links.md`.
 
 ### Links that do not exist
 

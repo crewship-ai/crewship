@@ -199,4 +199,25 @@ describe("ActivityRunPage", () => {
     render(<ActivityRunPage workspaceId="ws" runId="agent_run" onOpenNode={vi.fn()} />)
     expect(screen.getByText("Typed detail agent_run")).toBeInTheDocument()
   })
+
+  it("lists an issue the run created even when no chain row carries it (#2986)", async () => {
+    mock.fetch.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/v1/chains/")) {
+        return new Response(
+          JSON.stringify({
+            nodes: [
+              { id: "run:run_1", kind: "run", ref: "run_1", label: "repair-demo", depth: 0 },
+              { id: "issue:m9", kind: "issue", ref: "m9", label: "QUA-9", depth: 1 },
+            ],
+            edges: [{ from: "run:run_1", to: "issue:m9", kind: "produces" }],
+          }),
+        )
+      }
+      return respond(url)
+    })
+    render(<ActivityRunPage workspaceId="ws" runId="run_1" onOpenNode={vi.fn()} />)
+    const changed = screen.getByRole("region", { name: "What it changed" })
+    expect(await within(changed).findByText("QUA-9")).toBeInTheDocument()
+    expect(within(changed).getByText("Created")).toBeInTheDocument()
+  })
 })

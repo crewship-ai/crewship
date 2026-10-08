@@ -62,6 +62,7 @@ import {
   chainBranches,
   historyStrip,
   isActiveRun,
+  issuesCreatedBy,
   linkedEntities,
   runActions,
   runStatusLabel,
@@ -138,9 +139,25 @@ function RunPage({
     graphIssues: graph?.nodes.filter((n) => n.kind === "issue").map((n) => ({ ref: n.ref, label: n.label })),
     agents: chain?.agents,
   })
-  // The chain's issues are this run's only when the chain starts here; a run
-  // opened from deeper in a chain does not own what its parent touched.
-  const changed = chain?.origin === runId ? (chain.issues ?? []) : []
+  // What the run created comes from the walk's produces edges (#2986), with
+  // no five-ref cap. The chain's other issues count only when the chain
+  // starts here — a run opened deeper in a chain does not own what its parent
+  // touched — and then only as touched.
+  const changed = React.useMemo(() => {
+    const created = graph ? issuesCreatedBy(graph, runId) : []
+    const rows: { id: string; identifier?: string; title?: string; created: boolean }[] = created.map((i) => ({
+      id: i.id,
+      title: i.label,
+      created: true,
+    }))
+    if (chain?.origin === runId) {
+      for (const i of chain.issues ?? []) {
+        if (rows.some((r) => r.id === i.id)) continue
+        rows.push({ id: i.id, identifier: i.identifier, title: i.title, created: !!i.created })
+      }
+    }
+    return rows
+  }, [graph, runId, chain])
   const history = historyStrip(records, runId)
 
   async function retry() {
