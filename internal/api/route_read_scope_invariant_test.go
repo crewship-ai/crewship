@@ -175,6 +175,7 @@ var readRoutesWithoutWorkspace = map[string]string{
 	"GET /api/v1/me/preferences":                    "caller's own preferences",
 	"GET /api/v1/onboarding/status":                 "per-user onboarding progress",
 	"GET /api/v1/users/{id}/avatar":                 "avatar blob; no tenant rows",
+	"GET /api/v1/workspaces/{workspaceId}/logo":     "logo blob; no tenant rows (drawn to instance admins and in the switcher)",
 	"GET /api/v1/oauth/callback":                    "OAuth redirect landing; state carries the context",
 	"GET /api/v1/feedback":                          "caller's own submitted feedback",
 	"GET /api/v1/connectors/{connectorId}":          "static connector manifest read off disk, not tenant rows",

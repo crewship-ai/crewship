@@ -1020,6 +1020,8 @@ func statusForBackupError(err error) int {
 	case errors.Is(err, backup.ErrDecryption),
 		errors.Is(err, backup.ErrInvalidChecksum):
 		return http.StatusBadRequest
+	case errors.Is(err, backup.ErrRestoreNameTaken):
+		return http.StatusConflict
 	case errors.Is(err, backup.ErrNoOpRestore):
 		// The DB was never mutated; surface as 409 so the client sees
 		// "nothing to do" rather than "internal error".

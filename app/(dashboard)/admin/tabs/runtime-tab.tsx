@@ -5,7 +5,7 @@ import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { SettingsCard, SettingsDangerCard, SettingsRow, SettingsSegmented, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsDangerCard, SettingsRow, SettingsSaveBar, SettingsSegmented, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
 import { RuntimeIcon, runtimeBrand } from "@/components/icons/runtime-icons"
 import { apiFetch } from "@/lib/api-fetch"
 import { withWs } from "@/lib/admin-workspace-query"
@@ -295,27 +295,37 @@ const DURATIONS = [
   { label: "4 hours", seconds: 14400 },
 ] as const
 
+const DEFAULT_TTL = 900
+
 function LoggingCard({ workspaceId, state, onChange }: { workspaceId: string | null; state: LogLevelState | null; onChange: (s: LogLevelState) => void }) {
-  const [level, setLevel] = React.useState<string>("debug")
-  const [ttl, setTtl] = React.useState<number>(900)
+  // The picked level is a draft until the page's Save bar applies it; null
+  // follows whatever the server reports.
+  const [draftLevel, setDraftLevel] = React.useState<string | null>(null)
+  const [ttl, setTtl] = React.useState<number>(DEFAULT_TTL)
   const [busy, setBusy] = React.useState(false)
-  const put = async (body: { level: string; ttl_seconds: number }, done: string) => {
+  const level = draftLevel ?? state?.level ?? "debug"
+  /** PUT the level; throws the server's reason so the caller decides how to show it. */
+  const put = async (body: { level: string; ttl_seconds: number }) => {
     setBusy(true)
     try {
       const res = await apiFetch(withWs("/api/v1/admin/log-level", workspaceId), {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       })
-      if (!res.ok) { toast.error(await readApiError(res, "The log level was not changed")); return }
+      if (!res.ok) throw new Error(await readApiError(res, "The log level was not changed"))
       onChange(await res.json())
-      toast.success(done)
-    } catch {
-      toast.error("The log level was not changed")
+    } catch (e) {
+      throw e instanceof Error ? e : new Error("The log level was not changed")
     } finally {
       setBusy(false)
     }
   }
   const overridden = !!state && (state.level !== state.baseline || !!state.expires_at)
-  const changes = !state || level !== state.level
+  const changed = draftLevel !== null && (!state || draftLevel !== state.level)
+  const apply = async () => {
+    await put({ level, ttl_seconds: ttl })
+    setDraftLevel(null)
+    setTtl(DEFAULT_TTL)
+  }
   return (
     <SettingsCard icon={ScrollText} tint="var(--info)" title="Logging"
       description="Raise verbosity for a while; it drops back to the baseline by itself.">
@@ -328,23 +338,26 @@ function LoggingCard({ workspaceId, state, onChange }: { workspaceId: string | n
               : `Baseline ${state.baseline}`}
           </span>
         ) : "Not reported"}>
-        <SettingsSegmented label="Level" options={LEVELS.map((l) => ({ value: l, label: l }))} value={level} onChange={setLevel} disabled={busy} />
+        <SettingsSegmented label="Level" options={LEVELS.map((l) => ({ value: l, label: l }))} value={level} onChange={setDraftLevel} disabled={busy} />
       </SettingsRow>
       <SettingsRow label="Drop back after" description="How long the new level holds">
         <SettingsSegmented label="Duration" options={DURATIONS.map((d) => ({ value: d.seconds, label: d.label }))} value={ttl} onChange={setTtl} disabled={busy} />
       </SettingsRow>
-      <div className="flex items-center justify-end gap-2 px-4 py-2.5">
-        {state && overridden && (
+      {/* The edit joins the page's Save bar. A level change is the edit; a
+          duration only means something with one. */}
+      <SettingsSaveBar label="Logging" count={changed ? (ttl !== DEFAULT_TTL ? 2 : 1) : 0} saving={busy}
+        onSave={apply} onDiscard={() => { setDraftLevel(null); setTtl(DEFAULT_TTL) }} />
+      {state && overridden && (
+        <div className="flex items-center justify-end gap-2 px-4 py-2.5">
+          {/* An action, not an edit: it commits on the spot. */}
           <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={busy}
-            onClick={() => put({ level: state.baseline, ttl_seconds: 0 }, `Back to ${state.baseline}`)}>
-            Back to {state.baseline}
+            onClick={() => put({ level: state.baseline, ttl_seconds: 0 })
+              .then(() => { setDraftLevel(null); toast.success(`Back to ${state.baseline}`) })
+              .catch((e: Error) => toast.error(e.message))}>
+            {busy && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Back to {state.baseline}
           </Button>
-        )}
-        <Button size="sm" className="h-7 px-3 text-xs" disabled={busy || !changes}
-          onClick={() => put({ level, ttl_seconds: ttl }, `Log level ${level} for ${DURATIONS.find((d) => d.seconds === ttl)?.label}`)}>
-          {busy && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Apply
-        </Button>
-      </div>
+        </div>
+      )}
     </SettingsCard>
   )
 }

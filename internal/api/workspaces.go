@@ -116,6 +116,9 @@ type WorkspaceHandler struct {
 	// nil is safe: transferDepartingUserPages falls back to a no-op
 	// emitter on its own, matching every other SetJournal in this package.
 	journal journal.Emitter
+	// storageRoot keeps uploaded workspace logos (#3005); the router's
+	// storagePath, set by SetStorageRoot.
+	storageRoot string
 }
 
 // NewWorkspaceHandler creates a WorkspaceHandler with the given database and logger.

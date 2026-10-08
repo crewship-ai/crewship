@@ -1110,7 +1110,10 @@ workspaces:
   attachment files, memory versions without content, crews without their
   container), workspaces never or not recently backed up (the plan's
   `stale_alert_hours`, 36 by default), workspaces on no plan, and failed,
-  skipped or late runs. The whole-instance view also says when the latest
+  skipped or late runs. Workspaces that hold no crew (every signup gets one of
+  its own) are not judged one by one: one item says how many of them have no
+  backup and names up to three; they get no coverage row, and the summary
+  counts them apart ("N workspaces without crews"). The whole-instance view also says when the latest
   instance backup cannot unlock credentials on a new server — the vault key
   versions its sealed values use that its recovery kit does not carry (all of
   them when the kit was off), read from the bundle's own manifest. When the
@@ -1380,6 +1383,12 @@ server, 1–30, to change how many; `1` pages on every skip), and a plan that
 keeps skipping past `stale_alert_hours` also raises `stale`. A good run
 resolves both and starts the count over.
 
+A plan over several workspaces runs once per workspace for one due time (or
+one **Back up now**). Its `failed` and `stale` incidents clear only once every
+run of that group has finished and none failed, was interrupted or was
+skipped — one workspace coming back well never hides another one failing. A
+retry after an interruption stands in for the run it retried.
+
 The reminder's message names the command to run, for example "No test
 restore in 32 days — run `crewship backup drill --bundle <newest bundle>
 --identity <key file>`." It is delivered once when it opens, like `stale`, and
@@ -1422,7 +1431,7 @@ What happened: Nightly backup failed. Last successful backup: 32 hours ago.
 Detail: <the run's error>
 Repeats: 3 times since 2026-09-28T02:00:00Z · one incident
 Last good backup: 32 hours ago
-Open Backups: https://crewship.example.com/admin?tab=backups&section=overview
+Open Backups: https://crewship.example.com/admin/backups
 ```
 
 The link is made absolute against `CREWSHIP_PUBLIC_URL`; without it the
@@ -1445,9 +1454,12 @@ deleted) stays on it — other settings still save — and its alerts fail with
 the reason until it is removed. Adding a channel checks it is usable now.
 
 When the server itself is down its inbox is down too, so set a **heartbeat**:
-a public https URL (a healthchecks-style service) the server pings after
-every good run, with a 10-second timeout and one retry, never delaying the
-run. The outside service alerts when the pings stop. The last ping's time and
+a public https URL (a healthchecks-style service) the server pings once a
+plan's run comes back good — for a plan over several workspaces, once every
+run of that due time (or manual start) has finished and all of them are
+done — with a 10-second timeout and one retry, never delaying the run. A ping
+says that plan's latest round succeeded; it is not a health check of every
+plan. The outside service alerts when the pings stop. The last ping's time and
 outcome show in the settings.
 
 ### Backup keys and the recovery sheet
@@ -1467,9 +1479,11 @@ no secret.
 
 ## Admin UI
 
-Admin › Data › **Backups** is for instance administrators. It folds out six
-pages in the Admin sidebar, each deep-linkable as
-`/admin?tab=backups&section=<page>`:
+Admin › Data › **Backups** is for instance administrators. It is a page of
+its own, `/admin/backups`, with a side panel like Admin › Security: the scope,
+Overview, the runs by result, the plans, Recovery and the instance settings.
+Each page is deep-linkable as `/admin/backups?section=<page>` (an old
+`/admin?tab=backups&section=<page>` link still lands there):
 
 | Page | What it answers |
 |---|---|
@@ -1480,7 +1494,7 @@ pages in the Admin sidebar, each deep-linkable as
 | Recovery | A guided restore: backup, target, keys, checks, dry run, restore, then resume what stayed held. A whole-instance restore runs from the CLI; see [Recovery in the console](#recovery-in-the-console). |
 | Keys & alerts | The AGE public keys backups are encrypted to, the vault key versions restored secrets need, and who hears when a backup goes wrong. |
 
-A strip above each page chooses **Whole instance** or **Selected
+The panel's **Scope** chooses **Whole instance** or **Selected
 workspaces**; the choice is kept in the URL. Admin › Data › **Data
 retention** sets how long each kind of live data is kept per workspace, and
 shows a dry run of what a change overwrites before it is saved.

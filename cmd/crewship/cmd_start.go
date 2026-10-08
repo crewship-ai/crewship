@@ -352,7 +352,7 @@ var startCmd = &cobra.Command{
 			if err := lic.LoadFromFile(cfg.License.FilePath); err != nil {
 				logger.Warn("failed to load license file, using community defaults", "error", err, "path", cfg.License.FilePath)
 			} else {
-				c := lic.Claims()
+				c := lic.EffectiveClaims()
 				logger.Info("license loaded",
 					"edition", c.Edition,
 					"licensee", c.LicenseeOrg,

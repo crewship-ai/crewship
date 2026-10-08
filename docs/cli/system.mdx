@@ -92,7 +92,7 @@ harness rather than read out of release notes: it means "we ran it and watched
 it not happen". The same finding appears as a startup `WARN` in the server log,
 and as an advisory row in [`crewship doctor`](/cli/doctor#container-runtime-gaps).
 
-**License output:** Edition, Max crews, Max agents/crew, Max members, Licensee.
+**License output:** Edition, Max crews, Max agents/crew, Max members, Licensee. Current resource capacity is **Unlimited**; JSON/YAML uses `0` for unlimited. Resource licensing may change in future releases.
 
 With `--format json|yaml|ndjson` the command emits a structured payload
 (`runtime` + optional `license` key; `license` is omitted when the endpoint

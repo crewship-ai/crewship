@@ -30,6 +30,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 		ws.SetHub(r.hub)
 	}
 	ws.SetJournal(r.Journal())
+	ws.SetStorageRoot(r.storagePath)
 	crews := NewCrewHandler(r.db, r.logger)
 	crewSocket := r.socketPath
 	if crewSocket == "" {
@@ -99,6 +100,12 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// enforced inside the handler; the route gate is roleManage (ADMIN+)
 	// so a MANAGER never even reaches the finer OWNER check (#866.2).
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}", roleManage, ws.Delete)
+	// Workspace logo (#3005): set/clear like a rename (ADMIN+); the serve
+	// route is authed only — a workspace is drawn to instance admins and in
+	// the switcher, not just to its members.
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/logo", roleManage, ws.UploadLogo)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/logo", roleManage, ws.DeleteLogo)
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/logo", authed(http.HandlerFunc(ws.ServeLogo)))
 
 	// Workspace members
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members", authed(wsCtx(http.HandlerFunc(ws.ListMembers))))
