@@ -85,6 +85,7 @@ DELETE /api/v1/users/me/user-model roleSelf
 DELETE /api/v1/users/me/user-model/facts/{key} roleSelf
 DELETE /api/v1/workflow-templates/{id} roleCreate
 DELETE /api/v1/workspaces/{workspaceId} roleManage
+DELETE /api/v1/workspaces/{workspaceId}/logo roleManage
 DELETE /api/v1/workspaces/{workspaceId}/members/{memberId} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId} roleManage
@@ -344,6 +345,7 @@ POST /api/v1/workflow-templates roleCreate
 POST /api/v1/workspaces roleSelf
 POST /api/v1/workspaces/{workspaceId}/invitations roleManage
 POST /api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight roleSelf
+POST /api/v1/workspaces/{workspaceId}/logo roleManage
 POST /api/v1/workspaces/{workspaceId}/members roleManage
 POST /api/v1/workspaces/{workspaceId}/members/provision roleManage
 POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal roleCreate

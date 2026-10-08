@@ -2,6 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
 
 import { ProfileSection } from "../profile-section"
+import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
+
+/** As Settings renders it: inside the page's one floating Save bar. */
+function renderInPage(ui: React.ReactElement) {
+  return render(<PageSaveProvider>{ui}<PageSaveBar /></PageSaveProvider>)
+}
 
 // Same pattern as privacy-section.test.tsx / privileged-credentials-card.test.tsx:
 // drive the component through its real fetch path with a stubbed apiFetch.
@@ -113,9 +121,8 @@ describe("ProfileSection", () => {
 
   it("re-pulls the session after a name change so the top bar renames too", async () => {
     mockApi()
-    render(<ProfileSection userName="Ada Lovelace" userEmail="ada@example.com" />)
+    renderInPage(<ProfileSection userName="Ada Lovelace" userEmail="ada@example.com" />)
 
-    fireEvent.click(screen.getByRole("button", { name: /edit/i }))
     fireEvent.change(screen.getByDisplayValue("Ada Lovelace"), { target: { value: "Ada L" } })
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
 
@@ -142,32 +149,50 @@ describe("ProfileSection", () => {
     await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith(expect.stringMatching(/profile picture/i)))
   })
 
-  it("toasts a confirmation when the full-name save succeeds", async () => {
+  it("the name is a plain field: no Save until edited, then the page bar commits it", async () => {
     mockApi()
-    render(<ProfileSection userName="Ada Lovelace" userEmail="ada@example.com" />)
+    renderInPage(<ProfileSection userName="Ada Lovelace" userEmail="ada@example.com" />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
     const nameInput = screen.getByLabelText("Full name")
+    expect(nameInput).toHaveValue("Ada Lovelace")
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
+
     fireEvent.change(nameInput, { target: { value: "Grace Hopper" } })
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("1 unsaved change")
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith(expect.stringMatching(/name/i)))
-    // Editor closes on success, same as before this change.
-    expect(screen.queryByLabelText("Full name")).toBeNull()
+    await waitFor(() => {
+      const patch = apiFetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")
+      expect(JSON.parse(String((patch![1] as RequestInit).body))).toEqual({ full_name: "Grace Hopper" })
+    })
+    // Success is the bar saying so, not a toast; the field keeps the new name.
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Saved"))
+    expect(toastSuccess).not.toHaveBeenCalled()
+    expect(screen.getByLabelText("Full name")).toHaveValue("Grace Hopper")
   })
 
-  it("on a rejected name save, does not toast success and keeps the inline error with the editor open", async () => {
+  it("on a rejected name save, toasts the server's reason in the corner and keeps what was typed", async () => {
     mockApi({ namePatchStatus: 500 })
-    render(<ProfileSection userName="Ada Lovelace" userEmail="ada@example.com" />)
+    renderInPage(<ProfileSection userName="Ada Lovelace" userEmail="ada@example.com" />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
-    const nameInput = screen.getByLabelText("Full name")
-    fireEvent.change(nameInput, { target: { value: "Grace Hopper" } })
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Grace Hopper" } })
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
-    await waitFor(() => expect(screen.getByText("name rejected")).toBeTruthy())
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(toastError.mock.calls[0][0]).toBe("Couldn’t save Account")
+    expect(toastError.mock.calls[0][1]).toMatchObject({ description: "name rejected Your edits are kept." })
     expect(toastSuccess).not.toHaveBeenCalled()
-    expect(screen.getByLabelText("Full name")).toBeTruthy()
+    expect(screen.getByLabelText("Full name")).toHaveValue("Grace Hopper")
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("1 unsaved change")
+  })
+
+  it("blocks an empty name under the field, with Save disabled", () => {
+    mockApi()
+    renderInPage(<ProfileSection userName="Ada Lovelace" userEmail="ada@example.com" />)
+
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "   " } })
+    expect(screen.getByText("Name must be 1-100 characters")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
   })
 })
 

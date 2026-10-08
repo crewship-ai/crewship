@@ -31,6 +31,8 @@ func TestAcceptance_AdminInstanceBackupPlans(t *testing.T) {
 		`INSERT INTO workspaces(id,name,slug,created_at) VALUES('bp-people','People','people','2026-01-01 00:00:00'),('bp-lab','Lab','lab','2026-06-01 00:00:00')`,
 		`INSERT INTO users(id,email,full_name) VALUES('bp-boss','boss@people.invalid','Boss'),('bp-carol','carol@lab.invalid','Carol')`,
 		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('bp-m1','bp-people','bp-boss','OWNER'),('bp-m2','bp-lab','bp-carol','OWNER')`,
+		// Lab holds a crew: the overview lists only workspaces with crews.
+		`INSERT INTO crews(id,workspace_id,slug,name) VALUES('bp-crew','bp-lab','research','Research')`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatalf("%v\n%s", err, q)
