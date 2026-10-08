@@ -150,3 +150,52 @@ func TestWorkItemsList_SaysASoftDeletedAgentIsDeleted(t *testing.T) {
 		t.Fatalf("a soft-deleted agent must keep its name and say deleted, got %+v", got)
 	}
 }
+
+// The ledger draws an agent with the render stored for it, as every other
+// list does. Without avatar_url the client takes the agent for one with no
+// stored render and tries to backfill it on every page view, which the server
+// refuses with 409.
+func TestWorkItemsList_GivesTheAgentsStoredAvatar(t *testing.T) {
+	db := setupTestDB(t)
+	user := seedTestUser(t, db)
+	ws := seedTestWorkspace(t, db, user)
+	crew := seedCrewRow(t, db, "crew-x", ws, "Shop", "shop")
+	stored := seedAgentRow(t, db, "agent-stored", ws, crew, "Casey", "casey", "AGENT")
+	plain := seedAgentRow(t, db, "agent-plain", ws, crew, "Robin", "robin", "AGENT")
+	if _, err := db.Exec(`UPDATE agents SET avatar_svg_hash = 'abc123' WHERE id = ?`, stored); err != nil {
+		t.Fatal(err)
+	}
+	seedWorkItem(t, db, seededWork{ID: "wk-stored", WorkspaceID: ws, State: "succeeded", Source: "webhook", AgentID: stored})
+	seedWorkItem(t, db, seededWork{ID: "wk-plain", WorkspaceID: ws, State: "succeeded", Source: "webhook", AgentID: plain})
+
+	rr := httptest.NewRecorder()
+	NewWorkItemsHandler(db, quietLogger()).List(rr, workReq(t, "GET", "/x", "", user, ws, "OWNER"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	var page struct {
+		Items []struct {
+			ID    string `json:"id"`
+			Agent *struct {
+				AvatarURL *string `json:"avatar_url"`
+			} `json:"agent"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]*string{}
+	for _, it := range page.Items {
+		if it.Agent == nil {
+			t.Fatalf("item %s has no agent: %s", it.ID, rr.Body.String())
+		}
+		got[it.ID] = it.Agent.AvatarURL
+	}
+	want := "/api/v1/agents/agent-stored/avatar?v=abc123&workspace_id=" + ws
+	if got["wk-stored"] == nil || *got["wk-stored"] != want {
+		t.Errorf("stored avatar_url = %v, want %s", got["wk-stored"], want)
+	}
+	if got["wk-plain"] != nil {
+		t.Errorf("an agent without a stored render gets avatar_url %q, want null", *got["wk-plain"])
+	}
+}

@@ -28,6 +28,10 @@ type ledgerAgentRef struct {
 	Slug        string `json:"slug"`
 	AvatarSeed  string `json:"avatar_seed"`
 	AvatarStyle string `json:"avatar_style"`
+	// AvatarURL is the agent's stored render, null when it has none — the
+	// same field the agents list carries, so the client draws the same face
+	// and does not try to backfill one that is already stored.
+	AvatarURL *string `json:"avatar_url"`
 	// Deleted is true for an agent removed from the workspace whose row
 	// remains (deleted_at): its name still says whose work it was.
 	Deleted bool `json:"deleted"`
@@ -67,7 +71,7 @@ func lookupLedgerAgents(ctx context.Context, db *sql.DB, workspaceID string, ids
 		return out, nil
 	}
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, COALESCE(name,''), COALESCE(slug,''), COALESCE(avatar_seed,''), COALESCE(avatar_style,''), COALESCE(crew_id,''), deleted_at IS NOT NULL
+		SELECT id, COALESCE(name,''), COALESCE(slug,''), COALESCE(avatar_seed,''), COALESCE(avatar_style,''), COALESCE(avatar_svg_hash,''), COALESCE(crew_id,''), deleted_at IS NOT NULL
 		FROM agents WHERE workspace_id = ? AND id IN (`+placeholders(len(keys))+`)`,
 		append([]any{workspaceID}, keys...)...)
 	if err != nil {
@@ -76,9 +80,11 @@ func lookupLedgerAgents(ctx context.Context, db *sql.DB, workspaceID string, ids
 	defer rows.Close()
 	for rows.Next() {
 		var a ledgerAgentRef
-		if err := rows.Scan(&a.ID, &a.Name, &a.Slug, &a.AvatarSeed, &a.AvatarStyle, &a.crewID, &a.Deleted); err != nil {
+		var hash string
+		if err := rows.Scan(&a.ID, &a.Name, &a.Slug, &a.AvatarSeed, &a.AvatarStyle, &hash, &a.crewID, &a.Deleted); err != nil {
 			return nil, err
 		}
+		a.AvatarURL = agentAvatarURL(a.ID, hash, workspaceID)
 		out[a.ID] = &a
 	}
 	return out, rows.Err()
