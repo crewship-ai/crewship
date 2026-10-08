@@ -1380,6 +1380,12 @@ server, 1–30, to change how many; `1` pages on every skip), and a plan that
 keeps skipping past `stale_alert_hours` also raises `stale`. A good run
 resolves both and starts the count over.
 
+A plan over several workspaces runs once per workspace for one due time (or
+one **Back up now**). Its `failed` and `stale` incidents clear only once every
+run of that group has finished and none failed, was interrupted or was
+skipped — one workspace coming back well never hides another one failing. A
+retry after an interruption stands in for the run it retried.
+
 The reminder's message names the command to run, for example "No test
 restore in 32 days — run `crewship backup drill --bundle <newest bundle>
 --identity <key file>`." It is delivered once when it opens, like `stale`, and
@@ -1445,9 +1451,12 @@ deleted) stays on it — other settings still save — and its alerts fail with
 the reason until it is removed. Adding a channel checks it is usable now.
 
 When the server itself is down its inbox is down too, so set a **heartbeat**:
-a public https URL (a healthchecks-style service) the server pings after
-every good run, with a 10-second timeout and one retry, never delaying the
-run. The outside service alerts when the pings stop. The last ping's time and
+a public https URL (a healthchecks-style service) the server pings once a
+plan's run comes back good — for a plan over several workspaces, once every
+run of that due time (or manual start) has finished and all of them are
+done — with a 10-second timeout and one retry, never delaying the run. A ping
+says that plan's latest round succeeded; it is not a health check of every
+plan. The outside service alerts when the pings stop. The last ping's time and
 outcome show in the settings.
 
 ### Backup keys and the recovery sheet
