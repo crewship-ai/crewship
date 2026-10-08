@@ -144,6 +144,11 @@ describe("workflowLabel", () => {
     )
   })
 
+  it("prefers the routine's human name over its slug (#2979)", () => {
+    expect(workflowLabel({ routine_slug: "demo-marketing-check" }, "Check form delivery")).toBe("Check form delivery")
+    expect(workflowLabel({ routine_slug: "demo-marketing-check" }, "  ")).toBe("demo-marketing-check")
+  })
+
   it("falls back to whoever started it when the chain has no routine", () => {
     expect(workflowLabel({ started_by: "Pavel" })).toBe("Pavel")
   })
@@ -308,7 +313,9 @@ describe("the trail says where you are and how you got there", () => {
     const trail = activityTrail(path)
     expect(trail.crumbs.map((c) => c.label)).toEqual([
       "Overview",
-      "workflow: on-close-file-followup",
+      // A rail row's stop is named plainly: "workflow" is the code's word,
+      // not one the reader ever sees on the row they clicked (#2979).
+      "on-close-file-followup",
       "run: step 2 · fetch",
       "agent: ada",
     ])

@@ -12,6 +12,7 @@ import {
   matchesQuery,
   narrowChains,
   routineLens,
+  startedByWord,
   workflowHandle,
   workflowName,
   workflowSentence,
@@ -413,5 +414,17 @@ describe("assignmentsOf", () => {
     // "0 assignments" on the page the rail led to.
     expect(assignmentsOf({ id: "a", assignments: 0 })).toBe(1)
     expect(assignmentsOf({ id: "a", assignments: 3 })).toBe(3)
+  })
+})
+
+describe("startedByWord", () => {
+  it("says what set the run off in the rail's short words (#2979)", () => {
+    expect(startedByWord(chain({ started_by_kind: "schedule", started_by: "every 15 min" }))).toBe("schedule")
+    expect(startedByWord(chain({ started_by_kind: "webhook", started_by: "contact-form" }))).toBe("webhook · contact-form")
+    expect(startedByWord(chain({ started_by_kind: "user", started_by: "Demo" }))).toBe("by hand")
+    expect(startedByWord(chain({ started_by_kind: "issue", started_by: "Fix", started_by_key: "OPS-1" }))).toBe("from OPS-1")
+    expect(startedByWord(chain({ started_by_kind: "automation", started_by: "on issue closed" }))).toBe("rule · on issue closed")
+    expect(startedByWord(chain({ started_by_kind: "routine", started_by: "nightly" }))).toBe("called by nightly")
+    expect(startedByWord(chain({ started_by_kind: "unknown", started_by: "" }))).toBe("")
   })
 })

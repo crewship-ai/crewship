@@ -85,6 +85,32 @@ export function workflowName(c: ChainSummary, routineName?: string): string {
   return "Workflow"
 }
 
+/**
+ * What set the run off, in the rail's short words — the row's second line
+ * (#2979). The routine's name is the row's title, so the cause no longer
+ * shares a line with it as "schedule → Refresh crew telemetry".
+ */
+export function startedByWord(c: ChainSummary): string {
+  const who = c.started_by?.trim() ?? ""
+  switch (c.started_by_kind) {
+    case "schedule":
+      return "schedule"
+    case "webhook":
+      return who ? `webhook · ${who}` : "webhook"
+    case "user":
+      return "by hand"
+    case "issue":
+      return `from ${c.started_by_key?.trim() || who || "an issue"}`
+    case "automation":
+      return who ? `rule · ${who}` : "rule"
+    case "routine":
+    case "run":
+      return who ? `called by ${who}` : "called by a routine"
+    default:
+      return ""
+  }
+}
+
 /** How many trailing characters of the origin make the handle. */
 const HANDLE_LENGTH = 8
 

@@ -90,6 +90,8 @@ import {
   routineLens,
   workflowHandle,
   workflowSentence,
+  workflowName,
+  startedByWord,
   type ChainStatus,
   type LensKey,
 } from "@/lib/activity-lenses"
@@ -239,6 +241,8 @@ function WorkflowRow({
   const status = chainStatus(chain)
   const live = status === "running" || status === "waiting"
   const sentence = workflowSentence(chain, routine?.name)
+  const title = workflowName(chain, routine?.name)
+  const trigger = startedByWord(chain)
   const touched = chainTouched(chain)
   const handle = workflowHandle(chain.origin)
   const startedBy = chain.started_by?.trim() || chain.triggered_via || "unknown trigger"
@@ -294,10 +298,11 @@ function WorkflowRow({
       </span>
 
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        {/* The SHAPE, not the routine's name. Two runs of one routine render
-            the same word; what they did differs, and that is the line. */}
+        {/* The routine's name, as on /routines (#2979). The full shape —
+            cause → routine → agents → issues — is the tooltip; as a title it
+            read "schedule → Refresh crew t…", truncated before the name. */}
         <span className="truncate text-foreground/85" title={sentence}>
-          {sentence}
+          {title}
         </span>
         <span className="flex items-center gap-1.5 truncate text-[10.5px] text-muted-foreground-soft">
           {/* The two states a reader acts on are said in words, in their tone,
@@ -315,10 +320,10 @@ function WorkflowRow({
               <span aria-hidden>·</span>
             </>
           )}
-          <span>{relTime(chain.last_activity)}</span>
+          {trigger && <span className="truncate">{trigger}</span>}
           {chain.duration_ms != null && (
             <>
-              <span aria-hidden>·</span>
+              {trigger && <span aria-hidden>·</span>}
               <span>{formatDurationMs(chain.duration_ms)}</span>
             </>
           )}
@@ -331,7 +336,8 @@ function WorkflowRow({
         </span>
       </span>
 
-      <span className="mt-0.5 shrink-0 font-mono text-[10px] text-muted-foreground-soft">{handle}</span>
+      {/* When, not which: the run id is the tooltip's. */}
+      <span className="mt-0.5 shrink-0 font-mono text-[10px] text-muted-foreground-soft">{relTime(chain.last_activity)}</span>
     </SidebarRow>
         </motion.div>
       </TooltipTrigger>

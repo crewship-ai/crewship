@@ -329,11 +329,14 @@ export function ActivityStreamView({
         selectStop({
           kind: "workflow",
           id: origin,
-          label: workflowLabel(chains.find((c) => c.origin === origin)),
+          label: workflowLabel(
+            chains.find((c) => c.origin === origin),
+            pipelines.find((p) => p.slug === chains.find((c) => c.origin === origin)?.routine_slug)?.name,
+          ),
         }),
       )
     },
-    [chains],
+    [chains, pipelines],
   )
 
   /** The chain the workflow column draws, or undefined once the index has moved on. */
@@ -608,7 +611,13 @@ export function ActivityStreamView({
         if (s.label !== s.id) return s
         const resolved =
           s.kind === "workflow"
-            ? { ...s, label: workflowLabel(chains.find((c) => c.origin === s.id)) }
+            ? {
+                ...s,
+                label: workflowLabel(
+                  chains.find((c) => c.origin === s.id),
+                  routines.find((r) => r.slug === chains.find((c) => c.origin === s.id)?.routine_slug)?.name,
+                ),
+              }
             : resolveStop(s.kind, s.id)
         if (resolved.label === s.label || resolved.label === shortId(s.id)) return s
         changed = true
@@ -616,7 +625,7 @@ export function ActivityStreamView({
       })
       return changed ? { stops, dropped: p.dropped } : p
     })
-  }, [resolveStop, chains])
+  }, [resolveStop, chains, routines])
 
   // Keyboard: a surface you can only drive with a mouse is one you abandon
   // on the second screenful.
