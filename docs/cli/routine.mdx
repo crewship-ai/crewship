@@ -335,7 +335,8 @@ crewship routine run nightly-report --async --wait
 | `--tag` | Attach tag(s) to the run for filtering/grouping (repeatable; max 10) |
 | `--batch` | Path to a JSONL / JSON-array file of input sets — fan out N runs (tagged `batch:<id>`) |
 | `--delay` | Defer the run N seconds (parked in `pending_runs`; returns `SCHEDULED`) |
-| `--ttl` | Expire a deferred run if not dispatched within N seconds |
+| `--ttl` | Expire a deferred run if not dispatched within N seconds. A start queued for a full concurrency slot defaults to 3600 |
+| `--reject-if-busy` | When the routine's concurrency slot is full, fail with `429` instead of queuing the start. By default the start is queued and the CLI prints `Queued:` with its pending ID (`SCHEDULED`, `queued: true`). Sent as `queue_if_busy: false` |
 | `--priority` | Dispatch priority for deferred runs (higher fires first) |
 | `--idempotency-key` | Dedupe key; a duplicate within the TTL returns the original run as `DEDUPED` instead of executing again |
 | `--idempotency-ttl` | Dedupe window in seconds for `--idempotency-key` (`0` = server default, 24h) |
