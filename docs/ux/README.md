@@ -62,7 +62,10 @@ Leaving with edits pending (section nav, a link, reload) asks "Leave with N
 unsaved changes?" — Stay / Discard / Save and leave. A failed save is a toast
 in the bottom-right corner that stays until dismissed, offers Retry and keeps
 the edits; errors never sit inside a card. Success is quiet: the bar says
-"Saved" for a moment. On a phone the bar docks above the tab bar.
+"Saved" for a moment. On a phone the bar docks above the tab bar. The bar
+wears the success toast's green (`--save-bar-*` tokens in `app/globals.css`)
+with a slow halo and a pinging dot (both off under reduced motion): pending
+edits are one step from done and must not be overlooked.
 
 Adopting it on a new screen:
 

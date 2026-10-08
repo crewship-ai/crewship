@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { Check, Loader2 } from "lucide-react"
+import { CircleCheck, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
@@ -345,32 +345,42 @@ export function PageSaveBar({ className }: { className?: string }) {
   if (!s || (s.count === 0 && !s.saving && !s.justSaved)) return null
   const done = s.count === 0 && !s.saving
   return (
+    // Green like the success toasts in the corner (--save-bar-* tokens): the
+    // edits are one step from done, and the bar must not be overlooked.
     <div
       role="region"
       aria-label="Unsaved changes"
       data-slot="page-save-bar"
       className={cn(
-        "z-40 flex items-center gap-3 border border-line-strong bg-popover text-xs shadow-[0_16px_40px_rgba(0,0,0,.45)]",
+        "z-40 flex items-center gap-3 border border-[var(--save-bar-border)] bg-[var(--save-bar-bg)] text-xs text-[var(--save-bar-fg)]",
         "absolute bottom-6 left-1/2 -translate-x-1/2 rounded-xl py-1.5 pl-4 pr-1.5 whitespace-nowrap",
         "max-sm:fixed max-sm:inset-x-0 max-sm:bottom-[var(--mobile-tab-bar-h)] max-sm:translate-x-0 max-sm:rounded-none max-sm:border-x-0 max-sm:border-b-0 max-sm:px-3 max-sm:py-2",
+        done ? "shadow-[0_16px_40px_rgba(0,0,0,.45)]" : "save-bar-glow",
         className,
       )}
     >
       {done ? (
-        <span role="status" className="flex h-7 items-center gap-1.5 pr-2.5 text-success">
-          <Check className="h-3.5 w-3.5" /> Saved
+        <span role="status" className="flex h-7 items-center gap-1.5 pr-2.5 font-medium">
+          <CircleCheck className="h-4 w-4 fill-[var(--save-bar-fg)] text-[var(--save-bar-bg)]" aria-hidden /> Saved
         </span>
       ) : (
         <>
-          <span className="flex min-w-0 flex-1 items-center gap-2" title={s.labels.join(", ")}>
-            <span className="h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden />
+          <span className="flex min-w-0 flex-1 items-center gap-2 font-medium" title={s.labels.join(", ")}>
+            <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
+              <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--save-bar-fg)] opacity-70 motion-safe:animate-ping" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--save-bar-fg)]" />
+            </span>
             <span><span className="font-mono tabular-nums">{s.count}</span> unsaved change{s.count === 1 ? "" : "s"}</span>
           </span>
-          <kbd className="hidden rounded border border-line-strong px-1.5 font-mono text-[11px] text-muted-foreground sm:inline">⌘S</kbd>
-          <Button type="button" variant="ghost" size="sm" className="h-7 text-xs coarse:h-[2.75rem]" disabled={s.saving} onClick={s.discardAll}>
+          <kbd className="hidden rounded border border-[var(--save-bar-border)] px-1.5 font-mono text-[11px] sm:inline">⌘S</kbd>
+          <Button type="button" variant="ghost" size="sm"
+            className="h-7 text-xs text-[var(--save-bar-fg)] opacity-85 hover:bg-[color-mix(in_oklab,var(--save-bar-fg)_10%,transparent)] hover:text-[var(--save-bar-fg)] hover:opacity-100 coarse:h-[2.75rem]"
+            disabled={s.saving} onClick={s.discardAll}>
             Discard
           </Button>
-          <Button type="button" size="sm" className="h-7 gap-1.5 text-xs coarse:h-[2.75rem]" disabled={s.saving || !s.canSave} onClick={s.saveAll}>
+          <Button type="button" size="sm"
+            className="h-7 gap-1.5 bg-[var(--save-bar-action)] text-xs font-semibold text-[var(--save-bar-action-fg)] hover:bg-[var(--save-bar-action)] hover:brightness-110 coarse:h-[2.75rem]"
+            disabled={s.saving || !s.canSave} onClick={s.saveAll}>
             {s.saving && <Loader2 className="h-3 w-3 animate-spin" />}
             {s.saving ? "Saving…" : "Save"}
           </Button>
