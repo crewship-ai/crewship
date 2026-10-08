@@ -65,13 +65,19 @@ never permission to read the work a delivery produced.**
 
 | Method | Path | Auth | Request | Response | Status |
 |---|---|---|---|---|---|
-| GET | `/api/v1/workspaces/{workspaceId}/work-items` | member (`read`) | No body; optional `?state=`, `?class=`, `?source=`, `?agent_id=`, `?after=` | `{ items[], next_cursor }` | `200`, `400`, `401`, `403`, `500` |
+| GET | `/api/v1/workspaces/{workspaceId}/work-items` | member (`read`) | No body; optional `?state=`, `?class=`, `?source=`, `?agent_id=`, `?since=`, `?open=true`, `?after=` | `{ items[], next_cursor }` | `200`, `400`, `401`, `403`, `500` |
 | GET | `/api/v1/workspaces/{workspaceId}/work-items/{workItemId}` | member (`read`) | No body | One work item plus its `attempts[]` and `events[]` | `200`, `400`, `401`, `403`, `404`, `500` |
 
 The list is keyset paginated: at most 100 rows, with `next_cursor` set when
 more remain, passed back as `?after=`. Filters are validated against the
 vocabularies above — `?state=runnign` is a `400`, not an empty page, because
 "nothing is running" is the wrong answer to a typo.
+
+Pages run oldest first. `?since=` (an RFC 3339 time) keeps to work created
+since then, so a time window reads from its start rather than from the
+ledger's oldest row; an unreadable time is a `400`. `?open=true` keeps to work
+not yet finished (not `succeeded`, `failed`, `expired` or `cancelled`), however
+old — what still holds an agent's queue.
 
 A work item belonging to another workspace answers `404`, not `403`: a `403`
 would confirm the id exists to someone who has no business knowing it.
@@ -82,10 +88,10 @@ does not resolve ids by hand:
 | Field | Meaning |
 |---|---|
 | `agent` | `{ id, name, slug, avatar_seed, avatar_style, avatar_url, deleted }` of the agent that runs the work. `avatar_url` is the stored render, `null` when the agent has none. `deleted` is true for an agent removed from the workspace whose record remains; `null` when no record remains (`agent_id` stays) |
-| `crew` | `{ id, name, color, icon }` of that agent's crew; `null` when unknown |
-| `event_type` | For webhook work, the event the delivery carried (`issues`, `invoice.overdue`); empty otherwise |
-| `duration_ms` | From the first attempt's start to the last attempt's end; `null` until an attempt has ended |
-| `cost_usd` | The sum of the attempts' cost; `null` when no attempt recorded one |
+| `crew` | `{ id, name, color, icon, deleted }` of the work's crew, or its agent's; `deleted` is true for a crew removed from the workspace whose record remains; `null` when unknown |
+| `event_type` | For webhook work, the event the delivery carried (`issues`, `invoice.overdue`) — for a replay, its original's; empty otherwise |
+| `duration_ms` | For finished work, from the first attempt's start to the last attempt's end (retry waits included); `null` while the work is unfinished |
+| `cost_usd` | The sum of the attempts' recorded cost; `null` when none recorded a cost |
 
 The detail adds two lists. `attempts[]` carries one entry per attempt —
 `run_id` (the same namespace as the journal's run id), the lease and its
@@ -148,7 +154,7 @@ Check `raw_body_available` on the delivery before offering a replay control.
 
 | Method | Path | Auth | Request | Response | Status |
 |---|---|---|---|---|---|
-| GET | `/api/v1/workspaces/{workspaceId}/webhook-deliveries` | member (`read`) | No body; optional `?endpoint_id=`, `?source_delivery_id=`, `?decision=`, `?event_type=`, `?after=` | `{ items[], next_cursor }` | `200`, `400`, `401`, `403`, `500` |
+| GET | `/api/v1/workspaces/{workspaceId}/webhook-deliveries` | member (`read`) | No body; optional `?endpoint_id=`, `?source_delivery_id=`, `?decision=`, `?event_type=`, `?since=`, `?after=` | `{ items[], next_cursor }` | `200`, `400`, `401`, `403`, `500` |
 | GET | `/api/v1/workspaces/{workspaceId}/webhook-deliveries/{deliveryId}` | member (`read`) | No body | One delivery record | `200`, `400`, `401`, `403`, `404`, `500` |
 
 Every inbound webhook is recorded before anything is dispatched, including the

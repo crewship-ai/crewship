@@ -165,6 +165,16 @@ func (h *WebhookDeliveriesHandler) List(w http.ResponseWriter, r *http.Request) 
 		query += ` AND event_type=?`
 		args = append(args, eventType)
 	}
+	// since= keeps to deliveries received in a window; pages are oldest first.
+	since, ok := ledgerSince(r.URL.Query().Get("since"))
+	if !ok {
+		replyError(w, http.StatusBadRequest, "since must be an RFC 3339 time, e.g. 2026-10-08T00:00:00Z")
+		return
+	}
+	if since != "" {
+		query += ` AND received_at>=?`
+		args = append(args, since)
+	}
 	query += ` ORDER BY id LIMIT 101`
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)

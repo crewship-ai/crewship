@@ -18,6 +18,8 @@ import (
 	"database/sql"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // ledgerAgentRef is who a piece of work belongs to — enough to draw the
@@ -45,6 +47,8 @@ type ledgerCrewRef struct {
 	Name  string `json:"name"`
 	Color string `json:"color"`
 	Icon  string `json:"icon"`
+	// Deleted is true for a crew removed from the workspace whose row remains.
+	Deleted bool `json:"deleted"`
 }
 
 func uniqueNonEmpty(values []string) []any {
@@ -58,6 +62,21 @@ func uniqueNonEmpty(values []string) []any {
 		out = append(out, v)
 	}
 	return out
+}
+
+// ledgerSince reads the since= filter: an RFC 3339 instant, rewritten in the
+// ledger's own fixed-width layout so it compares with the stored text.
+// ok is false when since was given and cannot be read.
+func ledgerSince(raw string) (since string, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", true
+	}
+	t, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return "", false
+	}
+	return tsformat.Format(t.UTC()), true
 }
 
 func placeholders(n int) string {
@@ -97,7 +116,7 @@ func lookupLedgerCrews(ctx context.Context, db *sql.DB, workspaceID string, ids 
 		return out, nil
 	}
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, COALESCE(name,''), COALESCE(color,''), COALESCE(icon,'')
+		SELECT id, COALESCE(name,''), COALESCE(color,''), COALESCE(icon,''), deleted_at IS NOT NULL
 		FROM crews WHERE workspace_id = ? AND id IN (`+placeholders(len(keys))+`)`,
 		append([]any{workspaceID}, keys...)...)
 	if err != nil {
@@ -106,7 +125,7 @@ func lookupLedgerCrews(ctx context.Context, db *sql.DB, workspaceID string, ids 
 	defer rows.Close()
 	for rows.Next() {
 		var c ledgerCrewRef
-		if err := rows.Scan(&c.ID, &c.Name, &c.Color, &c.Icon); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Color, &c.Icon, &c.Deleted); err != nil {
 			return nil, err
 		}
 		out[c.ID] = &c
@@ -131,6 +150,15 @@ func attachWorkContext(ctx context.Context, db *sql.DB, workspaceID string, item
 			deliveryIDs = append(deliveryIDs, it.SourceRef)
 		}
 		workIDs = append(workIDs, it.ID)
+	}
+	// A replay of webhook work carries no delivery of its own: it is about the
+	// event its original came in for. Walk replay_of back to that delivery.
+	replayRef, err := replayedDeliveries(ctx, db, workspaceID, items)
+	if err != nil {
+		return err
+	}
+	for _, ref := range replayRef {
+		deliveryIDs = append(deliveryIDs, ref)
 	}
 	agents, err := lookupLedgerAgents(ctx, db, workspaceID, agentIDs)
 	if err != nil {
@@ -165,11 +193,10 @@ func attachWorkContext(ctx context.Context, db *sql.DB, workspaceID string, item
 	type spend struct {
 		first, last string
 		cost        float64
-		hasCost     bool
 	}
 	spends := map[string]spend{}
 	rows, err := db.QueryContext(ctx, `
-		SELECT a.work_id, MIN(a.started_at), MAX(COALESCE(a.ended_at,'')), SUM(a.cost_usd), COUNT(a.cost_usd)
+		SELECT a.work_id, MIN(a.started_at), MAX(COALESCE(a.ended_at,'')), SUM(a.cost_usd)
 		FROM work_attempts a
 		JOIN work_items w ON w.id = a.work_id AND w.workspace_id = ?
 		WHERE a.work_id IN (`+placeholders(len(workIDs))+`)
@@ -181,12 +208,11 @@ func attachWorkContext(ctx context.Context, db *sql.DB, workspaceID string, item
 		var id string
 		var first, last sql.NullString
 		var cost sql.NullFloat64
-		var costs int
-		if err := rows.Scan(&id, &first, &last, &cost, &costs); err != nil {
+		if err := rows.Scan(&id, &first, &last, &cost); err != nil {
 			rows.Close()
 			return err
 		}
-		spends[id] = spend{first: first.String, last: last.String, cost: cost.Float64, hasCost: costs > 0}
+		spends[id] = spend{first: first.String, last: last.String, cost: cost.Float64}
 	}
 	rows.Close()
 
@@ -199,19 +225,94 @@ func attachWorkContext(ctx context.Context, db *sql.DB, workspaceID string, item
 		}
 		it.Crew = crews[crewID]
 		if it.Source == "webhook" {
-			it.EventType = events[it.SourceRef]
+			ref := it.SourceRef
+			if ref == "" {
+				ref = replayRef[it.ID]
+			}
+			it.EventType = events[ref]
 		}
 		if sp, ok := spends[it.ID]; ok {
-			if ms, ok := elapsedMS(sp.first, sp.last); ok {
-				it.DurationMS = &ms
+			// How long the work took is known once it has finished; while a
+			// later attempt runs, an earlier attempt's end is not it.
+			if terminal := it.TerminalAt != nil; terminal {
+				if ms, ok := elapsedMS(sp.first, sp.last); ok {
+					it.DurationMS = &ms
+				}
 			}
-			if sp.hasCost {
+			// cost_usd is NOT NULL DEFAULT 0 per attempt, so a zero sum is
+			// "no cost recorded", not a measured zero.
+			if sp.cost > 0 {
 				c := sp.cost
 				it.CostUSD = &c
 			}
 		}
 	}
 	return nil
+}
+
+// nameWorkItem gives one work item the context the list gives a page — for the
+// answers to resolve and replay, which a client may patch its cached row from.
+func nameWorkItem(ctx context.Context, db *sql.DB, workspaceID string, item *workItemView) error {
+	one := []workItemView{*item}
+	if err := attachWorkContext(ctx, db, workspaceID, one); err != nil {
+		return err
+	}
+	*item = one[0]
+	return nil
+}
+
+// maxReplayDepth bounds the walk from a replay back to its original: a chain
+// longer than this is not something the ledger produces by hand.
+const maxReplayDepth = 8
+
+// replayedDeliveries maps each webhook replay on the page (source_ref empty,
+// replay_of set) to the delivery its original came from — one query per level
+// of the chain, never one per row.
+func replayedDeliveries(ctx context.Context, db *sql.DB, workspaceID string, items []workItemView) (map[string]string, error) {
+	out := map[string]string{}
+	// pending: the work id still to resolve -> the page items waiting on it.
+	pending := map[string][]string{}
+	for _, it := range items {
+		if it.Source == "webhook" && it.SourceRef == "" && it.ReplayOf != nil && *it.ReplayOf != "" {
+			pending[*it.ReplayOf] = append(pending[*it.ReplayOf], it.ID)
+		}
+	}
+	for depth := 0; depth < maxReplayDepth && len(pending) > 0; depth++ {
+		keys := make([]any, 0, len(pending))
+		for id := range pending {
+			keys = append(keys, id)
+		}
+		rows, err := db.QueryContext(ctx, `
+			SELECT id, COALESCE(source_ref,''), COALESCE(replay_of,'') FROM work_items
+			WHERE workspace_id = ? AND id IN (`+placeholders(len(keys))+`)`,
+			append([]any{workspaceID}, keys...)...)
+		if err != nil {
+			return nil, err
+		}
+		next := map[string][]string{}
+		for rows.Next() {
+			var id, ref, replayOf string
+			if err := rows.Scan(&id, &ref, &replayOf); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			waiting := pending[id]
+			switch {
+			case ref != "":
+				for _, w := range waiting {
+					out[w] = ref
+				}
+			case replayOf != "":
+				next[replayOf] = append(next[replayOf], waiting...)
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		pending = next
+	}
+	return out, nil
 }
 
 // elapsedMS is the wall clock between the first attempt's start and the last

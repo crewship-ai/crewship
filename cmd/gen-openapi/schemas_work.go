@@ -216,8 +216,8 @@ func workLedgerSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 			"avatar_url": nullable(str()), "deleted": boolean(),
 		}, "id", "name", "slug", "avatar_seed", "avatar_style", "avatar_url", "deleted"),
 		"LedgerCrew": object(map[string]any{
-			"id": str(), "name": str(), "color": str(), "icon": str(),
-		}, "id", "name", "color", "icon"),
+			"id": str(), "name": str(), "color": str(), "icon": str(), "deleted": boolean(),
+		}, "id", "name", "color", "icon", "deleted"),
 		"WebhookDeliveryPage": object(map[string]any{
 			"items":       map[string]any{"type": "array", "items": ref("WebhookDelivery"), "maxItems": 100},
 			"next_cursor": nullable(str()),
