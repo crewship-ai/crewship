@@ -28,7 +28,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
 import { apiFetch } from "@/lib/api-fetch"
-import { stopAgent } from "@/lib/agent-stop"
+import { stopAgent, stopSuccessMessage } from "@/lib/agent-stop"
 import { entityHref } from "@/lib/entity-links"
 
 import {
@@ -218,7 +218,7 @@ export function AgentCanvas({
     // none. stopAgent never throws and words the 502s (#2864).
     const result = await stopAgent(agent.id, agent.workspace_id)
     if (result.ok) {
-      toast.success("Agent stopped")
+      toast.success(stopSuccessMessage(result))
     } else {
       toast.error(`Could not stop ${agent.name}`, { description: result.message })
     }
