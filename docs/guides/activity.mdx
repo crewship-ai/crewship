@@ -93,7 +93,7 @@ Picking a routine's row narrows the rail to that routine (`activity-rail-focus.t
 
 The STATUS rows stay and count the routine's runs, so **Could not finish** lists only the runs that failed. The time range from **Filter** decides how far back the list reaches.
 
-Clicking a run opens it in the column, and the focus stays while you step through its runs. **‹ All activity** leaves the focus.
+Clicking a run opens it in the column, and the focus stays while you step through its runs. **‹ All activity** leaves the focus. The rail slides in from the right on entering the focus and from the left on leaving it, the same 12px / 200ms entrance as the column.
 
 ### What a row is
 
@@ -106,6 +106,14 @@ Every row's second line starts with what the row **is**:
 What started the row follows after it. So *Routine · from QUA-1* (a routine started from an issue) never reads like *Issue · from QUA-1* (the issue being worked).
 
 ### Search and filters
+
+The **Filter** facets narrow the rail as well as the column beside it.
+
+- A picked crew keeps the rows whose agents belong to it, or whose routine that crew authored.
+- A picked agent keeps the rows it worked in.
+- A focused issue or routine keeps the rows that reached it.
+
+The index carries at most five agents per row, so a row whose only match is a sixth agent is not found by a crew or agent filter.
 
 The search box narrows two things at once: the rail's workflow list (client-side, over the loaded index page — matching the routine's name and slug, what started the chain, the handle, and the identifiers, titles and agent names it touched) and the journal query (server-side, as `q`).
 

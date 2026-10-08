@@ -595,6 +595,14 @@ export function ActivitySidebar({
   // render, which is a boundary nobody can see and everybody would report.
   const buckets = React.useMemo(() => bucketChains(workflowChains, Date.now()), [workflowChains])
 
+  // Whether the rail is coming BACK from a routine focus, so the full list
+  // slides in from the left then — and not on the page's first paint.
+  const wasFocused = React.useRef(false)
+  const leftFocus = !focusedRoutine && wasFocused.current
+  React.useEffect(() => {
+    wasFocused.current = !!focusedRoutine
+  }, [focusedRoutine])
+
   // The status rows count CHAINS, which is what the list under them holds,
   // over everything the search left — so a number survives its own selection
   // ("Could not finish 3" stays 3 after it is picked).
@@ -896,6 +904,9 @@ export function ActivitySidebar({
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
         {focusedRoutine && workspaceId ? (
+          // Into the focus from the right, back out from the left — the same
+          // 12px / 200ms entrance as the column beside it (#3000).
+          <div key={`focus:${focusedRoutine}`} className="animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out">
           <RailRoutineFocus
             workspaceId={workspaceId}
             slug={focusedRoutine}
@@ -907,8 +918,9 @@ export function ActivitySidebar({
             onOpenRun={(id) => onOpenRun?.(id)}
             onLeave={() => onFocusRoutine?.(null)}
           />
+          </div>
         ) : (
-        <>
+        <div key="all" className={cn(leftFocus && "animate-in fade-in-0 slide-in-from-left-3 duration-200 ease-out")}>
         {/* ── Status ── the same section, rows and count pills as /routines. */}
         <SidebarSection
           label="Status"
@@ -1091,7 +1103,7 @@ export function ActivitySidebar({
             </SidebarRow>
           </SidebarSection>
         )}
-        </>
+        </div>
         )}
       </div>
     </div>

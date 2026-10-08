@@ -524,14 +524,53 @@ export interface NarrowedChains {
  * stated by the caller — see ActivitySidebar's window notice — rather than
  * implied by a confident-looking count.
  */
+/**
+ * The Filter popover's facets, applied to chains (#3000). They used to narrow
+ * only the journal beside the rail, so with a crew picked the rail still
+ * listed every run.
+ *
+ * A chain's crews are its agents' crews and its routine's crew; its agents are
+ * the refs the index carries. Both lists are capped at five per row, so a
+ * chain whose only match is a sixth agent is not found — the cap's documented
+ * edge, stated rather than hidden.
+ */
+export interface ChainFilters {
+  crewIDs: string[]
+  agentIDs: string[]
+  focus: { kind: string; id: string } | null
+  crewOfAgent: (agentID: string) => string | undefined
+  crewOfRoutine: (slug: string) => string | undefined
+}
+
+function matchesFilters(c: ChainSummary, f: ChainFilters): boolean {
+  const agentIDs = (c.agents ?? []).map((a) => a.id)
+  if (f.agentIDs.length > 0 && !agentIDs.some((id) => f.agentIDs.includes(id))) return false
+  const crewIDs = [...f.crewIDs]
+  if (f.focus?.kind === "crew") crewIDs.push(f.focus.id)
+  if (crewIDs.length > 0) {
+    const crews = new Set<string>()
+    for (const id of agentIDs) {
+      const crew = f.crewOfAgent(id)
+      if (crew) crews.add(crew)
+    }
+    const routineCrew = c.routine_slug ? f.crewOfRoutine(c.routine_slug) : undefined
+    if (routineCrew) crews.add(routineCrew)
+    if (!crewIDs.some((id) => crews.has(id))) return false
+  }
+  if (f.focus?.kind === "issue" && !(c.issues ?? []).some((i) => i.id === f.focus!.id)) return false
+  if (f.focus?.kind === "routine" && c.routine_slug !== f.focus.id) return false
+  return true
+}
+
 export function narrowChains(
   chains: ChainSummary[],
   query: string,
   scope: string,
   routineNameOf?: (slug: string) => string | undefined,
+  filters?: ChainFilters,
 ): NarrowedChains {
-  const searched = chains.filter((c) =>
-    matchesQuery(c, query, routineNameOf?.(c.routine_slug ?? "")),
+  const searched = chains.filter(
+    (c) => matchesQuery(c, query, routineNameOf?.(c.routine_slug ?? "")) && (!filters || matchesFilters(c, filters)),
   )
   return { searched, visible: chainsInScope(searched, scope) }
 }

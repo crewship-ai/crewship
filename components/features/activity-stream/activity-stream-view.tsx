@@ -481,9 +481,19 @@ export function ActivityStreamView({
   //
   // `visible` goes to every list, dashboard and drill-down. `searched` goes to
   // the status segments alone, so their counts survive their own selection.
+  // The Filter popover's facets narrow the chains too (#3000), not only the
+  // journal: with a crew picked, the rail listed every run beside a column
+  // that showed one crew's.
   const narrowedChains = React.useMemo(
-    () => narrowChains(chains, search, facets.scope, (slug) => routineBySlug.get(slug)?.name),
-    [chains, search, facets.scope, routineBySlug],
+    () =>
+      narrowChains(chains, search, facets.scope, (slug) => routineBySlug.get(slug)?.name, {
+        crewIDs: facets.crewIDs,
+        agentIDs: facets.agentIDs,
+        focus: focus ? { kind: focus.kind, id: focus.id } : null,
+        crewOfAgent: (id) => lookup.agents.get(id)?.crew_id ?? undefined,
+        crewOfRoutine: (slug) => pipelines.find((p) => p.slug === slug)?.author_crew_id ?? undefined,
+      }),
+    [chains, search, facets.scope, facets.crewIDs, facets.agentIDs, focus, routineBySlug, lookup.agents, pipelines],
   )
   const visibleChains = narrowedChains.visible
 

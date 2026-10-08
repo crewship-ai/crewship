@@ -462,3 +462,28 @@ describe("agent work outside routines (#2989)", () => {
     expect(startedByWord(chain({ kind: "assignment", started_by_kind: "issue", started_by: "Fix", started_by_key: "OPS-3" }))).toBe("from OPS-3")
   })
 })
+
+describe("narrowChains — the rail follows every filter (#3000)", () => {
+  const fin = chain({ origin: "fin", routine_slug: "match-payments", agents: [{ id: "casey", name: "Casey", assignments: 1 }], agent_count: 1 })
+  const ops = chain({ origin: "ops", routine_slug: "telemetry", issues: [{ id: "m1", identifier: "OPS-1" }], issue_count: 1 })
+  const work = chain({ origin: "w", kind: "assignment", routine_slug: undefined, agents: [{ id: "morgan", name: "Morgan", assignments: 1 }], agent_count: 1 })
+  const all = [fin, ops, work]
+  const crewOfAgent = (id: string) => ({ casey: "crew_fin", morgan: "crew_ops" })[id]
+  const crewOfRoutine = (slug: string) => ({ "match-payments": "crew_fin", telemetry: "crew_ops" })[slug]
+  const origins = (f: Parameters<typeof narrowChains>[4]) =>
+    narrowChains(all, "", "all", undefined, f).visible.map((c) => c.origin)
+
+  it("narrows by crew through the chain's agents and its routine's crew", () => {
+    expect(origins({ crewIDs: ["crew_ops"], agentIDs: [], focus: null, crewOfAgent, crewOfRoutine })).toEqual(["ops", "w"])
+  })
+  it("narrows by agent", () => {
+    expect(origins({ crewIDs: [], agentIDs: ["casey"], focus: null, crewOfAgent, crewOfRoutine })).toEqual(["fin"])
+  })
+  it("narrows by a focused issue or routine", () => {
+    expect(origins({ crewIDs: [], agentIDs: [], focus: { kind: "issue", id: "m1" }, crewOfAgent, crewOfRoutine })).toEqual(["ops"])
+    expect(origins({ crewIDs: [], agentIDs: [], focus: { kind: "routine", id: "match-payments" }, crewOfAgent, crewOfRoutine })).toEqual(["fin"])
+  })
+  it("leaves the list alone with no filter", () => {
+    expect(origins(undefined)).toEqual(["fin", "ops", "w"])
+  })
+})
