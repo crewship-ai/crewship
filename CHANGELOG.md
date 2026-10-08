@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Restore checks and the restore itself judge a target by one rule (#2990).** The checks used to approve targets the restore then refused — a crew target for a workspace backup, replacing a workspace from a custom or crew backup, an empty server or drill for a non-instance backup — and neither looked at the new name. Both now share `ValidateRestoreTarget`: a new workspace or crew name must be a valid slug and free on this server, deleted workspaces included; a taken name is refused before anything is written (`409` from the restore). `restore/checks` and `crewship admin instance backups restore-checks` take the new name (`as_workspace` / `as_crew`, `--as-workspace` / `--as-crew`).
+
+- **A backup plan over several workspaces no longer reports success while one of them failed (#2990).** The plan's `failed` and `stale` incidents clear, and the heartbeat is pinged, only once every run of that due time (or manual start) has finished and none failed, was interrupted or was skipped. Before, the first workspace to finish well resolved the incident and pinged the heartbeat, hiding a failure in another workspace or pinging while it still ran.
+
 - **Admin › Backups no longer shows a partial restore as finished (#2989).** Recovery now shows the server's own verdict and names what did not land: missing attachments, crew files, rows short per table, incomplete items, clamped credentials and dropped columns, and says when crew files still have to be brought back into the containers.
 
 - **Settings and Admin save through one floating bar (#2984).** Edits on any card add up in a bar at the bottom of the page ("3 unsaved changes · Discard · Save", ⌘S / Ctrl+S) instead of a Save button per card. Leaving the page or switching section with edits pending asks first, and a failed save is a toast in the bottom-right corner that keeps the edits and offers Retry. Switches still save at once; changes across several workspaces still go through their preview.

@@ -329,6 +329,10 @@ func (h *InstanceBackupsHandler) catalogued(w http.ResponseWriter, ctx context.C
 type restoreChecksRequest struct {
 	bundleKeyRequest
 	Target string `json:"target"`
+	// AsWorkspace / AsCrew: the new name a new_workspace / crew target lands
+	// under, judged by the same rule the restore applies.
+	AsWorkspace string `json:"as_workspace,omitempty"`
+	AsCrew      string `json:"as_crew,omitempty"`
 }
 
 // RestoreChecks is POST /api/v1/admin/instance/backups/restore/checks.
@@ -351,7 +355,8 @@ func (h *InstanceBackupsHandler) RestoreChecks(w http.ResponseWriter, r *http.Re
 		replyError(w, http.StatusUnprocessableEntity, "the bundle cannot be read: "+err.Error())
 		return
 	}
-	in := backup.RestoreCheckInput{Manifest: m, BundleSize: entry.Size, Target: req.Target}
+	in := backup.RestoreCheckInput{Manifest: m, BundleSize: entry.Size, Target: req.Target,
+		AsWorkspace: strings.TrimSpace(req.AsWorkspace), AsCrew: strings.TrimSpace(req.AsCrew), Slugs: backup.DBSlugLookup(h.db)}
 	cfg := h.recoveryConfig()
 	dataDir := cfg.DataDir
 	if dataDir == "" {

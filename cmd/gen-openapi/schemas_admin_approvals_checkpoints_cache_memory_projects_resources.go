@@ -451,7 +451,7 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 				"entries": integer(), "tables": integer(), "files": integer(),
 			}, "ok", "proof_level", "detail", "problems", "absent")},
 		"POST /api/v1/admin/instance/backups/restore/checks": {
-			Request: object(map[string]any{"path": str(), "target": str(), "identity": str(), "passphrase": str()}, "path", "target"),
+			Request: object(map[string]any{"path": str(), "target": str(), "identity": str(), "passphrase": str(), "as_workspace": str(), "as_crew": str()}, "path", "target"),
 			Response: object(map[string]any{
 				"space":   object(map[string]any{"ok": boolean(), "need_bytes": integer(), "free_bytes": integer()}, "ok", "need_bytes", "free_bytes"),
 				"format":  object(map[string]any{"ok": boolean(), "version": integer(), "converter": boolean()}, "ok", "version", "converter"),

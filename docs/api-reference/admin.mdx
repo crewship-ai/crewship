@@ -1924,9 +1924,16 @@ image. `unsafe`: host settings in the crews' devcontainer configuration that a
 restore does not switch back on by itself — Docker socket mounts, privileged
 mode, host path binds; read only when a key is given, otherwise a runtime
 warning says they were not checked. `conflicts`: what the `target`
-(`empty_server`, `isolated`, `replace`, `new_workspace`, `crew`) already holds;
-an instance bundle restores only to `empty_server` (`crewship recover`) or
-`isolated` (`crewship backup drill`). `environments`: one runtime check per
+(`empty_server`, `isolated`, `replace`, `new_workspace`, `crew`) already holds,
+decided by the same rule the restore applies, so a target that passes here is
+never refused by the restore: an instance bundle restores only to
+`empty_server` (`crewship recover`) or `isolated` (`crewship backup drill`),
+and those two take nothing else; `replace` needs a workspace bundle that is not
+custom (a partial bundle would delete what it does not carry); `new_workspace`
+needs a workspace bundle and `crew` a crew bundle, each with the new name in
+`as_workspace` / `as_crew` — a valid slug that no workspace on this server
+holds, deleted workspaces included (the slug stays reserved). The restore
+itself answers `409` for a taken name. `environments`: one runtime check per
 complete container environment the bundle carries — `action` is `restore`,
 `rebuild` (built for another architecture than this server's Docker, or
 `missing_blobs` of its layers are neither in the bundle nor in the store
@@ -1939,7 +1946,7 @@ of each environment. Always an array.
 **Auth:** instance administrator. **Request:**
 
 ```json
-{"path": "/var/lib/crewship/backups/crewship-workspace-lab-20260930T020000Z.tar.zst", "target": "replace", "identity": "AGE-SECRET-KEY-1…"}
+{"path": "/var/lib/crewship/backups/crewship-workspace-lab-20260930T020000Z.tar.zst", "target": "new_workspace", "as_workspace": "lab-restored", "identity": "AGE-SECRET-KEY-1…"}
 ```
 
 **Response:**

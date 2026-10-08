@@ -24999,6 +24999,12 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "as_crew": {
+                    "type": "string"
+                  },
+                  "as_workspace": {
+                    "type": "string"
+                  },
                   "identity": {
                     "type": "string"
                   },
