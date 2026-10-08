@@ -185,11 +185,11 @@ describe("ActivityRunPage", () => {
     expect(screen.getByRole("button", { name: /Stop/ })).toBeInTheDocument()
   })
 
-  it("points admins and managers at the raw events, and nobody else", async () => {
+  it("points admins at the raw events, and nobody else — the Journal is theirs", async () => {
     render(<ActivityRunPage workspaceId="ws" runId="run_1" onOpenNode={vi.fn()} />)
     expect(await screen.findByRole("link", { name: /18 raw events/ })).toHaveAttribute("href", "/journal?trace_id=run_1")
     cleanup()
-    mock.role = "MEMBER"
+    mock.role = "MANAGER"
     render(<ActivityRunPage workspaceId="ws" runId="run_1" onOpenNode={vi.fn()} />)
     expect(screen.queryByRole("link", { name: /raw events/i })).toBeNull()
   })

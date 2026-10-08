@@ -359,7 +359,7 @@ export function ActivityHome({ workspaceId, chains, onOpenRun, onOpenIssue }: Ac
           title="Latest runs"
           icon={ListChecks}
           action={
-            roleAtLeast(role, "MANAGER") ? (
+            roleAtLeast(role, "ADMIN") ? (
               <Link href="/journal" className="inline-flex items-center gap-1 hover:text-foreground">
                 Raw events in Journal <ExternalLink className="h-3 w-3" />
               </Link>

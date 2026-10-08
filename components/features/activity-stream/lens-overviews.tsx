@@ -17,8 +17,8 @@
 //   Agents    who worked, how much, how long, and what it cost
 //   Routines  what ran, how often, and how reliably
 //
-// Workflows keeps ActivityOverview — it was always that lens's dashboard, and
-// it is the one that was right.
+// The time view (lens "workflows") opens ActivityHome, the run-built home
+// (#2979).
 //
 // All three read the SAME ChainSummary[] the rail reads, so no dashboard can
 // disagree with the list beside it about what happened. The shaping is in

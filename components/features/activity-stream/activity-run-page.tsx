@@ -445,7 +445,8 @@ function RunPage({
             </Appear>
           )}
 
-          {roleAtLeast(role, "MANAGER") && (
+          {/* The Journal is admin-only (lib/nav-sections), so is the way in. */}
+          {roleAtLeast(role, "ADMIN") && (
             <Appear order={6}>
               <Link
                 href={`/journal?trace_id=${encodeURIComponent(runId)}`}
