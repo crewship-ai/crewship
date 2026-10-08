@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Eye, Palette } from "lucide-react"
 
-import { SettingsCard } from "@/components/features/settings/shared"
+import { SettingsCard, controlHeight } from "@/components/features/settings/shared"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { SaveFooter } from "@/components/ui/save-footer"
@@ -13,6 +13,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier } from "@/lib/permissions/tiers"
 import { normalizePageTheme, DEFAULT_PAGE_THEME, colorContrast, type PageTheme } from "@/lib/pages/theme"
 import { PagesThemePreviewPanel } from "./pages-theme-preview"
+import { cn } from "@/lib/utils"
 
 export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string; role: string | null }) {
   const sharedTheme = useWorkspacePagesTheme(workspaceId)
@@ -39,7 +40,7 @@ export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string
         <span>{labels[key]}</span>
         {editable ? <span className="flex items-center gap-2">
           <input aria-label={`${labels[key]} picker`} type="color" className="h-8 w-9 cursor-pointer rounded border bg-transparent" value={/^#[0-9a-f]{6}$/i.test(form.draft[key]) ? form.draft[key] : theme[key]} onChange={e => form.set(key, e.target.value)} />
-          <Input aria-label={labels[key]} className="w-28 font-mono" value={form.draft[key]} maxLength={7} onChange={e => form.set(key, e.target.value)} />
+          <Input aria-label={labels[key]} className={cn(controlHeight, "w-28 font-mono")} value={form.draft[key]} maxLength={7} onChange={e => form.set(key, e.target.value)} />
         </span> : <span className="font-mono">{theme[key]}</span>}
       </div>)}
     </div>

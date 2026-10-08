@@ -29,7 +29,31 @@ import { PageSaveLabel, toastSaveError, usePageSave } from "@/components/ui/page
  * text size comes from the control primitives (text-control).
  */
 // coarse:h-[2.75rem] — a finger needs 44px; desktop density is untouched.
-export const settingsControl = "h-8 w-full sm:w-64 coarse:h-[2.75rem]"
+export const controlHeight = "h-8 coarse:h-[2.75rem]"
+export const settingsControl = cn(controlHeight, "w-full sm:w-64")
+/**
+ * A control inside a table or list row (a role picker, a model picker): one
+ * step smaller so the row keeps its rhythm, still a full finger on touch.
+ * Outside a SettingsRow, a form uses `controlHeight` and the primitive's
+ * text-control size; a dialog keeps the primitive's default.
+ */
+export const inlineControl = "h-7 text-xs coarse:h-[2.75rem]"
+/**
+ * The one table style for Settings and Admin: a 12px sentence-case header in
+ * the muted ink, 13px cells, 16px side padding, hairlines between rows and
+ * none under the last. A row that opens something adds `settingsTableRowLink`.
+ * Status in a cell is a StatusPill; machine text is `type-page-stamp`-sized mono.
+ */
+export const settingsTable = "w-full text-control tabular-nums [&_tbody_tr:last-child>td]:border-b-0"
+export const settingsTh = "whitespace-nowrap border-b border-border px-4 py-2 text-left text-label font-medium text-muted-foreground"
+export const settingsTd = "border-b border-border px-4 py-2.5 align-middle"
+export const settingsTableRowLink = "cursor-pointer outline-none hover:bg-[var(--row-hover-bg)] focus-visible:bg-[var(--row-hover-bg)]"
+
+/** A native <select> dressed as SelectTrigger, at control height. */
+export const nativeSelect = cn(
+  controlHeight,
+  "rounded-md border border-control-border bg-surface-subtle px-2.5 text-control text-foreground outline-none hover:border-line-strong focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50",
+)
 
 /** A custom picker button (popover combobox) dressed as SelectTrigger. */
 export const settingsPickerButton = cn(
@@ -110,7 +134,7 @@ function SettingsCardHeader({
           {title}
         </h3>
         {description && (
-          <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">{description}</p>
+          <p className="mt-0.5 text-label leading-snug text-muted-foreground">{description}</p>
         )}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
@@ -120,9 +144,10 @@ function SettingsCardHeader({
 
 /**
  * Single row inside a SettingsCard: label + optional description on the
- * left, right-aligned content on the right. Uses text-xs for the label
- * and text-[11px] for the description so rows match the orchestration
- * row aesthetic.
+ * left, right-aligned content on the right. The label is text-control,
+ * the size of the field beside it; the description is text-label in the
+ * muted ink, the same as the card header's — a supporting line is 12px,
+ * never fine print (docs/ux/README.md › Type).
  */
 export function SettingsRow({
   label,
@@ -151,9 +176,9 @@ export function SettingsRow({
           clipped mid-word and the input sat on top of the text. A description
           is allowed to be a sentence, so the layout has to absorb one. */}
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] text-foreground">{label}</div>
+        <div className="text-control text-foreground">{label}</div>
         {description && (
-          <div className="text-[11px] text-muted-foreground-soft mt-0.5 leading-snug">{description}</div>
+          <div className="text-label text-muted-foreground mt-0.5 leading-snug">{description}</div>
         )}
       </div>
       <div className="flex items-center gap-2 shrink-0 justify-end">{children}</div>
@@ -168,7 +193,7 @@ export function SettingsEmpty({
   children: ReactNode
 }) {
   return (
-    <div className="px-4 py-6 text-center text-[11px] text-muted-foreground">
+    <div className="px-4 py-6 text-center text-label text-muted-foreground">
       {children}
     </div>
   )

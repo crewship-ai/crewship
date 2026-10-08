@@ -78,7 +78,7 @@ function Avatar({ name, logoUrl }: { name: string; logoUrl?: string | null }) {
     return <img src={logoUrl} alt="" aria-hidden onError={() => setBroken(true)} className="h-4 w-4 shrink-0 rounded-[5px] object-cover" />
   }
   return (
-    <span aria-hidden className="grid h-4 w-4 shrink-0 place-items-center rounded-[5px] bg-muted text-[9.5px] font-semibold text-muted-foreground">
+    <span aria-hidden className="grid h-4 w-4 shrink-0 place-items-center rounded-[5px] bg-muted text-micro font-semibold text-muted-foreground">
       {(name.trim()[0] ?? "·").toUpperCase()}
     </span>
   )
@@ -143,7 +143,7 @@ export function WorkspaceScopeSection({
               <span className="flex min-w-0 items-center gap-1.5">
                 <span className="truncate">{w.name}</span>
                 {w.id === currentId && (
-                  <span className="rounded border border-dashed border-control-border px-1 font-mono text-[9px] text-muted-foreground" title="The workspace you are in">here</span>
+                  <span className="rounded border border-dashed border-control-border px-1 font-mono text-micro text-muted-foreground" title="The workspace you are in">here</span>
                 )}
               </span>
             }
@@ -159,7 +159,7 @@ export function WorkspaceScopeSection({
           />
         )}
       </div>
-      <p className="px-2 pb-1 pt-1 text-[11px] text-muted-foreground" data-slot="workspace-scope-summary">
+      <p className="px-2 pb-1 pt-1 text-label text-muted-foreground" data-slot="workspace-scope-summary">
         {inert ?? scopeSummary(workspaces, scope, mode)}
       </p>
     </DrillNavSection>

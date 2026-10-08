@@ -168,7 +168,7 @@ export function MemoryConfigCard({ workspaceId }: {
           </div>
 
           {!valid && (
-            <p className="text-[11px] text-destructive">
+            <p className="text-label text-destructive">
               Must be a whole number between {MIN_DAYS} and {MAX_DAYS} (10 years).
             </p>
           )}
@@ -176,7 +176,7 @@ export function MemoryConfigCard({ workspaceId }: {
           {/* Whether the current value was chosen matters before changing it:
               overriding a default is routine, overriding a deliberate policy
               is not. */}
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-label text-muted-foreground">
             {config.is_default
               ? `Currently the built-in default (${config.versions_retention_days} days) — not set for this workspace. Saving makes it explicit.`
               : `Set explicitly for this workspace.`}
@@ -187,13 +187,13 @@ export function MemoryConfigCard({ workspaceId }: {
               never touched here. This trims the VERSION TRAIL of those files —
               the record of what each write changed, which is what makes a
               memory edit recoverable and auditable. */}
-          <p className="text-[11px] leading-snug text-muted-foreground">
+          <p className="text-label leading-snug text-muted-foreground">
             This is housekeeping for the instance, not a memory policy. An agent&apos;s memory lives in
             its own files and is kept for as long as the agent exists; what expires here is the trail
             of past versions of those files — what you would use to see what a write changed, or to
             roll one back.
           </p>
-          <p className="text-[11px] leading-snug text-muted-foreground">
+          <p className="text-label leading-snug text-muted-foreground">
             The trim runs shortly after this instance starts and then daily at 03:00 UTC. The three
             most recent versions of every file always survive, whatever the window says. Changes to
             this setting are journalled as <code className="font-mono">memory.config_updated</code>,
@@ -201,7 +201,7 @@ export function MemoryConfigCard({ workspaceId }: {
           </p>
 
           {!canEdit && (
-            <p className="text-[11px] text-muted-foreground">Requires an admin to change.</p>
+            <p className="text-label text-muted-foreground">Requires an admin to change.</p>
           )}
         </div>
       )}

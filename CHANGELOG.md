@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - **Accepted deferred routine starts disappeared when execution capacity was busy or dispatch failed.** Capacity rejection now retries with bounded backoff until TTL, and errors/expiry remain inspectable through `routine pending get` and `pending list --status`. Retry preserves the accepted recipe and occurrence identity. ⚠️ **Behaviour change:** starts without TTL stop after ten capacity rejections; attempted debounce starts keep their payload while newer triggers open a separate window, and attempted one-time starts cannot be rewritten by another save. (#3010)
+- **Settings and Admin read as one product (#3022).** A refused switch in Access & Secrets or Hooks flips back and says why in the bottom-right toast instead of a line in the card. Every field, select and picker has the same size as its neighbours; supporting text (row descriptions, hints, empty states) is 12px instead of 11px and nothing is set below 11px; every table uses one header, cell and row style; person status, Keeper decisions, "No owner" and "Off" are status pills.
 
 - **Open-source license capacity showed inactive limits.** The license API, administration and CLI now report unlimited crews, members and agents, including when a signed license contains historical caps. Signed claims and enforcement hooks remain available for future releases; administration explains that resource licensing may change.
 

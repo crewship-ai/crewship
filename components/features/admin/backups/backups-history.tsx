@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { SettingsSegmented, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
+import { SettingsSegmented, SettingsSummary, SummaryItem, nativeSelect, settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
 import { Chip, Gate, WsName } from "./backups-kit"
 import { formatPhases, formatSize, formatWhen, proofLabel, runPlanLabel, runResult, type BackupRun } from "./backups-model"
 import { checkBundle, downloadHref, pinBundle, useBackupRuns, workspaceFor } from "./use-backup-runs"
@@ -51,8 +51,8 @@ export function matches(r: BackupRun, f: RunFilter): boolean {
   }
 }
 
-const TH = "px-3 py-2 text-left font-medium"
-const TD = "px-3 py-2.5 align-top"
+const TH = settingsTh
+const TD = cn(settingsTd, "align-top")
 
 /**
  * Backups › Backup history: every run in the scope, what it went through, and
@@ -98,7 +98,7 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
         <SummaryItem n={nIncomplete} tone={nIncomplete ? "warn" : undefined}>incomplete</SummaryItem>
         <SummaryItem n={nPinned}>pinned</SummaryItem>
         {ctx.inDrill && filter !== "all" && (
-          <span data-slot="run-filter" className="inline-flex h-6 items-center rounded-full bg-primary/10 px-2.5 text-[11.5px] text-primary-hover">
+          <span data-slot="run-filter" className="inline-flex h-6 items-center rounded-full bg-primary/10 px-2.5 text-micro text-primary-hover">
             Showing {filterLabel}
           </span>
         )}
@@ -108,7 +108,7 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
           {!ctx.inDrill && <SettingsSegmented label="Filter runs" options={FILTERS} value={localFilter} onChange={setLocalFilter} />}
           {plans.length > 1 && (
             <select aria-label="Plan" value={plan} onChange={(e) => setPlan(e.target.value)}
-              className="h-8 rounded-md border border-control-border bg-surface-subtle px-2.5 text-xs coarse:h-[2.75rem]">
+              className={nativeSelect}>
               <option value="">All plans</option>
               {plans.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
@@ -122,19 +122,19 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
           </span>
           <div className="min-w-0 flex-1">
             <h3 className="text-sm font-semibold">{filter === "all" ? "Every run" : `${filterLabel} runs`}</h3>
-            <p className="mt-0.5 text-[12px] text-muted-foreground">Newest first · open a run for its phases and proof</p>
+            <p className="mt-0.5 text-label text-muted-foreground">Newest first · open a run for its phases and proof</p>
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-[12.5px] tabular-nums">
-            <thead className="border-b border-border">
-              <tr className="text-[11px] text-muted-foreground">
+          <table className={settingsTable}>
+            <thead>
+              <tr>
                 {["Started", "Scope", "Plan", "Size", "Result", "Checked to"].map((h) => <th key={h} className={cn(TH, h === "Size" && "text-right")}>{h}</th>)}
                 <th className={TH}><span className="sr-only">Pinned</span></th>
               </tr>
             </thead>
             <tbody>
-              {list.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-[12px] text-muted-foreground">No runs {filter === "all" && !plan ? "in this scope yet" : "match this filter"}.</td></tr>}
+              {list.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-label text-muted-foreground">No runs {filter === "all" && !plan ? "in this scope yet" : "match this filter"}.</td></tr>}
               {list.map((r) => {
                 const res = runResult(r)
                 const proof = checked[r.bundle_path ?? ""]?.level ?? r.proof_level
@@ -142,7 +142,7 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
                   <tr key={r.id} tabIndex={0} aria-selected={open === r.id} data-run={r.id}
                     onClick={() => setOpen(r.id)}
                     onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(r.id) } }}
-                    className="cursor-pointer border-b border-border last:border-b-0 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none aria-selected:bg-accent">
+                    className={cn(settingsTableRowLink, "aria-selected:bg-accent")}>
                     <td className={cn(TD, "whitespace-nowrap")}>{formatWhen(r.started_at, now)}</td>
                     <td className={cn(TD, "whitespace-nowrap")}>{r.scope === "instance" ? <WsName name="Whole instance" instance /> : <WsName name={r.workspace_name ?? "—"} />}</td>
                     <td className={cn(TD, "min-w-[10rem]")}>{runPlanLabel(r)}</td>
@@ -184,7 +184,7 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-[11px] text-muted-foreground">{label}</dt>
+      <dt className="text-label text-muted-foreground">{label}</dt>
       <dd className="mt-0.5">{children}</dd>
     </div>
   )
@@ -194,10 +194,10 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 function Rung({ n, label, children }: { n: 1 | 2 | 3; label: string; children: React.ReactNode }) {
   return (
     <li className="flex items-start gap-3 border-b border-border py-2.5 last:border-b-0">
-      <span aria-hidden className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted font-mono text-[11px] text-muted-foreground">{n}</span>
+      <span aria-hidden className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted font-mono text-micro text-muted-foreground">{n}</span>
       <div className="min-w-0 flex-1">
         <div>{label}</div>
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">{children}</div>
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-label text-muted-foreground">{children}</div>
       </div>
     </li>
   )
@@ -218,7 +218,7 @@ function RunDrawer({ run, now, ctx, check, onPin, onCheck }: {
         <SheetTitle className="text-sm">{runPlanLabel(run)} · {formatWhen(run.started_at, now)}</SheetTitle>
         <SheetDescription className="sr-only">Phases, encryption and how far this backup is proven</SheetDescription>
       </SheetHeader>
-      <div className="grid flex-1 gap-5 px-4 pb-4 text-[12.5px]">
+      <div className="grid flex-1 gap-5 px-4 pb-4 text-label">
         <dl className="grid grid-cols-2 gap-3">
           <Fact label="Result"><Chip tone={res.tone}>{res.text}</Chip></Fact>
           <Fact label="Scope">{run.scope === "instance" ? "Whole instance" : run.workspace_name ?? "—"}</Fact>
@@ -284,11 +284,11 @@ function CheckDialog({ run, legacy, onClose, onCheck }: {
         {legacy ? (
           <p className="text-xs text-muted-foreground">This server can only verify the checksum for now, which needs no key.</p>
         ) : (
-          <div className="flex flex-col gap-2 text-[13px]">
+          <div className="flex flex-col gap-2 text-control">
             <label className="flex flex-col gap-1">
               <span className="text-muted-foreground">AGE identity (private key)</span>
               <textarea value={identity} onChange={(e) => setIdentity(e.target.value)} rows={2} spellCheck={false} placeholder="AGE-SECRET-KEY-1…"
-                className="rounded-md border border-control-border bg-surface-subtle px-2 py-1.5 font-mono text-[12px]" />
+                className="rounded-md border border-control-border bg-surface-subtle px-2 py-1.5 font-mono text-label" />
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-muted-foreground">or passphrase (older bundles)</span>
