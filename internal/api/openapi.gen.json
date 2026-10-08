@@ -40832,6 +40832,10 @@
                         "nullable": true,
                         "type": "string"
                       },
+                      "logo_url": {
+                        "nullable": true,
+                        "type": "string"
+                      },
                       "name": {
                         "type": "string"
                       },
@@ -40889,6 +40893,7 @@
                       "id",
                       "name",
                       "slug",
+                      "logo_url",
                       "created_at",
                       "updated_at",
                       "_count_members",

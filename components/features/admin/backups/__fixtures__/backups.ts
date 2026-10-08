@@ -18,11 +18,11 @@ const GB = 1_000_000_000
 const MB = 1_000_000
 
 export const FIXTURE_WORKSPACES: ScopeWorkspace[] = [
-  { id: "ws-dess", name: "Dess", slug: "dess" },
-  { id: "ws-unify", name: "Unify Lab", slug: "unify-lab" },
-  { id: "ws-coolify", name: "Coolify", slug: "coolify" },
-  { id: "ws-pages", name: "Pages demo", slug: "pages-demo" },
-  { id: "ws-sandbox", name: "Sandbox", slug: "sandbox" },
+  { id: "ws-dess", name: "Dess", slug: "dess", crews: 4 },
+  { id: "ws-unify", name: "Unify Lab", slug: "unify-lab", crews: 2 },
+  { id: "ws-coolify", name: "Coolify", slug: "coolify", crews: 1 },
+  { id: "ws-pages", name: "Pages demo", slug: "pages-demo", crews: 1 },
+  { id: "ws-sandbox", name: "Sandbox", slug: "sandbox", crews: 0 },
 ]
 
 function at(now: Date, daysAgo: number, hh: number, mm = 0): string {

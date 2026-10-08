@@ -28,12 +28,18 @@ beforeEach(() => {
 })
 afterEach(() => cleanup())
 
+// The panel holds the filters that apply to the page on screen, then the
+// navigation. Filters and links never mix: the scope shows where it changes
+// what is listed, the run facets only on Backup history, nothing on the
+// instance settings.
 describe("BackupsPage panel", () => {
-  it("is headed by ← Admin and lists Scope, Status, Runs, Plans, Recovery and Settings", async () => {
+  it("is headed by ← Admin and navigates by Overview, Backup history, Plans, Recovery and Settings", async () => {
     show()
     const p = panel()
     expect(within(p).getByRole("link", { name: /Admin/ })).toHaveAttribute("href", "/admin")
-    for (const label of ["Scope", "Status", "Runs", "Plans", "Recovery", "Settings"]) expect(within(p).getByText(label)).toBeInTheDocument()
+    for (const label of ["Overview", "Backup history", "New plan", "New restore", "Storage", "Keys & alerts"]) {
+      expect(within(p).getByRole("button", { name: new RegExp(label) })).toBeInTheDocument()
+    }
     expect(within(p).queryByText("Data retention")).toBeNull()
   })
 
@@ -44,8 +50,10 @@ describe("BackupsPage panel", () => {
     expect(param("section")).toBe("storage")
   })
 
-  it("a Runs facet opens Backup history filtered by it", async () => {
+  it("shows the run facets only on Backup history", async () => {
     show()
+    expect(within(panel()).queryByRole("button", { name: /^Failed/ })).toBeNull()
+    fireEvent.click(within(panel()).getByRole("button", { name: /Backup history/ }))
     fireEvent.click(await within(panel()).findByRole("button", { name: /^Failed/ }))
     expect(param("section")).toBe("history")
     expect(param("status")).toBe("failed")
@@ -58,47 +66,46 @@ describe("BackupsPage panel", () => {
     expect(param("plan")).toBeTruthy()
   })
 
-  it("greys the workspace list out on an instance-only page", async () => {
+  it("drops the scope on an instance-only page", async () => {
     show("?demo=1&section=keys")
-    const list = (await screen.findAllByText("Selected workspaces"))[0].closest("[data-slot=backups-scope]") as HTMLElement
-    expect(list.querySelector("[data-slot=workspace-scope]")).toHaveAttribute("aria-disabled", "true")
+    await within(panel()).findByRole("button", { name: /Keys & alerts/ })
+    expect(within(panel()).queryByText("Whole instance")).toBeNull()
   })
 
-  it("switches between the whole instance and selected workspaces, kept in ?scope=", async () => {
+  it("lists the workspaces only once Selected workspaces is picked, kept in ?scope=", async () => {
     show()
+    expect(within(panel()).queryByText("All workspaces")).toBeNull()
     fireEvent.click(within(panel()).getByRole("button", { name: /Selected workspaces/ }))
     expect(param("scope")).toBe("workspaces")
+    expect(await within(panel()).findByText("All workspaces")).toBeInTheDocument()
     fireEvent.click(within(panel()).getByRole("button", { name: /Whole instance/ }))
     expect(param("scope")).toBe("instance")
   })
 })
 
-// The panel's toolbar: a search over plans and runs, and a Filter with the
-// dimensions the Runs facets do not cover (kind, proof, when). The facet
-// counts and Backup history apply the same filters.
-describe("BackupsPage toolbar", () => {
+// On Backup history the panel's search and facets narrow the runs; the counts
+// beside each facet are the rows it opens.
+describe("BackupsPage history filters", () => {
   it("search narrows the plans in the panel", async () => {
     show()
     await within(panel()).findByRole("button", { name: /Complete recovery/ })
-    fireEvent.change(within(panel()).getByPlaceholderText("Search runs, plans…"), { target: { value: "memory" } })
+    fireEvent.change(within(panel()).getByPlaceholderText(/Search/), { target: { value: "memory" } })
     expect(within(panel()).queryByRole("button", { name: /Complete recovery/ })).toBeNull()
     expect(within(panel()).getByRole("button", { name: /Memory every 6 h/ })).toBeInTheDocument()
   })
 
-  it("Filter › Kind narrows the runs the facets count and History shows, kept in the URL", async () => {
+  it("Kind narrows the runs, kept in the URL", async () => {
     show("?demo=1&section=history")
     await within(panel()).findByRole("button", { name: /^All runs\s*5/ })
-    fireEvent.click(within(panel()).getByRole("button", { name: /Filter/ }))
-    fireEvent.click(screen.getByRole("button", { name: /Environments/ }))
+    fireEvent.click(within(panel()).getByRole("button", { name: /^Environments/ }))
     expect(param("kind")).toBe("environments")
     expect(within(panel()).getByRole("button", { name: /^All runs\s*1/ })).toBeInTheDocument()
   })
 
-  it("Filter › Proof keeps only runs proven that far", async () => {
+  it("Proof keeps only runs proven that far", async () => {
     show("?demo=1&section=history")
     await within(panel()).findByRole("button", { name: /^All runs\s*5/ })
-    fireEvent.click(within(panel()).getByRole("button", { name: /Filter/ }))
-    fireEvent.click(screen.getByRole("button", { name: /Test restore/ }))
+    fireEvent.click(within(panel()).getByRole("button", { name: /^Test restore/ }))
     expect(param("proof")).toBe("3")
     expect(within(panel()).getByRole("button", { name: /^All runs\s*2/ })).toBeInTheDocument()
   })

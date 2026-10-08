@@ -69,14 +69,14 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"last_active_at", "active_sessions", "cli_tokens", "locked_until", "failed_login_count", "email_verified",
 		"instance_admin", "instance_admin_source", "suspended_at", "suspended_reason", "setup_link_expires_at")
 	adminWorkspace := object(map[string]any{
-		"id": str(), "name": str(), "slug": str(), "created_at": str(), "updated_at": str(),
+		"id": str(), "name": str(), "slug": str(), "logo_url": nullable(str()), "created_at": str(), "updated_at": str(),
 		"_count_members": integer(), "_count_agents": integer(), "_count_crews": integer(),
 		"preferred_language": nullable(str()), "run_retention_days": nullable(integer()),
 		"allow_privileged_credentials": boolean(), "pending_invitations": integer(),
 		"last_activity_at": nullable(str()), "runs_7d": integer(), "runs_by_day": array(integer()),
 		"cost_30d_usd": number(), "current": boolean(),
 		"owners": array(object(map[string]any{"id": str(), "email": str(), "full_name": nullable(str())}, "id", "email", "full_name")),
-	}, "id", "name", "slug", "created_at", "updated_at", "_count_members", "_count_agents", "_count_crews",
+	}, "id", "name", "slug", "logo_url", "created_at", "updated_at", "_count_members", "_count_agents", "_count_crews",
 		"preferred_language", "run_retention_days", "allow_privileged_credentials", "pending_invitations",
 		"last_activity_at", "runs_7d", "runs_by_day", "cost_30d_usd", "current", "owners")
 	// The three per-person POSTs carry no body; EmptyRequest is the shared

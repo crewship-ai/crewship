@@ -9,10 +9,11 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
 import { WorkspaceScopeSection, type Scope } from "@/components/features/admin/workspace-scope"
-import { SidebarFacet, SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
+import { SidebarSearch } from "@/components/layout/sidebar-kit"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { BACKUP_SECTIONS, initialBackupsSection, type BackupsSection } from "@/app/(dashboard)/admin/navigation"
 import { useBackupsScope, type RunFilter, type RunQuery, type SectionCtx } from "./backups-console"
-import { INSTANCE_ONLY, describePlanWhen } from "./backups-model"
+import { describePlanWhen } from "./backups-model"
 import { useBackupRuns } from "./use-backup-runs"
 import { useBackupPlans } from "./use-backup-plans"
 import { useBackupsOverview } from "./use-backups-overview"
@@ -81,6 +82,22 @@ function readView(search: string): View {
   }
 }
 
+/** A block of the panel's filters that slides in and out as the page changes. */
+function Reveal({ children }: { children: React.ReactNode }) {
+  const reduce = useReducedMotion()
+  return (
+    <motion.div
+      initial={reduce ? false : { opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: "auto" }}
+      exit={reduce ? undefined : { opacity: 0, height: 0 }}
+      transition={{ duration: 0.18, ease: [0.2, 0.7, 0.2, 1] }}
+      className="overflow-hidden"
+    >
+      {children}
+    </motion.div>
+  )
+}
+
 export function BackupsPage() {
   const { workspaceId, demo, workspaces, urlState, selected, scope, commit, backUpNow } = useBackupsScope()
   const [view, setView] = React.useState<View>(() => readView(typeof window === "undefined" ? "" : window.location.search))
@@ -136,89 +153,116 @@ export function BackupsPage() {
   const setQuery = (next: Partial<RunQuery>) => update({ query: { ...view.query, ...next } })
   const needle = view.query.q.trim().toLowerCase()
   const shownPlans = (plans.data ?? []).filter((p) => !needle || p.name.toLowerCase().includes(needle))
-  const filterCount = [view.query.kind, view.query.proof, view.query.period].filter(Boolean).length
+  const onHistory = view.section === "history"
+  const filterCount = onHistory ? [view.status !== "all", view.query.kind, view.query.proof, view.query.period].filter(Boolean).length : 0
 
-  // The panel's toolbar narrows runs (and the plans list, by name) on top of
-  // the Runs facets: what was kept, how far it is proven, and when.
+  // What each History facet would show, the others held: the count beside an
+  // option is the number of rows picking it opens.
+  const scoped = runsInScope(runs.data ?? [], { scope, selected }, runs.source === "legacy")
+  const countWith = (q: Partial<RunQuery>, status: RunFilter = view.status) =>
+    scoped.filter((r) => matches(r, status) && matchesQuery(r, { ...view.query, ...q })).length
+
+  // The search narrows what the page lists: runs on Backup history, the plans
+  // everywhere else. The filters live in the panel, not in a popover.
   const toolbar = (
-    <>
-      <SidebarSearch value={view.query.q} onValueChange={(q) => setQuery({ q })} placeholder="Search runs, plans…" />
-      <SidebarFilterPopover label="Filter runs" activeCount={filterCount} onClear={() => setQuery({ kind: "", proof: "", period: "" })} panelClassName="min-w-[240px]">
-        <SidebarFacet label="Kind" resetLabel="Any kind" resetActive={!view.query.kind} onReset={() => setQuery({ kind: "" })} first>
-          {KINDS.map((k) => (
-            <SidebarFacetOption key={k.key} active={view.query.kind === k.key} onToggle={() => setQuery({ kind: view.query.kind === k.key ? "" : k.key })}>{k.label}</SidebarFacetOption>
-          ))}
-        </SidebarFacet>
-        <SidebarFacet label="Proof" resetLabel="Any proof" resetActive={!view.query.proof} onReset={() => setQuery({ proof: "" })}>
-          {PROOFS.map((k) => (
-            <SidebarFacetOption key={k.key} active={view.query.proof === k.key} onToggle={() => setQuery({ proof: view.query.proof === k.key ? "" : k.key })}>{k.label}</SidebarFacetOption>
-          ))}
-        </SidebarFacet>
-        <SidebarFacet label="When" resetLabel="Any time" resetActive={!view.query.period} onReset={() => setQuery({ period: "" })}>
-          {PERIODS.map((k) => (
-            <SidebarFacetOption key={k.key} active={view.query.period === k.key} onToggle={() => setQuery({ period: view.query.period === k.key ? "" : k.key })}>{k.label}</SidebarFacetOption>
-          ))}
-        </SidebarFacet>
-      </SidebarFilterPopover>
-    </>
+    <SidebarSearch value={view.query.q} onValueChange={(q) => setQuery({ q })} placeholder={onHistory ? "Search runs…" : "Search plans…"} />
   )
 
-  const instanceOnly = INSTANCE_ONLY.has(view.section)
+  // The scope applies where it changes what is listed: Overview, Backup
+  // history and a new restore. Plans carry their own scope; Storage and Keys
+  // are instance settings; restore history and drills are the instance's.
+  const scopedSection = view.section === "overview" || onHistory || (view.section === "recovery" && view.recovery === "new")
   const wsScope: Scope = { all: urlState.ws === null, ids: selected }
-  const inert = instanceOnly ? "Instance setting · applies to every backup plan" : scope === "instance" ? "The whole instance is picked above" : undefined
 
-  const nav = (
+  const facet = <K extends keyof RunQuery>(key: K, label: string, any: string, options: { key: RunQuery[K]; label: string }[]) => (
+    <DrillNavSection label={label}>
+      <DrillNavItem pressed={!view.query[key]} selected={!view.query[key]} onSelect={() => setQuery({ [key]: "" } as Partial<RunQuery>)}
+        label={any} meta={countWith({ [key]: "" } as Partial<RunQuery>)} />
+      {options.map((o, i) => {
+        const n = countWith({ [key]: o.key } as Partial<RunQuery>)
+        return (
+          <DrillNavItem key={String(o.key)} index={i + 1} pressed={view.query[key] === o.key} selected={view.query[key] === o.key} muted={n === 0}
+            onSelect={() => setQuery({ [key]: view.query[key] === o.key ? "" : o.key } as Partial<RunQuery>)} label={o.label} meta={n} />
+        )
+      })}
+    </DrillNavSection>
+  )
+
+  const filters = (
     <>
-      <div data-slot="backups-scope">
-        <DrillNavSection label="Scope" collapsible={false}>
-          <div className={cn(instanceOnly && "pointer-events-none opacity-45")} aria-disabled={instanceOnly ? true : undefined}>
+      {scopedSection && (
+        <Reveal key="scope">
+          <DrillNavSection label="Scope" collapsible={false}>
             <DrillNavItem pressed={scope === "instance"} selected={scope === "instance"} onSelect={() => commit("instance", selected)}
               icon={<Globe className="h-3.5 w-3.5" />} label="Whole instance" sub="Workspaces, users, instance settings" />
             <DrillNavItem pressed={scope === "workspaces"} selected={scope === "workspaces"} onSelect={() => commit("workspaces", selected)}
-              icon={<Users className="h-3.5 w-3.5" />} label="Selected workspaces" meta={`${selected.size}/${workspaces.length}`} />
-          </div>
+              icon={<Users className="h-3.5 w-3.5" />} label="Selected workspaces" meta={scope === "workspaces" ? `${selected.size}/${workspaces.length}` : undefined} />
+          </DrillNavSection>
+        </Reveal>
+      )}
+      {scopedSection && scope === "workspaces" && (
+        <Reveal key="workspaces">
+          <WorkspaceScopeSection workspaces={workspaces} scope={wsScope} currentId={workspaceId} hideEmpty
+            onChange={(next) => commit("workspaces", next.all ? new Set(workspaces.map((w) => w.id)) : next.ids)} />
+        </Reveal>
+      )}
+      {onHistory && (
+        <Reveal key="history-filters">
+          <DrillNavSection label="Result" count={countWith({}, "all")}>
+            {RUN_FACETS.map((f, i) => {
+              const n = countWith({}, f.key)
+              return (
+                <DrillNavItem key={f.key} index={i} pressed={view.status === f.key} selected={view.status === f.key}
+                  muted={f.key !== "all" && n === 0} onSelect={() => update({ status: f.key })}
+                  icon={<span className={cn("h-1.5 w-1.5 rounded-full", f.dot)} aria-hidden />} label={f.label} meta={n} />
+              )
+            })}
+          </DrillNavSection>
+          {facet("kind", "Kind", "Any kind", KINDS)}
+          {facet("proof", "Proof", "Any proof", PROOFS)}
+          {facet("period", "When", "Any time", PERIODS)}
+        </Reveal>
+      )}
+    </>
+  )
+
+  const nav = (
+    <>
+      <AnimatePresence initial={false}>{filters}</AnimatePresence>
+      <div data-slot="backups-nav" className={cn((scopedSection || onHistory) && "mt-2 border-t border-sidebar-border pt-1")}>
+        <DrillNavSection label="Backups" collapsible={false}>
+          <DrillNavItem selected={view.section === "overview"} onSelect={() => update({ section: "overview" })}
+            icon={<Home className="h-3.5 w-3.5" />} label="Overview"
+            meta={attention ? <span className="text-destructive">{attention}</span> : undefined} />
+          <DrillNavItem selected={onHistory} onSelect={() => update({ section: "history" })}
+            icon={<History className="h-3.5 w-3.5" />} label="Backup history" meta={facetCount.all} />
         </DrillNavSection>
-        <WorkspaceScopeSection workspaces={workspaces} scope={wsScope} currentId={workspaceId} inert={inert}
-          onChange={(next) => commit("workspaces", next.all ? new Set(workspaces.map((w) => w.id)) : next.ids)} />
+        <DrillNavSection label="Plans" count={shownPlans.length}>
+          {shownPlans.map((p, i) => (
+            <DrillNavItem key={p.id} index={i} selected={view.section === "schedules" && view.plan === p.id} muted={!p.enabled}
+              onSelect={() => update({ section: "schedules", plan: p.id })}
+              icon={<CalendarClock className="h-3.5 w-3.5" />} label={p.name} sub={describePlanWhen(p)} meta={p.enabled ? "on" : "off"} />
+          ))}
+          <DrillNavItem selected={view.section === "schedules" && view.plan === "new"} onSelect={newPlan}
+            icon={<Plus className="h-3.5 w-3.5" />} label={<span className="text-primary-hover">New plan</span>} />
+        </DrillNavSection>
+        <DrillNavSection label="Recovery">
+          <DrillNavItem selected={view.section === "recovery" && view.recovery === "new"} onSelect={() => update({ section: "recovery", recovery: "new" })}
+            icon={<RotateCcw className="h-3.5 w-3.5" />} label="New restore" />
+          <DrillNavItem selected={view.section === "recovery" && view.recovery === "history"} onSelect={() => update({ section: "recovery", recovery: "history" })}
+            icon={<ListChecks className="h-3.5 w-3.5" />} label="Restore history" />
+          <DrillNavItem selected={view.section === "recovery" && view.recovery === "drills"} onSelect={() => update({ section: "recovery", recovery: "drills" })}
+            icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Drills" />
+        </DrillNavSection>
+        <DrillNavSection label="Settings" count={2}>
+          <DrillNavItem selected={view.section === "storage"} onSelect={() => update({ section: "storage" })}
+            icon={<HardDrive className="h-3.5 w-3.5" />} label="Storage" title="Instance setting · applies to every backup plan"
+            meta={<span className="rounded bg-primary/10 px-1 text-[10px] text-primary-hover">Instance</span>} />
+          <DrillNavItem selected={view.section === "keys"} onSelect={() => update({ section: "keys" })}
+            icon={<KeyRound className="h-3.5 w-3.5" />} label="Keys & alerts" title="Instance setting · applies to every backup plan"
+            meta={<span className="rounded bg-primary/10 px-1 text-[10px] text-primary-hover">Instance</span>} />
+        </DrillNavSection>
       </div>
-      <DrillNavSection label="Status" collapsible={false}>
-        <DrillNavItem selected={view.section === "overview"} onSelect={() => update({ section: "overview" })}
-          icon={<Home className="h-3.5 w-3.5" />} label="Overview"
-          meta={attention ? <span className="text-destructive">{attention}</span> : undefined} />
-      </DrillNavSection>
-      <DrillNavSection label="Runs" count={facetCount.all}>
-        {RUN_FACETS.map((f, i) => (
-          <DrillNavItem key={f.key} index={i} pressed={view.section === "history" && view.status === f.key} selected={view.section === "history" && view.status === f.key}
-            muted={f.key !== "all" && facetCount[f.key] === 0}
-            onSelect={() => update({ section: "history", status: f.key })}
-            icon={<span className={cn("h-1.5 w-1.5 rounded-full", f.dot)} aria-hidden />} label={f.label} meta={facetCount[f.key]} />
-        ))}
-      </DrillNavSection>
-      <DrillNavSection label="Plans" count={shownPlans.length}>
-        {shownPlans.map((p, i) => (
-          <DrillNavItem key={p.id} index={i} selected={view.section === "schedules" && view.plan === p.id} muted={!p.enabled}
-            onSelect={() => update({ section: "schedules", plan: p.id })}
-            icon={<CalendarClock className="h-3.5 w-3.5" />} label={p.name} sub={describePlanWhen(p)} meta={p.enabled ? "on" : "off"} />
-        ))}
-        <DrillNavItem selected={view.section === "schedules" && view.plan === "new"} onSelect={newPlan}
-          icon={<Plus className="h-3.5 w-3.5" />} label={<span className="text-primary-hover">New plan</span>} />
-      </DrillNavSection>
-      <DrillNavSection label="Recovery">
-        <DrillNavItem selected={view.section === "recovery" && view.recovery === "new"} onSelect={() => update({ section: "recovery", recovery: "new" })}
-          icon={<RotateCcw className="h-3.5 w-3.5" />} label="New restore" />
-        <DrillNavItem selected={view.section === "recovery" && view.recovery === "history"} onSelect={() => update({ section: "recovery", recovery: "history" })}
-          icon={<ListChecks className="h-3.5 w-3.5" />} label="Restore history" />
-        <DrillNavItem selected={view.section === "recovery" && view.recovery === "drills"} onSelect={() => update({ section: "recovery", recovery: "drills" })}
-          icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Drills" />
-      </DrillNavSection>
-      <DrillNavSection label="Settings" count={2}>
-        <DrillNavItem selected={view.section === "storage"} onSelect={() => update({ section: "storage" })}
-          icon={<HardDrive className="h-3.5 w-3.5" />} label="Storage" title="Instance setting · applies to every backup plan"
-          meta={<span className="rounded bg-primary/10 px-1 text-[10px] text-primary-hover">Instance</span>} />
-        <DrillNavItem selected={view.section === "keys"} onSelect={() => update({ section: "keys" })}
-          icon={<KeyRound className="h-3.5 w-3.5" />} label="Keys & alerts" title="Instance setting · applies to every backup plan"
-          meta={<span className="rounded bg-primary/10 px-1 text-[10px] text-primary-hover">Instance</span>} />
-      </DrillNavSection>
     </>
   )
 

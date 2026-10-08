@@ -509,7 +509,15 @@ export interface RetentionChange {
 export interface RetentionPutResponse { dry_run: boolean; changes: RetentionChange[]; preview_id?: string }
 
 /** The workspaces the scope bar lists (GET /api/v1/admin/workspaces). */
-export interface ScopeWorkspace { id: string; name: string; slug: string }
+export interface ScopeWorkspace {
+  id: string
+  name: string
+  slug: string
+  /** The workspace's own logo, when one was set. */
+  logoUrl?: string | null
+  /** Crews it holds; the panel folds workspaces with none away. */
+  crews?: number
+}
 
 // ─── Sections ───────────────────────────────────────────────────────────────
 
