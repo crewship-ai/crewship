@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { REPORTED_USAGE_HINT, formatReportedUsage } from "@/components/features/routines/routine-cost-format"
 
 import type { BottomPanelContext } from "./types"
 import { EmptyState, statusColor } from "./shared"
@@ -66,7 +67,7 @@ export function TraceTab({ workspaceId, context }: { workspaceId: string; contex
           <><span>·</span><span>{Math.round(run.duration_ms / 1000)}s</span></>
         )}
         {typeof run.cost_usd === "number" && run.cost_usd > 0 && (
-          <><span>·</span><span>${run.cost_usd.toFixed(4)}</span></>
+          <><span>·</span><span title={REPORTED_USAGE_HINT}>{formatReportedUsage(run.cost_usd)} reported usage</span></>
         )}
       </div>
 
