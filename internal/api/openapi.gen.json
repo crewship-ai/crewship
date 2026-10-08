@@ -14398,6 +14398,9 @@
           "priority": {
             "type": "integer"
           },
+          "queue_if_busy": {
+            "type": "boolean"
+          },
           "tags": {
             "items": {
               "type": "string"
