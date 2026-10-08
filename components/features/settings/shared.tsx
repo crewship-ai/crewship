@@ -3,6 +3,7 @@
 import { useId, type CSSProperties, type ReactNode } from "react"
 import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { PageSaveLabel, toastSaveError, usePageSave } from "@/components/ui/page-save-bar"
 
 /**
  * Shared settings card shell (Harbor).
@@ -69,7 +70,9 @@ export function SettingsCard({
       className={cn("overflow-hidden rounded-card border border-border bg-card", className)}
     >
       <SettingsCardHeader title={title} titleId={titleId} description={description} actions={actions} icon={icon} tint={tint} />
-      <div className={cn(padded && "p-4", bodyClassName)}>{children}</div>
+      <PageSaveLabel label={title}>
+        <div className={cn(padded && "p-4", bodyClassName)}>{children}</div>
+      </PageSaveLabel>
     </section>
   )
 }
@@ -194,7 +197,7 @@ export function SettingsDangerCard({
       className="overflow-hidden rounded-card border border-destructive/30 bg-card"
     >
       <SettingsCardHeader title={title} titleId={titleId} description={description} actions={actions} icon={icon} danger />
-      {children}
+      <PageSaveLabel label={title}>{children}</PageSaveLabel>
     </section>
   )
 }
@@ -245,20 +248,25 @@ export function SettingsSegmented<T extends string | number>({ label, options, v
 }
 
 /**
- * One Save for a page of fields: it appears, pinned to the bottom of the
- * scrolling pane, once something differs from what the server holds.
+ * One Save for a page of fields. Inside a page with a PageSaveProvider
+ * (Settings, Admin, nested pages) it hands its edits to the page's floating
+ * bar and draws nothing; on its own it draws the bar itself.
  */
-export function SettingsSaveBar({ count, onSave, onDiscard, saving = false, canSave = true }: {
-  count: number; onSave: () => void; onDiscard: () => void; saving?: boolean; canSave?: boolean
+export function SettingsSaveBar({ count, onSave, onDiscard, saving = false, canSave = true, label = "changes" }: {
+  count: number; onSave: () => void | Promise<unknown>; onDiscard: () => void; saving?: boolean; canSave?: boolean
+  /** What the error toast calls these edits: "Couldn't save Limits". */
+  label?: string
 }) {
-  if (count === 0) return null
+  const inPage = usePageSave({ label, count, saving, canSave, save: onSave, discard: onDiscard })
+  if (inPage || count === 0) return null
   return (
     <div role="region" aria-label="Unsaved changes" data-slot="settings-save-bar"
       className="sticky bottom-4 z-10 mx-auto flex w-fit items-center gap-3 rounded-xl border border-border bg-card py-1.5 pl-4 pr-1.5 text-xs shadow-lg">
       <span><span className="font-mono tabular-nums">{count}</span> unsaved change{count === 1 ? "" : "s"}</span>
       <button type="button" onClick={onDiscard} disabled={saving}
         className="h-7 rounded-md px-2.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50">Discard</button>
-      <button type="button" onClick={onSave} disabled={saving || !canSave}
+      <button type="button" disabled={saving || !canSave}
+        onClick={() => { Promise.resolve().then(onSave).catch((e) => toastSaveError(label, e instanceof Error ? e.message : null)) }}
         className="h-7 rounded-md bg-primary px-3 font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">Save</button>
     </div>
   )

@@ -22,6 +22,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier, isOwner } from "@/lib/permissions/tiers"
 import { SettingsCard, SettingsRow, SettingsDangerCard, settingsControl, settingsPickerButton } from "@/components/features/settings/shared"
 import { PagesAppearanceCard } from "./pages-appearance-card"
+import { WorkspaceLogoRow } from "./workspace-logo-row"
 import { cn } from "@/lib/utils"
 import { PrivilegedCredentialsCard } from "@/components/features/settings/sections/privileged-credentials-card"
 
@@ -29,18 +30,21 @@ interface GeneralSectionProps {
   workspaceId: string
   orgName: string
   orgSlug: string
+  /** The workspace's uploaded logo (#3005), or null. */
+  logoUrl?: string | null
   preferredLanguage: string | null
   agentCount: number
   crewCount: number
   memberCount: number
   role: string | null
   onUpdated: (org: { name: string; slug: string; preferred_language: string | null }) => void
+  onLogoChange?: (logoUrl: string | null) => void
   onDelete: () => void
 }
 
 export function GeneralSection({
-  workspaceId, orgName, orgSlug, preferredLanguage,
-  agentCount, crewCount, memberCount, role, onUpdated, onDelete,
+  workspaceId, orgName, orgSlug, logoUrl, preferredLanguage,
+  agentCount, crewCount, memberCount, role, onUpdated, onLogoChange, onDelete,
 }: GeneralSectionProps) {
   // Name, slug and language are all typed-in values on one card, so they share
   // one draft and one footer. Language used to PATCH the instant you picked it,
@@ -140,6 +144,7 @@ export function GeneralSection({
             : "Your workspace name, slug, and default agent language. Only workspace admins can change these."
         }
       >
+        <WorkspaceLogoRow workspaceId={workspaceId} name={orgName} logoUrl={logoUrl} canEdit={canEdit} onChange={(u) => onLogoChange?.(u)} />
         {!canEdit ? (
           <>
             <SettingsRow label="Workspace name">
@@ -230,6 +235,7 @@ export function GeneralSection({
             </SettingsRow>
             <SaveFooter
               dirty={form.isDirty}
+              count={form.dirtyCount}
               status={form.status}
               error={form.error}
               onSave={handleSave}

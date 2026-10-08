@@ -37,6 +37,10 @@ import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
 import { RoutineRunInputsDialog } from "@/components/features/routines/routine-run-inputs-dialog"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ConfirmDialog, type Consequence } from "@/components/ui/confirm-dialog"
+import { usePageSave } from "@/components/ui/page-save-bar"
+import { automationsForIssue } from "@/lib/automations"
+import { statusLabel } from "@/components/features/issues/status-icon"
 import { RunActivityTimeline, RUN_WORK_ENTRY_TYPES } from "@/components/features/activity/run-activity-timeline"
 import { IssueCardDetail, type IssueRun } from "@/components/features/issues/issue-card-detail"
 import {
@@ -448,6 +452,72 @@ export function IssueDetailSurface({
     [base, qs, refresh],
   )
 
+  /* ---------------------------------------------------------------- *
+   *  The draft: edits wait for the page's Save bar                     *
+   * ---------------------------------------------------------------- */
+
+  // Inside a page Save bar (the issues page, /issues/<id>) every property
+  // edit is staged here and one Save sends them in one PATCH. A misclick on
+  // a status used to fire the automations that react to it at once, and the
+  // description saved itself mid-sentence. Without a bar (an embed with no
+  // provider) edits still PATCH at once, as before.
+  const [draft, setDraft] = React.useState<Record<string, unknown>>({})
+  const draftRef = React.useRef(draft)
+  draftRef.current = draft
+  React.useEffect(() => { setDraft({}) }, [identifier])
+
+  const stage = React.useCallback(async (body: Record<string, unknown>): Promise<boolean> => {
+    if (!issue) return false
+    setDraft((cur) => withoutUnchanged({ ...cur, ...body }, issue))
+    return true
+  }, [issue])
+
+  // The PATCH the bar's Save sends: errors reject, so the bar reports them in
+  // its corner toast and keeps the draft.
+  const commit = React.useCallback(async (body: Record<string, unknown>) => {
+    if (!base) throw new Error("This issue is still loading.")
+    setBusy(true)
+    try {
+      const res = await apiFetch(`${base}?${qs}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const b = await res.json().catch(() => null)
+        throw new Error(b?.detail ?? "The server refused the change.")
+      }
+      setDraft({})
+      await refresh()
+    } finally {
+      setBusy(false)
+    }
+  }, [base, qs, refresh])
+
+  // A status that sets something off, or a new assignee, asks first.
+  const [confirm, setConfirm] = React.useState<{ body: Record<string, unknown>; done: () => void } | null>(null)
+  const save = React.useCallback(() => {
+    const body = { ...draftRef.current }
+    if (!asksFirst(body)) return commit(body)
+    return new Promise<void>((resolve, reject) => {
+      setConfirm({
+        body,
+        done: () => resolve(),
+      })
+      confirmRun.current = () => commit(body).then(resolve, reject)
+    })
+  }, [commit])
+  const confirmRun = React.useRef<(() => Promise<void>) | null>(null)
+
+  const draftCount = Object.keys(draft).filter((k) => k !== "assignee_type").length
+  const inPage = usePageSave({
+    label: `Issue ${identifier}`,
+    count: draftCount,
+    saving: busy && draftCount > 0,
+    save,
+    discard: () => setDraft({}),
+  })
+
   const postComment = React.useCallback(
     async (body: string): Promise<boolean> => {
       if (!base) return false
@@ -497,12 +567,14 @@ export function IssueDetailSurface({
         }
         const created: IssueLabel = await res.json()
         setRoster((r) => ({ ...r, labels: [...r.labels, created] }))
-        await patch({ labels: [...(issue?.labels ?? []).map((l) => l.id), created.id] })
+        // Creating the label is the instant part; attaching it is an edit.
+        const attached = (draftRef.current.labels as string[] | undefined) ?? (issue?.labels ?? []).map((l) => l.id)
+        await (inPage ? stage : patch)({ labels: [...attached, created.id] })
       } catch {
         toast.error("Failed to create label")
       }
     },
-    [qs, patch, issue?.labels],
+    [qs, patch, stage, inPage, issue?.labels],
   )
 
   const addRelation = React.useCallback(
@@ -749,7 +821,7 @@ export function IssueDetailSurface({
       projects: roster.projects,
       routines: pipelines.map((p) => ({ id: p.id, name: p.name, slug: p.slug })),
       milestones,
-      patch,
+      patch: inPage ? stage : patch,
       createLabel,
       addRelation,
       removeRelation,
@@ -763,6 +835,8 @@ export function IssueDetailSurface({
     pipelines,
     milestones,
     patch,
+    stage,
+    inPage,
     createLabel,
     addRelation,
     removeRelation,
@@ -804,7 +878,8 @@ export function IssueDetailSurface({
     )
   }
 
-  const project = roster.projects.find((p) => p.id === issue.project_id) ?? null
+  const shown = withDraft(issue, draft, roster)
+  const project = roster.projects.find((p) => p.id === shown.project_id) ?? null
 
   return (
     <>
@@ -822,7 +897,7 @@ export function IssueDetailSurface({
       </div>
     )}
     <IssueCardDetail
-      issue={issue}
+      issue={shown}
       filesPanel={<IssueFilesCard key={issue.id} issue={issue} editable={editable} />}
       workPanel={<IssueWorkPanel key={issue.id} issue={issue} agents={roster.agents} editable={editable} onChanged={refresh} latestOutcome={runs[0]?.outcome} />}
       unavailable={subFailed}
@@ -862,6 +937,26 @@ export function IssueDetailSurface({
         />
       }
     />
+    {confirm && (
+      <ConfirmDialog
+        open
+        onOpenChange={(open) => {
+          if (open) return
+          // Cancel keeps the draft; the bar stays.
+          confirm.done()
+          setConfirm(null)
+        }}
+        title={confirmTitle(confirm.body, issue)}
+        description="This change is sent the moment you confirm."
+        consequences={consequencesOf(confirm.body, automationsForIssue(automations, { missionId: issue.id, crewId: issue.crew_id }), subIssues, roster.agents)}
+        confirmLabel={confirm.body.status ? `Mark ${(statusLabel[String(confirm.body.status)] ?? String(confirm.body.status)).toLowerCase()}` : "Save"}
+        onConfirm={async () => {
+          const run = confirmRun.current
+          setConfirm(null)
+          await run?.()
+        }}
+      />
+    )}
     {routineRunForm?.issueIdentifier === identifier && (
       <RoutineRunInputsDialog
         definition={routineRunForm.definition}
@@ -890,4 +985,105 @@ function DetailSkeleton() {
       </div>
     </div>
   )
+}
+
+/* ------------------------------------------------------------------ *
+ *  Draft helpers                                                      *
+ * ------------------------------------------------------------------ */
+
+/** The statuses whose change sets something off: completion and review. */
+const ASKING_STATUSES = new Set(["DONE", "CANCELLED", "DUPLICATE", "REVIEW"])
+
+function asksFirst(body: Record<string, unknown>): boolean {
+  return (typeof body.status === "string" && ASKING_STATUSES.has(body.status)) || "assignee_id" in body
+}
+
+function labelIds(v: unknown): string {
+  return [...((v as string[] | undefined) ?? [])].sort().join(",")
+}
+
+/** The draft minus every field that is back to what the issue holds. */
+function withoutUnchanged(body: Record<string, unknown>, issue: Mission): Record<string, unknown> {
+  const out = { ...body }
+  const same = (k: string, now: unknown) => {
+    if (k in out && (out[k] ?? "") === (now ?? "")) delete out[k]
+  }
+  same("title", issue.title)
+  same("description", issue.description)
+  same("status", issue.status)
+  same("priority", issue.priority)
+  same("due_date", issue.due_date?.split("T")[0])
+  same("milestone_id", issue.milestone_id)
+  same("project_id", issue.project_id)
+  same("routine_id", issue.routine_id)
+  if ("estimate" in out && (out.estimate ?? null) === (issue.estimate ?? null)) delete out.estimate
+  if ("labels" in out && labelIds(out.labels) === labelIds((issue.labels ?? []).map((l) => l.id))) delete out.labels
+  if ("assignee_id" in out && (out.assignee_id || null) === (issue.assignee_id || null)) {
+    delete out.assignee_id
+    delete out.assignee_type
+  }
+  return out
+}
+
+/** The issue as the draft would leave it, for the card to draw. */
+function withDraft(
+  issue: Mission,
+  draft: Record<string, unknown>,
+  roster: { agents: { id: string; name: string }[]; labels: IssueLabel[] },
+): Mission {
+  if (Object.keys(draft).length === 0) return issue
+  const next: Mission = { ...issue }
+  const blankable = (v: unknown) => (v === "" ? null : v)
+  for (const k of ["title", "description", "status", "priority"] as const) {
+    if (k in draft) (next as unknown as Record<string, unknown>)[k] = draft[k]
+  }
+  for (const k of ["due_date", "milestone_id", "project_id", "routine_id"] as const) {
+    if (k in draft) (next as unknown as Record<string, unknown>)[k] = blankable(draft[k])
+  }
+  if ("estimate" in draft) next.estimate = draft.estimate as number | null
+  if ("assignee_id" in draft) {
+    const id = (draft.assignee_id as string) || null
+    next.assignee_id = id
+    next.assignee_type = id ? (draft.assignee_type as "agent" | "user") : null
+    next.assignee_name = id ? roster.agents.find((a) => a.id === id)?.name ?? issue.assignee_name ?? null : null
+  }
+  if ("labels" in draft) {
+    const byId = new Map([...roster.labels, ...(issue.labels ?? [])].map((l) => [l.id, l]))
+    next.labels = ((draft.labels as string[]) ?? []).map((id) => byId.get(id)).filter((l): l is IssueLabel => !!l)
+  }
+  return next
+}
+
+function confirmTitle(body: Record<string, unknown>, issue: Mission): string {
+  const who = issue.identifier ?? "this issue"
+  if (typeof body.status === "string") return `Mark ${who} ${(statusLabel[body.status] ?? body.status).toLowerCase()}?`
+  return `Reassign ${who}?`
+}
+
+/** What a confirmed status or assignee change sets off, in words. */
+function consequencesOf(
+  body: Record<string, unknown>,
+  automations: { name: string; enabled: boolean; event_type: string }[],
+  subIssues: Mission[],
+  agents: { id: string; name: string }[],
+): Consequence[] {
+  const out: Consequence[] = []
+  if (typeof body.status === "string") {
+    for (const a of automations.filter((x) => x.enabled && x.event_type === "mission.status_change")) {
+      out.push({ tone: "warn", text: `Starts “${a.name}”, which reacts to a status change` })
+    }
+    const open = subIssues.filter((c) => !["DONE", "CANCELLED", "DUPLICATE", "COMPLETED"].includes(String(c.status)))
+    if (["DONE", "CANCELLED", "DUPLICATE"].includes(body.status) && open.length > 0) {
+      out.push({ tone: "lost", text: `${open.length} sub-issue${open.length === 1 ? " is" : "s are"} still open; the server refuses this until ${open.length === 1 ? "it is" : "they are"} closed` })
+    }
+  }
+  if ("assignee_id" in body) {
+    const name = agents.find((a) => a.id === body.assignee_id)?.name
+    for (const a of automations.filter((x) => x.enabled && x.event_type === "mission.assigned")) {
+      out.push({ tone: "warn", text: `Starts “${a.name}”, which reacts to an assignment` })
+    }
+    out.push({ tone: "kept", text: name ? `${name} is told the issue is theirs` : "The issue is left without an assignee" })
+  }
+  out.push({ tone: "kept", text: "People following this issue are notified" })
+  return out
 }

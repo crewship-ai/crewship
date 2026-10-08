@@ -120,15 +120,15 @@ export const editionLabel = (edition?: string) =>
  * a made-up one.
  */
 export const FINDING_ACTIONS: Record<string, { label: string; href: string }> = {
-  no_backup_recorded: { label: "Create a backup", href: "/admin?tab=backups" },
+  no_backup_recorded: { label: "Create a backup", href: "/admin/backups" },
   rate_limit_disabled: { label: "Limits", href: "/admin?tab=ratelimits" },
   signup_open: { label: "People", href: "/admin/people" },
   seed_account_default_password: { label: "People", href: "/admin/people" },
   privileged_credentials_enabled: { label: "Access & Secrets", href: "/settings?tab=access" },
   private_endpoints_in_use: { label: "Security", href: "/admin/security" },
   private_endpoints_ceiling_open: { label: "Security", href: "/admin/security" },
-  encryption_key_generated: { label: "Key custody", href: "/admin?tab=backups" },
-  encryption_key_missing: { label: "Key custody", href: "/admin?tab=backups" },
+  encryption_key_generated: { label: "Key custody", href: "/admin/backups?section=keys" },
+  encryption_key_missing: { label: "Key custody", href: "/admin/backups?section=keys" },
   plaintext_secrets_allowed: { label: "Access & Secrets", href: "/settings?tab=access" },
 }
 

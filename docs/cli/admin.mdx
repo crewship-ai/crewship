@@ -1166,7 +1166,9 @@ image) or `skip` (no Docker), and the layers count toward the space check.
 
 | Flag | Required | Description |
 |---|---|---|
-| `--target` | no | `empty_server` (default), `isolated`, `replace`, `new_workspace` or `crew`. |
+| `--target` | no | `empty_server` (default), `isolated`, `replace`, `new_workspace`, `crew` or `in_place` (the backup under its own names, e.g. a crew archive as the crew it was). |
+| `--as-workspace` | no | The new workspace name a `new_workspace` target lands under; judged like the restore judges it (a free slug, deleted workspaces included). |
+| `--as-crew` | no | The new crew name a `crew` target lands under, judged the same way. |
 | `--identity` | no | age identity file; also reads the crews' configuration for unsafe settings. |
 | `--passphrase-file` | no | The bundle's passphrase, for the same. |
 | `--timeout` | no | How long to wait for the server, 30m by default. |

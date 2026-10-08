@@ -115,7 +115,7 @@ export function PeoplePage() {
       <DrillNavSection label="Workspaces" count={shownWorkspaces.length}>
         {shownWorkspaces.map((w, i) => (
           <DrillNavItem key={w.id} index={i} selected={ws?.id === w.id} onSelect={() => openWorkspace(w.id)} title={`${w.name} · ${w.slug}`}
-            icon={<WorkspaceTile id={w.id} name={w.name} />}
+            icon={<WorkspaceTile id={w.id} name={w.name} logoUrl={w.logo_url} />}
             label={w.name}
             sub={`${membersOf(people, w.id).length} people · ${w._count_crews} crews`}
             meta={w.current ? <span className="text-[10px]">you</span> : undefined} />

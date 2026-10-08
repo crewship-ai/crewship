@@ -1,5 +1,6 @@
 "use client"
 
+import { PageSaveBar } from "@/components/ui/page-save-bar"
 import { IssueDetailSurface } from "@/components/features/issues/issue-detail-surface"
 import { ProjectDetailSurface } from "@/components/features/issues/project-detail-surface"
 import { ContextDetailPanel, type DetailContext } from "@/components/features/orchestration/context-detail-panel"
@@ -39,13 +40,17 @@ export function RightPanelContent({
 }: RightPanelContentProps) {
   if (selectedIssue) {
     return (
-      <div className="h-full overflow-y-auto">
-        <IssueDetailSurface
-          key={selectedIssue.id}
-          workspaceId={workspaceId}
-          identifier={selectedIssue.identifier ?? selectedIssue.id}
-          onChanged={onIssueUpdated}
-        />
+      // The issues page's Save bar, over this panel when the issue opens here.
+      <div className="relative h-full">
+        <div className="h-full overflow-y-auto pb-20">
+          <IssueDetailSurface
+            key={selectedIssue.id}
+            workspaceId={workspaceId}
+            identifier={selectedIssue.identifier ?? selectedIssue.id}
+            onChanged={onIssueUpdated}
+          />
+        </div>
+        <PageSaveBar />
       </div>
     )
   }

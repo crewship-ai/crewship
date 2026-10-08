@@ -10,6 +10,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { SubBar } from "@/components/layout/sub-bar"
 import { SIDEBAR_WIDTH, SidebarCollapseButton, SidebarToolbar } from "@/components/layout/sidebar-kit"
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet"
+import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 /**
  * A nested page: one level deeper than the page it came from, with its own
@@ -86,6 +87,8 @@ export function DrillPage({
   )
 
   return (
+    // One Save for the nested page, as in Settings (components/ui/page-save-bar).
+    <PageSaveProvider>
     <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col">
       <SubBar
         icon={BackIcon}
@@ -136,12 +139,15 @@ export function DrillPage({
             )}
           </motion.aside>
         )}
-        <main className={cn("min-h-0 min-w-0 flex-1 overflow-y-auto", className)}>
-          {isMobile && mobileNav && (
-            <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 py-2 backdrop-blur">{mobileNav}</div>
-          )}
-          {children}
-        </main>
+        <div className="relative min-h-0 min-w-0 flex-1">
+          <main className={cn("h-full overflow-y-auto pb-20", className)}>
+            {isMobile && mobileNav && (
+              <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 py-2 backdrop-blur">{mobileNav}</div>
+            )}
+            {children}
+          </main>
+          <PageSaveBar />
+        </div>
       </div>
       {isMobile && (
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
@@ -163,6 +169,7 @@ export function DrillPage({
         </Sheet>
       )}
     </div>
+    </PageSaveProvider>
   )
 }
 
@@ -289,10 +296,12 @@ export function DrillNavItem({
   /** For toggles (a facet value) rather than a place: aria-pressed. */
   pressed?: boolean
 }) {
+  // A pick here swaps what the page shows; with edits pending, ask first.
+  const guard = usePageSaveGuard()
   return (
     <button
       type="button"
-      onClick={onSelect}
+      onClick={() => guard(onSelect)}
       data-drill-close
       aria-current={pressed === undefined && selected ? "true" : undefined}
       aria-pressed={pressed}

@@ -40,6 +40,12 @@ var (
 	// "crew", "workspace", nor "instance".
 	ErrInvalidScope = errors.New("backup: invalid scope")
 
+	// ErrRestoreNameTaken is returned when a restore under a new name
+	// (--as-workspace, --as-crew) names a workspace slug this server
+	// already holds, live or deleted: workspaces.slug stays UNIQUE after a
+	// soft delete.
+	ErrRestoreNameTaken = errors.New("backup: restore name taken")
+
 	// ErrIncompatibleTarget is returned on restore when the bundle's
 	// compatible_targets list disallows the current target (e.g. a
 	// crew bundle being restored into a different Crewship instance).

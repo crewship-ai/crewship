@@ -16,7 +16,8 @@ export function useScopeWorkspaces() {
   return useResource<ScopeWorkspace[]>(
     "/api/v1/admin/workspaces",
     () => FIXTURE_WORKSPACES,
-    (json) => listOf<{ id: string; name: string; slug: string }>(json).map((w) => ({ id: w.id, name: w.name, slug: w.slug })),
+    (json) => listOf<{ id: string; name: string; slug: string; logo_url?: string | null; _count_crews?: number }>(json)
+      .map((w) => ({ id: w.id, name: w.name, slug: w.slug, logoUrl: w.logo_url ?? null, crews: w._count_crews })),
   )
 }
 
