@@ -297,7 +297,8 @@ var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-
 // recompile the regex on every call.
 var emailSlugCleanRE = regexp.MustCompile(`[^a-z0-9-]`)
 
-// Signup registers a new user and creates their default workspace.
+// Signup registers a new user. A user with live invitations joins those
+// workspaces; one with none gets a default workspace of their own.
 // POST /api/v1/auth/signup — disabled when CREWSHIP_ALLOW_SIGNUP is false.
 //
 // The response is deliberately the same 202 + body for a brand-new
@@ -419,36 +420,41 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slug := slugBase + "-" + workspaceID[:8]
-	_, err = tx.ExecContext(r.Context(),
-		"INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-		workspaceID, req.FullName+"'s Workspace", slug, now, now)
-	if err != nil {
-		replyInternalError(w, h.logger, "insert workspace", err)
-		return
-	}
-	// The new workspace's own copy of the Keeper defaults (a template).
-	if err := governance.SeedWorkspace(r.Context(), tx, workspaceID); err != nil {
-		replyInternalError(w, h.logger, "keeper template", err)
-		return
-	}
-	if err := retention.ApplyDefaults(r.Context(), tx, workspaceID); err != nil {
-		replyInternalError(w, h.logger, "retention defaults", err)
-		return
-	}
-
-	_, err = tx.ExecContext(r.Context(),
-		"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
-		memberID, workspaceID, userID, "OWNER", now)
-	if err != nil {
-		replyInternalError(w, h.logger, "insert membership", err)
-		return
-	}
-
+	// Invitations first: a person who signs up because they were invited
+	// joins those workspaces and gets no empty workspace of their own
+	// (#3006). Only a signup with nothing to redeem gets one to work in.
 	joined, err := redeemPendingInvitations(r.Context(), tx, userID, req.Email, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "redeem invitations", err)
 		return
+	}
+
+	slug := ""
+	if joined == 0 {
+		slug = slugBase + "-" + workspaceID[:8]
+		_, err = tx.ExecContext(r.Context(),
+			"INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+			workspaceID, req.FullName+"'s Workspace", slug, now, now)
+		if err != nil {
+			replyInternalError(w, h.logger, "insert workspace", err)
+			return
+		}
+		// The new workspace's own copy of the Keeper defaults (a template).
+		if err := governance.SeedWorkspace(r.Context(), tx, workspaceID); err != nil {
+			replyInternalError(w, h.logger, "keeper template", err)
+			return
+		}
+		if err := retention.ApplyDefaults(r.Context(), tx, workspaceID); err != nil {
+			replyInternalError(w, h.logger, "retention defaults", err)
+			return
+		}
+		_, err = tx.ExecContext(r.Context(),
+			"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
+			memberID, workspaceID, userID, "OWNER", now)
+		if err != nil {
+			replyInternalError(w, h.logger, "insert membership", err)
+			return
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -479,15 +485,18 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 //
 // Returns how many invitations were redeemed, for the log line.
 func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, now string) (int, error) {
+	// Only live workspaces: an invitation to a workspace deleted since is no
+	// place to land, and the signup then gets a workspace of its own.
 	// LOWER() on both sides because the inviter typed the address by
 	// hand. expires_at is stored RFC3339 ("...T...Z") while datetime()
 	// yields "... ..." — comparing them as TEXT makes every stored value
 	// sort after every clock value ('T' > ' '), i.e. nothing ever
 	// expires. datetime() on both sides normalises them first.
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, workspace_id, role FROM workspace_invitations
-		WHERE LOWER(email) = LOWER(?) AND accepted_at IS NULL
-		  AND datetime(expires_at) > datetime('now')`, email)
+		SELECT i.id, i.workspace_id, i.role FROM workspace_invitations i
+		JOIN workspaces w ON w.id = i.workspace_id AND w.deleted_at IS NULL
+		WHERE LOWER(i.email) = LOWER(?) AND i.accepted_at IS NULL
+		  AND datetime(i.expires_at) > datetime('now')`, email)
 	if err != nil {
 		return 0, err
 	}

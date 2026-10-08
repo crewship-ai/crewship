@@ -34,14 +34,16 @@ type Claims struct {
 	ExpiresAt    int64    `json:"expires_at"`
 }
 
+// Resource limits use 0 for unlimited. Current releases do not enforce edition
+// limits; future releases may introduce them. Signed claims remain preserved.
 var communityDefaults = Claims{
 	LicenseID:    "community",
 	LicenseeName: "Community User",
 	LicenseeOrg:  "",
 	Edition:      EditionCommunity,
-	MaxCrews:     15,
-	MaxAgents:    10,
-	MaxMembers:   5,
+	MaxCrews:     0,
+	MaxAgents:    0,
+	MaxMembers:   0,
 	Features:     nil,
 }
 
@@ -164,25 +166,28 @@ func (l *License) Edition() Edition {
 	return l.claims.Edition
 }
 
-// MaxCrews returns the maximum number of crews allowed per workspace.
+// EffectiveClaims returns the capacity currently permitted by the server. Raw
+// signed Claims are retained for verification and future edition enforcement.
+// Keep this policy aligned with Check*Limit in enforce.go when enabling limits.
+func (l *License) EffectiveClaims() Claims {
+	c := l.Claims()
+	c.MaxCrews, c.MaxAgents, c.MaxMembers = 0, 0, 0
+	return c
+}
+
+// MaxCrews returns the effective maximum crews per workspace; 0 is unlimited.
 func (l *License) MaxCrews() int {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.claims.MaxCrews
+	return l.EffectiveClaims().MaxCrews
 }
 
-// MaxAgentsPerCrew returns the maximum number of agents allowed in a single crew.
+// MaxAgentsPerCrew returns the effective agents per crew limit; 0 is unlimited.
 func (l *License) MaxAgentsPerCrew() int {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.claims.MaxAgents
+	return l.EffectiveClaims().MaxAgents
 }
 
-// MaxMembers returns the maximum number of members allowed per workspace.
+// MaxMembers returns the effective members per workspace limit; 0 is unlimited.
 func (l *License) MaxMembers() int {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.claims.MaxMembers
+	return l.EffectiveClaims().MaxMembers
 }
 
 // HasFeature reports whether the license includes the named feature flag.

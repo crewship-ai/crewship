@@ -83,70 +83,10 @@ func (h *UserProfileHandler) UploadAvatar(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Bound the read before touching the body so an oversized upload is
-	// rejected without buffering it all.
-	r.Body = http.MaxBytesReader(w, r.Body, maxAvatarBytes)
-	if err := r.ParseMultipartForm(maxAvatarBytes); err != nil {
-		replyError(w, http.StatusBadRequest, "invalid multipart form or file too large (max 2MB)")
+	data, ok := readUploadedImage(w, r)
+	if !ok {
 		return
 	}
-	defer func() {
-		if r.MultipartForm != nil {
-			_ = r.MultipartForm.RemoveAll()
-		}
-	}()
-
-	file, _, err := r.FormFile("file")
-	if err != nil {
-		replyError(w, http.StatusBadRequest, "file field is required")
-		return
-	}
-	defer file.Close()
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		// MaxBytesReader trips here for a stream that only reveals its size
-		// past the cap — surface it as the same 400, not a 500.
-		replyError(w, http.StatusBadRequest, "could not read file (max 2MB)")
-		return
-	}
-	if len(data) == 0 {
-		replyError(w, http.StatusBadRequest, "file is empty")
-		return
-	}
-
-	ct := http.DetectContentType(data)
-	if !allowedAvatarContentType(ct) {
-		replyError(w, http.StatusBadRequest, "unsupported image type: must be PNG, JPEG, or WebP")
-		return
-	}
-
-	// Decode the header (not just the magic bytes) to prove it's a real,
-	// parseable image of an allowed format AND to read its dimensions. This
-	// rejects a file with a valid content-type prefix but a corrupt body, and
-	// bounds the pixel dimensions before anything downstream tries to render
-	// it (decompression-bomb defense). DecodeConfig reads only the header, so
-	// it never allocates the full bitmap.
-	cfg, format, derr := image.DecodeConfig(bytes.NewReader(data))
-	if derr != nil {
-		replyError(w, http.StatusBadRequest, "file is not a valid PNG, JPEG, or WebP image")
-		return
-	}
-	if format != "png" && format != "jpeg" && format != "webp" {
-		replyError(w, http.StatusBadRequest, "unsupported image type: must be PNG, JPEG, or WebP")
-		return
-	}
-	if cfg.Width > maxAvatarDimension || cfg.Height > maxAvatarDimension || cfg.Width <= 0 || cfg.Height <= 0 {
-		replyError(w, http.StatusBadRequest, fmt.Sprintf("image dimensions must be between 1 and %d px per side", maxAvatarDimension))
-		return
-	}
-
-	// EXIF/metadata: we store the uploaded bytes verbatim, so any EXIF a JPEG
-	// carries (incl. GPS) is preserved. That's an accepted trade-off — the
-	// avatar is the user's own self-uploaded image and re-encoding to strip
-	// metadata would cost a full decode/encode (and webp re-encode isn't in
-	// stdlib). Documented in docs/api-reference/auth.mdx; stripping is a
-	// possible follow-up if it becomes a concern.
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o775); err != nil {
 		replyInternalError(w, h.logger, "avatar mkdir", err)
@@ -169,6 +109,78 @@ func (h *UserProfileHandler) UploadAvatar(w http.ResponseWriter, r *http.Request
 	}
 
 	h.writeProfile(w, r, user.ID)
+}
+
+// readUploadedImage reads the "file" field of a multipart upload and proves it
+// is a real PNG, JPEG or WebP of at most 2MB and maxAvatarDimension a side. It
+// answers 400 itself and returns ok=false on any refusal. The profile picture
+// and the workspace logo (#3005) share it, so the two accept the same files.
+func readUploadedImage(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	// Bound the read before touching the body so an oversized upload is
+	// rejected without buffering it all.
+	r.Body = http.MaxBytesReader(w, r.Body, maxAvatarBytes)
+	if err := r.ParseMultipartForm(maxAvatarBytes); err != nil {
+		replyError(w, http.StatusBadRequest, "invalid multipart form or file too large (max 2MB)")
+		return nil, false
+	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		replyError(w, http.StatusBadRequest, "file field is required")
+		return nil, false
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		// MaxBytesReader trips here for a stream that only reveals its size
+		// past the cap — surface it as the same 400, not a 500.
+		replyError(w, http.StatusBadRequest, "could not read file (max 2MB)")
+		return nil, false
+	}
+	if len(data) == 0 {
+		replyError(w, http.StatusBadRequest, "file is empty")
+		return nil, false
+	}
+
+	ct := http.DetectContentType(data)
+	if !allowedAvatarContentType(ct) {
+		replyError(w, http.StatusBadRequest, "unsupported image type: must be PNG, JPEG, or WebP")
+		return nil, false
+	}
+
+	// Decode the header (not just the magic bytes) to prove it's a real,
+	// parseable image of an allowed format AND to read its dimensions. This
+	// rejects a file with a valid content-type prefix but a corrupt body, and
+	// bounds the pixel dimensions before anything downstream tries to render
+	// it (decompression-bomb defense). DecodeConfig reads only the header, so
+	// it never allocates the full bitmap.
+	cfg, format, derr := image.DecodeConfig(bytes.NewReader(data))
+	if derr != nil {
+		replyError(w, http.StatusBadRequest, "file is not a valid PNG, JPEG, or WebP image")
+		return nil, false
+	}
+	if format != "png" && format != "jpeg" && format != "webp" {
+		replyError(w, http.StatusBadRequest, "unsupported image type: must be PNG, JPEG, or WebP")
+		return nil, false
+	}
+	if cfg.Width > maxAvatarDimension || cfg.Height > maxAvatarDimension || cfg.Width <= 0 || cfg.Height <= 0 {
+		replyError(w, http.StatusBadRequest, fmt.Sprintf("image dimensions must be between 1 and %d px per side", maxAvatarDimension))
+		return nil, false
+	}
+
+	// EXIF/metadata: we store the uploaded bytes verbatim, so any EXIF a JPEG
+	// carries (incl. GPS) is preserved. That's an accepted trade-off — the
+	// avatar is the user's own self-uploaded image and re-encoding to strip
+	// metadata would cost a full decode/encode (and webp re-encode isn't in
+	// stdlib). Documented in docs/api-reference/auth.mdx; stripping is a
+	// possible follow-up if it becomes a concern.
+	return data, true
 }
 
 // DeleteAvatar clears the caller's avatar back to initials.

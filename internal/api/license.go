@@ -27,7 +27,7 @@ type licenseResponse struct {
 }
 
 // Status returns the current license edition, limits, and enabled features.
-// GET /api/v1/license
+// GET /api/v1/system/license
 func (h *LicenseHandler) Status(w http.ResponseWriter, r *http.Request) {
 	if h.license == nil {
 		defaults := license.CommunityDefaults()
@@ -42,7 +42,7 @@ func (h *LicenseHandler) Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c := h.license.Claims()
+	c := h.license.EffectiveClaims()
 	features := c.Features
 	if features == nil {
 		features = []string{}

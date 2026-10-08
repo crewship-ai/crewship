@@ -86,6 +86,10 @@ type OverviewResponse struct {
 	Space           SpaceInfo           `json:"space"`
 	Workspaces      []WorkspaceCoverage `json:"workspaces,omitempty"`
 	InstanceSummary *string             `json:"instance_summary"`
+	// CrewlessWorkspaces counts the selected workspaces that hold no crew
+	// (every signup gets one of its own). They are left out of Workspaces and
+	// summed up in one attention item instead of one row each.
+	CrewlessWorkspaces int `json:"crewless_workspaces"`
 }
 
 // Verdicts (the console words them: verdictHeadline).
@@ -169,10 +173,16 @@ func bundleVerdict(e *backup.CatalogEntry) string {
 	}
 }
 
-type wsRef struct{ ID, Name string }
+type wsRef struct {
+	ID, Name string
+	// Crews is how many live crews the workspace holds.
+	Crews int
+}
 
 func liveWorkspaces(ctx context.Context, db *sql.DB) ([]wsRef, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, name FROM workspaces WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE, id`)
+	rows, err := db.QueryContext(ctx, `SELECT w.id, w.name,
+		(SELECT COUNT(*) FROM crews c WHERE c.workspace_id = w.id AND c.deleted_at IS NULL)
+		FROM workspaces w WHERE w.deleted_at IS NULL ORDER BY w.name COLLATE NOCASE, w.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +190,7 @@ func liveWorkspaces(ctx context.Context, db *sql.DB) ([]wsRef, error) {
 	var out []wsRef
 	for rows.Next() {
 		var w wsRef
-		if err := rows.Scan(&w.ID, &w.Name); err != nil {
+		if err := rows.Scan(&w.ID, &w.Name, &w.Crews); err != nil {
 			return nil, err
 		}
 		out = append(out, w)
@@ -287,6 +297,23 @@ func BuildOverview(ctx context.Context, db *sql.DB, in OverviewInput, now time.T
 			}
 		}
 	}
+	// Workspaces that hold no crew (every signup gets one of its own) are
+	// summed up in one attention item, not judged one by one: crewed is what
+	// the verdict, the per-workspace items and the coverage rows look at.
+	var crewed, crewless []wsRef
+	for _, w := range selected {
+		if w.Crews > 0 {
+			crewed = append(crewed, w)
+		} else {
+			crewless = append(crewless, w)
+		}
+	}
+	// What the verdict and the plan row judge: the crewed workspaces, or the
+	// selection itself when none of it holds a crew.
+	judged := crewed
+	if len(judged) == 0 {
+		judged = selected
+	}
 	cat, err := backup.ListCatalog(ctx, db, "")
 	if err != nil {
 		return nil, err
@@ -370,10 +397,10 @@ func BuildOverview(ctx context.Context, db *sql.DB, in OverviewInput, now time.T
 		}
 		verdict = bundleVerdict(latest)
 	} else {
-		if len(selected) == 0 {
+		if len(judged) == 0 {
 			verdict = VerdictNone
 		}
-		for _, w := range selected {
+		for _, w := range judged {
 			e := latestByWS[w.ID]
 			if v := bundleVerdict(e); verdictRank[v] < verdictRank[verdict] {
 				verdict = v
@@ -395,7 +422,7 @@ func BuildOverview(ctx context.Context, db *sql.DB, in OverviewInput, now time.T
 	switch {
 	case in.Scope == ScopeInstance && latest == nil:
 		withWS := 0
-		for _, w := range all {
+		for _, w := range judged {
 			for _, e := range cat {
 				if e.WorkspaceID == w.ID && e.Kind != backup.KindCustom {
 					withWS++
@@ -403,7 +430,7 @@ func BuildOverview(ctx context.Context, db *sql.DB, in OverviewInput, now time.T
 				}
 			}
 		}
-		s := fmt.Sprintf("No instance backup exists yet; %d of %d workspaces have workspace backups.", withWS, len(all))
+		s := fmt.Sprintf("No instance backup exists yet; %d of %d workspaces have workspace backups.", withWS, len(judged))
 		st.Summary = &s
 	case latest != nil && len(latest.Incomplete) > 0:
 		s := fmt.Sprintf("The latest backup (%s) is missing things: %s.", fmtDay(latest.CreatedAt, loc), describeIncomplete(latest.Incomplete))
@@ -422,7 +449,7 @@ func BuildOverview(ctx context.Context, db *sql.DB, in OverviewInput, now time.T
 		}
 	} else {
 		n := 0
-		for _, w := range selected {
+		for _, w := range judged {
 			for _, p := range plans {
 				if covers(p, w.ID) {
 					n++
@@ -430,9 +457,9 @@ func BuildOverview(ctx context.Context, db *sql.DB, in OverviewInput, now time.T
 				}
 			}
 		}
-		row := StatusRow{Value: fmt.Sprintf("%d of %d workspaces on a plan", n, len(selected))}
-		if n < len(selected) {
-			row.Detail, row.DetailTone = strp(plural(len(selected)-n, "workspace has no plan", "workspaces have no plan")), tone("warn")
+		row := StatusRow{Value: fmt.Sprintf("%d of %d workspaces on a plan", n, len(judged))}
+		if n < len(judged) {
+			row.Detail, row.DetailTone = strp(plural(len(judged)-n, "workspace has no plan", "workspaces have no plan")), tone("warn")
 		}
 		for _, p := range plans {
 			if p.Enabled && p.Preset == backup.PresetCustom {
@@ -555,7 +582,7 @@ func BuildOverview(ctx context.Context, db *sql.DB, in OverviewInput, now time.T
 	// ── Needs attention.
 	add := func(it AttentionItem) { out.NeedsAttention = append(out.NeedsAttention, it) }
 	if in.Scope == ScopeWorkspaces {
-		for _, w := range selected {
+		for _, w := range crewed {
 			wsID := w.ID
 			e := latestByWS[w.ID]
 			if e != nil && len(e.Incomplete) > 0 {
@@ -582,6 +609,28 @@ func BuildOverview(ctx context.Context, db *sql.DB, in OverviewInput, now time.T
 				add(AttentionItem{ID: "noplan:" + w.ID, Severity: "warn", Title: fmt.Sprintf("%s is on no backup plan", w.Name),
 					Detail: "it is backed up only by hand", Action: &AttentionAction{Kind: "schedules", Label: "Add to a plan", WorkspaceID: &wsID}})
 			}
+		}
+		// The workspaces without crews, in one line: none of them has a
+		// full backup, and none gets a row or a Back up now of its own.
+		var unbacked []string
+		for _, w := range crewless {
+			if latestByWS[w.ID] == nil {
+				unbacked = append(unbacked, w.Name)
+			}
+		}
+		if len(unbacked) > 0 {
+			named := unbacked
+			more := ""
+			if len(named) > 3 {
+				named, more = named[:3], fmt.Sprintf(" +%d more", len(unbacked)-3)
+			}
+			verb := "have"
+			if len(unbacked) == 1 {
+				verb = "has"
+			}
+			add(AttentionItem{ID: "crewless", Severity: "warn",
+				Title:  fmt.Sprintf("%s without crews %s no backup", plural(len(unbacked), "workspace", "workspaces"), verb),
+				Detail: strings.Join(named, ", ") + more})
 		}
 	} else {
 		if latest != nil && len(latest.Incomplete) > 0 {
@@ -686,7 +735,8 @@ func BuildOverview(ctx context.Context, db *sql.DB, in OverviewInput, now time.T
 	// ── Per-workspace rows.
 	if in.Scope == ScopeWorkspaces {
 		out.Workspaces = []WorkspaceCoverage{}
-		for _, w := range selected {
+		out.CrewlessWorkspaces = len(crewless)
+		for _, w := range crewed {
 			row := WorkspaceCoverage{WorkspaceID: w.ID, Name: w.Name, Status: "ok"}
 			for _, p := range plans {
 				if covers(p, w.ID) {

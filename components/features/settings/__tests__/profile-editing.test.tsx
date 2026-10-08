@@ -41,8 +41,9 @@ describe("ProfileSection editing (#867.1)", () => {
   })
 
   it("saves an edited full name via PATCH /users/me", async () => {
+    // The name is a plain field now (no Edit step); on its own, without a
+    // page bar, the card's SaveFooter strip carries Save.
     renderProfile()
-    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }))
     const input = screen.getByLabelText(/full name/i) as HTMLInputElement
     fireEvent.change(input, { target: { value: "Ada B. Lovelace" } })
 
@@ -55,20 +56,19 @@ describe("ProfileSection editing (#867.1)", () => {
       expect(call![1]).toMatchObject({ method: "PATCH" })
       expect(JSON.parse(call![1].body)).toEqual({ full_name: "Ada B. Lovelace" })
     })
-    await waitFor(() => expect(screen.getByText("Ada B. Lovelace")).toBeTruthy())
+    await waitFor(() => expect(screen.getByLabelText(/full name/i)).toHaveValue("Ada B. Lovelace"))
   })
 
-  it("shows a save error inline while staying in edit mode (#883 review)", async () => {
+  it("keeps the typed name and shows the server's reason after a failed save (#883 review)", async () => {
     renderProfile()
-    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }))
     fireEvent.change(screen.getByLabelText(/full name/i), { target: { value: "X" } })
 
     apiFetch.mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: "boom" }) })
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
 
-    // Error is visible AND the input is still rendered (edit mode intact).
+    // The reason is visible AND what was typed is still there to retry.
     await waitFor(() => expect(screen.getByText("boom")).toBeTruthy())
-    expect(screen.getByLabelText(/full name/i)).toBeTruthy()
+    expect(screen.getByLabelText(/full name/i)).toHaveValue("X")
   })
 
   it("posts a password change and confirms sessions were signed out", async () => {

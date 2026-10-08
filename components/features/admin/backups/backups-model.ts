@@ -98,6 +98,9 @@ export interface OverviewResponse {
   workspaces?: WorkspaceCoverage[]
   /** For the scope bar: "5 workspaces, 7 users, instance settings, …". */
   instance_summary?: string | null
+  /** Selected workspaces that hold no crew: left out of `workspaces` and
+   *  summed up in one needs_attention item ("crewless"). */
+  crewless_workspaces?: number
 }
 
 export type RunStatus = "running" | "done" | "incomplete" | "failed" | "interrupted" | "skipped"
@@ -509,7 +512,15 @@ export interface RetentionChange {
 export interface RetentionPutResponse { dry_run: boolean; changes: RetentionChange[]; preview_id?: string }
 
 /** The workspaces the scope bar lists (GET /api/v1/admin/workspaces). */
-export interface ScopeWorkspace { id: string; name: string; slug: string }
+export interface ScopeWorkspace {
+  id: string
+  name: string
+  slug: string
+  /** The workspace's own logo, when one was set. */
+  logoUrl?: string | null
+  /** Crews it holds; the panel folds workspaces with none away. */
+  crews?: number
+}
 
 // ─── Sections ───────────────────────────────────────────────────────────────
 

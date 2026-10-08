@@ -151,6 +151,9 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 		// the document described a JSON profile response as a binary SVG.
 		"POST /api/v1/users/me/avatar": {Response: ref("Profile"), ResponseMedia: []string{"application/json"}}, "DELETE /api/v1/users/me/avatar": {Response: ref("Profile"), ResponseMedia: []string{"application/json"}},
 		"GET /api/v1/users/{id}/avatar": {Response: map[string]any{"type": "string", "format": "binary"}, ResponseMedia: []string{"image/svg+xml", "image/png", "image/jpeg", "image/webp"}},
+		// Workspace logo (#3005): the profile picture's twin; set/clear answer the workspace.
+		"POST /api/v1/workspaces/{workspaceId}/logo": {Response: ref("Workspace"), ResponseMedia: []string{"application/json"}}, "DELETE /api/v1/workspaces/{workspaceId}/logo": {Response: ref("Workspace"), ResponseMedia: []string{"application/json"}},
+		"GET /api/v1/workspaces/{workspaceId}/logo": {Response: map[string]any{"type": "string", "format": "binary"}, ResponseMedia: []string{"image/png", "image/jpeg", "image/webp"}},
 	}
 	return map[string]map[string]DomainSchema{"credentials": credentialRoutes, "connectors-integrations": integrationRoutes, "auth-profile": authProfileRoutes}, components
 }
