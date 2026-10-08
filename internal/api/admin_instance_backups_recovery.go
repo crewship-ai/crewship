@@ -342,7 +342,7 @@ func (h *InstanceBackupsHandler) RestoreChecks(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if !backup.ValidRestoreTarget(req.Target) {
-		replyError(w, http.StatusBadRequest, "target must be empty_server, isolated, replace, new_workspace or crew")
+		replyError(w, http.StatusBadRequest, "target must be empty_server, isolated, replace, new_workspace, crew or in_place")
 		return
 	}
 	ctx := r.Context()

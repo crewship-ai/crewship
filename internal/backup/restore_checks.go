@@ -68,12 +68,15 @@ const (
 	TargetReplace      = "replace"
 	TargetNewWorkspace = "new_workspace"
 	TargetCrew         = "crew"
+	// TargetInPlace is the backup back under its own names: a crew archive
+	// as the crew it was, a workspace archive as its workspace (no replace).
+	TargetInPlace = "in_place"
 )
 
 // ValidRestoreTarget reports whether t is a known target.
 func ValidRestoreTarget(t string) bool {
 	switch t {
-	case TargetEmptyServer, TargetIsolated, TargetReplace, TargetNewWorkspace, TargetCrew:
+	case TargetEmptyServer, TargetIsolated, TargetReplace, TargetNewWorkspace, TargetCrew, TargetInPlace:
 		return true
 	}
 	return false
@@ -203,6 +206,8 @@ func EvaluateRestoreChecks(in RestoreCheckInput) RestoreChecks {
 	}
 	spec := RestoreTargetSpec{Target: in.Target}
 	switch in.Target {
+	case TargetInPlace:
+		spec.Target = ""
 	case TargetNewWorkspace:
 		spec.NewName = in.AsWorkspace
 	case TargetCrew:

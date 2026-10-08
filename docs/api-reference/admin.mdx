@@ -1924,7 +1924,7 @@ image. `unsafe`: host settings in the crews' devcontainer configuration that a
 restore does not switch back on by itself — Docker socket mounts, privileged
 mode, host path binds; read only when a key is given, otherwise a runtime
 warning says they were not checked. `conflicts`: what the `target`
-(`empty_server`, `isolated`, `replace`, `new_workspace`, `crew`) already holds,
+(`empty_server`, `isolated`, `replace`, `new_workspace`, `crew`, `in_place`) already holds,
 decided by the same rule the restore applies, so a target that passes here is
 never refused by the restore: an instance bundle restores only to
 `empty_server` (`crewship recover`) or `isolated` (`crewship backup drill`),
@@ -1933,7 +1933,9 @@ custom (a partial bundle would delete what it does not carry); `new_workspace`
 needs a workspace bundle and `crew` a crew bundle, each with the new name in
 `as_workspace` / `as_crew` — a valid slug that no workspace on this server
 holds, deleted workspaces included (the slug stays reserved). The restore
-itself answers `409` for a taken name. `environments`: one runtime check per
+itself answers `409` for a taken name. `in_place` restores a workspace or crew
+bundle under its own names (no replace, no new name); an instance bundle is
+refused. `environments`: one runtime check per
 complete container environment the bundle carries — `action` is `restore`,
 `rebuild` (built for another architecture than this server's Docker, or
 `missing_blobs` of its layers are neither in the bundle nor in the store

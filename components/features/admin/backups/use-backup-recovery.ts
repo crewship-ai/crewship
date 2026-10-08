@@ -81,7 +81,9 @@ export interface RestoreRequest {
 
 /** POST …/restore/checks — space, format, runtime, unsafe settings, conflicts. */
 export function restoreChecks(req: Omit<RestoreRequest, "dry_run">): Promise<SendResult<RestoreChecks>> {
-  return send(`${INSTANCE_BACKUPS}/restore/checks`, "POST", { ...req, target: req.target === "crew_in_place" ? "crew" : req.target })
+  // In place is the backup under its own names: the server's in_place target,
+  // judged by the same rule the restore applies to a restore with no flags.
+  return send(`${INSTANCE_BACKUPS}/restore/checks`, "POST", { ...req, target: req.target === "crew_in_place" ? "in_place" : req.target, as_crew: req.target === "crew" ? req.as_crew : undefined })
 }
 
 interface RowCountMismatch { table: string; recorded: number; actual: number }

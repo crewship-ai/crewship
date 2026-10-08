@@ -81,6 +81,9 @@ func TestRestoreTargetContract(t *testing.T) {
 		{"instance archive onto an empty server", inst, instPath, TargetEmptyServer, "", true},
 		{"workspace archive onto an empty server", ws, wsPath, TargetEmptyServer, "", false},
 		{"workspace archive as an isolated drill", ws, wsPath, TargetIsolated, "", false},
+		{"crew archive back where it was", crew, crewPath, TargetInPlace, "", true},
+		{"workspace archive back under its own name", ws, wsPath, TargetInPlace, "", true},
+		{"instance archive never restores in place online", inst, instPath, TargetInPlace, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

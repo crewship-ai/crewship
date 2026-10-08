@@ -92,7 +92,7 @@ const TARGETS: Record<ArchiveKind, TargetOption[]> = {
     { key: "new_workspace", label: "Into a new workspace", about: "Only what the archive holds, beside what exists.", named: "workspace" },
   ],
   crew: [
-    { key: "crew", label: "Crew under a new name", about: "Arrives next to the crews already in the workspace.", named: "crew" },
+    { key: "crew", label: "Crew under a new name", about: "Lands as a new workspace of that name, holding just this crew; nothing that exists is touched.", named: "crew" },
     { key: "crew_in_place", label: "The crew where it was", about: "Back under its own name; conflicts are checked first." },
   ],
   unknown: [
