@@ -224,7 +224,10 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// Deferred dispatch (delay/ttl/debounce/priority) — list + cancel
 	// parked triggers. Registered before {slug} routes so the literal
 	// "pending" segment wins net/http matching.
+	// openapi: query status:string; responses 200,400,500,503
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/pending", authed(wsCtx(http.HandlerFunc(pipes.ListPendingRuns))))
+	// openapi: responses 200,404,500,503
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}", authed(wsCtx(http.HandlerFunc(pipes.GetPendingRun))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel", roleCreate, pipes.CancelPendingRun)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/runs/errors", authed(wsCtx(http.HandlerFunc(pipes.ListErrorGroups))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay", roleCreate, pipes.BulkReplayRuns)
