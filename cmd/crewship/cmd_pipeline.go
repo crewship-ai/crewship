@@ -683,6 +683,11 @@ var pipelineRunCmd = &cobra.Command{
 		if v, _ := cmd.Flags().GetInt("priority"); v != 0 {
 			runBody["priority"] = v
 		}
+		// A full concurrency slot queues an immediate start by default
+		// (#3025); --reject-if-busy asks for the 429 refusal instead.
+		if v, _ := cmd.Flags().GetBool("reject-if-busy"); v {
+			runBody["queue_if_busy"] = false
+		}
 		// One-time start (#2460/#2501): fire_at parks the trigger like
 		// --delay does, but at an absolute instant, pinned to the archive
 		// that passed preflight — so the run that fires later is the recipe
@@ -767,6 +772,11 @@ var pipelineRunCmd = &cobra.Command{
 			PendingID string `json:"pending_id" yaml:"pending_id"`
 			FireAt    string `json:"fire_at" yaml:"fire_at"`
 			Coalesced bool   `json:"coalesced" yaml:"coalesced"`
+			// Queued: an immediate start accepted into the deferred queue
+			// because its concurrency slot was full (Reason
+			// "concurrency_limit").
+			Queued bool   `json:"queued,omitempty" yaml:"queued,omitempty"`
+			Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("decode run response: %w", err)
@@ -802,7 +812,12 @@ var pipelineRunCmd = &cobra.Command{
 			if result.Coalesced {
 				verb = "Debounced (coalesced into existing pending run)"
 			}
-			fmt.Printf("%s: pending %s fires at %s\n", verb, result.PendingID, result.FireAt)
+			if result.Queued {
+				fmt.Printf("Queued: another run holds this routine's concurrency slot; pending %s starts when a slot frees\n", result.PendingID)
+				fmt.Printf("  status: crewship routine pending get %s\n", result.PendingID)
+			} else {
+				fmt.Printf("%s: pending %s fires at %s\n", verb, result.PendingID, result.FireAt)
+			}
 			fmt.Printf("  cancel: crewship routine pending cancel %s\n", result.PendingID)
 			if waitForRun {
 				// A deferred trigger has no run id yet — nothing to poll.
@@ -1313,7 +1328,8 @@ func init() {
 	pipelineRunCmd.Flags().String("metadata", "", "JSON object stored on the run + exposed to steps (e.g. '{\"source\":\"manual\"}')")
 	pipelineRunCmd.Flags().String("batch", "", "path to a JSONL/JSON-array file of input sets — fan out N runs (tagged batch:<id>)")
 	pipelineRunCmd.Flags().Int("delay", 0, "defer the run N seconds (parked in pending_runs; returns SCHEDULED)")
-	pipelineRunCmd.Flags().Int("ttl", 0, "expire a deferred run if not dispatched within N seconds")
+	pipelineRunCmd.Flags().Int("ttl", 0, "expire a deferred run if not dispatched within N seconds (a run queued for a full concurrency slot defaults to 3600)")
+	pipelineRunCmd.Flags().Bool("reject-if-busy", false, "when the routine's concurrency slot is full, fail with 429 instead of queuing the start (the default queues it and returns SCHEDULED)")
 	pipelineRunCmd.Flags().String("debounce-key", "", "coalesce burst triggers sharing this key into one run")
 	pipelineRunCmd.Flags().Int("debounce-window", 0, "debounce window in seconds (default 30) — fires this long after the last trigger")
 	pipelineRunCmd.Flags().Int("debounce-max", 0, "max debounce extension in seconds (a continuously-retriggered key still fires by then)")

@@ -190,7 +190,25 @@ run result (including `run_id`, `status`, `output`, `step_outputs`,
 `inputs`, `tags`, and `metadata` are optional. `delay_seconds`, `ttl_seconds`,
 `debounce_window_seconds`, and `debounce_max_seconds` must be between `0` and
 `2,592,000` seconds when deferred dispatch is used; invalid values return
-`400`. `priority` is carried to the pending queue. The `Idempotency-Key` header
+`400`. `priority` is carried to the pending queue.
+
+**A full concurrency slot queues the start.** When an immediate start finds its
+routine's `concurrency_key` at `max_concurrent`, it is accepted into the same
+pending queue as a deferred start: `202` with `status: "SCHEDULED"`,
+`pending_id`, `queued: true` and `reason: "concurrency_limit"`. The dispatcher
+starts it when a slot frees, retrying as described under
+[Deferred and replay operations](#deferred-and-replay-operations). It waits at
+most `ttl_seconds`, or one hour when none is given, then ends `expired` with a
+reason. A retry with the same `Idempotency-Key`, also after the slot frees,
+answers with that start instead of starting a second run: the same
+`SCHEDULED` receipt while it waits, `200 DEDUPED` with its `run_id` once it
+ran, and `409` naming the start when it ended without running (expired,
+failed or cancelled); use a new key to start again. The key stays bound to
+that start. The queued run is attributed to the request's trigger (manual by
+default). Send
+`"queue_if_busy": false` to keep the `429` refusal. The queued start is pinned
+to the published version, so a routine without one answers `409`. Webhooks,
+schedules, replay and agent-invoked runs keep their own concurrency handling. The `Idempotency-Key` header
 deduplicates a run (the optional `idempotency_key_ttl_seconds` body field sets
 the deduplication window; `0` uses the server default). `run_batch` requires a
 non-empty `items` array and accepts at most 100 items; violations return `400`.
@@ -291,7 +309,7 @@ The run status values are:
 | `WAITING` | The run is parked at an approval or event wait; this is not a failure. |
 | `DEDUPED` | An idempotency key matched an existing run; `run_id` identifies the original. |
 | `IN_PROGRESS` | `202` under `Prefer: respond-async`: the run has started and `run_id` is its handle; poll the run for the outcome. |
-| `SCHEDULED` | `202` for a deferred start (`delay_seconds`, `debounce_key` or `fire_at`); no run exists yet, `pending_id` is the handle. |
+| `SCHEDULED` | `202` for a deferred start (`delay_seconds`, `debounce_key` or `fire_at`), or for an immediate start queued because its concurrency slot was full (`queued: true`, `reason: "concurrency_limit"`); no run exists yet, `pending_id` is the handle. |
 | `DRY_RUN_OK` | A `dry_run` or `test_run` preview completed; no agent was invoked. This is not returned by the normal `run` endpoint. |
 
 `SCHEDULED` responses use `202 Accepted` and contain `pending_id`, RFC3339Nano
