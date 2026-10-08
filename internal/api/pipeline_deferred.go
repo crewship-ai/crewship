@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -31,6 +32,52 @@ const defaultCapacityQueueTTL = time.Hour
 type deferredOptions struct {
 	queuedForCapacity bool
 	id                string
+	// triggeredVia / triggeredByID attribute a queued immediate start to what
+	// started it; empty keeps the deferred default (effectivePendingTrigger).
+	triggeredVia  pipeline.TriggeredVia
+	triggeredByID string
+}
+
+// queuedKeyLocks serialises requests that carry the same Idempotency-Key
+// through "look up the queued start → run → queue on refusal", so a retry
+// cannot slip between the refusal and the queued row and run the work a
+// second time. Process-local, matching the single-writer deployment.
+type queuedKeyLocks struct {
+	mu    sync.Mutex
+	locks map[string]*queuedKeyLock
+}
+
+type queuedKeyLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+// lock blocks until key is free and returns its release func, which is safe
+// to call more than once.
+func (l *queuedKeyLocks) lock(key string) func() {
+	l.mu.Lock()
+	if l.locks == nil {
+		l.locks = map[string]*queuedKeyLock{}
+	}
+	k := l.locks[key]
+	if k == nil {
+		k = &queuedKeyLock{}
+		l.locks[key] = k
+	}
+	k.refs++
+	l.mu.Unlock()
+	k.mu.Lock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			k.mu.Unlock()
+			l.mu.Lock()
+			if k.refs--; k.refs == 0 {
+				delete(l.locks, key)
+			}
+			l.mu.Unlock()
+		})
+	}
 }
 
 // queuedStartID derives the pending ID of a capacity-queued start from the
@@ -57,6 +104,28 @@ func (h *PipelineHandler) queuedStartForKey(ctx context.Context, workspaceID, pi
 		return nil
 	}
 	return pr
+}
+
+// writeKeyedStartReceipt answers a retry whose Idempotency-Key already
+// queued a start, with what became of it: still waiting (or dispatched
+// without a run link yet) → the queued receipt; ran → DEDUPED with its run;
+// ended without running → 409 naming the start, so the caller uses a new
+// key to start again.
+func writeKeyedStartReceipt(w http.ResponseWriter, pr pipeline.PendingRun) {
+	switch {
+	case pr.Status == "fired" && pr.FiredRunID != "":
+		writeJSON(w, http.StatusOK, map[string]any{"status": "DEDUPED", "run_id": pr.FiredRunID, "pending_id": pr.ID})
+	case pr.Status == "pending" || pr.Status == "fired":
+		writeQueuedReceipt(w, pr, false)
+	default:
+		msg := fmt.Sprintf("This Idempotency-Key already queued start %s, which ended %s", pr.ID, pr.Status)
+		if pr.LastError != "" {
+			msg += ": " + pr.LastError
+		}
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": msg + ". Use a new Idempotency-Key to start again.", "pending_id": pr.ID, "pending_status": pr.Status,
+		})
+	}
 }
 
 // writeQueuedReceipt answers a start that waits for its concurrency slot.
@@ -197,11 +266,21 @@ func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Requ
 		// notice (issue #842 Phase 1). Empty for service/token triggers.
 		InvokingUserID:      invokingUser,
 		InvocationAuthority: pipeline.HumanInvocationAuthority(invokingUser, pipeline.RoutineRunAuthority),
+		TriggeredVia:        opts.triggeredVia,
+		TriggeredByID:       opts.triggeredByID,
 	}, admit)
 	var conflict *deferredPinConflict
 	if errors.As(err, &conflict) {
 		replyError(w, http.StatusConflict, conflict.Error())
 		return
+	}
+	if err != nil && opts.id != "" {
+		// The key's start already exists (written by another request with
+		// the same key): answer with it instead of failing.
+		if existing, gerr := store.Get(r.Context(), workspaceID, opts.id); gerr == nil && existing != nil {
+			writeKeyedStartReceipt(w, *existing)
+			return
+		}
 	}
 	if err != nil {
 		h.logger.Error("enqueue deferred run", "error", err, "slug", p.Slug)

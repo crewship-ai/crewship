@@ -168,3 +168,83 @@ func TestRunRejectIfBusyKeeps429(t *testing.T) {
 		t.Fatalf("a refused start left %d pending rows", n)
 	}
 }
+
+// Review finding: two requests with one key racing through the refusal must
+// end with one queued start and the same receipt, never a 500 or two rows.
+func TestRunQueueConcurrentSameKeyQueuesOnce(t *testing.T) {
+	h, db, user, ws, release := queueIfBusyRig(t)
+	defer release()
+	replies := make(chan *httptest.ResponseRecorder, 4)
+	for i := 0; i < 4; i++ {
+		go func() { replies <- postQueueIfBusyRun(t, h, user, ws, `{"inputs":{}}`, "race-key") }()
+	}
+	ids := map[string]bool{}
+	for i := 0; i < 4; i++ {
+		rr := <-replies
+		if rr.Code != 202 {
+			t.Fatalf("concurrent retry: status %d: %s", rr.Code, rr.Body)
+		}
+		var r struct {
+			PendingID string `json:"pending_id"`
+		}
+		_ = json.Unmarshal(rr.Body.Bytes(), &r)
+		ids[r.PendingID] = true
+	}
+	if len(ids) != 1 {
+		t.Fatalf("concurrent requests with one key got %d pending IDs", len(ids))
+	}
+	if n := pendingCount(t, db, ws); n != 1 {
+		t.Fatalf("%d pending rows, want 1", n)
+	}
+}
+
+// Review finding: a retry reports what became of the queued start, not a
+// SCHEDULED receipt for work that already ran or ended.
+func TestRunQueueRetryReportsWhatBecameOfTheStart(t *testing.T) {
+	h, db, user, ws, release := queueIfBusyRig(t)
+	defer release()
+	first := postQueueIfBusyRun(t, h, user, ws, `{"inputs":{}}`, "outcome-key")
+	var queued struct {
+		PendingID string `json:"pending_id"`
+	}
+	_ = json.Unmarshal(first.Body.Bytes(), &queued)
+
+	if _, err := db.Exec(`UPDATE pending_runs SET status='fired', fired_run_id='run_done' WHERE id=?`, queued.PendingID); err != nil {
+		t.Fatal(err)
+	}
+	rr := postQueueIfBusyRun(t, h, user, ws, `{"inputs":{}}`, "outcome-key")
+	var deduped map[string]any
+	_ = json.Unmarshal(rr.Body.Bytes(), &deduped)
+	if rr.Code != 200 || deduped["status"] != "DEDUPED" || deduped["run_id"] != "run_done" {
+		t.Fatalf("retry after the queued start ran: %d %s", rr.Code, rr.Body)
+	}
+
+	if _, err := db.Exec(`UPDATE pending_runs SET status='expired', fired_run_id='', last_error='Deferred start expired before dispatch.' WHERE id=?`, queued.PendingID); err != nil {
+		t.Fatal(err)
+	}
+	rr = postQueueIfBusyRun(t, h, user, ws, `{"inputs":{}}`, "outcome-key")
+	if rr.Code != 409 || !strings.Contains(rr.Body.String(), "expired") || !strings.Contains(rr.Body.String(), queued.PendingID) {
+		t.Fatalf("retry after the queued start expired: %d %s", rr.Code, rr.Body)
+	}
+	if n := pendingCount(t, db, ws); n != 1 {
+		t.Fatalf("%d pending rows, want 1", n)
+	}
+}
+
+// Review finding: a queued manual start keeps its trigger, not "schedule".
+func TestRunQueueKeepsManualTrigger(t *testing.T) {
+	h, db, user, ws, release := queueIfBusyRig(t)
+	defer release()
+	rr := postQueueIfBusyRun(t, h, user, ws, `{"inputs":{}}`, "")
+	var r struct {
+		PendingID string `json:"pending_id"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &r)
+	var via string
+	if err := db.QueryRow(`SELECT COALESCE(triggered_via,'') FROM pending_runs WHERE id=?`, r.PendingID).Scan(&via); err != nil {
+		t.Fatalf("pending row: %v", err)
+	}
+	if via != string(pipeline.TriggeredViaManual) {
+		t.Fatalf("queued manual start recorded as %q", via)
+	}
+}
