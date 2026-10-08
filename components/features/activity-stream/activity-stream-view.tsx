@@ -77,9 +77,10 @@ import { activityUrl, parseActivityUrl, type ActivityUrlState } from "@/lib/acti
 import { ActivityOverview, iconFor } from "./activity-overview"
 import { ActivityDetail } from "./activity-detail"
 import { WorkflowPage } from "./workflow-page"
+import { ActivityRunPage } from "./activity-run-page"
 import { AgentsOverview, IssuesOverview, RoutinesLensOverview } from "./lens-overviews"
 import { RoutineRunsPage } from "./routine-runs-page"
-import { AgentDrillDown, IssueDrillDown, RunDrillDown } from "./drill-downs"
+import { AgentDrillDown, IssueDrillDown } from "./drill-downs"
 import { FeedRow } from "./feed-row"
 
 /** Connection state as a word, not a button. */
@@ -1015,27 +1016,20 @@ export function ActivityStreamView({
               )}
 
               {openRun && (
-                <RunDrillDown
+                // Every run opens the same page, whichever way it was reached:
+                // a sub-run in a tree, a dot in Previous runs, or `?run=` from
+                // the inbox and the bell. A run that is not a routine run falls
+                // back inside to the typed detail (agent work).
+                <ActivityRunPage
+                  key={openRun.id}
                   workspaceId={workspaceId}
-                  runID={openRun.id}
-                  // The routine is whichever one the reader walked through to
-                  // get here — a run is opened from its routine's list or from
-                  // a workflow, and both leave that stop on the path.
-                  //
-                  // The third arm is for a run that was DEEP-LINKED. `?run=<id>`
-                  // is the commonest legacy link in the product (the inbox, the
-                  // bell, a routine's run rows) and it carries no routine, so
-                  // the first two arms find nothing and the page renders "this
-                  // run's record is not loaded" over a run the index can name.
-                  // A run that is a chain's origin has its routine right there
-                  // on the row; reading it costs nothing and is exact. A run
-                  // that is NOT an origin still falls through to undefined,
-                  // which is the honest answer rather than a guess.
-                  routineSlug={
-                    path.stops.find((s) => s.kind === "routine")?.id ??
-                    chains.find((c) => c.origin === workflowAnchor(path))?.routine_slug ??
-                    chains.find((c) => c.origin === openRun.id)?.routine_slug
-                  }
+                  runId={openRun.id}
+                  chain={chains.find((c) => c.origin === openRun.id)}
+                  routineName={(() => {
+                    const slug = chains.find((c) => c.origin === openRun.id)?.routine_slug
+                    return slug ? routines.find((r) => r.slug === slug)?.name : undefined
+                  })()}
+                  onOpenNode={openNode}
                 />
               )}
 
@@ -1084,7 +1078,19 @@ export function ActivityStreamView({
                   overview, which then answered a question nobody asked; the
                   overview is gone here, not pushed down. */}
               {surface.main === "workflow" &&
-                (openChain ? (
+                (openChain && openChain.routine_slug ? (
+                  // A chain that starts at a routine run opens THAT run — the
+                  // approved detail (#2979). The chain page below stays for
+                  // chains rooted in agent work, which have no run to open.
+                  <ActivityRunPage
+                    key={openChain.origin}
+                    workspaceId={workspaceId}
+                    runId={openChain.origin}
+                    chain={openChain}
+                    routineName={routines.find((r) => r.slug === openChain.routine_slug)?.name}
+                    onOpenNode={openNode}
+                  />
+                ) : openChain ? (
                   <WorkflowPage
                     workspaceId={workspaceId}
                     chain={openChain}

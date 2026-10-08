@@ -10,7 +10,8 @@ import type { ActivityDetail } from "../activity-detail"
 import type { WorkflowPage } from "../workflow-page"
 import type { RoutineRunsPage } from "../routine-runs-page"
 import type { AgentsOverview, IssuesOverview, RoutinesLensOverview } from "../lens-overviews"
-import type { AgentDrillDown, IssueDrillDown, RunDrillDown } from "../drill-downs"
+import type { AgentDrillDown, IssueDrillDown } from "../drill-downs"
+import type { ActivityRunPage } from "../activity-run-page"
 import type { FeedRow } from "../feed-row"
 const mock = vi.hoisted(() => ({
   list: vi.fn(), stream: vi.fn(), chains: vi.fn(), fetch: vi.fn(), lookup: vi.fn(), mobile: false,
@@ -25,7 +26,7 @@ const mock = vi.hoisted(() => ({
   routines: vi.fn<(p: ComponentProps<typeof RoutinesLensOverview>) => React.ReactNode>(),
   agent: vi.fn<(p: ComponentProps<typeof AgentDrillDown>) => React.ReactNode>(),
   issue: vi.fn<(p: ComponentProps<typeof IssueDrillDown>) => React.ReactNode>(),
-  run: vi.fn<(p: ComponentProps<typeof RunDrillDown>) => React.ReactNode>(),
+  run: vi.fn<(p: ComponentProps<typeof ActivityRunPage>) => React.ReactNode>(),
   row: vi.fn<(p: ComponentProps<typeof FeedRow>) => React.ReactNode>(),
 }))
 vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search) }))
@@ -43,13 +44,16 @@ vi.mock("../activity-detail", () => ({ ActivityDetail: mock.detail }))
 vi.mock("../workflow-page", () => ({ WorkflowPage: mock.workflow }))
 vi.mock("../routine-runs-page", () => ({ RoutineRunsPage: mock.routine }))
 vi.mock("../lens-overviews", () => ({ AgentsOverview: mock.agents, IssuesOverview: mock.issues, RoutinesLensOverview: mock.routines }))
-vi.mock("../drill-downs", () => ({ AgentDrillDown: mock.agent, IssueDrillDown: mock.issue, RunDrillDown: mock.run }))
+vi.mock("../drill-downs", () => ({ AgentDrillDown: mock.agent, IssueDrillDown: mock.issue }))
+vi.mock("../activity-run-page", () => ({ ActivityRunPage: mock.run }))
 vi.mock("../feed-row", () => ({ FeedRow: mock.row }))
 import { ActivityStreamView } from "../activity-stream-view"
 import { EMPTY_FACETS } from "../activity-sidebar"
 const event = (id: string, extra: Partial<JournalEntry> = {}): JournalEntry => ({ id, workspace_id: "ws", ts: "2026-10-02T20:00:00Z", entry_type: "run.completed", severity: "info", actor_type: "system", summary: id, ...extra })
 const entries = [event("e1", { crew_id: "c1", agent_id: "a1", mission_id: "m1", payload: { run_id: "r1", pipeline_slug: "triage", step_id: "step1" } }), event("e2", { payload: { run_id: "r2", routine_slug: "other", step: "step2" } })]
 const chain: ChainSummary = { origin: "r1", started_by_kind: "schedule", started_by: "nightly", runs: 1, max_chain_depth: 0, failed_runs: 0, failed: false, first_activity: "2026-10-02T20:00:00Z", last_activity: "2026-10-02T20:00:01Z", duration_ms: 1000, issue_count: 0, agent_count: 0, routine_slug: "triage" }
+// A chain rooted in agent work: no routine run to open, so it keeps the chain page.
+const agentChain: ChainSummary = { ...chain, origin: "w1", started_by_kind: "user", routine_slug: undefined }
 const lookup: JournalLookupValue = { crews: new Map([["c1", { id: "c1", name: "Builders", slug: "builders", icon: null, color: "blue" }]]), agents: new Map([["a1", { id: "a1", name: "Alice", slug: "alice", crew_id: "c1", avatar_seed: null, avatar_style: null }]]), missions: new Map([["m1", { id: "m1", title: "Fix the failing integration in the workspace", status: "IN_PROGRESS" }]]), loading: false, refresh: vi.fn() }
 const sidebar = () => mock.sidebar.mock.calls.at(-1)![0]
 const overview = () => mock.overview.mock.calls.at(-1)![0]
@@ -61,7 +65,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/activity")
   mock.list.mockReturnValue(listState())
   mock.stream.mockReturnValue({ status: "connected" })
-  mock.chains.mockReturnValue({ chains: [chain], hasUnrecordedRuns: false, hasMore: false, error: null, refresh: mock.refreshChains })
+  mock.chains.mockReturnValue({ chains: [chain, agentChain], hasUnrecordedRuns: false, hasMore: false, error: null, refresh: mock.refreshChains })
   mock.lookup.mockReturnValue(lookup)
   mock.fetch.mockImplementation(async () => new Response(JSON.stringify({ missions: [{ id: "m1", title: "Fix", status: "IN_PROGRESS", priority: "high" }] })))
   mock.sidebar.mockImplementation((p) => <aside><input aria-label="Activity search" value={p.search} onChange={(e) => p.onSearchChange(e.target.value)} /><button onClick={p.onToggleCollapse}>Hide rail</button></aside>)
@@ -74,7 +78,7 @@ beforeEach(() => {
   mock.routines.mockImplementation(() => <div>Routine overview</div>)
   mock.agent.mockImplementation((p) => <div>Agent {p.name}</div>)
   mock.issue.mockImplementation((p) => <div>Issue {p.issueId}</div>)
-  mock.run.mockImplementation((p) => <div>Run {p.runID}</div>)
+  mock.run.mockImplementation((p) => <div>Run {p.runId}</div>)
   mock.row.mockImplementation((p) => <button onClick={p.onSelect}>Row {p.entry.id}</button>)
 })
 afterEach(async () => { await act(async () => {}); cleanup() })
@@ -208,8 +212,8 @@ it("starts mobile filters closed and closes their overlay", () => {
 
 it("walks from workflow through named nodes, back, and breadcrumb jumps", () => {
   show()
-  act(() => sidebar().onSelectChain("r1"))
-  expect(screen.getByText("Workflow r1")).toBeVisible()
+  act(() => sidebar().onSelectChain("w1"))
+  expect(screen.getByText("Workflow w1")).toBeVisible()
   expect(screen.queryByText("Overview: e1,e2")).toBeNull()
   const workflow = () => mock.workflow.mock.calls.at(-1)![0]
   for (const [kind, id, label] of [["agent", "a1", "Alice"], ["crew", "c1", "Builders"], ["issue", "m1", "Fix the failing integration i…"], ["routine", "p1", "Triage"], ["step", "step1", "step1"]]) {
@@ -218,15 +222,29 @@ it("walks from workflow through named nodes, back, and breadcrumb jumps", () => 
     // One stop up is Escape or the previous crumb; the back-bar's button is
     // the way OUT, as "Back to issues" is on /issues.
     fireEvent.keyDown(window, { key: "Escape" })
-    expect(screen.getByText("Workflow r1")).toBeVisible()
+    expect(screen.getByText("Workflow w1")).toBeVisible()
   }
   act(() => workflow().onOpenNode("run", "r1"))
-  expect(mock.run.mock.calls.at(-1)![0].routineSlug).toBe("triage")
+  expect(mock.run.mock.calls.at(-1)![0]).toMatchObject({ runId: "r1", routineName: "Triage" })
   fireEvent.keyDown(window, { key: "Escape" })
-  expect(screen.getByText("Workflow r1")).toBeVisible()
+  expect(screen.getByText("Workflow w1")).toBeVisible()
   act(() => workflow().onOpenNode("agent", "a1"))
   fireEvent.click(screen.getByRole("button", { name: "Back to activity" }))
   expect(screen.getByText("Overview: e1,e2")).toBeVisible()
+})
+
+it("opens a chain that starts at a routine run as that run's page", () => {
+  // #2979: the rail row leads to the run — status, steps, what it caused —
+  // not to a chain page listing run ids to click a second time.
+  show()
+  act(() => sidebar().onSelectChain("r1"))
+  expect(screen.getByText("Run r1")).toBeVisible()
+  expect(mock.workflow).not.toHaveBeenCalled()
+  expect(mock.run.mock.calls.at(-1)![0]).toMatchObject({ runId: "r1", routineName: "Triage", chain: { origin: "r1" } })
+  act(() => mock.run.mock.calls.at(-1)![0].onOpenNode("issue", "m1"))
+  expect(screen.getByText("Issue m1")).toBeVisible()
+  fireEvent.keyDown(window, { key: "Escape" })
+  expect(screen.getByText("Run r1")).toBeVisible()
 })
 
 it.each(["agents", "issues", "routines"] as const)("gives the %s lens its own overview and entity drill-down", (lens) => {
@@ -237,7 +255,7 @@ it.each(["agents", "issues", "routines"] as const)("gives the %s lens its own ov
     act(() => mock.agents.mock.calls.at(-1)![0].onOpenEntity("agent", "a1", "Alice"))
     expect(screen.getByText("Agent Alice")).toBeVisible()
     act(() => mock.agent.mock.calls.at(-1)![0].onOpenWorkflow("r1"))
-    expect(screen.getByText("Workflow r1")).toBeVisible()
+    expect(screen.getByText("Run r1")).toBeVisible()
   } else if (lens === "issues") {
     expect(screen.getByText("Issue overview")).toBeVisible()
     act(() => mock.issues.mock.calls.at(-1)![0].onOpenEntity("issue", "m1", "Fix"))
@@ -248,7 +266,7 @@ it.each(["agents", "issues", "routines"] as const)("gives the %s lens its own ov
     act(() => mock.routines.mock.calls.at(-1)![0].onOpenRoutine("triage", "Triage"))
     expect(screen.getByText("Routine triage")).toBeVisible()
     act(() => mock.routine.mock.calls.at(-1)![0].onOpenRun("child-run"))
-    expect(mock.run.mock.calls.at(-1)![0].routineSlug).toBe("triage")
+    expect(mock.run.mock.calls.at(-1)![0].runId).toBe("child-run")
     expect(window.location.search).toContain("run=child-run")
   }
 })
@@ -256,7 +274,7 @@ it("resolves a deep-linked run's routine from the workflow index", () => {
   window.history.replaceState(null, "", "/activity?run=r1")
   show()
   expect(screen.getByText("Run r1")).toBeVisible()
-  expect(mock.run.mock.calls.at(-1)![0].routineSlug).toBe("triage")
+  expect(mock.run.mock.calls.at(-1)![0].routineName).toBe("Triage")
 })
 it("relabels inbound issue and routine IDs and preserves unknown node identities", () => {
   window.history.replaceState(null, "", "/activity?pipeline=triage&lens=routines")
@@ -264,7 +282,7 @@ it("relabels inbound issue and routine IDs and preserves unknown node identities
   expect(screen.getByRole("navigation", { name: "Activity trail" })).toHaveTextContent("Triage")
   act(() => sidebar().onOpenEntity("issue", "m1", "m1"))
   expect(screen.getByRole("navigation", { name: "Activity trail" })).toHaveTextContent("Fix the failing integration i…")
-  act(() => sidebar().onSelectChain("r1"))
+  act(() => sidebar().onSelectChain("w1"))
   act(() => mock.workflow.mock.calls.at(-1)![0].onOpenNode("agent", "unknown"))
   expect(screen.getByText("Agent #known")).toBeVisible()
 })
