@@ -34,6 +34,7 @@ vi.mock("@/hooks/use-active-routine-runs", () => ({
 vi.mock("@/hooks/use-pipeline-schedules", () => ({
   usePipelineSchedules: () => ({ schedules: h.schedules, loading: false, error: null }),
 }))
+vi.mock("@/hooks/use-pending-starts", () => ({ usePendingStarts: () => ({ starts: [], loading: false, error: null, refresh: vi.fn() }) }))
 vi.mock("@/hooks/use-pipeline-runs", () => ({ usePipelineRuns: () => ({ runs: h.recorded ?? [], loading: false, error: null }) }))
 vi.mock("@/hooks/use-automations", () => ({
   useAutomations: () => ({ automations: h.automations, loading: false, error: null }),
