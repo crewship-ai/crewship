@@ -2,16 +2,16 @@
 
 // Left rail for /activity.
 //
-// The rail is NAVIGATION and nothing else: one line of status segments, then
-// the workflow list. That is the whole column.
+// The rail follows the recipe /issues and /routines already use (#2979): the
+// sidebar-kit toolbar, a collapsible STATUS section in the Routines rail's
+// words, then every run of the window grouped by time, and the two ledgers as
+// rows at the bottom.
 //
-// It used to stack four unrelated things in it — a status bucket list, a crew
-// list, 17 issues, 39 routines — and then the workflows underneath, so a place
-// you go and a way to narrow what you see looked like the same kind of row.
-// "Failed" existed twice (a bucket here, `severity: error` in the popover) and
-// a filter that matched nothing left 56 rows all reading 0. Every narrowing now
-// lives in the filter popover, where a narrowing belongs; the decisions behind
-// that split are pure functions in lib/activity-rail.ts.
+// It used to carry two controls no other page has — a row of lens tabs and a
+// segmented status switch — and it listed only COMPOSED workflows, so a plain
+// run of a routine was hidden and a quiet workspace saw an empty column that
+// said "they are under Routines". Every run is listed now; the lenses are a
+// "Group by" choice behind the View button, where the kit puts grouping.
 //
 // SidebarFilterPopover owns the panel, so a pick never closes it and never
 // clears a sibling facet (#1776).
@@ -30,8 +30,18 @@ import {
   SidebarSection,
   SidebarRow,
   SidebarToolbar,
+  SidebarViewButton,
 } from "@/components/layout/sidebar-kit"
-import { CircleDot, Workflow } from "lucide-react"
+import { Bot, CircleDot, ClipboardList, Rows3, Webhook, Workflow } from "lucide-react"
+
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -54,9 +64,8 @@ import {
   activeFilterCount,
   clearedFilters,
   filterFacets,
-  railSegments,
   railSources,
-  type RailSegment,
+  railStatusRows,
   type TimeRangeKey,
 } from "@/lib/activity-rail"
 import {
@@ -65,15 +74,19 @@ import {
   bucketChains,
   chainScopeCounts,
   chainStatus,
-  isComposed,
   issueLens,
   routineLens,
   workflowHandle,
   workflowSentence,
+  workflowName,
+  startedByWord,
   type ChainStatus,
   type LensKey,
 } from "@/lib/activity-lenses"
 import { cn } from "@/lib/utils"
+import { StatusRows } from "./activity-status-rows"
+import { RailRoutineFocus } from "./activity-rail-focus"
+import { rowKind } from "@/lib/activity-rail-focus"
 
 // Re-exported so the shell keeps importing the range table from the rail it
 // belongs to; the values themselves moved to lib/activity-rail.ts, where the
@@ -172,126 +185,13 @@ function Count({ n, dim }: { n: number; dim?: boolean }) {
   )
 }
 
-/**
- * The status line: All · Running · Waiting · Failed, one line, one choice.
- *
- * This replaces the STATUS section — five full-width rows for what is a single
- * mutually-exclusive pick. The tones are the ones the overview cards already
- * read for the same four buckets (--info / --warn / --destructive / --success),
- * so a failure is one colour across the page; the bucket-list glyphs went with
- * the bucket list.
- *
- * A segment with no number is one this query cannot count, not one holding
- * nothing — see railSegments.
- */
-function ScopeSegments({
-  segments,
-  scope,
-  onScope,
-}: {
-  segments: RailSegment[]
-  scope: FacetState["scope"]
-  onScope: (s: FacetState["scope"]) => void
-}) {
-  return (
-    <div
-      role="group"
-      aria-label="Activity status"
-      className="mx-2 mb-1.5 flex shrink-0 items-center gap-0.5 rounded-md border border-foreground/[0.08] bg-foreground/[0.04] p-0.5"
-    >
-      {segments.map((s) => {
-        const selected = scope === s.key
-        const empty = s.count === 0
-        return (
-          <button
-            key={s.key}
-            type="button"
-            aria-pressed={selected}
-            title={s.hint}
-            onClick={() => onScope(s.key)}
-            className={cn(
-              "flex min-w-0 flex-1 items-center justify-center gap-1 rounded px-1 py-1 text-[11px] transition-colors",
-              selected
-                ? "bg-primary/15 text-primary"
-                : empty
-                  ? "text-foreground/40 hover:bg-foreground/[0.04] hover:text-foreground"
-                  : "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground",
-            )}
-          >
-            <span className="truncate">{s.label}</span>
-            {s.count != null && s.count > 0 && (
-              <span
-                className="shrink-0 font-mono text-[10px] tabular-nums"
-                style={selected ? undefined : { color: `var(${s.token})` }}
-              >
-                {s.count}
-              </span>
-            )}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-/**
- * Which catalogue the rail is listing, and the row grammar for each.
- *
- * The rail listed workflows and nothing else, which answered "which routine
- * ran" and left "what happened to ENG-7" and "what did my agents do" with
- * nowhere to be asked. Before that it stacked four catalogues and 56 rows read
- * 0. The lens is the third option: one list at a time, and each list holds only
- * the members that were ACTIVE in this window — an issue nobody touched today
- * is in /issues, not here. See lib/activity-lenses.
- */
-function LensTabs({
-  lens,
-  counts,
-  onLens,
-}: {
-  lens: LensKey
-  counts: Record<LensKey, number>
-  onLens: (l: LensKey) => void
-}) {
-  return (
-    <div role="tablist" aria-label="Activity lens" className="mx-2 mb-1.5 flex shrink-0 gap-1 border-b border-foreground/[0.06]">
-      {ACTIVITY_LENSES.map((l) => {
-        const on = lens === l.key
-        const n = counts[l.key]
-        return (
-          <button
-            key={l.key}
-            role="tab"
-            type="button"
-            aria-selected={on}
-            title={l.hint}
-            onClick={() => onLens(l.key)}
-            className={cn(
-              "-mb-px flex min-w-0 items-center gap-1 border-b-2 px-1.5 py-1.5 text-[11px] transition-colors",
-              on
-                ? "border-primary font-medium text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <span className="truncate">{l.label}</span>
-            {/* A zero is printed rather than hidden: an empty lens is an answer
-                ("nothing touched an issue today"), and a tab with no number
-                beside three that have one reads as still loading. */}
-            <span className={cn("font-mono text-[10px] tabular-nums", n === 0 && "text-muted-foreground-soft")}>
-              {n}
-            </span>
-          </button>
-        )
-      })}
-    </div>
-  )
-}
 
 /** Tone token per chain status — the same four the overview cards read. */
 const STATUS_TOKEN: Record<ChainStatus, string> = {
   waiting: "--warn",
   failed: "--destructive",
   running: "--primary",
+  stopped: "--muted-foreground",
   done: "--success",
 }
 
@@ -325,6 +225,9 @@ function WorkflowRow({
   const status = chainStatus(chain)
   const live = status === "running" || status === "waiting"
   const sentence = workflowSentence(chain, routine?.name)
+  const title = workflowName(chain, routine?.name)
+  const trigger = startedByWord(chain)
+  const kind = rowKind(chain)
   const touched = chainTouched(chain)
   const handle = workflowHandle(chain.origin)
   const startedBy = chain.started_by?.trim() || chain.triggered_via || "unknown trigger"
@@ -360,6 +263,14 @@ function WorkflowRow({
             size="sm"
             className="relative !h-5 !w-5 !rounded-md"
           />
+        ) : chain.kind === "assignment" ? (
+          // Agent work started outside any routine (#2989): an agent's face.
+          <span
+            aria-hidden
+            className="relative flex h-5 w-5 items-center justify-center rounded-md bg-primary/15 text-primary"
+          >
+            <Bot className="h-3 w-3" />
+          </span>
         ) : (
           // No routine ran: an agent-rooted chain, or one whose routine is gone.
           // A neutral tile rather than a borrowed icon — wearing some other
@@ -380,16 +291,42 @@ function WorkflowRow({
       </span>
 
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        {/* The SHAPE, not the routine's name. Two runs of one routine render
-            the same word; what they did differs, and that is the line. */}
+        {/* The routine's name, as on /routines (#2979). The full shape —
+            cause → routine → agents → issues — is the tooltip; as a title it
+            read "schedule → Refresh crew t…", truncated before the name. */}
         <span className="truncate text-foreground/85" title={sentence}>
-          {sentence}
+          {title}
         </span>
         <span className="flex items-center gap-1.5 truncate text-[10.5px] text-muted-foreground-soft">
-          <span>{relTime(chain.last_activity)}</span>
+          {/* The two states a reader acts on are said in words, in their tone,
+              so the row reads without decoding the dot. Same words as the
+              STATUS rows above it. */}
+          {status === "failed" && (
+            <>
+              <span className="text-destructive">could not finish</span>
+              <span aria-hidden>·</span>
+            </>
+          )}
+          {status === "waiting" && (
+            <>
+              <span className="text-warn">waiting for you</span>
+              <span aria-hidden>·</span>
+            </>
+          )}
+          {status === "stopped" && (
+            <>
+              <span>stopped</span>
+              <span aria-hidden>·</span>
+            </>
+          )}
+          {/* What the row IS (#2998) — a routine run, issue work or agent
+              work — so "from QUA-1" never leaves a reader guessing which. */}
+          <span className={cn("shrink-0 font-mono text-[9.5px] uppercase tracking-wide", kind.tone)}>{kind.label}</span>
+          <span aria-hidden>·</span>
+          {trigger && <span className="truncate">{trigger}</span>}
           {chain.duration_ms != null && (
             <>
-              <span aria-hidden>·</span>
+              {trigger && <span aria-hidden>·</span>}
               <span>{formatDurationMs(chain.duration_ms)}</span>
             </>
           )}
@@ -402,7 +339,8 @@ function WorkflowRow({
         </span>
       </span>
 
-      <span className="mt-0.5 shrink-0 font-mono text-[10px] text-muted-foreground-soft">{handle}</span>
+      {/* When, not which: the run id is the tooltip's. */}
+      <span className="mt-0.5 shrink-0 font-mono text-[10px] text-muted-foreground-soft">{relTime(chain.last_activity)}</span>
     </SidebarRow>
         </motion.div>
       </TooltipTrigger>
@@ -428,8 +366,6 @@ function WorkflowRow({
 /** What an empty lens needs to say, and the facts that decide which sentence. */
 export interface EmptyLensFacts {
   lens: LensKey
-  /** Chains in the window that composed nothing — the Workflows lens's own case. */
-  bareRuns: number
   /** Rows the index returned before any narrowing. 0 means an empty workspace. */
   loadedChainCount: number
   /** The search box emptied the window. */
@@ -457,17 +393,18 @@ export function emptyLensCopy(f: EmptyLensFacts): string {
       ? "No workflows recorded yet. Runs from before chain recording cannot be grouped — the link was never written."
       : "No workflows yet. One appears the first time something causes something else."
   }
-  if (f.narrowedAway) return "Nothing in this window matches the search. Clear it to see the rest."
+  // Search and the Filter facets both narrow the rail now (#3000, #3007), so
+  // the sentence names both rather than blaming a search box that is empty.
+  if (f.narrowedAway) return "No run in this window matches the search or filters. Clear them to see the rest."
   if (f.scopedAway) return "Nothing in this window has that status. Pick another, or All."
   // Past here the window HAS chains — the lens simply holds none of them, which
   // is an answer about the work rather than about the filters.
   switch (f.lens) {
     case "workflows":
-      return f.bareRuns > 0
-        ? `Nothing composed a process in this window. ${f.bareRuns} ${
-            f.bareRuns === 1 ? "run" : "runs"
-          } happened on their own — they are under Routines.`
-        : "Nothing composed a process in this window."
+      // Every run is listed under Time, so an empty one is a quiet window —
+      // not runs filed somewhere else on the page. No advice to widen the
+      // range: the run index is not cut by it, so it would change nothing.
+      return "Nothing ran in this window."
     case "issues":
       return "Nothing touched an issue in this window. Issues with no activity are in Issues, not here."
     case "agents":
@@ -505,7 +442,7 @@ export interface ActivitySidebarProps {
   /**
    * The same window with the search applied but NOT the status segment.
    *
-   * The segments count over this, because a count has to survive its own
+   * The status rows count over this, because a count has to survive its own
    * selection: counting over `chains` would make picking "Failed" render
    * "Failed 3 · Waiting 0 · Running 0" — what is left after the pick rather
    * than what there is to pick.
@@ -552,9 +489,34 @@ export interface ActivitySidebarProps {
    */
   onOpenEntity: (kind: string, id: string, label: string) => void
   onToggleCollapse: () => void
+  /**
+   * Open one of the two ledgers — accepted work and received webhooks.
+   *
+   * They were tabs above the page header. They are places to go, so they are
+   * rows, the way Inbox lists To handle / Updates / History in its rail.
+   */
+  onOpenSection?: (section: "work" | "deliveries") => void
+  /** Back from a ledger (#3012): the run list slides in from the left. */
+  entersFromLeft?: boolean
+  /** For the routine focus's run fetch (#2998). */
+  workspaceId?: string
+  /**
+   * The routine the rail is narrowed to, by slug (#2998). Owned by the shell
+   * so it survives opening one of the routine's runs.
+   */
+  focusedRoutine?: string | null
+  onFocusRoutine?: (slug: string | null) => void
+  /** The run open in the column, for the focus list's highlight. */
+  openRunId?: string | null
+  onOpenRun?: (runId: string) => void
 }
 
 export function ActivitySidebar({
+  workspaceId,
+  focusedRoutine,
+  onFocusRoutine,
+  openRunId,
+  onOpenRun,
   search,
   onSearchChange,
   facets,
@@ -582,7 +544,10 @@ export function ActivitySidebar({
   onLens,
   onOpenEntity,
   onToggleCollapse,
+  onOpenSection,
+  entersFromLeft,
 }: ActivitySidebarProps) {
+  const [statusOpen, setStatusOpen] = React.useState(true)
   // See railInventory. Unfocused the popover answers "where is the activity";
   // focused it has to answer "where else can I go", or picking one issue
   // deletes every other option and there is no way back out except the crumb.
@@ -607,13 +572,11 @@ export function ActivitySidebar({
   // about what happened. See ActivitySidebarProps.chains.
   const scopedChains = chains
 
-  // Only composed chains are workflows. A bare run — one routine, invoked,
-  // nothing bound to anything — is a run of that routine and belongs in the
-  // Routines lens, which is where it already appears. Twelve of twenty-one rows
-  // here were that, which is what made this lens read as a worse-named copy of
-  // Routines. See isComposed.
-  const workflowChains = React.useMemo(() => scopedChains.filter(isComposed), [scopedChains])
-  const bareRuns = scopedChains.length - workflowChains.length
+  // Every run of the window. Only COMPOSED chains used to be listed here, and
+  // a plain run of a routine — the commonest thing that happens — fell through
+  // to a sentence pointing at another lens. The rail is where a run is FOUND;
+  // whether it composed anything is something its row and its page show.
+  const workflowChains = scopedChains
 
   const lensIssues = React.useMemo(() => issueLens(scopedChains), [scopedChains])
   const lensAgents = React.useMemo(() => agentLens(scopedChains), [scopedChains])
@@ -637,23 +600,20 @@ export function ActivitySidebar({
   // render, which is a boundary nobody can see and everybody would report.
   const buckets = React.useMemo(() => bucketChains(workflowChains, Date.now()), [workflowChains])
 
-  // The segments count CHAINS, which is what the list under them holds. They
-  // counted journal entries before, so "Failed 9" sat above three failed
-  // workflows — one control, one list, two numbers describing different objects.
-  //
-  // Counted over `chainsBeforeStatus`, i.e. everything the search left, so a
-  // number survives its own selection. Marked complete because the chain index
-  // is fetched independently of the scope facet, so all four buckets of THIS
-  // WINDOW are genuinely held whichever segment is picked — which is a
-  // different claim from "these are all the chains there are", and the one
-  // `chainsHaveMore` is rendered for.
-  const chainCounts = React.useMemo(
-    () => chainScopeCounts(chainsBeforeStatus),
+  // Whether the rail is coming BACK from a routine focus, so the full list
+  // slides in from the left then — and not on the page's first paint.
+  const wasFocused = React.useRef(Boolean(entersFromLeft))
+  const leftFocus = !focusedRoutine && wasFocused.current
+  React.useEffect(() => {
+    wasFocused.current = !!focusedRoutine
+  }, [focusedRoutine])
+
+  // The status rows count CHAINS, which is what the list under them holds,
+  // over everything the search left — so a number survives its own selection
+  // ("Could not finish 3" stays 3 after it is picked).
+  const statusRows = React.useMemo(
+    () => railStatusRows(chainScopeCounts(chainsBeforeStatus), chainsBeforeStatus.length),
     [chainsBeforeStatus],
-  )
-  const segments = React.useMemo(
-    () => railSegments(facets.scope, chainCounts, chainsBeforeStatus.length, true),
-    [facets.scope, chainCounts, chainsBeforeStatus.length],
   )
 
   const facetKeys = filterFacets({
@@ -667,7 +627,7 @@ export function ActivitySidebar({
 
   return (
     <div className="flex h-full flex-col">
-      <SidebarToolbar>
+      <SidebarToolbar className="relative">
         <SidebarSearch
           value={search}
           onValueChange={onSearchChange}
@@ -677,11 +637,13 @@ export function ActivitySidebar({
         <SidebarFilterPopover
           label="Filter activity"
           activeCount={activeFilterCount(facets, focus != null)}
-          // The panel is anchored to the trigger's right edge inside a 280px
-          // rail that clips its overflow, so anything wider than the trigger's
-          // distance from the rail's left edge loses its first characters —
-          // "FILTERS" rendering as "TERS" is what 264px looked like.
-          panelClassName="w-[228px]"
+          // Hung from the toolbar, not the trigger. The rail clips its
+          // overflow, and with Group by and collapse right of the trigger the
+          // kit's right-edge anchor pushed the panel past the rail's left edge
+          // ("FILTERS" read as "LTERS" on dev3). The toolbar is the one box
+          // that always fits: the panel spans it, gutter to gutter.
+          className="static"
+          panelClassName="left-2 right-2 top-full -mt-1 w-auto"
           onClear={() => {
             onChange(clearedFilters(facets))
             onFocus(null)
@@ -914,18 +876,68 @@ export function ActivitySidebar({
             </SidebarFacetOption>
           </SidebarFacet>
         </SidebarFilterPopover>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarViewButton aria-label="Group activity by" title="Group by">
+              <Rows3 className="h-3.5 w-3.5" />
+            </SidebarViewButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuLabel className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-muted-foreground">
+              Group by
+            </DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={lens} onValueChange={(v) => onLens(v as LensKey)}>
+              {/* The lenses, behind the kit's View button. They were a second
+                  row of tabs under the toolbar — a control no other rail has —
+                  and grouping is what the View trigger is for. */}
+              {ACTIVITY_LENSES.map((g) => (
+                <DropdownMenuRadioItem key={g.key} value={g.key} title={g.hint} className="text-xs">
+                  {g.label}
+                  {/* Zero is printed: an empty grouping is an answer, and a
+                      choice with no number beside three that have one reads
+                      as still loading. */}
+                  <span className="ml-auto font-mono text-[10px] tabular-nums text-muted-foreground">
+                    {lensCounts[g.key]}
+                  </span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
       </SidebarToolbar>
 
-      <LensTabs lens={lens} counts={lensCounts} onLens={onLens} />
-
-      <ScopeSegments
-        segments={segments}
-        scope={facets.scope}
-        onScope={(s) => onChange({ ...facets, scope: s })}
-      />
-
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+        {focusedRoutine && workspaceId ? (
+          // Into the focus from the right, back out from the left — the same
+          // 12px / 200ms entrance as the column beside it (#3000).
+          <div key={`focus:${focusedRoutine}`} className="animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out">
+          <RailRoutineFocus
+            workspaceId={workspaceId}
+            slug={focusedRoutine}
+            name={routineBySlug.get(focusedRoutine)?.name || focusedRoutine}
+            scope={facets.scope}
+            range={facets.range}
+            openRunId={openRunId ?? null}
+            onPickScope={(key) => onChange({ ...facets, scope: key })}
+            onOpenRun={(id) => onOpenRun?.(id)}
+            onLeave={() => onFocusRoutine?.(null)}
+          />
+          </div>
+        ) : (
+        <div key="all" className={cn(leftFocus && "animate-in fade-in-0 slide-in-from-left-3 duration-200 ease-out")}>
+        {/* ── Status ── the same section, rows and count pills as /routines. */}
+        <SidebarSection
+          label="Status"
+          count={statusRows.length}
+          collapsible
+          collapsed={!statusOpen}
+          onToggle={() => setStatusOpen(!statusOpen)}
+          className="border-b border-foreground/[0.06] pb-1"
+        >
+          <StatusRows rows={statusRows} scope={facets.scope} onPick={(key) => onChange({ ...facets, scope: key })} />
+        </SidebarSection>
+
         {lensCounts[lens] === 0 ? (
           // Emptiness is measured on THE LENS THAT IS OPEN, not on the chain
           // list behind it. Measuring the chains meant an Issues lens with no
@@ -946,7 +958,6 @@ export function ActivitySidebar({
           <p className="px-3 py-2 text-[11px] leading-snug text-muted-foreground-soft">
             {emptyLensCopy({
               lens,
-              bareRuns,
               loadedChainCount,
               narrowedAway: loadedChainCount > 0 && chainsBeforeStatus.length === 0,
               scopedAway: chainsBeforeStatus.length > 0 && scopedChains.length === 0,
@@ -975,7 +986,13 @@ export function ActivitySidebar({
                   index={i}
                   routine={routineBySlug.get(c.routine_slug ?? "")}
                   selected={selectedChain === c.origin}
-                  onSelect={() => onSelectChain(selectedChain === c.origin ? null : c.origin)}
+                  onSelect={() => {
+                    const picking = selectedChain !== c.origin
+                    onSelectChain(picking ? c.origin : null)
+                    // A routine's row narrows the rail to that routine and
+                    // lists its runs (#2998).
+                    if (picking && c.routine_slug && onFocusRoutine) onFocusRoutine(c.routine_slug)
+                  }}
                 />
               ))}
             </SidebarSection>
@@ -1059,15 +1076,8 @@ export function ActivitySidebar({
           </SidebarSection>
         )}
 
-        {lens === "workflows" && workflowChains.length > 0 && bareRuns > 0 && (
-          <p className="px-3 pb-1 pt-1.5 text-[10.5px] leading-snug text-muted-foreground-soft">
-            {bareRuns} {bareRuns === 1 ? "run" : "runs"} composed nothing and {bareRuns === 1 ? "is" : "are"}{" "}
-            listed under Routines.
-          </p>
-        )}
-
         {/* The edge of what this column can see, stated where the numbers are.
-            Every count above — four lens tabs, four status segments — is derived
+            Every count above — the status rows and the Group by totals — is derived
             from ONE PAGE of the index, and without this line "Agents 4" over a
             workspace with a thousand workflows reads as a fact about the
             workspace while being a fact about the newest {loadedChainCount}. The
@@ -1084,6 +1094,21 @@ export function ActivitySidebar({
           <p className="px-3 pb-1 pt-1.5 text-[10.5px] leading-snug text-muted-foreground-soft">
             Older runs are not indexed here — the link that would group them was never written.
           </p>
+        )}
+
+        {onOpenSection && (
+          <SidebarSection label="Ledger" className="mt-2 border-t border-foreground/[0.06] pt-1">
+            <SidebarRow as="div" aria-label="Work queue" onSelect={() => onOpenSection("work")}>
+              <ClipboardList className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="flex-1 truncate text-foreground/80">Work queue</span>
+            </SidebarRow>
+            <SidebarRow as="div" aria-label="Webhook deliveries" onSelect={() => onOpenSection("deliveries")}>
+              <Webhook className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="flex-1 truncate text-foreground/80">Webhook deliveries</span>
+            </SidebarRow>
+          </SidebarSection>
+        )}
+        </div>
         )}
       </div>
     </div>

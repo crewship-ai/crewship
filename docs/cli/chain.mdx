@@ -72,9 +72,14 @@ WHEN    STARTED BY                    ROUTINE  RUNS  DEPTH  STATUS  ORIGIN
   cell falls back to the bare trigger word rather than inventing a name.
 - **DEPTH** is the deepest `chain_depth` the chain reached. `0` is a run
   somebody started by hand; anything higher is a chain that built itself.
-- **STATUS** is `FAILED` when **any** run in the chain failed, not only the
-  root. `interrupted` runs are not counted as failures — a process that died is
-  an operational event, not the chain's verdict.
+- **STATUS** follows the Activity rail's precedence: `waiting` (a run is
+  parked on a person), `FAILED` (**any** run in the chain failed, not only the
+  root), `running`, then a stop — `cancelled`, `interrupted`, or `stopped` when
+  the chain holds both — and `ok` only when everything finished. A stopped
+  branch never hides a live one. `interrupted` runs are not counted as
+  failures: a process that died is an operational event, not the chain's
+  verdict.
+- **ROUTINE** is the routine's slug, or `work: <task>` for agent work started outside any routine (`kind: assignment`).
 - **ORIGIN** is the anchor. Feed it straight back: `crewship chain prn_01j4`.
 
 <Note>
@@ -90,7 +95,9 @@ WHEN    STARTED BY                    ROUTINE  RUNS  DEPTH  STATUS  ORIGIN
   cannot answer either — `last_activity` falls back to `started_at` while a run
   is going, so a chain waiting on an approval since Tuesday and one that
   finished on Tuesday carry the same instant. Use `waiting_runs > 0` to find
-  what needs a human.
+  what needs a human. `completed_runs`, `cancelled_runs` and `interrupted_runs`
+  count the other terminal outcomes, so a stopped chain is not read as a
+  finished one.
 </Note>
 
 ### Paging

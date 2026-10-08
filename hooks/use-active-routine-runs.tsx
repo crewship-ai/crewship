@@ -98,7 +98,9 @@ export function deriveActiveRoutineRuns(rows: PipelineRun[]): Derived {
 // dropdown answers "what just finished?", the /activity rail owns the
 // full post-mortem), newest ended first, capped so the dropdown never
 // holds more rows than it renders.
-const RECENT_STATUSES: ReadonlySet<string> = new Set(["completed", "failed"])
+// Every terminal outcome, stops included (#2988): a run somebody cancelled or
+// one whose process died is a result the reader wants to see, not one to hide.
+const RECENT_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled", "interrupted"])
 
 export function deriveRecentTerminalRuns(rows: PipelineRun[], limit = 3): PipelineRun[] {
   const terminal = rows.filter((r) => RECENT_STATUSES.has(r.status))

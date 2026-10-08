@@ -216,3 +216,32 @@ func TestCovPRun_ListActiveRuns_PopulatedRegistry(t *testing.T) {
 		t.Errorf("cancel_requested = %v, want false", rows[0]["cancel_requested"])
 	}
 }
+
+// #3002: the Activity home narrows its runs to the rail's chains, so a run
+// in the list says which chain it belongs to.
+func TestCovPRun_ListWorkspaceRuns_IncludesChainOrigin(t *testing.T) {
+	h, db, userID, wsID := runsHandlerRig(t)
+	seedRunsPipeline(t, db, wsID, "covprun-origin-p1", "covprun-origin-p1")
+	seedRunRow(t, db, wsID, "covprun-origin-p1", "covprun-origin-p1", "covprun-origin-root", "completed")
+	seedRunRow(t, db, wsID, "covprun-origin-p1", "covprun-origin-p1", "covprun-origin-child", "completed")
+	if _, err := db.Exec(`UPDATE pipeline_runs SET chain_origin = 'covprun-origin-root' WHERE id IN ('covprun-origin-root','covprun-origin-child')`); err != nil {
+		t.Fatalf("seed origin: %v", err)
+	}
+	req := withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/pipeline-runs", nil), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.ListWorkspaceRuns(rr, req)
+	var resp struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(resp.Rows))
+	}
+	for _, row := range resp.Rows {
+		if got, _ := row["chain_origin"].(string); got != "covprun-origin-root" {
+			t.Errorf("%v: chain_origin = %v, want covprun-origin-root", row["id"], row["chain_origin"])
+		}
+	}
+}
