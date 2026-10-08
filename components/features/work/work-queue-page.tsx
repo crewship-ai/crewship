@@ -2,8 +2,8 @@
 
 // The Work queue, as Activity's home tells runs (#3012).
 //
-//   header        one sentence: pieces of work · needs you · in line · done · failed
-//   flow          Arrived → In line → Running → Done, with the three ways out
+//   header        one sentence: pieces of work · needs you · in the queue · done · failed
+//   flow          Arrived → In the queue → Running → Done, with the three ways out
 //   needs you     work nobody can call done or failed, settled here
 //   why failed    failures grouped by cause
 //   what came in  one lane per agent; every piece of work a dot to open
@@ -17,11 +17,9 @@ import { AlertTriangle, ArrowRight, GanttChartSquare, Inbox, ListChecks } from "
 
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { Button } from "@/components/ui/button"
-import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Appear } from "@/components/ui/detail"
-import { CrewIcon } from "@/components/ui/crew-icon"
-import { iconColorProps } from "@/lib/crew-icons"
-import type { LedgerAgent, LedgerCrew, WorkItem } from "@/hooks/use-work-items"
+import { LaneAxis, TIME_WINDOW_MS, WindowToggle, type TimeWindow } from "@/components/features/activity-stream/time-window"
+import type { WorkItem } from "@/hooks/use-work-items"
 import { formatDurationMs } from "@/lib/activity-stream"
 import { relTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
@@ -44,10 +42,14 @@ import {
   workSubject,
   type LedgerTone,
 } from "@/lib/work-ledger"
+import { CrewChip, LedgerAvatar } from "./ledger-parts"
 import { ResolveWorkDialog, type ResolveMode } from "./resolve-work-dialog"
 
-export type LedgerWindow = "24h" | "7d"
-export const LEDGER_WINDOW_MS: Record<LedgerWindow, number> = { "24h": 24 * 3_600_000, "7d": 7 * 24 * 3_600_000 }
+export type LedgerWindow = TimeWindow
+export const LEDGER_WINDOW_MS = TIME_WINDOW_MS
+
+/** Lanes drawn before the rest fold into "+ N quieter agents" — as the home does. */
+const MAX_LANES = 8
 
 const HEAD_TONE = {
   default: "text-muted-foreground",
@@ -55,78 +57,6 @@ const HEAD_TONE = {
   warn: "text-warn",
   destructive: "text-destructive",
 } as const
-
-export function LedgerAvatar({ agent, className }: { agent: LedgerAgent | null | undefined; className?: string }) {
-  if (!agent) {
-    return <span aria-hidden className={cn("inline-block shrink-0 rounded-full border border-dashed border-muted-foreground/50", className)} />
-  }
-  return (
-    <AgentAvatar
-      seed={agent.avatar_seed || agent.id}
-      style={agent.avatar_style || undefined}
-      agentId={agent.id}
-      alt=""
-      // A deleted agent keeps its face, greyed: the work was still theirs.
-      className={cn("shrink-0 rounded-full", isDeletedAgent(agent) && "opacity-50 grayscale", className)}
-    />
-  )
-}
-
-/** The crew in its own colour and icon, as the rest of the product draws it. */
-export function CrewChip({ crew, className }: { crew: LedgerCrew; className?: string }) {
-  const glyph = iconColorProps(crew.color)
-  return (
-    <span className={cn("inline-flex min-w-0 items-center gap-1", className)}>
-      <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="h-4 w-4 rounded [&_svg]:h-2.5 [&_svg]:w-2.5" />
-      <span className={cn("truncate text-[10.5px]", glyph.className)} style={glyph.style}>
-        {crew.name}
-      </span>
-    </span>
-  )
-}
-
-export function WindowToggle({ value, onChange }: { value: LedgerWindow; onChange: (w: LedgerWindow) => void }) {
-  return (
-    <div role="group" aria-label="Window" className="flex overflow-hidden rounded-md border border-border font-mono text-[11px]">
-      {(["24h", "7d"] as const).map((w) => (
-        <button
-          key={w}
-          type="button"
-          aria-pressed={value === w}
-          onClick={() => onChange(w)}
-          className={cn(
-            "px-2.5 py-1 transition-colors",
-            value === w ? "bg-foreground/[0.08] text-foreground" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {w === "24h" ? "24 h" : "7 d"}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-export function LaneAxis({ from, to, win }: { from: number; to: number; win: LedgerWindow }) {
-  const ticks = 6
-  const labels = Array.from({ length: ticks + 1 }, (_, i) => {
-    const t = new Date(from + ((to - from) * i) / ticks)
-    if (i === ticks) return "now"
-    return win === "24h"
-      ? t.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false })
-      : t.toLocaleDateString(undefined, { weekday: "short" })
-  })
-  return (
-    <div className="grid grid-cols-[minmax(0,200px)_1fr_96px] gap-3 font-mono text-[10px] text-muted-foreground-soft">
-      <span />
-      <span className="flex justify-between">
-        {labels.map((l, i) => (
-          <span key={i}>{l}</span>
-        ))}
-      </span>
-      <span />
-    </div>
-  )
-}
 
 export interface WorkQueuePageProps {
   workspaceId: string
@@ -199,10 +129,10 @@ export function WorkQueuePage({
       <Appear order={1}>
         <DashboardCard role="region" aria-label="Flow" title="Flow" icon={ArrowRight} hint="click a step to narrow">
           <div className="flex flex-wrap items-stretch gap-2">
-            <FlowStep label="Arrived" value={flow.arrived} note={`from ${flow.sources} ${flow.sources === 1 ? "source" : "sources"}`} />
+            <FlowStep label="Arrived" value={flow.arrived} note={`for ${flow.agents} ${flow.agents === 1 ? "agent" : "agents"}`} />
             <FlowArrow />
             <FlowStep
-              label="In line"
+              label={LEDGER_TONE_LABEL.line}
               value={flow.line.count}
               note={flow.line.blocked ? "behind a blocked item" : "waiting for capacity"}
               tone={flow.line.blocked ? "text-warn" : undefined}
@@ -240,7 +170,7 @@ export function WorkQueuePage({
             aria-label="Needs you"
             title="Needs you"
             icon={Inbox}
-            hint={needs.length ? "the agent takes no new work until this is settled" : undefined}
+            hint={needs.length ? "its agent waits until you decide" : undefined}
             className={cn("h-full", needs.length > 0 && "border-warn/40 bg-warn/[0.04]")}
           >
             {needs.length === 0 ? (
@@ -289,6 +219,13 @@ export function WorkQueuePage({
                     </div>
                   </li>
                 ))}
+                {needs.length > 3 && (
+                  <li>
+                    <button type="button" onClick={() => onTone("needs")} className="text-xs text-warn underline-offset-2 hover:underline">
+                      + {needs.length - 3} more waiting for a decision
+                    </button>
+                  </li>
+                )}
               </ul>
             )}
           </DashboardCard>
@@ -335,8 +272,8 @@ export function WorkQueuePage({
             <p className="py-6 text-center text-xs text-muted-foreground">{loading ? "Loading work…" : "No work arrived in this window."}</p>
           ) : (
             <div className="flex flex-col gap-1.5">
-              <LaneAxis from={from} to={now} win={win} />
-              {lanes.map((lane) => (
+              <LaneAxis from={from} to={now} win={win} className="grid-cols-[minmax(0,200px)_1fr_96px]" />
+              {lanes.slice(0, MAX_LANES).map((lane) => (
                 <div key={lane.key} className="grid grid-cols-[minmax(0,200px)_1fr_96px] items-center gap-3">
                   <span className="flex min-w-0 items-center gap-2">
                     <LedgerAvatar agent={lane.agent} className="h-5 w-5" />
@@ -374,7 +311,15 @@ export function WorkQueuePage({
                   </span>
                 </div>
               ))}
+              {lanes.length > MAX_LANES && (
+                <p className="pl-[212px] text-[11px] text-muted-foreground">+ {lanes.length - MAX_LANES} quieter agents</p>
+              )}
               <Legend />
+              {capped && (
+                <p className="text-[10.5px] text-muted-foreground-soft">
+                  Showing the newest 100 pieces of work; older ones in this window are not drawn or counted.
+                </p>
+              )}
             </div>
           )}
         </DashboardCard>
@@ -393,9 +338,6 @@ export function WorkQueuePage({
                 </li>
               ))}
             </ul>
-          )}
-          {capped && (
-            <p className="mt-2 text-[10.5px] text-muted-foreground-soft">Showing the newest 100 pieces of work; older ones are not counted.</p>
           )}
         </DashboardCard>
       </Appear>
@@ -469,8 +411,8 @@ function WorkRow({ item, onOpen }: { item: WorkItem; onOpen: (id: string) => voi
         {tone === "running" && <span className={cn("absolute inset-0 animate-ping rounded-full opacity-60", LEDGER_TONE_DOT[tone])} />}
         <span className={cn("relative h-2 w-2 rounded-full", LEDGER_TONE_DOT[tone])} />
       </span>
-      <span className="w-[170px] shrink-0 truncate font-mono text-xs">{workSubject(item)}</span>
-      <span className="flex w-[230px] shrink-0 items-center gap-1.5 truncate text-xs text-muted-foreground">
+      <span className="w-[120px] shrink-0 truncate font-mono text-xs sm:w-[170px]">{workSubject(item)}</span>
+      <span className="hidden w-[230px] shrink-0 items-center gap-1.5 truncate text-xs text-muted-foreground md:flex">
         <LedgerAvatar agent={item.agent} className="h-4 w-4" />
         <span className={cn("truncate", isDeletedAgent(item.agent) && "line-through")}>{agentName(item.agent)}</span>
         {item.crew && <CrewChip crew={item.crew} className="hidden lg:inline-flex" />}

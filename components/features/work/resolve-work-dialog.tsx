@@ -7,6 +7,11 @@
 // mark it failed, mark it done, or mark it failed and run its input again —
 // and this dialog asks for what the server requires before it records any of
 // them: that you checked the runtime has stopped, and why you decided so.
+//
+// Retry is two calls — resolve, then replay — so it is offered only when the
+// replay can work (the payload is still kept, the workflow is not private),
+// and a replay refused after the resolve says the work is now failed rather
+// than leaving the dialog open over a stale generation.
 
 import * as React from "react"
 import { toast } from "sonner"
@@ -22,7 +27,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { useReplayWorkItem, useResolveWorkItem, type WorkItem } from "@/hooks/use-work-items"
+import { useWebhookDelivery } from "@/hooks/use-webhook-deliveries"
+import { replayAvailability, useReplayWorkItem, useResolveWorkItem, type WorkItem } from "@/hooks/use-work-items"
 import { agentName, workSubject } from "@/lib/work-ledger"
 
 export type ResolveMode = "failed" | "succeeded" | "retry"
@@ -71,8 +77,16 @@ export function ResolveWorkDialog({
     }
   }, [open, item?.id, mode])
 
+  // Asked as if the work had already failed: Retry fails it first.
+  const delivery = useWebhookDelivery(
+    workspaceId,
+    mode === "retry" && item?.source === "webhook" && item.source_ref ? item.source_ref : null,
+  )
+  const replayable = item && mode === "retry" ? replayAvailability({ ...item, state: "failed" }, delivery) : null
+
   const copy = COPY[mode]
   const pending = resolve.isPending || replay.isPending
+  const blocked = replayable != null && replayable.state !== "available"
 
   async function submit() {
     if (!item) return
@@ -85,7 +99,13 @@ export function ResolveWorkDialog({
         reason: reason.trim(),
       })
       if (mode === "retry") {
-        await replay.mutateAsync({ workItemId: item.id, reason: reason.trim() })
+        try {
+          await replay.mutateAsync({ workItemId: item.id, reason: reason.trim() })
+        } catch (e) {
+          toast.error(`Marked as failed, but it could not be sent again: ${e instanceof Error ? e.message : String(e)}`)
+          onOpenChange(false)
+          return
+        }
         toast.success("Marked as failed and sent again")
       } else {
         toast.success(mode === "succeeded" ? "Marked as done" : "Marked as failed")
@@ -121,13 +141,19 @@ export function ResolveWorkDialog({
             <Checkbox checked={stopped} onCheckedChange={(v) => setStopped(v === true)} className="mt-0.5" />
             I checked that nothing is still running for this work.
           </label>
+          {blocked && (
+            <p className="text-xs text-muted-foreground">
+              {replayable.reason}
+              {replayable.state === "unavailable" && " Mark it as failed instead."}
+            </p>
+          )}
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button disabled={!stopped || reason.trim() === "" || pending} onClick={() => void submit()}>
+          <Button disabled={!stopped || reason.trim() === "" || pending || blocked} onClick={() => void submit()}>
             {copy.action}
           </Button>
         </DialogFooter>

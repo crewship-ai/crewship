@@ -159,7 +159,7 @@ export function ledgerHeadline(c: LedgerCounts): HeadPart[] {
   const parts: HeadPart[] = [{ text: plural(c.total, "piece of work", "pieces of work"), tone: "default" }]
   if (c.needs) parts.push({ text: `${c.needs} needs you`, tone: "warn" })
   if (c.running) parts.push({ text: `${c.running} running`, tone: "primary" })
-  if (c.line) parts.push({ text: `${c.line} waiting in line`, tone: "default" })
+  if (c.line) parts.push({ text: `${c.line} in the queue`, tone: "default" })
   if (c.done) parts.push({ text: `${c.done} done`, tone: "default" })
   if (c.failed) parts.push({ text: `${c.failed} failed`, tone: "destructive" })
   if (c.cancelled) parts.push({ text: `${c.cancelled} cancelled`, tone: "default" })
@@ -175,7 +175,6 @@ function median(values: number[]): number | null {
 
 export interface LedgerFlow {
   arrived: number
-  sources: number
   line: { count: number; blocked: boolean }
   running: number
   agents: number
@@ -187,14 +186,13 @@ export interface LedgerFlow {
   cancelled: number
 }
 
-/** Arrived → In line → Running → Done, with the three ways out. */
+/** Arrived → In the queue → Running → Done, with the three ways out. */
 export function ledgerFlow(items: readonly WorkItem[]): LedgerFlow {
   const c = ledgerCounts(items)
   const blockedAgents = new Set(items.filter((i) => ledgerTone(i.state) === "needs").map((i) => i.agent_id))
   const inLine = items.filter((i) => ledgerTone(i.state) === "line")
   return {
     arrived: c.total,
-    sources: new Set(items.map((i) => eventFamily(i.event_type) || i.source)).size,
     line: { count: c.line, blocked: inLine.some((i) => blockedAgents.has(i.agent_id)) },
     running: c.running,
     agents: new Set(items.map((i) => i.agent_id)).size,
@@ -406,14 +404,21 @@ export interface EndpointHealth {
   families: string[]
   last: string
   profile: string
-  verdict: "ok" | "blocked" | "gone"
+  /**
+   * ok: arriving and its work moves · quiet: nothing for a day · blocked: its
+   * agent's queue holds on work that needs you · gone: the agent was deleted.
+   */
+  verdict: "ok" | "quiet" | "blocked" | "gone"
 }
+
+/** An endpoint with nothing in a day is not "arriving", whatever it did before. */
+const QUIET_AFTER_MS = 24 * 3_600_000
 
 /**
  * Is this webhook arriving at all, and does its work move? One entry per
  * endpoint, busiest first; a deleted endpoint last.
  */
-export function endpointHealth(deliveries: readonly WebhookDelivery[], _now = Date.now()): EndpointHealth[] {
+export function endpointHealth(deliveries: readonly WebhookDelivery[], now = Date.now()): EndpointHealth[] {
   const by = new Map<string, WebhookDelivery[]>()
   for (const d of deliveries) by.set(d.endpoint_id, [...(by.get(d.endpoint_id) ?? []), d])
   return [...by.entries()]
@@ -422,6 +427,7 @@ export function endpointHealth(deliveries: readonly WebhookDelivery[], _now = Da
       const agent = list.find((d) => d.agent)?.agent ?? null
       const gone = isDeletedAgent(agent) && list.every((d) => d.endpoint_kind === "agent")
       const blocked = list.some((d) => d.work_state === "needs_reconciliation")
+      const quiet = now - Date.parse(sorted[0].received_at) > QUIET_AFTER_MS
       return {
         endpointId,
         name: agent?.name || (gone ? DELETED : endpointId),
@@ -430,7 +436,7 @@ export function endpointHealth(deliveries: readonly WebhookDelivery[], _now = Da
         families: familyCounts(list.map((d) => d.event_type)).map((f) => f.family),
         last: sorted[0].received_at,
         profile: sorted[0].profile,
-        verdict: gone ? ("gone" as const) : blocked ? ("blocked" as const) : ("ok" as const),
+        verdict: gone ? ("gone" as const) : blocked ? ("blocked" as const) : quiet ? ("quiet" as const) : ("ok" as const),
       }
     })
     .sort((a, b) => Number(a.verdict === "gone") - Number(b.verdict === "gone") || b.count - a.count || a.name.localeCompare(b.name))
@@ -480,4 +486,10 @@ export function deliveryLanes(deliveries: readonly WebhookDelivery[], win: { fro
       ignored: list.filter((d) => deliveryTone(d) === "ignored").length,
     }))
     .sort((a, b) => b.dots.length - a.dots.length || a.family.localeCompare(b.family))
+}
+
+/** A cost as the ledger prints it: "—" for none, "<$0.01" below a cent. */
+export function formatCost(usd: number): string {
+  if (!Number.isFinite(usd) || usd === 0) return "—"
+  return usd < 0.01 ? `<$0.01` : `$${usd.toFixed(2)}`
 }

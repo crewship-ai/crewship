@@ -21,7 +21,10 @@ vi.mock("@/hooks/use-work-items", async (original) => ({
   useResolveWorkItem: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useReplayWorkItem: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
-vi.mock("@/hooks/use-webhook-deliveries", () => ({ useWebhookDeliveries: mocks.deliveries }))
+vi.mock("@/hooks/use-webhook-deliveries", () => ({
+  useWebhookDeliveries: mocks.deliveries,
+  useWebhookDelivery: () => ({ delivery: null, loading: false, notFound: false }),
+}))
 vi.mock("@/components/features/work/work-item-detail", () => ({
   WorkItemDetail: ({ workItemId }: { workItemId: string }) => <p>Detail {workItemId}</p>,
 }))
@@ -63,8 +66,8 @@ it("keeps the overview default and loads the ledger only when requested", () => 
 it("switches the rail to the ledger's rows and leaves to all activity with legacy parameters kept (#3012)", () => {
   window.history.replaceState(null, "", "/activity?run=run-7&section=work")
   render(<ActivityWorkspace workspaceId="ws-a" />)
-  const tabs = screen.getByRole("tablist", { name: "Ledger" })
-  expect(within(tabs).getByRole("tab", { name: "Work queue" })).toHaveAttribute("aria-selected", "true")
+  const ledgers = screen.getByRole("navigation", { name: "Ledger" })
+  expect(within(ledgers).getByRole("button", { name: "Work queue" })).toHaveAttribute("aria-current", "page")
   expect(screen.getByRole("region", { name: "Status" })).toHaveTextContent("Needs you")
   expect(screen.getByRole("region", { name: "Status" })).not.toHaveTextContent("Expired")
   fireEvent.click(screen.getByRole("button", { name: "All activity" }))
@@ -74,7 +77,7 @@ it("switches the rail to the ledger's rows and leaves to all activity with legac
 it("switches between the two ledgers from the rail", () => {
   window.history.replaceState(null, "", "/activity?section=work")
   render(<ActivityWorkspace workspaceId="ws-a" />)
-  fireEvent.click(screen.getByRole("tab", { name: "Deliveries" }))
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Ledger" })).getByRole("button", { name: "Deliveries" }))
   expect(mocks.push).toHaveBeenCalledWith("/activity?section=deliveries", { scroll: false })
 })
 
@@ -92,7 +95,7 @@ it("names the agent and the event, and narrows every card to an agent picked in 
   expect(latest).toHaveTextContent("invoice.disputed")
   expect(latest).toHaveTextContent("Casey")
   expect(latest).toHaveTextContent("Sidecar did not start")
-  fireEvent.click(screen.getByLabelText("Casey"))
+  fireEvent.click(screen.getByLabelText(/^Casey,/))
   expect(screen.getByRole("heading", { name: /Work queue · Casey/ })).toBeInTheDocument()
   expect(screen.getByRole("region", { name: "Latest work" })).not.toHaveTextContent("order.shipped")
 })
@@ -128,6 +131,41 @@ it("opens an accepted delivery's work in the Work queue", () => {
   expect(mocks.push).toHaveBeenCalledWith("/activity?section=work", { scroll: false })
   view.rerender(<ActivityWorkspace workspaceId="ws-a" />)
   expect(screen.getByText("Detail work-1")).toBeVisible()
+})
+
+it("keeps an agent picked on the Work queue removable on Deliveries, where it has no row (#3017)", () => {
+  window.history.replaceState(null, "", "/activity?section=work")
+  mocks.work.mockReturnValue({
+    items: [work("w1", "succeeded", casey, "invoice.disputed", 2)],
+    nextCursor: null, loading: false, error: null, refetch: vi.fn(),
+  })
+  const view = render(<ActivityWorkspace workspaceId="ws-a" />)
+  fireEvent.click(screen.getByLabelText(/^Casey,/))
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Ledger" })).getByRole("button", { name: "Deliveries" }))
+  view.rerender(<ActivityWorkspace workspaceId="ws-a" />)
+  expect(screen.getByRole("heading", { name: /Webhook deliveries · Casey/ })).toBeInTheDocument()
+  expect(screen.getByLabelText(/^Casey, none here/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Remove filter" }))
+  expect(screen.getByRole("heading", { name: "Webhook deliveries" })).toBeInTheDocument()
+})
+
+it("says the ledger did not load, and loads it again on request", () => {
+  window.history.replaceState(null, "", "/activity?section=work")
+  const refetch = vi.fn()
+  mocks.work.mockReturnValue({ items: [], nextCursor: null, loading: false, error: new Error("server unavailable"), refetch })
+  render(<ActivityWorkspace workspaceId="ws-a" />)
+  expect(screen.getByRole("alert")).toHaveTextContent("Could not load the work queue: server unavailable")
+  fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Try again" }))
+  expect(refetch).toHaveBeenCalled()
+})
+
+it("opens on a phone with the rail closed over the page", () => {
+  mocks.mobile = true
+  window.history.replaceState(null, "", "/activity?section=work")
+  render(<ActivityWorkspace workspaceId="ws-a" />)
+  expect(screen.getByRole("heading", { name: "Work queue" })).toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: "All activity" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Close filters" })).toBeNull()
 })
 
 it("uses a replacement redirect for old Work bookmarks", () => {

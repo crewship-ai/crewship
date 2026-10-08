@@ -118,6 +118,8 @@ export interface LedgerAgent {
   slug: string
   avatar_seed: string
   avatar_style: string
+  /** The agent's stored render; null when it is generated from the seed. */
+  avatar_url?: string | null
   /** Removed from the workspace; the record (and name) remain. */
   deleted?: boolean
 }

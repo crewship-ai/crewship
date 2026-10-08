@@ -369,21 +369,25 @@ Opening one keeps Activity's shape. The rail slides over to the ledger's own row
 
 - a **Work queue · Deliveries** switch;
 - **Status** in Activity's words and colours: *Needs you*, *In the queue*, *Running*, *Done*, *Failed*, *Cancelled* for work; *Accepted* and *Ignored* for deliveries;
-- **Agents** (or **Endpoints**) with their own avatars, and whether their queue moves — *idle*, *running*, *blocked*, *deleted*;
+- **Agents** with their own avatars, and whether their queue moves — *idle*, *running*, *blocked*, *deleted*; on deliveries, **Endpoints** with when the last delivery came, or *quiet*, *blocked*, *deleted*;
 - **Events**, grouped by family (`invoice.*`, `ping`).
 
-Every row narrows the whole page beside it, and picking it again clears it. The **24 h / 7 d** toggle sets the window for both.
+Every row narrows the whole page beside it. A status row works as in Activity — **All** clears it; an agent or event picked again clears it. Each narrowing also shows as a chip under the switch that removes it, and an agent picked on one ledger stays picked on the other (an endpoint is an agent), keeping its row even where it has nothing. The **24 h / 7 d** toggle sets the window for both. On a phone the rail is a drawer, closed when the page opens and after each pick.
 
 **Work queue** reads top to bottom:
 
-- one sentence — how many pieces of work, how many need you, wait in line, finished, failed;
-- **Flow** — *Arrived → In line → Running → Done*, with *Needs you*, *Failed* and *Cancelled* beside it; a step narrows to it;
-- **Needs you** — work whose outcome nobody knows (`needs_reconciliation`). It holds the agent's only slot, so everything sent to that agent waits behind it, and the card says how much. A MANAGER or above settles it here: **Retry** (mark failed, then run the same input again under your name), **Mark as failed** or **Mark as done**. Each asks what you checked and that nothing is still running;
+- one sentence — how many pieces of work, how many need you, are in the queue, finished, failed;
+- **Flow** — *Arrived → In the queue → Running → Done*, with *Needs you*, *Failed* and *Cancelled* beside it; a step narrows to it;
+- **Needs you** — work whose outcome nobody knows (`needs_reconciliation`). It holds the agent's only slot, so everything sent to that agent waits behind it, and the card says how much. A MANAGER or above settles it here: **Retry** (mark failed, then run the same input again under your name), **Mark as failed** or **Mark as done**. Each asks what you checked and that nothing is still running. Retry is two steps: it is not offered when the input cannot be run again (the webhook payload passed its retention, or the work belongs to a private workflow) and the dialog says why; if running it again is refused after the work was marked failed, the work stays failed and a message says so;
 - **Why work failed** — failures grouped by cause, with the agents and events affected;
-- **What came in** — one lane per agent, with its crew in its own colour and icon; every piece of work is a dot that opens it;
+- **What came in** — one lane per agent, with its crew in its own colour and icon; every piece of work is a dot that opens it. Past eight agents the rest fold into "+ N quieter agents";
 - **Latest work** — one sentence per piece: the event, the agent who took it, and how it ended.
 
-**Webhook deliveries** shows one card per endpoint — is it arriving, which profile verified it, and whether its agent's queue is blocked (with a link into the Work queue narrowed to that agent) or the endpoint is gone. Below are the arrivals per event family and the latest deliveries with what each became. A delivery opens beside the list with its decision, sender's id, payload size and retention; its work opens in the Work queue. The body itself is never shown.
+**Webhook deliveries** shows one card per endpoint — is it arriving (an endpoint with nothing in the last 24 h reads *quiet*), which profile verified it, and whether its agent's queue is blocked (with a link into the Work queue narrowed to that agent) or the endpoint is gone. Below are the arrivals per event family and the latest deliveries with what each became. A delivery opens beside the list with its decision, sender's id, payload size and retention; its work opens in the Work queue. The body itself is never shown.
+
+A piece of work opens in a panel beside the page, with its agent and crew by name. On a phone, work and deliveries open in a sheet.
+
+Each ledger reads the newest 100 rows. When the window holds more, the lanes card says so: older rows are neither drawn nor counted.
 
 Only the open ledger is mounted, so opening one does not start the journal stream.
 

@@ -1,7 +1,8 @@
 "use client"
 
 // The STATUS rows — the Routines rail's words, icons and count pills (#2979).
-// Shared by the rail and its routine focus (#2998), so the two cannot drift.
+// Shared by the rail, its routine focus (#2998) and the ledgers' rail (#3017),
+// so they cannot drift.
 
 import * as React from "react"
 import { Activity, CheckCircle2, CircleSlash, Layers, PauseCircle, XCircle } from "lucide-react"
@@ -20,19 +21,32 @@ const STATUS_ICON: Record<RailScope, React.ComponentType<{ className?: string }>
   failed: XCircle,
 }
 
-export function StatusRows({
+/** A status row of any rail: the Activity scopes, or a ledger's (#3017). */
+export interface StatusRow<K extends string = string> {
+  key: K
+  label: string
+  tone: string
+  count: number
+  /** Defaults to the Routines rail's glyph for an Activity scope. */
+  icon?: React.ComponentType<{ className?: string }>
+}
+
+export function StatusRows<K extends string = RailStatusRow["key"]>({
   rows,
   scope,
   onPick,
+  label = "Status",
 }: {
-  rows: RailStatusRow[]
+  rows: StatusRow<K>[]
   scope: string
-  onPick: (key: RailStatusRow["key"]) => void
+  onPick: (key: K) => void
+  /** The region's name: "Status", or "Decision" on the deliveries rail. */
+  label?: string
 }) {
   return (
-    <div role="region" aria-label="Status">
+    <div role="region" aria-label={label}>
       {rows.map((r) => {
-        const Icon = STATUS_ICON[r.key]
+        const Icon = r.icon ?? STATUS_ICON[r.key as unknown as RailScope] ?? Layers
         const isSelected = scope === r.key
         const empty = r.count === 0 && !isSelected
         return (
@@ -41,21 +55,28 @@ export function StatusRows({
             <span className={cn("flex-1 truncate", empty ? "text-muted-foreground-soft" : "text-foreground/80")}>
               {r.label}
             </span>
-            <span
-              className={cn(
-                "rounded-full px-1.5 py-px text-[10px] tabular-nums",
-                r.count === 0
-                  ? "text-muted-foreground-soft"
-                  : isSelected
-                    ? "bg-primary/15 text-primary-hover"
-                    : "bg-foreground/[0.05] text-muted-foreground",
-              )}
-            >
-              {r.count}
-            </span>
+            <CountPill count={r.count} selected={isSelected} />
           </SidebarRow>
         )
       })}
     </div>
+  )
+}
+
+/** The rail's count pill — also beside the ledgers' agent and event rows. */
+export function CountPill({ count, selected }: { count: number; selected: boolean }) {
+  return (
+    <span
+      className={cn(
+        "rounded-full px-1.5 py-px text-[10px] tabular-nums",
+        count === 0
+          ? "text-muted-foreground-soft"
+          : selected
+            ? "bg-primary/15 text-primary-hover"
+            : "bg-foreground/[0.05] text-muted-foreground",
+      )}
+    >
+      {count}
+    </span>
   )
 }

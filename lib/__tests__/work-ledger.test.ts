@@ -6,6 +6,7 @@ import {
   deliveryLine,
   deliveryTone,
   endpointHealth,
+  formatCost,
   eventFamily,
   failureCauses,
   humanReason,
@@ -97,7 +98,7 @@ describe("the work queue's summary (#3012)", () => {
     expect(ledgerHeadline(counts).map((p) => p.text)).toEqual([
       "9 pieces of work",
       "1 needs you",
-      "1 waiting in line",
+      "1 in the queue",
       "3 done",
       "3 failed",
       "1 cancelled",
@@ -225,6 +226,15 @@ describe("webhook deliveries (#3012)", () => {
     expect(health[0].count).toBe(2)
   })
 
+  it("does not call an endpoint that has gone quiet for a day arriving", () => {
+    const old = new Date(NOW - 3 * 24 * 3_600_000).toISOString()
+    const [h] = endpointHealth([delivery({ received_at: old })], NOW)
+    expect(h.verdict).toBe("quiet")
+    // A blocked queue matters more than a quiet sender.
+    const [b] = endpointHealth([delivery({ received_at: old, work_state: "needs_reconciliation" })], NOW)
+    expect(b.verdict).toBe("blocked")
+  })
+
   it("narrows by decision, endpoint and family", () => {
     expect(narrowDeliveries(deliveries, { decision: "ignored" })).toHaveLength(1)
     expect(narrowDeliveries(deliveries, { endpointId: robot2.id })).toHaveLength(1)
@@ -256,5 +266,13 @@ describe("what a reader sees of a reason (#3017)", () => {
     expect(deliveryLine(delivery({ event_type: "ping", filter_decision: "ignored", filter_reason: "ping", work_id: null, work_state: null }))).toBe(
       "Connection test — nothing to do",
     )
+  })
+})
+
+describe("formatCost", () => {
+  it("does not round a real cost away to zero", () => {
+    expect(formatCost(0)).toBe("—")
+    expect(formatCost(0.004)).toBe("<$0.01")
+    expect(formatCost(1.25)).toBe("$1.25")
   })
 })

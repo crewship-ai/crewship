@@ -16,8 +16,11 @@ import * as React from "react"
 import { CheckCircle2, GanttChartSquare, ListChecks, Radio, X } from "lucide-react"
 
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
+import { LaneAxis, WindowToggle, type TimeWindow } from "@/components/features/activity-stream/time-window"
 import { Appear } from "@/components/ui/detail"
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import type { WebhookDelivery } from "@/hooks/use-webhook-deliveries"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { relTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import {
@@ -32,7 +35,10 @@ import {
   isDeletedAgent,
   ledgerTone,
 } from "@/lib/work-ledger"
-import { LaneAxis, LedgerAvatar, WindowToggle, type LedgerWindow } from "./work-queue-page"
+import { LedgerAvatar } from "./ledger-parts"
+
+/** Lanes drawn before the rest fold into "+ N quieter event families" — as the home does. */
+const MAX_LANES = 8
 
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`
@@ -47,8 +53,8 @@ function dotClass(d: { tone: "accepted" | "ignored"; workTone: keyof typeof LEDG
 
 export interface DeliveriesPageProps {
   deliveries: WebhookDelivery[]
-  win: LedgerWindow
-  onWin: (w: LedgerWindow) => void
+  win: TimeWindow
+  onWin: (w: TimeWindow) => void
   from: number
   now: number
   narrowedTo: string | null
@@ -71,6 +77,7 @@ export function DeliveriesPage({
   onOpenAgentWork,
 }: DeliveriesPageProps) {
   const [openId, setOpenId] = React.useState<string | null>(null)
+  const isMobile = useIsMobile()
   const accepted = deliveries.filter((d) => deliveryTone(d) === "accepted").length
   const ignored = deliveries.length - accepted
   const latest = [...deliveries].sort((a, b) => b.received_at.localeCompare(a.received_at))
@@ -131,8 +138,10 @@ export function DeliveriesPage({
                       {h.count} {h.count === 1 ? "delivery" : "deliveries"} · {h.families.join(", ") || "—"} · last {relTime(h.last)}
                     </p>
                   </div>
-                  {h.verdict !== "gone" && (
-                    <span aria-label="Receiving" className="relative inline-flex h-2 w-2 shrink-0">
+                  {/* The live ping only for an endpoint that is arriving now — the
+                      home pings only what is actually running. */}
+                  {h.verdict === "ok" && (
+                    <span aria-hidden className="relative inline-flex h-2 w-2 shrink-0">
                       <span className="absolute inset-0 animate-ping rounded-full bg-success opacity-50" />
                       <span className="relative h-2 w-2 rounded-full bg-success" />
                     </span>
@@ -143,6 +152,9 @@ export function DeliveriesPage({
                     <CheckCircle2 className="h-3.5 w-3.5 text-success" />
                     Arriving · verified with <span className="font-mono">{h.profile}</span>
                   </p>
+                )}
+                {h.verdict === "quiet" && (
+                  <p className="text-xs text-muted-foreground">Quiet — nothing arrived in the last 24 h.</p>
                 )}
                 {h.verdict === "blocked" && (
                   <p className="flex flex-wrap items-center gap-x-2 text-xs text-warn">
@@ -169,8 +181,8 @@ export function DeliveriesPage({
               <p className="py-6 text-center text-xs text-muted-foreground">{loading ? "Loading deliveries…" : "Nothing arrived in this window."}</p>
             ) : (
               <div className="flex flex-col gap-1.5">
-                <LaneAxis from={from} to={now} win={win} />
-                {lanes.map((lane) => (
+                <LaneAxis from={from} to={now} win={win} className="grid-cols-[minmax(0,200px)_1fr_96px]" />
+                {lanes.slice(0, MAX_LANES).map((lane) => (
                   <div key={lane.family} className="grid grid-cols-[minmax(0,200px)_1fr_96px] items-center gap-3">
                     <span className="truncate font-mono text-xs">{lane.family}</span>
                     <span className="relative h-3.5 rounded bg-foreground/[0.04]">
@@ -210,6 +222,14 @@ export function DeliveriesPage({
                     </span>
                   ))}
                 </div>
+                {lanes.length > MAX_LANES && (
+                  <p className="pl-[212px] text-[11px] text-muted-foreground">+ {lanes.length - MAX_LANES} quieter event families</p>
+                )}
+                {capped && (
+                  <p className="text-[10.5px] text-muted-foreground-soft">
+                    Showing the newest 100 deliveries; older ones in this window are not drawn or counted.
+                  </p>
+                )}
               </div>
             )}
           </DashboardCard>
@@ -237,10 +257,10 @@ export function DeliveriesPage({
                         )}
                       >
                         <span className={cn("h-2 w-2 shrink-0 rounded-full", dotClass({ tone: deliveryTone(d), workTone: work }))} />
-                        <span className={cn("w-[170px] shrink-0 truncate font-mono text-xs", ignoredRow && "text-muted-foreground")}>
+                        <span className={cn("w-[120px] shrink-0 truncate font-mono text-xs sm:w-[170px]", ignoredRow && "text-muted-foreground")}>
                           {d.event_type || "—"}
                         </span>
-                        <span className="flex w-[150px] shrink-0 items-center gap-1.5 truncate text-xs text-muted-foreground">
+                        <span className="hidden w-[150px] shrink-0 items-center gap-1.5 truncate text-xs text-muted-foreground md:flex">
                           <LedgerAvatar agent={d.agent} className="h-4 w-4" />
                           <span className={cn("truncate", isDeletedAgent(d.agent) && "line-through")}>{agentName(d.agent)}</span>
                         </span>
@@ -252,8 +272,9 @@ export function DeliveriesPage({
                         >
                           {deliveryLine(d)}
                         </span>
-                        <span className="w-32 shrink-0 whitespace-nowrap text-right font-mono text-[10.5px] text-muted-foreground">
-                          {bytes(d.body_bytes)} · {relTime(d.received_at)}
+                        <span className="shrink-0 whitespace-nowrap text-right font-mono text-[10.5px] text-muted-foreground sm:w-32">
+                          <span className="hidden sm:inline">{bytes(d.body_bytes)} · </span>
+                          {relTime(d.received_at)}
                         </span>
                       </button>
                     </li>
@@ -261,14 +282,30 @@ export function DeliveriesPage({
                 })}
               </ul>
             )}
-            {capped && (
-              <p className="mt-2 text-[10.5px] text-muted-foreground-soft">Showing the newest 100 deliveries; older ones are not counted.</p>
-            )}
           </DashboardCard>
         </Appear>
       </div>
 
-      {opened && <DeliveryDetail delivery={opened} onClose={() => setOpenId(null)} onOpenWork={onOpenWork} />}
+      {opened && !isMobile && (
+        <aside
+          aria-label="Delivery"
+          className="w-[360px] shrink-0 border-l border-hairline bg-card/40 p-4 animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out"
+        >
+          <DeliveryDetail delivery={opened} onClose={() => setOpenId(null)} onOpenWork={onOpenWork} />
+        </aside>
+      )}
+      {isMobile && (
+        <Sheet open={opened != null} onOpenChange={(o) => !o && setOpenId(null)}>
+          <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
+            <SheetHeader>
+              <SheetTitle>Delivery</SheetTitle>
+            </SheetHeader>
+            <div className="px-4 pb-4">
+              {opened && <DeliveryDetail delivery={opened} onOpenWork={onOpenWork} />}
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
     </div>
   )
 }
@@ -279,7 +316,8 @@ function DeliveryDetail({
   onOpenWork,
 }: {
   delivery: WebhookDelivery
-  onClose: () => void
+  /** The side panel's close; the mobile sheet closes itself. */
+  onClose?: () => void
   onOpenWork: (id: string) => void
 }) {
   const work = d.work_state ? ledgerTone(d.work_state) : null
@@ -317,18 +355,17 @@ function DeliveryDetail({
     ],
   ]
   return (
-    <aside
-      aria-label="Delivery"
-      className="hidden w-[360px] shrink-0 border-l border-hairline bg-card/40 p-4 animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out md:block"
-    >
+    <>
       <div className="mb-3 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="eyebrow text-muted-foreground">Delivery</p>
           <p className="truncate font-mono text-sm">{d.event_type || "—"}</p>
         </div>
-        <button type="button" aria-label="Close" onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
-          <X className="h-4 w-4" />
-        </button>
+        {onClose && (
+          <button type="button" aria-label="Close delivery" onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
       <dl className="grid grid-cols-[96px_1fr] gap-x-3 gap-y-2 text-xs">
         {rows.map(([k, v]) => (
@@ -341,6 +378,6 @@ function DeliveryDetail({
       <p className="mt-4 text-[10.5px] leading-snug text-muted-foreground-soft">
         The body itself is never shown: a signed third-party payload can carry anything the sender put in it.
       </p>
-    </aside>
+    </>
   )
 }

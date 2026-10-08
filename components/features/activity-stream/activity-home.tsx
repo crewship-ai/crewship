@@ -61,9 +61,10 @@ import { waitpointDecide } from "@/lib/api/waitpoints"
 import { roleAtLeast } from "@/lib/routine-governance"
 import { relTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
+import { LaneAxis, TIME_WINDOW_MS, WindowToggle, type TimeWindow } from "./time-window"
 
-type Window = "24h" | "7d"
-const WINDOW_MS: Record<Window, number> = { "24h": 24 * 3_600_000, "7d": 7 * 24 * 3_600_000 }
+type Window = TimeWindow
+const WINDOW_MS = TIME_WINDOW_MS
 
 export interface ActivityHomeProps {
   workspaceId: string
@@ -151,22 +152,7 @@ export function ActivityHome({ workspaceId, chains, scope, onOpenRun, onOpenIssu
             </p>
           </div>
           <div className="flex-1" />
-          <div role="group" aria-label="Window" className="flex overflow-hidden rounded-md border border-border font-mono text-[11px]">
-            {(["24h", "7d"] as const).map((w) => (
-              <button
-                key={w}
-                type="button"
-                aria-pressed={win === w}
-                onClick={() => setWin(w)}
-                className={cn(
-                  "px-2.5 py-1 transition-colors",
-                  win === w ? "bg-foreground/[0.08] text-foreground" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {w === "24h" ? "24 h" : "7 d"}
-              </button>
-            ))}
-          </div>
+          <WindowToggle value={win} onChange={setWin} />
         </div>
       </Appear>
 
@@ -239,7 +225,7 @@ export function ActivityHome({ workspaceId, chains, scope, onOpenRun, onOpenIssu
             </p>
           ) : (
             <div className="flex flex-col gap-1.5">
-              <AxisRow from={from} to={now} win={win} />
+              <LaneAxis from={from} to={now} win={win} />
               {lanes.lanes.map((lane) => (
                 <div key={lane.slug} className="grid grid-cols-[minmax(0,200px)_1fr_76px] items-center gap-3">
                   <span className="truncate text-xs" title={lane.name}>
@@ -521,28 +507,6 @@ function NeedsYou({
         </ul>
       )}
     </DashboardCard>
-  )
-}
-
-function AxisRow({ from, to, win }: { from: number; to: number; win: Window }) {
-  const ticks = 6
-  const labels = Array.from({ length: ticks + 1 }, (_, i) => {
-    const t = new Date(from + ((to - from) * i) / ticks)
-    if (i === ticks) return "now"
-    return win === "24h"
-      ? t.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false })
-      : t.toLocaleDateString(undefined, { weekday: "short" })
-  })
-  return (
-    <div className="grid grid-cols-[minmax(0,200px)_1fr_76px] gap-3 font-mono text-[10px] text-muted-foreground-soft">
-      <span />
-      <span className="flex justify-between">
-        {labels.map((l, i) => (
-          <span key={i}>{l}</span>
-        ))}
-      </span>
-      <span />
-    </div>
   )
 }
 

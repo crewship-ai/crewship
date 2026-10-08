@@ -11,6 +11,7 @@
 import * as React from "react"
 import { X } from "lucide-react"
 
+import { TIME_WINDOW_MS, type TimeWindow } from "@/components/features/activity-stream/time-window"
 import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -35,15 +36,27 @@ import {
   type LedgerTone,
 } from "@/lib/work-ledger"
 import { DeliveriesPage } from "./deliveries-page"
-import { DeliveriesRail, WorkRail, type LedgerSection, type RailAgentRow } from "./ledger-rail"
+import { DeliveriesRail, WorkRail, type LedgerSection, type RailAgentRow, type RailChip } from "./ledger-rail"
 import { WorkItemDetail } from "./work-item-detail"
-import { LEDGER_WINDOW_MS, WorkQueuePage, type LedgerWindow } from "./work-queue-page"
+import { WorkQueuePage } from "./work-queue-page"
 
-const AGENT_NOTE: Record<string, { note: string; tone?: string }> = {
-  blocked: { note: "blocked", tone: "text-warn" },
-  running: { note: "running", tone: "text-primary" },
+const AGENT_NOTE: Record<string, { note: string; noteTone?: string }> = {
+  blocked: { note: "blocked", noteTone: "text-warn" },
+  running: { note: "running", noteTone: "text-primary" },
   idle: { note: "idle" },
   deleted: { note: "deleted" },
+}
+
+const ENDPOINT_NOTE = { gone: "deleted", blocked: "blocked", quiet: "quiet" } as const
+
+/**
+ * The picked agent or family keeps a row while it is picked, even when the
+ * window or the other ledger holds none of it: a filter with no row to unpick
+ * left the page empty with no way back.
+ */
+function keepPicked<T>(rows: T[], picked: string | null, key: (r: T) => string, make: (id: string) => T): T[] {
+  if (!picked || rows.some((r) => key(r) === picked)) return rows
+  return [...rows, make(picked)]
 }
 
 export function LedgerView({
@@ -57,7 +70,7 @@ export function LedgerView({
   onSection: (s: LedgerSection) => void
   onLeave: () => void
 }) {
-  const [win, setWin] = React.useState<LedgerWindow>("24h")
+  const [win, setWin] = React.useState<TimeWindow>("24h")
   const [now, setNow] = React.useState(() => Date.now())
   React.useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000)
@@ -70,19 +83,33 @@ export function LedgerView({
   const [openWorkId, setOpenWorkId] = React.useState<string | null>(null)
   const isMobile = useIsMobile()
   const [railCollapsed, setRailCollapsed] = React.useState(false)
+  // On a phone the rail is a drawer over the page; start it closed, as
+  // Activity and the Routines explorer do.
+  React.useEffect(() => {
+    if (isMobile) setRailCollapsed(true)
+  }, [isMobile])
   const { role } = useAbilities()
 
   const work = useWorkItems(workspaceId)
   const deliveries = useWebhookDeliveries(workspaceId)
-  const from = now - LEDGER_WINDOW_MS[win]
+  const from = now - TIME_WINDOW_MS[win]
   const windowLabel = win === "24h" ? "last 24 h" : "last 7 days"
 
+  // A pick on a phone closes the drawer, so the page it narrowed shows.
+  function picked<T>(set: (v: T) => void) {
+    return (v: T) => {
+      set(v)
+      if (isMobile) setRailCollapsed(true)
+    }
+  }
+
   // Switching ledgers keeps the agent (an endpoint IS an agent) and drops the
-  // status, whose words differ between the two.
+  // status, whose words differ between the two, and the open work panel.
   function switchSection(s: LedgerSection) {
     setTone("all")
     setDecision("all")
     setFamily(null)
+    setOpenWorkId(null)
     onSection(s)
   }
 
@@ -91,43 +118,76 @@ export function LedgerView({
   // The rail counts each facet over the OTHER facets, so a row survives its
   // own selection — the rule the Activity rail keeps.
   const workForCounts = narrowWork(workInWindow, { agentId, family })
-  const workAgents: RailAgentRow[] = ledgerAgents(narrowWork(workInWindow, { tone, family })).map((a) => ({
-    id: a.id,
-    name: a.name,
-    agent: a.agent,
-    count: a.count,
-    ...AGENT_NOTE[a.state],
-  }))
-  const workFamilies = familyCounts(narrowWork(workInWindow, { tone, agentId }).map((i) => i.event_type ?? ""))
 
   const dlvInWindow = inWindow(deliveries.deliveries, (d) => d.received_at, from)
   const narrowedDlv = narrowDeliveries(dlvInWindow, { decision, endpointId: agentId, family })
   const dlvForCounts = narrowDeliveries(dlvInWindow, { endpointId: agentId, family })
-  const endpoints: RailAgentRow[] = endpointHealth(narrowDeliveries(dlvInWindow, { decision, family }), now).map((h) => ({
-    id: h.endpointId,
-    name: h.name,
-    agent: h.agent,
-    count: h.count,
-    note: h.verdict === "gone" ? "deleted" : h.verdict === "blocked" ? "blocked" : relTime(h.last),
-    noteTone: h.verdict === "blocked" ? "text-warn" : undefined,
-  }))
-  const dlvFamilies = familyCounts(narrowDeliveries(dlvInWindow, { decision, endpointId: agentId }).map((d) => d.event_type))
 
-  const agentLabel = agentId
-    ? agentName(
-        work.items.find((i) => i.agent_id === agentId)?.agent ??
-          deliveries.deliveries.find((d) => d.endpoint_id === agentId)?.agent,
-      )
-    : null
-  const narrowedTo =
-    [
-      section === "work" && tone !== "all" ? LEDGER_TONE_LABEL[tone] : null,
-      section === "deliveries" && decision !== "all" ? (decision === "accepted" ? "Accepted" : "Ignored") : null,
-      agentLabel,
-      family,
-    ]
-      .filter(Boolean)
-      .join(" · ") || null
+  const pickedAgent =
+    work.items.find((i) => i.agent_id === agentId)?.agent ?? deliveries.deliveries.find((d) => d.endpoint_id === agentId)?.agent ?? null
+  const agentLabel = agentId ? agentName(pickedAgent) : null
+  const emptyAgentRow = (id: string): RailAgentRow => ({ id, name: agentName(pickedAgent), agent: pickedAgent, count: 0, note: "none here" })
+  const emptyFamilyRow = (f: string) => ({ family: f, count: 0 })
+
+  const workAgents = keepPicked(
+    ledgerAgents(narrowWork(workInWindow, { tone, family })).map(
+      (a): RailAgentRow => ({ id: a.id, name: a.name, agent: a.agent, count: a.count, ...AGENT_NOTE[a.state] }),
+    ),
+    agentId,
+    (r) => r.id,
+    emptyAgentRow,
+  )
+  const workFamilies = keepPicked(
+    familyCounts(narrowWork(workInWindow, { tone, agentId }).map((i) => i.event_type ?? "")),
+    family,
+    (f) => f.family,
+    emptyFamilyRow,
+  )
+  const endpoints = keepPicked(
+    endpointHealth(narrowDeliveries(dlvInWindow, { decision, family }), now).map(
+      (h): RailAgentRow => ({
+        id: h.endpointId,
+        name: h.name,
+        agent: h.agent,
+        count: h.count,
+        note: h.verdict === "ok" ? relTime(h.last) : ENDPOINT_NOTE[h.verdict],
+        noteTone: h.verdict === "blocked" ? "text-warn" : undefined,
+      }),
+    ),
+    agentId,
+    (r) => r.id,
+    emptyAgentRow,
+  )
+  const dlvFamilies = keepPicked(
+    familyCounts(narrowDeliveries(dlvInWindow, { decision, endpointId: agentId }).map((d) => d.event_type)),
+    family,
+    (f) => f.family,
+    emptyFamilyRow,
+  )
+
+  const statusLabel =
+    section === "work"
+      ? tone !== "all"
+        ? LEDGER_TONE_LABEL[tone]
+        : null
+      : decision !== "all"
+        ? decision === "accepted"
+          ? "Accepted"
+          : "Ignored"
+        : null
+  const chips: RailChip[] = [
+    statusLabel && {
+      key: "status",
+      label: statusLabel,
+      onRemove: () => (section === "work" ? setTone("all") : setDecision("all")),
+    },
+    agentLabel && { key: "agent", label: agentLabel, onRemove: () => setAgentId(null) },
+    family && { key: "family", label: family, onRemove: () => setFamily(null) },
+  ].filter((c): c is RailChip => Boolean(c))
+  const narrowedTo = chips.map((c) => c.label).join(" · ") || null
+
+  const failure = section === "work" ? work.error : deliveries.error
+  const retry = section === "work" ? work.refetch : deliveries.refetch
 
   const detail = openWorkId ? (
     <WorkItemDetail workspaceId={workspaceId} workItemId={openWorkId} onNavigate={(id) => setOpenWorkId(id)} />
@@ -162,13 +222,15 @@ export function LedgerView({
               <WorkRail
                 counts={ledgerCounts(workForCounts)}
                 tone={tone}
-                onTone={setTone}
+                onTone={picked(setTone)}
                 agents={workAgents}
                 agentId={agentId}
-                onAgent={setAgentId}
+                onAgent={picked(setAgentId)}
                 families={workFamilies}
                 family={family}
-                onFamily={setFamily}
+                onFamily={picked(setFamily)}
+                chips={chips}
+                loading={work.loading}
                 windowLabel={windowLabel}
                 onSection={switchSection}
                 onLeave={onLeave}
@@ -182,13 +244,15 @@ export function LedgerView({
                   ignored: dlvForCounts.filter((d) => deliveryTone(d) === "ignored").length,
                 }}
                 decision={decision}
-                onDecision={setDecision}
+                onDecision={picked(setDecision)}
                 endpoints={endpoints}
                 endpointId={agentId}
-                onEndpoint={setAgentId}
+                onEndpoint={picked(setAgentId)}
                 families={dlvFamilies}
                 family={family}
-                onFamily={setFamily}
+                onFamily={picked(setFamily)}
+                chips={chips}
+                loading={deliveries.loading}
                 windowLabel={windowLabel}
                 onSection={switchSection}
                 onLeave={onLeave}
@@ -201,9 +265,19 @@ export function LedgerView({
 
       <div key={section} className="flex min-w-0 flex-1 animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out">
         <div className="min-w-0 flex-1 overflow-y-auto">
-          {(section === "work" ? work.error : deliveries.error) && (
-            <div className="border-b border-destructive/30 bg-destructive/5 px-4 py-2 text-[12px] text-destructive">
-              {(section === "work" ? work.error : deliveries.error)?.message}
+          {failure && (
+            // Without this the cards below would say "nothing failed" about
+            // a ledger that never loaded.
+            <div
+              role="alert"
+              className="mx-4 mt-4 flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive md:mx-6"
+            >
+              <span>
+                Could not load the {section === "work" ? "work queue" : "webhook deliveries"}: {failure.message}. What shows below may be out of date.
+              </span>
+              <button type="button" onClick={() => void retry()} className="w-fit rounded border border-destructive/40 px-2 py-0.5 hover:bg-destructive/10">
+                Try again
+              </button>
             </div>
           )}
           {section === "work" ? (
@@ -246,7 +320,7 @@ export function LedgerView({
         {!isMobile && section === "work" && openWorkId && (
           <aside
             aria-label="Work item detail"
-            className="hidden w-[440px] shrink-0 overflow-y-auto border-l border-hairline animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out md:block"
+            className="w-[440px] shrink-0 overflow-y-auto border-l border-hairline animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out"
           >
             <div className="flex justify-end px-2 pt-2">
               <button
