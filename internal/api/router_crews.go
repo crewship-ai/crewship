@@ -617,6 +617,8 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("POST", "/api/v1/crews/{crewId}/provision", roleCreate, provisioning.ProvisionTrigger)
 	// The rebuild handler delegates its enqueue failure response.
 	// openapi: responses 500
+	// ProvisionRebuild delegates admission and responses to ProvisionTrigger.
+	// openapi: responses 202,400,404,409,429,500,503
 	r.authedMut("POST", "/api/v1/crews/{crewId}/rebuild", roleCreate, provisioning.ProvisionRebuild)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/restart-agents", roleCreate, provisioning.RestartCrewAgents)
 

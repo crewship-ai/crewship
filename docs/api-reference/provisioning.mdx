@@ -243,7 +243,7 @@ which provisions first if the crew has no image and then starts it.
 }
 ```
 
-**Errors** (RFC 7807 Problem Details on every 4xx/5xx — `type`, `title`, `status`, `detail`, `instance`):
+**Errors:** provisioning admission failures use RFC 7807 Problem Details (`type`, `title`, `status`, `detail`, `instance`) as `application/json`. Authentication, workspace and role guards use `{ "error": "…" }`; rebuild also uses that envelope for unexpected enqueue failures.
 
 | Status | Condition |
 |---|---|
@@ -261,7 +261,7 @@ which provisions first if the crew has no image and then starts it.
 POST /api/v1/crews/{crewId}/rebuild
 ```
 
-**Auth:** Authenticated caller with the `create` role action. **Request:** `crewId` path parameter; no body. **Response:** the same JSON shape as the trigger endpoint. **Statuses:** `202 Accepted`; `403`, `404`, `409`, `429`, `500`, or `503` when the corresponding provisioning condition applies.
+**Auth:** Authenticated caller with the `create` role action. **Request:** `crewId` path parameter; no body. **Response:** the same JSON shape as the trigger endpoint. **Statuses:** `202 Accepted`; `400`, `401`, `403`, `404`, `409`, `429`, `500`, or `503` when the corresponding provisioning or middleware condition applies.
 
 Triggers a fresh build that bypasses the provisioned-image cache and the installation-layer caches, so floating tool selectors can resolve newer versions. The previously selected image stays in place until the new build publishes: a failed or superseded rebuild leaves the previous image and its requirements selected, and the crew remains startable throughout. Use when upstream features publish breaking updates under the same tag.
 
