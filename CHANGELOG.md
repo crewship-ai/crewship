@@ -54,6 +54,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **CI: a trusted-main guard flags any change to CI control files (#2960).** `CI Inventory Guard` runs main's code against PR files as data. Required-job inventories of the CI, Security and CodeQL workflows, the routing and verdict helpers, and a closed namespace (`.github/`, `scripts/ci/`, every `scripts/` path a workflow references) are compared with main; any change needs a separate administrator dispatch for the exact head SHA.
 
+- ⚠️ **Behaviour change: a routine `agent_run` step now waits for a busy agent instead of failing at once.** When a chat, an assignment or another routine holds the agent, the step waits up to its `timeout_seconds` (15 minutes without one) or until the run is stopped, then fails with a reason naming the busy agent. Waiting steps take the agent in no guaranteed order, hold their run and do not survive a restart. (#3023)
+
 - **CI: the full Go suite and the shuffled suite run in three package partitions each.** `Go` keeps vet and the cross-builds; `Go test` and `Go Shuffle` split `go list ./...` largest-first by measured cost and prove every package runs exactly once (a truncated listing still fails).
 
 - **CI: race tests stop re-migrating test databases and skip checkptr inside the transpiled SQLite library.** One migrated template is now shared per source tree across test binaries (it cost 56 s per binary under race), `internal/api` prefetches its per-test database copies, and `cmd/crewship` fixtures start from the template instead of running the migration chain seven more times. Under `-race`, CI compiles `modernc.org/*` with `checkptr` off (migration chain 55 s → 29 s); race detection and checkptr stay on for all Crewship code.
@@ -6283,7 +6285,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Repeated crew deletion or idle eviction could accumulate anonymous Docker volumes.** New noexec bind-volume records carry installation ownership and are reaped once unused, preserving host data, home/tools history and other installations; unlabelled historical volumes stay for operator investigation. Runtime recreation now reports container removal failures. (#2970)
 
-- ⚠️ **Behaviour change: a routine `agent_run` step now waits for a busy agent instead of failing at once.** When a chat, an assignment or another routine holds the agent, the step waits up to its `timeout_seconds` (15 minutes without one) or until the run is stopped, then fails with a reason naming the busy agent. Waiting steps take the agent in no guaranteed order, hold their run and do not survive a restart. (#3023)
+- **Long routine runs no longer drop out of the overview and the Activity menu.** Running and waiting runs load from their own list instead of the 200 newest runs. When those 200 runs do not reach back seven days, the routine run summary reads "newest N runs · since …" instead of "7d"; partial and needs-a-person results count as finished, not as successes. The run detail shows the result and next step before provenance and evidence. (#3011)
 
 ## [1.0.0-rc.1] — 2026-07-12
 
