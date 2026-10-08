@@ -27,6 +27,7 @@ import { Switch } from "@/components/ui/switch"
 import { Spinner } from "@/components/ui/spinner"
 import { SettingsCard, SettingsEmpty, SettingsRow } from "@/components/features/settings/shared"
 import { apiFetch } from "@/lib/api-fetch"
+import { toastSwitchError } from "@/components/ui/page-save-bar"
 import { Capability } from "@/lib/capabilities"
 
 export interface AccessSecretsMember {
@@ -98,7 +99,6 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
 
   async function toggle(next: boolean) {
     setSaving(true)
-    setPolicyError(null)
     try {
       const res = await apiFetch(
         `/api/v1/credentials/reveal-policy?workspace_id=${encodeURIComponent(workspaceId)}`,
@@ -110,12 +110,12 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
       )
       const data = (await res.json().catch(() => ({}))) as { enabled?: boolean; error?: string }
       if (!res.ok) {
-        setPolicyError(typeof data.error === "string" ? data.error : `Request failed (${res.status})`)
+        toastSwitchError("Value reveal", typeof data.error === "string" ? data.error : `Request failed (${res.status}).`)
         return
       }
       setEnabled(Boolean(data.enabled))
     } catch {
-      setPolicyError("Network error — the policy was not changed.")
+      toastSwitchError("Value reveal", "Network error — the policy was not changed.")
     } finally {
       setSaving(false)
     }

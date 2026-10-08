@@ -44,6 +44,7 @@ import { Switch } from "@/components/ui/switch"
 import { Spinner } from "@/components/ui/spinner"
 import { SettingsCard, SettingsEmpty } from "@/components/features/settings/shared"
 import { apiFetch } from "@/lib/api-fetch"
+import { toastSwitchError } from "@/components/ui/page-save-bar"
 import { isAdminTier } from "@/lib/permissions/tiers"
 import { cn } from "@/lib/utils"
 
@@ -204,7 +205,6 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
    */
   const [windowCapped, setWindowCapped] = React.useState(true)
   const [readError, setReadError] = React.useState<string | null>(null)
-  const [toggleError, setToggleError] = React.useState<string | null>(null)
   // One id per in-flight request. A single id re-enabled every switch as soon
   // as ANY toggle finished, so finishing hook A unlocked hook B mid-flight.
   const [pending, setPending] = React.useState<ReadonlySet<string>>(() => new Set())
@@ -262,7 +262,6 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
     async (hook: HookRow) => {
       const next = !hook.enabled
       setPending((prev) => new Set(prev).add(hook.id))
-      setToggleError(null)
       // Optimistic, then reverted on refusal — the switch is the one control
       // here and a control that lags a round trip reads as broken.
       setHooks((prev) => prev?.map((h) => (h.id === hook.id ? { ...h, enabled: next } : h)) ?? prev)
@@ -275,10 +274,9 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
         if (!res.ok) throw new Error(String(res.status))
       } catch {
         setHooks((prev) => prev?.map((h) => (h.id === hook.id ? { ...h, enabled: hook.enabled } : h)) ?? prev)
-        setToggleError(
-          next
-            ? "Couldn't change the hook — enabling it was refused."
-            : "Couldn't change the hook — disabling it was refused.",
+        toastSwitchError(
+          `the ${hook.event} hook`,
+          next ? "Enabling it was refused." : "Disabling it was refused.",
         )
       } finally {
         setPending((prev) => {
@@ -406,13 +404,6 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
           </div>
         )}
       </SettingsCard>
-
-      {toggleError && (
-        <p className="flex items-center gap-1.5 text-[11px] text-destructive">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          {toggleError}
-        </p>
-      )}
 
       {retiredCount > 0 && (
         <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
