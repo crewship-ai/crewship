@@ -13,15 +13,7 @@ import (
 
 func TestAIStatusCommandRegistrationDiagnostics(t *testing.T) {
 	binary := buildCrewshipBinary(t)
-	fixturePath := filepath.Join(t.TempDir(), "ai-client.exe")
-	build := exec.Command("go", "build", "-o", fixturePath, "./testdata/ai-reconnect-client")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build client fixture: %v\n%s", err, output)
-	}
-	fixture, err := os.ReadFile(fixturePath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	fixture := buildAIClientFixture(t)
 	for _, client := range []string{"claude", "codex"} {
 		for _, state := range []string{"owned", "modified", "missing-executable"} {
 			t.Run(client+"/"+state, func(t *testing.T) {

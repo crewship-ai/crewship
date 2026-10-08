@@ -35,6 +35,16 @@ copy of the user configuration. Failed replacement or verification preserves the
 previous registration and receipt. Publication refuses a configuration or receipt
 that changed during staging; reconnect after inspecting any concurrent edits.
 Reconnection requires a regular configuration file (not a symlink).
+Publication and rollback preserve the inspected permission bits, including broader
+modes such as `0644`, independently of umask; they do not tighten an existing
+client configuration. Crewship's new receipts and staging files request `0600`.
+The first native client configuration is created by that client's registration
+command, so its initial permissions follow the client's policy.
+
+Atomic publication replaces the configuration inode. Permission-bit preservation
+does not preserve the previous inode's owner, ACLs, extended attributes or hardlink
+relationships: the new file belongs to the writing user and uses filesystem defaults
+for other metadata. These metadata cases are not covered by the registration fixtures.
 Entries created by older versions or changed manually are refused: inspect them
 and remove them explicitly with the client before reconnecting. Other entries
 are untouched. Receipts contain configuration fingerprints, never tokens.

@@ -19,7 +19,13 @@ func TestAIReconnectUnderRestrictiveUmask(t *testing.T) {
 		TestAIReconnectFailurePreservesRegistration(t)
 		return
 	}
-	child := exec.Command(os.Args[0], "-test.run=^TestAIReconnectUnderRestrictiveUmask$", "-test.count=1")
+	args := []string{"-test.run=^TestAIReconnectUnderRestrictiveUmask$", "-test.count=1", "-test.v"}
+	if testing.Short() {
+		args = append(args, "-test.short")
+	}
+	// This is the same test binary, so a parent built with -race already
+	// carries race instrumentation into the child; there is no -test.race flag.
+	child := exec.Command(os.Args[0], args...)
 	child.Env = append(os.Environ(), "AI_RECONNECT_UMASK_CHILD=1")
 	if output, err := child.CombinedOutput(); err != nil {
 		t.Fatalf("umask 0077 reconnect matrix: %v\n%s", err, output)
