@@ -283,6 +283,9 @@ it("resolves a deep-linked run's routine from the workflow index", () => {
   show()
   expect(screen.getByText("Run r1")).toBeVisible()
   expect(mock.run.mock.calls.at(-1)![0].routineName).toBe("Triage")
+  // The trail names the routine, not the run id the link carried.
+  expect(screen.getByRole("navigation", { name: "Activity trail" })).toHaveTextContent("Triage")
+  expect(screen.getByRole("navigation", { name: "Activity trail" })).not.toHaveTextContent("r1")
 })
 it("relabels inbound issue and routine IDs and preserves unknown node identities", () => {
   window.history.replaceState(null, "", "/activity?pipeline=triage&lens=routines")

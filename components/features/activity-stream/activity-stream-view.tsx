@@ -529,9 +529,16 @@ export function ActivityStreamView({
         const r = routines.find((x) => x.id === ref || x.slug === ref)
         return { kind, id: r?.slug ?? ref, label: r?.name ?? ref }
       }
+      if (kind === "run") {
+        // A run that starts a chain is named after its routine — "Check form
+        // delivery", not "run: run_cmuz7so7…" in the trail and the header.
+        const slug = chains.find((c) => c.origin === ref)?.routine_slug
+        const name = slug ? (routines.find((x) => x.slug === slug)?.name ?? slug) : undefined
+        if (name) return { kind, id: ref, label: name }
+      }
       return { kind, id: ref, label: shortId(ref) }
     },
-    [lookup.agents, lookup.crews, labels.issues, routines],
+    [lookup.agents, lookup.crews, labels.issues, routines, chains],
   )
 
   /** Walk one level down. Bounded and loop-collapsing — see openStop. */
