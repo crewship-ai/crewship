@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
-
 	"github.com/santhosh-tekuri/jsonschema/v5"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/managedlaunch"
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 )
 
 // Grade the committed OpenAPI against bytes from the handlers, including
@@ -68,8 +71,22 @@ func TestProvisionResponseSchemaMatchesHandlerWire(t *testing.T) {
 		features     any
 		job          *ProvisionJob
 		wantFeatures bool
+		built        *devcontainer.ToolchainInventory
 	}{
 		{name: "idle without provenance"},
+		{name: "built managed toolchain", built: &devcontainer.ToolchainInventory{
+			SchemaVersion: 1, Status: "available", ImageID: "sha256:built",
+			Tools: []devcontainer.ToolchainTool{{
+				Binary: "codex", Status: "available", Path: "/usr/local/bin/codex", Version: "1.2.3",
+				ManagedPath: "/opt/crewship/toolchain/codex", ManagedVersion: "1.2.3",
+				LaunchArtifact: &managedlaunch.Artifact{Path: "/opt/crewship/toolchain/codex", SHA256: strings.Repeat("a", 64), Format: "static_elf"},
+			}},
+			Qualification: &devcontainer.ToolchainQualification{Status: "qualified", ImageID: "sha256:built", Tools: []devcontainer.ToolchainProbe{{Binary: "codex", Status: "available"}}},
+		}},
+		{name: "built legacy toolchain", built: &devcontainer.ToolchainInventory{
+			SchemaVersion: 1, Status: "available",
+			Tools: []devcontainer.ToolchainTool{{Binary: "codex", Status: "unavailable"}},
+		}},
 		{name: "empty provenance", features: "[]", wantFeatures: true},
 		{name: "null provenance", features: "null", wantFeatures: true},
 		{name: "invalid provenance", features: "invalid"},
@@ -83,6 +100,15 @@ func TestProvisionResponseSchemaMatchesHandlerWire(t *testing.T) {
 			crew := seedCrewRow(t, h.db, "schema-crew", ws, "Schema", "schema")
 			if _, err := h.db.Exec(`UPDATE crews SET resolved_features = ? WHERE id = ?`, tc.features, crew); err != nil {
 				t.Fatal(err)
+			}
+			if tc.built != nil {
+				requirements, err := json.Marshal(devcontainer.AggregatedRequirements{Toolchain: tc.built})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := h.db.Exec(`UPDATE crews SET cached_image = ?, cached_requirements = ? WHERE id = ?`, "sha256:built", string(requirements), crew); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if tc.job != nil {
 				h.mu.Lock()
@@ -116,12 +142,14 @@ func TestProvisionResponseSchemaMatchesHandlerWire(t *testing.T) {
 			if err := schema.Validate(payload); err != nil {
 				t.Fatal(err)
 			}
-			// Every wire key needs a declared property: the permissive default alone
-			// would accept a schema that silently drops the optional job fields.
-			props := doc["components"].(map[string]any)["schemas"].(map[string]any)["RemainingCrewProvisionStatusV1"].(map[string]any)["properties"].(map[string]any)
-			for key := range payload {
-				if props[key] == nil {
-					t.Errorf("undeclared wire field %s", key)
+			// Validate declarations recursively: permissive additional properties
+			// must not hide missing generated client fields inside tool inventories.
+			statusSchema := doc["components"].(map[string]any)["schemas"].(map[string]any)["RemainingCrewProvisionStatusV1"].(map[string]any)
+			assertProvisionWireFieldsDeclared(t, payload, statusSchema, "$")
+			if tc.built != nil {
+				toolchain, ok := payload["toolchain"].(map[string]any)
+				if !ok || toolchain["built"] == nil {
+					t.Fatal("fixture did not exercise built toolchain")
 				}
 			}
 			for _, key := range []string{"status", "cached_image", "toolchain"} {
@@ -190,5 +218,35 @@ func TestProvisionResponseSchemaMatchesHandlerWire(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// This contract contains inline objects/arrays; walk only its emitted wire data.
+func assertProvisionWireFieldsDeclared(t *testing.T, value any, schema map[string]any, path string) {
+	t.Helper()
+	switch value := value.(type) {
+	case map[string]any:
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok {
+			t.Errorf("%s: missing object properties", path)
+			return
+		}
+		for key, child := range value {
+			childSchema, ok := properties[key].(map[string]any)
+			if !ok {
+				t.Errorf("undeclared wire field %s.%s", path, key)
+				continue
+			}
+			assertProvisionWireFieldsDeclared(t, child, childSchema, path+"."+key)
+		}
+	case []any:
+		items, ok := schema["items"].(map[string]any)
+		if !ok {
+			t.Errorf("%s: missing array item schema", path)
+			return
+		}
+		for index, child := range value {
+			assertProvisionWireFieldsDeclared(t, child, items, fmt.Sprintf("%s[%d]", path, index))
+		}
 	}
 }

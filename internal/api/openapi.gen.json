@@ -3982,6 +3982,31 @@
                           "binary": {
                             "type": "string"
                           },
+                          "launch_artifact": {
+                            "properties": {
+                              "format": {
+                                "type": "string"
+                              },
+                              "path": {
+                                "type": "string"
+                              },
+                              "sha256": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "sha256",
+                              "format"
+                            ],
+                            "type": "object"
+                          },
+                          "managed_path": {
+                            "type": "string"
+                          },
+                          "managed_version": {
+                            "type": "string"
+                          },
                           "path": {
                             "type": "string"
                           },
@@ -10659,6 +10684,31 @@
                     "items": {
                       "properties": {
                         "binary": {
+                          "type": "string"
+                        },
+                        "launch_artifact": {
+                          "properties": {
+                            "format": {
+                              "type": "string"
+                            },
+                            "path": {
+                              "type": "string"
+                            },
+                            "sha256": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "sha256",
+                            "format"
+                          ],
+                          "type": "object"
+                        },
+                        "managed_path": {
+                          "type": "string"
+                        },
+                        "managed_version": {
                           "type": "string"
                         },
                         "path": {

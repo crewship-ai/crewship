@@ -99,7 +99,12 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("PATCH", "/api/v1/crews/{crewId}/missions/{missionId}", "RemainingCrewMissionUpdatedV1", object(map[string]any{"id": str(), "title": str(), "description": str(), "status": str(), "tasks": array(anyObject()), "created_at": str(), "updated_at": str()}))
 	add("PUT", "/api/v1/crews/{crewId}/persona", "RemainingCrewPersonaUpdatedV1", ref("CrewPersonaResponseV1"))
 	add("PUT", "/api/v1/crews/{crewId}/policy", "RemainingCrewPolicyUpdatedV1", ref("CrewPolicyResponseV1"))
-	tool := object(map[string]any{"binary": str(), "version": str(), "path": str(), "status": str()})
+	launchArtifact := object(map[string]any{"path": str(), "sha256": str(), "format": str()})
+	launchArtifact["required"] = []string{"path", "sha256", "format"}
+	tool := object(map[string]any{
+		"binary": str(), "version": str(), "path": str(), "status": str(),
+		"managed_path": str(), "managed_version": str(), "launch_artifact": launchArtifact,
+	})
 	tool["required"] = []string{"binary", "status"}
 	probe := object(map[string]any{"binary": str(), "status": str()})
 	probe["required"] = []string{"binary", "status"}
