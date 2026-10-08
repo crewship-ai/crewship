@@ -349,12 +349,15 @@ type chainsListRow struct {
 	CompletedRuns int    `json:"completed_runs"`
 	CancelledRuns int    `json:"cancelled_runs"`
 	// Interrupted is not "failed": the process died, the work may be fine.
-	InterruptedRuns int    `json:"interrupted_runs"`
-	Failed          bool   `json:"failed"`
-	FirstActivity   string `json:"first_activity"`
-	LastActivity    string `json:"last_activity"`
-	DurationMS      *int64 `json:"duration_ms"`
-	Issues          []struct {
+	InterruptedRuns int  `json:"interrupted_runs"`
+	Failed          bool `json:"failed"`
+	// #2989: what the chain is rooted in, and an assignment root's task.
+	Kind          string `json:"kind"`
+	Task          string `json:"task"`
+	FirstActivity string `json:"first_activity"`
+	LastActivity  string `json:"last_activity"`
+	DurationMS    *int64 `json:"duration_ms"`
+	Issues        []struct {
 		ID         string `json:"id"`
 		Identifier string `json:"identifier"`
 		Title      string `json:"title"`
@@ -1155,15 +1158,41 @@ func TestChainsList_HotQueriesReachRunsByChainOrigin(t *testing.T) {
 	r := newChainsListRig(t)
 
 	t.Run("grouped index", func(t *testing.T) {
-		plan := explainPlan(t, r.db, chainsIndexQuery,
-			r.ws, r.ws, r.ws, r.ws, r.ws, r.ws, r.ws, r.ws, 50, 0)
+		plan := explainPlan(t, r.db, chainsIndexQuery, chainsIndexArgs(r.ws, r.user, 50, 0)...)
 		t.Logf("chainsIndexQuery plan:\n  %s", strings.Join(plan, "\n  "))
+		// Only the routine-run grouping is measured: the assignment arm
+		// (#2989) groups the tree rows of agent work, a different and much
+		// smaller set, and sorting those is not a sweep of every run.
+		inGrouped := false
 		for _, step := range plan {
-			if strings.Contains(step, "USE TEMP B-TREE FOR GROUP BY") {
+			switch {
+			case strings.Contains(step, "CO-ROUTINE grouped"):
+				inGrouped = true
+				continue
+			case strings.Contains(step, "CO-ROUTINE") || strings.Contains(step, "UNION ALL"):
+				inGrouped = false
+			}
+			if inGrouped && strings.Contains(step, "USE TEMP B-TREE FOR GROUP BY") {
 				t.Errorf("the grouping sorts every run in the workspace into a temp B-tree; "+
 					"an index leading (workspace_id, chain_origin) delivers them in grouping order:\n  %s",
 					strings.Join(plan, "\n  "))
 			}
+		}
+	})
+
+	// #2989: an assignment chain's descendants are found by chain_origin, the
+	// same column, so they too must come out of an index rather than a sweep
+	// of every assignment in the workspace.
+	t.Run("agent work descendants", func(t *testing.T) {
+		plan := explainPlan(t, r.db, chainsIndexQuery, chainsIndexArgs(r.ws, r.user, 50, 0)...)
+		var reached bool
+		for _, step := range plan {
+			if strings.Contains(step, " a USING ") && strings.Contains(step, "chain_origin") {
+				reached = true
+			}
+		}
+		if !reached {
+			t.Errorf("assignment descendants are not reached by (workspace_id, chain_origin):\n  %s", strings.Join(plan, "\n  "))
 		}
 	})
 
@@ -1183,6 +1212,7 @@ func TestChainsList_HotQueriesReachRunsByChainOrigin(t *testing.T) {
 		for _, ty := range chainIssueEntryTypes {
 			args = append(args, ty)
 		}
+		args = append(args, r.ws, "prn_origin", "prn_origin")
 		args = append(args, r.ws, MaxChainSummaryRefs)
 		query := fmt.Sprintf(chainIssuesQuery, sqlPlaceholders(1), sqlPlaceholders(len(chainIssueEntryTypes)))
 		plan := explainPlan(t, r.db, query, args...)
@@ -1310,6 +1340,175 @@ func TestChainsList_CountsEveryOutcome(t *testing.T) {
 		}
 		if c.Failed {
 			t.Errorf("%s: a stopped run is not a failure, but Failed is set", c.Origin)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// #2989 — agent work started outside a routine.
+//
+// The index grouped pipeline_runs only, so a delegation from a chat, an issue
+// mention or lead planning never appeared in Activity at all. A root
+// assignment (no parent assignment, no dispatching run) is a chain of its own;
+// its descendants carry chain_origin = the root's id, so the grouping is a
+// stored column, not a guess.
+// ---------------------------------------------------------------------------
+
+func (r *chainsListRig) seedChat(t *testing.T, id, createdBy, visibility string) {
+	t.Helper()
+	r.exec(t, `INSERT INTO chats (id, agent_id, workspace_id, mode, status, created_by, visibility) VALUES (?, ?, ?, 'CHAT', 'ACTIVE', NULLIF(?, ''), ?)`,
+		id, r.lead, r.ws, createdBy, visibility)
+}
+
+func (r *chainsListRig) seedRootAssignment(t *testing.T, id, chatID, task, status string, at time.Time) {
+	t.Helper()
+	r.exec(t, `INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, created_at, started_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, r.ws, chatID, r.lead, r.agent, task, status,
+		at.Format(time.RFC3339), at.Format(time.RFC3339))
+}
+
+func (r *chainsListRig) seedChildAssignment(t *testing.T, id, parent, origin, status string, at time.Time) {
+	t.Helper()
+	r.exec(t, `INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, parent_assignment_id, chain_origin, depth, created_at, started_at, finished_at)
+		VALUES (?, ?, ?, ?, ?, 'sub-task', ?, ?, ?, 2, ?, ?, ?)`, id, r.ws, r.chat, r.agent, r.agent, status, parent, origin,
+		at.Format(time.RFC3339), at.Format(time.RFC3339), at.Add(time.Minute).Format(time.RFC3339))
+}
+
+func (r *chainsListRig) listAs(t *testing.T, userID, role string) chainsListBody {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/chains", nil)
+	req = withWorkspaceUser(req, userID, r.ws, role)
+	rr := httptest.NewRecorder()
+	r.h.List(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	return decodeChainsList(t, rr)
+}
+
+func TestChainsList_AgentWorkOutsideRoutinesIsAChain(t *testing.T) {
+	r := newChainsListRig(t)
+	r.seedChat(t, "chat_mine", r.user, "private")
+	at := r.tick()
+	r.seedRootAssignment(t, "asg_root", "chat_mine", "Draft the reply to Ava", "RUNNING", at)
+	r.seedChildAssignment(t, "asg_child", "asg_root", "asg_root", "COMPLETED", at.Add(time.Minute))
+	r.exec(t, `INSERT INTO inbox_items (id, workspace_id, kind, source_id, title, payload_json) VALUES ('inb_rnh', ?, 'run_needs_human', 'asg_root', 'Needs you', '{}')`, r.ws)
+
+	b := r.listAs(t, r.user, "OWNER")
+	var got *chainsListRow
+	for i := range b.Chains {
+		if b.Chains[i].Origin == "asg_root" {
+			got = &b.Chains[i]
+		}
+		if b.Chains[i].Origin == "asg_child" {
+			t.Errorf("a delegated assignment was listed as a chain of its own")
+		}
+	}
+	if got == nil {
+		t.Fatalf("agent work outside routines is missing: %v", b.origins())
+	}
+	if got.Kind != "assignment" || got.Task != "Draft the reply to Ava" {
+		t.Errorf("kind/task = %q/%q, want assignment/Draft the reply to Ava", got.Kind, got.Task)
+	}
+	if got.Runs != 2 || got.RunningRuns != 1 || got.CompletedRuns != 1 {
+		t.Errorf("counts runs=%d running=%d completed=%d, want 2/1/1", got.Runs, got.RunningRuns, got.CompletedRuns)
+	}
+	if got.WaitingRuns != 1 {
+		t.Errorf("waiting = %d, want 1 — an open run_needs_human ask on the work", got.WaitingRuns)
+	}
+	// The root's own agent counts as well as the delegation's: both are Ada,
+	// so one agent with two pieces of work.
+	if got.AgentCount != 1 || len(got.Agents) != 1 || got.Agents[0].Assignments != 2 {
+		t.Errorf("agents = %+v (count %d), want Ada ×2", got.Agents, got.AgentCount)
+	}
+}
+
+func TestChainsList_AgentWorkNamesTheIssueItWasFor(t *testing.T) {
+	r := newChainsListRig(t)
+	r.seedChat(t, "chat_mine", r.user, "private")
+	r.seedIssue(t, "msn_mention", r.ws, r.crew, r.lead, "ENG-90", "Answer the mention")
+	r.seedRootAssignment(t, "asg_mention", "chat_mine", "reply on ENG-90", "COMPLETED", r.tick())
+	r.exec(t, `UPDATE assignments SET mission_id = 'msn_mention' WHERE id = 'asg_mention'`)
+
+	for _, c := range r.listAs(t, r.user, "OWNER").Chains {
+		if c.Origin != "asg_mention" {
+			continue
+		}
+		if c.IssueCount != 1 || len(c.Issues) != 1 || c.Issues[0].Identifier != "ENG-90" {
+			t.Errorf("issues = %+v (count %d), want ENG-90", c.Issues, c.IssueCount)
+		}
+		if c.StartedByKind != "issue" || c.StartedByKey != "ENG-90" {
+			t.Errorf("started_by = %q/%q, want issue/ENG-90", c.StartedByKind, c.StartedByKey)
+		}
+		return
+	}
+	t.Fatal("the mention's work is not listed")
+}
+
+func TestChainsList_RoutineDispatchedWorkStaysInItsRunsChain(t *testing.T) {
+	r := newChainsListRig(t)
+	run := r.seedRun(t, runSpec{id: "prn_disp", via: pipeline.TriggeredViaManual})
+	r.exec(t, `INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, parent_run_id, chain_origin)
+		VALUES ('asg_from_run', ?, ?, ?, ?, 'routine step', 'RUNNING', ?, ?)`, r.ws, r.chat, r.lead, r.agent, run, run)
+
+	b := r.listAs(t, r.user, "OWNER")
+	for _, c := range b.Chains {
+		if c.Origin == "asg_from_run" {
+			t.Fatalf("routine-dispatched work listed twice: %v", b.origins())
+		}
+		if c.Origin == run && c.Kind != "run" {
+			t.Errorf("routine chain kind = %q, want run", c.Kind)
+		}
+	}
+}
+
+func TestChainsList_AgentWorkFollowsTheChatsAudience(t *testing.T) {
+	r := newChainsListRig(t)
+	member := "usr_member"
+	r.exec(t, `INSERT INTO users (id, email, full_name) VALUES (?, 'member@example.com', 'Member')`, member)
+	r.exec(t, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wm_member', ?, ?, 'MEMBER')`, r.ws, member)
+
+	r.seedChat(t, "chat_owner_private", r.user, "private")
+	r.seedChat(t, "chat_member_private", member, "private")
+	r.seedIssue(t, "msn_work", r.ws, r.crew, r.lead, "ENG-77", "Issue work")
+	at := r.tick()
+	r.seedRootAssignment(t, "asg_owner", "chat_owner_private", "owner's private delegation", "COMPLETED", at)
+	r.seedRootAssignment(t, "asg_member", "chat_member_private", "member's own delegation", "COMPLETED", at)
+	// Issue work runs in the issue's MISSION chat, whose id is the mission id
+	// (assignments_run.go). Chat audience alone would hide it from members;
+	// the issue is what makes it readable, as on /issues.
+	r.exec(t, `INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('msn_work', ?, ?, 'MISSION', 'ACTIVE')`, r.lead, r.ws)
+	r.seedRootAssignment(t, "asg_issue", "msn_work", "work the issue", "COMPLETED", at)
+	r.exec(t, `UPDATE assignments SET mission_id = 'msn_work' WHERE id = 'asg_issue'`)
+
+	seen := map[string]bool{}
+	for _, c := range r.listAs(t, member, "MEMBER").Chains {
+		seen[c.Origin] = true
+	}
+	if seen["asg_owner"] {
+		t.Errorf("a MEMBER sees work from the owner's private chat")
+	}
+	if !seen["asg_member"] || !seen["asg_issue"] {
+		t.Errorf("a MEMBER misses work they may read: %v", seen)
+	}
+	for _, c := range r.listAs(t, r.user, "OWNER").Chains {
+		seen["owner:"+c.Origin] = true
+	}
+	if !seen["owner:asg_owner"] {
+		t.Errorf("the OWNER does not see their own chat's work")
+	}
+}
+
+func TestChainsList_AgentWorkNeverCrossesTheWorkspace(t *testing.T) {
+	r := newChainsListRig(t)
+	r.seedWorkspace(t, "ws_other", "other")
+	r.exec(t, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew_o', 'ws_other', 'O', 'crew_o')`)
+	r.exec(t, `INSERT INTO agents (id, workspace_id, crew_id, name, slug) VALUES ('agt_o', 'ws_other', 'crew_o', 'O', 'agt_o')`)
+	r.exec(t, `INSERT INTO chats (id, agent_id, workspace_id, mode, status, created_by, visibility) VALUES ('chat_o', 'agt_o', 'ws_other', 'CHAT', 'ACTIVE', ?, 'private')`, r.user)
+	r.exec(t, `INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status) VALUES ('asg_o', 'ws_other', 'chat_o', 'agt_o', 'agt_o', 'theirs', 'RUNNING')`)
+	for _, c := range r.listAs(t, r.user, "OWNER").Chains {
+		if c.Origin == "asg_o" {
+			t.Fatalf("another workspace's assignment was listed")
 		}
 	}
 }

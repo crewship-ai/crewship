@@ -120,6 +120,7 @@ One selection, one column — never a stack.
 | Nothing, grouped by Issue / Agent / Routine | That grouping's own dashboard |
 | A status row, a search, a crew/agent/issue filter, a pinned crumb, or a node walked into from a graph | The feed as a list, with **Load older** |
 | A run row whose chain starts at a routine run | That [run's page](#a-run-page) |
+| A row of agent work started outside any routine | That [work's page](#agent-work-outside-routines) |
 | A run row rooted in agent work | The [workflow page](#a-workflow-page) |
 | An issue / agent / run / routine row | Its [drill-down](#where-a-row-leads) |
 | A feed row | That [event, opened](#opening-one-event) |
@@ -167,6 +168,21 @@ A rail row whose chain starts at a routine run opens **that run** (`activity-run
 | **Raw events** | `N raw events · Journal` (`GET /api/v1/journal/count?run_id=`), for OWNER and ADMIN only. |
 
 A run id that is not a routine run — agent work — falls back to the typed run detail.
+
+## Agent work outside routines
+
+A delegation from a chat, an issue mention or lead planning is listed in the rail as its own row. It wears an agent's face and is titled by its task, and its second line says what started it: `from chat · Lead`, `from OPS-3`, `lead planning · OPS-3`, `by hand`.
+
+The row opens the work's page (`activity-work-page.tsx`), shaped like a run's page:
+
+- the task;
+- the state in the rail's words;
+- what started it;
+- Started / Duration / Pieces of work / Could not finish / Agents;
+- **Delegations and asks**: the assignments it delegated and the `run_needs_human` asks it raised, nested;
+- **Linked to**: the issue it was for and the agents who did it.
+
+The row is shown only to people who may read the chat it came from, or, for issue work, to the workspace's trusted members. A plain chat turn that dispatched nothing is not listed (`docs/specs/activity-work-index.md`).
 
 ## A workflow page
 

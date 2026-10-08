@@ -131,6 +131,8 @@ is the busiest table in the schema. There is no "return everything" mode.
 | `chains[].failed` | boolean | `failed_runs > 0`. True when **any** run in the chain failed, not only the root. |
 | `chains[].running_runs` | integer | Runs still in flight — status `running` or `queued`. A queued run rides with running because from a reader's side it is accepted work that has not finished. **Always present**, including when 0. |
 | `chains[].waiting_runs` | integer | Runs parked on a person — status `waiting` or `paused`. Split from `running_runs` rather than folded into one "active" count because the two ask different things: a running chain resolves itself, a waiting one never will. Both are derived from **status**, not from a missing `ended_at` — that cheaper test would report every interrupted run as running forever. **Always present**, including when 0. |
+| `chains[].kind` | string | What the chain is rooted in: `run`, a routine run and everything it caused, or `assignment`, agent work started outside any routine (a delegation from a chat, an issue mention, lead planning). For an `assignment` chain, `origin` is the root assignment's id, `runs` counts the assignments in its tree, the outcome counts come from assignment statuses, and `waiting_runs` counts open `run_needs_human` asks on that work. **Always present.** |
+| `chains[].task` | string | An `assignment` chain's root task. Omitted for `run` chains. |
 | `chains[].completed_runs` | integer | Runs that finished — status `completed`. **Always present**, including when 0. |
 | `chains[].cancelled_runs` | integer | Runs somebody stopped — status `cancelled`. Not a failure and not finished work. **Always present**, including when 0. |
 | `chains[].interrupted_runs` | integer | Runs whose process died before they ended — status `interrupted` (written on boot recovery). Counted apart from `cancelled_runs` because nobody chose to stop them, and apart from `failed_runs` because the work itself may have been fine. **Always present**, including when 0. A client deriving one summary word should let `waiting_runs` and `running_runs` win over these, so a stopped branch never hides a live one. |
@@ -257,6 +259,16 @@ Two related cases that are *not* excluded:
   membership, so a former member no longer supplies it — the same rule as the
   deleted rule above: the fact that a person started this outlives their
   membership, and the identifier is what carries it.
+
+### Agent work outside routines
+
+A root assignment is one with no parent assignment, no dispatching run and no inherited `chain_origin`. It forms a chain of its own. Its descendants are the assignments whose `chain_origin` names it, a stored column written when they were delegated, so nothing is grouped by time or agent. `started_by_kind` is one of:
+
+- `issue` or `lead_planning`, with `started_by_key` = the identifier;
+- `user`, a person who assigned it;
+- `agent`, delegated from a chat.
+
+Such a row is listed only when the caller may read the chat the work came from (the chat audience). For issue work, a trusted member of the workspace may also read it, the same reach `/issues` gives over that issue's runs. Agent work dispatched by a routine stays in that routine run's chain. A chat turn that dispatched nothing is not listed; see `docs/specs/activity-work-index.md`.
 
 ### Tenancy
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"log/slog"
 	"net/http"
 	"time"
@@ -154,6 +155,14 @@ type ChainSummary struct {
 	CompletedRuns   int `json:"completed_runs"`
 	CancelledRuns   int `json:"cancelled_runs"`
 	InterruptedRuns int `json:"interrupted_runs"`
+
+	// Kind says what the chain is rooted in (#2989): "run" for a routine run
+	// and everything it caused, "assignment" for agent work started outside
+	// any routine — a delegation from a chat, an issue mention, lead
+	// planning. For an assignment chain, Origin is the root assignment's id,
+	// Runs counts the assignments in its tree, and Task is the root's task.
+	Kind string `json:"kind"`
+	Task string `json:"task,omitempty"`
 
 	// FirstActivity/LastActivity bound the chain: the earliest start and the
 	// latest end (falling back to start for a run still going). Rows are
@@ -342,8 +351,73 @@ WITH grouped AS (
       AND chain_origin IS NOT NULL
       AND chain_origin <> ''
     GROUP BY chain_origin
-)
-SELECT g.origin, g.runs, g.max_chain_depth, g.failed_runs, g.running_runs, g.waiting_runs,
+),
+-- Agent work started outside any routine (#2989): a root assignment — no
+-- parent assignment, no dispatching run, no inherited chain — and the
+-- assignments whose chain_origin names it. Grouped by a stored column, never
+-- by time or agent. Visible when the caller may read the chat it came from
+-- (chataudience), or, for issue work, when they are a trusted member — the
+-- same reach /issues gives them over that issue's runs.
+roots AS (
+    SELECT r.id, r.task, r.chat_id, r.mission_id, r.lead_planning, r.created_by_user_id, r.assigned_by_id
+    FROM assignments r
+    WHERE r.workspace_id = ?
+      AND COALESCE(r.parent_assignment_id, '') = ''
+      AND COALESCE(r.parent_run_id, '') = ''
+      AND COALESCE(r.chain_origin, '') = ''
+      AND (
+        EXISTS (SELECT 1 FROM chats c WHERE c.id = r.chat_id AND c.workspace_id = r.workspace_id AND ` + chataudience.VisibleSQL + `)
+        OR (COALESCE(r.mission_id, '') <> ''
+            AND EXISTS (SELECT 1 FROM missions m WHERE m.id = r.mission_id AND m.workspace_id = r.workspace_id)
+            AND EXISTS (SELECT 1 FROM workspace_members wm
+                        WHERE wm.workspace_id = r.workspace_id AND wm.user_id = ?
+                          AND COALESCE(wm.access_mode, 'trusted') = 'trusted'))
+      )
+),
+-- The root itself, then its descendants by chain_origin. Two arms rather
+-- than one OR'd join so each reaches assignments through an index: the
+-- primary key, and (workspace_id, chain_origin).
+tree AS (
+    SELECT rt.id AS origin, a.id, a.status, COALESCE(a.depth, 0) AS depth,
+           COALESCE(a.started_at, a.created_at) AS began,
+           COALESCE(a.finished_at, a.started_at, a.created_at) AS ended
+    FROM roots rt
+    JOIN assignments a ON a.id = rt.id
+    UNION ALL
+    SELECT rt.id, a.id, a.status, COALESCE(a.depth, 0),
+           COALESCE(a.started_at, a.created_at),
+           COALESCE(a.finished_at, a.started_at, a.created_at)
+    -- CROSS JOIN fixes the order (SQLite honours it): one probe of
+    -- idx_assignment_chain_origin per root, never a sweep of the workspace.
+    FROM roots rt
+    CROSS JOIN assignments a
+    WHERE a.chain_origin = rt.id
+      AND a.workspace_id = ?
+),
+agrouped AS (
+    SELECT t.origin,
+           COUNT(*) AS runs,
+           MAX(t.depth) AS max_chain_depth,
+           SUM(CASE WHEN t.status = 'FAILED' THEN 1 ELSE 0 END) AS failed_runs,
+           SUM(CASE WHEN t.status IN ('PENDING','QUEUED','RUNNING') THEN 1 ELSE 0 END) AS running_runs,
+           -- Waiting is an open run_needs_human ask on the work: its
+           -- source_id is the assignment id (issue_outcome_inbox.go).
+           SUM(CASE WHEN EXISTS (
+                 SELECT 1 FROM inbox_items i
+                 WHERE i.workspace_id = ? AND i.kind = 'run_needs_human'
+                   AND i.source_id = t.id AND COALESCE(i.state, '') <> 'resolved')
+               THEN 1 ELSE 0 END) AS waiting_runs,
+           SUM(CASE WHEN t.status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed_runs,
+           SUM(CASE WHEN t.status = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled_runs,
+           0 AS interrupted_runs,
+           strftime('%Y-%m-%dT%H:%M:%SZ', MIN(julianday(t.began))) AS first_activity,
+           strftime('%Y-%m-%dT%H:%M:%SZ', MAX(julianday(t.ended))) AS last_activity
+    FROM tree t
+    GROUP BY t.origin
+),
+merged AS (
+SELECT 'run' AS kind, '' AS task,
+       g.origin, g.runs, g.max_chain_depth, g.failed_runs, g.running_runs, g.waiting_runs,
        g.completed_runs, g.cancelled_runs, g.interrupted_runs,
        g.first_activity, g.last_activity,
        COALESCE(root.triggered_via, ''),
@@ -369,15 +443,43 @@ SELECT g.origin, g.runs, g.max_chain_depth, g.failed_runs, g.running_runs, g.wai
        COALESCE((SELECT COALESCE(NULLIF(u.full_name, ''), u.email) FROM users u
                   JOIN workspace_members wm
                     ON wm.user_id = u.id AND wm.workspace_id = ?
-                  WHERE u.id = root.invoking_user_id), '')
+                  WHERE u.id = root.invoking_user_id), ''),
+       '' AS a_mission_id, '' AS a_mission_identifier, '' AS a_mission_title, 0 AS a_lead_planning,
+       '' AS a_creator_name, '' AS a_assigner_name
 FROM grouped g
 LEFT JOIN pipeline_runs root ON root.id = g.origin AND root.workspace_id = ?
-ORDER BY g.last_activity DESC, g.origin DESC
+    UNION ALL
+    SELECT 'assignment', COALESCE(rt.task, ''),
+           ag.origin, ag.runs, ag.max_chain_depth, ag.failed_runs, ag.running_runs, ag.waiting_runs,
+           ag.completed_runs, ag.cancelled_runs, ag.interrupted_runs,
+           ag.first_activity, ag.last_activity,
+           '', '', COALESCE(rt.created_by_user_id, ''), '', '',
+           '', '', '', '', '', '',
+           COALESCE(rt.mission_id, ''),
+           COALESCE((SELECT m.identifier FROM missions m WHERE m.id = rt.mission_id AND m.workspace_id = ?), ''),
+           COALESCE((SELECT m.title FROM missions m WHERE m.id = rt.mission_id AND m.workspace_id = ?), ''),
+           COALESCE(rt.lead_planning, 0),
+           COALESCE((SELECT COALESCE(NULLIF(u.full_name, ''), u.email) FROM users u
+                      JOIN workspace_members wm ON wm.user_id = u.id AND wm.workspace_id = ?
+                      WHERE u.id = rt.created_by_user_id), ''),
+           COALESCE((SELECT ab.name FROM agents ab WHERE ab.id = rt.assigned_by_id AND ab.workspace_id = ?), '')
+    FROM agrouped ag
+    JOIN roots rt ON rt.id = ag.origin
+)
+SELECT * FROM merged
+ORDER BY julianday(last_activity) DESC, origin DESC
 LIMIT ? OFFSET ?`
 
-func (h *ChainsListHandler) query(r *http.Request, workspaceID string, limit, offset int) ([]ChainSummary, error) {
-	rows, err := h.db.QueryContext(r.Context(), chainsIndexQuery,
-		workspaceID, // grouped
+// chainsIndexArgs is chainsIndexQuery's argument list, in placeholder order.
+// One function so the handler and the query-plan test cannot drift apart.
+func chainsIndexArgs(workspaceID, viewer string, limit, offset int) []any {
+	args := []any{workspaceID}                        // grouped
+	args = append(args, workspaceID)                  // roots
+	args = append(args, chataudience.Args(viewer)...) // roots: chat audience
+	args = append(args, viewer)                       // roots: trusted member, for issue work
+	args = append(args, workspaceID)                  // tree: descendants
+	args = append(args, workspaceID)                  // agrouped: inbox asks
+	args = append(args,
 		workspaceID, // automations.name
 		workspaceID, // automations.event_type
 		workspaceID, // missions.id
@@ -385,7 +487,20 @@ func (h *ChainsListHandler) query(r *http.Request, workspaceID string, limit, of
 		workspaceID, // pipeline_schedules.name
 		workspaceID, // users, through workspace_members
 		workspaceID, // root run
+		workspaceID, // assignment arm: mission identifier
+		workspaceID, // assignment arm: mission title
+		workspaceID, // assignment arm: creator, through workspace_members
+		workspaceID, // assignment arm: assigning agent
 		limit, offset)
+	return args
+}
+
+func (h *ChainsListHandler) query(r *http.Request, workspaceID string, limit, offset int) ([]ChainSummary, error) {
+	var viewer string
+	if u := UserFromContext(r.Context()); u != nil {
+		viewer = u.ID
+	}
+	rows, err := h.db.QueryContext(r.Context(), chainsIndexQuery, chainsIndexArgs(workspaceID, viewer, limit, offset)...)
 	if err != nil {
 		return nil, err
 	}
@@ -403,18 +518,34 @@ func (h *ChainsListHandler) query(r *http.Request, workspaceID string, limit, of
 			issueTitle   string
 			scheduleName string
 			userName     string
+			aMissionID   string
+			aMissionKey  string
+			aMissionName string
+			aLeadPlan    int
+			aCreator     string
+			aAssigner    string
 		)
 		if err := rows.Scan(
+			&c.Kind, &c.Task,
 			&c.Origin, &c.Runs, &c.MaxChainDepth, &c.FailedRuns, &c.RunningRuns, &c.WaitingRuns,
 			&c.CompletedRuns, &c.CancelledRuns, &c.InterruptedRuns,
 			&c.FirstActivity, &c.LastActivity,
 			&c.TriggeredVia, &triggeredBy, &userID, &c.RoutineID, &c.RoutineSlug,
 			&ruleName, &ruleEvent, &issueID, &issueTitle, &scheduleName, &userName,
+			&aMissionID, &aMissionKey, &aMissionName, &aLeadPlan, &aCreator, &aAssigner,
 		); err != nil {
 			return nil, err
 		}
 		c.Failed = c.FailedRuns > 0
 		c.DurationMS = chainElapsedMS(c.FirstActivity, c.LastActivity)
+		if c.Kind == "assignment" {
+			c.StartedByKind, c.StartedByID, c.StartedByKey, c.StartedBy = resolveAssignmentStart(assignmentStart{
+				missionID: aMissionID, missionKey: aMissionKey, missionTitle: aMissionName,
+				leadPlanning: aLeadPlan != 0, creatorID: userID, creatorName: aCreator, assignerName: aAssigner,
+			})
+			out = append(out, c)
+			continue
+		}
 		c.StartedByKind, c.StartedByID, c.StartedByKey, c.StartedBy = resolveChainStart(chainStart{
 			via:          c.TriggeredVia,
 			triggeredBy:  triggeredBy,
@@ -429,6 +560,31 @@ func (h *ChainsListHandler) query(r *http.Request, workspaceID string, limit, of
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// assignmentStart is what an assignment chain's root records about why it
+// exists (#2989).
+type assignmentStart struct {
+	missionID, missionKey, missionTitle string
+	leadPlanning                        bool
+	creatorID, creatorName              string
+	assignerName                        string
+}
+
+// resolveAssignmentStart names what set agent work off, from the root's own
+// columns: an issue (or the lead planning it), a person who assigned it, or
+// the agent that delegated it from a chat.
+func resolveAssignmentStart(a assignmentStart) (kind, id, key, label string) {
+	switch {
+	case a.missionID != "" && a.leadPlanning:
+		return "lead_planning", a.missionID, a.missionKey, a.missionTitle
+	case a.missionID != "":
+		return "issue", a.missionID, a.missionKey, a.missionTitle
+	case a.creatorID != "":
+		return "user", a.creatorID, "", a.creatorName
+	default:
+		return "agent", "", "", a.assignerName
+	}
 }
 
 // chainsUnrecordedQuery asks whether this workspace still holds runs from
@@ -615,7 +771,9 @@ var chainIssueEntryTypes = []string{
 // which is what stops a chain from having unboundedly many assignments at all.
 const chainAgentsQuery = `
 WITH work AS (
-    SELECT a.chain_origin        AS origin,
+    -- An assignment chain's root carries no chain_origin of its own (#2989):
+    -- it IS the origin, so it is matched by id and grouped under itself.
+    SELECT CASE WHEN COALESCE(a.chain_origin, '') = '' THEN a.id ELSE a.chain_origin END AS origin,
            ag.id                 AS agent_id,
            COALESCE(ag.name, '') AS agent_name,
            COALESCE(ag.slug, '') AS agent_slug,
@@ -625,8 +783,9 @@ WITH work AS (
       ON ag.id = a.assigned_to_id
      AND ag.workspace_id = a.workspace_id
     WHERE a.workspace_id = ?
-      AND a.chain_origin IN (%s)
-    GROUP BY a.chain_origin, ag.id
+      AND (a.chain_origin IN (%[1]s)
+           OR (COALESCE(a.chain_origin, '') = '' AND a.id IN (%[1]s)))
+    GROUP BY 1, ag.id
 ),
 ranked AS (
     SELECT origin, agent_id, agent_name, agent_slug, assignments,
@@ -702,6 +861,17 @@ touched AS (
     JOIN missions m
       ON m.id = j.mission_id
      AND m.workspace_id = j.workspace_id
+    UNION ALL
+    -- The issue an assignment was asked for (assignments.mission_id, #2989):
+    -- work in a routine's chain and agent work rooted outside one alike.
+    SELECT CASE WHEN COALESCE(a.chain_origin, '') = '' THEN a.id ELSE a.chain_origin END, m.id, 0
+    FROM assignments a
+    JOIN missions m
+      ON m.id = a.mission_id
+     AND m.workspace_id = a.workspace_id
+    WHERE a.workspace_id = ?
+      AND (a.chain_origin IN (%[1]s)
+           OR (COALESCE(a.chain_origin, '') = '' AND a.id IN (%[1]s)))
 ),
 agg AS (
     SELECT origin, issue_id, MAX(created) AS created, COUNT(*) AS touches
@@ -746,6 +916,7 @@ func (h *ChainsListHandler) attachTouched(ctx context.Context, workspaceID strin
 
 func (h *ChainsListHandler) attachAgents(ctx context.Context, workspaceID string, origins []any, at map[string]*ChainSummary) error {
 	args := append([]any{workspaceID}, origins...)
+	args = append(args, origins...) // an assignment chain's root, by id
 	args = append(args, MaxChainSummaryRefs)
 	rows, err := h.db.QueryContext(ctx, fmt.Sprintf(chainAgentsQuery, sqlPlaceholders(len(origins))), args...)
 	if err != nil {
@@ -778,6 +949,9 @@ func (h *ChainsListHandler) attachIssues(ctx context.Context, workspaceID string
 	for _, t := range chainIssueEntryTypes {
 		args = append(args, t)
 	}
+	args = append(args, workspaceID) // assignments.mission_id arm
+	args = append(args, origins...)
+	args = append(args, origins...)
 	args = append(args, workspaceID, MaxChainSummaryRefs)
 	query := fmt.Sprintf(chainIssuesQuery, sqlPlaceholders(len(origins)), sqlPlaceholders(len(chainIssueEntryTypes)))
 	rows, err := h.db.QueryContext(ctx, query, args...)

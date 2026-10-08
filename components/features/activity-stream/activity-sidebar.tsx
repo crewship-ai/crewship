@@ -34,6 +34,7 @@ import {
 } from "@/components/layout/sidebar-kit"
 import {
   Activity,
+  Bot,
   CheckCircle2,
   CircleSlash,
   CircleDot,
@@ -281,6 +282,14 @@ function WorkflowRow({
             size="sm"
             className="relative !h-5 !w-5 !rounded-md"
           />
+        ) : chain.kind === "assignment" ? (
+          // Agent work started outside any routine (#2989): an agent's face.
+          <span
+            aria-hidden
+            className="relative flex h-5 w-5 items-center justify-center rounded-md bg-primary/15 text-primary"
+          >
+            <Bot className="h-3 w-3" />
+          </span>
         ) : (
           // No routine ran: an agent-rooted chain, or one whose routine is gone.
           // A neutral tile rather than a borrowed icon — wearing some other

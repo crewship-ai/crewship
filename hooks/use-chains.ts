@@ -46,6 +46,14 @@ export interface ChainSummary {
    * the live counts: an older server does not send them. Cancelled (somebody
    * stopped it) and interrupted (the process died) are kept apart.
    */
+  /**
+   * What the chain is rooted in (#2989): "run" for a routine run and what it
+   * caused, "assignment" for agent work started outside any routine. Absent
+   * from an older server, which only ever sent run chains.
+   */
+  kind?: "run" | "assignment"
+  /** An assignment root's task — the name of agent work. */
+  task?: string
   completed_runs?: number
   cancelled_runs?: number
   interrupted_runs?: number

@@ -12,6 +12,7 @@ import type { RoutineRunsPage } from "../routine-runs-page"
 import type { AgentsOverview, IssuesOverview, RoutinesLensOverview } from "../lens-overviews"
 import type { AgentDrillDown, IssueDrillDown } from "../drill-downs"
 import type { ActivityRunPage } from "../activity-run-page"
+import type { ActivityWorkPage } from "../activity-work-page"
 import type { FeedRow } from "../feed-row"
 const mock = vi.hoisted(() => ({
   list: vi.fn(), stream: vi.fn(), chains: vi.fn(), fetch: vi.fn(), lookup: vi.fn(), mobile: false,
@@ -27,6 +28,7 @@ const mock = vi.hoisted(() => ({
   agent: vi.fn<(p: ComponentProps<typeof AgentDrillDown>) => React.ReactNode>(),
   issue: vi.fn<(p: ComponentProps<typeof IssueDrillDown>) => React.ReactNode>(),
   run: vi.fn<(p: ComponentProps<typeof ActivityRunPage>) => React.ReactNode>(),
+  work: vi.fn<(p: ComponentProps<typeof ActivityWorkPage>) => React.ReactNode>(),
   row: vi.fn<(p: ComponentProps<typeof FeedRow>) => React.ReactNode>(),
 }))
 vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search) }))
@@ -47,6 +49,7 @@ vi.mock("../routine-runs-page", () => ({ RoutineRunsPage: mock.routine }))
 vi.mock("../lens-overviews", () => ({ AgentsOverview: mock.agents, IssuesOverview: mock.issues, RoutinesLensOverview: mock.routines }))
 vi.mock("../drill-downs", () => ({ AgentDrillDown: mock.agent, IssueDrillDown: mock.issue }))
 vi.mock("../activity-run-page", () => ({ ActivityRunPage: mock.run }))
+vi.mock("../activity-work-page", () => ({ ActivityWorkPage: mock.work }))
 vi.mock("../feed-row", () => ({ FeedRow: mock.row }))
 import { ActivityStreamView } from "../activity-stream-view"
 import { EMPTY_FACETS } from "../activity-sidebar"
@@ -55,6 +58,8 @@ const entries = [event("e1", { crew_id: "c1", agent_id: "a1", mission_id: "m1", 
 const chain: ChainSummary = { origin: "r1", started_by_kind: "schedule", started_by: "nightly", runs: 1, max_chain_depth: 0, failed_runs: 0, failed: false, first_activity: "2026-10-02T20:00:00Z", last_activity: "2026-10-02T20:00:01Z", duration_ms: 1000, issue_count: 0, agent_count: 0, routine_slug: "triage" }
 // A chain rooted in agent work: no routine run to open, so it keeps the chain page.
 const agentChain: ChainSummary = { ...chain, origin: "w1", started_by_kind: "user", routine_slug: undefined }
+// Agent work started outside any routine (#2989): its own page.
+const workChain: ChainSummary = { ...chain, origin: "asg1", kind: "assignment", task: "Draft the reply", started_by_kind: "agent", routine_slug: undefined }
 const lookup: JournalLookupValue = { crews: new Map([["c1", { id: "c1", name: "Builders", slug: "builders", icon: null, color: "blue" }]]), agents: new Map([["a1", { id: "a1", name: "Alice", slug: "alice", crew_id: "c1", avatar_seed: null, avatar_style: null }]]), missions: new Map([["m1", { id: "m1", title: "Fix the failing integration in the workspace", status: "IN_PROGRESS" }]]), loading: false, refresh: vi.fn() }
 const sidebar = () => mock.sidebar.mock.calls.at(-1)![0]
 const home = () => mock.home.mock.calls.at(-1)![0]
@@ -66,7 +71,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/activity")
   mock.list.mockReturnValue(listState())
   mock.stream.mockReturnValue({ status: "connected" })
-  mock.chains.mockReturnValue({ chains: [chain, agentChain], hasUnrecordedRuns: false, hasMore: false, error: null, refresh: mock.refreshChains })
+  mock.chains.mockReturnValue({ chains: [chain, agentChain, workChain], hasUnrecordedRuns: false, hasMore: false, error: null, refresh: mock.refreshChains })
   mock.lookup.mockReturnValue(lookup)
   mock.fetch.mockImplementation(async () => new Response(JSON.stringify({ missions: [{ id: "m1", title: "Fix", status: "IN_PROGRESS", priority: "high" }] })))
   mock.sidebar.mockImplementation((p) => <aside><input aria-label="Activity search" value={p.search} onChange={(e) => p.onSearchChange(e.target.value)} /><button onClick={p.onToggleCollapse}>Hide rail</button></aside>)
@@ -80,6 +85,7 @@ beforeEach(() => {
   mock.agent.mockImplementation((p) => <div>Agent {p.name}</div>)
   mock.issue.mockImplementation((p) => <div>Issue {p.issueId}</div>)
   mock.run.mockImplementation((p) => <div>Run {p.runId}</div>)
+  mock.work.mockImplementation((p) => <div>Work {p.chain.origin}</div>)
   mock.row.mockImplementation((p) => <button onClick={p.onSelect}>Row {p.entry.id}</button>)
 })
 afterEach(async () => { await act(async () => {}); cleanup() })
@@ -96,7 +102,7 @@ it("shares counts and metadata and wires live entries to the same journal window
   expect(mock.stream.mock.calls.at(-1)![0].onEntry).toBe(mock.prepend)
   // The home reads runs, not the journal window: it is handed the chain index.
   expect(home()).toMatchObject({ workspaceId: "ws & a" })
-  expect(home().chains.map((c) => c.origin)).toEqual(["r1", "w1"])
+  expect(home().chains.map((c) => c.origin)).toEqual(["r1", "w1", "asg1"])
   act(() => sidebar().onRetryChains?.())
   expect(mock.refreshChains).toHaveBeenCalledOnce()
 })
@@ -339,6 +345,13 @@ it("steps to the next and previous run with the arrow keys, in the rail's order 
   input.focus()
   fireEvent.keyDown(input, { key: "ArrowDown" })
   expect(screen.getByText("Run r1")).toBeVisible()
+})
+it("opens agent work outside routines as its own page (#2989)", () => {
+  show()
+  act(() => sidebar().onSelectChain("asg1"))
+  expect(screen.getByText("Work asg1")).toBeVisible()
+  expect(mock.run).not.toHaveBeenCalled()
+  expect(mock.workflow).not.toHaveBeenCalled()
 })
 it("opens a run under the Issues back-bar: the way out, then only the stops walked", () => {
   // #2979: /issues reads "‹ Back to issues › OPS-1". The home crumb would

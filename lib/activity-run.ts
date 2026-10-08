@@ -154,7 +154,11 @@ const CAUSAL = new Set(["triggers", "produces", "executes"])
  * hanging off it, so the child is the run of it that belongs to this chain
  * (chain_origin), named after the routine rather than its slug.
  */
-export function chainBranches(graph: BranchGraph, originRunRef: string): RunTreeNode[] {
+export function chainBranches(
+  graph: BranchGraph,
+  originRunRef: string,
+  rootKind: "run" | "assignment" = "run",
+): RunTreeNode[] {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
   const out = new Map<string, { to: string; kind: string }[]>()
   for (const e of graph.edges) {
@@ -162,7 +166,7 @@ export function chainBranches(graph: BranchGraph, originRunRef: string): RunTree
     list.push({ to: e.to, kind: e.kind })
     out.set(e.from, list)
   }
-  const rootId = `run:${originRunRef}`
+  const rootId = `${rootKind}:${originRunRef}`
   const seen = new Set<string>([rootId])
 
   const childrenOf = (id: string): RunTreeNode[] => {

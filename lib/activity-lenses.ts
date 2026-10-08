@@ -76,6 +76,8 @@ export const ACTIVITY_LENSES: readonly LensMeta[] = [
  * by retention.
  */
 export function workflowName(c: ChainSummary, routineName?: string): string {
+  // Agent work outside routines is named by what it was asked to do (#2989).
+  if (c.kind === "assignment" && c.task?.trim()) return c.task.trim()
   const named = routineName?.trim()
   if (named) return named
   const slug = c.routine_slug?.trim()
@@ -106,6 +108,11 @@ export function startedByWord(c: ChainSummary): string {
     case "routine":
     case "run":
       return who ? `called by ${who}` : "called by a routine"
+    // Agent work outside routines (#2989).
+    case "lead_planning":
+      return `lead planning · ${c.started_by_key?.trim() || who || "an issue"}`
+    case "agent":
+      return who ? `from chat · ${who}` : "from chat"
     default:
       return ""
   }

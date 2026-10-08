@@ -79,6 +79,7 @@ WHEN    STARTED BY                    ROUTINE  RUNS  DEPTH  STATUS  ORIGIN
   branch never hides a live one. `interrupted` runs are not counted as
   failures: a process that died is an operational event, not the chain's
   verdict.
+- **ROUTINE** is the routine's slug, or `work: <task>` for agent work started outside any routine (`kind: assignment`).
 - **ORIGIN** is the anchor. Feed it straight back: `crewship chain prn_01j4`.
 
 <Note>

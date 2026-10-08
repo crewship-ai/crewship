@@ -54309,6 +54309,13 @@
                             },
                             "type": "array"
                           },
+                          "kind": {
+                            "enum": [
+                              "run",
+                              "assignment"
+                            ],
+                            "type": "string"
+                          },
                           "last_activity": {
                             "format": "date-time",
                             "type": "string"
@@ -54341,6 +54348,9 @@
                             "type": "string"
                           },
                           "started_by_kind": {
+                            "type": "string"
+                          },
+                          "task": {
                             "type": "string"
                           },
                           "triggered_via": {

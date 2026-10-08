@@ -450,3 +450,15 @@ describe("chainStatus — stopped work (#2981)", () => {
     expect(chainStatus(chain())).toBe("done")
   })
 })
+
+describe("agent work outside routines (#2989)", () => {
+  it("names the work by its task and says what started it", () => {
+    const work = chain({ kind: "assignment", task: "Draft the reply to Ava", routine_slug: undefined, started_by_kind: "agent", started_by: "Lead" })
+    expect(workflowName(work)).toBe("Draft the reply to Ava")
+    expect(startedByWord(work)).toBe("from chat · Lead")
+    expect(startedByWord(chain({ kind: "assignment", started_by_kind: "lead_planning", started_by: "Fix", started_by_key: "OPS-3" }))).toBe(
+      "lead planning · OPS-3",
+    )
+    expect(startedByWord(chain({ kind: "assignment", started_by_kind: "issue", started_by: "Fix", started_by_key: "OPS-3" }))).toBe("from OPS-3")
+  })
+})

@@ -221,3 +221,22 @@ describe("issuesCreatedBy (#2986)", () => {
     expect(issuesCreatedBy(graph, "r1")).toEqual([{ id: "i1", label: "OPS-1" }])
   })
 })
+
+describe("chainBranches from an assignment root (#2989)", () => {
+  it("nests the delegations and asks under the work they came from", () => {
+    const graph = {
+      nodes: [
+        { id: "assignment:a1", kind: "assignment", ref: "a1", label: "Draft the reply" },
+        { id: "assignment:a2", kind: "assignment", ref: "a2", label: "Check the bank feed", status: "COMPLETED" },
+        { id: "inbox:x1", kind: "inbox", ref: "x1", label: "Needs you" },
+        { id: "agent:g1", kind: "agent", ref: "g1", label: "Casey" },
+      ],
+      edges: [
+        { from: "assignment:a1", to: "assignment:a2", kind: "triggers" },
+        { from: "assignment:a1", to: "inbox:x1", kind: "produces" },
+        { from: "agent:g1", to: "assignment:a1", kind: "executes" },
+      ],
+    }
+    expect(chainBranches(graph, "a1", "assignment").map((n) => n.label)).toEqual(["Check the bank feed", "Needs you"])
+  })
+})

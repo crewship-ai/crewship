@@ -80,6 +80,7 @@ import { ActivityDetail } from "./activity-detail"
 import { WorkflowPage } from "./workflow-page"
 import { ActivityHome } from "./activity-home"
 import { ActivityRunPage } from "./activity-run-page"
+import { ActivityWorkPage } from "./activity-work-page"
 import { AgentsOverview, IssuesOverview, RoutinesLensOverview } from "./lens-overviews"
 import { RoutineRunsPage } from "./routine-runs-page"
 import { AgentDrillDown, IssueDrillDown } from "./drill-downs"
@@ -1130,7 +1131,15 @@ export function ActivityStreamView({
                   overview, which then answered a question nobody asked; the
                   overview is gone here, not pushed down. */}
               {surface.main === "workflow" &&
-                (openChain && openChain.routine_slug ? (
+                (openChain && openChain.kind === "assignment" ? (
+                  // Agent work started outside any routine (#2989).
+                  <ActivityWorkPage
+                    key={openChain.origin}
+                    workspaceId={workspaceId}
+                    chain={openChain}
+                    onOpenNode={openNode}
+                  />
+                ) : openChain && openChain.routine_slug ? (
                   // A chain that starts at a routine run opens THAT run — the
                   // approved detail (#2979). The chain page below stays for
                   // chains rooted in agent work, which have no run to open.

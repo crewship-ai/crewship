@@ -126,6 +126,10 @@ type chainSummary struct {
 	WaitingRuns int `json:"waiting_runs" yaml:"waiting_runs"`
 	// Terminal outcomes besides failed. Cancelled (someone stopped it) and
 	// interrupted (the process died) are not "done", and not failures either.
+	// Kind is "run" (a routine run and what it caused) or "assignment" (agent
+	// work started outside any routine); Task is an assignment root's task.
+	Kind            string `json:"kind" yaml:"kind"`
+	Task            string `json:"task,omitempty" yaml:"task,omitempty"`
 	CompletedRuns   int    `json:"completed_runs" yaml:"completed_runs"`
 	CancelledRuns   int    `json:"cancelled_runs" yaml:"cancelled_runs"`
 	InterruptedRuns int    `json:"interrupted_runs" yaml:"interrupted_runs"`
@@ -354,6 +358,20 @@ Examples:
 	},
 }
 
+// chainSubject is the ROUTINE cell: the routine's slug, or for agent work
+// started outside any routine (#2989) its task, marked so it does not read as
+// a routine name.
+func chainSubject(c chainSummary) string {
+	if c.Kind == "assignment" {
+		task := c.Task
+		if len([]rune(task)) > 40 {
+			task = string([]rune(task)[:39]) + "…"
+		}
+		return "work: " + task
+	}
+	return c.RoutineSlug
+}
+
 // chainStatusWord is the STATUS cell, in the web rail's precedence (#2981):
 // waiting (only a person can move it), FAILED, running, then a stop, then ok.
 // A stopped branch never hides a live one, and cancelled (somebody stopped it)
@@ -393,7 +411,7 @@ func renderChainList(l chainList) []string {
 		rows = append(rows, []string{
 			issueRelativeTime(c.LastActivity),
 			chainCauseCell(c),
-			orDash(sanitizeTerminal(c.RoutineSlug)),
+			orDash(sanitizeTerminal(chainSubject(c))),
 			strconv.Itoa(c.Runs),
 			strconv.Itoa(c.MaxChainDepth),
 			status,

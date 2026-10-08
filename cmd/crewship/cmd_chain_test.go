@@ -606,3 +606,15 @@ func TestChainStatusWord_FollowsTheRailPrecedence(t *testing.T) {
 		}
 	}
 }
+
+// #2989: agent work outside routines has no routine; its row names the task.
+func TestRenderChainList_AgentWorkNamesItsTask(t *testing.T) {
+	l := chainList{Chains: []chainSummary{{
+		Origin: "asg_1", Kind: "assignment", Task: "Draft the reply to Ava", StartedByKind: "agent", StartedBy: "Lead",
+		Runs: 2, RunningRuns: 1, FirstActivity: "2026-08-07T12:00:00Z", LastActivity: "2026-08-07T12:01:00Z",
+	}}, Count: 1, Limit: 50}
+	out := strings.Join(renderChainList(l), "\n")
+	if !strings.Contains(out, "work: Draft the reply to Ava") || !strings.Contains(out, "running") {
+		t.Errorf("agent work row does not name its task and state:\n%s", out)
+	}
+}
