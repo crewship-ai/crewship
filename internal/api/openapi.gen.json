@@ -75182,6 +75182,22 @@
             }
           },
           {
+            "in": "query",
+            "name": "before_seq",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Workspace ID or slug.",
             "in": "header",
             "name": "X-Workspace-ID",
@@ -75198,6 +75214,9 @@
                 "schema": {
                   "properties": {
                     "after_seq": {
+                      "type": "integer"
+                    },
+                    "before_seq": {
                       "type": "integer"
                     },
                     "events": {
@@ -75248,6 +75267,9 @@
                         "type": "object"
                       },
                       "type": "array"
+                    },
+                    "has_older": {
+                      "type": "boolean"
                     },
                     "latest_seq": {
                       "type": "integer"

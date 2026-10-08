@@ -23,7 +23,7 @@
 // one more village.
 
 import * as React from "react"
-import { Bot, CircleDot, Clock, ListTree } from "lucide-react"
+import { Bot, CircleDot, Clock, ListTree, MessageSquare, type LucideIcon } from "lucide-react"
 
 import { Appear, DetailCard, EmptyState, Pill, StatStrip, type StatItem } from "@/components/ui/detail"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -33,6 +33,10 @@ import { formatDurationMs } from "@/lib/activity-stream"
 import { relTime } from "@/lib/time"
 import { assignmentsOf } from "@/lib/activity-lenses"
 import type { ChainSummary } from "@/hooks/use-chains"
+import { humanAction, useIssueTimeline } from "@/hooks/use-issue-timeline"
+import { runStatusLabel } from "@/lib/activity-run"
+import type { TimelineItem } from "@/lib/issue-timeline"
+import { cn } from "@/lib/utils"
 
 /** The page shell every drill-down shares — one width, one rhythm. */
 function Shell({ children }: { children: React.ReactNode }) {
@@ -62,6 +66,8 @@ export interface IssueDrillDownProps {
   /** Chains that touched it, for the strip and the "who did this" line. */
   chains: ChainSummary[]
   onOpenWorkflow: (origin: string) => void
+  /** Open a run from the history (#2983). */
+  onOpenRun?: (runId: string) => void
 }
 
 /**
@@ -78,44 +84,38 @@ export interface IssueDrillDownProps {
  * first is that a reader who came here wanting the issue's body would have gone
  * to /issues.
  */
-export function IssueDrillDown({ workspaceId, issueId, label, chains, onOpenWorkflow }: IssueDrillDownProps) {
-  // Which chains reached this issue. The strip's numbers come from the same
-  // ChainSummary[] the rail lists, so they cannot disagree with the row that
-  // led here. Matched on the id alone: an identifier-or-id predicate looks
-  // forgiving and is how the wrong key went unnoticed.
+export function IssueDrillDown({ workspaceId, issueId, label, chains, onOpenWorkflow, onOpenRun }: IssueDrillDownProps) {
+  // The issue's own history, read by issue with its own paging (#2983). It
+  // used to be derived from the loaded page of chains and their five capped
+  // issue refs, so older history and the sixth issue simply were not there.
+  const history = useIssueTimeline(workspaceId, issueId)
+
+  // Which chains of the loaded window reached this issue — context, labelled
+  // as such, and no longer the history. Matched on the id alone.
   const touching = React.useMemo(
     () => chains.filter((c) => (c.issues ?? []).some((i) => i.id === issueId)),
     [chains, issueId],
   )
   const created = touching.some((c) => (c.issues ?? []).some((i) => i.id === issueId && i.created))
-  // The human handle, read off the refs rather than taken from the caller: the
-  // chain index carries it, and it is what /issues/[identifier] resolves by.
+  // The human handle, read off the issue itself and only then off a chain ref.
   // Absent on a workspace that does not use identifiers, which is a fact about
   // the workspace and not a lookup failure — see the link below.
-  const identifier = React.useMemo(
-    () =>
-      touching
-        .flatMap((c) => c.issues ?? [])
-        .find((i) => i.id === issueId && i.identifier)?.identifier,
-    [touching, issueId],
-  )
-  const heading = identifier || label || issueId
+  const identifier =
+    history.issue?.identifier ||
+    touching.flatMap((c) => c.issues ?? []).find((i) => i.id === issueId && i.identifier)?.identifier ||
+    undefined
+  const heading = identifier || history.issue?.title || label || issueId
   const agents = React.useMemo(
     () => [...new Set(touching.flatMap((c) => (c.agents ?? []).map((a) => a.name || a.slug || a.id)))],
     [touching],
   )
 
   const stats: StatItem[] = [
-    { label: "Workflows", value: String(touching.length) },
-    { label: "Origin", value: created ? "created here" : "existed before", tone: created ? "success" : "default" },
+    { label: "Status", value: history.issue?.status ? humanAction(history.issue.status.toLowerCase()) : "—" },
+    { label: "Origin", value: created ? "created by a run" : "—", tone: created ? "success" : "default" },
     { label: "Agents", value: agents.length > 0 ? agents.join(", ") : "—" },
-    {
-      label: "Last touched",
-      value: touching[0] ? relTime(touching[0].last_activity) : "—",
-    },
+    { label: "Last activity", value: history.items[0] ? relTime(history.items[0].at) : "—" },
   ]
-
-  void workspaceId
 
   return (
     <Shell>
@@ -123,7 +123,10 @@ export function IssueDrillDown({ workspaceId, issueId, label, chains, onOpenWork
         <div className="flex flex-wrap items-center gap-2">
           <CircleDot className="h-4 w-4 shrink-0 text-muted-foreground" />
           <h1 className="min-w-0 font-mono text-base font-semibold tracking-tight">{heading}</h1>
-          {created && <Pill tone="success">created here</Pill>}
+          {identifier && history.issue?.title && (
+            <span className="min-w-0 truncate text-sm text-muted-foreground">{history.issue.title}</span>
+          )}
+          {created && <Pill tone="success">created by a run</Pill>}
           {/* Rendered only when there is an identifier to render it with.
               /issues/[identifier] resolves an identifier and nothing else, so a
               workspace that does not use them has no URL for this issue — and a
@@ -139,27 +142,55 @@ export function IssueDrillDown({ workspaceId, issueId, label, chains, onOpenWork
         </div>
       </Appear>
 
-      {/* What Activity knows that /issues does not: which processes reached
-          this issue, and which agent did the reaching. */}
       <Appear order={1}>
         <StatStrip items={stats} />
       </Appear>
 
       <Appear order={2}>
+        <section role="region" aria-label="History">
+          <DetailCard title="History" subtitle="Events, comments and runs, newest first">
+            {history.error ? (
+              <EmptyState icon={CircleDot} title={history.error} description="The issue's own record could not be read." />
+            ) : history.loading ? (
+              <p role="status" className="py-6 text-center text-xs text-muted-foreground">
+                Loading the issue's history…
+              </p>
+            ) : history.items.length === 0 && !history.canLoadOlder ? (
+              <EmptyState icon={CircleDot} title="Nothing recorded yet" description="No event, comment or run on this issue." />
+            ) : (
+              <div className="flex flex-col">
+                <ol className="flex flex-col">
+                  {history.items.map((i) => (
+                    <HistoryRow key={i.key} item={i} onOpenRun={onOpenRun} />
+                  ))}
+                </ol>
+                {history.canLoadOlder && (
+                  <button
+                    type="button"
+                    disabled={history.busy}
+                    onClick={() => void history.loadOlder()}
+                    className="mt-2 self-center rounded-md border border-foreground/[0.08] px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground disabled:opacity-50"
+                  >
+                    {history.busy ? "Loading…" : "Load older"}
+                  </button>
+                )}
+              </div>
+            )}
+          </DetailCard>
+        </section>
+      </Appear>
+
+      <Appear order={3}>
         <DetailCard
-          title="What reached it"
-          subtitle={`${touching.length} ${touching.length === 1 ? "workflow" : "workflows"}`}
+          title="Workflows in the loaded window"
+          subtitle={`${touching.length} ${touching.length === 1 ? "workflow" : "workflows"} · the rail's chains only, not the issue's history`}
         >
           {touching.length === 0 ? (
-            <EmptyState
-              icon={CircleDot}
-              title="Nothing reached it in this window"
-              description="Widen the range, or open the issue for its own history."
-            />
+            <p className="text-xs text-muted-foreground">No chain in the loaded window reached this issue.</p>
           ) : (
             <div className="flex flex-col">
               {touching.map((c) => {
-                const mine = (c.issues ?? []).find((i) => i.identifier === identifier || i.id === identifier)
+                const mine = (c.issues ?? []).find((i) => i.id === issueId)
                 const who = (c.agents ?? []).map((a) => a.name || a.slug || a.id)
                 return (
                   <button
@@ -175,9 +206,7 @@ export function IssueDrillDown({ workspaceId, issueId, label, chains, onOpenWork
                     />
                     <span className="min-w-0 truncate">
                       {c.routine_slug || c.started_by}
-                      {who.length > 0 && (
-                        <span className="text-muted-foreground-soft"> → {who.join(", ")}</span>
-                      )}
+                      {who.length > 0 && <span className="text-muted-foreground-soft"> → {who.join(", ")}</span>}
                     </span>
                     <span className="shrink-0 font-mono text-[10px] text-muted-foreground-soft">
                       {mine?.created ? "created" : "changed"}
@@ -193,6 +222,50 @@ export function IssueDrillDown({ workspaceId, issueId, label, chains, onOpenWork
         </DetailCard>
       </Appear>
     </Shell>
+  )
+}
+
+const HISTORY_ICON: Record<TimelineItem["kind"], LucideIcon> = {
+  event: Clock,
+  comment: MessageSquare,
+  run: Bot,
+}
+
+function HistoryRow({ item, onOpenRun }: { item: TimelineItem; onOpenRun?: (runId: string) => void }) {
+  const Icon = HISTORY_ICON[item.kind]
+  const openable = item.kind === "run" && item.runId && onOpenRun
+  const body = (
+    <>
+      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-1.5 text-xs">
+          <span className={cn("font-medium", openable && "group-hover:underline")}>{item.title}</span>
+          {item.kind === "run" && item.action && (
+            <span className="text-[10.5px] text-muted-foreground">{runStatusLabel(item.action)}</span>
+          )}
+          {item.actor && <span className="truncate text-[10.5px] text-muted-foreground-soft">· {item.actor}</span>}
+        </span>
+        {item.detail && <span className="mt-0.5 line-clamp-2 block text-[11.5px] text-muted-foreground">{item.detail}</span>}
+      </span>
+      <span className="w-16 shrink-0 text-right font-mono text-[10px] text-muted-foreground-soft" title={item.at}>
+        {item.at ? relTime(item.at) : "—"}
+      </span>
+    </>
+  )
+  return (
+    <li>
+      {openable ? (
+        <button
+          type="button"
+          onClick={() => onOpenRun!(item.runId!)}
+          className="group flex w-full items-start gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
+        >
+          {body}
+        </button>
+      ) : (
+        <div className="flex items-start gap-2.5 px-1.5 py-2">{body}</div>
+      )}
+    </li>
   )
 }
 

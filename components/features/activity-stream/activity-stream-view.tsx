@@ -1036,6 +1036,7 @@ export function ActivityStreamView({
                   label={openIssue.label}
                   chains={visibleChains}
                   onOpenWorkflow={selectChain}
+                  onOpenRun={(runID) => openNode("run", runID)}
                 />
               )}
 
