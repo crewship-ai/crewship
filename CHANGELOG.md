@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- ⚠️ **Behaviour change: an immediate routine start whose concurrency slot is full is now queued instead of refused with `429`.** It returns `202 SCHEDULED` with `pending_id`, `queued: true` and `reason: "concurrency_limit"`, starts when a slot frees, and waits at most `ttl_seconds` (one hour by default) before ending `expired`. A retry with the same `Idempotency-Key` returns the same pending start. Send `queue_if_busy: false` (CLI `--reject-if-busy`) to keep the `429`. Webhooks, schedules, replay and agent-invoked runs are unchanged. (#3025)
 - **Accepted deferred routine starts disappeared when execution capacity was busy or dispatch failed.** Capacity rejection now retries with bounded backoff until TTL, and errors/expiry remain inspectable through `routine pending get` and `pending list --status`. Retry preserves the accepted recipe and occurrence identity. ⚠️ **Behaviour change:** starts without TTL stop after ten capacity rejections; attempted debounce starts keep their payload while newer triggers open a separate window, and attempted one-time starts cannot be rewritten by another save. (#3010)
 
 - **Open-source license capacity showed inactive limits.** The license API, administration and CLI now report unlimited crews, members and agents, including when a signed license contains historical caps. Signed claims and enforcement hooks remain available for future releases; administration explains that resource licensing may change.

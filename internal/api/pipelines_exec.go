@@ -58,6 +58,10 @@ type runRequestBody struct {
 	DebounceWindowSecond int    `json:"debounce_window_seconds,omitempty"`
 	DebounceMaxSeconds   int    `json:"debounce_max_seconds,omitempty"`
 	Priority             int    `json:"priority,omitempty"`
+	// QueueIfBusy: an immediate start whose concurrency_key slot is full is
+	// accepted into the deferred queue (202 SCHEDULED, queued) unless this
+	// is false, which keeps the 429 refusal (#3025).
+	QueueIfBusy *bool `json:"queue_if_busy,omitempty"`
 	// IdempotencyKeyTTLSeconds bounds the dedupe window for the
 	// Idempotency-Key header (0 = default 24h).
 	IdempotencyKeyTTLSeconds int `json:"idempotency_key_ttl_seconds,omitempty"`
@@ -303,7 +307,14 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// ttl elapses first). Immediate runs (no delay/debounce) fall through
 	// to the synchronous path below unchanged.
 	if h.db != nil && (body.DelaySeconds > 0 || body.DebounceKey != "" || body.FireAt != "") {
-		h.enqueueDeferredRun(w, r, workspaceID, invokingUser, p, body)
+		h.enqueueDeferredRun(w, r, workspaceID, invokingUser, p, body, deferredOptions{})
+		return
+	}
+	// A retry of a start that was queued for capacity answers with that
+	// start, even once the slot has freed: running it now as well would
+	// execute the same request twice.
+	if queued := h.queuedStartForKey(r.Context(), workspaceID, p.ID, idempotencyKey); queued != nil {
+		writeQueuedReceipt(w, *queued, false)
 		return
 	}
 
@@ -414,6 +425,17 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		// Concurrency rejection is a normal 429, not an internal
 		// error. Map before the catch-all.
 		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
+			// Waiting is the default (#3025): the start joins the deferred
+			// queue and its dispatcher retries until the TTL. The executor
+			// released the idempotency reservation, so the key now belongs
+			// to the queued start.
+			if h.db != nil && (body.QueueIfBusy == nil || *body.QueueIfBusy) {
+				h.enqueueDeferredRun(w, r, workspaceID, invokingUser, p, body, deferredOptions{
+					queuedForCapacity: true,
+					id:                queuedStartID(workspaceID, p.ID, idempotencyKey),
+				})
+				return
+			}
 			w.Header().Set("Retry-After", "5")
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{
 				"error":  "concurrency limit reached for this pipeline",
