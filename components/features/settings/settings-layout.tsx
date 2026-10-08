@@ -22,6 +22,7 @@ import { MembersSection } from "./sections/members-section"
 import { AccessSecretsSection } from "./sections/access-secrets-section"
 import { HooksSection } from "./sections/hooks-section"
 import { SectionMoved } from "./sections/section-moved"
+import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
 
 interface Org {
   id: string
@@ -109,6 +110,16 @@ export function initialFocusedMember(search: string): string {
 }
 
 export function SettingsLayout() {
+  // One Save for the whole page: every card's edits join the floating bar,
+  // and leaving with edits pending asks first (components/ui/page-save-bar).
+  return (
+    <PageSaveProvider>
+      <SettingsPage />
+    </PageSaveProvider>
+  )
+}
+
+function SettingsPage() {
   const { session, signOut } = useAuth()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
 
@@ -367,9 +378,10 @@ export function SettingsLayout() {
       )}
 
       {/* Content */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div className="relative flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full">
-          <div className="max-w-3xl mx-auto p-4 md:p-6 space-y-4">
+          {/* pb-24: room under the last card for the floating Save bar. */}
+          <div className="max-w-3xl mx-auto p-4 pb-24 md:p-6 md:pb-24 space-y-4">
             {/* The mobile nav trigger used to live here, above the content, and
                 doubled as the section label. Both jobs moved to the sub-bar. */}
 
@@ -387,6 +399,7 @@ export function SettingsLayout() {
             </AnimatePresence>
           </div>
         </ScrollArea>
+        <PageSaveBar />
       </div>
       </div>
     </div>

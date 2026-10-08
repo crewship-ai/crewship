@@ -43,6 +43,39 @@ A screen that cannot answer 1 says so in one line, not with an empty pane.
 | Long list | `usePagedList` (`hooks/use-paged-list`) | `?limit&offset` + `X-Total-Count`; show `N of TOTAL` and a Show-more |
 | Disabled primary button | a one-line reason beside it | onboarding's `blocking reason` pattern |
 | Irreversible action | `AlertDialog` that says what is lost and where to recover | Skip setup, delete, nuke |
+| Saving typed-in values | `PageSaveProvider` + `PageSaveBar` (`components/ui/page-save-bar`); cards register through `useDirtyForm` + `SaveFooter`, `SettingsSaveBar` or `usePageSave` | see "Saving" below |
+
+### Saving
+
+One rule for every screen in Crewship that edits typed-in values — Settings,
+Admin and nested pages today; crew settings, routines and every other editor
+adopt the same bar, never a Save of their own:
+
+| Control | How it saves |
+|---|---|
+| Switch | at once; on failure it flips back and the error is a toast |
+| Text, number, select, picker | ONE floating bar, bottom centre of the content pane: "N unsaved changes · Discard · Save" (⌘S / Ctrl+S). Never a Save button inside a card |
+| A change across several workspaces | the same bar; its Save opens the dry-run preview, the confirm applies |
+| Delete and other irreversible actions | its own button in the Danger zone and an `AlertDialog` |
+
+Leaving with edits pending (section nav, a link, reload) asks "Leave with N
+unsaved changes?" — Stay / Discard / Save and leave. A failed save is a toast
+in the bottom-right corner that stays until dismissed, offers Retry and keeps
+the edits; errors never sit inside a card. Success is quiet: the bar says
+"Saved" for a moment. On a phone the bar docks above the tab bar.
+
+Adopting it on a new screen:
+
+1. Wrap the page in `PageSaveProvider` (outside its section nav, so the nav
+   can ask before switching) and put `PageSaveBar` once inside a `relative`
+   box around the scrolling content; give the scroller ~6rem bottom padding.
+   `DrillPage` already does both.
+2. Cards register their edits: `useDirtyForm` + `SaveFooter count={form.dirtyCount}`
+   (the card's own strip disappears inside a provider), `SettingsSaveBar` for
+   a list of drafts, or `usePageSave({ label, count, save, discard })` for
+   anything else. `save` rejects on failure; the bar shows the toast.
+3. Navigation that swaps the page's content without a link goes through
+   `usePageSaveGuard()`.
 
 Type scale: `text-micro` / `text-label` / `text-body`; mono only for machine
 text (ids, times, counts, durations). Section labels use the `eyebrow`

@@ -3,13 +3,13 @@
 import * as React from "react"
 import { toast } from "sonner"
 
-import { SettingsCard } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsSaveBar } from "@/components/features/settings/shared"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Chip, FieldRow, Gate, InlineInput, ItemRow, LocalOnlyBar, SmallButton, Unavailable } from "./backups-kit"
 import { formatSize, formatWhen, verifiedByText, type BackupSettings, type NewOffsiteDestination, type OffsiteDestination, type SpaceInfo } from "./backups-model"
 import { addDestination, removeDestination, saveBackupSettings, testDestination, useBackupSettings, useDestinations } from "./use-backup-settings"
 import { useBackupsOverview } from "./use-backups-overview"
-import { perform } from "./use-backups-data"
+import { perform, performSave } from "./use-backups-data"
 import type { SectionCtx } from "./backups-console"
 
 /**
@@ -49,7 +49,7 @@ export function StorageBody({ settings, destinations = [], destinationsReady = t
   const [limits, setLimits] = React.useState(settings.limits)
   const [adding, setAdding] = React.useState(false)
   const [removing, setRemoving] = React.useState<OffsiteDestination | null>(null)
-  const dirty = JSON.stringify(limits) !== JSON.stringify(settings.limits)
+  const changed = (Object.keys(limits) as (keyof BackupSettings["limits"])[]).filter((k) => limits[k] !== settings.limits[k]).length
   const local = settings.destinations.find((d) => d.kind === "local")
   const verifiedOffsite = settings.destinations.some((d) => d.kind !== "local" && d.verified)
   const setLimit = (k: keyof BackupSettings["limits"]) => (e: React.ChangeEvent<HTMLInputElement>) => setLimits((l) => ({ ...l, [k]: Math.max(0, Number(e.target.value) || 0) }))
@@ -96,13 +96,10 @@ export function StorageBody({ settings, destinations = [], destinationsReady = t
         <FieldRow label="Disk"><InlineInput aria-label="Disk MB/s" type="number" min={0} value={limits.disk_mbps} onChange={setLimit("disk_mbps")} />MB/s <span className="text-muted-foreground">· 0 is no limit</span></FieldRow>
         <FieldRow label="Upload"><InlineInput aria-label="Upload MB/s" type="number" min={0} value={limits.upload_mbps} onChange={setLimit("upload_mbps")} />MB/s <span className="text-muted-foreground">· 0 is no limit</span></FieldRow>
         <FieldRow label="Staging">encrypted before it touches disk; wiped after the run and on the next start after a crash</FieldRow>
-        {dirty && (
-          <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">
-            <SmallButton primary onClick={async () => { if (await perform(ctx.demo, () => saveBackupSettings({ limits }), "Limits saved", "The limits could not be saved")) reload?.() }}>Save limits</SmallButton>
-            <SmallButton onClick={() => setLimits(settings.limits)}>Discard</SmallButton>
-          </div>
-        )}
       </SettingsCard>
+      {/* The page's Save bar commits these; it says "Saved" and, on a failure, why not. */}
+      <SettingsSaveBar label="Backup limits" count={changed} onDiscard={() => setLimits(settings.limits)}
+        onSave={async () => { if (await performSave(ctx.demo, () => saveBackupSettings({ limits }))) reload?.() }} />
 
       <ConfirmDialog open={!!removing} onOpenChange={(o) => { if (!o) setRemoving(null) }} destructive
         title={`Remove ${removing?.name ?? "this destination"}?`}

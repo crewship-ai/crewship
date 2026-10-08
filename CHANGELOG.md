@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Settings and Admin save through one floating bar (#2984).** Edits on any card add up in a bar at the bottom of the page ("3 unsaved changes · Discard · Save", ⌘S / Ctrl+S) instead of a Save button per card. Leaving the page or switching section with edits pending asks first, and a failed save is a toast in the bottom-right corner that keeps the edits and offers Retry. Switches still save at once; changes across several workspaces still go through their preview.
+
 - **A stopped installation can reset its application data without losing management state.** `reset --data` validates an explicit local target, removes exact installation-labelled Docker resources, restores clean database defaults and preserves identity, configuration, secrets, logs and backups. Interrupted resets block startup until a successful retry. `paths` shows effective configuration without creating files. (#2977)
 - **Server scratch files and update caches now belong to the selected installation.** Development PID checks refuse unrelated processes after PID reuse; `/api/health` shares `/healthz` liveness and writer-ownership checks while keeping the healthy `status: ok` field. (#2977)
 - ⚠️ **Behaviour change: server paths now follow one installation root regardless of DATABASE_URL.** Explicit storage, log, memory, Bolt and socket configuration is respected, including YAML values equal to old defaults. `CREWSHIP_HOME` and `start --data-dir` select the root; startup refuses to abandon existing data in prior locations instead of silently using a new empty store. Relative SQLite URLs retain compatibility. (#2977)

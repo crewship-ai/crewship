@@ -4,7 +4,6 @@ import * as React from "react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 import { SettingsSaveBar, SettingsSegmented } from "@/components/features/settings/shared"
 import { ConfirmDialog, type Consequence } from "@/components/ui/confirm-dialog"
 import { Gate, TD, TH, WarnBar } from "./backups-kit"
@@ -186,7 +185,7 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
       <p className="rounded-lg border border-border bg-card px-3 py-2 text-[13px] text-muted-foreground">
         Turning a limit on says how many rows go at the next sweep, and that older backups still hold them until they age out.
       </p>
-      <SettingsSaveBar count={diff.length} saving={busy} onDiscard={() => setDraft({})} onSave={review} />
+      <SettingsSaveBar label="Data retention" count={diff.length} saving={busy} onDiscard={() => setDraft({})} onSave={review} />
       <ConfirmDialog open={preview !== null} onOpenChange={(o) => { if (!o) setPreview(null) }} destructive={swept > 0}
         title={preview && plan.length ? `Apply ${preview.count} limit${preview.count === 1 ? "" : "s"} to ${preview.all ? "every existing workspace" : `${preview.size} workspace${preview.size === 1 ? "" : "s"}`}?` : "Nothing to change"}
         description="The dry run lists every value this overwrites."
@@ -281,10 +280,8 @@ export function RetentionDefaultsCard({ rows, demo }: { rows: RetentionRow[]; de
           </tbody>
         </table>
       </div>
-      <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">
-        <Button size="sm" disabled={edits.length === 0} onClick={() => void review()}>Save defaults for new workspaces…</Button>
-        {edits.length > 0 && <Button size="sm" variant="ghost" onClick={() => setDraft({})}>Discard</Button>}
-      </div>
+      {/* The page's Save bar opens the preview below; the confirm writes. */}
+      <SettingsSaveBar label="Defaults for new workspaces" count={edits.length} onDiscard={() => setDraft({})} onSave={review} />
       <ConfirmDialog open={preview !== null} onOpenChange={(o) => { if (!o) setPreview(null) }}
         title={preview && preview.changes.length ? `Change ${preview.changes.length} default${preview.changes.length === 1 ? "" : "s"} for new workspaces?` : "Nothing to change"}
         description="Only workspaces created from now on start with these."

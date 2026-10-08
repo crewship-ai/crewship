@@ -248,6 +248,7 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
       ) : null}
 
       <SettingsSaveBar
+        label="Limits"
         count={edits.length}
         saving={saving}
         canSave={edits.every((e) => e.valid)}

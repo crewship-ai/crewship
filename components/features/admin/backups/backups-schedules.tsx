@@ -3,7 +3,7 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
-import { SettingsCard, SettingsSegmented } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsSaveBar, SettingsSegmented } from "@/components/features/settings/shared"
 import { Chip, FieldRow, Gate, InlineInput, ItemRow, SmallButton, TD, TH } from "./backups-kit"
 import {
   CADENCE_LABEL, CATEGORIES, PRESETS, computeNextRuns, contentsFromPreview, describeKeep, describePlanWhen, formatPlannedRun,
@@ -12,7 +12,7 @@ import {
 } from "./backups-model"
 import { previewContents, savePlan, useBackupPlans, usePlanCalendar, usePlanNext } from "./use-backup-plans"
 import { useBackupSettings, useRecipients } from "./use-backup-settings"
-import { perform } from "./use-backups-data"
+import { performSave } from "./use-backups-data"
 import type { SectionCtx } from "./backups-console"
 
 export type PlanDraft = Omit<BackupPlan, "next_run_at" | "last_run_at" | "id"> & { id?: string }
@@ -64,6 +64,9 @@ export function BackupsSchedules({ ctx }: { ctx: SectionCtx }) {
 
 export function SchedulesBody({ plans, ctx, reload, now = new Date() }: { plans: BackupPlan[]; ctx: SectionCtx; reload?: () => void; now?: Date }) {
   const [draft, setDraft] = React.useState<PlanDraft>(() => (plans[0] ? draftOf(plans[0]) : newDraft(ctx.scope, ctx.selected)))
+  // What the editor last loaded or saved: Discard goes back to it, and the
+  // page's Save bar counts the fields that differ from it.
+  const [base, setBase] = React.useState<PlanDraft>(draft)
   const [dirty, setDirty] = React.useState(false)
   const [dropped, setDropped] = React.useState<Set<CategoryKey>>(() => new Set())
   const [adv, setAdv] = React.useState(false)
@@ -72,10 +75,14 @@ export function SchedulesBody({ plans, ctx, reload, now = new Date() }: { plans:
   const recipients = useRecipients()
   const editorRef = React.useRef<HTMLDivElement>(null)
 
-  const load = (d: PlanDraft) => {
+  const reset = (d: PlanDraft) => {
     setDraft(d)
+    setBase(d)
     setDirty(false)
     setDropped(new Set(d.preset === "custom" ? CATEGORY_KEYS.filter((k) => k !== "env" && !d.contents.includes(k)) : []))
+  }
+  const load = (d: PlanDraft) => {
+    reset(d)
     editorRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" })
   }
   const lastSignal = React.useRef(ctx.newPlanSignal)
@@ -83,6 +90,8 @@ export function SchedulesBody({ plans, ctx, reload, now = new Date() }: { plans:
     if (ctx.newPlanSignal === lastSignal.current) return
     lastSignal.current = ctx.newPlanSignal
     load(newDraft(ctx.scope, ctx.selected))
+    // A new plan is unsaved until it is saved, edited or not.
+    setDirty(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a new signal is the only trigger
   }, [ctx.newPlanSignal])
 
@@ -117,14 +126,15 @@ export function SchedulesBody({ plans, ctx, reload, now = new Date() }: { plans:
       cron_expr: draft.cadence === "custom" ? draft.cron_expr : null,
       recipient_ids: draft.recipient_ids.length ? draft.recipient_ids : (recipients.data ?? []).map((r) => r.id),
     }
-    const out = await perform(ctx.demo, () => savePlan(body), draft.id ? "Plan saved" : "Plan created", "The plan could not be saved")
-    setSaving(false)
+    // The page's Save bar says "Saved"; a failure rejects into its toast and
+    // keeps the draft.
+    const out = await performSave(ctx.demo, () => savePlan(body)).finally(() => setSaving(false))
     if (out) {
-      setDirty(false)
-      setDraft(draftOf(out))
+      reset(draftOf(out))
       reload?.()
     }
   }
+  const changed = dirty ? Math.max(1, (Object.keys(draft) as (keyof PlanDraft)[]).filter((k) => JSON.stringify(draft[k]) !== JSON.stringify(base[k])).length) : 0
 
   const offsiteReady = (settings.data?.destinations ?? []).some((d) => d.kind !== "local" && d.available)
   const recipientNames = (recipients.data ?? []).filter((r) => !draft.recipient_ids.length || draft.recipient_ids.includes(r.id)).map((r) => `“${r.name}”`)
@@ -202,11 +212,8 @@ export function SchedulesBody({ plans, ctx, reload, now = new Date() }: { plans:
           </span>
         </FieldRow>
         <FieldRow label="Encryption">always{recipientNames.length ? ` · to ${recipientNames.join(" and ")}` : " · add a backup key under Keys & alerts"}</FieldRow>
-        <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">
-          <SmallButton primary onClick={save} disabled={saving}>{saving ? "Saving…" : "Save plan"}</SmallButton>
-          {dirty && <span className="text-[12.5px] text-muted-foreground">Unsaved changes</span>}
-        </div>
       </SettingsCard>
+      <SettingsSaveBar label="Backup plan" count={changed} saving={saving} onSave={save} onDiscard={() => reset(base)} />
     </>
   )
 }

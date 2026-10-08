@@ -4,7 +4,7 @@ import * as React from "react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
-import { SettingsCard } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsSaveBar } from "@/components/features/settings/shared"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Chip, Eyebrow, FieldRow, Gate, InlineInput, ItemRow, SmallButton } from "./backups-kit"
 import {
@@ -14,7 +14,7 @@ import {
   RECOVERY_SHEET_HREF, addRecipient, removeRecipient, saveBackupSettings, sendTestAlert, setRecoveryKit,
   useBackupSettings, useIncidents, useRecipients, useVaultKeys,
 } from "./use-backup-settings"
-import { perform } from "./use-backups-data"
+import { perform, performSave } from "./use-backups-data"
 import type { SectionCtx } from "./backups-console"
 
 /**
@@ -234,7 +234,8 @@ export function AlertsBody({ settings, incident, ctx, reload }: { settings: Back
   const [channels, setChannels] = React.useState(settings.channels ?? [])
   const offsiteKnown = settings.destinations.some((d) => d.kind !== "local" && d.available)
   const channelsDirty = JSON.stringify(channels) !== JSON.stringify(settings.channels ?? [])
-  const dirty = JSON.stringify(events) !== JSON.stringify(settings.events) || url !== (settings.heartbeat_url ?? "") || channelsDirty
+  const changed = (Object.keys(events) as (keyof AlertEvents)[]).filter((k) => events[k] !== settings.events[k]).length
+    + (url !== (settings.heartbeat_url ?? "") ? 1 : 0) + (channelsDirty ? 1 : 0)
   return (
     <>
       <div className="flex flex-col gap-2 px-3.5 py-3">
@@ -276,15 +277,13 @@ export function AlertsBody({ settings, incident, ctx, reload }: { settings: Back
         ping <InlineInput aria-label="Heartbeat URL" type="url" className="w-full max-w-[15rem]" placeholder="https://hc.example.com/ping/…" value={url} onChange={(e) => setUrl(e.target.value)} />
         after every good run; the outside service alerts when pings stop
       </FieldRow>
-      {dirty && (
-        <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">
-          <SmallButton primary onClick={async () => {
-            const patch = { events, heartbeat_url: url.trim() || null, ...(channelsDirty ? { channels } : {}) }
-            if (await perform(ctx.demo, () => saveBackupSettings(patch), "Alerts saved", "The alerts could not be saved")) reload?.()
-          }}>Save alerts</SmallButton>
-          <SmallButton onClick={() => { setEvents(settings.events); setUrl(settings.heartbeat_url ?? ""); setChannels(settings.channels ?? []) }}>Discard</SmallButton>
-        </div>
-      )}
+      {/* The page's Save bar commits these; it says "Saved" and, on a failure, why not. */}
+      <SettingsSaveBar label="Alerts" count={changed}
+        onDiscard={() => { setEvents(settings.events); setUrl(settings.heartbeat_url ?? ""); setChannels(settings.channels ?? []) }}
+        onSave={async () => {
+          const patch = { events, heartbeat_url: url.trim() || null, ...(channelsDirty ? { channels } : {}) }
+          if (await performSave(ctx.demo, () => saveBackupSettings(patch))) reload?.()
+        }} />
     </>
   )
 }

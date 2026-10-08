@@ -31,6 +31,7 @@ import type { RuntimeEntry } from "./tabs/runtime-tab"
 import { BackupsConsole } from "@/components/features/admin/backups/backups-console"
 import { NotificationsTab } from "./tabs/notifications-tab"
 import { RateLimitsTab } from "./tabs/rate-limits-tab"
+import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 /**
  * Admin sidebar sections — ONLY real, wired tabs.
@@ -57,6 +58,16 @@ const SETTINGS_TABS: ReadonlySet<TabKey> = new Set<TabKey>(["providers", "notifi
 const CONSOLE_TABS: ReadonlySet<TabKey> = new Set<TabKey>(["backups", "retention"])
 
 export default function AdminPage() {
+  // One Save for the console: every card's edits join the floating bar, and
+  // switching section with edits pending asks first.
+  return (
+    <PageSaveProvider>
+      <AdminConsole />
+    </PageSaveProvider>
+  )
+}
+
+function AdminConsole() {
   const router = useRouter()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   // The console belongs to instance administrators (instance_admin.go on the
@@ -77,7 +88,8 @@ export default function AdminPage() {
   const [backupSection, _setBackupSection] = useState<BackupsSection>(() =>
     typeof window === "undefined" ? "overview" : initialBackupsSection(window.location.search),
   )
-  const setTab = useCallback((next: TabKey, section?: BackupsSection) => {
+  const guard = usePageSaveGuard()
+  const setTab = useCallback((next: TabKey, section?: BackupsSection) => guard(() => {
     _setTab(next)
     if (section) _setBackupSection(section)
     // replaceState, not a route push: this is the same document, and a history
@@ -95,7 +107,7 @@ export default function AdminPage() {
       }
       window.history.replaceState(null, "", url.toString())
     }
-  }, [])
+  }), [guard])
   // The Backups row folds its six pages away; open while one is on screen.
   const [backupsOpen, setBackupsOpen] = useState(true)
   // Universal search doubles as a command-finder — filters the nav live.
@@ -308,7 +320,7 @@ export default function AdminPage() {
           placeholder="Search admin…"
           onKeyDown={(e) => {
             if (e.key === "Enter" && firstNavMatch) {
-              if (firstNavMatch.href) router.push(firstNavMatch.href)
+              if (firstNavMatch.href) { const href = firstNavMatch.href; guard(() => router.push(href)) }
               else setTab(firstNavMatch.key as TabKey, firstNavMatch.children?.[0]?.key)
               setMobileNavOpen(false)
             }
@@ -366,7 +378,7 @@ export default function AdminPage() {
                   key={item.key}
                   selected={isActive}
                   onSelect={() => {
-                    if (item.href) router.push(item.href)
+                    if (item.href) { const href = item.href; guard(() => router.push(href)) }
                     else setTab(item.key as TabKey)
                     setMobileNavOpen(false)
                   }}
@@ -437,8 +449,9 @@ export default function AdminPage() {
             without a tab stop a keyboard-only admin cannot scroll it at all
             (axe: scrollable-region-focusable). The label names the section
             rather than saying "content", so the landmark list stays useful. */}
+        <div className="relative flex-1 min-w-0">
         <div
-          className="flex-1 min-w-0 overflow-y-auto"
+          className="h-full overflow-y-auto pb-20"
           tabIndex={0}
           role="region"
           aria-label={sectionLabel ? `Admin ${sectionLabel}` : "Admin content"}
@@ -459,6 +472,8 @@ export default function AdminPage() {
           {renderContent()}
         </div>
         )}
+      </div>
+        <PageSaveBar />
       </div>
       </div>
     </div>

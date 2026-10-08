@@ -230,6 +230,7 @@ export function GeneralSection({
             </SettingsRow>
             <SaveFooter
               dirty={form.isDirty}
+              count={form.dirtyCount}
               status={form.status}
               error={form.error}
               onSave={handleSave}

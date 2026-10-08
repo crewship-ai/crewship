@@ -13,16 +13,24 @@ const h = vi.hoisted(() => ({ apiFetch: vi.fn(), toast: { success: vi.fn(), erro
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => h.apiFetch(...a) }))
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-dess", loading: false }) }))
 vi.mock("sonner", () => ({ toast: h.toast }))
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock("next/link", () => ({ default: ({ href, children, ...p }: { href: string; children: React.ReactNode }) => <a href={href} {...p}>{children}</a> }))
 
 import { BackupsConsole } from "../backups-console"
+import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
 import { SpaceCard } from "../backups-overview"
 import type { BackupsSection } from "@/app/(dashboard)/admin/navigation"
 
 function show(page: BackupsSection | "retention", search = "?demo=1") {
   window.history.replaceState(null, "", `/admin${search}`)
   const onNavigate = vi.fn()
-  const utils = render(<BackupsConsole page={page} onNavigate={onNavigate} />)
+  // As the Admin page mounts it: inside the page's one Save bar.
+  const utils = render(
+    <PageSaveProvider>
+      <BackupsConsole page={page} onNavigate={onNavigate} />
+      <PageSaveBar />
+    </PageSaveProvider>,
+  )
   return { ...utils, onNavigate }
 }
 
@@ -530,10 +538,15 @@ describe("Keys & alerts", () => {
       serve({ channels: [], available_channels: [slack], channel_status: [] })
       show("keys", "")
       fireEvent.click(await screen.findByLabelText("Slack · Ops"))
-      fireEvent.click(screen.getByRole("button", { name: "Save alerts" }))
-      await waitFor(() => expect(h.toast.success).toHaveBeenCalledWith("Alerts saved"))
-      const put = h.apiFetch.mock.calls.find(([u, init]) => String(u).endsWith("/backups/settings") && (init as RequestInit | undefined)?.method === "PUT")
+      // The page's one Save bar, not a Save inside the card.
+      expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("1 unsaved change")
+      fireEvent.click(screen.getByRole("button", { name: "Save" }))
+      const isPut = ([u, init]: unknown[]) => String(u).endsWith("/backups/settings") && (init as RequestInit | undefined)?.method === "PUT"
+      await waitFor(() => expect(h.apiFetch.mock.calls.some(isPut)).toBe(true))
+      const put = h.apiFetch.mock.calls.find(isPut)
       expect(JSON.parse(String((put?.[1] as RequestInit).body))).toMatchObject({ channels: ["nch_s"] })
+      // Success is the bar's "Saved", not a toast of its own.
+      expect(h.toast.success).not.toHaveBeenCalled()
     })
 
     it("sends a test and shows when it did not arrive", async () => {
@@ -562,7 +575,7 @@ describe("Keys & alerts", () => {
       expect(within(row).getByText(/the channel is switched off/)).toBeInTheDocument()
       expect(screen.queryByText(/Configure a provider/)).toBeNull()
       fireEvent.click(within(row).getByRole("checkbox"))
-      expect(screen.getByRole("button", { name: "Save alerts" })).toBeInTheDocument()
+      expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("1 unsaved change")
     })
   })
 
@@ -614,10 +627,10 @@ describe("Data retention", () => {
     const { container } = show("retention")
     await screen.findAllByText("Chats")
     const card = container.querySelector("[data-slot=retention-defaults]") as HTMLElement
-    expect(within(card).getByRole("button", { name: "Save defaults for new workspaces…" })).toBeDisabled()
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
     const row = within(card).getByText("Chats").closest("tr") as HTMLElement
     fireEvent.click(within(row).getByRole("button", { name: "30 d" }))
-    fireEvent.click(within(card).getByRole("button", { name: "Save defaults for new workspaces…" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
     const dialog = await screen.findByTestId("confirm-dialog")
     expect(within(dialog).getByText("Change 1 default for new workspaces?")).toBeInTheDocument()
     expect(within(dialog).getByText("No existing workspace changes.")).toBeInTheDocument()
@@ -643,5 +656,36 @@ describe("a server without the new endpoints", () => {
     show("history", "")
     expect(await screen.findByText(/Run history is not available on this server yet/)).toBeInTheDocument()
     expect(screen.getByText("400 MB")).toBeInTheDocument()
+  })
+})
+
+describe("one Save bar for Backups", () => {
+  it("Storage limits join the page bar; Discard puts them back", async () => {
+    show("storage")
+    const cpu = await screen.findByLabelText("CPU cores")
+    const before = (cpu as HTMLInputElement).value
+    fireEvent.change(cpu, { target: { value: String(Number(before) + 1) } })
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("1 unsaved change")
+    expect(screen.queryByRole("button", { name: "Save limits" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+    expect(screen.getByLabelText("CPU cores")).toHaveValue(Number(before))
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
+  })
+
+  it("demo Storage save sends nothing and keeps the edit", async () => {
+    show("storage")
+    const cpu = await screen.findByLabelText("CPU cores")
+    fireEvent.change(cpu, { target: { value: String(Number((cpu as HTMLInputElement).value) + 1) } })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(h.toast.message).toHaveBeenCalledWith("Demo data · nothing was sent"))
+    expect(h.apiFetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PUT")).toBe(false)
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("1 unsaved change")
+  })
+
+  it("a Schedules edit counts the fields it changed, with no Save plan button", async () => {
+    show("schedules")
+    fireEvent.click(await screen.findByRole("radio", { name: /Custom/ }))
+    expect(screen.queryByRole("button", { name: "Save plan" })).toBeNull()
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent(/[1-9]\d* unsaved changes?/)
   })
 })
