@@ -5,6 +5,7 @@ Uses a disposable workspace; never changes the active CLI profile. No models,
 external HTTP services or private repository access. See --help for execution.
 """
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -70,6 +71,7 @@ class Suite:
         self.slug_by_id = {}
         self.last_evidence = {}
         self.pending = []
+        self.deferred = []
         self.member_config = None
         self.member_tmp = None
         self.extra_workspaces = []
@@ -142,11 +144,18 @@ class Suite:
 
     def persist(self):
         report = dict(server=self.args.server, prefix=self.prefix, workspace_id=self.workspace, scenarios=self.results,
-                      coverage_note=("Role and workspace isolation checks with a synthetic account; models and browser excluded." if self.args.bucket == "access" else "50 deterministic recipes plus repetitions and admission checks. Models, browser, integrations, credentials, RBAC and other API domains require separate buckets."))
+                      coverage_note=("Role and workspace isolation checks with a synthetic account; models excluded; browser checks optional." if self.args.bucket == "access" else ("Complex foreach and deferred priority contention; no agent or external business effects." if self.args.bucket == "workflows" else "50 deterministic recipes plus repetitions and admission checks. Models, browser, integrations, credentials, RBAC and other API domains require separate buckets.")))
         if self.test_user_id:
             report["retained_test_account"] = self.test_user_id
         successful = [x for x in self.results if x["result"] == "PASS"]
-        report["verified_unique_runs"] = len({x.get("evidence", {}).get("run_id") for x in successful if x.get("evidence", {}).get("run_id")})
+        verified = set()
+        for entry in successful:
+            evidence = entry.get("evidence", {})
+            if evidence.get("run_id"):
+                verified.add(evidence["run_id"])
+            verified.update(evidence.get("run_ids", []))
+            verified.update(run["run_id"] for run in evidence.get("runs", []))
+        report["verified_unique_runs"] = len(verified)
         warm = sorted(x["evidence"]["duration_ms"] for x in successful if x["test_id"].startswith("RTN-REPEAT-") and "duration_ms" in x.get("evidence", {}))
         if warm:
             report["warm_execution_ms"] = dict(samples=len(warm), p50=warm[(len(warm)-1)//2], p95=warm[max(0, (95*len(warm)+99)//100-1)])
@@ -201,6 +210,8 @@ class Suite:
         self.persist()
 
     def cleanup(self):
+        for pending_id in self.deferred:
+            self.api("POST", f"/api/v1/workspaces/{self.workspace}/pipelines/pending/{pending_id}/cancel", {}, (200, 404))
         for run_id in self.pending:
             self.api("POST", f"/api/v1/workspaces/{self.workspace}/pipelines/runs/{run_id}/cancel", {}, (200, 409))
         if self.member_config:
@@ -250,6 +261,111 @@ class Suite:
                         lambda expression=expression, i=i: self.save(f"{self.prefix}-invalid-{i}", dict(agentless=True, steps=[transform({"qty": 2}, expression)]), (422,)))
 
 
+
+    def execute_workflows(self):
+        for i, parallelism in enumerate([1, 2, 4, 0, 20], 1):
+            values = [dict(qty=n+1, price=(n % 5)+2) for n in range(32)]
+            definition = dict(agentless=True, inputs=[dict(name="products", type="array", default=values), dict(name="fee", type="integer", default=3)], steps=[
+                transform(7, step_id="source"),
+                dict(id="result", type="foreach", foreach=dict(items="{{ inputs.products }}", **{"as":"product"}, parallelism=parallelism, steps=[
+                    dict(id="compute", type="code", code=dict(runtime="cel", code="{{ inputs.product.qty }} * {{ inputs.product.price }} + {{ steps.source.output }} + {{ inputs.fee }}")),
+                    dict(id="emit", type="transform", transform=dict(input="{{ steps.compute.output }}", expression="."))]))])
+            expected = json.dumps([x["qty"]*x["price"]+10 for x in values], separators=(",", ":"))
+            def check(definition=definition, expected=expected, i=i):
+                slug = self.prefix + "-complex-" + str(i)
+                self.save(slug, definition)
+                return dict(self.run(slug, expected), items_verified=32, item_order_verified=True, body_steps=2)
+            self.record(f"RTN-FOREACH-COMPLEX-{i:03d}", "foreach ordered multi-step body with upstream and shared inputs", check)
+        self.record("RTN-STATE-OPERATOR-001", "state write, next-run read and operator recovery", self.execute_state)
+        self.record("RTN-BUDGET-MUTATION-001", "routine budget set, validation and clear without model cost", self.execute_budget)
+        self.record("RTN-QUEUE-PRIORITY-001", "priority contention with 14 real deferred runs", self.execute_priority)
+
+    def execute_state(self):
+        slug = self.prefix + "-state"
+        self.save(slug, dict(agentless=True, inputs=[dict(name="cursor", type="string", default="first")], steps=[
+            dict(id="read", type="transform", transform=dict(input="{{ routine.state.cursor }}", expression=".")),
+            dict(id="result", type="transform", transform=dict(input="{{ inputs.cursor }}", expression="."), state_write=dict(cursor="{{ steps.result.output }}"))]))
+        first = self.run(slug, "first")
+        base = f"/api/v1/workspaces/{self.workspace}/pipelines/{slug}/state"
+        state = self.api("GET", base)
+        assert any(entry["key"] == "cursor" and entry["value"] == "first" for bucket in state["buckets"] for entry in bucket["entries"]), "routine did not persist its cursor"
+        second = self.run(slug, "first")
+        detail = self.api("GET", f"/api/v1/workspaces/{self.workspace}/pipeline-runs/{second['run_id']}")
+        assert detail["step_outputs"]["read"] == "first", "next run did not read prior state"
+        self.api("PUT", base+"/cursor", dict(value="repaired"))
+        third = self.run(slug, "first")
+        detail = self.api("GET", f"/api/v1/workspaces/{self.workspace}/pipeline-runs/{third['run_id']}")
+        assert detail["step_outputs"]["read"] == "repaired", "operator recovery not visible to next run"
+        self.api("DELETE", base+"/cursor", {})
+        self.api("DELETE", base+"/cursor", {}, (404,))
+        self.api("PUT", base+"/other", dict(value="temporary"))
+        cleared = self.api("DELETE", base, {})
+        assert cleared["removed"] == 1 and self.api("GET", base)["buckets"] == [], "state clear did not clear manual bucket"
+        return dict(run_ids=[first["run_id"],second["run_id"],third["run_id"]], cursor_write_verified=True, next_run_read_verified=True, operator_recovery_verified=True)
+
+    def execute_budget(self):
+        slug = self.prefix + "-budget"
+        self.save(slug, dict(agentless=True, steps=[transform(5)]))
+        base = f"/api/v1/workspaces/{self.workspace}/pipelines/{slug}/budget"
+        initial = self.api("GET", base)
+        assert not initial["has_budget"] and initial["spent_usd"] == 0
+        self.api("PATCH", base, dict(monthly_budget_usd=-1), (400,))
+        self.api("PATCH", base, dict(monthly_budget_usd=2))
+        budget = self.api("GET", base)
+        assert budget["has_budget"] and budget["monthly_budget_usd"] == 2
+        evidence = self.run(slug, "5")
+        budget = self.api("GET", base)
+        assert budget["spent_usd"] == 0 and not budget.get("over_budget",False)
+        self.api("PATCH", base, dict(monthly_budget_usd=0))
+        assert not self.api("GET", base)["has_budget"]
+        return dict(evidence, budget_mutations_verified=True, enforcement_with_paid_spend="NOT_RUN")
+
+    def execute_priority(self):
+        # Twelve worker slots is a code hypothesis tested here, not a completion
+        # ordering guarantee. Hold each first-wave slot for twenty seconds.
+        slug = self.prefix + "-priority"
+        self.save(slug, dict(agentless=True, inputs=[dict(name="index", type="integer"), dict(name="until", type="string")], steps=[
+            dict(id="hold", type="wait", wait=dict(kind="datetime", until="{{ inputs.until }}")),
+            dict(id="result", type="transform", transform=dict(input="{{ inputs.index }}", expression="."))]))
+        fire_at = datetime.now(timezone.utc) + timedelta(seconds=12)
+        until = fire_at + timedelta(seconds=20)
+        receipts = []
+        for index in range(14):
+            priority = 10 if index >= 12 else 0
+            receipt = self.api("POST", f"/api/v1/workspaces/{self.workspace}/pipelines/{slug}/run", dict(fire_at=fire_at.isoformat(), priority=priority, inputs=dict(index=index, until=until.isoformat())), (202,))
+            assert receipt["status"] == "SCHEDULED" and receipt["priority"] == priority
+            self.deferred.append(receipt["pending_id"])
+            receipts.append(dict(index=index, priority=priority, pending_id=receipt["pending_id"]))
+        assert datetime.now(timezone.utc) < fire_at, "enqueue was too slow to establish co-due priority contention"
+        deadline = time.monotonic() + 65
+        first_wave = None
+        completed = []
+        while time.monotonic() < deadline:
+            rows = self.api("GET", f"/api/v1/workspaces/{self.workspace}/pipeline-runs", query={"limit":100})["rows"]
+            rows = [row for row in rows if row["pipeline_slug"] == slug]
+            for row in rows:
+                if row["status"] not in ("completed", "failed", "cancelled") and row["id"] not in self.pending:
+                    self.pending.append(row["id"])
+            if len(rows) == 12 and not any(row["status"] in ("completed", "failed", "cancelled") for row in rows) and first_wave is None:
+                first_wave = []
+                for row in rows:
+                    detail = self.api("GET", f"/api/v1/workspaces/{self.workspace}/pipeline-runs/{row['id']}")
+                    first_wave.append(dict(run_id=row["id"], index=detail["inputs"]["index"], started_at=row["started_at"]))
+                assert {12,13}.issubset({row["index"] for row in first_wave}), "high-priority requests did not enter the saturated first wave"
+            if len(rows) == 14 and all(row["status"] in ("completed", "failed", "cancelled") for row in rows):
+                for row in rows:
+                    detail = self.api("GET", f"/api/v1/workspaces/{self.workspace}/pipeline-runs/{row['id']}")
+                    assert detail["status"] == "completed" and detail["cost_usd"] == 0, "queued run failed or incurred cost"
+                    index = detail["inputs"]["index"]
+                    assert detail["output"] == str(index), "queued business output mismatch"
+                    started = datetime.fromisoformat(row["started_at"].replace("Z", "+00:00"))
+                    completed.append(dict(run_id=row["id"], index=index, queue_after_fire_ms=round((started-fire_at).total_seconds()*1000), duration_ms=detail["duration_ms"]))
+                break
+            time.sleep(0.5)
+        assert len(completed) == 14 and len({x["index"] for x in completed}) == 14, "lost or duplicated queued runs"
+        assert first_wave is not None, "could not observe saturated first wave; priority contention remains unverified"
+        self.pending = [run_id for run_id in self.pending if run_id not in {x["run_id"] for x in completed}]
+        return dict(first_wave=first_wave, runs=completed, scheduled=receipts, no_lost_or_duplicate_runs=True, ordering="priority observed at admission under saturation; completion order is not guaranteed")
 
     def execute_browser(self):
         self.api("POST", f"/api/v1/crews/{self.crew}/members", dict(user_id=self.test_user_id, role="MEMBER"), (201,200))
@@ -334,7 +450,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", default="crewship", help="authenticated Crewship CLI binary")
     parser.add_argument("--browser", action="store_true", help="with access bucket, verify routine messages in Playwright as MEMBER")
-    parser.add_argument("--bucket", choices=["deterministic", "access"], default="deterministic", help="access creates one synthetic account that remains after memberships are removed")
+    parser.add_argument("--bucket", choices=["deterministic", "access", "workflows"], default="deterministic", help="access creates one synthetic account that remains after memberships are removed")
     parser.add_argument("--profile", help="explicit existing CLI profile, useful in a worktree")
     parser.add_argument("--server", required=True, help="test server URL, e.g. http://localhost:8082")
     parser.add_argument("--output", required=True, help="new directory for incremental sanitized results")
@@ -350,6 +466,8 @@ def main():
         if suite.results[-1]["result"] == "PASS":
             if args.bucket == "access":
                 suite.execute_access()
+            elif args.bucket == "workflows":
+                suite.execute_workflows()
             else:
                 suite.execute()
     finally:

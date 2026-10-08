@@ -148,3 +148,25 @@ Credentials reach the browser driver through stdin and are excluded from reports
 Cross-workspace requests explicitly set `workspace_id` to the target workspace:
 the CLI injects its selected workspace into query parameters, and the server
 resolves that parameter before the path's workspace ID.
+
+### Complex foreach and real queue contention
+
+Select `--bucket workflows` with the same command and a fresh output directory.
+It executes five 32-item foreach recipes with two body steps, upstream outputs,
+shared inputs and different parallelism limits. It then enqueues 14 co-due
+agentless runs, submitting the two high-priority requests last. Short datetime
+waits hold the dispatcher slots so the test can observe whether high-priority
+requests enter the saturated first wave. Every result is checked for its own
+input-derived output, zero cost, durable completion and lack of lost/duplicate
+runs. This measures deferred dispatch, not contention on a model agent.
+
+The queue test takes about 35 seconds after setup and needs a test instance with
+an otherwise quiet dispatcher. It has a 65-second polling deadline and records
+per-run delay after `fire_at`; concurrent completion order is not guaranteed.
+An unobservable first wave fails the check rather than silently claiming
+priority coverage.
+
+The workflows bucket also verifies state written by a routine, read by its next
+run, repaired through the operator API, and removed/cleared. It checks budget
+set/clear and negative-value validation with a zero-cost routine; enforcement
+against actual paid spend still requires a separate authorized model scenario.
