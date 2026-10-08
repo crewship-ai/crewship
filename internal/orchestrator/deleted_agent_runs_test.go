@@ -6,8 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,8 +23,32 @@ import (
 func startDirectRun(t *testing.T, o *Orchestrator, st *memState, agentID, slug string, recordSlug bool) (RunState, *exec.Cmd, chan error) {
 	t.Helper()
 	runID := NewRunID()
-	args := directRunCommand(runID, []string{"sleep", "60"})
+	cmd, done, output := startDirectRunProcess(t, runID, []string{"sleep", "60"})
+	loc := RunLocation{ContainerID: "test", AgentSlug: slug, RunID: runID}
+	if err := awaitDirectRunAlive(o, loc, done, output, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	rs := RunState{ID: runID, AgentID: agentID, Status: "running", StartedAt: time.Now(), ContainerID: "test"}
+	if recordSlug {
+		rs.AgentSlug = slug
+	}
+	b, _ := json.Marshal(rs)
+	_ = st.Set(context.Background(), "agent_runs", runID, b)
+	return rs, cmd, done
+}
+
+// startDirectRunProcess launches argv under the direct-run wrapper with its
+// combined output captured, so a fixture that dies during startup can say why.
+func startDirectRunProcess(t *testing.T, runID string, argv []string) (*exec.Cmd, chan error, startupOutput) {
+	t.Helper()
+	args := directRunCommand(runID, argv)
 	cmd := exec.Command(args[0], args[1:]...)
+	f, err := os.CreateTemp(t.TempDir(), "direct-run-output-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	cmd.Stdout, cmd.Stderr = f, f
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -31,24 +58,68 @@ func startDirectRun(t *testing.T, o *Orchestrator, st *memState, agentID, slug s
 		_ = cmd.Process.Kill()
 		_ = exec.Command("rm", "-f", directRunPIDFile(runID)).Run()
 	})
-	loc := RunLocation{ContainerID: "test", AgentSlug: slug, RunID: runID}
-	deadline := time.Now().Add(5 * time.Second)
+	return cmd, done, startupOutput{path: f.Name()}
+}
+
+// awaitDirectRunAlive polls the probe until the run reads alive. It fails
+// with the evidence a bare "never became alive" used to throw away (#2892):
+// whether the wrapper exited and with what status, its output, the last probe
+// answer and the PID file it was supposed to write. done is drained only when
+// the process has exited; the exit status is put back for the caller.
+func awaitDirectRunAlive(o *Orchestrator, loc RunLocation, done chan error, output startupOutput, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var alive bool
+	var probeErr error
 	for {
-		if alive, err := o.RunIsAliveAt(context.Background(), loc); err == nil && alive {
-			break
+		alive, probeErr = o.RunIsAliveAt(context.Background(), loc)
+		if probeErr == nil && alive {
+			return nil
+		}
+		select {
+		case waitErr := <-done:
+			done <- waitErr
+			return fmt.Errorf("run never became alive: wrapper exited during startup (%s); last probe alive=%v err=%v; %s; output: %q",
+				exitDescription(waitErr), alive, probeErr, pidFileEvidence(loc.RunID), output.String())
+		default:
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("run never became alive")
+			return fmt.Errorf("run never became alive within %s: wrapper still running; last probe alive=%v err=%v; %s; output: %q",
+				timeout, alive, probeErr, pidFileEvidence(loc.RunID), output.String())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	rs := RunState{ID: runID, AgentID: agentID, Status: "running", StartedAt: time.Now(), ContainerID: "test"}
-	if recordSlug {
-		rs.AgentSlug = slug
+}
+
+func exitDescription(err error) string {
+	var exitErr *exec.ExitError
+	switch {
+	case err == nil:
+		return "exit status 0"
+	case errors.As(err, &exitErr):
+		return exitErr.Error()
+	default:
+		return "wait: " + err.Error()
 	}
-	b, _ := json.Marshal(rs)
-	_ = st.Set(context.Background(), "agent_runs", runID, b)
-	return rs, cmd, done
+}
+
+func pidFileEvidence(runID string) string {
+	b, err := os.ReadFile(directRunPIDFile(runID))
+	if err != nil {
+		return "pid file: " + err.Error()
+	}
+	return fmt.Sprintf("pid file: %q", strings.TrimSpace(string(b)))
+}
+
+// startupOutput is the wrapper's stdout+stderr. A file rather than a pipe:
+// with a pipe, Wait would also wait for the setsid child holding it open.
+type startupOutput struct{ path string }
+
+func (o startupOutput) String() string {
+	b, err := os.ReadFile(o.path)
+	if err != nil {
+		return "(unreadable: " + err.Error() + ")"
+	}
+	return string(b)
 }
 
 func runStatus(t *testing.T, st *memState, runID string) string {
