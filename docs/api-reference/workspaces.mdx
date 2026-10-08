@@ -367,13 +367,13 @@ This takes a `user_id` and only a `user_id`. When all you have is an email addre
 | Status | Condition |
 |---|---|
 | `400` | Missing `user_id`, invalid `role` |
-| `402` | License member limit reached |
+| `402` | Reserved for future license limits; currently unlimited |
 | `403` | Caller not `OWNER`/`ADMIN`, or tried to assign `ADMIN` without being `OWNER` |
 | `404` | `user_id` does not match any user |
 | `409` | User is already a member |
 
 <Accordion title="License limit (402 Payment Required)">
-When the workspace's license caps the member count, adding a member that would exceed it returns **`402 Payment Required`** with the limit detail in the Problem Details body. The check runs before the request body is read, so a capped workspace rejects every add regardless of payload. The same limit applies to [Create invitation](#create-invitation).
+Current releases allow unlimited members and do not return this license error. Resource licensing may change in future releases. If future enforcement caps the member count, adding a member that would exceed it returns **`402 Payment Required`** with the limit detail in the JSON error body. The check runs before the request body is read, so a capped workspace rejects every add regardless of payload. The same limit applies to [Create invitation](#create-invitation).
 </Accordion>
 
 ### Provision member
@@ -723,7 +723,7 @@ resolving an arbitrary address would be an account-existence oracle.
 | Status | Condition |
 |---|---|
 | `400` | Missing/invalid email or role |
-| `402` | License member limit exceeded |
+| `402` | Reserved for future license limits; currently unlimited |
 | `403` | Caller not `OWNER`/`ADMIN`, or tried to invite as `ADMIN` without being `OWNER` |
 | `409` | Email belongs to an existing member, or there's already a non-expired invitation for this email |
 

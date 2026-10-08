@@ -4191,18 +4191,18 @@ Bucketed time-series metrics for the dashboard charts. Returns zero-filled bucke
 ## License System
 
 <Note>
-**Roadmap (v0.2).** The license/edition system below is on the v0.2 roadmap. v0.1 ships as fully open-source Apache-2.0 with no edition gating.
+**Current behavior.** The open-source edition has unlimited crews, members and agents. The license API reports `0` for each resource limit, meaning unlimited. Resource licensing may change in future releases; the signed-license infrastructure remains available for that purpose.
 </Note>
 
-Crewship will use a three-tier licensing model that controls workspace limits and feature availability.
+The edition identifiers below are retained for future licensing. They do not impose resource limits in current releases, even when a loaded signed license contains finite caps.
 
 ### Editions
 
 | Edition | Description | Limits |
 |---------|-------------|--------|
-| **Community** | Free, default edition | 15 crews, 10 agents/crew, 5 members |
-| **Team** | Paid team tier | Higher limits, additional features |
-| **Enterprise** | Full enterprise tier | Unlimited, all features enabled |
+| **Community** | Free, default edition | Unlimited crews, agents/crew and members |
+| **Team** | Paid team tier | Reserved for future licensing |
+| **Enterprise** | Full enterprise tier | Reserved for future licensing |
 
 ### License Claims
 

@@ -138,7 +138,7 @@ export interface JournalIntegrity {
   error?: string
 }
 
-/** License edition + limits — GET /api/v1/system/license (read-only). */
+/** Effective license capacity — GET /api/v1/system/license. Zero means unlimited. */
 export interface LicenseInfo {
   edition: string
   licensee_org?: string

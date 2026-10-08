@@ -485,17 +485,17 @@ crewship admin stats --format json | jq '.crews'
 
 ```
 COUNT        VALUE
-Crews        3 of 15
+Crews        3
 Agents       8
-Members      2 of 5
+Members      2
 Running now  0
 Edition      community
 ```
 
-Counts are read against the ceiling the licence imposes on each: a bare "8
-agents" is not something anyone acts on, "3 of 15 crews" is. Where the edition
-imposes no ceiling, the bare count is shown. If the licence cannot be read the
-counts still print — losing the ceilings must not cost you the numbers.
+Current open-source releases permit unlimited crews, members and agents, so
+these counts have no license ceiling. Future releases may introduce resource
+licensing; the CLI retains support for displaying finite ceilings. If the
+license cannot be read, counts still print.
 
 ---
 
