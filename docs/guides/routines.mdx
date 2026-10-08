@@ -731,6 +731,12 @@ gates at run time, checked pre-flight AND on every redirect hop
 A blocked request fails the step with a structured error naming the step,
 the host, and which layer denied it — before any bytes leave the server.
 
+**Response redaction.** Known resolved credential values and their common JSON
+and URL encodings are redacted from HTTP results and request errors. This is
+best-effort protection, not detection of arbitrary derived values such as base64,
+hex or fragments. Upstream services should not echo credentials. Very short
+credentials may also redact unrelated output substrings.
+
 **Credential injection.** `credential_ref.type` is resolved at run time
 against the workspace credential vault by **type** (case-insensitive match
 on the vault type, e.g. `API_KEY`, `GENERIC_SECRET`), never by ID — so a
@@ -787,6 +793,12 @@ direction that matters — reading a destructive action as an ordinary one
 than being read as `normal`.
 
 Three kinds: `approval` (HITL token), `datetime` (sleep until ISO timestamp), `event` (external signal via `POST /api/v1/workspaces/{ws}/pipeline-runs/{runId}/signal`). Both `approval` and `event` survive a process restart: a top-level run parks (`status: WAITING`) with durable state — `pipeline_waitpoints` for approval, `pipeline_signal_waits` for event (migration v154, #1409) — and at boot the parked run is resumed from that state. For `event` specifically, a signal delivered while the process was down (or a hair before the step even reached the wait) is not lost: the signal endpoint records the delivery durably before attempting any in-process wake, and the resumed step reads it straight back out (see [Durability and restart recovery](#durability-and-restart-recovery)).
+
+`wait.timeout_sec` sets the wait's timeout. A positive `timeout_seconds` on
+the step takes precedence when both are supplied. Omitting both (or using
+zero) keeps the kind's default: 24 hours for approval, one hour for event,
+and no timeout for datetime. Existing parked waits retain their recorded
+deadline when resumed.
 
 **Event deadlines.** `timeout_seconds` also applies to parked `event` waits
 (default: one hour). The deadline is fixed when the step first arms; retrying
@@ -989,13 +1001,22 @@ The `files:` block works in **both** crew manifest shapes — a standalone `kind
 
 ### `transform`
 
+**Transform compatibility.** Transform supports field/array paths and standalone
+`length`, `keys`, `tostring`, `@json`/`tojson`; use `code` for arithmetic or pipes.
+Field names are literal, including `-`, `?` and `!`; this is not a full jq parser.
+Whitespace around an array index is accepted. Save and draft validation check
+all branches, including inactive ones. Existing definitions with unsupported
+syntax need a manual correction before re-saving or draft testing; there is no
+automatic migration. Ordinary execution of an existing routine still skips
+inactive branches and reports an error if an unsupported expression is reached.
+
 ```json
 {
-  "id": "extract_emails",
+  "id": "extract_email",
   "type": "transform",
   "transform": {
     "input": "{{ steps.fetch.output }}",
-    "expression": ".items[] | .email"
+    "expression": ".items[0].email"
   }
 }
 ```
@@ -2382,7 +2403,7 @@ pipeline: concurrency_key rendered to empty value (referenced input missing or e
 Why fail-fast: a routine that declares `concurrency_key: "{{ inputs.account_id }}"` is asking the platform to serialise runs per tenant. If `account_id` is missing, treating the empty key as "no gate" would silently allow unlimited parallelism for a routine the author explicitly asked us to serialise — a denial-of-self by misconfiguration. The executor refuses to start the run.
 
 Fixes, in order of preference:
-1. **Supply the input.** The caller (curl / `crewship routine run --inputs '{...}'` / scheduler / webhook) needs to pass the referenced input. For webhooks this means the `inputs_template` in the webhook config must produce it from the incoming payload.
+1. **Supply the input.** The caller (curl / `crewship routine run --inputs '{...}'` / scheduler / webhook) needs to pass the referenced input. Webhooks expose the incoming payload under `inputs.event`; `inputs_template` adds literal values and does not evaluate expressions or merge payload fields into top-level inputs.
 2. **Set a default on the InputSpec.** If the input is genuinely optional but you still want a tenant-style gate, add `"default": "global"` (or any non-empty sentinel) to the `InputSpec`. The platform merges defaults before rendering the key.
 3. **Use a literal prefix.** A template like `"vendor-alert-{{ inputs.vendor_id }}"` always renders non-empty (the literal `vendor-alert-` survives even when `vendor_id` is missing); the key still gates, just less granularly.
 4. **Drop the gate.** If you genuinely don't want concurrency control, omit `concurrency_key` entirely (do NOT set it to `""` — that's the *unset* sentinel).

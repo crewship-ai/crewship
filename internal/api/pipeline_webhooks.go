@@ -823,6 +823,21 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		targetDefinitionJSON = ver.DefinitionJSON
 	}
 
+	// Reject invalid inputs before committing acceptance/deduplication or
+	// returning a polling handle. Run repeats this gate authoritatively,
+	// but a pre-run rejection there cannot create a pipeline_runs row.
+	targetDSL, parseErr := pipeline.Parse([]byte(targetDefinitionJSON))
+	if parseErr != nil {
+		h.alertWebhookFireFailure(r.Context(), wh, "", "target routine definition is invalid")
+		replyError(w, http.StatusConflict, "target routine definition is invalid")
+		return
+	}
+	if inputErr := pipeline.ValidateFormInputs(targetDSL, inputs); inputErr != nil {
+		h.alertWebhookFireFailure(r.Context(), wh, "", "webhook inputs are invalid: "+inputErr.Error())
+		replyError(w, http.StatusBadRequest, inputErr.Error())
+		return
+	}
+
 	// Concurrency pre-check, synchronous — and it MUST come before the
 	// idempotency reservation below. An over-limit delivery answers
 	// 429 + Retry-After like the old synchronous handler did; a 202
@@ -837,21 +852,18 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	// same count-vs-max) the executor's Acquire enforces — same source
 	// of truth, evaluated early. It cannot RESERVE the slot, though, so
 	// a small TOCTOU window remains; the background goroutine below
-	// handles a residual ErrConcurrencyLimitReached explicitly. Parse
-	// or key-render errors fall through deliberately: the executor
-	// re-parses authoritatively and its failure path (Forget +
-	// RecordFire FAILED) surfaces them.
+	// handles a residual ErrConcurrencyLimitReached explicitly. Other
+	// precheck errors remain authoritative in the executor and are
+	// surfaced through the retained delivery receipt.
 	if h.runs != nil {
-		if dsl, derr := pipeline.Parse([]byte(targetDefinitionJSON)); derr == nil {
-			if cerr := h.runs.PrecheckConcurrency(r.Context(), dsl, wh.WorkspaceID, inputs); errors.Is(cerr, pipeline.ErrConcurrencyLimitReached) {
-				// Record the throttled attempt (parity with the old
-				// synchronous handler, which stamped FAILED before
-				// answering 429).
-				h.alertWebhookFireFailure(r.Context(), wh, "", "concurrency limit reached before a run could start")
-				w.Header().Set("Retry-After", "5")
-				replyError(w, http.StatusTooManyRequests, "concurrency limit reached")
-				return
-			}
+		if cerr := h.runs.PrecheckConcurrency(r.Context(), targetDSL, wh.WorkspaceID, inputs); errors.Is(cerr, pipeline.ErrConcurrencyLimitReached) {
+			// Record the throttled attempt (parity with the old
+			// synchronous handler, which stamped FAILED before
+			// answering 429).
+			h.alertWebhookFireFailure(r.Context(), wh, "", "concurrency limit reached before a run could start")
+			w.Header().Set("Retry-After", "5")
+			replyError(w, http.StatusTooManyRequests, "concurrency limit reached")
+			return
 		}
 	}
 

@@ -587,8 +587,10 @@ type WaitStep struct {
 	// event fields
 	EventType   string `json:"event_type,omitempty"`
 	EventFilter string `json:"event_filter,omitempty"` // simple equality match on payload
-	// TimeoutSec wraps the wait — exhausting it falls through to OnFail.
-	// 0 = no timeout (wait forever).
+	// TimeoutSec is the documented wait-body alias for timeout_seconds.
+	// A positive timeout_seconds on the step takes precedence. Zero uses
+	// the kind's default (24h for approval, 1h for event).
+	TimeoutSec int `json:"timeout_sec,omitempty"`
 }
 
 // RiskLevels is the accepted vocabulary for WaitStep.RiskLevel, in
@@ -616,12 +618,13 @@ func ValidRiskLevel(s string) bool {
 // fully deterministic. Useful for wiring step outputs together
 // without calling another agent_run just to format JSON.
 //
-// Expression is a small jq-flavored subset: ".path", ".path | tostring",
-// ".items[0]", ".name + '-' + .surname". Full grammar in
-// internal/pipeline/transform.go (separate file for parser tests).
+// Expression supports identity, field/array paths and the standalone
+// length, keys, tostring, @json and tojson operations. Arithmetic and
+// pipelines are not supported; use a code step for computation.
+// The shared parser and evaluator live in runner_transform.go.
 type TransformStep struct {
 	Input      string `json:"input"`      // template-substituted; usually {{ steps.X.output }}
-	Expression string `json:"expression"` // jq-flavored projection
+	Expression string `json:"expression"` // field/array path or standalone supported operation
 }
 
 // NotifyStep is a non-blocking inbox notification (Type == StepNotify).
