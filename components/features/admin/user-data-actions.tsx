@@ -13,6 +13,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { apiFetch } from "@/lib/api-fetch"
+import { controlHeight } from "@/components/features/settings/shared"
 
 /**
  * What can be done to one person's data: hand it over, or erase it.
@@ -173,7 +174,7 @@ export function UserDataActions({ userId, email, workspaceId, onErased }: UserDa
                   placeholder="e.g. erasure request #1234 from the data subject"
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
-                  className="h-8 text-xs"
+                  className={controlHeight}
                   autoFocus
                 />
               </div>

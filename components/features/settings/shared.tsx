@@ -29,7 +29,20 @@ import { PageSaveLabel, toastSaveError, usePageSave } from "@/components/ui/page
  * text size comes from the control primitives (text-control).
  */
 // coarse:h-[2.75rem] — a finger needs 44px; desktop density is untouched.
-export const settingsControl = "h-8 w-full sm:w-64 coarse:h-[2.75rem]"
+export const controlHeight = "h-8 coarse:h-[2.75rem]"
+export const settingsControl = cn(controlHeight, "w-full sm:w-64")
+/**
+ * A control inside a table or list row (a role picker, a model picker): one
+ * step smaller so the row keeps its rhythm, still a full finger on touch.
+ * Outside a SettingsRow, a form uses `controlHeight` and the primitive's
+ * text-control size; a dialog keeps the primitive's default.
+ */
+export const inlineControl = "h-7 text-xs coarse:h-[2.75rem]"
+/** A native <select> dressed as SelectTrigger, at control height. */
+export const nativeSelect = cn(
+  controlHeight,
+  "rounded-md border border-control-border bg-surface-subtle px-2.5 text-control text-foreground outline-none hover:border-line-strong focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50",
+)
 
 /** A custom picker button (popover combobox) dressed as SelectTrigger. */
 export const settingsPickerButton = cn(

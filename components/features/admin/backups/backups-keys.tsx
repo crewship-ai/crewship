@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { Bell, BellRing, KeyRound, LockKeyhole } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { SettingsCard, SettingsRow, SettingsSaveBar, SettingsSummary, SummaryItem, settingsControl } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsRow, SettingsSaveBar, SettingsSummary, SummaryItem, settingsControl, controlHeight } from "@/components/features/settings/shared"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -88,11 +88,11 @@ export function RecipientsList({ list, ctx, reload }: { list: BackupRecipient[];
       {adding ? (
         <div className="flex flex-col gap-2 border-t border-border px-4 py-3 text-[13px]">
           <Input aria-label="Key name" placeholder="Name, e.g. ops-2027" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-            className="h-8 coarse:h-[2.75rem]" />
+            className={controlHeight} />
           <Input aria-label="Public key" placeholder="age1…" value={form.public_key} onChange={(e) => setForm({ ...form, public_key: e.target.value })} spellCheck={false}
-            className="h-8 font-mono text-[12px] coarse:h-[2.75rem]" />
+            className={cn(controlHeight, "font-mono")} />
           <Input aria-label="Who holds the private key" placeholder="Who holds the private key" value={form.holder} onChange={(e) => setForm({ ...form, holder: e.target.value })}
-            className="h-8 coarse:h-[2.75rem]" />
+            className={controlHeight} />
           <div className="flex gap-1.5">
             <Button type="button" size="sm" className={rowButton} disabled={!valid} onClick={async () => {
               const out = await perform(ctx.demo, () => addRecipient({ name: form.name.trim(), public_key: form.public_key.trim(), holder: form.holder.trim() }), "Key added · new backups are encrypted to it", "The key could not be added")

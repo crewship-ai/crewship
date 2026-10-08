@@ -9,6 +9,8 @@ import { Switch } from "@/components/ui/switch"
 import { SettingsCard, SettingsRow } from "../shared"
 import { getAutomaticSoundCapability, type AutomaticSoundCapability } from "@/lib/notification-sound-coordinator"
 import { SOUND_PRESETS, SOUND_PREFERENCES_EVENT, readSoundPreferences, saveSoundPreferences, unlockNotificationAudio, playNotificationSound, isNotificationAudioReady, type SoundId, type SoundPreferences } from "@/lib/notification-sounds"
+import { nativeSelect } from "@/components/features/settings/shared"
+import { cn } from "@/lib/utils"
 
 export function NotificationSoundSettings() {
   const { session } = useAuth()
@@ -141,7 +143,7 @@ function NativeSelect({ value, onChange, options, ...rest }: { value: string; on
         {...rest}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-8 w-40 cursor-pointer appearance-none rounded-md border border-control-border bg-surface-subtle pl-3 pr-8 text-control text-foreground outline-none transition-colors hover:border-line-strong focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        className={cn(nativeSelect, "w-40 cursor-pointer appearance-none pl-3 pr-8 transition-colors")}
       >
         {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>

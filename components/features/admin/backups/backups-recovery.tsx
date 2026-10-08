@@ -301,8 +301,8 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
                   <input type="file" className="text-xs file:mr-2 file:h-7 file:rounded-md file:border file:border-control-border file:bg-card file:px-2.5 file:text-xs"
                     onChange={async (e) => { const f = e.target.files?.[0]; if (f) setIdentity(await f.text()) }} />
                 </label>
-                <Textarea aria-label="AGE identity" rows={2} value={identity} onChange={(e) => setIdentity(e.target.value)} placeholder="AGE-SECRET-KEY-1…" spellCheck={false} className="font-mono text-xs" />
-                <Input aria-label="Passphrase (older bundles)" type="password" placeholder="or passphrase (older bundles)" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} className="h-8 coarse:h-[2.75rem]" />
+                <Textarea aria-label="AGE identity" rows={2} value={identity} onChange={(e) => setIdentity(e.target.value)} placeholder="AGE-SECRET-KEY-1…" spellCheck={false} className="font-mono" />
+                <Input aria-label="Passphrase (older bundles)" type="password" placeholder="or passphrase (older bundles)" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} className={settingsControl} />
               </span>
             </SettingsRow>
             <SettingsRow label="Vault keys" description="Unlock credentials inside the restored data">

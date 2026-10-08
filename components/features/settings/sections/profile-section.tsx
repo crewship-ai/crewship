@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
-import { SettingsCard, SettingsRow, SettingsEmpty, settingsControl } from "../shared"
+import { SettingsCard, SettingsRow, SettingsEmpty, settingsControl, controlHeight } from "../shared"
 import { useDirtyForm } from "@/hooks/use-dirty-form"
 import { SaveFooter } from "@/components/ui/save-footer"
 import { DeviceSessions } from "./device-sessions"
@@ -555,17 +555,17 @@ export function ProfileSection({
               <div className="space-y-1">
                 <Label htmlFor="pw-current" className="text-xs">Current password</Label>
                 <Input id="pw-current" type="password" value={pwCurrent} autoComplete="current-password"
-                  onChange={(e) => setPwCurrent(e.target.value)} className="h-8 text-xs" disabled={pwSaving} />
+                  onChange={(e) => setPwCurrent(e.target.value)} className={controlHeight} disabled={pwSaving} />
               </div>
               <div className="space-y-1">
                 <Label htmlFor="pw-new" className="text-xs">New password</Label>
                 <Input id="pw-new" type="password" value={pwNew} autoComplete="new-password"
-                  onChange={(e) => setPwNew(e.target.value)} className="h-8 text-xs" disabled={pwSaving} />
+                  onChange={(e) => setPwNew(e.target.value)} className={controlHeight} disabled={pwSaving} />
               </div>
               <div className="space-y-1">
                 <Label htmlFor="pw-confirm" className="text-xs">Confirm new password</Label>
                 <Input id="pw-confirm" type="password" value={pwConfirm} autoComplete="new-password"
-                  onChange={(e) => setPwConfirm(e.target.value)} className="h-8 text-xs" disabled={pwSaving} />
+                  onChange={(e) => setPwConfirm(e.target.value)} className={controlHeight} disabled={pwSaving} />
               </div>
               {pwError && <p className="text-[11px] text-destructive">{pwError}</p>}
             </div>
@@ -700,7 +700,7 @@ export function ProfileSection({
                     id="token-name"
                     value={tokenName} onChange={(e) => setTokenName(e.target.value)}
                     placeholder="e.g. MacBook Pro, ci-deploy-bot"
-                    className="h-8 text-xs"
+                    className={controlHeight}
                     onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleCreateToken()}
                     autoFocus
                   />
@@ -726,7 +726,7 @@ export function ProfileSection({
                       </TooltipProvider>
                     </Label>
                     <Select value={tokenTier} onValueChange={(v) => setTokenTier(v as "STANDARD" | "ADMIN")}>
-                      <SelectTrigger className="h-8 text-xs">
+                      <SelectTrigger className={controlHeight}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -747,7 +747,7 @@ export function ProfileSection({
                       value={String(tokenExpirySeconds)}
                       onValueChange={(v) => setTokenExpirySeconds(Number(v))}
                     >
-                      <SelectTrigger className="h-8 text-xs">
+                      <SelectTrigger className={controlHeight}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>

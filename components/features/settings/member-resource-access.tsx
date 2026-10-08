@@ -7,6 +7,7 @@ import { z } from "zod"
 import { Button } from "@/components/ui/button"
 import { usePageSave } from "@/components/ui/page-save-bar"
 import { apiFetch } from "@/lib/api-fetch"
+import { nativeSelect } from "@/components/features/settings/shared"
 
 const rightSchema = z.object({ kind: z.enum(["agent", "project"]), id: z.string().min(1), operation: z.string() })
 const policySchema = z.object({
@@ -90,7 +91,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label }: {
     const right = { kind, id: resourceId, operation }
     if (!rights.some(existing => existing.kind === kind && existing.id === resourceId && existing.operation === operation)) setRights([...rights, right])
   }
-  const selectClass = "rounded-md border bg-background px-2 text-xs h-8 coarse:h-12"
+  const selectClass = nativeSelect
   const protectedRole = role === "OWNER" || role === "ADMIN"
   return <div className="space-y-3 text-xs">
     <label className="flex flex-wrap items-center gap-2">Access mode

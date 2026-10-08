@@ -31,7 +31,7 @@ import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
-import { SettingsCard, SettingsRow } from "../shared"
+import { SettingsCard, SettingsRow, inlineControl } from "../shared"
 import { MemberResourceAccess } from "../member-resource-access"
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -252,7 +252,7 @@ function MemberRoleControl({
         disabled={saving}
       >
         <SelectTrigger
-          className="h-6 w-[104px] text-[10px] px-2"
+          className={cn(inlineControl, "w-[7.5rem] px-2")}
           aria-label={`Change role for ${personLabel(member.user.full_name, member.user.email)}`}
         >
           <SelectValue />

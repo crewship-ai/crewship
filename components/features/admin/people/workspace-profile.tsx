@@ -6,13 +6,14 @@ import { AlertTriangle, ChevronRight, Mail, Plus, Settings as SettingsIcon, User
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { SettingsCard, SettingsDangerCard, SettingsRow } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsDangerCard, SettingsRow, controlHeight, nativeSelect } from "@/components/features/settings/shared"
 import { WeekLine, WorkspaceTile, ago } from "@/app/(dashboard)/admin/tabs/admin-kit"
 import {
   daysUntil, displayName, isLastOwner, membersOf, ownersOf, personStatus, roleIn, type Person, type Role, type Workspace,
 } from "./people-model"
 import { InlineConfirm, PersonLabel, RoleSelect, SetupLinkBox, StatusChip, roleLabel } from "./people-parts"
 import type { SetupLink, usePeople } from "./use-people"
+import { cn } from "@/lib/utils"
 
 type Actions = ReturnType<typeof usePeople>["actions"]
 
@@ -123,7 +124,7 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted }: {
           <div className="grid gap-1.5 border-t border-border px-4 py-2.5">
             <div className="flex flex-wrap items-center gap-2">
               <Input list={`cands-${ws.id}`} value={who} onChange={(e) => setWho(e.target.value)} placeholder="Name or email" aria-label="Person to add"
-                autoFocus className="h-8 min-w-0 flex-1" onKeyDown={(e) => { if (e.key === "Enter") void add() }} />
+                autoFocus className={cn(controlHeight, "min-w-0 flex-1")} onKeyDown={(e) => { if (e.key === "Enter") void add() }} />
               <datalist id={`cands-${ws.id}`}>
                 {candidates.map((p) => <option key={p.id} value={p.email}>{displayName(p)}</option>)}
               </datalist>
@@ -155,7 +156,7 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted }: {
       <SettingsDangerCard icon={AlertTriangle} title="Danger zone" description="Who owns this workspace, and whether it exists">
         <SettingsRow label="Transfer ownership" description="The new owner must be a member; the current owner stays on as Admin">
           <select aria-label="New owner" value={newOwner} onChange={(e) => setNewOwner(e.target.value)} disabled={nonOwners.length === 0}
-            className="h-8 w-40 rounded-md border border-control-border bg-surface-subtle px-2 text-control disabled:opacity-50">
+            className={cn(nativeSelect, "w-full sm:w-64")}>
             <option value="">{nonOwners.length ? "Choose…" : "No other member"}</option>
             {nonOwners.map((p) => <option key={p.id} value={p.id}>{displayName(p)}</option>)}
           </select>

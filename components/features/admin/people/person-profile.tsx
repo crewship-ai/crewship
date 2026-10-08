@@ -4,7 +4,7 @@ import * as React from "react"
 import { AlertTriangle, Building2, KeyRound, Plus, ShieldCheck, UserRound, Database, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { SettingsCard, SettingsDangerCard, SettingsRow } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsDangerCard, SettingsRow, nativeSelect } from "@/components/features/settings/shared"
 import { UserDataActions } from "@/components/features/admin/user-data-actions"
 import { UserSessions } from "./person-sessions"
 import { WorkspaceTile, ago } from "@/app/(dashboard)/admin/tabs/admin-kit"
@@ -13,6 +13,7 @@ import {
 } from "./people-model"
 import { InlineConfirm, PersonAvatar, RoleSelect, SetupLinkBox, StatusChip, roleLabel } from "./people-parts"
 import type { SetupLink, usePeople } from "./use-people"
+import { cn } from "@/lib/utils"
 
 type Actions = ReturnType<typeof usePeople>["actions"]
 
@@ -132,7 +133,7 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
           adding ? (
             <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2.5">
               <select aria-label="Workspace" value={addWs || available[0].id} onChange={(e) => setAddWs(e.target.value)}
-                className="h-8 min-w-0 flex-1 rounded-md border border-control-border bg-surface-subtle px-2 text-control">
+                className={cn(nativeSelect, "min-w-0 flex-1")}>
                 {available.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
               </select>
               <RoleSelect label="Role" value={addRole} onChange={(r) => r && setAddRole(r)} />
@@ -210,7 +211,7 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
         description={dataWs ? `Export or erase what ${workspaces.find((w) => w.id === dataWs)?.name ?? "this workspace"} holds about them` : "They belong to no workspace, so no workspace holds data about them"}>
         {person.memberships.length > 1 && (
           <select aria-label="Workspace for personal data" value={dataWs} onChange={(e) => setDataWs(e.target.value)}
-            className="mb-2 h-8 rounded-md border border-control-border bg-surface-subtle px-2 text-xs coarse:h-[2.75rem]">
+            className={cn(nativeSelect, "mb-2")}>
             {person.memberships.map((m) => <option key={m.workspace_id} value={m.workspace_id}>{m.name}</option>)}
           </select>
         )}

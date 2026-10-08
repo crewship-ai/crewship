@@ -43,7 +43,7 @@ import {
 } from "@/components/ui/select"
 import { SaveFooter } from "@/components/ui/save-footer"
 import { useDirtyForm } from "@/hooks/use-dirty-form"
-import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsRow, settingsControl } from "@/components/features/settings/shared"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
 import { apiFetch } from "@/lib/api-fetch"
@@ -598,7 +598,7 @@ function WatchdogCard({
               value={form.draft.sampleEvery}
               onChange={(e) => form.set("sampleEvery", e.target.value)}
               disabled={!canEdit}
-              className="h-8 w-16 text-xs text-right tabular-nums"
+              className={cn(settingsControl, "sm:w-16 text-right tabular-nums")}
               aria-label={`Review one in every N tool calls (${SAMPLE_EVERY_MIN}-${SAMPLE_EVERY_MAX})`}
               aria-invalid={sampleEveryProblem !== null}
               data-testid="keeper-governance-sample-every"
@@ -687,7 +687,7 @@ function WatchdogCard({
           // an over-long paste is refused before the round-trip, not lost to a 400.
           maxLength={WATCH_SPEC_MAX_LEN}
           placeholder={"flag any read of ~/.ssh or id_rsa\nflag credential access outside 08:00–18:00"}
-          className="mt-2 text-xs font-mono"
+          className="mt-2 font-mono"
           aria-label="Custom watch rules"
           data-testid="keeper-watch-spec"
         />
@@ -837,7 +837,7 @@ function FindingsRoutingCard({
           disabled={!canEdit}
         >
           <SelectTrigger
-            className="h-8 text-xs w-[220px]"
+            className={settingsControl}
             aria-label="Security contact"
             data-testid="keeper-governance-contact"
           >
@@ -875,7 +875,7 @@ function FindingsRoutingCard({
             value={form.draft.risk}
             onChange={(e) => form.set("risk", e.target.value)}
             disabled={!canEdit}
-            className="h-8 w-16 text-xs text-right tabular-nums"
+            className={cn(settingsControl, "sm:w-16 text-right tabular-nums")}
             aria-label="DENY notification risk threshold (1-10)"
             aria-invalid={!riskValid}
             data-testid="keeper-governance-risk"
@@ -1027,7 +1027,7 @@ function CredentialLeasesCard({
               value={form.draft.minutes}
               onChange={(e) => form.set("minutes", e.target.value)}
               disabled={!canEdit}
-              className="h-8 w-20 text-xs text-right tabular-nums"
+              className={cn(settingsControl, "sm:w-20 text-right tabular-nums")}
               aria-label="Credential auto-lease TTL in minutes (0 or empty to disable)"
               aria-invalid={problem !== null}
               data-testid="keeper-governance-auto-lease"
@@ -1207,7 +1207,7 @@ function GovernanceModelCard({
           disabled={!canEdit}
         >
           <SelectTrigger
-            className="h-8 text-xs w-[220px]"
+            className={settingsControl}
             aria-label="Governance model provider"
             data-testid="keeper-gov-provider"
           >
@@ -1240,7 +1240,7 @@ function GovernanceModelCard({
                 onChange={(e) => form.set("modelId", e.target.value)}
                 disabled={!canEdit}
                 placeholder={chosen?.modelHint}
-                className="h-8 w-[240px] text-xs font-mono"
+                className={cn(settingsControl, "font-mono")}
                 aria-label="Governance model id"
                 aria-required="true"
                 aria-invalid={modelMissing}
@@ -1292,7 +1292,7 @@ function GovernanceModelCard({
               disabled={!canEdit}
             >
               <SelectTrigger
-                className="h-8 text-xs w-[220px]"
+                className={settingsControl}
                 aria-label="Governance model credential"
                 data-testid="keeper-gov-credential"
               >

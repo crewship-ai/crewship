@@ -36,7 +36,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { SaveFooter } from "@/components/ui/save-footer"
 import { useDirtyForm } from "@/hooks/use-dirty-form"
 import { useIsInstanceAdmin } from "@/hooks/use-auth"
-import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsRow, settingsControl } from "@/components/features/settings/shared"
 import { cn } from "@/lib/utils"
 
 /** Where an effective value came from. Mirrors keepercfg.Source. */
@@ -581,7 +581,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
               onChange={(e) => form.set("endpoint", e.target.value)}
               disabled={!canEdit}
               placeholder="http://localhost:11434"
-              className="h-8 w-[240px] text-xs font-mono"
+              className={cn(settingsControl, "font-mono")}
               aria-label="Judge endpoint URL"
               data-testid="keeper-judge-endpoint"
             />
@@ -666,7 +666,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
               disabled={!canEdit}
             >
               <SelectTrigger
-                className="h-8 w-[240px] text-xs font-mono"
+                className={cn(settingsControl, "font-mono")}
                 aria-label="Judge model"
                 data-testid="keeper-judge-model-select"
               >
@@ -685,7 +685,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
               onChange={(e) => form.set("model", e.target.value)}
               disabled={!canEdit}
               placeholder="qwen2.5:7b"
-              className="h-8 w-[240px] text-xs font-mono"
+              className={cn(settingsControl, "font-mono")}
               aria-label="Judge model"
               data-testid="keeper-judge-model"
             />
@@ -730,7 +730,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
             value={form.draft.timeoutSec}
             onChange={(e) => form.set("timeoutSec", e.target.value)}
             disabled={!canEdit}
-            className="h-8 w-[80px] text-xs font-mono"
+            className={cn(settingsControl, "sm:w-20 font-mono")}
             aria-label="Judge time budget in seconds"
             data-testid="keeper-judge-timeout"
           />

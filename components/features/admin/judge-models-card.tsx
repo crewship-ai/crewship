@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import { SettingsCard, SettingsRow, SettingsEmpty } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsRow, SettingsEmpty, inlineControl } from "@/components/features/settings/shared"
 import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
 import { cn } from "@/lib/utils"
 
@@ -640,7 +640,7 @@ function SlotEditor({
             void onSave(slot.slot, { provider: next, model: slot.model.value })
           }}
         >
-          <SelectTrigger size="sm" className="h-7 w-[7.5rem] text-xs" aria-label={`${slot.label} provider`}>
+          <SelectTrigger size="sm" className={cn(inlineControl, "w-[7.5rem]")} aria-label={`${slot.label} provider`}>
             <SelectValue placeholder="provider" />
           </SelectTrigger>
           <SelectContent>
@@ -660,7 +660,7 @@ function SlotEditor({
         >
           <SelectTrigger
             size="sm"
-            className="h-7 min-w-[11rem] text-xs font-mono"
+            className={cn(inlineControl, "min-w-[11rem] font-mono")}
             aria-label={`${slot.label} model`}
             data-testid={`keeper-aux-model-${slot.slot}`}
           >
@@ -691,7 +691,7 @@ function SlotEditor({
           >
             <SelectTrigger
               size="sm"
-              className="h-7 w-[9.5rem] text-[11px]"
+              className={cn(inlineControl, "w-[9.5rem]")}
               aria-label={`${slot.label} key`}
               data-testid={`keeper-aux-credential-${slot.slot}`}
             >

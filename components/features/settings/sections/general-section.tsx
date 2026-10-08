@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button"
 import { LANGUAGES } from "@/lib/languages"
 import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier, isOwner } from "@/lib/permissions/tiers"
-import { SettingsCard, SettingsRow, SettingsDangerCard, settingsControl, settingsPickerButton } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsRow, SettingsDangerCard, settingsControl, settingsPickerButton, controlHeight } from "@/components/features/settings/shared"
 import { PagesAppearanceCard } from "./pages-appearance-card"
 import { WorkspaceLogoRow } from "./workspace-logo-row"
 import { cn } from "@/lib/utils"
@@ -344,7 +344,7 @@ export function GeneralSection({
                     spellCheck={false}
                     aria-label="Confirm workspace slug"
                     placeholder={orgSlug}
-                    className="h-8 text-xs font-mono"
+                    className={cn(controlHeight, "font-mono")}
                     disabled={isDeleting}
                   />
                 </div>

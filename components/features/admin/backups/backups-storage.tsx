@@ -5,9 +5,7 @@ import { toast } from "sonner"
 import { Gauge, HardDrive, Info, Server } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import {
-  SettingsCard, SettingsRow, SettingsSaveBar, SettingsSummary, SummaryItem, settingsControl,
-} from "@/components/features/settings/shared"
+import { SettingsCard, SettingsRow, SettingsSaveBar, SettingsSummary, SummaryItem, settingsControl, controlHeight } from "@/components/features/settings/shared"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -201,7 +199,7 @@ export function AddDestinationForm({ ctx, onDone }: { ctx: SectionCtx; onDone: (
   const valid = /^https?:\/\/\S+$/.test(form.endpoint.trim()) && form.bucket.trim() && form.access_key_id.trim() && form.secret_access_key.trim()
   const field = (k: "name" | "endpoint" | "region" | "bucket" | "prefix" | "access_key_id", label: string, placeholder: string, mono = false) => (
     <Input aria-label={label} placeholder={placeholder} value={form[k]} spellCheck={false} onChange={(e) => set(k, e.target.value)}
-      className={cn("h-8 coarse:h-[2.75rem]", mono && "font-mono text-[12px]")} />
+      className={cn(controlHeight, mono && "font-mono")} />
   )
   return (
     <div data-slot="add-destination" className="flex flex-col gap-2.5 border-b border-border px-4 py-3 text-[13px] last:border-b-0">
@@ -212,7 +210,7 @@ export function AddDestinationForm({ ctx, onDone }: { ctx: SectionCtx; onDone: (
         {field("prefix", "Prefix", "Prefix, e.g. crewship/prod", true)}
         {field("access_key_id", "Access key ID", "Access key ID", true)}
         <Input aria-label="Secret access key" placeholder="Secret access key" type="password" autoComplete="off" value={form.secret_access_key}
-          onChange={(e) => set("secret_access_key", e.target.value)} className="h-8 font-mono text-[12px] coarse:h-[2.75rem]" />
+          onChange={(e) => set("secret_access_key", e.target.value)} className={cn(controlHeight, "font-mono")} />
         {field("name", "Name", "Name (default: bucket/prefix)")}
       </div>
       <label className="flex items-center gap-2">

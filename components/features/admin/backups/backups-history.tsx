@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { SettingsSegmented, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
+import { SettingsSegmented, SettingsSummary, SummaryItem, nativeSelect } from "@/components/features/settings/shared"
 import { Chip, Gate, WsName } from "./backups-kit"
 import { formatPhases, formatSize, formatWhen, proofLabel, runPlanLabel, runResult, type BackupRun } from "./backups-model"
 import { checkBundle, downloadHref, pinBundle, useBackupRuns, workspaceFor } from "./use-backup-runs"
@@ -108,7 +108,7 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
           {!ctx.inDrill && <SettingsSegmented label="Filter runs" options={FILTERS} value={localFilter} onChange={setLocalFilter} />}
           {plans.length > 1 && (
             <select aria-label="Plan" value={plan} onChange={(e) => setPlan(e.target.value)}
-              className="h-8 rounded-md border border-control-border bg-surface-subtle px-2.5 text-xs coarse:h-[2.75rem]">
+              className={nativeSelect}>
               <option value="">All plans</option>
               {plans.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>

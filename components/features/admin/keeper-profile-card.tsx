@@ -32,7 +32,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { SaveFooter } from "@/components/ui/save-footer"
 import { useDirtyForm } from "@/hooks/use-dirty-form"
 import { useIsInstanceAdmin } from "@/hooks/use-auth"
-import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsRow, settingsControl } from "@/components/features/settings/shared"
 import { cn } from "@/lib/utils"
 
 type ConfigSource = "instance" | "env" | "profile" | "default"
@@ -233,7 +233,7 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
           onValueChange={(v) => form.set("name", v)}
           disabled={!canEdit}
         >
-          <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+          <SelectTrigger className={settingsControl}><SelectValue /></SelectTrigger>
           <SelectContent>
             {(p.choices ?? ["lean", "standard", "thorough"]).map((c) => (
               <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>
@@ -302,7 +302,7 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
           onValueChange={(v) => form.set("escalateFrom", v)}
           disabled={!canEdit}
         >
-          <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue /></SelectTrigger>
+          <SelectTrigger className={settingsControl}><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="0" className="text-xs">Tier default (L4 only)</SelectItem>
             <SelectItem value="1" className="text-xs">L1 and above</SelectItem>
@@ -354,7 +354,7 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
           value={form.draft.budget}
           onChange={(e) => form.set("budget", e.target.value)}
           disabled={!canEdit}
-          className="h-8 w-[110px] text-xs"
+          className={cn(settingsControl, "sm:w-28")}
           aria-label="Prompt budget"
           data-testid="keeper-profile-budget"
         />

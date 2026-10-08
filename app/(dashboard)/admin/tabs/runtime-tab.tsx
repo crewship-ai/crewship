@@ -5,7 +5,7 @@ import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { SettingsCard, SettingsDangerCard, SettingsRow, SettingsSaveBar, SettingsSegmented, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsDangerCard, SettingsRow, SettingsSaveBar, SettingsSegmented, SettingsSummary, SummaryItem, inlineControl } from "@/components/features/settings/shared"
 import { RuntimeIcon, runtimeBrand } from "@/components/icons/runtime-icons"
 import { apiFetch } from "@/lib/api-fetch"
 import { withWs } from "@/lib/admin-workspace-query"
@@ -503,7 +503,7 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string | null }) {
           <Label htmlFor="prune-confirm" className="text-[11px] font-normal text-muted-foreground">
             Type <span className="font-mono text-foreground">remove</span> to delete every crew&apos;s containers and volumes
           </Label>
-          <Input id="prune-confirm" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" className="h-7 w-32 font-mono text-xs" />
+          <Input id="prune-confirm" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" className={cn(inlineControl, "w-32 font-mono")} />
           <Button variant="destructive" size="sm" className="h-7 px-2.5 text-xs" disabled={typed.trim().toLowerCase() !== "remove" || busy === "prune"} onClick={pruneCrews}>
             {busy === "prune" && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Remove every runtime
           </Button>

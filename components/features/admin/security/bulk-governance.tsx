@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { toastSaveError } from "@/components/ui/page-save-bar"
-import { SettingsCard, SettingsSaveBar } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsSaveBar, controlHeight } from "@/components/features/settings/shared"
 import { saveDefaults, saveInstanceGovernance, type DefaultsResult, type GovSaveResult, type GovTargets, type InstanceGovRow, type InstanceGovSettings } from "./use-instance-keeper"
 
 /**
@@ -212,7 +212,7 @@ export function BulkGovernanceForm({
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {f.text ? (
-                    <Input aria-label={f.label} className="h-8 max-w-xs text-xs" value={String(value ?? "")}
+                    <Input aria-label={f.label} className={cn(controlHeight, "max-w-xs")} value={String(value ?? "")}
                       placeholder={shared === undefined ? "Mixed" : undefined}
                       onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))} />
                   ) : (
@@ -340,7 +340,7 @@ export function DefaultsForm({ current, onSaved }: { current: InstanceGovSetting
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {f.text ? (
-                    <Input aria-label={f.label} className="h-8 max-w-xs text-xs coarse:h-[2.75rem]" value={String(value ?? "")}
+                    <Input aria-label={f.label} className={cn(controlHeight, "max-w-xs")} value={String(value ?? "")}
                       onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))} />
                   ) : (
                     <Segmented field={f} value={value} name={f.label} onPick={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
