@@ -57,7 +57,7 @@ crewship work list --agent research-agent -f json
 
 **Output columns:** ID, STATE, SOURCE, EVENT, AGENT, ATTEMPTS, CREATED
 
-AGENT is the agent's name, or `(deleted) <id>` once the agent is gone. EVENT is
+AGENT is the agent's name, prefixed `(deleted)` once the agent was removed — with its id when no record of it remains. EVENT is
 the webhook event a delivery carried. The capacity class, crew, duration and
 cost are in `-f json`.
 

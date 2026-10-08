@@ -7950,6 +7950,9 @@
           "avatar_style": {
             "type": "string"
           },
+          "deleted": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           },
@@ -7965,7 +7968,8 @@
           "name",
           "slug",
           "avatar_seed",
-          "avatar_style"
+          "avatar_style",
+          "deleted"
         ],
         "type": "object"
       },

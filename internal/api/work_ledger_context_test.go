@@ -6,6 +6,7 @@ package api
 // went. Additive fields; access is the list's own.
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -110,5 +111,42 @@ func TestWebhookDeliveriesList_NamesTheAgentAndTheWorksState(t *testing.T) {
 	}
 	if page.Items[0].WorkState == nil || *page.Items[0].WorkState != "needs_reconciliation" {
 		t.Errorf("work_state = %v, want needs_reconciliation", page.Items[0].WorkState)
+	}
+}
+
+// An agent deleted from the workspace keeps its row (deleted_at) and its name:
+// the ledger says it was deleted rather than presenting it as a live agent.
+func TestWorkItemsList_SaysASoftDeletedAgentIsDeleted(t *testing.T) {
+	db := setupTestDB(t)
+	user := seedTestUser(t, db)
+	ws := seedTestWorkspace(t, db, user)
+	crew := seedCrewRow(t, db, "crew-x", ws, "Shop", "shop")
+	agent := seedAgentRow(t, db, "agent-robot", ws, crew, "Lab Robot", "lab-robot", "AGENT")
+	if _, err := db.Exec(`UPDATE agents SET deleted_at = datetime('now') WHERE id = ?`, agent); err != nil {
+		t.Fatal(err)
+	}
+	seedWorkItem(t, db, seededWork{ID: "wk-robot", WorkspaceID: ws, State: "failed", Source: "webhook", AgentID: agent})
+
+	rr := httptest.NewRecorder()
+	NewWorkItemsHandler(db, quietLogger()).List(rr, workReq(t, "GET", "/x", "", user, ws, "OWNER"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	var page struct {
+		Items []struct {
+			Agent *struct {
+				Name    string `json:"name"`
+				Deleted bool   `json:"deleted"`
+			} `json:"agent"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Agent == nil {
+		t.Fatalf("want one item with its agent, got %s", rr.Body.String())
+	}
+	if got := page.Items[0].Agent; got.Name != "Lab Robot" || !got.Deleted {
+		t.Fatalf("a soft-deleted agent must keep its name and say deleted, got %+v", got)
 	}
 }

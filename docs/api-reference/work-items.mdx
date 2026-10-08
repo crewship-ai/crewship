@@ -81,7 +81,7 @@ does not resolve ids by hand:
 
 | Field | Meaning |
 |---|---|
-| `agent` | `{ id, name, slug, avatar_seed, avatar_style }` of the agent that runs the work; `null` once the agent is deleted (`agent_id` stays) |
+| `agent` | `{ id, name, slug, avatar_seed, avatar_style, deleted }` of the agent that runs the work. `deleted` is true for an agent removed from the workspace whose record remains; `null` when no record remains (`agent_id` stays) |
 | `crew` | `{ id, name, color, icon }` of that agent's crew; `null` when unknown |
 | `event_type` | For webhook work, the event the delivery carried (`issues`, `invoice.overdue`); empty otherwise |
 | `duration_ms` | From the first attempt's start to the last attempt's end; `null` until an attempt has ended |
