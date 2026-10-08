@@ -589,7 +589,7 @@ export function ActivitySidebar({
 
   return (
     <div className="flex h-full flex-col">
-      <SidebarToolbar>
+      <SidebarToolbar className="relative">
         <SidebarSearch
           value={search}
           onValueChange={onSearchChange}
@@ -599,11 +599,13 @@ export function ActivitySidebar({
         <SidebarFilterPopover
           label="Filter activity"
           activeCount={activeFilterCount(facets, focus != null)}
-          // The panel is anchored to the trigger's right edge inside a 280px
-          // rail that clips its overflow, so anything wider than the trigger's
-          // distance from the rail's left edge loses its first characters —
-          // "FILTERS" rendering as "TERS" is what 264px looked like.
-          panelClassName="w-[228px]"
+          // Hung from the toolbar, not the trigger. The rail clips its
+          // overflow, and with Group by and collapse right of the trigger the
+          // kit's right-edge anchor pushed the panel past the rail's left edge
+          // ("FILTERS" read as "LTERS" on dev3). The toolbar is the one box
+          // that always fits: the panel spans it, gutter to gutter.
+          className="static"
+          panelClassName="left-2 right-2 top-full -mt-1 w-auto"
           onClear={() => {
             onChange(clearedFilters(facets))
             onFocus(null)

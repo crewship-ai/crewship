@@ -229,6 +229,19 @@ describe("ActivitySidebar — the shared sidebar recipe", () => {
     expect(onLens).toHaveBeenCalledWith("issues")
   })
 
+  it("hangs the filter panel from the toolbar so the rail never clips it", () => {
+    // Group by and collapse sit right of the trigger, so a panel hung from the
+    // trigger's right edge grew left past the rail, which clips its overflow —
+    // "FILTERS" read as "LTERS" on dev3. Spanning the toolbar always fits.
+    mount()
+    fireEvent.click(screen.getByRole("button", { name: /filter/i }))
+    const panel = screen.getByRole("group", { name: "Filter activity" })
+    expect(panel.className).toMatch(/\bleft-2\b/)
+    expect(panel.className).toMatch(/\bright-2\b/)
+    expect(panel.className).not.toMatch(/\bright-0\b/)
+    expect(panel.parentElement?.className).toMatch(/\bstatic\b/)
+  })
+
   it("opens the work and delivery ledgers from the rail", () => {
     const onOpenSection = vi.fn()
     mount({ onOpenSection })
