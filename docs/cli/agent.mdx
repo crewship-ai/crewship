@@ -575,7 +575,12 @@ upgrading the avatar library repaints every agent. Once a render is stored,
 that exact image is served instead and the face stops moving.
 
 An agent with no stored render is in the normal, pre-persistence state, not
-a broken one.
+a broken one. The CLI cannot draw a render (the generator runs in the
+browser), so agents created with `crewship agent create` start without one.
+The dashboard stores renders when an agent is created or edited there, and
+its **Store missing avatars** action fills in the rest — see
+[Agent avatars](/api-reference/agents#agent-avatars). Viewing an agent never
+stores one.
 
 ### `crewship agent avatar show`
 

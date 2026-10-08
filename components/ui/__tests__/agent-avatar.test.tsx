@@ -2,14 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 // Persisted agent avatars (#1297) — the component's job is to prefer a
-// stored render when there is one, degrade to seed generation whenever it
-// can't be used, and hand the server a render for agents that lack one.
+// stored render when there is one and degrade to seed generation whenever it
+// can't be used. It never writes one (#2876): see
+// agent-avatar-view-is-read.test.tsx.
 
 const h = vi.hoisted(() => ({
   /** Set to make resolveStoredAvatarSrc decline (bearer mode, no stored render). */
   declineStored: false,
-  /** What useWorkspace() reports — null models a store that hasn't resolved. */
-  workspaceId: "ws-1" as string | null,
 }))
 
 vi.mock("@/lib/agent-avatar", () => ({
@@ -24,25 +23,15 @@ vi.mock("@/lib/agent-avatar", () => ({
 vi.mock("@/lib/agent-avatar-persist", () => ({
   resolveStoredAvatarSrc: (url: string | null | undefined) =>
     !url || h.declineStored ? null : `resolved:${url}`,
-  queueAvatarBackfill: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock("@/hooks/use-avatar-styles", () => ({ useAvatarStylesVersion: () => 0 }))
 
-vi.mock("@/hooks/use-workspace", () => ({
-  useCurrentWorkspaceId: () => h.workspaceId,
-}))
-
-import { queueAvatarBackfill } from "@/lib/agent-avatar-persist"
 
 import { AgentAvatar } from "../agent-avatar"
 
-const mockBackfill = vi.mocked(queueAvatarBackfill)
-
 beforeEach(() => {
-  mockBackfill.mockClear()
   h.declineStored = false
-  h.workspaceId = "ws-1"
 })
 
 describe("AgentAvatar", () => {
@@ -59,7 +48,6 @@ describe("AgentAvatar", () => {
   it("prefers the stored render, resolved from the avatarUrl prop", () => {
     render(
       <AgentAvatar
-        agentId="ag-1"
         seed="alice"
         style="thumbs"
         avatarUrl="/api/v1/agents/ag-1/avatar?v=abc"
@@ -78,7 +66,6 @@ describe("AgentAvatar", () => {
     h.declineStored = true
     render(
       <AgentAvatar
-        agentId="ag-1"
         seed="alice"
         style="thumbs"
         avatarUrl="/api/v1/agents/ag-1/avatar?v=abc"
@@ -99,7 +86,6 @@ describe("AgentAvatar", () => {
   it("falls back to generating when the stored render fails to load", async () => {
     render(
       <AgentAvatar
-        agentId="ag-1"
         seed="alice"
         style="thumbs"
         avatarUrl="/api/v1/agents/ag-1/avatar?v=abc"
@@ -114,65 +100,6 @@ describe("AgentAvatar", () => {
         "data:image/svg+xml;utf8,generated-alice-thumbs",
       ),
     )
-  })
-
-  // The workspace id is part of the offer, not decoration: the PUT is
-  // workspace-scoped and the server refuses it outright without one (#2196).
-  it("offers a render to the server for an agent that has none", async () => {
-    render(<AgentAvatar agentId="ag-1" seed="alice" style="thumbs" />)
-    await waitFor(() =>
-      expect(mockBackfill).toHaveBeenCalledWith("ag-1", "alice", "thumbs", "ws-1"),
-    )
-  })
-
-  // /onboarding renders a real agent's avatar and never mounts the workspace
-  // store, so the store-only read would report null there for the whole visit
-  // and skip the backfill. The prop is how that route supplies the id it
-  // already has.
-  it("prefers an explicit workspaceId over the store", async () => {
-    h.workspaceId = null
-    render(<AgentAvatar agentId="ag-1" seed="alice" style="thumbs" workspaceId="ws-onboarding" />)
-    await waitFor(() =>
-      expect(mockBackfill).toHaveBeenCalledWith("ag-1", "alice", "thumbs", "ws-onboarding"),
-    )
-  })
-
-  // The workspace store resolves asynchronously, so a cold first paint has no
-  // id. The component still offers — queueAvatarBackfill is the one place
-  // that decides what a missing workspace means — and re-offers once the id
-  // lands, because workspaceId is in the effect's dependencies.
-  it("re-offers once the workspace store resolves", async () => {
-    h.workspaceId = null
-    const { rerender } = render(<AgentAvatar agentId="ag-1" seed="alice" style="thumbs" />)
-    await waitFor(() =>
-      expect(mockBackfill).toHaveBeenCalledWith("ag-1", "alice", "thumbs", null),
-    )
-
-    h.workspaceId = "ws-1"
-    rerender(<AgentAvatar agentId="ag-1" seed="alice" style="thumbs" />)
-    await waitFor(() =>
-      expect(mockBackfill).toHaveBeenCalledWith("ag-1", "alice", "thumbs", "ws-1"),
-    )
-  })
-
-  it("does not re-offer a render for an agent that already has one", async () => {
-    render(
-      <AgentAvatar
-        agentId="ag-1"
-        seed="alice"
-        style="thumbs"
-        avatarUrl="/api/v1/agents/ag-1/avatar?v=abc"
-      />,
-    )
-    await waitFor(() => expect(mockBackfill).not.toHaveBeenCalled())
-  })
-
-  // Most call sites render an avatar for something that isn't a persisted
-  // agent row (a crew, a skill author, a comment byline). Those have no id
-  // to store against and must stay exactly as they are.
-  it("does not offer a render when there is no agent id", async () => {
-    render(<AgentAvatar seed="alice" style="thumbs" />)
-    await waitFor(() => expect(mockBackfill).not.toHaveBeenCalled())
   })
 
   it("keeps the existing class merging and img passthrough behaviour", () => {

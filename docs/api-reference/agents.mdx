@@ -1274,10 +1274,19 @@ header. Rebuilding the URL by hand and dropping that parameter yields a
 
 <Note>
   The server never draws an avatar (the generator is JavaScript-only). The
-  client renders the image and stores it — at creation, or the first time
-  someone with edit rights views an agent that has none. Agents created
-  through the CLI or crew templates therefore start with `avatar_url: null`
-  and get filled in later.
+  dashboard renders the image and stores it when someone **creates or edits**
+  an agent there: the agent editor, the avatar picker, a crew's avatar style
+  and a crew created from a template. Viewing an agent never stores anything —
+  a render is a write, and a read must not cause one.
+
+  Agents created elsewhere (the CLI, the API, Captain) and agents that predate
+  this start with `avatar_url: null`. Store theirs with the explicit backfill:
+  **Settings › General › Agent avatars › Store missing avatars** for the whole
+  workspace (admins), or the same button beside **Avatar style** in a crew's
+  **Settings** tab for that crew (managers and up). It calls the `PUT` below
+  once per agent without a render and reports how many it stored, and how many
+  it skipped because you cannot edit them. To store an SVG of your own instead,
+  use [`crewship agent avatar set`](/cli/agent#crewship-agent-avatar-set).
 </Note>
 
 ### Get stored avatar

@@ -581,7 +581,6 @@ export function ConversationsSidebar({
                   <AgentAvatar
                     seed={agent.avatar_seed || agent.slug}
                     style={agent.avatar_style}
-                    agentId={agent.id}
                     avatarUrl={agent.avatar_url}
                     alt=""
                     className="h-4 w-4 shrink-0 rounded-[5px]"
@@ -725,7 +724,6 @@ export function ConversationsSidebar({
                   <AgentAvatar
                     seed={a.avatar_seed || a.slug}
                     style={a.avatar_style}
-                    agentId={a.id}
                     avatarUrl={a.avatar_url}
                     alt=""
                     className="h-5 w-5 shrink-0 rounded-[6px]"
@@ -903,7 +901,6 @@ export function ConversationsSidebar({
                       <AgentAvatar
                         seed={a.avatar_seed || a.slug}
                         style={a.avatar_style}
-                        agentId={a.id}
                         avatarUrl={a.avatar_url}
                         alt=""
                         className="h-4 w-4 rounded-[5px]"
@@ -933,7 +930,6 @@ export function ConversationsSidebar({
                       <AgentAvatar
                         seed={a.avatar_seed || a.slug}
                         style={a.avatar_style}
-                        agentId={a.id}
                         avatarUrl={a.avatar_url}
                         alt=""
                         className="h-5 w-5 rounded-[6px]"
@@ -1028,7 +1024,6 @@ function ConversationListRow({
         <AgentAvatar
           seed={agent.avatar_seed || agent.slug}
           style={agent.avatar_style}
-          agentId={agent.id}
           avatarUrl={agent.avatar_url}
           alt=""
           className="h-5 w-5 rounded-[6px]"

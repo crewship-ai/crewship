@@ -852,7 +852,6 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 <AgentAvatar
                   seed={agent.avatar_seed || agent.name}
                   style={agent.avatar_style || agent.crew?.avatar_style}
-                  agentId={agent.id}
                   avatarUrl={agent.avatar_url}
                   className="h-5 w-5 rounded-full shrink-0"
                 />

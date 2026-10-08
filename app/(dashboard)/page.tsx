@@ -268,11 +268,11 @@ export default function DashboardPage() {
 
         <div className="grid min-w-0 grid-cols-1 gap-3 xl:h-[520px] xl:grid-cols-3">
           <Appear order={1} className="min-w-0 xl:col-span-2 xl:min-h-0">
-            <DashboardResults key={workspaceId} review={reviewQ.data ?? []} inProgress={inProgressQ.data ?? []} completed={completedQ.data ?? []} activeAgentRuns={agentRunsQ.data ?? []} activeRoutineRuns={activeRuns.runs} recentRoutineRuns={activeRuns.recentDashboardRuns} agents={agents} crews={crews} workspaceId={workspaceId} loading={reviewQ.isPending || inProgressQ.isPending || completedQ.isPending || agentRunsQ.isPending} error={reviewQ.isError || inProgressQ.isError || completedQ.isError || agentRunsQ.isError} routineError={activeRuns.error} routineLoading={activeRuns.loading} onRetry={() => { void reviewQ.refetch(); void inProgressQ.refetch(); void completedQ.refetch(); void agentRunsQ.refetch(); activeRuns.refresh() }} />
+            <DashboardResults key={workspaceId} review={reviewQ.data ?? []} inProgress={inProgressQ.data ?? []} completed={completedQ.data ?? []} activeAgentRuns={agentRunsQ.data ?? []} activeRoutineRuns={activeRuns.runs} recentRoutineRuns={activeRuns.recentDashboardRuns} agents={agents} crews={crews} loading={reviewQ.isPending || inProgressQ.isPending || completedQ.isPending || agentRunsQ.isPending} error={reviewQ.isError || inProgressQ.isError || completedQ.isError || agentRunsQ.isError} routineError={activeRuns.error} routineLoading={activeRuns.loading} onRetry={() => { void reviewQ.refetch(); void inProgressQ.refetch(); void completedQ.refetch(); void agentRunsQ.refetch(); activeRuns.refresh() }} />
           </Appear>
           <Appear order={2} className="flex min-w-0 flex-col gap-3 xl:min-h-0 [&>div]:h-auto">
             <UpNext schedules={schedules.schedules} />
-            <FleetBoard cards={fleetCards} workspaceId={workspaceId} />
+            <FleetBoard cards={fleetCards} />
           </Appear>
         </div>
 
