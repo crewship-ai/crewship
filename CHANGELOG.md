@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- ⚠️ **Behaviour change: a routine `agent_run` step now waits for a busy agent instead of failing at once.** When a chat, an assignment or another routine holds the agent, the step waits up to its `timeout_seconds` (15 minutes without one) or until the run is stopped, then fails with a reason naming the busy agent. Waiting steps take the agent in no guaranteed order, hold their run and do not survive a restart. (#3023)
 - **Open-source license capacity showed inactive limits.** The license API, administration and CLI now report unlimited crews, members and agents, including when a signed license contains historical caps. Signed claims and enforcement hooks remain available for future releases; administration explains that resource licensing may change.
 
 - **A workspace can have a logo (#3005).** Settings › General › Identity has a Workspace logo row (Upload, Change, Remove; PNG, JPEG or WebP up to 2MB, the same rules as a profile picture), and `crewship workspace logo set <file>` / `remove` do the same. The workspace switcher and Admin › People draw the logo instead of the initial. API: `POST`/`DELETE`/`GET /api/v1/workspaces/{workspaceId}/logo`; setting or removing it is `ADMIN+` and audited.
