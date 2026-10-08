@@ -698,6 +698,7 @@ function WatchdogCard({
       {canEdit && (
         <SaveFooter
           dirty={form.isDirty}
+          count={form.dirtyCount}
           status={form.status}
           error={form.error}
           canSave={!sampleEveryBlocksSave}
@@ -950,6 +951,7 @@ function FindingsRoutingCard({
       {canEdit && (
         <SaveFooter
           dirty={form.isDirty}
+          count={form.dirtyCount}
           status={form.status}
           error={form.error}
           canSave={riskValid}
@@ -1043,6 +1045,7 @@ function CredentialLeasesCard({
       {canEdit && (
         <SaveFooter
           dirty={form.isDirty}
+          count={form.dirtyCount}
           status={form.status}
           error={form.error}
           canSave={problem === null}
@@ -1338,6 +1341,7 @@ function GovernanceModelCard({
       {canEdit && (
         <SaveFooter
           dirty={form.isDirty}
+          count={form.dirtyCount}
           status={form.status}
           error={form.error}
           canSave={!modelMissing}

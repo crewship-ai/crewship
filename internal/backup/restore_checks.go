@@ -8,6 +8,7 @@ package backup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -67,12 +68,15 @@ const (
 	TargetReplace      = "replace"
 	TargetNewWorkspace = "new_workspace"
 	TargetCrew         = "crew"
+	// TargetInPlace is the backup back under its own names: a crew archive
+	// as the crew it was, a workspace archive as its workspace (no replace).
+	TargetInPlace = "in_place"
 )
 
 // ValidRestoreTarget reports whether t is a known target.
 func ValidRestoreTarget(t string) bool {
 	switch t {
-	case TargetEmptyServer, TargetIsolated, TargetReplace, TargetNewWorkspace, TargetCrew:
+	case TargetEmptyServer, TargetIsolated, TargetReplace, TargetNewWorkspace, TargetCrew, TargetInPlace:
 		return true
 	}
 	return false
@@ -102,6 +106,13 @@ type RestoreCheckInput struct {
 	// WorkspaceExists reports whether a workspace with this id or slug is on
 	// the server.
 	WorkspaceExists func(idOrSlug string) bool
+	// AsWorkspace / AsCrew are the new names a new_workspace / crew target
+	// lands under — the same values the restore itself is given.
+	AsWorkspace string
+	AsCrew      string
+	// Slugs answers what the server holds under a workspace slug, deleted
+	// rows included (the slug stays UNIQUE after a soft delete).
+	Slugs SlugLookup
 }
 
 // RestoreNeedBytes estimates the room a restore needs on the data directory.
@@ -181,34 +192,38 @@ func EvaluateRestoreChecks(in RestoreCheckInput) RestoreChecks {
 	}
 	out.Unsafe = append(out.Unsafe, in.Unsafe...)
 
-	ws := ""
-	if m.Contents.Workspace != nil {
-		ws = m.Contents.Workspace.Slug
+	// What the target collides with is decided by the same rule the restore
+	// applies (ValidateRestoreTarget), so a target approved here is never
+	// refused there.
+	slugs := in.Slugs
+	if slugs == nil && in.WorkspaceExists != nil {
+		slugs = func(_ context.Context, s string) (SlugState, error) {
+			if in.WorkspaceExists(s) {
+				return SlugLive, nil
+			}
+			return SlugFree, nil
+		}
 	}
-	exists := func(s string) bool { return s != "" && in.WorkspaceExists != nil && in.WorkspaceExists(s) }
-	switch {
-	case m.Scope == ScopeInstance && in.Target != TargetEmptyServer && in.Target != TargetIsolated:
-		out.Conflicts = ConflictsCheck{Detail: "an instance backup restores only into an empty server (crewship recover) or an isolated drill (crewship backup drill)"}
-	case in.Target == TargetEmptyServer:
-		out.Conflicts = ConflictsCheck{OK: true, Detail: "runs offline with `crewship recover` into an empty data directory; nothing on this server changes"}
-	case in.Target == TargetIsolated:
-		out.Conflicts = ConflictsCheck{OK: true, Detail: "runs offline with `crewship backup drill` in a throwaway directory; nothing on this server changes"}
-	case in.Target == TargetReplace:
-		if exists(ws) {
-			out.Conflicts = ConflictsCheck{OK: true, Detail: "replaces workspace " + ws + " on this server; its current data is overwritten"}
-		} else {
-			out.Conflicts = ConflictsCheck{OK: true, Detail: "workspace " + ws + " is not on this server; it is created"}
-		}
-	case in.Target == TargetNewWorkspace:
-		if exists(ws) {
-			out.Conflicts = ConflictsCheck{OK: true, Detail: "a workspace " + ws + " exists; the restore lands under the new name you give it"}
-		} else {
-			out.Conflicts = ConflictsCheck{OK: true, Detail: "no workspace has that name; nothing collides"}
-		}
-	case in.Target == TargetCrew:
-		out.Conflicts = ConflictsCheck{OK: true, Detail: "restores one crew under the name you give it; no other crew changes"}
-	default:
+	spec := RestoreTargetSpec{Target: in.Target}
+	switch in.Target {
+	case TargetInPlace:
+		spec.Target = ""
+	case TargetNewWorkspace:
+		spec.NewName = in.AsWorkspace
+	case TargetCrew:
+		spec.NewName = in.AsCrew
+	}
+	if !ValidRestoreTarget(in.Target) {
 		out.Conflicts = ConflictsCheck{Detail: "unknown target " + in.Target}
+	} else if detail, err := ValidateRestoreTarget(context.Background(), m, spec, slugs); err != nil {
+		var te *RestoreTargetError
+		if errors.As(err, &te) {
+			out.Conflicts = ConflictsCheck{Detail: te.Detail}
+		} else {
+			out.Conflicts = ConflictsCheck{Detail: err.Error()}
+		}
+	} else {
+		out.Conflicts = ConflictsCheck{OK: true, Detail: detail}
 	}
 	return out
 }

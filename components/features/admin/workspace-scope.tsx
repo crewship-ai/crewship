@@ -33,6 +33,10 @@ export interface ScopeWorkspace {
   slug: string
   /** A number beside the name, e.g. how many rows the page holds for it. */
   count?: number
+  /** The workspace's own logo, when one was set; initials otherwise. */
+  logoUrl?: string | null
+  /** How many crews it holds; with `hideEmpty`, those with none fold away. */
+  crews?: number
 }
 
 export function readScope(all: ScopeWorkspace[]): Scope {
@@ -68,7 +72,11 @@ function Box({ state }: { state: "on" | "off" | "mixed" }) {
   )
 }
 
-function Avatar({ name }: { name: string }) {
+function Avatar({ name, logoUrl }: { name: string; logoUrl?: string | null }) {
+  const [broken, setBroken] = React.useState(false)
+  if (logoUrl && !broken) {
+    return <img src={logoUrl} alt="" aria-hidden onError={() => setBroken(true)} className="h-4 w-4 shrink-0 rounded-[5px] object-cover" />
+  }
   return (
     <span aria-hidden className="grid h-4 w-4 shrink-0 place-items-center rounded-[5px] bg-muted text-[9.5px] font-semibold text-muted-foreground">
       {(name.trim()[0] ?? "·").toUpperCase()}
@@ -87,7 +95,7 @@ export function scopeSummary(all: ScopeWorkspace[], scope: Scope, mode: "edit" |
 }
 
 export function WorkspaceScopeSection({
-  workspaces, scope, onChange, currentId, mode = "view", inert,
+  workspaces, scope, onChange, currentId, mode = "view", inert, hideEmpty = false,
 }: {
   workspaces: ScopeWorkspace[]
   scope: Scope
@@ -98,7 +106,13 @@ export function WorkspaceScopeSection({
   /** When set, the selection does not apply to what is on screen (an
    *  instance-wide setting): the list is greyed out and this says why. */
   inert?: string
+  /** Fold workspaces that hold no crew (every signup gets one of its own)
+   *  behind "Show N without crews". */
+  hideEmpty?: boolean
 }) {
+  const [showEmpty, setShowEmpty] = React.useState(false)
+  const empty = hideEmpty ? workspaces.filter((w) => w.crews === 0) : []
+  const shown = showEmpty ? workspaces : workspaces.filter((w) => !empty.includes(w))
   const selected = scope.ids
   const n = selected.size
   const all = scope.all
@@ -118,13 +132,13 @@ export function WorkspaceScopeSection({
           icon={<Box state={all ? "on" : n ? "mixed" : "off"} />}
           label="All workspaces"
         />
-        {workspaces.map((w, i) => (
+        {shown.map((w, i) => (
           <DrillNavItem
             key={w.id}
             index={i + 1}
             pressed={selected.has(w.id)}
             onSelect={() => toggle(w.id)}
-            icon={<span className="flex items-center gap-2"><Box state={selected.has(w.id) ? "on" : "off"} /><Avatar name={w.name} /></span>}
+            icon={<span className="flex items-center gap-2"><Box state={selected.has(w.id) ? "on" : "off"} /><Avatar name={w.name} logoUrl={w.logoUrl} /></span>}
             label={
               <span className="flex min-w-0 items-center gap-1.5">
                 <span className="truncate">{w.name}</span>
@@ -136,6 +150,14 @@ export function WorkspaceScopeSection({
             meta={w.count !== undefined ? w.count : undefined}
           />
         ))}
+        {empty.length > 0 && (
+          <DrillNavItem
+            muted
+            onSelect={() => setShowEmpty(!showEmpty)}
+            label={showEmpty ? `Hide ${empty.length} without crews` : `Show ${empty.length} without crews`}
+            title="Workspaces that hold no crew, such as the one every signup gets"
+          />
+        )}
       </div>
       <p className="px-2 pb-1 pt-1 text-[11px] text-muted-foreground" data-slot="workspace-scope-summary">
         {inert ?? scopeSummary(workspaces, scope, mode)}

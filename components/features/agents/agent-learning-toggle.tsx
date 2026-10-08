@@ -34,6 +34,32 @@ interface LearningResponse {
   reason?: string | null
 }
 
+/** A flip waiting for its Save: the new value and the audit reason. */
+export interface LearningDraft { enabled: boolean; reason: string }
+
+/** PATCH the learning flag; throws with the server's message on refusal. */
+export async function saveLearning(agentId: string, workspaceId: string, enabled: boolean, reason: string): Promise<LearningResponse> {
+  const res = await apiFetch(
+    `/api/v1/agents/${agentId}/learning?workspace_id=${encodeURIComponent(workspaceId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled, reason: reason.trim() }),
+    },
+  )
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`
+    try {
+      const e = (await res.json()) as { error?: string }
+      if (e.error) msg = e.error
+    } catch {
+      /* keep */
+    }
+    throw new Error(msg)
+  }
+  return (await res.json()) as LearningResponse
+}
+
 export interface AgentLearningToggleProps {
   agentId: string
   workspaceId: string
@@ -44,9 +70,17 @@ export interface AgentLearningToggleProps {
    * mistake rather than a hierarchy.
    */
   bare?: boolean
+  /**
+   * Draft mode (the agent Edit dialog): the flip and its reason go to the
+   * caller, which applies them on its own Save (saveLearning). No Confirm
+   * button; null means nothing pending.
+   */
+  draft?: LearningDraft | null
+  onDraftChange?: (next: LearningDraft | null) => void
 }
 
-export function AgentLearningToggle({ agentId, workspaceId, canEdit , bare = false }: AgentLearningToggleProps) {
+export function AgentLearningToggle({ agentId, workspaceId, canEdit , bare = false, draft, onDraftChange }: AgentLearningToggleProps) {
+  const deferred = onDraftChange !== undefined
   const SHELL = bare ? "p-4" : "rounded-xl border border-foreground/8 bg-card p-4"
   // Mirrors the CrewPolicyControls pattern: if caller passes canEdit
   // explicitly we honor it (lets admin overlays override), otherwise
@@ -106,8 +140,18 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit , bare = fal
   }, [load])
 
   const currentEnabled = state?.enabled ?? false
-  const target = pendingEnabled ?? currentEnabled
-  const dirty = pendingEnabled !== null && pendingEnabled !== currentEnabled
+  const pendingValue = deferred ? draft?.enabled ?? null : pendingEnabled
+  const reasonValue = deferred ? draft?.reason ?? "" : reason
+  const target = pendingValue ?? currentEnabled
+  const dirty = pendingValue !== null && pendingValue !== currentEnabled
+  const flip = (checked: boolean) => {
+    if (!deferred) return setPendingEnabled(checked)
+    onDraftChange(checked === currentEnabled ? null : { enabled: checked, reason: draft?.reason ?? "" })
+  }
+  const editReason = (value: string) => {
+    if (!deferred) return setReason(value)
+    if (draft) onDraftChange({ ...draft, reason: value })
+  }
 
   const save = useCallback(async () => {
     if (pendingEnabled === null) return
@@ -117,32 +161,13 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit , bare = fal
     }
     setSaving(true)
     try {
-      const res = await apiFetch(
-        `/api/v1/agents/${agentId}/learning?workspace_id=${encodeURIComponent(workspaceId)}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ enabled: pendingEnabled, reason: reason.trim() }),
-        },
-      )
-      if (!res.ok) {
-        let msg = `HTTP ${res.status}`
-        try {
-          const e = (await res.json()) as { error?: string }
-          if (e.error) msg = e.error
-        } catch {
-          /* keep */
-        }
-        toast.error(`Failed: ${msg}`)
-        return
-      }
-      const body = (await res.json()) as LearningResponse
+      const body = await saveLearning(agentId, workspaceId, pendingEnabled, reason)
       setState(body)
       setPendingEnabled(null)
       setReason("")
       toast.success(body.enabled ? "Self-learning enabled" : "Self-learning disabled")
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update")
+      toast.error(e instanceof Error ? `Failed: ${e.message}` : "Failed to update")
     } finally {
       setSaving(false)
     }
@@ -192,7 +217,7 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit , bare = fal
         </div>
         <Switch
           checked={target}
-          onCheckedChange={(checked) => setPendingEnabled(checked)}
+          onCheckedChange={flip}
           disabled={!effectiveCanEdit || saving}
           data-testid="agent-learning-switch"
           aria-label="Toggle self-improving mode"
@@ -210,11 +235,14 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit , bare = fal
           <Input
             id={`agent-learning-reason-${agentId}`}
             type="text"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder={pendingEnabled ? "why grant autonomy to this agent?" : "why revoke autonomy?"}
+            value={reasonValue}
+            onChange={(e) => editReason(e.target.value)}
+            placeholder={pendingValue ? "why grant autonomy to this agent?" : "why revoke autonomy?"}
             disabled={saving}
           />
+          {deferred ? (
+            <p className="text-[11px] text-muted-foreground">Applied when you save the agent.</p>
+          ) : (
           <div className="flex items-center gap-2">
             <Button
               type="button"
@@ -237,6 +265,7 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit , bare = fal
               Cancel
             </Button>
           </div>
+          )}
         </div>
       )}
 

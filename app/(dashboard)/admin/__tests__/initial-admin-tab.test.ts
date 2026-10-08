@@ -7,7 +7,7 @@ import { initialAdminTab, movedAdminTabHref, initialBackupsSection, adminSection
 // Keeper". Settings has had `?tab=` since its rewrite; this is the same contract.
 describe("initialAdminTab", () => {
   it("returns the section from a valid ?tab= param", () => {
-    expect(initialAdminTab("?tab=backups")).toBe("backups")
+    expect(initialAdminTab("?tab=retention")).toBe("retention")
     expect(initialAdminTab("?tab=ratelimits")).toBe("ratelimits")
   })
 
@@ -43,40 +43,37 @@ describe("movedAdminTabHref", () => {
   })
 })
 
-// Admin › Backups became six pages nested under Data › Backups, with Data
-// retention beside it. `?tab=backups&section=` deep-links a page; the old bare
-// `?tab=backups` keeps working and lands on its Overview.
+// Admin › Backups is a nested page of its own (/admin/backups, a DrillPage
+// like Security and People), with Data retention left beside it in the
+// console. An old `?tab=backups&section=` link lands on the same page there,
+// keeping its section, scope, workspaces and the run it pointed at.
 describe("Backups pages", () => {
-  it("reads ?section= for each of the six pages", () => {
-    for (const s of ["overview", "history", "schedules", "storage", "recovery", "keys"]) {
-      expect(initialBackupsSection(`?tab=backups&section=${s}`)).toBe(s)
-    }
+  it("sends an old ?tab=backups link to /admin/backups", () => {
+    expect(movedAdminTabHref("?tab=backups")).toBe("/admin/backups")
   })
-  it("sends an old ?tab=backups link and an unknown section to Overview", () => {
-    expect(initialAdminTab("?tab=backups")).toBe("backups")
-    expect(initialBackupsSection("?tab=backups")).toBe("overview")
-    expect(initialBackupsSection("?tab=backups&section=nope")).toBe("overview")
+  it("keeps the section, scope, workspaces and run of an old link", () => {
+    expect(movedAdminTabHref("?tab=backups&section=history&scope=workspaces&ws=dess,coolify&run=r1"))
+      .toBe("/admin/backups?section=history&scope=workspaces&ws=dess%2Ccoolify&run=r1")
+  })
+  it("reads ?section= for each page and sends an unknown one to Overview", () => {
+    for (const s of ["overview", "history", "schedules", "storage", "recovery", "keys"]) {
+      expect(initialBackupsSection(`?section=${s}`)).toBe(s)
+    }
+    expect(initialBackupsSection("")).toBe("overview")
+    expect(initialBackupsSection("?section=nope")).toBe("overview")
   })
   it("keeps ?tab=retention as its own section, named Data retention", () => {
     expect(initialAdminTab("?tab=retention")).toBe("retention")
-    expect(adminSectionLabel("retention", "overview")).toBe("Data retention")
+    expect(adminSectionLabel("retention")).toBe("Data retention")
   })
-  it("names the page in the sub-bar as Backups › page", () => {
-    expect(adminSectionLabel("backups", "keys")).toBe("Backups › Keys & alerts")
-    expect(adminSectionLabel("backups", "history")).toBe("Backups › Backup history")
-  })
-  it("nests the six pages under Data › Backups, Data retention beside it", () => {
+  it("lists Backups under Data as one row that opens its own page, Data retention beside it", () => {
     const data = sections.find((s) => s.label === "Data")!
     expect(data.items.map((i) => i.label)).toEqual(["Backups", "Data retention"])
-    expect(data.items[0].children?.map((c) => c.label)).toEqual(["Overview", "Backup history", "Schedules", "Storage", "Recovery", "Keys & alerts"])
-    expect(ALL_TABS).toContain("backups")
+    expect(data.items[0].href).toBe("/admin/backups")
+    expect(ALL_TABS).not.toContain("backups")
     expect(ALL_TABS).toContain("retention")
   })
-  it("a search for a page keeps it under Backups; a search for Backups keeps all six", () => {
-    const hit = filterNav("keys").flatMap((s) => s.items)
-    expect(hit).toHaveLength(1)
-    expect(hit[0].key).toBe("backups")
-    expect(hit[0].children?.map((c) => c.key)).toEqual(["keys"])
-    expect(filterNav("backup").flatMap((s) => s.items)[0].children).toHaveLength(6)
+  it("a search for Backups finds the row", () => {
+    expect(filterNav("backup").flatMap((s) => s.items).map((i) => i.label)).toEqual(["Backups"])
   })
 })

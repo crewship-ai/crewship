@@ -29,6 +29,7 @@ import { EditorAccessSection } from "@/components/features/pages/editor/section-
 import { EditorHistorySection } from "@/components/features/pages/editor/section-history"
 import { PageDetailsStrip, PageEditorHeader } from "@/components/features/pages/editor/editor-header"
 import { PropertiesCard } from "@/components/features/pages/editor/properties-card"
+import { PageSaveBar, PageSaveProvider, usePageSaveControls } from "@/components/ui/page-save-bar"
 
 /**
  * The editor's own chrome, inside the content column.
@@ -70,7 +71,21 @@ export interface PageEditorShellProps {
   onLeft?: () => void
 }
 
-export function PageEditorShell({ workspaceId, slug, page, loading, capabilities, navigation, onLeft }: PageEditorShellProps) {
+export function PageEditorShell(props: PageEditorShellProps) {
+  // One Save for the editor, as in Settings and Admin: a section's typed-in
+  // values are a draft until the floating bar's Save. The editor keeps asking
+  // the leave question itself — its guard owns Back and the address — so the
+  // bar only saves and discards (guardLeaving false), and the person is asked
+  // once.
+  return (
+    <PageSaveProvider guardLeaving={false}>
+      <EditorShell {...props} />
+    </PageSaveProvider>
+  )
+}
+
+function EditorShell({ workspaceId, slug, page, loading, capabilities, navigation, onLeft }: PageEditorShellProps) {
+  const bar = usePageSaveControls()
   const { section, pane, setSection, setPane, setMode, setDirty, pending, openPage } = navigation
 
   // Focus lands on the editor's heading when the editor opens, and on the
@@ -153,7 +168,7 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
     ? `Viewers still see publication ${page.publication_version}`
     : capabilities.hasApplicationDraft
       ? "The application draft is not published"
-      : "Each section saves on its own"
+      : "Edits wait for Save"
 
   const leave = () => {
     setMode("view")
@@ -167,11 +182,12 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
   )
 
   return (
-    <div data-slot="page-editor" className="flex h-full min-h-0 flex-col bg-background">
+    <div data-slot="page-editor" className="relative flex h-full min-h-0 flex-col bg-background">
       {/* Only this column scrolls, and wide content scrolls inside its own
           container — the document itself must never move sideways. */}
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-        <div className="flex flex-col gap-4 p-4">
+        {/* pb-24: room under the last card for the floating Save bar. */}
+        <div className="flex flex-col gap-4 p-4 pb-24">
           {loading && page == null ? (
             <p role="status" className="text-sm text-muted-foreground">
               Loading this Page…
@@ -216,7 +232,8 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
         </div>
       </div>
 
-      <UnsavedWorkDialog pending={pending} onReturnFocus={() => heading.current?.focus()} />
+      <PageSaveBar />
+      <UnsavedWorkDialog pending={pending} onDiscard={() => bar?.discardAll()} onReturnFocus={() => heading.current?.focus()} />
     </div>
   )
 }
@@ -258,15 +275,18 @@ function SectionFrame({
  * Asked once, in one place, for every way out of a section: another section,
  * another Page, leaving the editor, and Back.
  *
- * It deliberately does not promise to keep anything. The editor has no
- * autosave and no global Save — each control writes its own thing at its own
- * moment — so the honest offer is "discard" or "stay", not "save everything".
+ * It deliberately does not promise to keep anything: the drafts wait for the
+ * page bar's Save, so the honest offer here is "discard" or "stay". Discard
+ * drops the bar's drafts too, so nothing half-typed survives the move.
  */
 function UnsavedWorkDialog({
   pending,
+  onDiscard,
   onReturnFocus,
 }: {
   pending: EditorNavigation["pending"]
+  /** Drops the page bar's drafts before the navigation goes ahead. */
+  onDiscard: () => void
   /**
    * Where focus goes when the answer leaves you where you were.
    *
@@ -295,6 +315,7 @@ function UnsavedWorkDialog({
       // rather than at the top of the document.
       window.requestAnimationFrame(onReturnFocus)
     } else {
+      onDiscard()
       pending?.discard()
     }
   }

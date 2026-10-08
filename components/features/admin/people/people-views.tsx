@@ -98,7 +98,7 @@ export function WorkspacesTable({ workspaces, people, onOpen }: { workspaces: Wo
                 <tr key={w.id} tabIndex={0} onClick={() => onOpen(w.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(w.id) }}
                   className="cursor-pointer border-b border-border last:border-b-0 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none">
                   <td className={td}>
-                    <span className="flex items-center gap-2.5"><WorkspaceTile id={w.id} name={w.name} />
+                    <span className="flex items-center gap-2.5"><WorkspaceTile id={w.id} name={w.name} logoUrl={w.logo_url} />
                       <span><span className="block">{w.name}</span><span className="block font-mono text-[11px] text-muted-foreground">{w.slug}</span></span>
                     </span>
                   </td>
