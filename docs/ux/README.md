@@ -56,6 +56,7 @@ adopt the same bar, never a Save of their own:
 | Switch | at once; on failure it flips back and the error is a toast |
 | Text, number, select, picker | ONE floating bar, bottom centre of the content pane: "N unsaved changes · Discard · Save" (⌘S / Ctrl+S). Never a Save button inside a card |
 | A change across several workspaces | the same bar; its Save opens the dry-run preview, the confirm applies |
+| An issue's fields (title, description, status, priority, assignee, dates, project, milestone, routine, labels) | the same bar, one PATCH for all of them; a status of Done, Cancelled, Duplicate or Review, or a new assignee, asks first and names the automations it starts. Start, Stop, review verbs, comments and links stay instant actions |
 | Delete and other irreversible actions | its own button in the Danger zone and an `AlertDialog` |
 
 Leaving with edits pending (section nav, a link, reload) asks "Leave with N

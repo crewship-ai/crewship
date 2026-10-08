@@ -1,27 +1,18 @@
 "use client"
 
-import { Bot, CalendarClock, ClipboardList, MessageSquareText, Settings2, Sparkles, Webhook, Wrench } from "lucide-react"
+import { CalendarClock, ClipboardList, MessageSquareText, Sparkles, Webhook } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { toast } from "sonner"
 
-import { AgentLearningToggle } from "@/components/features/agents/agent-learning-toggle"
-import { SystemPromptEditor } from "@/components/features/crews/system-prompt-editor"
-
-import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provider-icons"
+import { AgentLearningToggle, type LearningDraft } from "@/components/features/agents/agent-learning-toggle"
 
 import { Appear, DetailCard } from "@/components/ui/detail"
 import { MAX_SUGGESTED_PROMPTS, MAX_SUGGESTED_PROMPT_LENGTH } from "@/lib/agent-suggestions"
-import { MAX_FIELDS_PER_FORM, MAX_FORMS, summarizeAskForms } from "@/lib/ask-template"
 import { AGENT_EXTERNAL_TRIGGERS, AGENT_SELF_LEARNING } from "@/lib/feature-gates"
 import { cn } from "@/lib/utils"
 
-import {
-  ConfigCards, ConfigPresets, ConfigReadOnly, ConfigRow, ConfigSelect, ConfigSwitch, ConfigText,
-} from "../canvas/config-field"
-import { ConfigModel } from "../canvas/config-model"
+import { ConfigReadOnly, ConfigRow, ConfigSwitch } from "../canvas/config-field"
 import { AskFormsBuilder } from "../ask-forms-builder"
-import { RestrictedExecutionProfile } from "./restricted-execution-profile"
-import { PaysWithRow } from "./pays-with-row"
 import type { AgentRecord } from "./types"
 
 // =============================================================================
@@ -37,55 +28,6 @@ import type { AgentRecord } from "./types"
 // because they belong to the crew, and editing them from here would let two
 // screens fight over one value.
 // =============================================================================
-
-const PROVIDERS = [
-  { value: "ANTHROPIC", label: "Anthropic" },
-  { value: "OPENAI", label: "OpenAI" },
-  { value: "GOOGLE", label: "Google" },
-  { value: "OLLAMA", label: "Ollama" },
-] as const
-
-const ADAPTERS = [
-  { value: "CLAUDE_CODE", label: "Claude Code" },
-  { value: "OPENCODE", label: "OpenCode" },
-  { value: "CODEX_CLI", label: "Codex CLI" },
-  { value: "GEMINI_CLI", label: "Gemini CLI" },
-  { value: "CURSOR_CLI", label: "Cursor CLI" },
-  { value: "FACTORY_DROID", label: "Factory Droid" },
-] as const
-
-const TOOL_PROFILES = [
-  {
-    value: "MINIMAL",
-    title: "MINIMAL",
-    description: "Reads and plans only. Codex runs read-only, Gemini in plan mode, Claude with a restricted tool list.",
-  },
-  {
-    value: "CODING",
-    title: "CODING",
-    description: "Everyday work — writes to the workspace and runs commands inside the crew container.",
-  },
-  {
-    value: "FULL",
-    title: "FULL",
-    description: "Highest autonomy. On Factory Droid it also raises the autonomy level.",
-  },
-] as const
-
-const TIMEOUTS = [
-  { value: 300, label: "5 m" },
-  { value: 900, label: "15 m" },
-  { value: 1800, label: "30 m" },
-  { value: 3600, label: "1 h" },
-]
-
-function providerMark(provider: string | null | undefined) {
-  const p = (provider ?? "").toUpperCase()
-  if (p === "OPENAI") return <OpenAIIcon className="h-3.5 w-3.5 shrink-0" />
-  if (p === "GOOGLE") return <GeminiIcon className="h-3.5 w-3.5 shrink-0 text-[#4285F4]" />
-  if (p === "ANTHROPIC") return <AnthropicIcon className="h-3.5 w-3.5 shrink-0 text-[#D97757]" />
-  return <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-}
 
 // Mirrors `controlBase` in ../canvas/config-field.tsx, which is module-private
 // there. Copied rather than re-derived so this textarea sits on the same line
@@ -184,111 +126,6 @@ export function SuggestedPromptsField({ value, onSave, draftMode = false }: {
 }
 
 /**
- * Ask forms — the questions that need answers before they can be asked.
- *
- * Chat suggestions above are one line of text each; a form collects a
- * supplier, an amount, a month and a photo of the receipt, then renders them
- * into an ordinary message. The definition is JSON and is edited as JSON,
- * deliberately: a schema builder is the right surface once forms are shared
- * across agents (the pack library in the companion PRD), and until then a
- * builder would be several hundred lines of UI standing between an author and
- * a document they can already read.
- *
- * The counts and the parse error are a courtesy, not the rule. The server
- * validates on write (internal/askforms) and names the form and the
- * placeholder when it refuses — including the one refusal that matters most,
- * a {{placeholder}} that names no field, which is caught here at SAVE time so
- * the person talking to the agent never meets a broken template.
- */
-export function AskFormsField({ value, onSave }: {
-  value: string
-  onSave: (next: string) => Promise<void> | void
-}) {
-  const id = useId()
-  const [local, setLocal] = useState(value)
-  const server = useRef(value)
-  useEffect(() => {
-    server.current = value
-    setLocal(value)
-  }, [value])
-
-  const summary = summarizeAskForms(local)
-
-  async function commit() {
-    if (local === server.current) return
-    try {
-      await onSave(local)
-      server.current = local
-      toast.success("Ask forms saved")
-    } catch (err) {
-      setLocal(server.current)
-      toast.error(err instanceof Error ? err.message : "Could not save")
-    }
-  }
-
-  return (
-    <ConfigRow
-      full
-      label="Forms"
-      hint="A JSON array of form definitions. Each one becomes a chip that opens a short questionnaire; submitting it sends an ordinary message built from the template."
-      htmlFor={id}
-    >
-      <div className="w-full">
-        <textarea
-          id={id}
-          value={local}
-          rows={10}
-          spellCheck={false}
-          placeholder={ASK_FORMS_PLACEHOLDER}
-          onChange={(e) => setLocal(e.target.value)}
-          onBlur={() => void commit()}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.preventDefault()
-              setLocal(server.current)
-              ;(e.target as HTMLElement).blur()
-            }
-          }}
-          className={cn(
-            textareaBase,
-            "min-h-[180px] resize-y py-1.5 font-mono text-xs leading-relaxed",
-            (summary.error || summary.tooManyForms || summary.overFullForms.length > 0) &&
-              "border-destructive",
-          )}
-        />
-        <div className="type-meta mt-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-          <span className={cn("text-muted-foreground-soft", summary.tooManyForms && "text-destructive")}>
-            {summary.forms} / {MAX_FORMS} forms · {summary.fields} fields
-          </span>
-          {summary.error && <span className="text-destructive">{summary.error}</span>}
-          {!summary.error && summary.overFullForms.length > 0 && (
-            <span className="text-destructive">
-              {summary.overFullForms.join(", ")} — the limit is {MAX_FIELDS_PER_FORM} fields per form
-            </span>
-          )}
-        </div>
-      </div>
-    </ConfigRow>
-  )
-}
-
-/** Shown in an empty editor: a whole working form, because the fastest way to
- *  write the second one is to edit the first. */
-const ASK_FORMS_PLACEHOLDER = `[
-  {
-    "id": "receipt",
-    "label": "Add a receipt",
-    "attachment": "required",
-    "template": "Please file this receipt.\\n\\nSupplier: {{supplier}}\\nAmount: {{amount}} {{amount_currency}}\\nPeriod: {{month}}",
-    "fields": [
-      { "name": "supplier", "label": "Supplier", "type": "text", "required": true },
-      { "name": "amount", "label": "Amount", "type": "money", "currency": ["CZK", "EUR"] },
-      { "name": "month", "label": "Period", "type": "month" }
-    ]
-  }
-]`
-
-/**
  * Like parseSuggestedPrompts but WITHOUT the cap — the editor has to be able
  * to show a ninth line in order to say there is one. parseSuggestedPrompts is
  * the render path and truncates on purpose; this is the counting path.
@@ -297,17 +134,23 @@ function parseSuggestedPromptsUncapped(raw: string): string[] {
   return raw.split(/\r\n|\r|\n/).map((l) => l.trim()).filter((l) => l.length > 0)
 }
 
+/**
+ * The agent settings the Edit dialog's own sections do not cover: chat
+ * suggestions, ask forms, the legacy per-agent schedule and the learning
+ * posture. Every change goes to `patch`, which the dialog keeps as a draft;
+ * nothing here writes on its own. (Identity, model, tools and the system
+ * prompt used to have a second, save-per-field editor here; the dialog's
+ * sections own them now.)
+ */
 export interface ConfigTabProps {
   agent: AgentRecord
-  crews: { id: string; name: string; slug: string }[]
   patch: (body: Record<string, unknown>) => Promise<void>
-  onSelectCrew: (slug: string | null) => void
+  /** The learning flip waiting for the dialog's Save. */
+  learning?: { draft: LearningDraft | null; onChange: (next: LearningDraft | null) => void }
 }
 
-export function ConfigTab({ agent, crews, patch, onSelectCrew, supplementalOnly = false, omitBilling = false }: ConfigTabProps & { supplementalOnly?: boolean; omitBilling?: boolean }) {
-  const isLead = agent.agent_role === "LEAD"
+export function ConfigTab({ agent, patch, learning }: ConfigTabProps) {
   const webhookSet = (agent as AgentRecord & { webhook_secret_set?: boolean }).webhook_secret_set ?? false
-  const tools = agent.cli_tools ?? []
 
   return (
     // `columns: 3 24rem` is the whole rule: at most three columns, each at
@@ -320,146 +163,6 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew, supplementalOnly 
     // the label drifts one way, the control the other, and the pair stops
     // reading as one thing. That was the gap Pavel spotted in Identity.
     <div className="[columns:3_24rem] gap-4 max-w-[105rem] [&>*]:mb-4 [&>*]:break-inside-avoid">
-      {!supplementalOnly && (
-      <Appear order={0}>
-        <DetailCard bare icon={Bot} title="Identity">
-          <ConfigText label="Name" value={agent.name} onSave={(v) => patch({ name: v })} />
-          <ConfigText
-            label="Slug" mono hint="Used in the CLI and when delegating between agents."
-            value={agent.slug} onSave={(v) => patch({ slug: v })}
-          />
-          <ConfigText label="Role title" value={agent.role_title ?? ""} onSave={(v) => patch({ role_title: v })} />
-          {/* Only offered once the crew list has arrived. Rendering it early
-              meant the agent's own crew was not among the options, so the
-              select fell back to "(no crew)" and the first stray change
-              detached the agent from its crew — silently. */}
-          {crews.length > 0 ? (
-            <ConfigSelect
-              label="Crew"
-              hint="Decides the container, the network and the shared memory — a change there hits every agent in the crew."
-              value={agent.crew_id ?? ""}
-              options={[{ value: "", label: "(no crew)" }, ...crews.map((c) => ({ value: c.id, label: c.name }))]}
-              onSave={(v) => patch({ crew_id: v || null })}
-              action={agent.crew ? (
-                <button
-                  type="button"
-                  onClick={() => onSelectCrew(agent.crew!.slug)}
-                  className="type-meta shrink-0 whitespace-nowrap text-primary hover:underline"
-                >
-                  Open crew
-                </button>
-              ) : undefined}
-            />
-          ) : (
-            <ConfigReadOnly label="Crew" value={agent.crew?.name ?? "—"} note="loading" />
-          )}
-          <ConfigSelect
-            label="Role in crew" hint="A lead may assign work to the others and wait for the result."
-            value={agent.agent_role}
-            options={[{ value: "AGENT", label: "Agent" }, { value: "LEAD", label: "Lead" }]}
-            onSave={(v) => patch({ agent_role: v })}
-          />
-          {isLead && (
-            <ConfigSelect
-              label="Lead mode" hint="A passive lead only answers; it never drives anyone."
-              value={agent.lead_mode || "active"}
-              options={[{ value: "active", label: "Active" }, { value: "passive", label: "Passive" }]}
-              onSave={(v) => patch({ lead_mode: v })}
-            />
-          )}
-          <ConfigText
-            label="Description" multiline value={agent.description ?? ""}
-            placeholder="What this agent does…"
-            onSave={(v) => patch({ description: v })}
-          />
-        </DetailCard>
-      </Appear>
-      )}
-
-      {!supplementalOnly && (
-      <Appear order={1}>
-        <DetailCard bare icon={Settings2} title="Model and run">
-          <ConfigSelect
-            label="Provider" value={(agent.llm_provider ?? "ANTHROPIC").toUpperCase()}
-            adornment={providerMark(agent.llm_provider)}
-            options={PROVIDERS.map((p) => ({ value: p.value, label: p.label }))}
-            onSave={(v) => patch({ llm_provider: v })}
-          />
-          <ConfigModel
-            label="Model" hint="Only what this provider can actually serve."
-            workspaceId={agent.workspace_id}
-            provider={(agent.llm_provider ?? "ANTHROPIC").toUpperCase()}
-            value={agent.llm_model ?? ""}
-            onSave={(v) => patch({ llm_model: v })}
-          />
-          <RestrictedExecutionProfile agentId={agent.id} workspaceId={agent.workspace_id} initialProfile={agent.restricted_execution_profile ?? "disabled"} />
-          <ConfigSelect
-            label="CLI adapter" hint="What launches the agent inside the container."
-            value={agent.cli_adapter}
-            options={ADAPTERS.map((a) => ({ value: a.value, label: a.label }))}
-            onSave={(v) => patch({ cli_adapter: v })}
-          />
-          {/* The seat the adapter pays with, asked where the adapter is chosen
-              (PRD provider-logins §6.3): an adapter and a seat that disagree
-              are caught here, not as a 401 inside a run. */}
-          <PaysWithRow
-            workspaceId={agent.workspace_id}
-            agentId={agent.id}
-            agentName={agent.name}
-            cliAdapter={agent.cli_adapter}
-            paysWith={agent.pays_with ?? null}
-          />
-          <ConfigPresets
-            label="Longest run" hint="When it expires the run ends as a timeout."
-            value={agent.timeout_seconds} presets={TIMEOUTS}
-            onSave={(v) => patch({ timeout_seconds: v })}
-          />
-          <ConfigSwitch
-            label="Memory between sessions" hint="Without it every session starts from nothing."
-            checked={agent.memory_enabled}
-            onSave={(v) => patch({ memory_enabled: v })}
-          />
-        </DetailCard>
-      </Appear>
-      )}
-
-      {!supplementalOnly && (
-      <Appear order={2}>
-        <DetailCard
-          bare icon={Wrench} title="What it may do" subtitle="tool_profile"
-          footer={<>Where the agent reaches <b className="font-medium text-foreground">outward</b> is not decided here — that is the crew network policy.</>}
-        >
-          <ConfigCards
-            value={agent.tool_profile}
-            options={TOOL_PROFILES.map((t) => ({ value: t.value, title: t.title, description: t.description }))}
-            onSave={(v) => patch({ tool_profile: v })}
-          />
-          {tools.length > 0 && (
-            <div className="border-t border-hairline px-3 py-2.5">
-              <div className="type-meta mb-1.5 uppercase tracking-wide text-muted-foreground-soft">
-                Tools currently enabled
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {tools.slice(0, 8).map((t) => (
-                  <span
-                    key={t}
-                    className="type-meta rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-foreground/80"
-                  >
-                    {t}
-                  </span>
-                ))}
-                {tools.length > 8 && (
-                  <span className="type-meta text-muted-foreground-soft">+ {tools.length - 8} more</span>
-                )}
-              </div>
-            </div>
-          )}
-        </DetailCard>
-      </Appear>
-      )}
-
-      {supplementalOnly && !omitBilling && <section className="space-y-2"><p className="text-xs text-muted-foreground">Billing access is managed separately and applies immediately.</p><PaysWithRow workspaceId={agent.workspace_id} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} paysWith={agent.pays_with ?? null} /></section>}
-
       {/* Scheduling an agent directly is a second cron alongside routines —
           internal/scheduler/scheduler.go registers one entry per agent with
           schedule_enabled=1 and fires it straight through the orchestrator,
@@ -527,7 +230,7 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew, supplementalOnly 
           footer="Shown only on an empty conversation. Write the questions this agent is actually good at — the ones you would otherwise type every morning."
         >
           <SuggestedPromptsField
-            draftMode={supplementalOnly}
+            draftMode
             value={(agent as AgentRecord & { suggested_prompts?: string | null }).suggested_prompts ?? ""}
             onSave={(v) => patch({ suggested_prompts: v })}
           />
@@ -550,23 +253,9 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew, supplementalOnly 
             <code className="font-mono text-foreground/80">crewship agent ask-preview {agent.slug} &lt;form-id&gt; --var k=v</code>.
           </>}
         >
-          {supplementalOnly ? <AskFormsBuilder value={(agent as AgentRecord & { ask_forms?: string | null }).ask_forms ?? ""} onChange={(value) => { void patch({ ask_forms: value }) }} /> : <AskFormsField value={(agent as AgentRecord & { ask_forms?: string | null }).ask_forms ?? ""} onSave={(v) => patch({ ask_forms: v })} />}
+          <AskFormsBuilder value={(agent as AgentRecord & { ask_forms?: string | null }).ask_forms ?? ""} onChange={(value) => { void patch({ ask_forms: value }) }} />
         </DetailCard>
       </Appear>
-
-      {/* The system prompt is the longest thing on this screen and the one
-          people actually read, so it takes a column of its own instead of
-          being squeezed beside a switch. It stays inside the same bounded
-          block — 800 characters of mono set 2000px wide is unreadable. */}
-      {!supplementalOnly && (
-      <Appear order={7}>
-        <SystemPromptEditor
-          value={agent.system_prompt}
-          onSave={(v) => patch({ system_prompt: v })}
-          updatedHint={`updated ${new Date(agent.updated_at).toLocaleDateString()}`}
-        />
-      </Appear>
-      )}
 
       {AGENT_SELF_LEARNING && (
         <Appear order={8}>
@@ -575,7 +264,7 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew, supplementalOnly 
               bare icon={Sparkles} title="Learning posture"
               footer="Per agent, and separate from the crew's autonomy level. Every flip is recorded with its reason."
             >
-              <AgentLearningToggle bare agentId={agent.id} workspaceId={agent.workspace_id} />
+              <AgentLearningToggle bare agentId={agent.id} workspaceId={agent.workspace_id} draft={learning?.draft} onDraftChange={learning?.onChange} />
             </DetailCard>
           </div>
         </Appear>

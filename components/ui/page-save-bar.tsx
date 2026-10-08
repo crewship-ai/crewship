@@ -93,7 +93,13 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : typeof e === "string" ? e : "Save failed."
 }
 
-export function PageSaveProvider({ children }: { children: React.ReactNode }) {
+export function PageSaveProvider({ children, guardLeaving = true }: {
+  children: React.ReactNode
+  /** False when the host page asks its own "leave with unsaved work?" (the
+   *  Pages editor, whose guard owns Back and its address): the bar then only
+   *  saves and discards, so the person is asked once, not twice. */
+  guardLeaving?: boolean
+}) {
   const router = useRouter()
   const [entries, setEntries] = React.useState<Record<string, Registered>>({})
   const entriesRef = React.useRef(entries)
@@ -210,15 +216,17 @@ export function PageSaveProvider({ children }: { children: React.ReactNode }) {
         saveAll()
       }
     }
-    document.addEventListener("click", onClick, true)
-    window.addEventListener("beforeunload", onUnload)
+    if (guardLeaving) {
+      document.addEventListener("click", onClick, true)
+      window.addEventListener("beforeunload", onUnload)
+    }
     window.addEventListener("keydown", onKey)
     return () => {
       document.removeEventListener("click", onClick, true)
       window.removeEventListener("beforeunload", onUnload)
       window.removeEventListener("keydown", onKey)
     }
-  }, [dirty, router, saveAll])
+  }, [dirty, router, saveAll, guardLeaving])
 
   const api = React.useMemo<PageSaveApi>(() => ({ set, failed, guard }), [set, failed, guard])
   const labels = list.filter((e) => e.count > 0).map((e) => e.label)
@@ -292,6 +300,16 @@ export function usePageSaveLabel(): string | null {
 export function usePageSaveFailed(): () => void {
   const api = React.useContext(PageSaveContext)
   return React.useCallback(() => api?.failed(), [api])
+}
+
+/**
+ * The bar's pending edits and its Discard, for a host page that asks the
+ * leave question itself (`guardLeaving={false}`) and must drop the drafts
+ * when the person answers Discard.
+ */
+export function usePageSaveControls(): { count: number; discardAll: () => void } | null {
+  const s = React.useContext(PageSaveStateContext)
+  return s ? { count: s.count, discardAll: s.discardAll } : null
 }
 
 /** True inside a PageSaveProvider: the card's own Save gives way to the bar. */
