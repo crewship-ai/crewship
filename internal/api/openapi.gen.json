@@ -15789,10 +15789,94 @@
         },
         "type": "array"
       },
+      "WorkspacePendingRunResponseV1": {
+        "properties": {
+          "can_cancel": {
+            "type": "boolean"
+          },
+          "debounce_key": {
+            "type": "string"
+          },
+          "dispatch_attempts": {
+            "type": "integer"
+          },
+          "expires_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "fire_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "inputs": {
+            "additionalProperties": true,
+            "description": "Read-only preset projection: safe primitives, type markers for credential/file/redacted values, empty containers for structured values. Not replay inputs.",
+            "type": "object"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "next_attempt_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "pinned_version": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "pipeline_slug": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "fired",
+              "failed",
+              "expired",
+              "cancelled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "inputs",
+          "pinned_version",
+          "id",
+          "pipeline_slug",
+          "priority",
+          "fire_at",
+          "expires_at",
+          "next_attempt_at",
+          "status",
+          "run_id",
+          "dispatch_attempts",
+          "last_error",
+          "can_cancel"
+        ],
+        "type": "object"
+      },
       "WorkspacePendingRunsResponseV1": {
         "items": {
           "properties": {
+            "can_cancel": {
+              "type": "boolean"
+            },
             "debounce_key": {
+              "type": "string"
+            },
+            "dispatch_attempts": {
+              "type": "integer"
+            },
+            "expires_at": {
+              "nullable": true,
               "type": "string"
             },
             "fire_at": {
@@ -15806,6 +15890,13 @@
               "description": "Read-only preset projection: safe primitives, type markers for credential/file/redacted values, empty containers for structured values. Not replay inputs.",
               "type": "object"
             },
+            "last_error": {
+              "type": "string"
+            },
+            "next_attempt_at": {
+              "nullable": true,
+              "type": "string"
+            },
             "pinned_version": {
               "nullable": true,
               "type": "integer"
@@ -15815,8 +15906,36 @@
             },
             "priority": {
               "type": "integer"
+            },
+            "run_id": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "pending",
+                "fired",
+                "failed",
+                "expired",
+                "cancelled"
+              ],
+              "type": "string"
             }
           },
+          "required": [
+            "inputs",
+            "pinned_version",
+            "id",
+            "pipeline_slug",
+            "priority",
+            "fire_at",
+            "expires_at",
+            "next_attempt_at",
+            "status",
+            "run_id",
+            "dispatch_attempts",
+            "last_error",
+            "can_cancel"
+          ],
           "type": "object"
         },
         "type": "array"
@@ -138507,6 +138626,176 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}": {
+      "get": {
+        "description": "Get workspace pipeline pending (GET /api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}).",
+        "operationId": "get_api_v1_workspaces_workspaceId_pipeline-pending_pendingId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pendingId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePendingRunResponseV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace pipeline pending",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/pipeline-runs": {
       "get": {
         "description": "List workspace pipeline runs (GET /api/v1/workspaces/{workspaceId}/pipeline-runs).",
@@ -143277,6 +143566,14 @@
             "in": "path",
             "name": "workspaceId",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
             "schema": {
               "type": "string"
             }

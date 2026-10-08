@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Accepted deferred routine starts disappeared when execution capacity was busy or dispatch failed.** Capacity rejection now retries with bounded backoff until TTL, and errors/expiry remain inspectable through `routine pending get` and `pending list --status`. Retry preserves the accepted recipe and occurrence identity. ⚠️ **Behaviour change:** starts without TTL stop after ten capacity rejections; attempted debounce starts keep their payload while newer triggers open a separate window, and attempted one-time starts cannot be rewritten by another save. (#3010)
+
 - **Routine HTTP results now redact injected credentials, including JSON and URL-escaped values.** Redaction applies before response bodies and request errors reach step results, run history or broadcasts.
 - ⚠️ **Behaviour change: routine authoring and validation now reject unsupported transform expressions, including skipped branches.** Existing definitions must be corrected before re-saving or draft testing; there is no automatic rewrite. Running an existing definition still skips inactive branches, while unsupported expressions reached at runtime fail. Use code for arithmetic or pipes. Whitespace around array indices remains supported.
 - **Approval waits now honor the documented `wait.timeout_sec` setting.** A positive step-level `timeout_seconds` takes precedence; parked waits keep their recorded deadlines.

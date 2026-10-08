@@ -30,6 +30,7 @@ CREATE TABLE pending_runs (
     invoking_user_id TEXT,
     invocation_authority TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending', fired_run_id TEXT,
+    dispatch_attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', next_attempt_at TEXT,
     triggered_via TEXT,
     chain_depth INTEGER,
     chain_origin TEXT,
@@ -38,7 +39,7 @@ CREATE TABLE pending_runs (
     created_at TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now','subsec')));
 CREATE UNIQUE INDEX idx_pending_runs_debounce ON pending_runs (pipeline_id, debounce_key)
-    WHERE status='pending' AND debounce_key IS NOT NULL;`)
+    WHERE status='pending' AND debounce_key IS NOT NULL AND dispatch_attempts=0;`)
 	if err != nil {
 		t.Fatal(err)
 	}

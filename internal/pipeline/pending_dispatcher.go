@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -54,6 +55,7 @@ type PendingRunDispatcher struct {
 	logger         *slog.Logger
 	tick           time.Duration
 	maxConcurrency int
+	now            func() time.Time // injectable clock for backoff/TTL boundary tests
 
 	sem     chan struct{}  // bounded worker pool; sized at first sweep
 	wg      sync.WaitGroup // tracks in-flight dispatch goroutines
@@ -79,6 +81,7 @@ func NewPendingRunDispatcher(store *PendingRunStore, executor runExecutor, logge
 		logger:         logger,
 		tick:           5 * time.Second,
 		maxConcurrency: defaultDispatchConcurrency,
+		now:            time.Now,
 		stopCh:         make(chan struct{}),
 		stopped:        make(chan struct{}),
 	}
@@ -149,13 +152,16 @@ func (d *PendingRunDispatcher) sweep(ctx context.Context) {
 		return
 	}
 	defer wr.Leave()
-	now := time.Now().UTC()
+	now := d.now().UTC()
 	if n, err := d.store.ExpireDue(ctx, now); err != nil {
 		d.logger.Warn("pending dispatcher: expire", "error", err)
 	} else if n > 0 {
 		d.logger.Info("pending dispatcher: expired past-ttl runs", "count", n)
 	}
 	due, err := d.store.DueRuns(ctx, now, 25)
+	// Never hold the sweep writer while waiting for worker slots: a worker
+	// may itself be waiting for a closing quiet window to release.
+	wr.Leave()
 	if err != nil {
 		d.logger.Warn("pending dispatcher: list due", "error", err)
 		return
@@ -199,7 +205,7 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 	if !ok {
 		return
 	}
-	claimed, err := d.store.ClaimDue(ctx, pr.ID, time.Now().UTC())
+	claimed, err := d.store.ClaimDue(ctx, pr.ID, d.now().UTC())
 	wr.Leave()
 	if err != nil {
 		d.logger.Warn("pending dispatcher: claim", "error", err, "pending_id", pr.ID)
@@ -268,19 +274,75 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		// occurrence identifies the start; redispatch of that occurrence dedupes.
 		IdempotencyKey: ScheduledFireIdempotencyKey("pending", pr.ID, pr.FireAt.UTC().Format(time.RFC3339Nano)),
 	})
+	// Run has returned; release busy admission before waiting on a writer gate.
+	adm.Done()
 	if runErr != nil {
 		d.logger.Warn("pending dispatcher: run failed", "error", runErr, "pending_id", pr.ID)
+		d.recordDispatchError(ctx, pr, runErr)
+		return
+	}
+	if res == nil || res.RunID == "" {
+		d.recordDispatchError(ctx, pr, errors.New("executor returned no run receipt"))
 		return
 	}
 	// Backfill the fired run id now that we have it (claim used "").
 	// The run has finished, so the busy probe no longer counts it: the
 	// backfill is its own writer, and waits out a window rather than landing
 	// inside one.
-	if res != nil {
-		if uerr := quiesce.Do(ctx, func(ctx context.Context) error {
-			return d.store.SetFiredRunID(ctx, pr.ID, res.RunID)
-		}); uerr != nil {
-			d.logger.Warn("pending dispatcher: backfill run id", "error", uerr, "pending_id", pr.ID)
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), quiesce.DefaultHoldCap+quiesce.DefaultDrainTimeout+time.Minute)
+	defer cancel()
+	if uerr := quiesce.Do(writeCtx, func(ctx context.Context) error {
+		return d.store.SetFiredRunID(ctx, pr, res.RunID)
+	}); uerr != nil {
+		d.logger.Warn("pending dispatcher: backfill run id", "error", uerr, "pending_id", pr.ID)
+	}
+}
+
+// No TTL was historically a valid admission. Bound that legacy case to ten
+// capacity attempts; an explicit TTL instead remains the retry deadline.
+const maxPendingAttemptsWithoutTTL = 10
+
+func pendingCapacityBackoff(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	if attempt >= 6 {
+		return time.Minute
+	}
+	return (2 * time.Second) << (attempt - 1)
+}
+
+func (d *PendingRunDispatcher) recordDispatchError(ctx context.Context, pr PendingRun, runErr error) {
+	now := d.now().UTC()
+	status, reason := "failed", "Deferred start could not be dispatched. Check server logs using the pending ID."
+	var next *time.Time
+	if errors.Is(runErr, ErrConcurrencyLimitReached) {
+		switch {
+		case pr.ExpiresAt != nil && !now.Before(*pr.ExpiresAt):
+			status, reason = "expired", "Deferred start expired before execution capacity became available."
+		case pr.ExpiresAt == nil && pr.DispatchAttempts >= maxPendingAttemptsWithoutTTL:
+			reason = "Execution capacity remained unavailable after 10 dispatch attempts; no TTL was supplied."
+		default:
+			status, reason = "pending", "Waiting for routine execution capacity."
+			at := now.Add(pendingCapacityBackoff(pr.DispatchAttempts))
+			if pr.ExpiresAt != nil && at.After(*pr.ExpiresAt) {
+				at = *pr.ExpiresAt
+			}
+			next = &at
 		}
+	} else if errors.Is(runErr, ErrPinnedVersionNotFound) {
+		reason = "The accepted recipe version is no longer available."
+	} else if errors.Is(runErr, ErrRoutineNotActive) {
+		reason = "The routine is no longer active."
+	}
+	// Finalize even when the execution context was canceled at shutdown. This
+	// bounded write can wait out a full default backup window and never sleeps
+	// through a capacity retry interval.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), quiesce.DefaultHoldCap+quiesce.DefaultDrainTimeout+time.Minute)
+	defer cancel()
+	if err := quiesce.Do(writeCtx, func(ctx context.Context) error {
+		return d.store.FinishDispatchError(ctx, pr, status, reason, next)
+	}); err != nil {
+		d.logger.Error("pending dispatcher: persist dispatch failure", "pending_id", pr.ID, "error", err)
 	}
 }

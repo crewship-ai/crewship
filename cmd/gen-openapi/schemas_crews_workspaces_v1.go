@@ -103,7 +103,16 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 	add("/api/v1/workspaces/{workspaceId}/pipelines/{slug}/export", "WorkspacePipelineExportResponseV1", object(map[string]any{"name": str(), "slug": str(), "definition": anyObject(), "version": integer()}))
 	add("/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget", "WorkspacePipelineBudgetResponseV1", object(map[string]any{"slug": str(), "has_budget": boolean(), "monthly_budget_usd": number(), "month": str(), "spent_usd": number(), "pct_used": number(), "over_budget": boolean()}))
 	add("/api/v1/workspaces/{workspaceId}/pipelines/budget-summary", "WorkspacePipelineBudgetSummaryResponseV1", object(map[string]any{"month": str(), "total_budget_usd": number(), "total_spent_usd": number(), "pipelines": array(anyObject())}))
-	addList("/api/v1/workspaces/{workspaceId}/pipelines/pending", "WorkspacePendingRunsResponseV1", object(map[string]any{"id": str(), "pipeline_slug": str(), "pinned_version": nullable("integer"), "debounce_key": str(), "priority": integer(), "fire_at": str(), "inputs": map[string]any{"type": "object", "additionalProperties": true, "description": "Read-only preset projection: safe primitives, type markers for credential/file/redacted values, empty containers for structured values. Not replay inputs."}}))
+	pending := object(map[string]any{
+		"id": str(), "pipeline_slug": str(), "pinned_version": nullable("integer"), "debounce_key": str(),
+		"priority": integer(), "fire_at": str(), "expires_at": nullable("string"), "next_attempt_at": nullable("string"),
+		"status": map[string]any{"type": "string", "enum": []string{"pending", "fired", "failed", "expired", "cancelled"}},
+		"run_id": str(), "dispatch_attempts": integer(), "last_error": str(), "can_cancel": boolean(),
+		"inputs": map[string]any{"type": "object", "additionalProperties": true, "description": "Read-only preset projection: safe primitives, type markers for credential/file/redacted values, empty containers for structured values. Not replay inputs."},
+	})
+	pending["required"] = []string{"inputs", "pinned_version", "id", "pipeline_slug", "priority", "fire_at", "expires_at", "next_attempt_at", "status", "run_id", "dispatch_attempts", "last_error", "can_cancel"}
+	addList("/api/v1/workspaces/{workspaceId}/pipelines/pending", "WorkspacePendingRunsResponseV1", pending)
+	add("/api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}", "WorkspacePendingRunResponseV1", pending)
 	addList("/api/v1/workspaces/{workspaceId}/pipeline-webhooks", "WorkspacePipelineWebhooksResponseV1", object(map[string]any{
 		"ingress_profile": map[string]any{"type": "string", "enum": []string{"crewship", "github"}},
 		"id":              str(), "workspace_id": str(), "name": str(), "target_pipeline_slug": str(), "token": str(), "signing_secret_set": boolean(), "inputs_template": anyObject(), "enabled": boolean(), "rate_limit_per_min": integer(), "created_at": str(), "updated_at": str(),

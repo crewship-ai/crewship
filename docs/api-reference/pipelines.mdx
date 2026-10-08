@@ -59,7 +59,8 @@ Problem Details shape (`error` is the human-readable message).
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/waitpoints` | member | List pending durable waitpoints |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve` | create | Approve a pending waitpoint |
 | POST | `/api/v1/waitpoint-tokens/{token}` | token | Public waitpoint completion callback |
-| GET | `/api/v1/workspaces/{workspaceId}/pipelines/pending` | member | List deferred triggers not yet fired |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/pending` | member | List deferred receipts; `status` defaults to `pending` |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}` | member | Inspect a deferred receipt by ID, including terminal states |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel` | update | Cancel a deferred trigger |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget` | member | Monthly spend report |
 | PATCH | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget` | manage | Set or clear the monthly spend cap |
@@ -439,7 +440,9 @@ a timezone offset, in the future and within two years; it is parked as a
 pending run pinned to the version this save publishes, the response's
 `trigger` is `{"kind": "once", "first_fire_at", "enabled": true}` with no
 `schedule_id`, and a later save of the same routine with a new `fire_at`
-moves that one pending start rather than adding another; a start that was
+moves that one pending start rather than adding another, provided dispatch
+has not yet been attempted. An attempted pending start keeps its accepted
+recipe and inputs; editing it through another `once` save returns `422`. A start that was
 cancelled is never re-armed by a save, and one that already fired is only
 re-armed for a different `fire_at` -- otherwise the save is `422` "this
 one-time start has already been consumed"), or `"manual"` (an
@@ -716,11 +719,38 @@ See [`crewship routine appearance`](/cli/routine) for the CLI equivalent.
 #### `GET /api/v1/workspaces/{workspaceId}/pipelines/pending`
 
 **Auth:** `member`. `200 OK` returns an array (never `null`) of at most 100
-pending deferred triggers. Each item contains `id`, `pipeline_slug`, optional
-`debounce_key`, `priority`, RFC3339Nano `fire_at`, nullable `pinned_version`,
-and the read-only `inputs` preview (`{}` when empty). The preview retains safe primitives; credentials, files and known secrets become
-type-only markers, and other containers are empty. It must not be replayed as
-run inputs. An unavailable database is `503`; listing failure is `500`.
+receipts. `status=pending|fired|failed|expired|cancelled|all` defaults to `pending`;
+an unsupported status is `400`. Pending rows use scheduled-time order; other
+filters use newest accepted starts first.
+
+Each item contains `id`, `pipeline_slug`, optional `debounce_key`, `priority`,
+RFC3339Nano `fire_at`, nullable `pinned_version`, `status`, `run_id`,
+`dispatch_attempts`, safe `last_error`, nullable `expires_at` and `next_attempt_at`,
+`can_cancel`, and the read-only `inputs` preview (`{}` when empty). The preview
+retains safe primitives; credentials, files and known secrets become type-only
+markers, and other containers are empty. It must not be replayed as run inputs.
+An unavailable database is `503`; listing failure is `500`.
+
+Capacity rejection retries without occupying a worker during backoff: 2, 4, 8,
+16, 32, then at most 60 seconds. The original TTL ends waiting as `expired` with
+a reason; absent TTL, ten rejected attempts end as `failed`. Other dispatch
+errors become `failed` without automatic retry. `fire_at` retains the occurrence
+identity; `next_attempt_at` controls eligibility. Retry preserves pin, payload,
+priority and accepted ID. After an attempted debounce start, newer triggers
+open a separate window. Priority is best effort among eligible rows, not FIFO.
+
+#### `GET /api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}`
+
+**Auth:** `member`. `200 OK` returns one receipt with the same shape as the list,
+including terminal receipts that no longer appear in the default pending list.
+Unknown or another workspace's IDs return `404`; unavailable DB is `503` and
+read failure is `500`. CLI: `crewship routine pending get <pending_id>`.
+
+`fired` denotes a claimed dispatch, not run completion. Its `run_id` may be empty
+while the executor runs. Existing fired rows without a link are exposed unchanged
+and are not classified as failed solely from that emptiness. `can_cancel` is true
+only for pending starts whose caller has update permission. Once a run link exists,
+inspect the run itself for completion and outcome.
 
 #### `POST /api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel`
 
