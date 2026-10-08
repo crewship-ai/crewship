@@ -145,10 +145,13 @@ const WAITING_PAGE_SIZE = 500
 export function ActivityStreamView({
   workspaceId,
   onOpenSection,
+  railEntersFromLeft,
 }: {
   workspaceId: string
   /** Open one of the ledgers (work queue, webhook deliveries). See ActivityWorkspace. */
   onOpenSection?: (section: "work" | "deliveries") => void
+  /** The overview is coming back from a ledger: its rail enters from the left. */
+  railEntersFromLeft?: boolean
 }) {
   const isMobile = useIsMobile()
   const lookup = useJournalLookup()
@@ -992,6 +995,7 @@ export function ActivityStreamView({
               onOpenEntity={(kind, id, label) => setPath(selectStop({ kind, id, label }))}
               onToggleCollapse={() => setRailCollapsed(true)}
               onOpenSection={onOpenSection}
+              entersFromLeft={railEntersFromLeft}
               // The routine focus (#2998): the rail narrows to one routine and
               // lists its runs; opening one keeps the focus.
               workspaceId={workspaceId}

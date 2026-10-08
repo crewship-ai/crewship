@@ -496,6 +496,8 @@ export interface ActivitySidebarProps {
    * rows, the way Inbox lists To handle / Updates / History in its rail.
    */
   onOpenSection?: (section: "work" | "deliveries") => void
+  /** Back from a ledger (#3012): the run list slides in from the left. */
+  entersFromLeft?: boolean
   /** For the routine focus's run fetch (#2998). */
   workspaceId?: string
   /**
@@ -543,6 +545,7 @@ export function ActivitySidebar({
   onOpenEntity,
   onToggleCollapse,
   onOpenSection,
+  entersFromLeft,
 }: ActivitySidebarProps) {
   const [statusOpen, setStatusOpen] = React.useState(true)
   // See railInventory. Unfocused the popover answers "where is the activity";
@@ -599,7 +602,7 @@ export function ActivitySidebar({
 
   // Whether the rail is coming BACK from a routine focus, so the full list
   // slides in from the left then — and not on the page's first paint.
-  const wasFocused = React.useRef(false)
+  const wasFocused = React.useRef(Boolean(entersFromLeft))
   const leftFocus = !focusedRoutine && wasFocused.current
   React.useEffect(() => {
     wasFocused.current = !!focusedRoutine

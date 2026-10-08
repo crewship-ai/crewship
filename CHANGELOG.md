@@ -9,6 +9,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **The Work queue and Webhook deliveries look like Activity (#3017).** Opening either one keeps the rail and switches it, with a slide, to the ledger's own rows:
+  - status in Activity's words — the Waiting and Expired filters, which nothing ever filled, are gone;
+  - agents with their avatars, and whether their queue moves;
+  - event families.
+
+  Each row narrows the page. The Work queue gives:
+  - a summary sentence and a flow from Arrived to Done;
+  - **Needs you**, where work with an unknown outcome is settled with **Retry**, **Mark as failed** or **Mark as done**, and the card says how many items wait behind it;
+  - failures grouped by cause;
+  - one lane per agent, with its crew's colour;
+  - the latest work, one sentence each.
+
+  Deliveries show each endpoint's health, arrivals per event family, and what each delivery became, with a detail panel that opens its work.
 - **The work queue and webhook deliveries name who, what and how it ended (#3012).** `GET …/work-items` items carry `agent` (name, slug, avatar), `crew` (name, colour, icon), `event_type`, `duration_ms` and `cost_usd`; `GET …/webhook-deliveries` carries `agent` and the resulting `work_state`. `crewship work list` shows the agent's name and the event instead of the agent id and capacity class, and `crewship work deliveries list` shows the agent and the work state.
 - **Activity's rail follows source and severity filters too (#3007).** With a source, severity or telemetry filter, the rail lists only the runs the matching events belong to, and is empty when none match. It no longer keeps listing every run beside an empty column. Agent work started outside a routine is hidden in Activity for now; the index and CLI still list it.
 - **A crew, agent, issue or routine filter keeps Activity's home, narrowed (#3002).** The column used to swap the home for the raw journal list ("morgan runs claude --print …"). It now shows the same cards for the chains the rail shows, titled with the filter. Source, severity and telemetry filters keep the event list. `GET …/pipeline-runs` returns each run's `chain_origin`.

@@ -26,6 +26,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
+import type { LedgerAgent, WorkState } from "@/hooks/use-work-items"
 
 // ── Wire types — mirror internal/api/webhook_deliveries.go exactly ──────────
 
@@ -57,6 +58,10 @@ export interface WebhookDelivery {
   /** Whether a replay can still reproduce this delivery. */
   raw_body_available: boolean
   raw_body_expires_at: string | null
+  /** The endpoint's agent (#3012); null once deleted. */
+  agent?: LedgerAgent | null
+  /** The state of the work this delivery became; null when ignored. */
+  work_state?: WorkState | null
 }
 
 export interface WebhookDeliveryPage {

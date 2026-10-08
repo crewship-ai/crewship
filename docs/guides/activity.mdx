@@ -32,7 +32,7 @@ The two are deliberately separate: the rail must still answer "where can I go" w
 - **You want to know what your agents did.** **Group by → Agent** lists agents that took work in the window, how much, and in which workflows.
 - **An issue moved and you want to know what moved it.** **Group by → Issue** lists issues touched in the window with the routine and agent that reached each one.
 - **You are chasing a failure.** The **Could not finish** status row narrows both the rail and the feed.
-- **You want accepted work or received webhooks.** The **Ledger** rows at the bottom of the rail open the [work queue and webhook deliveries](#ledgers).
+- **You want accepted work or received webhooks.** The **Ledger** rows at the bottom of the rail switch it to the [work queue and webhook deliveries](#ledgers).
 
 To *author* a routine, go to [Routines](/guides/routines). A plain approval can be decided from the home's **Needs you** card or on the run page — it is the same item as in [Inbox](/guides/inbox), and an approval with a decision form opens on the run, where the form is. To read the raw event log, use `/journal` (workspace OWNER and ADMIN only, see [Crew Journal](/guides/crew-journal)).
 
@@ -363,12 +363,29 @@ The legacy `/orchestration` route still redirects to `/activity` so old bookmark
 
 ## Ledgers
 
-Two lists sit under **Ledger** at the bottom of the rail:
+Two places sit under **Ledger** at the bottom of the rail: the **Work queue** (`?section=work`), every piece of accepted work — a webhook, a chat turn, a schedule, an assignment — with its attempts and result; and **Webhook deliveries** (`?section=deliveries`), every received webhook, including the ones the filter ignored.
 
-- **Work queue** (`?section=work`) — the durable work ledger: every piece of accepted work (a webhook, a chat turn, a schedule, an assignment), its attempts and its result, filterable by state.
-- **Webhook deliveries** (`?section=deliveries`) — every received webhook, including the ones the filter ignored; an accepted delivery opens its work.
+Opening one keeps Activity's shape. The rail slides over to the ledger's own rows — **‹ All activity** leads back, and slides the run list in again from the left:
 
-They used to be tabs above the page header. Each now opens the way an issue does: the **Activity** header first, then a back-bar — **‹ Back to activity › Work queue · Webhook deliveries** — with the two ledgers side by side, because a delivery opens its work and the reader needs the way back. Only the open ledger is mounted, so opening one does not start the journal stream.
+- a **Work queue · Deliveries** switch;
+- **Status** in Activity's words and colours: *Needs you*, *In the queue*, *Running*, *Done*, *Failed*, *Cancelled* for work; *Accepted* and *Ignored* for deliveries;
+- **Agents** (or **Endpoints**) with their own avatars, and whether their queue moves — *idle*, *running*, *blocked*, *deleted*;
+- **Events**, grouped by family (`invoice.*`, `ping`).
+
+Every row narrows the whole page beside it, and picking it again clears it. The **24 h / 7 d** toggle sets the window for both.
+
+**Work queue** reads top to bottom:
+
+- one sentence — how many pieces of work, how many need you, wait in line, finished, failed;
+- **Flow** — *Arrived → In line → Running → Done*, with *Needs you*, *Failed* and *Cancelled* beside it; a step narrows to it;
+- **Needs you** — work whose outcome nobody knows (`needs_reconciliation`). It holds the agent's only slot, so everything sent to that agent waits behind it, and the card says how much. A MANAGER or above settles it here: **Retry** (mark failed, then run the same input again under your name), **Mark as failed** or **Mark as done**. Each asks what you checked and that nothing is still running;
+- **Why work failed** — failures grouped by cause, with the agents and events affected;
+- **What came in** — one lane per agent, with its crew in its own colour and icon; every piece of work is a dot that opens it;
+- **Latest work** — one sentence per piece: the event, the agent who took it, and how it ended.
+
+**Webhook deliveries** shows one card per endpoint — is it arriving, which profile verified it, and whether its agent's queue is blocked (with a link into the Work queue narrowed to that agent) or the endpoint is gone. Below are the arrivals per event family and the latest deliveries with what each became. A delivery opens beside the list with its decision, sender's id, payload size and retention; its work opens in the Work queue. The body itself is never shown.
+
+Only the open ledger is mounted, so opening one does not start the journal stream.
 
 ## Activity Bar (toolbar)
 

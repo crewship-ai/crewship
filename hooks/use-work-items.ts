@@ -103,6 +103,28 @@ export interface WorkItem {
   created_at: string
   updated_at: string
   terminal_at: string | null
+  /** Who, where and what (#3012). `agent`/`crew` are null once deleted. */
+  agent?: LedgerAgent | null
+  crew?: LedgerCrew | null
+  /** The webhook event a delivery carried; empty for other sources. */
+  event_type?: string
+  duration_ms?: number | null
+  cost_usd?: number | null
+}
+
+export interface LedgerAgent {
+  id: string
+  name: string
+  slug: string
+  avatar_seed: string
+  avatar_style: string
+}
+
+export interface LedgerCrew {
+  id: string
+  name: string
+  color: string
+  icon: string
 }
 
 export interface WorkAttempt {
@@ -617,6 +639,34 @@ export function useReplayWorkItem(
     invalidateKeys: workspaceId ? [workItemKeys.all(workspaceId)] : [],
     onOk: (data) => options.onCreated?.(data),
     onAccepted: (data) => options.onCreated?.(data),
+    onError: (error) => options.onError?.(error),
+  })
+}
+
+/**
+ * Records an investigated outcome for work awaiting reconciliation (#3012).
+ * It does not stop a process: the caller confirms the runtime has stopped, and
+ * names the generation it read, so a stale page cannot settle newer work.
+ */
+export function useResolveWorkItem(
+  workspaceId: string | null | undefined,
+  options: { onResolved?: (item: WorkItem) => void; onError?: (error: unknown) => void } = {},
+) {
+  return useApiMutation<
+    { workItemId: string; state: "succeeded" | "failed" | "cancelled"; generation: number; reason: string },
+    WorkItem
+  >({
+    request: ({ workItemId, state, generation, reason }) => ({
+      input: `${base(workspaceId ?? "")}/${encodeURIComponent(workItemId)}/resolve`,
+      init: {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state, generation, runtime_stopped: true, reason }),
+      },
+    }),
+    invalidateKeys: workspaceId ? [workItemKeys.all(workspaceId)] : [],
+    onOk: (data) => options.onResolved?.(data),
+    onAccepted: (data) => options.onResolved?.(data),
     onError: (error) => options.onError?.(error),
   })
 }
