@@ -91,7 +91,7 @@ it("names the agent and the event, and narrows every card to an agent picked in 
   const latest = screen.getByRole("region", { name: "Latest work" })
   expect(latest).toHaveTextContent("invoice.disputed")
   expect(latest).toHaveTextContent("Casey")
-  expect(latest).toHaveTextContent("sidecar did not start")
+  expect(latest).toHaveTextContent("Sidecar did not start")
   fireEvent.click(screen.getByLabelText("Casey"))
   expect(screen.getByRole("heading", { name: /Work queue · Casey/ })).toBeInTheDocument()
   expect(screen.getByRole("region", { name: "Latest work" })).not.toHaveTextContent("order.shipped")

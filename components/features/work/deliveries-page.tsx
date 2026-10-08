@@ -29,6 +29,7 @@ import {
   deliveryLine,
   deliveryTone,
   endpointHealth,
+  isDeletedAgent,
   ledgerTone,
 } from "@/lib/work-ledger"
 import { LaneAxis, LedgerAvatar, WindowToggle, type LedgerWindow } from "./work-queue-page"
@@ -241,7 +242,7 @@ export function DeliveriesPage({
                         </span>
                         <span className="flex w-[150px] shrink-0 items-center gap-1.5 truncate text-xs text-muted-foreground">
                           <LedgerAvatar agent={d.agent} className="h-4 w-4" />
-                          <span className={cn("truncate", !d.agent && "line-through")}>{agentName(d.agent)}</span>
+                          <span className={cn("truncate", isDeletedAgent(d.agent) && "line-through")}>{agentName(d.agent)}</span>
                         </span>
                         <span
                           className={cn(
@@ -251,7 +252,7 @@ export function DeliveriesPage({
                         >
                           {deliveryLine(d)}
                         </span>
-                        <span className="w-24 shrink-0 text-right font-mono text-[10.5px] text-muted-foreground">
+                        <span className="w-32 shrink-0 whitespace-nowrap text-right font-mono text-[10.5px] text-muted-foreground">
                           {bytes(d.body_bytes)} · {relTime(d.received_at)}
                         </span>
                       </button>
@@ -290,7 +291,7 @@ function DeliveryDetail({
     [
       "Decision",
       deliveryTone(d) === "ignored" ? (
-        <span key="d">Ignored — {d.filter_reason || "nothing to do"}</span>
+        <span key="d">Ignored · {deliveryLine(d)}</span>
       ) : (
         <span key="d" className="text-success">Accepted</span>
       ),

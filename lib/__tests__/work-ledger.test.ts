@@ -8,6 +8,8 @@ import {
   endpointHealth,
   eventFamily,
   failureCauses,
+  humanReason,
+  isDeletedAgent,
   ledgerAgents,
   ledgerCounts,
   ledgerFlow,
@@ -208,7 +210,7 @@ describe("webhook deliveries (#3012)", () => {
   it("says what each delivery became", () => {
     expect(deliveryTone(deliveries[1])).toBe("ignored")
     expect(deliveryTone(deliveries[0])).toBe("accepted")
-    expect(deliveryLine(deliveries[1])).toBe("ping is not an event")
+    expect(deliveryLine(deliveries[1])).toBe("Connection test — nothing to do")
     expect(deliveryLine(deliveries[2])).toBe("→ work · needs you")
     expect(deliveryLine(deliveries[0])).toBe("→ work · done")
   })
@@ -227,5 +229,32 @@ describe("webhook deliveries (#3012)", () => {
     expect(narrowDeliveries(deliveries, { decision: "ignored" })).toHaveLength(1)
     expect(narrowDeliveries(deliveries, { endpointId: robot2.id })).toHaveLength(1)
     expect(narrowDeliveries(deliveries, { family: "invoice.*" })).toHaveLength(2)
+  })
+})
+
+describe("what a reader sees of a reason (#3017)", () => {
+  it("drops raw ids and the operator boilerplate", () => {
+    expect(humanReason("refused at dispatch: agent cmuzox3gm000b2ee652f3 was deleted while this work waited")).toBe(
+      "refused at dispatch: the agent was deleted while this work waited",
+    )
+    expect(
+      humanReason("resolved by cmuxw94hh0001de39519d: runtime confirmed stopped by operator; Lab agent had an invalid model"),
+    ).toBe("Lab agent had an invalid model — settled by hand")
+    expect(humanReason("")).toBe("")
+  })
+
+  it("treats an agent removed from the workspace as deleted", () => {
+    const gone = { ...robot2, deleted: true }
+    expect(isDeletedAgent(gone)).toBe(true)
+    expect(isDeletedAgent(null)).toBe(true)
+    expect(isDeletedAgent(casey)).toBe(false)
+    const agents = ledgerAgents([item("failed", { agent: gone, agent_id: gone.id })])
+    expect(agents[0]).toMatchObject({ name: "Lab Robot 2", state: "deleted" })
+  })
+
+  it("says a ping is a connection test", () => {
+    expect(deliveryLine(delivery({ event_type: "ping", filter_decision: "ignored", filter_reason: "ping", work_id: null, work_state: null }))).toBe(
+      "Connection test — nothing to do",
+    )
   })
 })

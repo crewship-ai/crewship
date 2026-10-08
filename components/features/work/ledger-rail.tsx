@@ -122,12 +122,12 @@ function AgentRows({
                 style={a.agent.avatar_style || undefined}
                 agentId={a.agent.id}
                 alt=""
-                className="h-4 w-4 shrink-0 rounded-full"
+                className={cn("h-4 w-4 shrink-0 rounded-full", a.agent.deleted && "opacity-50 grayscale")}
               />
             ) : (
               <span aria-hidden className="h-4 w-4 shrink-0 rounded-full border border-dashed border-muted-foreground/50" />
             )}
-            <span className={cn("min-w-0 flex-1 truncate", a.agent ? "text-foreground/80" : "text-muted-foreground line-through")}>
+            <span className={cn("min-w-0 flex-1 truncate", a.agent && !a.agent.deleted ? "text-foreground/80" : "text-muted-foreground line-through")}>
               {a.name}
             </span>
             <span className={cn("shrink-0 text-[10.5px]", a.noteTone ?? "text-muted-foreground-soft")}>{a.note}</span>

@@ -68,6 +68,33 @@ export function agentName(agent: LedgerAgent | null | undefined): string {
   return agent?.name || DELETED
 }
 
+/** No record left, or removed from the workspace with its record kept. */
+export function isDeletedAgent(agent: LedgerAgent | null | undefined): boolean {
+  return !agent || Boolean(agent.deleted)
+}
+
+const RAW_ID = /\bc[a-z0-9]{20,}\b/g
+
+/**
+ * A state reason as a reader should see it. The ledger writes reasons for
+ * operators — "resolved by <user id>: runtime confirmed stopped by operator;
+ * <what they wrote>", "agent <id> was deleted" — and the ids mean nothing on
+ * a page that already names the agent.
+ */
+export function humanReason(reason: string | null | undefined): string {
+  let r = (reason ?? "").trim()
+  if (!r) return ""
+  const settled = /^resolved by \S+:\s*runtime confirmed stopped by operator;\s*(.*)$/i.exec(r)
+  if (settled) r = `${settled[1].trim() || "Outcome recorded"} — settled by hand`
+  r = r.replace(/\bagent\s+c[a-z0-9]{20,}\b/gi, "the agent").replace(RAW_ID, "…")
+  return r
+}
+
+/** First letter up, for a reason that stands on its own. */
+export function sentence(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s
+}
+
 const SOURCE_WORD: Record<WorkSource, string> = {
   webhook: "Webhook",
   chat: "Chat turn",
@@ -91,7 +118,7 @@ export function eventFamily(event: string | null | undefined): string {
 
 /** How it ended, as a sentence — never a raw state or id. */
 export function workLine(item: WorkItem): string {
-  const reason = item.state_reason?.trim()
+  const reason = humanReason(item.state_reason)
   switch (ledgerTone(item.state)) {
     case "needs":
       return reason ? `Outcome unclear — ${reason}` : "Outcome unclear"
@@ -106,7 +133,7 @@ export function workLine(item: WorkItem): string {
       return (item.attempt_count ?? 0) === 0 ? "Cancelled before it started" : "Cancelled while running"
     case "failed":
       if (item.state === "expired") return "Expired before it started"
-      return reason || "Failed"
+      return sentence(reason) || "Failed"
   }
 }
 
@@ -210,7 +237,7 @@ export function failureCauses(items: readonly WorkItem[]): FailureCause[] {
   const by = new Map<string, { items: WorkItem[] }>()
   for (const it of items) {
     if (ledgerTone(it.state) !== "failed") continue
-    const cause = it.state === "expired" ? "Expired before it started" : it.state_reason?.trim() || "No reason recorded"
+    const cause = it.state === "expired" ? "Expired before it started" : humanReason(it.state_reason) || "No reason recorded"
     const g = by.get(cause) ?? { items: [] }
     g.items.push(it)
     by.set(cause, g)
@@ -285,7 +312,7 @@ export function ledgerLanes(items: readonly WorkItem[], win: { from: number; to:
         size: list.length,
       }
     })
-    .sort((a, b) => Number(!a.agent) - Number(!b.agent) || b.size - a.size || a.name.localeCompare(b.name))
+    .sort((a, b) => Number(isDeletedAgent(a.agent)) - Number(isDeletedAgent(b.agent)) || b.size - a.size || a.name.localeCompare(b.name))
     .map(({ size: _size, ...lane }) => lane)
 }
 
@@ -305,7 +332,7 @@ export function ledgerAgents(items: readonly WorkItem[]): RailAgent[] {
     .map(([id, list]) => {
       const agent = list.find((i) => i.agent)?.agent ?? null
       const tones = new Set(list.map((i) => ledgerTone(i.state)))
-      const state: RailAgent["state"] = !agent
+      const state: RailAgent["state"] = isDeletedAgent(agent)
         ? "deleted"
         : tones.has("needs")
           ? "blocked"
@@ -314,7 +341,7 @@ export function ledgerAgents(items: readonly WorkItem[]): RailAgent[] {
             : "idle"
       return { id, name: agentName(agent), agent, count: list.length, state }
     })
-    .sort((a, b) => Number(!a.agent) - Number(!b.agent) || b.count - a.count || a.name.localeCompare(b.name))
+    .sort((a, b) => Number(isDeletedAgent(a.agent)) - Number(isDeletedAgent(b.agent)) || b.count - a.count || a.name.localeCompare(b.name))
 }
 
 /** The rail's EVENTS section: families with counts, largest first. */
@@ -361,7 +388,11 @@ export function deliveryTone(d: WebhookDelivery): DeliveryTone {
 
 /** What the delivery became: the filter's reason, or the work and its state. */
 export function deliveryLine(d: WebhookDelivery): string {
-  if (deliveryTone(d) === "ignored") return d.filter_reason || "Ignored — nothing to do"
+  if (deliveryTone(d) === "ignored") {
+    if (d.event_type === "ping") return "Connection test — nothing to do"
+    const reason = humanReason(d.filter_reason)
+    return reason && reason.toLowerCase() !== d.event_type.toLowerCase() ? sentence(reason) : "Ignored — nothing to do"
+  }
   if (!d.work_id) return "Accepted"
   if (!d.work_state) return "→ work"
   return `→ work · ${LEDGER_TONE_LABEL[ledgerTone(d.work_state)].toLowerCase()}`
@@ -389,7 +420,7 @@ export function endpointHealth(deliveries: readonly WebhookDelivery[], _now = Da
     .map(([endpointId, list]) => {
       const sorted = [...list].sort((a, b) => b.received_at.localeCompare(a.received_at))
       const agent = list.find((d) => d.agent)?.agent ?? null
-      const gone = !agent && list.every((d) => d.endpoint_kind === "agent")
+      const gone = isDeletedAgent(agent) && list.every((d) => d.endpoint_kind === "agent")
       const blocked = list.some((d) => d.work_state === "needs_reconciliation")
       return {
         endpointId,

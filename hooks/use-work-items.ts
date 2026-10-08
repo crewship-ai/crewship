@@ -118,6 +118,8 @@ export interface LedgerAgent {
   slug: string
   avatar_seed: string
   avatar_style: string
+  /** Removed from the workspace; the record (and name) remain. */
+  deleted?: boolean
 }
 
 export interface LedgerCrew {

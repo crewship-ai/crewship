@@ -31,6 +31,9 @@ import {
   LEDGER_TONE_TEXT,
   agentName,
   failureCauses,
+  humanReason,
+  isDeletedAgent,
+  sentence,
   ledgerCounts,
   ledgerFlow,
   ledgerHeadline,
@@ -63,7 +66,8 @@ export function LedgerAvatar({ agent, className }: { agent: LedgerAgent | null |
       style={agent.avatar_style || undefined}
       agentId={agent.id}
       alt=""
-      className={cn("shrink-0 rounded-full", className)}
+      // A deleted agent keeps its face, greyed: the work was still theirs.
+      className={cn("shrink-0 rounded-full", isDeletedAgent(agent) && "opacity-50 grayscale", className)}
     />
   )
 }
@@ -252,7 +256,7 @@ export function WorkQueuePage({
                           <span className="font-mono text-foreground/85">{workSubject(item)}</span> → {agentName(item.agent)}
                         </span>
                         <span className="line-clamp-2 text-sm font-medium">
-                          {item.state_reason || "The run ended without a recorded outcome."} Crewship cannot tell whether it happened.
+                          {sentence(humanReason(item.state_reason)) || "The run ended without a recorded outcome."} Crewship cannot tell whether it happened.
                         </span>
                         <span className="text-[11px] text-muted-foreground">
                           {relTime(item.created_at)} · attempt {item.attempt_count}
@@ -337,7 +341,7 @@ export function WorkQueuePage({
                   <span className="flex min-w-0 items-center gap-2">
                     <LedgerAvatar agent={lane.agent} className="h-5 w-5" />
                     <span className="min-w-0">
-                      <span className={cn("block truncate text-xs", !lane.agent && "text-muted-foreground line-through")}>{lane.name}</span>
+                      <span className={cn("block truncate text-xs", isDeletedAgent(lane.agent) && "text-muted-foreground line-through")}>{lane.name}</span>
                       <span className="flex min-w-0 items-center gap-1.5">
                         {lane.crew && <CrewChip crew={lane.crew} className="shrink-0" />}
                         <span className="truncate font-mono text-[10px] text-muted-foreground-soft">{lane.feeds.join(" · ")}</span>
@@ -468,7 +472,7 @@ function WorkRow({ item, onOpen }: { item: WorkItem; onOpen: (id: string) => voi
       <span className="w-[170px] shrink-0 truncate font-mono text-xs">{workSubject(item)}</span>
       <span className="flex w-[230px] shrink-0 items-center gap-1.5 truncate text-xs text-muted-foreground">
         <LedgerAvatar agent={item.agent} className="h-4 w-4" />
-        <span className={cn("truncate", !item.agent && "line-through")}>{agentName(item.agent)}</span>
+        <span className={cn("truncate", isDeletedAgent(item.agent) && "line-through")}>{agentName(item.agent)}</span>
         {item.crew && <CrewChip crew={item.crew} className="hidden lg:inline-flex" />}
       </span>
       <span
@@ -482,7 +486,7 @@ function WorkRow({ item, onOpen }: { item: WorkItem; onOpen: (id: string) => voi
       <span className="hidden shrink-0 rounded border border-border px-1.5 py-px font-mono text-[10px] text-muted-foreground md:inline">
         {item.attempt_count} {item.attempt_count === 1 ? "attempt" : "attempts"}
       </span>
-      <span className="w-14 shrink-0 text-right font-mono text-[10.5px] text-muted-foreground">{relTime(item.created_at)}</span>
+      <span className="w-16 shrink-0 whitespace-nowrap text-right font-mono text-[10.5px] text-muted-foreground">{relTime(item.created_at)}</span>
     </button>
   )
 }
