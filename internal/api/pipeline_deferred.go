@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,9 +20,62 @@ import (
 // accidental immediate fire) and rejects absurd far-future schedules.
 const maxDeferralSeconds = 30 * 24 * 3600
 
+// defaultCapacityQueueTTL bounds how long an immediate start queued for a
+// full concurrency slot waits when the caller set no ttl_seconds.
+const defaultCapacityQueueTTL = time.Hour
+
+// deferredOptions marks an immediate start that is being queued because its
+// concurrency slot was full (#3025): it is due now, waits at most its TTL
+// (defaultCapacityQueueTTL when none was given) and, when the caller sent an
+// Idempotency-Key, gets a stable ID so a retry finds it.
+type deferredOptions struct {
+	queuedForCapacity bool
+	id                string
+}
+
+// queuedStartID derives the pending ID of a capacity-queued start from the
+// caller's Idempotency-Key. Empty without a key: the start then gets a random
+// ID and a retry cannot be matched to it.
+func queuedStartID(workspaceID, pipelineID, key string) string {
+	if key == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(workspaceID + "\x00" + pipelineID + "\x00" + key))
+	return "pnd_q" + hex.EncodeToString(sum[:12])
+}
+
+// queuedStartForKey returns the capacity-queued start this Idempotency-Key
+// already created, in any status, or nil.
+func (h *PipelineHandler) queuedStartForKey(ctx context.Context, workspaceID, pipelineID, key string) *pipeline.PendingRun {
+	id := queuedStartID(workspaceID, pipelineID, key)
+	if id == "" || h.db == nil {
+		return nil
+	}
+	pr, err := pipeline.NewPendingRunStore(h.db).Get(ctx, workspaceID, id)
+	if err != nil {
+		h.logger.Warn("lookup queued routine start", "error", err)
+		return nil
+	}
+	return pr
+}
+
+// writeQueuedReceipt answers a start that waits for its concurrency slot.
+func writeQueuedReceipt(w http.ResponseWriter, pr pipeline.PendingRun, coalesced bool) {
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"status":         "SCHEDULED",
+		"pending_id":     pr.ID,
+		"fire_at":        pr.FireAt.Format(time.RFC3339Nano),
+		"coalesced":      coalesced,
+		"pinned_version": pr.PinnedVersion,
+		"priority":       pr.Priority,
+		"queued":         true,
+		"reason":         "concurrency_limit",
+	})
+}
+
 // enqueueDeferredRun parks a delayed/debounced trigger in pending_runs.
 // Always writes the HTTP response (scheduled receipt or error).
-func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Request, workspaceID, invokingUser string, p *pipeline.Pipeline, body runRequestBody) {
+func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Request, workspaceID, invokingUser string, p *pipeline.Pipeline, body runRequestBody, opts deferredOptions) {
 	// Bound every duration field so a huge value can't overflow the
 	// fire_at/expires_at arithmetic (which would wrap negative and fire
 	// immediately). Reject rather than clamp so the caller sees the limit.
@@ -60,6 +115,9 @@ func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Requ
 	}
 
 	var expiresAt *time.Time
+	if opts.queuedForCapacity && body.TTLSeconds == 0 {
+		body.TTLSeconds = int(defaultCapacityQueueTTL / time.Second)
+	}
 	if body.TTLSeconds > 0 {
 		e := now.Add(time.Duration(body.TTLSeconds) * time.Second)
 		expiresAt = &e
@@ -114,10 +172,14 @@ func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Requ
 	admit := func(ctx context.Context, pin *int) error {
 		return h.deferredInputsFitPin(ctx, p, pin, body)
 	}
+	id := opts.id
+	if id == "" {
+		id = "pnd_" + generateCUID()
+	}
 	store := pipeline.NewPendingRunStore(h.db)
 	stored, err := store.EnqueueChecked(r.Context(), pipeline.PendingRun{
 		PinnedVersion: body.PinnedVersion,
-		ID:            "pnd_" + generateCUID(),
+		ID:            id,
 		WorkspaceID:   workspaceID,
 		PipelineID:    p.ID,
 		PipelineSlug:  p.Slug,
@@ -151,6 +213,10 @@ func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Requ
 	// #2500), and the only reading that cannot be wrong is the one the
 	// compare-and-set just committed — not this request's computed pin, and
 	// not a re-read that could fail and fall back to it.
+	if opts.queuedForCapacity {
+		writeQueuedReceipt(w, pipeline.PendingRun{ID: stored.ID, FireAt: stored.FireAt, PinnedVersion: stored.PinnedVersion, Priority: body.Priority}, stored.Coalesced)
+		return
+	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":         "SCHEDULED",
 		"pending_id":     stored.ID,
