@@ -285,6 +285,8 @@ The Time grouping used to list only chains that **composed** something and sent 
 
 ## Keyboard
 
+On a run's page, **↑** and **↓** step to the previous and next run in the rail's order (Active now, Today, Earlier). The ends stay put, and the keys do nothing while you type in a field.
+
 - `j` / `k` — step to the next or previous event in the feed, opening it. From nothing open, `j` opens the newest.
 - `Esc` — close an opened event; with nothing open it steps one stop back up the trail, rather than doing nothing once you are already at the top.
 
@@ -324,7 +326,15 @@ They used to be tabs above the page header. Each now opens the way an issue does
 
 The `/activity` page answers "what happened" in depth; the **Activity Bar** answers "what is running right now" at a glance, from anywhere in the app. It is the Activity icon in the top toolbar next to the Inbox bell, with a badge counting live runs — amber the moment anything waits on a human approval, blue while routines run.
 
-The dropdown holds **LIVE** (up to six active routine runs with their current step, elapsed time and cost, each with Review / Trace / Cancel, plus any in-flight agent runs) and **RECENT** (the last few terminal routine runs, so "did my run just finish?" costs no page hop). The footer opens `/activity?status=active` while anything is live, and `/activity` otherwise.
+The dropdown speaks the rail's words. It holds two sections:
+
+- **LIVE**: up to six active routine runs, plus any in-flight agent runs. Each routine run shows its current step, elapsed time and cost.
+  - A run that waits on a person says **waiting for you**, and **Decide →** opens the run's page, where the approval is.
+  - **Open run** opens the run's page.
+  - **Cancel** is offered only to OWNER and ADMIN, the roles the cancel API accepts.
+- **RECENT**: the last few finished runs, so "did my run just finish?" costs no page hop. A run reads **Completed**, **Could not finish**, **Cancelled** or **Interrupted**, with the rail's colours; a stopped run is grey, not green.
+
+The footer opens `/activity?status=waiting` when something waits on a person, `/activity?status=active` while anything is live, and `/activity` otherwise.
 
 The server is the source of truth: `GET /api/v1/runs?status=RUNNING` for agent runs and `GET /api/v1/workspaces/{ws}/pipelines/runs/active` for routine runs, re-fetched on a short poll and immediately on `assignment.updated`, `run.*`, `mission.updated`, `pipeline.run.*` and `pipeline.step.started` — so a dropped frame cannot leave the badge stale. Nothing in flight, and the badge disappears.
 

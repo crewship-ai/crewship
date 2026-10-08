@@ -73,7 +73,7 @@ import {
   type SidebarRoutine,
 } from "./activity-sidebar"
 import { useChains } from "@/hooks/use-chains"
-import { narrowChains, type LensKey } from "@/lib/activity-lenses"
+import { bucketChains, narrowChains, type LensKey } from "@/lib/activity-lenses"
 import { activityUrl, parseActivityUrl, type ActivityUrlState } from "@/lib/activity-url"
 import { iconFor } from "./activity-overview"
 import { ActivityDetail } from "./activity-detail"
@@ -644,6 +644,22 @@ export function ActivityStreamView({
         else setPath(backFrom)
         return
       }
+      // ↑ / ↓ step through the rail's runs from an opened run (#2988), in
+      // the order the rail draws them — Active now, Today, Earlier — so the
+      // key moves to the row the reader sees above or below. The ends stay
+      // put rather than wrapping round.
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !selected) {
+        const current = stop?.kind === "workflow" || stop?.kind === "run" ? stop.id : null
+        if (!current) return
+        const order = bucketChains(visibleChains, Date.now()).flatMap((b) => b.chains)
+        const i = order.findIndex((c) => c.origin === current)
+        if (i < 0) return
+        const next = order[e.key === "ArrowDown" ? i + 1 : i - 1]
+        if (!next) return
+        e.preventDefault()
+        selectChain(next.origin)
+        return
+      }
       if (e.key !== "j" && e.key !== "k") return
       e.preventDefault()
       const i = selected ? visible.findIndex((x) => x.id === selected.id) : -1
@@ -652,7 +668,7 @@ export function ActivityStreamView({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [visible, selected])
+  }, [visible, selected, stop, visibleChains, selectChain])
 
   // Every chip carries whether it NARROWS the feed. All of them do except a
   // workflow, which re-points the graph: the journal has no chain_origin

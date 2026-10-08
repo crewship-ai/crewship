@@ -323,6 +323,23 @@ it.each(["array", "http", "network"])("handles %s issue metadata responses", asy
   await act(async () => {})
   expect(sidebar().issues).toEqual(kind === "array" ? [{ id: "new" }] : [])
 })
+it("steps to the next and previous run with the arrow keys, in the rail's order (#2988)", () => {
+  show()
+  act(() => sidebar().onSelectChain("r1"))
+  expect(screen.getByText("Run r1")).toBeVisible()
+  fireEvent.keyDown(window, { key: "ArrowDown" })
+  expect(screen.getByText("Workflow w1")).toBeVisible()
+  fireEvent.keyDown(window, { key: "ArrowUp" })
+  expect(screen.getByText("Run r1")).toBeVisible()
+  // The ends stay put rather than wrapping round.
+  fireEvent.keyDown(window, { key: "ArrowUp" })
+  expect(screen.getByText("Run r1")).toBeVisible()
+  // Typing in the search box is not navigation.
+  const input = screen.getByRole("textbox", { name: "Activity search" })
+  input.focus()
+  fireEvent.keyDown(input, { key: "ArrowDown" })
+  expect(screen.getByText("Run r1")).toBeVisible()
+})
 it("opens a run under the Issues back-bar: the way out, then only the stops walked", () => {
   // #2979: /issues reads "‹ Back to issues › OPS-1". The home crumb would
   // repeat the button beside it ("Back to activity › Overview › …").
