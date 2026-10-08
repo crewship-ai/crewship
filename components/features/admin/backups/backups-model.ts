@@ -98,6 +98,9 @@ export interface OverviewResponse {
   workspaces?: WorkspaceCoverage[]
   /** For the scope bar: "5 workspaces, 7 users, instance settings, …". */
   instance_summary?: string | null
+  /** Selected workspaces that hold no crew: left out of `workspaces` and
+   *  summed up in one needs_attention item ("crewless"). */
+  crewless_workspaces?: number
 }
 
 export type RunStatus = "running" | "done" | "incomplete" | "failed" | "interrupted" | "skipped"

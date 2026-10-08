@@ -64,6 +64,7 @@ export function OverviewBody({ data, ctx, now = new Date() }: { data: OverviewRe
         <SummaryItem>{s.how_often.value}</SummaryItem>
         <SummaryItem tone={s.offsite_verified ? undefined : "danger"}>{s.offsite_verified ? s.where.value : "This server only"}</SummaryItem>
         {cov && <SummaryItem n={covered} tone={covered < cov.length ? "warn" : "success"}>{`of ${cov.length} workspaces covered`}</SummaryItem>}
+        {!!data.crewless_workspaces && <SummaryItem n={data.crewless_workspaces}>{data.crewless_workspaces === 1 ? "workspace without crews" : "workspaces without crews"}</SummaryItem>}
       </SettingsSummary>
 
       <NeedsAttention items={attentionItems(data)} ctx={ctx} />

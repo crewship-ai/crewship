@@ -61,7 +61,12 @@ export function overviewFixture(now: Date, scope: "instance" | "workspaces", sel
     "ws-pages": { last: at(now, 9, 3), status: "bad" },
     "ws-sandbox": { last: null, status: "bad" },
   }
-  const rows = FIXTURE_WORKSPACES.filter((w) => selected.includes(w.id))
+  // As the server does: a workspace that holds no crew gets no row of its
+  // own, only a count and one attention item for all of them.
+  const picked = FIXTURE_WORKSPACES.filter((w) => selected.includes(w.id))
+  const rows = picked.filter((w) => w.crews !== 0)
+  const crewless = picked.filter((w) => w.crews === 0)
+  const unbacked = crewless.filter((w) => !cov[w.id].last)
   const risk = rows.filter((w) => cov[w.id].status !== "ok")
   return {
     instance_summary: "5 workspaces, 7 users, instance settings, container environments",
@@ -98,10 +103,14 @@ export function overviewFixture(now: Date, scope: "instance" | "workspaces", sel
             detail: "No plan covers it.",
             action: { kind: "back_up_now" as const, label: "Back up now", workspace_id: w.id },
           }))),
+      ...(!inst && unbacked.length
+        ? [{ id: "crewless", severity: "warn" as const, title: `${unbacked.length} workspace${unbacked.length === 1 ? "" : "s"} without crews ${unbacked.length === 1 ? "has" : "have"} no backup`, detail: unbacked.map((w) => w.name).join(", ") }]
+        : []),
       { id: "late", severity: "warn", title: "One backup ran four hours late", detail: "The server was down at 03:00; one catch-up backup ran at 07:12 when it came back." },
     ],
     nights: nights(now),
     space: { backups_bytes: 26 * GB, free_bytes: 212 * GB, total_bytes: 342 * GB, staging_need_bytes: 9 * GB, restore_need_bytes: 48 * GB },
+    crewless_workspaces: inst ? 0 : crewless.length,
     workspaces: inst ? undefined : rows.map((w) => ({
       workspace_id: w.id, name: w.name, last_backup_at: cov[w.id].last, status: cov[w.id].status,
       plan: cov[w.id].status === "ok" ? "Workspace backup" : null, proof: cov[w.id].status === "ok" ? 2 : 0,

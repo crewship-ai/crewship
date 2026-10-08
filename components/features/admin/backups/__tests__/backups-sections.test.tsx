@@ -103,15 +103,25 @@ describe("Overview", () => {
   })
 
   it("in workspaces scope shows a row per ticked workspace and offers a backup where none is recent", async () => {
-    show("overview", "?demo=1&scope=workspaces&ws=dess,sandbox")
+    show("overview", "?demo=1&scope=workspaces&ws=dess,pages-demo")
     const table = (await screen.findByText("The newest backup of each selected workspace")).closest("section")!
     expect(within(table).getByText("Dess")).toBeInTheDocument()
-    expect(within(table).getByText("Sandbox")).toBeInTheDocument()
+    expect(within(table).getByText("Pages demo")).toBeInTheDocument()
     expect(within(table).queryByText("Coolify")).toBeNull()
-    expect(within(table).getByText("never")).toBeInTheDocument()
-    expect(screen.getByText("Sandbox: never backed up")).toBeInTheDocument()
+    expect(screen.getByText("Pages demo: last backup 9 days ago")).toBeInTheDocument()
     expect(within(table).getAllByRole("button", { name: "Back up now" }).length).toBeGreaterThan(0)
     expect(screen.getByText(/of 2 workspaces covered/)).toBeInTheDocument()
+  })
+
+  // A workspace that holds no crew (every signup gets one) has no row of its
+  // own: the server sums those up in one attention item.
+  it("folds workspaces without crews into one attention item and a summary count", async () => {
+    show("overview", "?demo=1&scope=workspaces&ws=dess,sandbox")
+    expect(await screen.findByText("1 workspace without crews has no backup")).toBeInTheDocument()
+    const table = screen.getByText("The newest backup of each selected workspace").closest("section")!
+    expect(within(table).queryByText("Sandbox")).toBeNull()
+    expect(screen.getByText(/workspace without crews$/)).toBeInTheDocument()
+    expect(screen.getByText(/of 1 workspaces covered/)).toBeInTheDocument()
   })
 })
 

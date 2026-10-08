@@ -1110,7 +1110,10 @@ workspaces:
   attachment files, memory versions without content, crews without their
   container), workspaces never or not recently backed up (the plan's
   `stale_alert_hours`, 36 by default), workspaces on no plan, and failed,
-  skipped or late runs. The whole-instance view also says when the latest
+  skipped or late runs. Workspaces that hold no crew (every signup gets one of
+  its own) are not judged one by one: one item says how many of them have no
+  backup and names up to three; they get no coverage row, and the summary
+  counts them apart ("N workspaces without crews"). The whole-instance view also says when the latest
   instance backup cannot unlock credentials on a new server — the vault key
   versions its sealed values use that its recovery kit does not carry (all of
   them when the kit was off), read from the bundle's own manifest. When the
