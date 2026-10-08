@@ -127,7 +127,7 @@ describe("SaveFooter inside a page", () => {
     toastError.mockReset()
   })
 
-  function FooterCard({ title, initial = "idle" as SaveStatus, error = null as string | null, onSave = vi.fn() }) {
+  function FooterCard({ title, initial = "idle", error = null, onSave = vi.fn() }: { title: string; initial?: SaveStatus; error?: string | null; onSave?: () => void }) {
     const [status, setStatus] = useState<SaveStatus>(initial)
     return (
       <SettingsCard title={title}>
