@@ -4,7 +4,6 @@ import * as React from "react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 import { SettingsSaveBar, SettingsSegmented } from "@/components/features/settings/shared"
 import { ConfirmDialog, type Consequence } from "@/components/ui/confirm-dialog"
 import { Gate, TD, TH, WarnBar } from "./backups-kit"
@@ -21,7 +20,7 @@ import type { SectionCtx } from "./backups-console"
  */
 export function DataRetention({ ctx }: { ctx: SectionCtx }) {
   const res = useDataRetention(ctx.selected)
-  if (ctx.selected.size === 0) return <p className="text-[13px] text-muted-foreground">Tick a workspace in the bar above.</p>
+  if (ctx.selected.size === 0) return <p className="text-control text-muted-foreground">Tick a workspace in the bar above.</p>
   return (
     <Gate resource={res} what="Data retention" skeleton="h-[360px]">
       {(data) => <RetentionBody rows={data.rows} ctx={ctx} reload={res.reload} />}
@@ -160,8 +159,8 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
                 return (
                   <tr key={r.key} data-key={r.key} className="[&:last-child>td]:border-b-0">
                     <td className={cn(TD, "whitespace-normal")}>
-                      <div>{r.label}{r.mixed && !(r.key in draft) && <span className="ml-2 font-mono text-[10.5px] text-warn">mixed</span>}</div>
-                      {r.note && <div className="text-[12.5px] text-muted-foreground">{r.note}</div>}
+                      <div>{r.label}{r.mixed && !(r.key in draft) && <span className="ml-2 font-mono text-micro text-warn">mixed</span>}</div>
+                      {r.note && <div className="text-label text-muted-foreground">{r.note}</div>}
                     </td>
                     <td className={TD}>
                       <div className="w-max"><SettingsSegmented<string> label={`Keep ${r.label} for`} value={r.mixed && !(r.key in draft) ? "" : value === null ? "forever" : String(value)}
@@ -176,17 +175,17 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
               {housekeeping.map((r) => (
                 <tr key={r.key} data-key={r.key} className="text-muted-foreground [&:last-child>td]:border-b-0">
                   <td className={TD}>{r.label}</td>
-                  <td className={cn(TD, "font-mono text-[12px]")}>{r.fixed ?? retentionLabel(r.days)}</td>
+                  <td className={cn(TD, "font-mono text-label")}>{r.fixed ?? retentionLabel(r.days)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
-      <p className="rounded-lg border border-border bg-card px-3 py-2 text-[13px] text-muted-foreground">
+      <p className="rounded-lg border border-border bg-card px-3 py-2 text-control text-muted-foreground">
         Turning a limit on says how many rows go at the next sweep, and that older backups still hold them until they age out.
       </p>
-      <SettingsSaveBar count={diff.length} saving={busy} onDiscard={() => setDraft({})} onSave={review} />
+      <SettingsSaveBar label="Data retention" count={diff.length} saving={busy} onDiscard={() => setDraft({})} onSave={review} />
       <ConfirmDialog open={preview !== null} onOpenChange={(o) => { if (!o) setPreview(null) }} destructive={swept > 0}
         title={preview && plan.length ? `Apply ${preview.count} limit${preview.count === 1 ? "" : "s"} to ${preview.all ? "every existing workspace" : `${preview.size} workspace${preview.size === 1 ? "" : "s"}`}?` : "Nothing to change"}
         description="The dry run lists every value this overwrites."
@@ -256,8 +255,8 @@ export function RetentionDefaultsCard({ rows, demo }: { rows: RetentionRow[]; de
   return (
     <div className="overflow-hidden rounded-card border border-border bg-card" data-slot="retention-defaults">
       <div className="border-b border-border px-4 py-3">
-        <div className="text-[14px] font-medium">Defaults for new workspaces</div>
-        <div className="text-[13px] text-muted-foreground">What a workspace created from now on starts with. Existing workspaces are not changed.</div>
+        <div className="text-body font-medium">Defaults for new workspaces</div>
+        <div className="text-control text-muted-foreground">What a workspace created from now on starts with. Existing workspaces are not changed.</div>
       </div>
       {stale && <div className="border-b border-border px-4 py-2.5"><WarnBar tone="bad" title={STALE_PREVIEW}>Nothing was written.</WarnBar></div>}
       <div className="overflow-x-auto">
@@ -281,10 +280,8 @@ export function RetentionDefaultsCard({ rows, demo }: { rows: RetentionRow[]; de
           </tbody>
         </table>
       </div>
-      <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">
-        <Button size="sm" disabled={edits.length === 0} onClick={() => void review()}>Save defaults for new workspaces…</Button>
-        {edits.length > 0 && <Button size="sm" variant="ghost" onClick={() => setDraft({})}>Discard</Button>}
-      </div>
+      {/* The page's Save bar opens the preview below; the confirm writes. */}
+      <SettingsSaveBar label="Defaults for new workspaces" count={edits.length} onDiscard={() => setDraft({})} onSave={review} />
       <ConfirmDialog open={preview !== null} onOpenChange={(o) => { if (!o) setPreview(null) }}
         title={preview && preview.changes.length ? `Change ${preview.changes.length} default${preview.changes.length === 1 ? "" : "s"} for new workspaces?` : "Nothing to change"}
         description="Only workspaces created from now on start with these."

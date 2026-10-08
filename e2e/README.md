@@ -110,3 +110,73 @@ Prefer a shallow route smoke check or a focused feature interaction. The PR
 contract subset does not stand in for provider-backed chat or agent execution;
 those require their own runtime fixtures. A manual probe or a screenshot from
 a past run is not a substitute for a reproducible regression test.
+
+## Deterministic routine executions on a live server
+
+`routines-live-contracts.py` runs 50 saved recipes through an authenticated CLI
+against a real server, then repeats one recipe 20 times and checks transform
+admission. It creates its own workspace and restricted crew, verifies business
+outputs against durable run records, writes each result immediately, and deletes
+only its generated workspace. The active CLI profile is never changed.
+
+```bash
+crewship-heavy python3 e2e/routines-live-contracts.py \
+  --binary /path/to/crewship \
+  --server http://127.0.0.1:8082 \
+  --output /mnt/dev-workspace/tmp/builds/routines-live-new-run
+```
+
+The output directory must be new. Use the same server hostname the CLI token was issued for. Pass `--profile`
+when running from a worktree outside the configured directory binding. An OWNER account able to create workspaces and
+crews is required. Setup or cleanup failures must be investigated; they are not
+successful runs. This suite covers deterministic transforms, expr/CEL, ordered
+foreach, DAG dependencies and conditions. Fifty recipes and twenty repetitions
+are reported separately. Browser flows, models, HTTP credential injection,
+integrations, permissions and other API domains belong in additional suites;
+this result cannot certify the whole product. No paid model or external service
+is called.
+
+Use `--bucket access` to provision one fresh synthetic account and exercise
+MEMBER, MANAGER, ADMIN and VIEWER against saved routines and a second workspace.
+The account is intentionally retained because the public API cannot delete it;
+its memberships and temporary CLI config are removed. No existing account or
+password is changed. Add `--browser` to verify that a MEMBER sees both low and
+medium notifications addressed to its crew and its workspace in the browser
+API and Inbox UI. This requires the installed Playwright dependency and browser.
+Credentials reach the browser driver through stdin and are excluded from reports.
+
+Cross-workspace requests explicitly set `workspace_id` to the target workspace:
+the CLI injects its selected workspace into query parameters, and the server
+resolves that parameter before the path's workspace ID.
+
+### Complex foreach and real queue contention
+
+Select `--bucket workflows` with the same command and a fresh output directory.
+It executes five 32-item foreach recipes with two body steps, upstream outputs,
+shared inputs and different parallelism limits. It then enqueues 14 co-due
+agentless runs, submitting the two high-priority requests last. Short datetime
+waits hold the dispatcher slots so the test can observe whether high-priority
+requests enter the saturated first wave. Every result is checked for its own
+input-derived output, zero cost, durable completion and lack of lost/duplicate
+runs. This measures deferred dispatch, not contention on a model agent.
+
+The queue test takes about 35 seconds after setup and needs a test instance with
+an otherwise quiet dispatcher. It has a 65-second polling deadline and records
+per-run delay after `fire_at`; concurrent completion order is not guaranteed.
+An unobservable first wave fails the check rather than silently claiming
+priority coverage.
+
+The workflows bucket also verifies state written by a routine, read by its next
+run, repaired through the operator API, and removed/cleared. It checks budget
+set/clear and negative-value validation with a zero-cost routine; enforcement
+against actual paid spend still requires a separate authorized model scenario.
+
+Harness failure-path checks (simulated subprocess/API failures, no real run):
+
+```bash
+crewship-heavy env PYTHONDONTWRITEBYTECODE=1 python3 e2e/routines_live_contracts_test.py
+```
+
+Cleanup attempts all fixture resources even when cancellation, logout or a
+workspace deletion fails. Temporary credential removal runs in `finally`;
+the scenario reports cleanup failures after all attempts.

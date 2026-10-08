@@ -6,13 +6,14 @@ import { AlertTriangle, ChevronRight, Mail, Plus, Settings as SettingsIcon, User
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { SettingsCard, SettingsDangerCard, SettingsRow } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsDangerCard, SettingsRow, controlHeight, nativeSelect } from "@/components/features/settings/shared"
 import { WeekLine, WorkspaceTile, ago } from "@/app/(dashboard)/admin/tabs/admin-kit"
 import {
   daysUntil, displayName, isLastOwner, membersOf, ownersOf, personStatus, roleIn, type Person, type Role, type Workspace,
 } from "./people-model"
 import { InlineConfirm, PersonLabel, RoleSelect, SetupLinkBox, StatusChip, roleLabel } from "./people-parts"
 import type { SetupLink, usePeople } from "./use-people"
+import { cn } from "@/lib/utils"
 
 type Actions = ReturnType<typeof usePeople>["actions"]
 
@@ -62,15 +63,15 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted }: {
     <div className="space-y-4" data-slot="workspace-profile">
       <section aria-label={ws.name} className="overflow-hidden rounded-card border border-border bg-card">
         <div className="flex flex-wrap items-start gap-4 p-4">
-          <WorkspaceTile id={ws.id} name={ws.name} size="lg" />
+          <WorkspaceTile id={ws.id} name={ws.name} size="lg" logoUrl={ws.logo_url} />
           <div className="min-w-0 flex-1">
             <h2 className="flex flex-wrap items-baseline gap-2 text-lg font-semibold tracking-[-0.01em]">
-              {ws.name}<span className="font-mono text-[12px] font-normal text-muted-foreground">{ws.slug}</span>
+              {ws.name}<span className="font-mono text-label font-normal text-muted-foreground">{ws.slug}</span>
             </h2>
-            <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+            <p className="mt-0.5 text-label text-muted-foreground">
               Owner {owners.length ? owners.map(displayName).join(", ") : "—"} · created {new Date(ws.created_at).toLocaleDateString()} · active {ago(ws.last_activity_at)}
             </p>
-            <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11.5px] text-muted-foreground">
+            <div className="mt-3 flex flex-wrap items-center gap-1.5 text-label text-muted-foreground">
               <Chip n={members.length} label="people" />
               <Chip n={ws._count_agents} label="agents" />
               <Chip n={ws._count_crews} label="crews" />
@@ -87,7 +88,7 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted }: {
       </section>
 
       <SettingsCard icon={Users} tint="var(--primary)" title="Members" description="Everyone who can open this workspace"
-        actions={<span className="font-mono text-[11px] text-muted-foreground">{members.length}</span>}>
+        actions={<span className="font-mono text-micro text-muted-foreground">{members.length}</span>}>
         {members.map((p) => {
           const role = roleIn(p, ws.id)!
           const lastOwner = role === "OWNER" && isLastOwner(people, ws.id, p.id)
@@ -117,13 +118,13 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted }: {
             </div>
           )
         })}
-        {members.length === 0 && <p className="border-b border-border px-4 py-3 text-[12px] text-muted-foreground">No one yet.</p>}
+        {members.length === 0 && <p className="border-b border-border px-4 py-3 text-label text-muted-foreground">No one yet.</p>}
         {link && <SetupLinkBox url={link.url} expiresAt={link.expires_at} onDone={() => setLink(null)} />}
         {adding ? (
           <div className="grid gap-1.5 border-t border-border px-4 py-2.5">
             <div className="flex flex-wrap items-center gap-2">
               <Input list={`cands-${ws.id}`} value={who} onChange={(e) => setWho(e.target.value)} placeholder="Name or email" aria-label="Person to add"
-                autoFocus className="h-8 min-w-0 flex-1" onKeyDown={(e) => { if (e.key === "Enter") void add() }} />
+                autoFocus className={cn(controlHeight, "min-w-0 flex-1")} onKeyDown={(e) => { if (e.key === "Enter") void add() }} />
               <datalist id={`cands-${ws.id}`}>
                 {candidates.map((p) => <option key={p.id} value={p.email}>{displayName(p)}</option>)}
               </datalist>
@@ -131,11 +132,11 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted }: {
               <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>Cancel</Button>
               <Button size="sm" onClick={add} disabled={!who.trim() || busy === "create-person"}>Add</Button>
             </div>
-            <p className="text-[11px] text-muted-foreground">Someone new gets an account and a setup link you pass on. No email is sent.</p>
+            <p className="text-label text-muted-foreground">Someone new gets an account and a setup link you pass on. No email is sent.</p>
           </div>
         ) : (
           <button type="button" onClick={() => setAdding(true)}
-            className="flex w-full items-center gap-1.5 border-t border-border px-4 py-2.5 text-left text-[12.5px] text-primary-hover hover:bg-accent">
+            className="flex w-full items-center gap-1.5 border-t border-border px-4 py-2.5 text-left text-label text-primary-hover hover:bg-accent">
             <Plus className="size-3.5" />Add a person to {ws.name}
           </button>
         )}
@@ -155,7 +156,7 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted }: {
       <SettingsDangerCard icon={AlertTriangle} title="Danger zone" description="Who owns this workspace, and whether it exists">
         <SettingsRow label="Transfer ownership" description="The new owner must be a member; the current owner stays on as Admin">
           <select aria-label="New owner" value={newOwner} onChange={(e) => setNewOwner(e.target.value)} disabled={nonOwners.length === 0}
-            className="h-8 w-40 rounded-md border border-control-border bg-surface-subtle px-2 text-control disabled:opacity-50">
+            className={cn(nativeSelect, "w-full sm:w-64")}>
             <option value="">{nonOwners.length ? "Choose…" : "No other member"}</option>
             {nonOwners.map((p) => <option key={p.id} value={p.id}>{displayName(p)}</option>)}
           </select>
@@ -182,7 +183,7 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted }: {
         )}
       </SettingsDangerCard>
 
-      <Link href={`/admin/people?view=access`} className="inline-flex items-center gap-1 text-[12px] text-primary-hover hover:underline">
+      <Link href={`/admin/people?view=access`} className="inline-flex items-center gap-1 text-label text-primary-hover hover:underline">
         Everyone's access at a glance <ChevronRight className="size-3" />
       </Link>
     </div>

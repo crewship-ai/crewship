@@ -94,7 +94,7 @@ export function PeoplePage() {
       <div className="mx-2 mt-1 grid grid-cols-3 gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5" role="group" aria-label="View">
         {VIEWS.map((v) => (
           <button key={v.key} type="button" aria-pressed={view === v.key && !person && !ws} onClick={() => showView(v.key)} data-drill-close
-            className={cn("flex h-7 items-center justify-center gap-1 rounded-md text-[11.5px] font-medium transition-colors",
+            className={cn("flex h-7 items-center justify-center gap-1 rounded-md text-label font-medium transition-colors",
               view === v.key && !person && !ws ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
             <v.icon className="h-3.5 w-3.5" />{v.label}
           </button>
@@ -115,10 +115,10 @@ export function PeoplePage() {
       <DrillNavSection label="Workspaces" count={shownWorkspaces.length}>
         {shownWorkspaces.map((w, i) => (
           <DrillNavItem key={w.id} index={i} selected={ws?.id === w.id} onSelect={() => openWorkspace(w.id)} title={`${w.name} · ${w.slug}`}
-            icon={<WorkspaceTile id={w.id} name={w.name} />}
+            icon={<WorkspaceTile id={w.id} name={w.name} logoUrl={w.logo_url} />}
             label={w.name}
             sub={`${membersOf(people, w.id).length} people · ${w._count_crews} crews`}
-            meta={w.current ? <span className="text-[10px]">you</span> : undefined} />
+            meta={w.current ? <span className="text-micro">you</span> : undefined} />
         ))}
         <DrillNavItem index={shownWorkspaces.length} onSelect={() => setDialog("workspace")}
           icon={<Plus className="h-3.5 w-3.5 text-primary-hover" />} label={<span className="text-primary-hover">New workspace</span>} />
@@ -138,7 +138,7 @@ export function PeoplePage() {
   )
 
   const crumb = (label: string) => (
-    <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+    <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-label text-muted-foreground">
       <button type="button" className="hover:text-foreground" onClick={() => showView(ws ? "workspaces" : "people")}>{ws ? "Workspaces" : "People"}</button>
       <ChevronRight className="size-3" /><span className="text-foreground">{label}</span>
     </nav>

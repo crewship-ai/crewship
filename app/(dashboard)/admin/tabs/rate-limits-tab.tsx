@@ -176,7 +176,7 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
             tint={meta.tint}
             title={group}
             description={meta.about || undefined}
-            actions={<span className="font-mono text-[11px] text-muted-foreground">{groupChanged ? `${groupChanged} changed` : "defaults"}</span>}
+            actions={<span className="font-mono text-micro text-muted-foreground">{groupChanged ? `${groupChanged} changed` : "defaults"}</span>}
           >
             {rows.map((l) => {
               const draft = drafts[l.key] ?? String(l.value)
@@ -196,15 +196,15 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <label htmlFor={inputId} className="text-[13px] text-foreground">{l.display_name}</label>
+                      <label htmlFor={inputId} className="text-control text-foreground">{l.display_name}</label>
                       {l.overridden && direction && (
-                        <span className="rounded-full bg-warn/15 px-1.5 font-mono text-[10px] text-warn">{direction} · default {l.default}</span>
+                        <span className="rounded-full bg-warn/15 px-1.5 font-mono text-micro text-warn">{direction} · default {l.default}</span>
                       )}
                     </div>
                     {inRange ? (
-                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground-soft" title={l.description}>{firstSentence(l.description)}</p>
+                      <p className="mt-0.5 truncate text-label text-muted-foreground-soft" title={l.description}>{firstSentence(l.description)}</p>
                     ) : (
-                      <p className="mt-0.5 text-[11px] text-destructive">Must be between {l.min} and {l.max}</p>
+                      <p className="mt-0.5 text-label text-destructive">Must be between {l.min} and {l.max}</p>
                     )}
                   </div>
                   <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-64">
@@ -223,7 +223,7 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
                         onChange={(e) => setDrafts((prev) => ({ ...prev, [l.key]: e.target.value }))}
                         className="h-full w-20 min-w-0 bg-transparent px-2 text-right font-mono text-control tabular-nums outline-none"
                       />
-                      <span className="flex h-full flex-1 items-center truncate border-l border-border bg-muted px-2 text-[11px] text-muted-foreground" title={l.unit}>{l.unit}</span>
+                      <span className="flex h-full flex-1 items-center truncate border-l border-border bg-muted px-2 text-label text-muted-foreground" title={l.unit}>{l.unit}</span>
                     </div>
                     {l.overridden ? (
                       <Button size="icon-sm" variant="ghost" className="h-7 w-7" disabled={saving || busyKey === l.key}
@@ -248,6 +248,7 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
       ) : null}
 
       <SettingsSaveBar
+        label="Limits"
         count={edits.length}
         saving={saving}
         canSave={edits.every((e) => e.valid)}

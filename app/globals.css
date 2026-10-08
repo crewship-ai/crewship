@@ -164,6 +164,13 @@
    *    reads on a dark ground only; these are the same hues taken dark enough
    *    to be text on white (pinned in theme-contrast.test, day block). ── */
   --success: #157A45;
+  /* The page Save bar (components/ui/page-save-bar) wears the success toast's
+     colours (Sonner richColors), so pending edits read as one step from done. */
+  --save-bar-bg: #ECFDF3;
+  --save-bar-border: #A7EBC3;
+  --save-bar-fg: #00702A;
+  --save-bar-action: #00702A;
+  --save-bar-action-fg: #FFFFFF;
   --info: #0A63D6;
   --notice: #0B6E7F;
   --warn: #8A5A00;
@@ -377,6 +384,11 @@
 
   /* ── Semantic palette (identical to light — brand-consistent across modes) ── */
   --success: oklch(0.72 0.18 152);
+  --save-bar-bg: #001F0F;
+  --save-bar-border: #0B4A27;
+  --save-bar-fg: #59F3A6;
+  --save-bar-action: #59F3A6;
+  --save-bar-action-fg: #00170B;
   --info: #5DA1FF;
   --notice: oklch(0.72 0.14 200);
   --warn: oklch(0.78 0.15 75);
@@ -1211,6 +1223,18 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .drill-row-in { animation: none; }
+}
+
+/* The page Save bar breathes a green halo so pending edits are hard to miss. */
+.save-bar-glow {
+  animation: save-bar-glow 2.4s ease-in-out infinite;
+}
+@keyframes save-bar-glow {
+  0%, 100% { box-shadow: 0 0 0 1px color-mix(in oklab, var(--save-bar-fg) 45%, transparent), 0 0 18px color-mix(in oklab, var(--save-bar-fg) 20%, transparent), 0 16px 40px rgb(0 0 0 / 0.45); }
+  50% { box-shadow: 0 0 0 1px color-mix(in oklab, var(--save-bar-fg) 85%, transparent), 0 0 30px color-mix(in oklab, var(--save-bar-fg) 40%, transparent), 0 16px 40px rgb(0 0 0 / 0.45); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .save-bar-glow { animation: none; box-shadow: 0 0 0 1px var(--save-bar-border), 0 16px 40px rgb(0 0 0 / 0.45); }
 }
 
 /*

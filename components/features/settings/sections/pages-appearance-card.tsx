@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Eye, Palette } from "lucide-react"
 
-import { SettingsCard } from "@/components/features/settings/shared"
+import { SettingsCard, controlHeight } from "@/components/features/settings/shared"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { SaveFooter } from "@/components/ui/save-footer"
@@ -13,6 +13,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier } from "@/lib/permissions/tiers"
 import { normalizePageTheme, DEFAULT_PAGE_THEME, colorContrast, type PageTheme } from "@/lib/pages/theme"
 import { PagesThemePreviewPanel } from "./pages-theme-preview"
+import { cn } from "@/lib/utils"
 
 export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string; role: string | null }) {
   const sharedTheme = useWorkspacePagesTheme(workspaceId)
@@ -39,7 +40,7 @@ export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string
         <span>{labels[key]}</span>
         {editable ? <span className="flex items-center gap-2">
           <input aria-label={`${labels[key]} picker`} type="color" className="h-8 w-9 cursor-pointer rounded border bg-transparent" value={/^#[0-9a-f]{6}$/i.test(form.draft[key]) ? form.draft[key] : theme[key]} onChange={e => form.set(key, e.target.value)} />
-          <Input aria-label={labels[key]} className="w-28 font-mono" value={form.draft[key]} maxLength={7} onChange={e => form.set(key, e.target.value)} />
+          <Input aria-label={labels[key]} className={cn(controlHeight, "w-28 font-mono")} value={form.draft[key]} maxLength={7} onChange={e => form.set(key, e.target.value)} />
         </span> : <span className="font-mono">{theme[key]}</span>}
       </div>)}
     </div>
@@ -51,7 +52,7 @@ export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string
     {contrast !== false && contrast < 4.5 && <p role="status" className="px-4 pb-3 text-sm text-warn">Text contrast is below 4.5:1. Adjust the text or background colors for readability.</p>}
     {editable && <>
       <Button variant="ghost" className="mx-4 mb-3" onClick={() => { for (const key of Object.keys(DEFAULT_PAGE_THEME) as (keyof PageTheme)[]) form.set(key, DEFAULT_PAGE_THEME[key]) }}>Use default colors</Button>
-      <SaveFooter dirty={form.isDirty} status={form.status} error={form.error} canSave={valid} onCancel={form.reset} onSave={() => void form.submit(async draft => {
+      <SaveFooter dirty={form.isDirty} count={form.dirtyCount} status={form.status} error={form.error} canSave={valid} onCancel={form.reset} onSave={() => void form.submit(async draft => {
         const response = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pages_theme: draft }) })
         if (!response.ok) { const body = await response.json().catch(() => null); throw new Error(body?.error ?? "Unable to save Pages colors") }
         await refreshWorkspaceSettings()

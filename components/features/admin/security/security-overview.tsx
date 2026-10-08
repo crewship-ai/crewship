@@ -5,7 +5,7 @@ import Link from "next/link"
 import { AlertTriangle, ChevronRight, Server, ShieldAlert, ShieldCheck, Activity as ActivityIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { SettingsCard, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsSummary, SummaryItem, settingsTable, settingsTh, settingsTd } from "@/components/features/settings/shared"
 import { KeeperHealthCard } from "@/components/features/admin/keeper-health-card"
 import { FINDING_ACTIONS } from "@/app/(dashboard)/admin/tabs/overview-tab"
 import type { KeeperLogEntry, KeeperStatus } from "@/app/(dashboard)/admin/types"
@@ -61,26 +61,26 @@ export function SecurityOverview({ status, posture, postureError, entries, works
 
       <SettingsCard icon={list.length || unchecked ? AlertTriangle : ShieldCheck} tint={unchecked ? "var(--destructive)" : list.length ? "var(--warn)" : "var(--success)"}
         title="Needs attention" description={unchecked ? "The server's setup could not be checked" : list.length ? "What to fix first, most pressing on top" : "Nothing in this server's setup stands out"}
-        actions={<span className="font-mono text-[11px] text-muted-foreground">{list.length}</span>}>
+        actions={<span className="font-mono text-micro text-muted-foreground">{list.length}</span>}>
         {unchecked && (
           <div data-finding="unchecked" className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0">
             <ShieldAlert className="h-4 w-4 shrink-0 text-destructive" />
             <div className="min-w-0 flex-1">
-              <div className="text-[13px]">The server&apos;s setup could not be checked</div>
-              <div className="truncate text-[11px] text-muted-foreground-soft">{unchecked} Until it is read, nothing here says the setup is safe.</div>
+              <div className="text-control">The server&apos;s setup could not be checked</div>
+              <div className="truncate text-label text-muted-foreground-soft">{unchecked} Until it is read, nothing here says the setup is safe.</div>
             </div>
           </div>
         )}
         {list.length === 0 && !unchecked ? (
-          <p className="px-4 py-3 text-[12px] text-success">Nothing in this instance&apos;s posture stands out.</p>
+          <p className="px-4 py-3 text-label text-success">Nothing in this instance&apos;s posture stands out.</p>
         ) : list.map((f) => (
           <div key={f.key} data-finding={f.key} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0">
             {f.severity === "high"
               ? <ShieldAlert className="h-4 w-4 shrink-0 text-destructive" />
               : <AlertTriangle className={cn("h-4 w-4 shrink-0", f.severity === "medium" ? "text-warn" : "text-muted-foreground")} />}
             <div className="min-w-0 flex-1">
-              <div className="text-[13px]">{f.title}</div>
-              <div className="truncate text-[11px] text-muted-foreground-soft" title={f.detail}>{firstSentence(f.detail)}</div>
+              <div className="text-control">{f.title}</div>
+              <div className="truncate text-label text-muted-foreground-soft" title={f.detail}>{firstSentence(f.detail)}</div>
             </div>
             {f.action && (
               <Link href={f.action.href} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-control-border px-2.5 text-xs hover:bg-accent">
@@ -92,18 +92,18 @@ export function SecurityOverview({ status, posture, postureError, entries, works
       </SettingsCard>
 
       <SettingsCard icon={Server} tint="var(--purple)" title="Server setup" description="Read from the environment at deploy; change it there, not here"
-        actions={<span className="rounded-full bg-primary/10 px-2 font-mono text-[10.5px] text-primary-hover" title="Applies to every workspace on this server">Instance</span>}>
+        actions={<span className="rounded-full bg-primary/10 px-2 font-mono text-micro text-primary-hover" title="Applies to every workspace on this server">Instance</span>}>
         {postureError ? (
-          <p className="px-4 py-3 text-[12px] text-muted-foreground">{postureError}</p>
+          <p className="px-4 py-3 text-label text-muted-foreground">{postureError}</p>
         ) : !posture ? (
-          <p className="px-4 py-3 text-[12px] text-muted-foreground">Loading…</p>
+          <p className="px-4 py-3 text-label text-muted-foreground">Loading…</p>
         ) : (
           <dl className="grid sm:grid-cols-2" data-slot="server-setup">
             {setupRows(posture).map((r) => (
-              <div key={r.label} className="flex min-w-0 items-center gap-2 border-b border-border px-4 py-2 text-[12.5px] sm:odd:border-r">
+              <div key={r.label} className="flex min-w-0 items-center gap-2 border-b border-border px-4 py-2 text-label sm:odd:border-r">
                 <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", DOT[r.tone])} aria-hidden />
                 <dt className="min-w-0 flex-1 truncate">{r.label}</dt>
-                <dd className={cn("font-mono text-[11.5px]", r.tone === "bad" ? "font-medium text-destructive" : "text-muted-foreground")}>{r.value}</dd>
+                <dd className={cn("font-mono text-micro", r.tone === "bad" ? "font-medium text-destructive" : "text-muted-foreground")}>{r.value}</dd>
               </div>
             ))}
           </dl>
@@ -113,22 +113,22 @@ export function SecurityOverview({ status, posture, postureError, entries, works
       {health ? <InstanceHealthCard rows={health} error={healthError ?? null} selectedCount={selectedCount} /> : <KeeperHealthCard workspaceId={workspaceId} />}
 
       <SettingsCard icon={ActivityIcon} tint="var(--primary)" title="Recent activity" description="Credential decisions and background reviews"
-        actions={<button type="button" onClick={onOpenActivity} className="inline-flex items-center gap-1 text-[12px] text-primary-hover hover:underline">All activity<ChevronRight className="h-3 w-3" /></button>}>
+        actions={<button type="button" onClick={onOpenActivity} className="inline-flex items-center gap-1 text-label text-primary-hover hover:underline">All activity<ChevronRight className="h-3 w-3" /></button>}>
         {activityError ? (
-          <p className="px-4 py-3 text-[12px] text-destructive">Activity could not be read: {activityError}</p>
+          <p className="px-4 py-3 text-label text-destructive">Activity could not be read: {activityError}</p>
         ) : recent.length === 0 ? (
-          <p className="px-4 py-3 text-[12px] text-muted-foreground">Nothing yet. Decisions appear here as agents ask for secrets.</p>
+          <p className="px-4 py-3 text-label text-muted-foreground">Nothing yet. Decisions appear here as agents ask for secrets.</p>
         ) : recent.map((e) => (
           <div key={e.id} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0">
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px]">
+              <div className="truncate text-control">
                 {e.workspace_name && <span className="mr-1.5 text-muted-foreground">{e.workspace_name} ·</span>}
                 {e.agent_name} <span className="text-muted-foreground">→</span>{" "}
-                <span className={cn(streamOf(e) === "requests" && "font-mono text-[12px]")}>
+                <span className={cn(streamOf(e) === "requests" && "font-mono text-label")}>
                   {streamOf(e) === "requests" ? e.credential_name : STREAMS.find((s) => s.key === streamOf(e))?.label}
                 </span>
               </div>
-              <div className="truncate text-[11px] text-muted-foreground-soft">{firstSentence(e.reason || e.intent || "")}</div>
+              <div className="truncate text-label text-muted-foreground-soft">{firstSentence(e.reason || e.intent || "")}</div>
             </div>
             <DecisionChip decision={e.decision} />
           </div>
@@ -150,33 +150,33 @@ function InstanceHealthCard({ rows, error, selectedCount }: { rows: InstanceHeal
     <SettingsCard icon={ActivityIcon} tint={error || alarms ? "var(--destructive)" : "var(--success)"} title="Judge health"
       description={error ? "Could not be read" : alarms ? `${alarms} workspace${alarms === 1 ? "" : "s"} with a standing alarm` : "Recent decision window per workspace"}>
       {error ? (
-        <p className="px-4 py-3 text-[12px] text-destructive">The judge&apos;s health could not be read: {error}</p>
+        <p className="px-4 py-3 text-label text-destructive">The judge&apos;s health could not be read: {error}</p>
       ) : rows.length === 0 ? (
-        <p className="px-4 py-3 text-[12px] text-muted-foreground">{selectedCount === 0 ? "No workspace ticked." : "No decision window yet."}</p>
+        <p className="px-4 py-3 text-label text-muted-foreground">{selectedCount === 0 ? "No workspace ticked." : "No decision window yet."}</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-[12.5px]">
-            <thead className="border-b border-border text-left text-[11px] text-muted-foreground">
+          <table className={settingsTable}>
+            <thead>
               <tr>
-                <th className="px-4 py-2 font-medium">Workspace</th>
-                <th className="px-3 py-2 text-right font-medium">Decisions</th>
-                <th className="px-3 py-2 text-right font-medium">Work went on</th>
-                <th className="px-3 py-2 text-right font-medium">Judge failed</th>
-                <th className="px-3 py-2 text-right font-medium">p95</th>
-                <th className="px-4 py-2 font-medium">State</th>
+                <th className={settingsTh}>Workspace</th>
+                <th className={cn(settingsTh, "text-right")}>Decisions</th>
+                <th className={cn(settingsTh, "text-right")}>Work went on</th>
+                <th className={cn(settingsTh, "text-right")}>Judge failed</th>
+                <th className={cn(settingsTh, "text-right")}>p95</th>
+                <th className={settingsTh}>State</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => {
                 const thin = r.samples < r.min_samples
                 return (
-                  <tr key={r.workspace_id} className="border-b border-border last:border-b-0">
-                    <td className="px-4 py-2">{r.workspace_name}</td>
-                    <td className="px-3 py-2 text-right font-mono text-[11.5px]">{r.samples}</td>
-                    <td className="px-3 py-2 text-right font-mono text-[11.5px]">{thin ? "—" : `${Math.round(r.progressed_rate * 100)} %`}</td>
-                    <td className="px-3 py-2 text-right font-mono text-[11.5px]">{thin ? "—" : `${Math.round(r.judge_failure_rate * 100)} %`}</td>
-                    <td className="px-3 py-2 text-right font-mono text-[11.5px]">{r.samples ? `${r.p95_latency_ms} ms` : "—"}</td>
-                    <td className="px-4 py-2">
+                  <tr key={r.workspace_id}>
+                    <td className={settingsTd}>{r.workspace_name}</td>
+                    <td className={cn(settingsTd, "text-right font-mono text-micro")}>{r.samples}</td>
+                    <td className={cn(settingsTd, "text-right font-mono text-micro")}>{thin ? "—" : `${Math.round(r.progressed_rate * 100)} %`}</td>
+                    <td className={cn(settingsTd, "text-right font-mono text-micro")}>{thin ? "—" : `${Math.round(r.judge_failure_rate * 100)} %`}</td>
+                    <td className={cn(settingsTd, "text-right font-mono text-micro")}>{r.samples ? `${r.p95_latency_ms} ms` : "—"}</td>
+                    <td className={settingsTd}>
                       {r.alarm
                         ? <span className="text-destructive">{r.alarm.summary}</span>
                         : <span className="text-muted-foreground">{thin ? `too few decisions (${r.min_samples} needed)` : "no alarm"}</span>}

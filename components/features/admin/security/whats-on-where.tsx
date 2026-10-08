@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils"
 import type { InstanceGovRow } from "./use-instance-keeper"
 import type { BulkSection } from "./bulk-governance"
 import { SAMPLE_DEFAULT } from "./bulk-governance"
+import { settingsTable, settingsTh, settingsTd } from "@/components/features/settings/shared"
 
 /**
  * What each workspace has switched on, one row per workspace: the answer to
@@ -44,24 +45,24 @@ export function WhatsOnWhere({ rows, selected, onOpen, defaults, onOpenDefaults 
 }) {
   return (
     <div className="overflow-x-auto rounded-card border border-border bg-card" role="region" aria-label="What's on where">
-      <table className="w-full text-[12.5px]">
-        <thead className="border-b border-border text-left text-[11px] text-muted-foreground">
+      <table className={settingsTable}>
+        <thead>
           <tr>
-            <th className="px-3 py-2 font-medium">Workspace</th>
-            {COLS.map((c) => <th key={c.label} className="whitespace-nowrap px-3 py-2 font-medium">{c.label}</th>)}
+            <th className={settingsTh}>Workspace</th>
+            {COLS.map((c) => <th key={c.label} className={settingsTh}>{c.label}</th>)}
           </tr>
         </thead>
         <tbody>
           {defaults && (
-            <tr data-workspace="defaults" className="border-b border-border bg-muted/40">
-              <td className="px-3 py-2">
+            <tr data-workspace="defaults" className="bg-muted/40">
+              <td className={settingsTd}>
                 <div className="font-medium">New workspaces</div>
-                <div className="text-[10.5px] text-muted-foreground">copied when a workspace is created</div>
+                <div className="text-micro text-muted-foreground">copied when a workspace is created</div>
               </td>
               {COLS.map((c) => {
                 const v = c.show(defaults)
                 return (
-                  <td key={c.label} className="p-0">
+                  <td key={c.label} className="border-b border-border p-0">
                     <button type="button" onClick={onOpenDefaults} aria-label={`${c.label} in New workspaces: ${v.text}`}
                       className="kit-tap w-full whitespace-nowrap px-3 py-2 text-left italic text-muted-foreground hover:bg-muted">
                       {v.text}
@@ -72,20 +73,20 @@ export function WhatsOnWhere({ rows, selected, onOpen, defaults, onOpenDefaults 
             </tr>
           )}
           {rows.map((r) => (
-            <tr key={r.workspace_id} data-workspace={r.workspace_slug} className={cn("border-b border-border last:border-b-0", selected.has(r.workspace_id) && "bg-accent/40")}>
-              <td className="px-3 py-2">
+            <tr key={r.workspace_id} data-workspace={r.workspace_slug} className={cn(selected.has(r.workspace_id) && "bg-accent/40")}>
+              <td className={settingsTd}>
                 <div className="font-medium">{r.workspace_name}</div>
-                {!r.configured && <div className="text-[10.5px] text-muted-foreground" title="No settings of its own; runs on the built-in opt-out">built-in</div>}
+                {!r.configured && <div className="text-micro text-muted-foreground" title="No settings of its own; runs on the built-in opt-out">built-in</div>}
               </td>
               {COLS.map((c) => {
                 const v = c.show(r)
                 return (
-                  <td key={c.label} className="p-0">
+                  <td key={c.label} className="border-b border-border p-0">
                     <button type="button" onClick={() => onOpen(c.section, r.workspace_id)}
                       aria-label={`${c.label} in ${r.workspace_name}: ${v.text}`}
                       className="kit-tap w-full whitespace-nowrap px-3 py-2 text-left hover:bg-muted">
                       {v.off
-                        ? <span className="rounded-full border border-destructive/40 px-1.5 font-mono text-[10.5px] text-destructive">{v.text}</span>
+                        ? <span className="rounded-full border border-destructive/40 px-1.5 font-mono text-micro text-destructive">{v.text}</span>
                         : v.text}
                     </button>
                   </td>

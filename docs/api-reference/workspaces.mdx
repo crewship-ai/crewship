@@ -27,6 +27,9 @@ Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/r
 | `GET` | [`/api/v1/workspaces/{workspaceId}`](#get-workspace) | Fetch a single workspace |
 | `PATCH` | [`/api/v1/workspaces/{workspaceId}`](#update-workspace) | Partial update of workspace fields |
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}`](#delete-workspace) | Soft-delete the workspace + cascade (`OWNER` only) |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/logo`](#workspace-logo) | Upload or replace the workspace logo (`ADMIN+`) |
+| `DELETE` | [`/api/v1/workspaces/{workspaceId}/logo`](#workspace-logo) | Remove the workspace logo (`ADMIN+`) |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/logo`](#workspace-logo) | Fetch the uploaded logo (any signed-in user) |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/members`](#list-members) | All members of the workspace |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/members`](#add-member) | Add an existing user by user ID |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/members/provision`](#provision-member) | Create or add a member by email |
@@ -230,6 +233,34 @@ wanting to keep them indefinitely needs a real way to say so. See
 
 ---
 
+### Workspace logo
+
+```
+POST   /api/v1/workspaces/{workspaceId}/logo     (multipart/form-data, field "file")
+DELETE /api/v1/workspaces/{workspaceId}/logo
+GET    /api/v1/workspaces/{workspaceId}/logo
+```
+
+The logo the workspace is drawn with in the workspace switcher, Admin lists
+and the Backups and Security scope; without one it shows its initial. The
+same rules as a profile picture: PNG, JPEG or WebP, at most 2MB and 4096 px a
+side. Setting or removing it is `ADMIN+` and writes an audit entry
+(`workspace.logo.update` / `workspace.logo.remove`); both answer the workspace
+object, whose `logo_url` points at the `GET` route with a `?v=` cache buster
+(or is `null` after a removal). The `GET` route needs a signed-in user but not
+membership, because instance administrators see every workspace.
+
+| Status | Condition |
+|---|---|
+| `400` | Not a PNG, JPEG or WebP image, over 2MB, or over 4096 px a side |
+| `403` | Caller is not `OWNER`/`ADMIN` |
+| `404` | `GET`: no logo uploaded |
+| `503` | The server has no storage path configured |
+
+CLI: `crewship workspace logo set <file>` / `crewship workspace logo remove`.
+
+---
+
 ### Delete workspace
 
 ```
@@ -336,13 +367,13 @@ This takes a `user_id` and only a `user_id`. When all you have is an email addre
 | Status | Condition |
 |---|---|
 | `400` | Missing `user_id`, invalid `role` |
-| `402` | License member limit reached |
+| `402` | Reserved for future license limits; currently unlimited |
 | `403` | Caller not `OWNER`/`ADMIN`, or tried to assign `ADMIN` without being `OWNER` |
 | `404` | `user_id` does not match any user |
 | `409` | User is already a member |
 
 <Accordion title="License limit (402 Payment Required)">
-When the workspace's license caps the member count, adding a member that would exceed it returns **`402 Payment Required`** with the limit detail in the Problem Details body. The check runs before the request body is read, so a capped workspace rejects every add regardless of payload. The same limit applies to [Create invitation](#create-invitation).
+Current releases allow unlimited members and do not return this license error. Resource licensing may change in future releases. If future enforcement caps the member count, adding a member that would exceed it returns **`402 Payment Required`** with the limit detail in the JSON error body. The check runs before the request body is read, so a capped workspace rejects every add regardless of payload. The same limit applies to [Create invitation](#create-invitation).
 </Accordion>
 
 ### Provision member
@@ -681,7 +712,9 @@ Invitations are redeemed at **signup**: when the invited address creates
 an account via [`POST /api/v1/auth/signup`](/api-reference/auth#post-/api/v1/auth/signup),
 every live invitation for that address is consumed inside the same
 transaction and the new user lands in each inviting workspace at the
-invited role, on top of their own default workspace. An invitation for
+invited role. An invited person gets no default workspace of their own;
+only a signup with nothing to redeem (no live invitation to a workspace
+that still exists) gets one. An invitation for
 an address that *already* has an account is left pending -- signup is a
 no-op there, and redeeming it would place someone who never consented.
 This is also why `POST .../members` takes a `user_id` and not an email:
@@ -690,7 +723,7 @@ resolving an arbitrary address would be an account-existence oracle.
 | Status | Condition |
 |---|---|
 | `400` | Missing/invalid email or role |
-| `402` | License member limit exceeded |
+| `402` | Reserved for future license limits; currently unlimited |
 | `403` | Caller not `OWNER`/`ADMIN`, or tried to invite as `ADMIN` without being `OWNER` |
 | `409` | Email belongs to an existing member, or there's already a non-expired invitation for this email |
 

@@ -34,13 +34,18 @@ export function workspaceColor(id: string): string {
 }
 export const initials = (name: string) => name.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?"
 
-export function WorkspaceTile({ id, name, size = "md" }: { id: string; name: string; size?: "xs" | "md" | "lg" }) {
+export function WorkspaceTile({ id, name, size = "md", logoUrl }: { id: string; name: string; size?: "xs" | "md" | "lg"; logoUrl?: string | null }) {
+  const box = size === "xs" ? "h-5 w-5 rounded-[6px]" : size === "lg" ? "h-10 w-10 rounded-xl" : "h-7 w-7 rounded-lg"
+  if (logoUrl) {
+    // The workspace's own logo (#3005) when it has one.
+    return <img src={logoUrl} alt="" title={name} aria-hidden className={cn("shrink-0 object-cover", box)} />
+  }
   return (
     <span
       title={name}
       className={cn(
         "grid shrink-0 place-items-center font-semibold text-white",
-        size === "xs" ? "h-5 w-5 rounded-[6px] text-[8.5px]" : size === "lg" ? "h-10 w-10 rounded-xl text-sm" : "h-7 w-7 rounded-lg text-[11px]",
+        size === "xs" ? "h-5 w-5 rounded-[6px] text-micro" : size === "lg" ? "h-10 w-10 rounded-xl text-sm" : "h-7 w-7 rounded-lg text-label",
       )}
       style={{ background: workspaceColor(id) }}
       aria-hidden
@@ -65,7 +70,7 @@ export function WeekLine({ values, muted }: { values: number[]; muted?: boolean 
 export function DrawerSection({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <section aria-label={label}>
-      <h4 className="mb-1.5 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">{label}</h4>
+      <h4 className="mb-1.5 font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">{label}</h4>
       {children}
     </section>
   )

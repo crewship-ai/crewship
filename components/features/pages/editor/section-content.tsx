@@ -70,6 +70,7 @@ import { PageAvatar, PageGlyph } from "@/components/features/pages/page-glyph"
 import { IconPickerDialog } from "@/components/ui/icon-picker-dialog"
 import { PageEditor } from "@/components/features/pages/page-editor"
 import type { EditorSectionProps } from "@/components/features/pages/editor/section-props"
+import { usePageSave } from "@/components/ui/page-save-bar"
 
 // Content on an application Page opens the review of the agent's change.
 // S6 owns that surface; import it lazily so the ordinary panel Page never
@@ -439,6 +440,30 @@ function PageIdentityCard({
   const nameEmpty = form.name.trim() === ""
   const submittable = mayEdit && dirty && !nameEmpty && !save.isPending
 
+  // On the page's floating Save bar (the editor shell mounts it): the typed
+  // values join the bar, its Save sends this card's one PATCH, a refusal
+  // rejects into the bar's corner toast and keeps what was typed, and its
+  // Discard puts the accepted values back. Alone, the card keeps its Save.
+  const changed =
+    (form.name !== baseline.name ? 1 : 0) +
+    (form.description !== baseline.description ? 1 : 0) +
+    (form.icon !== baseline.icon || form.color !== baseline.color ? 1 : 0)
+  const inPage = usePageSave({
+    label: `Page ${server.name || slug}`,
+    count: mayEdit ? changed : 0,
+    canSave: mayEdit && !nameEmpty,
+    saving: save.isPending,
+    save: async () => {
+      setSaved(false)
+      const out = await save.mutateAsync({ ...form, name: form.name.trim() })
+      if (out.kind === "already-running") throw new Error(out.message)
+    },
+    discard: () => {
+      setForm(baseline)
+      setRefusal(null)
+    },
+  })
+
   const submit = (event: React.FormEvent) => {
     event.preventDefault()
     if (!submittable) return
@@ -541,12 +566,12 @@ function PageIdentityCard({
         </p>
       )}
 
-      {refusal && (
+      {refusal && !inPage && (
         <p role="alert" className="type-page-value text-destructive">
           {refusal}
         </p>
       )}
-      {saved && !dirty && (
+      {saved && !dirty && !inPage && (
         <p role="status" className="type-page-value text-success">
           Saved. The live Page now shows this name, description and icon.
         </p>
@@ -554,15 +579,17 @@ function PageIdentityCard({
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline pt-3">
         {/* The save's effect, stated at the control, from the one place the
-            editor keeps that vocabulary. There is no global Save here and no
-            autosave: every control says which of the five effects it is. */}
+            editor keeps that vocabulary. In the editor the page bar's Save
+            writes this card; there is no autosave. */}
         <p className="type-page-meta min-w-0 text-muted-foreground">
           {SAVE_EFFECT_NOTE["live-definition"]}
         </p>
-        <Button type="submit" size="sm" className="coarse:min-h-11" disabled={!submittable}>
-          {save.isPending && <Spinner className="h-3.5 w-3.5" />}
-          Save changes
-        </Button>
+        {!inPage && (
+          <Button type="submit" size="sm" className="coarse:min-h-11" disabled={!submittable}>
+            {save.isPending && <Spinner className="h-3.5 w-3.5" />}
+            Save changes
+          </Button>
+        )}
       </div>
       </form>
 

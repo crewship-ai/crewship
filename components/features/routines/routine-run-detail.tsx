@@ -609,32 +609,6 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           </Link>
         )}
       </div>
-      <DetailCard title="Run provenance" icon={History}>
-        <dl className="grid gap-2 text-xs sm:grid-cols-2">
-          <div><dt className="text-muted-foreground">Started by</dt><dd title={origin.source}>{triggerLabel}{readableOriginSource(origin.source) ? ` · ${readableOriginSource(origin.source)}` : ""}</dd></div>
-          <div><dt className="text-muted-foreground">Executed recipe</dt><dd>{run.pipeline_version != null ? `v${run.pipeline_version}` : "Version unavailable"}{run.definition_hash ? <span className="ml-1 font-mono" title={run.definition_hash}>· {run.definition_hash.slice(0, 12)}</span> : null}</dd></div>
-          <div><dt className="text-muted-foreground">Human initiator</dt><dd>Not independently verified in this run record</dd></div>
-          <div><dt className="text-muted-foreground">Credentials declared in executed recipe</dt><dd>{dsl ? credentialTypes.length ? credentialTypes.join(", ") : "None declared" : "Historical recipe unavailable"}</dd></div>
-        </dl>
-        <p className="mt-2 text-xs text-muted-foreground">Credential use in this run: not recorded. Declarations do not prove use.</p>
-      </DetailCard>
-      <RunEvidencePanel
-        key={runId}
-        workspaceId={workspaceId}
-        run={{
-          kind: "routine",
-          runId: run.id,
-          status: run.status,
-          outcome: run.outcome,
-          startedAt: run.started_at,
-          endedAt: run.ended_at,
-          stepId: run.failed_at_step || run.current_step_id,
-          failureKind: run.failure?.kind,
-          trigger: origin.label,
-          version: run.pipeline_version,
-          definitionHash: run.definition_hash,
-        }}
-      />
       {failed && (
         <DetailCard title="What to do next" icon={Lightbulb} data-testid="run-next-step">
           <ul className="space-y-1.5 text-xs leading-relaxed">
@@ -849,6 +823,35 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           />
         </DetailCard>
       )}
+      {/* Provenance and the shareable evidence answer "can I trust and pass
+        on this run?" — audit questions that come after "what came out", so
+        they follow the result instead of pushing it below the fold. */}
+      <DetailCard title="Run provenance" icon={History}>
+        <dl className="grid gap-2 text-xs sm:grid-cols-2">
+          <div><dt className="text-muted-foreground">Started by</dt><dd title={origin.source}>{triggerLabel}{readableOriginSource(origin.source) ? ` · ${readableOriginSource(origin.source)}` : ""}</dd></div>
+          <div><dt className="text-muted-foreground">Executed recipe</dt><dd>{run.pipeline_version != null ? `v${run.pipeline_version}` : "Version unavailable"}{run.definition_hash ? <span className="ml-1 font-mono" title={run.definition_hash}>· {run.definition_hash.slice(0, 12)}</span> : null}</dd></div>
+          <div><dt className="text-muted-foreground">Human initiator</dt><dd>Not independently verified in this run record</dd></div>
+          <div><dt className="text-muted-foreground">Credentials declared in executed recipe</dt><dd>{dsl ? credentialTypes.length ? credentialTypes.join(", ") : "None declared" : "Historical recipe unavailable"}</dd></div>
+        </dl>
+        <p className="mt-2 text-xs text-muted-foreground">Credential use in this run: not recorded. Declarations do not prove use.</p>
+      </DetailCard>
+      <RunEvidencePanel
+        key={runId}
+        workspaceId={workspaceId}
+        run={{
+          kind: "routine",
+          runId: run.id,
+          status: run.status,
+          outcome: run.outcome,
+          startedAt: run.started_at,
+          endedAt: run.ended_at,
+          stepId: run.failed_at_step || run.current_step_id,
+          failureKind: run.failure?.kind,
+          trigger: origin.label,
+          version: run.pipeline_version,
+          definitionHash: run.definition_hash,
+        }}
+      />
       <details
         data-testid="run-technical-details"
         onToggle={(e) => setShowTechnical(e.currentTarget.open)}

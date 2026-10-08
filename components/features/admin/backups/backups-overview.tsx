@@ -1,21 +1,28 @@
 "use client"
 
 import * as React from "react"
+import { AlertTriangle, CalendarDays, HardDrive, LayoutGrid, ShieldCheck } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { SettingsCard } from "@/components/features/settings/shared"
-import { Chip, Dot, Eyebrow, FieldRow, Gate, ItemRow, LocalOnlyBar, SmallButton, TD, TH, TONE_TEXT, WsName } from "./backups-kit"
+import { Button } from "@/components/ui/button"
+import { StatusPill } from "@/components/ui/status-pill"
+import { SettingsCard, SettingsRow, SettingsSummary, SummaryItem, settingsTable, settingsTh, settingsTd } from "@/components/features/settings/shared"
+import { Dot, Gate, TONE_PILL, TONE_TEXT } from "./backups-kit"
 import {
   formatAgo, formatSize, proofLabel, stripCells, verdictHeadline,
-  type AttentionItem, type Night, type OverviewResponse, type SpaceInfo, type WorkspaceCoverage,
+  type AttentionItem, type Night, type OverviewResponse, type SpaceInfo, type StatusRow, type WorkspaceCoverage,
 } from "./backups-model"
 import { useBackupsOverview } from "./use-backups-overview"
 import type { SectionCtx } from "./backups-console"
 
 /**
- * Backups › Overview. Five questions a client asks — what is protected, how
- * often, where, how long, and was it really restored — then only concrete
- * problems, the last fourteen nights, and the room on this disk.
+ * Backups › Overview, in the Settings card grammar (like Security › Overview).
+ *
+ * One line of state on top — the restore verdict, how often, where, and how
+ * many workspaces are covered — then what needs a person (including a
+ * local-only copy, which is a problem like any other), the
+ * five questions a client asks, coverage per workspace, the last fourteen
+ * nights, and the room on this disk.
  */
 export function BackupsOverview({ ctx }: { ctx: SectionCtx }) {
   const res = useBackupsOverview(ctx.scope, ctx.selected, ctx.workspaces)
@@ -26,38 +33,72 @@ export function BackupsOverview({ ctx }: { ctx: SectionCtx }) {
   )
 }
 
+
+/**
+ * The attention list, with the local-only copy the page used to draw as a
+ * banner. A space refusal needs nothing added: the server lists it itself.
+ */
+export function attentionItems(data: OverviewResponse): AttentionItem[] {
+  const extra: AttentionItem[] = []
+  if (!data.status.offsite_verified) {
+    extra.push({
+      id: "local-only", severity: "warn", title: "Local copy only. Losing this server is not covered.",
+      detail: "Every backup sits on the same disk as the data it protects.", action: { kind: "storage", label: "Storage" },
+    })
+  }
+  return [...extra, ...data.needs_attention]
+}
+
 export function OverviewBody({ data, ctx, now = new Date() }: { data: OverviewResponse; ctx: SectionCtx; now?: Date }) {
   const s = data.status
   const head = verdictHeadline(s.verdict)
+  const cov = data.workspaces
+  const covered = cov?.filter((w) => w.status === "ok").length ?? 0
   return (
     <>
-      <section data-slot="backup-status" aria-label="Backup status" className="overflow-hidden rounded-card border border-border bg-card">
-        <div className="flex flex-col gap-1.5 px-4 pb-2.5 pt-3.5">
-          <Eyebrow>{s.label}</Eyebrow>
-          <span data-slot="backup-verdict" data-tone={head.tone} className={cn("text-[22px] font-semibold leading-tight", TONE_TEXT[head.tone])}>{head.text}</span>
-          {s.summary && <p className="text-[13.5px]">{s.summary}</p>}
-        </div>
-        <div className="border-t border-border">
-          <FieldRow label="Protects" detail={s.protects.detail} detailTone={s.protects.detail_tone}>{s.protects.value}</FieldRow>
-          <FieldRow label="How often" detail={s.how_often.detail} detailTone={s.how_often.detail_tone}>{s.how_often.value}</FieldRow>
-          <FieldRow label="Where" detail={s.where.detail} detailTone={s.where.detail_tone}>{s.where.value}</FieldRow>
-          <FieldRow label="How long" detail={s.how_long.detail} detailTone={s.how_long.detail_tone}>{s.how_long.value}</FieldRow>
-          <FieldRow label="Really restored?" detail={s.really_restored.detail} detailTone={s.really_restored.detail_tone}>{s.really_restored.value}</FieldRow>
-        </div>
-      </section>
+      <SettingsSummary slot="backups-summary">
+        <span className="inline-flex items-center">
+          <span className={cn("mr-1.5 h-1.5 w-1.5 rounded-full", head.tone === "ok" ? "bg-success" : head.tone === "warn" ? "bg-warn" : head.tone === "bad" ? "bg-destructive" : "bg-muted-foreground/50")} aria-hidden />
+          <span data-slot="backup-verdict" data-tone={head.tone} className="text-foreground">{head.text}</span>
+        </span>
+        <SummaryItem>{s.how_often.value}</SummaryItem>
+        <SummaryItem tone={s.offsite_verified ? undefined : "danger"}>{s.offsite_verified ? s.where.value : "This server only"}</SummaryItem>
+        {cov && <SummaryItem n={covered} tone={covered < cov.length ? "warn" : "success"}>{`of ${cov.length} workspaces covered`}</SummaryItem>}
+        {!!data.crewless_workspaces && <SummaryItem n={data.crewless_workspaces}>{data.crewless_workspaces === 1 ? "workspace without crews" : "workspaces without crews"}</SummaryItem>}
+      </SettingsSummary>
 
-      {!s.offsite_verified && <LocalOnlyBar onStorage={() => ctx.go("storage")} />}
+      <NeedsAttention items={attentionItems(data)} ctx={ctx} />
 
-      <NeedsAttention items={data.needs_attention} ctx={ctx} />
+      <SettingsCard icon={ShieldCheck} tint={`var(--${head.tone === "bad" ? "destructive" : head.tone === "warn" ? "warn" : "success"})`}
+        title={s.label} description={s.summary ?? "What is protected, how often, where and for how long"}>
+        <ProtectionRow label="Protects" row={s.protects} />
+        <ProtectionRow label="How often" row={s.how_often} />
+        <ProtectionRow label="Where" row={s.where} />
+        <ProtectionRow label="How long" row={s.how_long} />
+        <ProtectionRow label="Really restored?" row={s.really_restored} />
+      </SettingsCard>
 
-      <SettingsCard title="Last 14 nights" description="what each night's run did">
+      {cov && <CoverageCard rows={cov} ctx={ctx} now={now} />}
+
+      <SettingsCard icon={CalendarDays} tint="var(--success)" title="Last 14 nights" description="What each night’s run did; hover a night for the details">
         <NightStrip nights={data.nights} today={localDay(now)} />
       </SettingsCard>
 
-      {ctx.scope === "workspaces" && data.workspaces && <CoverageTable rows={data.workspaces} ctx={ctx} now={now} />}
-
       <SpaceCard space={data.space} />
     </>
+  )
+}
+
+function ProtectionRow({ label, row }: { label: string; row: StatusRow }) {
+  return (
+    <SettingsRow label={label}>
+      <div className="flex max-w-[28rem] flex-col items-end gap-1 text-right">
+        <span className="text-control">{row.value}</span>
+        {row.detail && (row.detail_tone && row.detail_tone !== "muted"
+          ? <StatusPill tone={TONE_PILL[row.detail_tone]} label={row.detail} />
+          : <span className="text-xs text-muted-foreground">{row.detail}</span>)}
+      </div>
+    </SettingsRow>
   )
 }
 
@@ -73,13 +114,26 @@ function NeedsAttention({ items, ctx }: { items: AttentionItem[]; ctx: SectionCt
       default: return ctx.go(a.kind)
     }
   }
+  const bad = items.some((i) => i.severity === "bad")
   return (
-    <SettingsCard title="Needs attention" actions={<span className="font-mono text-[11px] text-muted-foreground">{items.length}</span>}>
+    <SettingsCard icon={items.length ? AlertTriangle : ShieldCheck} tint={bad ? "var(--destructive)" : items.length ? "var(--warn)" : "var(--success)"}
+      title="Needs attention" description={items.length ? "What to fix first, most pressing on top" : "Nothing needs attention"}
+      actions={<span className="font-mono text-xs tabular-nums text-muted-foreground">{items.length}</span>}>
       {items.length === 0 ? (
-        <p className="px-4 py-3 text-[12.5px] text-success">Nothing needs attention.</p>
+        <p className="px-4 py-3 text-xs text-success">Nothing needs attention.</p>
       ) : items.map((it) => (
-        <ItemRow key={it.id} lead={<Chip tone={it.severity}>!</Chip>} title={it.title} detail={it.detail}
-          action={it.action && <SmallButton primary={it.action.kind === "back_up_now"} onClick={() => act(it.action!)}>{it.action.label}</SmallButton>} />
+        <div key={it.id} data-attention={it.id} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0">
+          <StatusPill tone={it.severity === "bad" ? "danger" : "warn"} label={it.severity === "bad" ? "urgent" : "check"} className="shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="text-control">{it.title}</div>
+            <div className="text-xs text-muted-foreground">{it.detail}</div>
+          </div>
+          {it.action && (
+            <Button type="button" size="sm" variant={it.action.kind === "back_up_now" ? "default" : "outline"} className="h-7 shrink-0 text-xs" onClick={() => act(it.action!)}>
+              {it.action.label}
+            </Button>
+          )}
+        </div>
       ))}
     </SettingsCard>
   )
@@ -105,17 +159,17 @@ export function NightStrip({ nights, today }: { nights: Night[]; today: string }
   const cells = stripCells(nights, today)
   return (
     <>
-      <div className="grid grid-cols-[repeat(14,minmax(0,1fr))] gap-1 px-3.5 pb-1 pt-3" data-slot="night-strip">
+      <div className="grid grid-cols-[repeat(14,minmax(0,1fr))] gap-1 px-4 pb-1 pt-3" data-slot="night-strip">
         {cells.map((c) => (
           <div key={c.date} className="flex min-w-0 flex-col items-center gap-1" data-status={c.status}>
-            <div role="img" aria-label={c.title} title={c.title} data-tone={NIGHT_TONE[c.status]} className={cn("h-[30px] w-full rounded-[5px]", c.status === "none" && "border-[1.5px] border-dashed border-control-border")}
+            <div role="img" aria-label={c.title} title={c.title} data-tone={NIGHT_TONE[c.status]} className={cn("h-7 w-full rounded-md", c.status === "none" && "border border-dashed border-control-border")}
               style={{ background: NIGHT_BG[c.status] }} />
-            <span className="text-[12px] text-muted-foreground">{c.day}</span>
-            <span className="h-3.5 text-[12px]" aria-hidden>{c.mark}</span>
+            <span className="text-xs tabular-nums text-muted-foreground">{c.day}</span>
+            <span className="h-3.5 text-xs" aria-hidden>{c.mark}</span>
           </div>
         ))}
       </div>
-      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-3.5 pb-3 text-[13px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-3 text-xs text-muted-foreground">
         <span><Dot className="bg-success" />backup created</span>
         <span><Dot style={{ background: NIGHT_BG.incomplete }} />created · incomplete</span>
         <span><Dot className="bg-warn" />skipped or late</span>
@@ -127,21 +181,33 @@ export function NightStrip({ nights, today }: { nights: Night[]; today: string }
   )
 }
 
-function CoverageTable({ rows, ctx, now }: { rows: WorkspaceCoverage[]; ctx: SectionCtx; now: Date }) {
+const COVERAGE_LABEL: Record<WorkspaceCoverage["status"], string> = { ok: "covered", warn: "stale", bad: "not covered" }
+
+function CoverageCard({ rows, ctx, now }: { rows: WorkspaceCoverage[]; ctx: SectionCtx; now: Date }) {
+  const th = settingsTh
+  const td = settingsTd
   return (
-    <SettingsCard title="Workspaces" description="the newest backup of each selected workspace">
+    <SettingsCard icon={LayoutGrid} title="Coverage" description="The newest backup of each selected workspace">
       <div className="overflow-x-auto">
-        <table className="w-full tabular-nums">
-          <thead><tr><th className={TH}>Workspace</th><th className={TH}>Last backup</th><th className={TH}>Plan</th><th className={TH}>Checked to</th><th className={TH} /></tr></thead>
+        <table className={settingsTable}>
+          <thead><tr><th className={th}>Workspace</th><th className={th}>Last backup</th><th className={th}>Plan</th><th className={th}>Checked to</th><th className={th} /></tr></thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.workspace_id} className="[&:last-child>td]:border-b-0">
-                <td className={TD}><WsName name={r.name} here={r.workspace_id === ctx.currentWorkspaceId} /></td>
-                <td className={TD}>{formatAgo(r.last_backup_at, now)}</td>
-                <td className={cn(TD, !r.plan && "text-muted-foreground")}>{r.plan ?? "no plan covers it"}</td>
-                <td className={TD}>{proofLabel(r.proof)}</td>
-                <td className={cn(TD, "text-right")}>
-                  {r.status === "ok" ? <Chip tone="ok">covered</Chip> : <SmallButton primary onClick={() => ctx.backUpNow([r.workspace_id])}>Back up now</SmallButton>}
+              <tr key={r.workspace_id} data-coverage={r.status}>
+                <td className={td}>
+                  {r.name}
+                  {r.workspace_id === ctx.currentWorkspaceId && <span className="ml-1.5 text-xs text-muted-foreground">· here</span>}
+                </td>
+                <td className={cn(td, !r.last_backup_at && "text-muted-foreground")}>{formatAgo(r.last_backup_at, now)}</td>
+                <td className={cn(td, !r.plan && "text-muted-foreground")}>{r.plan ?? "no plan covers it"}</td>
+                <td className={cn(td, "text-muted-foreground")}>{proofLabel(r.proof)}</td>
+                <td className={cn(td, "text-right")}>
+                  <span className="inline-flex items-center gap-2">
+                    <StatusPill tone={TONE_PILL[r.status]} label={COVERAGE_LABEL[r.status]} />
+                    {r.status !== "ok" && (
+                      <Button type="button" size="sm" className="h-7 text-xs" onClick={() => ctx.backUpNow([r.workspace_id])}>Back up now</Button>
+                    )}
+                  </span>
                 </td>
               </tr>
             ))}
@@ -157,27 +223,23 @@ export function SpaceCard({ space }: { space: SpaceInfo }) {
   const used = Math.max(0, space.total_bytes - space.free_bytes)
   const backups = pct(space.backups_bytes)
   const other = Math.max(0, pct(used) - backups)
+  const fig = "font-mono text-control tabular-nums"
   return (
-    <SettingsCard title="Space" description="this server">
-      <div className="flex flex-col gap-2 px-3.5 py-3">
-        <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[13.5px] text-muted-foreground">
-          <span>Backups use <b className="font-semibold tabular-nums text-foreground">{formatSize(space.backups_bytes)}</b></span>
-          <span>disk <b className="font-semibold tabular-nums text-foreground">{formatSize(space.free_bytes)} free</b> of {formatSize(space.total_bytes)}</span>
-        </div>
-        <div className="text-[13.5px] text-muted-foreground">
-          A backup run needs <b className="font-semibold tabular-nums text-foreground">{formatSize(space.staging_need_bytes)}</b> free for staging · restoring the largest backup needs <b className="font-semibold tabular-nums text-foreground">{formatSize(space.restore_need_bytes)}</b>
-          {space.min_free_percent != null && <> · a run that would leave less than {space.min_free_percent} % free does not start</>}
-        </div>
-        {space.refusal && (
-          <p data-slot="space-refusal" className="rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-[13px] text-destructive">
-            <b className="font-semibold">New backup runs will not start.</b> {space.refusal}
-          </p>
-        )}
+    <SettingsCard icon={HardDrive} tint="var(--purple)" title="Space"
+      description={space.min_free_percent != null ? `A run that would leave less than ${space.min_free_percent} % free does not start` : "This server"}>
+      <SettingsRow label="Backups use"><span className={fig}>{formatSize(space.backups_bytes)}</span></SettingsRow>
+      <SettingsRow label="Disk">
+        <span className={cn(fig, space.refusal && TONE_TEXT.bad)}>{`${formatSize(space.free_bytes)} free`}</span>
+        <span className="text-xs text-muted-foreground">of {formatSize(space.total_bytes)}</span>
+      </SettingsRow>
+      <SettingsRow label="A backup run needs" description="Free room for staging"><span className={fig}>{formatSize(space.staging_need_bytes)}</span></SettingsRow>
+      <SettingsRow label="Restoring the largest backup needs"><span className={fig}>{formatSize(space.restore_need_bytes)}</span></SettingsRow>
+      <div className="flex flex-col gap-2 px-4 py-3">
         <div className="flex h-2.5 overflow-hidden rounded-full bg-muted" role="img" aria-label={`Backups ${backups.toFixed(1)} %, everything else ${other.toFixed(1)} %, the rest free`}>
           <i className="block h-full bg-primary" style={{ width: `${backups}%` }} />
           <i className="block h-full bg-control-border" style={{ width: `${other}%` }} />
         </div>
-        <div className="flex flex-wrap items-center gap-x-2.5 text-[13px] text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
           <span><Dot className="bg-primary" />backups</span>
           <span><Dot className="bg-control-border" />everything else</span>
           <span><Dot className="border border-control-border bg-muted" />free</span>

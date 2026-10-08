@@ -64,3 +64,22 @@ describe("CreateWorkspaceDialog", () => {
     expect(slugInput.value).toBe("custom")
   })
 })
+
+// #3005: a workspace with a logo is drawn with it — in the rail tile and in
+// the switcher's list — and with its initial otherwise.
+import { WorkspaceMark } from "../workspace-switcher"
+
+describe("WorkspaceMark", () => {
+  beforeEach(() => cleanup())
+
+  it("draws the logo when the workspace has one", () => {
+    const { container } = render(<WorkspaceMark name="Dess" logoUrl="/api/v1/workspaces/w1/logo?v=1" className="h-7 w-7" />)
+    expect(container.querySelector("img")?.getAttribute("src")).toBe("/api/v1/workspaces/w1/logo?v=1")
+  })
+
+  it("falls back to the initial without a logo", () => {
+    const { container } = render(<WorkspaceMark name="Dess" className="h-7 w-7" />)
+    expect(container.querySelector("img")).toBeNull()
+    expect(container.textContent).toBe("D")
+  })
+})
