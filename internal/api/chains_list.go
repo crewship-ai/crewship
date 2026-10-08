@@ -7,6 +7,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chain"
@@ -539,6 +540,7 @@ func (h *ChainsListHandler) query(r *http.Request, workspaceID string, limit, of
 		c.Failed = c.FailedRuns > 0
 		c.DurationMS = chainElapsedMS(c.FirstActivity, c.LastActivity)
 		if c.Kind == "assignment" {
+			c.Task = assignmentTaskTitle(c.Task)
 			c.StartedByKind, c.StartedByID, c.StartedByKey, c.StartedBy = resolveAssignmentStart(assignmentStart{
 				missionID: aMissionID, missionKey: aMissionKey, missionTitle: aMissionName,
 				leadPlanning: aLeadPlan != 0, creatorID: userID, creatorName: aCreator, assignerName: aAssigner,
@@ -560,6 +562,48 @@ func (h *ChainsListHandler) query(r *http.Request, workspaceID string, limit, of
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// assignmentTaskTitle turns an assignment's task into the row's title. Tasks
+// are often structured prompts — "[MISSION]\nName: …\nGoal: <untrusted …>" —
+// and the rail and the CLI table need one readable line. It takes the Name
+// line when there is one, else the first line that is neither a bracket tag
+// nor inside an untrusted block. Untrusted content is never the title: it is
+// external input, fenced precisely so it is not mistaken for ours.
+func assignmentTaskTitle(task string) string {
+	const max = 160
+	inUntrusted := false
+	first := ""
+	for _, line := range strings.Split(task, "\n") {
+		l := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(l, "<untrusted"):
+			inUntrusted = !strings.Contains(l, "</untrusted")
+			continue
+		case strings.HasPrefix(l, "</untrusted"):
+			inUntrusted = false
+			continue
+		case inUntrusted || l == "":
+			continue
+		case strings.HasPrefix(l, "[") && strings.HasSuffix(l, "]"):
+			continue
+		}
+		if name, ok := strings.CutPrefix(l, "Name:"); ok {
+			return capTitle(strings.TrimSpace(name), max)
+		}
+		if first == "" {
+			first = l
+		}
+	}
+	return capTitle(first, max)
+}
+
+func capTitle(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-1]) + "…"
 }
 
 // assignmentStart is what an assignment chain's root records about why it
