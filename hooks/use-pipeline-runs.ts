@@ -73,6 +73,10 @@ export function usePipelineRuns(
   // hook asks for the full 200 so a cron-heavy workspace doesn't
   // truncate its active set.
   limit = 100,
+  // poll: false drops the 3s poll for a feed that only needs the run.*
+  // events below — a history feed read beside a separate active feed,
+  // which already polls while anything runs.
+  { poll = true }: { poll?: boolean } = {},
 ) {
   const [runs, setRuns] = useState<PipelineRun[]>([])
   const [loading, setLoading] = useState(false)
@@ -148,10 +152,10 @@ export function usePipelineRuns(
     r.status === "running" || r.status === "queued" || r.status === "paused" || r.status === "waiting",
   )
   useEffect(() => {
-    if (!hasActive) return
+    if (!poll || !hasActive) return
     const t = setInterval(refresh, 3_000)
     return () => clearInterval(t)
-  }, [hasActive, refresh])
+  }, [poll, hasActive, refresh])
 
   // Realtime: any pipeline run state change kicks a refresh so we
   // catch "new run started" events that the active-only polling
