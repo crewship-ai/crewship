@@ -9,6 +9,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Settings › Members marks restricted members (#2878).** A restricted member's row shows a Restricted chip next to the role chip, and the expanded panel names the access mode; saving a changed mode in Edit resource access updates the roster. `GET /workspaces/{id}/members` returns `access_mode` to a trusted OWNER/ADMIN (the same gate as a member's access policy) and omits it for everyone else; `crewship workspace member list` has an ACCESS column (`-` when withheld).
+
+- **Cancelling a run parked at an approval can no longer race its resume (#2910).** If an approval, signal or event resumed the run at the same moment, the API could report the cancellation while the resumed run went on to execute its next steps. Exactly one side now wins: either the resume is refused and the run stays cancelled, or the resumed run is stopped before its next step and records `cancelled` (instead of `interrupted`). The response carries `"parked": true` only when the cancel recorded the row itself.
+
+- **A model call refused by the sidecar says why (#2899).** Every admission failure used to read as 403 "hard-budget traffic requires the restricted broker", even on a workspace with no budget. Only a host decision is still a 403 (a hard budget, or a refused agent, crew or credential scope); an unreachable host, a rejected sidecar credential, an unavailable budget store or a missing binding is a 503, and an unreadable host answer a 502. Each message names its kind. The troubleshooting guide lists what each one means.
+
+- **Routine runs show reported usage, not spend (#2193).** A run's `cost_usd` is what the agent CLIs reported, priced at list rates; under a subscription nothing is billed per call. Routine run detail, the crew bottom panel and the workspace digest now say "reported usage" with an approximate `~$` figure; `routine records` and `routine runs-all` call the column REPORTED USAGE. The `cost_usd` field is unchanged.
+
 - **An agent's restricted client execution can be changed in the web app again (#3028).** Edit agent › Model and execution has the Restricted client execution field; the change is part of the dialog's draft and applies on Save, after the agent. It had no UI since #3008. The unused Admin memory-configuration card is removed: Admin › Data retention › Memory versions edits the same setting.
 
 - **Settings and Admin read as one product (#3022).** A refused switch in Access & Secrets or Hooks flips back and says why in the bottom-right toast instead of a line in the card. Every field, select and picker has the same size as its neighbours; supporting text (row descriptions, hints, empty states) is 12px instead of 11px and nothing is set below 11px; every table uses one header, cell and row style; person status, Keeper decisions, "No owner" and "Off" are status pills.
