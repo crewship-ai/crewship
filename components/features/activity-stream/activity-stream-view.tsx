@@ -74,9 +74,10 @@ import {
 import { useChains } from "@/hooks/use-chains"
 import { narrowChains, type LensKey } from "@/lib/activity-lenses"
 import { activityUrl, parseActivityUrl, type ActivityUrlState } from "@/lib/activity-url"
-import { ActivityOverview, iconFor } from "./activity-overview"
+import { iconFor } from "./activity-overview"
 import { ActivityDetail } from "./activity-detail"
 import { WorkflowPage } from "./workflow-page"
+import { ActivityHome } from "./activity-home"
 import { ActivityRunPage } from "./activity-run-page"
 import { AgentsOverview, IssuesOverview, RoutinesLensOverview } from "./lens-overviews"
 import { RoutineRunsPage } from "./routine-runs-page"
@@ -738,10 +739,14 @@ export function ActivityStreamView({
   const openAgent = stop?.kind === "agent" ? stop : null
   const openRun = stop?.kind === "run" ? stop : null
 
+  // The home is the whole workspace's runs, so it shows only while nothing
+  // narrows the page. A crew, an agent, a search or a pinned crumb asks a
+  // narrower question, and the filtered list below answers it (#2979).
   const overviewShown =
     !loading &&
     !error &&
     !emptyByFilters &&
+    narrowingChips === 0 &&
     surface.main === "overview" &&
     facets.scope === "all" &&
     lens === "workflows"
@@ -813,6 +818,17 @@ export function ActivityStreamView({
             ) : (
               <>workflow</>
             )
+          ) : overviewShown ? (
+            // The home counts activities — the rail's rows — not journal
+            // events; "139 events" described a list this page no longer shows.
+            <>
+              {chains.length.toLocaleString()} {chains.length === 1 ? "activity" : "activities"}
+              {chains.some((c) => (c.waiting_runs ?? 0) > 0) && (
+                <span className="text-warn">
+                  {" "}· {chains.filter((c) => (c.waiting_runs ?? 0) > 0).length} needs you
+                </span>
+              )}
+            </>
           ) : (
             <>
               {visible.length.toLocaleString()} {visible.length === 1 ? "event" : "events"} ·{" "}
@@ -1167,17 +1183,13 @@ export function ActivityStreamView({
               )}
 
               {overviewShown && (
-                <ActivityOverview
-                  entries={visible}
-                  rangeLabel={range.label}
-                  labels={labels}
-                  agentName={agentName}
-                  crewName={crewName}
-                  crewMeta={crewMeta}
-                  selectedID={undefined}
-                  onSelect={setSelected}
-                  onSpineClick={setPinned}
-                  onScope={(s) => setFacets({ ...facets, scope: s })}
+                // Built from runs, not journal events (#2979): what needs you,
+                // what is live, what ran, what broke, what changed.
+                <ActivityHome
+                  workspaceId={workspaceId}
+                  chains={visibleChains}
+                  onOpenRun={(id) => openNode("run", id)}
+                  onOpenIssue={(id) => openNode("issue", id)}
                 />
               )}
 

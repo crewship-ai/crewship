@@ -5,7 +5,7 @@ import type { JournalEntry } from "@/lib/types/journal"
 import type { ChainSummary } from "@/hooks/use-chains"
 import type { JournalLookupValue } from "@/hooks/use-journal-lookup"
 import type { ActivitySidebar } from "../activity-sidebar"
-import type { ActivityOverview } from "../activity-overview"
+import type { ActivityHome } from "../activity-home"
 import type { ActivityDetail } from "../activity-detail"
 import type { WorkflowPage } from "../workflow-page"
 import type { RoutineRunsPage } from "../routine-runs-page"
@@ -17,7 +17,7 @@ const mock = vi.hoisted(() => ({
   list: vi.fn(), stream: vi.fn(), chains: vi.fn(), fetch: vi.fn(), lookup: vi.fn(), mobile: false,
   refresh: vi.fn(), loadMore: vi.fn(), prepend: vi.fn(), refreshChains: vi.fn(),
   sidebar: vi.fn<(p: ComponentProps<typeof ActivitySidebar>) => React.ReactNode>(),
-  overview: vi.fn<(p: ComponentProps<typeof ActivityOverview>) => React.ReactNode>(),
+  home: vi.fn<(p: ComponentProps<typeof ActivityHome>) => React.ReactNode>(),
   detail: vi.fn<(p: ComponentProps<typeof ActivityDetail>) => React.ReactNode>(),
   workflow: vi.fn<(p: ComponentProps<typeof WorkflowPage>) => React.ReactNode>(),
   routine: vi.fn<(p: ComponentProps<typeof RoutineRunsPage>) => React.ReactNode>(),
@@ -39,7 +39,8 @@ vi.mock("@/hooks/use-chains", () => ({ useChains: mock.chains }))
 vi.mock("@/hooks/use-pipelines", () => ({ usePipelines: () => ({ pipelines: [{ id: "p1", slug: "triage", name: "Triage", invocation_count: 2 }] }) }))
 vi.mock("@/hooks/use-pipeline-schedules", () => ({ usePipelineSchedules: () => ({ schedules: [] }) }))
 vi.mock("../activity-sidebar", async (original) => ({ ...await original<typeof import("../activity-sidebar")>(), ActivitySidebar: mock.sidebar }))
-vi.mock("../activity-overview", () => ({ ActivityOverview: mock.overview, iconFor: () => () => null }))
+vi.mock("../activity-overview", () => ({ iconFor: () => () => null }))
+vi.mock("../activity-home", () => ({ ActivityHome: mock.home }))
 vi.mock("../activity-detail", () => ({ ActivityDetail: mock.detail }))
 vi.mock("../workflow-page", () => ({ WorkflowPage: mock.workflow }))
 vi.mock("../routine-runs-page", () => ({ RoutineRunsPage: mock.routine }))
@@ -56,7 +57,7 @@ const chain: ChainSummary = { origin: "r1", started_by_kind: "schedule", started
 const agentChain: ChainSummary = { ...chain, origin: "w1", started_by_kind: "user", routine_slug: undefined }
 const lookup: JournalLookupValue = { crews: new Map([["c1", { id: "c1", name: "Builders", slug: "builders", icon: null, color: "blue" }]]), agents: new Map([["a1", { id: "a1", name: "Alice", slug: "alice", crew_id: "c1", avatar_seed: null, avatar_style: null }]]), missions: new Map([["m1", { id: "m1", title: "Fix the failing integration in the workspace", status: "IN_PROGRESS" }]]), loading: false, refresh: vi.fn() }
 const sidebar = () => mock.sidebar.mock.calls.at(-1)![0]
-const overview = () => mock.overview.mock.calls.at(-1)![0]
+const home = () => mock.home.mock.calls.at(-1)![0]
 const detail = () => mock.detail.mock.calls.at(-1)![0]
 const listState = (over: Record<string, unknown> = {}) => ({ entries, loading: false, loadingMore: false, error: null, nextCursor: null, refresh: mock.refresh, loadMore: mock.loadMore, prependLive: mock.prepend, ...over })
 const show = () => render(<ActivityStreamView workspaceId="ws & a" />)
@@ -69,7 +70,7 @@ beforeEach(() => {
   mock.lookup.mockReturnValue(lookup)
   mock.fetch.mockImplementation(async () => new Response(JSON.stringify({ missions: [{ id: "m1", title: "Fix", status: "IN_PROGRESS", priority: "high" }] })))
   mock.sidebar.mockImplementation((p) => <aside><input aria-label="Activity search" value={p.search} onChange={(e) => p.onSearchChange(e.target.value)} /><button onClick={p.onToggleCollapse}>Hide rail</button></aside>)
-  mock.overview.mockImplementation((p) => <div>Overview: {p.entries.map((e) => e.id).join(",")}</div>)
+  mock.home.mockImplementation(() => <div>Activity home</div>)
   mock.detail.mockImplementation((p) => <div>Record {p.entry.id}<button onClick={p.onBack}>Close record</button></div>)
   mock.workflow.mockImplementation((p) => <div>Workflow {p.chain.origin}</div>)
   mock.routine.mockImplementation((p) => <div>Routine {p.slug}</div>)
@@ -86,19 +87,16 @@ afterEach(async () => { await act(async () => {}); cleanup() })
 it("shares counts and metadata and wires live entries to the same journal window", async () => {
   show()
   await waitFor(() => expect(sidebar().issues).toHaveLength(1))
-  expect(screen.getByText("Overview: e1,e2")).toBeVisible()
+  expect(screen.getByText("Activity home")).toBeVisible()
   expect(sidebar().crewCounts).toEqual({ c1: 1 })
   expect(sidebar().issueCounts).toEqual({ m1: 1 })
   expect(sidebar().routineCounts).toEqual({ triage: 1, other: 1 })
   expect(mock.fetch).toHaveBeenCalledWith("/api/v1/missions?workspace_id=ws%20%26%20a&limit=200")
   expect(mock.list.mock.calls.at(-1)![0]).toMatchObject({ workspaceId: "ws & a", limit: 300, maxEntries: 2000 })
   expect(mock.stream.mock.calls.at(-1)![0].onEntry).toBe(mock.prepend)
-  expect(overview().agentName("a1")).toBe("Alice")
-  expect(overview().agentName()).toBeUndefined()
-  expect(overview().crewName("c1")).toBe("Builders")
-  expect(overview().crewName()).toBeUndefined()
-  expect(overview().crewMeta("c1")).toEqual({ icon: null, color: "blue" })
-  expect(overview().crewMeta()).toBeUndefined()
+  // The home reads runs, not the journal window: it is handed the chain index.
+  expect(home()).toMatchObject({ workspaceId: "ws & a" })
+  expect(home().chains.map((c) => c.origin)).toEqual(["r1", "w1"])
   act(() => sidebar().onRetryChains?.())
   expect(mock.refreshChains).toHaveBeenCalledOnce()
 })
@@ -108,7 +106,7 @@ it.each(["polling", "connecting"])("reports %s transport without hiding the wind
 })
 it("requests answer events with waiting asks and uses the larger waiting window", async () => {
   show()
-  act(() => overview().onScope("waiting"))
+  act(() => sidebar().onChange({ ...EMPTY_FACETS, scope: "waiting" }))
   const request = mock.list.mock.calls.at(-1)![0]
   expect(request.limit).toBe(500)
   expect(request.params.entry_type).toContain("approval.requested")
@@ -116,7 +114,7 @@ it("requests answer events with waiting asks and uses the larger waiting window"
   expect(mock.row).not.toHaveBeenCalled()
   await waitFor(() => expect(screen.getByText("Nothing here")).toBeVisible())
   fireEvent.click(screen.getByRole("button", { name: "Reset" }))
-  expect(screen.getByText("Overview: e1,e2")).toBeVisible()
+  expect(screen.getByText("Activity home")).toBeVisible()
 })
 it("combines server facets, debounces search and removes individual chips", async () => {
   show()
@@ -133,22 +131,32 @@ it("combines server facets, debounces search and removes individual chips", asyn
 it.each(["routine", "run", "step", "issue"] as const)("pins a %s crumb and clears it", (kind) => {
   show()
   const id = { routine: "triage", run: "r1", step: "step1", issue: "m1" }[kind]
-  act(() => overview().onSpineClick({ kind, id, label: "Pinned" }))
+  // Pinned from a record's spine. A pin narrows the page, so the filtered
+  // list answers it instead of the workspace-wide home (#2979).
+  fireEvent.keyDown(window, { key: "j" })
+  act(() => detail().onSpineClick({ kind, id, label: "Pinned" }))
   if (kind === "issue") expect(mock.list.mock.calls.at(-1)![0].params.mission_id).toBe("m1")
-  else expect(overview().entries.map((e) => e.id)).toEqual(["e1"])
+  else {
+    expect(screen.getByText("Row e1")).toBeInTheDocument()
+    expect(screen.queryByText("Row e2")).toBeNull()
+  }
+  expect(screen.queryByText("Activity home")).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Remove filter" }))
-  expect(overview().entries).toEqual(entries)
+  expect(screen.getByText("Activity home")).toBeVisible()
 })
 it("clears intersecting filters atomically instead of showing reassuring empty totals", () => {
   show()
   act(() => {
-    overview().onSpineClick({ kind: "run", id: "missing", label: "Unknown" })
     sidebar().onChange({ ...EMPTY_FACETS, crewIDs: ["c1"], agentIDs: ["a1"] })
+  })
+  fireEvent.keyDown(window, { key: "j" })
+  act(() => {
+    detail().onSpineClick({ kind: "run", id: "missing", label: "Unknown" })
   })
   expect(screen.getByText("No activity matches these filters")).toBeVisible()
   fireEvent.click(screen.getByRole("button", { name: "Clear all filters" }))
   expect(sidebar().facets).toEqual(EMPTY_FACETS)
-  expect(screen.getByText("Overview: e1,e2")).toBeVisible()
+  expect(screen.getByText("Activity home")).toBeVisible()
 })
 it("opens records from the keyboard, moves between them, and ignores typing in inputs", () => {
   show()
@@ -165,7 +173,7 @@ it("opens records from the keyboard, moves between them, and ignores typing in i
   fireEvent.keyDown(window, { key: "Escape" })
   expect(screen.queryByText("Record e1")).toBeNull()
   fireEvent.keyDown(window, { key: "x" })
-  expect(screen.getByText("Overview: e1,e2")).toBeVisible()
+  expect(screen.getByText("Activity home")).toBeVisible()
 })
 it("restores a record URL and popstate, and forgets records outside the loaded window", () => {
   window.history.replaceState(null, "", "/activity?entry=e1")
@@ -214,7 +222,7 @@ it("walks from workflow through named nodes, back, and breadcrumb jumps", () => 
   show()
   act(() => sidebar().onSelectChain("w1"))
   expect(screen.getByText("Workflow w1")).toBeVisible()
-  expect(screen.queryByText("Overview: e1,e2")).toBeNull()
+  expect(screen.queryByText("Activity home")).toBeNull()
   const workflow = () => mock.workflow.mock.calls.at(-1)![0]
   for (const [kind, id, label] of [["agent", "a1", "Alice"], ["crew", "c1", "Builders"], ["issue", "m1", "Fix the failing integration i…"], ["routine", "p1", "Triage"], ["step", "step1", "step1"]]) {
     act(() => workflow().onOpenNode(kind, id))
@@ -230,7 +238,7 @@ it("walks from workflow through named nodes, back, and breadcrumb jumps", () => 
   expect(screen.getByText("Workflow w1")).toBeVisible()
   act(() => workflow().onOpenNode("agent", "a1"))
   fireEvent.click(screen.getByRole("button", { name: "Back to activity" }))
-  expect(screen.getByText("Overview: e1,e2")).toBeVisible()
+  expect(screen.getByText("Activity home")).toBeVisible()
 })
 
 it("opens a chain that starts at a routine run as that run's page", () => {
@@ -291,7 +299,7 @@ it("handles a workflow swept from the index and returns to overview", () => {
   act(() => sidebar().onSelectChain("gone"))
   expect(screen.getByText("This workflow is no longer in the index")).toBeVisible()
   fireEvent.click(screen.getAllByRole("button", { name: "Back" }).at(-1)!)
-  expect(screen.getByText("Overview: e1,e2")).toBeVisible()
+  expect(screen.getByText("Activity home")).toBeVisible()
   act(() => sidebar().onSelectChain(null))
   expect(screen.queryByRole("navigation", { name: "Activity trail" })).toBeNull()
 })
@@ -321,7 +329,7 @@ it("opens a run under the Issues back-bar: the way out, then only the stops walk
   expect(trail).toHaveTextContent("Back to activity")
   expect(within(trail).queryByRole("button", { name: "Overview" })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Back to activity" }))
-  expect(screen.getByText("Overview: e1,e2")).toBeVisible()
+  expect(screen.getByText("Activity home")).toBeVisible()
 })
 it("hands the ledger opener to the rail", () => {
   const onOpenSection = vi.fn()

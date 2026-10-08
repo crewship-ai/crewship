@@ -427,7 +427,7 @@ describe("activity-stream-view wiring", () => {
     // The report: a workflow and the global overview on one screen. The
     // guard is a single derived boolean so the two cannot both be true.
     expect(src).toMatch(/const overviewShown =[\s\S]{0,200}?surface\.main === "overview"/)
-    expect(src).toMatch(/\{overviewShown && \(\s*<ActivityOverview/)
+    expect(src).toMatch(/\{overviewShown && \([\s\S]{0,200}?<ActivityHome/)
   })
 
   it("hands the workflow column to WorkflowPage with a way back and a way down", () => {
