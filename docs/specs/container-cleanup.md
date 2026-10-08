@@ -115,7 +115,9 @@ Enabled by `CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS` and `CREWSHIP_CACHE_EVICTION`
 boot and every 10 minutes while the Docker provider is available. Cancellation
 is checked before each pass and again after writer admission, before provider
 work. An already-canceled lifecycle starts no cleanup pass; a simultaneously
-ready tick cannot start another pass after cancellation. Unavailable-daemon
+ready tick cannot start another pass after cancellation. Cancellation is also
+checked between runtime/cache items and before switching to cache eviction;
+an in-flight provider operation may finish before the next boundary check. Unavailable-daemon
 failures remain retryable on later ticks until cancellation.
 
 **Stopped runtimes.** A runtime container (kind `crew`, this installation's

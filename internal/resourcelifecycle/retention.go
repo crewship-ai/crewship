@@ -121,9 +121,6 @@ func (r *Retention) Tick(ctx context.Context) {
 	if r == nil || r.DB == nil || r.Runtime == nil || r.InstanceID == "" {
 		return
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if ctx.Err() != nil {
 		return
 	}
@@ -139,7 +136,7 @@ func (r *Retention) Tick(ctx context.Context) {
 	if r.RuntimeAfter > 0 {
 		r.runtimes(ctx)
 	}
-	if r.EvictCache {
+	if r.EvictCache && ctx.Err() == nil {
 		r.cache(ctx)
 	}
 }
@@ -172,7 +169,7 @@ func (r *Retention) runtimes(ctx context.Context) {
 		return
 	}
 	for _, c := range list {
-		if quiesce.Yield(ctx) != nil {
+		if ctx.Err() != nil || quiesce.Yield(ctx) != nil {
 			return
 		}
 		// Cheap filter on the list view; FinishedAt needs an inspect.
@@ -227,6 +224,9 @@ func (r *Retention) runtime(ctx context.Context, c RetentionContainer) {
 }
 
 func (r *Retention) cache(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	containers, err := r.Runtime.ListContainers(ctx)
 	if err != nil {
 		r.logger().Warn("cache eviction: container list failed", "error", err)
@@ -234,6 +234,9 @@ func (r *Retention) cache(ctx context.Context) {
 	}
 	inUse := map[string]bool{}
 	for _, c := range containers {
+		if ctx.Err() != nil {
+			return
+		}
 		if c.Provisioning {
 			// A build of any installation is in flight: it may be about to
 			// commit or reuse an image. Decide nothing this tick.
@@ -241,6 +244,9 @@ func (r *Retention) cache(ctx context.Context) {
 			return
 		}
 		inUse[c.ImageID] = true
+	}
+	if ctx.Err() != nil {
+		return
 	}
 	images, err := r.Runtime.ListCacheImages(ctx)
 	if err != nil {
@@ -267,7 +273,7 @@ func (r *Retention) cache(ctx context.Context) {
 	now := r.now()
 	present := map[string]bool{}
 	for _, img := range images {
-		if quiesce.Yield(ctx) != nil {
+		if ctx.Err() != nil || quiesce.Yield(ctx) != nil {
 			return
 		}
 		if img.ID == "" {
@@ -297,6 +303,9 @@ func (r *Retention) cache(ctx context.Context) {
 		r.evict(ctx, img)
 	}
 	for id := range seen {
+		if ctx.Err() != nil {
+			return
+		}
 		if !present[id] {
 			r.forget(ctx, id)
 		}
