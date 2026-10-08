@@ -157,7 +157,7 @@ describe("Overview", () => {
     render(<SecurityPage />)
     const card = await screen.findByRole("region", { name: "Needs attention" })
     expect(within(card).getByText("No backup recorded")).toBeInTheDocument()
-    expect(within(card).getByRole("link", { name: /Create a backup/ })).toHaveAttribute("href", "/admin?tab=backups")
+    expect(within(card).getByRole("link", { name: /Create a backup/ })).toHaveAttribute("href", "/admin/backups")
   })
 
   it("shows the server's setup read-only, an unset value named as such", async () => {

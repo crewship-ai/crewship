@@ -1422,7 +1422,7 @@ What happened: Nightly backup failed. Last successful backup: 32 hours ago.
 Detail: <the run's error>
 Repeats: 3 times since 2026-09-28T02:00:00Z · one incident
 Last good backup: 32 hours ago
-Open Backups: https://crewship.example.com/admin?tab=backups&section=overview
+Open Backups: https://crewship.example.com/admin/backups
 ```
 
 The link is made absolute against `CREWSHIP_PUBLIC_URL`; without it the
@@ -1467,9 +1467,11 @@ no secret.
 
 ## Admin UI
 
-Admin › Data › **Backups** is for instance administrators. It folds out six
-pages in the Admin sidebar, each deep-linkable as
-`/admin?tab=backups&section=<page>`:
+Admin › Data › **Backups** is for instance administrators. It is a page of
+its own, `/admin/backups`, with a side panel like Admin › Security: the scope,
+Overview, the runs by result, the plans, Recovery and the instance settings.
+Each page is deep-linkable as `/admin/backups?section=<page>` (an old
+`/admin?tab=backups&section=<page>` link still lands there):
 
 | Page | What it answers |
 |---|---|
@@ -1480,7 +1482,7 @@ pages in the Admin sidebar, each deep-linkable as
 | Recovery | A guided restore: backup, target, keys, checks, dry run, restore, then resume what stayed held. A whole-instance restore runs from the CLI; see [Recovery in the console](#recovery-in-the-console). |
 | Keys & alerts | The AGE public keys backups are encrypted to, the vault key versions restored secrets need, and who hears when a backup goes wrong. |
 
-A strip above each page chooses **Whole instance** or **Selected
+The panel's **Scope** chooses **Whole instance** or **Selected
 workspaces**; the choice is kept in the URL. Admin › Data › **Data
 retention** sets how long each kind of live data is kept per workspace, and
 shows a dry run of what a change overwrites before it is saved.

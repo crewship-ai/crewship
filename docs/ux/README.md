@@ -115,16 +115,19 @@ files disagree or any pair drops below AA.
 
 ### Admin › Backups
 
-Data › Backups is one Admin sidebar row that folds out six pages (Overview,
-Backup history, Schedules, Storage, Recovery, Keys & alerts) indented under it,
-with Data retention beside it — `?tab=backups&section=…`, `?tab=retention`.
-The scope (Whole instance / Selected workspaces, workspace chips with "N of
-M") is a strip in the content header, never in the panel, kept in
-`?scope=&ws=`; instance-only pages say "Instance setting · applies to every
-backup plan". Proof is always three levels (checksum, contents checked, test
-restore) and a partial test restore reads as partial, in the warn tone.
-Sections live in `components/features/admin/backups/`; `?demo=1` (never in a
-production build) draws them from `__fixtures__` for review.
+Backups is a nested page, `/admin/backups` (`DrillPage`), like Security and
+People. Its side panel holds the **Scope** (Whole instance, or Selected
+workspaces with the same multi-select as Security, greyed out on the
+instance-only Storage and Keys & alerts), Overview with its attention count,
+**Runs** as facets (All, Failed, Incomplete, Manual, Pinned), **Plans** as rows
+with "+ New plan", Recovery (New restore, Restore history, Drills) and the two
+instance settings. Section, facet, plan, run and scope live in the URL
+(`?section=&status=&plan=&run=&scope=&ws=`); an old `?tab=backups` link lands
+here. Proof is always three levels (checksum, contents checked, test restore)
+and a partial result reads as partial, in the warn tone — the server's verdict,
+never one recomputed in the browser. Data retention is not a backup setting: it
+stays in the Admin console. Sections live in `components/features/admin/backups/`;
+`?demo=1` (never in a production build) draws them from `__fixtures__`.
 
 ## 3. Motion (all under `useReducedMotion`)
 

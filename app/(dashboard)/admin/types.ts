@@ -202,7 +202,6 @@ export type TabKey =
   | "providers"
   | "security"
   | "reviews"
-  | "backups"
   | "notifications"
   | "ratelimits"
   | "posture"

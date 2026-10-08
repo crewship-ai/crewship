@@ -34,6 +34,43 @@ export interface SectionCtx {
   backUpNow: (workspaceIds?: string[]) => void
   /** Bumped by the heading's "New plan" button. */
   newPlanSignal: number
+  /** The plan the side panel picked (Schedules opens it); "new" starts one. */
+  focusPlan?: string | null
+  /** The Runs facet the side panel picked (Backup history filters by it). */
+  runFilter?: RunFilter
+  /** True on the nested page, where the side panel lists plans and facets. */
+  inDrill?: boolean
+  /** The Recovery tab the side panel picked. */
+  recoveryView?: "new" | "history" | "drills"
+}
+
+/** The Runs facets of the side panel. */
+export type RunFilter = "all" | "failed" | "incomplete" | "manual" | "pinned"
+
+/**
+ * The scope (?scope=&ws=), the workspaces it picks from, and the actions every
+ * section shares. The nested Backups page and Data retention both build their
+ * SectionCtx from this.
+ */
+export function useBackupsScope(forceWorkspaces = false) {
+  const { workspaceId } = useWorkspace()
+  const demo = useDemo()
+  const ws = useScopeWorkspaces()
+  const workspaces = React.useMemo(() => ws.data ?? [], [ws.data])
+  const [urlState, setUrlState] = React.useState(() => parseScope(typeof window === "undefined" ? "" : window.location.search))
+  const selected = React.useMemo(() => resolveSelection(urlState, workspaces), [urlState, workspaces])
+  const scope: BackupScope = forceWorkspaces ? "workspaces" : urlState.scope
+  const commit = React.useCallback((nextScope: BackupScope, next: Set<string>) => {
+    const search = writeScope(window.location.search, nextScope, next, workspaces)
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${search}`)
+    setUrlState(parseScope(search))
+  }, [workspaces])
+  const backUpNow = React.useCallback((ids?: string[]) => {
+    const inst = scope === "instance" && !ids
+    void perform(demo, () => runNow({ scope: inst ? "instance" : "workspaces", workspace_ids: inst ? undefined : ids ?? [...selected], preset: inst ? "complete" : "workspace" }),
+      "Backup started · it appears in Backup history", "The backup could not start")
+  }, [demo, scope, selected])
+  return { workspaceId: workspaceId ?? null, demo, workspaces, urlState, selected, scope, commit, backUpNow }
 }
 
 /**
@@ -46,13 +83,7 @@ export function BackupsConsole({ page, onNavigate }: {
   page: BackupsSection | "retention"
   onNavigate: (section: BackupsSection) => void
 }) {
-  const { workspaceId } = useWorkspace()
-  const demo = useDemo()
-  const ws = useScopeWorkspaces()
-  const workspaces = React.useMemo(() => ws.data ?? [], [ws.data])
-  const [urlState, setUrlState] = React.useState(() => parseScope(typeof window === "undefined" ? "" : window.location.search))
-  const selected = React.useMemo(() => resolveSelection(urlState, workspaces), [urlState, workspaces])
-  const scope: BackupScope = page === "retention" ? "workspaces" : urlState.scope
+  const { workspaceId, demo, workspaces, urlState, selected, scope, commit, backUpNow } = useBackupsScope(page === "retention")
   // ?run= opens that run in Backup history: the link a backup incident's
   // inbox card carries (View failure).
   const [focus, setFocus] = React.useState<{ run: string | null; path: string | null }>(() => ({
@@ -61,11 +92,6 @@ export function BackupsConsole({ page, onNavigate }: {
   }))
   const [newPlanSignal, setNewPlanSignal] = React.useState(0)
 
-  const commit = (nextScope: BackupScope, next: Set<string>) => {
-    const search = writeScope(window.location.search, nextScope, next, workspaces)
-    window.history.replaceState(window.history.state, "", `${window.location.pathname}${search}`)
-    setUrlState(parseScope(search))
-  }
   const toggle = (id: string) => {
     const next = new Set(selected)
     if (next.has(id)) next.delete(id)
@@ -73,14 +99,8 @@ export function BackupsConsole({ page, onNavigate }: {
     commit(urlState.scope, next)
   }
 
-  const backUpNow = React.useCallback((ids?: string[]) => {
-    const inst = scope === "instance" && !ids
-    void perform(demo, () => runNow({ scope: inst ? "instance" : "workspaces", workspace_ids: inst ? undefined : ids ?? [...selected], preset: inst ? "complete" : "workspace" }),
-      "Backup started · it appears in Backup history", "The backup could not start")
-  }, [demo, scope, selected])
-
   const ctx: SectionCtx = {
-    scope, selected, workspaces, currentWorkspaceId: workspaceId ?? null, demo,
+    scope, selected, workspaces, currentWorkspaceId: workspaceId, demo,
     focusRun: focus.run, focusPath: focus.path, backUpNow, newPlanSignal,
     go: (section, opts) => {
       setFocus({ run: opts?.run ?? null, path: opts?.path ?? null })
