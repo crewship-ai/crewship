@@ -25,6 +25,9 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 	if step.Wait == nil {
 		return "", 0, 0, fmt.Errorf("wait step %q missing body", step.ID)
 	}
+	if step.TimeoutSec <= 0 {
+		step.TimeoutSec = step.Wait.TimeoutSec
+	}
 
 	// dry_run preview: short-circuit EVERY wait kind before it can block or
 	// cause side effects — datetime would sleep, approval would
@@ -40,6 +43,11 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 
 	switch step.Wait.Kind {
 	case "datetime":
+		if step.TimeoutSec > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, time.Duration(step.TimeoutSec)*time.Second)
+			defer cancel()
+		}
 		// Render template (allows {{ inputs.deadline }} etc.) before
 		// parsing — authors can pass a date dynamically.
 		untilRaw := Render(step.Wait.Until, parentRender)
