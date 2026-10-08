@@ -27,6 +27,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 import type { LedgerAgent, WorkState } from "@/hooks/use-work-items"
+import { readLedgerPages } from "@/lib/ledger-pages"
 
 // ── Wire types — mirror internal/api/webhook_deliveries.go exactly ──────────
 
@@ -180,6 +181,27 @@ export function useWebhookDeliveries(
   return {
     deliveries: query.data?.items ?? [],
     nextCursor: query.data?.next_cursor ?? null,
+    loading: query.isPending && Boolean(workspaceId),
+    error: query.error as DeliveryRequestError | null,
+    refetch: query.refetch,
+  }
+}
+
+/** The Webhook deliveries view's read (#3017): every delivery since `since`. */
+export function useLedgerDeliveries(workspaceId: string | null | undefined, since: string) {
+  useDeliveryRealtime(workspaceId)
+  const query = useQuery({
+    queryKey: [...webhookDeliveryKeys.all(workspaceId ?? ""), { view: "ledger", since }] as const,
+    enabled: Boolean(workspaceId),
+    queryFn: ({ signal }) =>
+      readLedgerPages(
+        (url) => fetchDeliveries<WebhookDeliveryPage>(url, signal, "Could not read the delivery ledger"),
+        `${base(workspaceId as string)}?${new URLSearchParams({ since }).toString()}`,
+      ),
+  })
+  return {
+    deliveries: query.data?.items ?? [],
+    capped: query.data?.capped ?? false,
     loading: query.isPending && Boolean(workspaceId),
     error: query.error as DeliveryRequestError | null,
     refetch: query.refetch,

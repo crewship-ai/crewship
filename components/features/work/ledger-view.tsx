@@ -16,26 +16,29 @@ import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useWebhookDeliveries } from "@/hooks/use-webhook-deliveries"
-import { useWorkItems } from "@/hooks/use-work-items"
+import { useLedgerDeliveries } from "@/hooks/use-webhook-deliveries"
+import { isTerminalWorkState, useLedgerWork } from "@/hooks/use-work-items"
 import { roleAtLeast } from "@/lib/routine-governance"
 import { relTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import {
   LEDGER_TONE_LABEL,
   agentName,
+  deliveryFamily,
   deliveryTone,
   endpointHealth,
+  endpointName,
   familyCounts,
   inWindow,
   ledgerAgents,
   ledgerCounts,
   narrowDeliveries,
   narrowWork,
+  workFamily,
   type DeliveryTone,
   type LedgerTone,
 } from "@/lib/work-ledger"
-import { DeliveriesPage } from "./deliveries-page"
+import { DeliveriesPage, DeliveryDetail } from "./deliveries-page"
 import { DeliveriesRail, WorkRail, type LedgerSection, type RailAgentRow, type RailChip } from "./ledger-rail"
 import { WorkItemDetail } from "./work-item-detail"
 import { WorkQueuePage } from "./work-queue-page"
@@ -81,6 +84,7 @@ export function LedgerView({
   const [agentId, setAgentId] = React.useState<string | null>(null)
   const [family, setFamily] = React.useState<string | null>(null)
   const [openWorkId, setOpenWorkId] = React.useState<string | null>(null)
+  const [openDeliveryId, setOpenDeliveryId] = React.useState<string | null>(null)
   const isMobile = useIsMobile()
   const [railCollapsed, setRailCollapsed] = React.useState(false)
   // On a phone the rail is a drawer over the page; start it closed, as
@@ -90,9 +94,12 @@ export function LedgerView({
   }, [isMobile])
   const { role } = useAbilities()
 
-  const work = useWorkItems(workspaceId)
-  const deliveries = useWebhookDeliveries(workspaceId)
   const from = now - TIME_WINDOW_MS[win]
+  // The server reads from the start of the window's first hour, so the query
+  // stays put while `now` ticks; the window itself is cut here.
+  const since = new Date(Math.floor(from / 3_600_000) * 3_600_000).toISOString()
+  const work = useLedgerWork(workspaceId, since)
+  const deliveries = useLedgerDeliveries(workspaceId, since)
   const windowLabel = win === "24h" ? "last 24 h" : "last 7 days"
 
   // A pick on a phone closes the drawer, so the page it narrowed shows.
@@ -103,17 +110,36 @@ export function LedgerView({
     }
   }
 
-  // Switching ledgers keeps the agent (an endpoint IS an agent) and drops the
-  // status, whose words differ between the two, and the open work panel.
-  function switchSection(s: LedgerSection) {
+  // A ledger switch keeps the agent (an agent's endpoint IS the agent) and
+  // drops the status, whose words differ between the two, the family and the
+  // open work panel — also when Back or Forward switches it.
+  const keepOpenWork = React.useRef(false)
+  const lastSection = React.useRef(section)
+  React.useEffect(() => {
+    if (lastSection.current === section) return
+    lastSection.current = section
     setTone("all")
     setDecision("all")
     setFamily(null)
-    setOpenWorkId(null)
+    setOpenDeliveryId(null)
+    if (keepOpenWork.current) keepOpenWork.current = false
+    else setOpenWorkId(null)
+  }, [section])
+  function switchSection(s: LedgerSection) {
+    // An endpoint that is not an agent's has no work queue of its own.
+    if (s === "work" && agentId && !work.items.some((i) => i.agent_id === agentId)) {
+      const d = deliveries.deliveries.find((x) => x.endpoint_id === agentId)
+      if (d && d.endpoint_kind && d.endpoint_kind !== "agent") setAgentId(null)
+    }
     onSection(s)
   }
 
-  const workInWindow = inWindow(work.items, (i) => i.created_at, from)
+  // The window, plus whatever is still unfinished however old it is: stuck
+  // work holds its agent's queue and must not fall out of a 24 h view.
+  const workInWindow = work.items.filter((i) => {
+    const t = Date.parse(i.created_at)
+    return (Number.isFinite(t) && t >= from) || !isTerminalWorkState(i.state)
+  })
   const narrowedWork = narrowWork(workInWindow, { tone, agentId, family })
   // The rail counts each facet over the OTHER facets, so a row survives its
   // own selection — the rule the Activity rail keeps.
@@ -123,22 +149,30 @@ export function LedgerView({
   const narrowedDlv = narrowDeliveries(dlvInWindow, { decision, endpointId: agentId, family })
   const dlvForCounts = narrowDeliveries(dlvInWindow, { endpointId: agentId, family })
 
-  const pickedAgent =
-    work.items.find((i) => i.agent_id === agentId)?.agent ?? deliveries.deliveries.find((d) => d.endpoint_id === agentId)?.agent ?? null
-  const agentLabel = agentId ? agentName(pickedAgent) : null
-  const emptyAgentRow = (id: string): RailAgentRow => ({ id, name: agentName(pickedAgent), agent: pickedAgent, count: 0, note: "none here" })
+  const pickedWork = work.items.find((i) => i.agent_id === agentId)
+  const pickedDelivery = deliveries.deliveries.find((d) => d.endpoint_id === agentId)
+  const pickedAgent = pickedWork?.agent ?? pickedDelivery?.agent ?? null
+  const agentLabel = !agentId ? null : pickedWork || !pickedDelivery ? agentName(pickedAgent) : endpointName(pickedDelivery)
+  const emptyAgentRow = (id: string): RailAgentRow => ({
+    id,
+    name: agentLabel ?? agentName(pickedAgent),
+    agent: pickedAgent,
+    deleted: pickedDelivery ? pickedDelivery.endpoint_kind === "agent" && !pickedAgent : !pickedAgent || Boolean(pickedAgent.deleted),
+    count: 0,
+    note: "none here",
+  })
   const emptyFamilyRow = (f: string) => ({ family: f, count: 0 })
 
   const workAgents = keepPicked(
     ledgerAgents(narrowWork(workInWindow, { tone, family })).map(
-      (a): RailAgentRow => ({ id: a.id, name: a.name, agent: a.agent, count: a.count, ...AGENT_NOTE[a.state] }),
+      (a): RailAgentRow => ({ id: a.id, name: a.name, agent: a.agent, deleted: a.state === "deleted", count: a.count, ...AGENT_NOTE[a.state] }),
     ),
     agentId,
     (r) => r.id,
     emptyAgentRow,
   )
   const workFamilies = keepPicked(
-    familyCounts(narrowWork(workInWindow, { tone, agentId }).map((i) => i.event_type ?? "")),
+    familyCounts(narrowWork(workInWindow, { tone, agentId }).map(workFamily)),
     family,
     (f) => f.family,
     emptyFamilyRow,
@@ -149,6 +183,7 @@ export function LedgerView({
         id: h.endpointId,
         name: h.name,
         agent: h.agent,
+        deleted: h.verdict === "gone",
         count: h.count,
         note: h.verdict === "ok" ? relTime(h.last) : ENDPOINT_NOTE[h.verdict],
         noteTone: h.verdict === "blocked" ? "text-warn" : undefined,
@@ -159,7 +194,7 @@ export function LedgerView({
     emptyAgentRow,
   )
   const dlvFamilies = keepPicked(
-    familyCounts(narrowDeliveries(dlvInWindow, { decision, endpointId: agentId }).map((d) => d.event_type)),
+    familyCounts(narrowDeliveries(dlvInWindow, { decision, endpointId: agentId }).map(deliveryFamily)),
     family,
     (f) => f.family,
     emptyFamilyRow,
@@ -185,6 +220,15 @@ export function LedgerView({
     family && { key: "family", label: family, onRemove: () => setFamily(null) },
   ].filter((c): c is RailChip => Boolean(c))
   const narrowedTo = chips.map((c) => c.label).join(" · ") || null
+
+  const openDelivery = deliveries.deliveries.find((d) => d.id === openDeliveryId) ?? null
+  // A delivery's "Became" opens its work in the Work queue, panel open.
+  function openDeliveryWork(id: string) {
+    keepOpenWork.current = true
+    setOpenDeliveryId(null)
+    switchSection("work")
+    setOpenWorkId(id)
+  }
 
   const failure = section === "work" ? work.error : deliveries.error
   const retry = section === "work" ? work.refetch : deliveries.refetch
@@ -290,7 +334,7 @@ export function LedgerView({
               from={from}
               now={now}
               narrowedTo={narrowedTo}
-              capped={Boolean(work.nextCursor)}
+              capped={work.capped}
               loading={work.loading}
               canResolve={roleAtLeast(role, "MANAGER")}
               onTone={(t) => setTone((cur) => (cur === t ? "all" : t))}
@@ -304,12 +348,10 @@ export function LedgerView({
               from={from}
               now={now}
               narrowedTo={narrowedTo}
-              capped={Boolean(deliveries.nextCursor)}
+              capped={deliveries.capped}
               loading={deliveries.loading}
-              onOpenWork={(id) => {
-                switchSection("work")
-                setOpenWorkId(id)
-              }}
+              openId={openDeliveryId}
+              onOpen={setOpenDeliveryId}
               onOpenAgentWork={(id) => {
                 switchSection("work")
                 setAgentId(id)
@@ -317,6 +359,14 @@ export function LedgerView({
             />
           )}
         </div>
+        {!isMobile && section === "deliveries" && openDelivery && (
+          <aside
+            aria-label="Delivery"
+            className="w-[360px] shrink-0 overflow-y-auto border-l border-hairline bg-card/40 p-4 animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out"
+          >
+            <DeliveryDetail delivery={openDelivery} onClose={() => setOpenDeliveryId(null)} onOpenWork={openDeliveryWork} />
+          </aside>
+        )}
         {!isMobile && section === "work" && openWorkId && (
           <aside
             aria-label="Work item detail"
@@ -337,6 +387,18 @@ export function LedgerView({
         )}
       </div>
 
+      {isMobile && (
+        <Sheet open={section === "deliveries" && openDelivery != null} onOpenChange={(open) => !open && setOpenDeliveryId(null)}>
+          <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
+            <SheetHeader>
+              <SheetTitle>Delivery</SheetTitle>
+            </SheetHeader>
+            <div className="px-4 pb-4">
+              {openDelivery && <DeliveryDetail delivery={openDelivery} onOpenWork={openDeliveryWork} />}
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
       {isMobile && (
         <Sheet open={section === "work" && Boolean(openWorkId)} onOpenChange={(open) => !open && setOpenWorkId(null)}>
           <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">

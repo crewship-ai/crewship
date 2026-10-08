@@ -73,7 +73,9 @@ export function isDeletedAgent(agent: LedgerAgent | null | undefined): boolean {
   return !agent || Boolean(agent.deleted)
 }
 
-const RAW_ID = /\bc[a-z0-9]{20,}\b/g
+// A CUID: c + 20 or more lowercase alphanumerics, with at least one digit —
+// an ordinary long word that starts with "c" is left alone.
+const RAW_ID = /\bc(?=[a-z]*\d)[a-z0-9]{20,}\b/g
 
 /**
  * A state reason as a reader should see it. The ledger writes reasons for
@@ -84,9 +86,9 @@ const RAW_ID = /\bc[a-z0-9]{20,}\b/g
 export function humanReason(reason: string | null | undefined): string {
   let r = (reason ?? "").trim()
   if (!r) return ""
-  const settled = /^resolved by \S+:\s*runtime confirmed stopped by operator;\s*(.*)$/i.exec(r)
+  const settled = /^resolved by \S+:\s*runtime confirmed stopped by operator;\s*([\s\S]*)$/i.exec(r)
   if (settled) r = `${settled[1].trim() || "Outcome recorded"} — settled by hand`
-  r = r.replace(/\bagent\s+c[a-z0-9]{20,}\b/gi, "the agent").replace(RAW_ID, "…")
+  r = r.replace(/\bagent\s+c(?=[a-z]*\d)[a-z0-9]{20,}\b/gi, "the agent").replace(RAW_ID, "…")
   return r
 }
 
@@ -114,6 +116,17 @@ export function eventFamily(event: string | null | undefined): string {
   if (!event) return ""
   const dot = event.indexOf(".")
   return dot > 0 ? `${event.slice(0, dot)}.*` : event
+}
+
+/** The family a piece of work narrows by: its event's, else its producer. */
+export function workFamily(item: WorkItem): string {
+  return eventFamily(item.event_type) || SOURCE_WORD[item.source] || item.source
+}
+
+/** A delivery's family; one without an event still has a row to pick. */
+export const NO_EVENT = "(no event)"
+export function deliveryFamily(d: WebhookDelivery): string {
+  return eventFamily(d.event_type) || NO_EVENT
 }
 
 /** How it ended, as a sentence — never a raw state or id. */
@@ -214,12 +227,20 @@ export interface NeedsYouEntry {
 }
 
 export function needsYou(items: readonly WorkItem[]): NeedsYouEntry[] {
-  return items
-    .filter((i) => ledgerTone(i.state) === "needs")
+  const needs = items.filter((i) => ledgerTone(i.state) === "needs")
+  // The line waits behind the agent's oldest unsettled item — say so once.
+  const holder = new Map<string, string>()
+  for (const i of [...needs].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
+    if (!holder.has(i.agent_id)) holder.set(i.agent_id, i.id)
+  }
+  return needs
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
     .map((item) => ({
       item,
-      behind: items.filter((o) => o.agent_id === item.agent_id && ledgerTone(o.state) === "line").length,
+      behind:
+        holder.get(item.agent_id) === item.id
+          ? items.filter((o) => o.agent_id === item.agent_id && ledgerTone(o.state) === "line").length
+          : 0,
     }))
 }
 
@@ -273,6 +294,12 @@ export interface LedgerLane {
   summary: { text: string; tone: LedgerTone | "default" }
 }
 
+/** Where a time sits on a lane, in percent; an unreadable time at the start. */
+function lanePosition(at: string, from: number, span: number): number {
+  const pct = ((Date.parse(at) - from) / span) * 100
+  return Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : 0
+}
+
 /** One lane per agent across the window, busiest first; a deleted agent last. */
 export function ledgerLanes(items: readonly WorkItem[], win: { from: number; to: number }): LedgerLane[] {
   const span = Math.max(1, win.to - win.from)
@@ -291,18 +318,22 @@ export function ledgerLanes(items: readonly WorkItem[], win: { from: number; to:
           ? { text: `${c.failed} failed`, tone: "failed" }
           : c.running
             ? { text: `${c.running} running`, tone: "running" }
-            : { text: `${c.done} done`, tone: "default" }
+            : c.done
+              ? { text: `${c.done} done`, tone: "default" }
+              : c.line
+                ? { text: `${c.line} in the queue`, tone: "line" }
+                : { text: `${c.cancelled} cancelled`, tone: "default" }
       const agent = list.find((i) => i.agent)?.agent ?? null
       return {
         key,
         name: agentName(agent),
         agent,
         crew: list.find((i) => i.crew)?.crew ?? null,
-        feeds: [...new Set(list.map((i) => eventFamily(i.event_type) || SOURCE_WORD[i.source]))].slice(0, 3),
+        feeds: [...new Set(list.map(workFamily))].slice(0, 3),
         dots: list.map((i) => ({
           id: i.id,
           tone: ledgerTone(i.state),
-          left: Math.min(100, Math.max(0, ((Date.parse(i.created_at) - win.from) / span) * 100)),
+          left: lanePosition(i.created_at, win.from, span),
           at: i.created_at,
           subject: workSubject(i),
         })),
@@ -342,11 +373,13 @@ export function ledgerAgents(items: readonly WorkItem[]): RailAgent[] {
     .sort((a, b) => Number(isDeletedAgent(a.agent)) - Number(isDeletedAgent(b.agent)) || b.count - a.count || a.name.localeCompare(b.name))
 }
 
-/** The rail's EVENTS section: families with counts, largest first. */
-export function familyCounts(events: readonly string[]): { family: string; count: number }[] {
+/**
+ * The rail's EVENTS section: families with counts, largest first. Takes
+ * families (workFamily / deliveryFamily), so every row can be narrowed to.
+ */
+export function familyCounts(families: readonly string[]): { family: string; count: number }[] {
   const by = new Map<string, number>()
-  for (const e of events) {
-    const f = eventFamily(e)
+  for (const f of families) {
     if (f) by.set(f, (by.get(f) ?? 0) + 1)
   }
   return [...by.entries()]
@@ -365,7 +398,7 @@ export function narrowWork(items: readonly WorkItem[], n: WorkNarrowing): WorkIt
     (i) =>
       (!n.tone || n.tone === "all" || ledgerTone(i.state) === n.tone) &&
       (!n.agentId || i.agent_id === n.agentId) &&
-      (!n.family || eventFamily(i.event_type) === n.family),
+      (!n.family || workFamily(i) === n.family),
   )
 }
 
@@ -396,8 +429,27 @@ export function deliveryLine(d: WebhookDelivery): string {
   return `→ work · ${LEDGER_TONE_LABEL[ledgerTone(d.work_state)].toLowerCase()}`
 }
 
+const KIND_WORD: Record<string, string> = { routine: "Routine endpoint", page: "Page endpoint" }
+
+/**
+ * Who a delivery came in for. Only an agent's endpoint carries an agent; an
+ * endpoint of another kind is named by its kind and is never "deleted".
+ */
+export function endpointName(d: Pick<WebhookDelivery, "agent" | "endpoint_kind">): string {
+  if (d.agent) return d.agent.name
+  if (d.endpoint_kind && d.endpoint_kind !== "agent") return KIND_WORD[d.endpoint_kind] ?? `${sentence(d.endpoint_kind)} endpoint`
+  return DELETED
+}
+
+/** Whether a delivery's endpoint is an agent that no longer exists. */
+export function isDeletedEndpoint(d: Pick<WebhookDelivery, "agent" | "endpoint_kind">): boolean {
+  return (d.endpoint_kind === "agent" || !d.endpoint_kind) && isDeletedAgent(d.agent)
+}
+
 export interface EndpointHealth {
   endpointId: string
+  /** "agent", or the kind of endpoint that is not an agent's. */
+  kind: string
   name: string
   agent: LedgerAgent | null
   count: number
@@ -425,15 +477,17 @@ export function endpointHealth(deliveries: readonly WebhookDelivery[], now = Dat
     .map(([endpointId, list]) => {
       const sorted = [...list].sort((a, b) => b.received_at.localeCompare(a.received_at))
       const agent = list.find((d) => d.agent)?.agent ?? null
-      const gone = isDeletedAgent(agent) && list.every((d) => d.endpoint_kind === "agent")
+      const kind = list[0].endpoint_kind || "agent"
+      const gone = kind === "agent" && isDeletedAgent(agent)
       const blocked = list.some((d) => d.work_state === "needs_reconciliation")
       const quiet = now - Date.parse(sorted[0].received_at) > QUIET_AFTER_MS
       return {
         endpointId,
-        name: agent?.name || (gone ? DELETED : endpointId),
+        kind,
+        name: agent?.name || endpointName({ agent, endpoint_kind: kind }),
         agent,
         count: list.length,
-        families: familyCounts(list.map((d) => d.event_type)).map((f) => f.family),
+        families: familyCounts(list.map(deliveryFamily)).map((f) => f.family),
         last: sorted[0].received_at,
         profile: sorted[0].profile,
         verdict: gone ? ("gone" as const) : blocked ? ("blocked" as const) : quiet ? ("quiet" as const) : ("ok" as const),
@@ -453,7 +507,7 @@ export function narrowDeliveries(deliveries: readonly WebhookDelivery[], n: Deli
     (d) =>
       (!n.decision || n.decision === "all" || deliveryTone(d) === n.decision) &&
       (!n.endpointId || d.endpoint_id === n.endpointId) &&
-      (!n.family || eventFamily(d.event_type) === n.family),
+      (!n.family || deliveryFamily(d) === n.family),
   )
 }
 
@@ -469,7 +523,7 @@ export function deliveryLanes(deliveries: readonly WebhookDelivery[], win: { fro
   const span = Math.max(1, win.to - win.from)
   const by = new Map<string, WebhookDelivery[]>()
   for (const d of deliveries) {
-    const f = eventFamily(d.event_type) || "unknown"
+    const f = deliveryFamily(d)
     by.set(f, [...(by.get(f) ?? []), d])
   }
   return [...by.entries()]
@@ -479,7 +533,7 @@ export function deliveryLanes(deliveries: readonly WebhookDelivery[], win: { fro
         id: d.id,
         tone: deliveryTone(d),
         workTone: d.work_state ? ledgerTone(d.work_state) : null,
-        left: Math.min(100, Math.max(0, ((Date.parse(d.received_at) - win.from) / span) * 100)),
+        left: lanePosition(d.received_at, win.from, span),
         at: d.received_at,
       })),
       accepted: list.filter((d) => deliveryTone(d) === "accepted").length,

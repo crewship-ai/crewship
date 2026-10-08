@@ -18,21 +18,19 @@ import { CheckCircle2, GanttChartSquare, ListChecks, Radio, X } from "lucide-rea
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { LaneAxis, WindowToggle, type TimeWindow } from "@/components/features/activity-stream/time-window"
 import { Appear } from "@/components/ui/detail"
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import type { WebhookDelivery } from "@/hooks/use-webhook-deliveries"
-import { useIsMobile } from "@/hooks/use-mobile"
 import { relTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import {
   LEDGER_TONE_DOT,
   LEDGER_TONE_LABEL,
   LEDGER_TONE_TEXT,
-  agentName,
   deliveryLanes,
   deliveryLine,
   deliveryTone,
   endpointHealth,
-  isDeletedAgent,
+  endpointName,
+  isDeletedEndpoint,
   ledgerTone,
 } from "@/lib/work-ledger"
 import { LedgerAvatar } from "./ledger-parts"
@@ -47,7 +45,8 @@ function bytes(n: number): string {
 }
 
 function dotClass(d: { tone: "accepted" | "ignored"; workTone: keyof typeof LEDGER_TONE_DOT | null }): string {
-  if (d.tone === "ignored") return "bg-muted-foreground/50"
+  // Ignored is a hollow ring, so it never reads as cancelled work.
+  if (d.tone === "ignored") return "border border-muted-foreground bg-card"
   return d.workTone ? LEDGER_TONE_DOT[d.workTone] : "bg-success"
 }
 
@@ -60,7 +59,9 @@ export interface DeliveriesPageProps {
   narrowedTo: string | null
   capped: boolean
   loading: boolean
-  onOpenWork: (workId: string) => void
+  /** The delivery open beside the page; the panel itself is the view's. */
+  openId: string | null
+  onOpen: (deliveryId: string) => void
   onOpenAgentWork: (agentId: string) => void
 }
 
@@ -73,17 +74,15 @@ export function DeliveriesPage({
   narrowedTo,
   capped,
   loading,
-  onOpenWork,
+  openId,
+  onOpen: setOpenId,
   onOpenAgentWork,
 }: DeliveriesPageProps) {
-  const [openId, setOpenId] = React.useState<string | null>(null)
-  const isMobile = useIsMobile()
   const accepted = deliveries.filter((d) => deliveryTone(d) === "accepted").length
   const ignored = deliveries.length - accepted
   const latest = [...deliveries].sort((a, b) => b.received_at.localeCompare(a.received_at))
   const health = endpointHealth(deliveries, now)
   const lanes = deliveryLanes(deliveries, { from, to: now })
-  const opened = deliveries.find((d) => d.id === openId) ?? null
 
   return (
     <div className="flex min-h-full">
@@ -191,7 +190,7 @@ export function DeliveriesPage({
                           key={d.id}
                           type="button"
                           onClick={() => setOpenId(d.id)}
-                          aria-label={`${lane.family}: ${d.tone}, ${relTime(d.at)}`}
+                          aria-label={`${lane.family}: ${d.tone}${d.workTone ? `, work ${LEDGER_TONE_LABEL[d.workTone].toLowerCase()}` : ""}, ${relTime(d.at)}`}
                           title={`${d.tone}${d.workTone ? ` → ${LEDGER_TONE_LABEL[d.workTone].toLowerCase()}` : ""} · ${new Date(d.at).toLocaleString(undefined, { hour12: false })}`}
                           className={cn(
                             "absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-card transition-transform hover:scale-150",
@@ -213,7 +212,10 @@ export function DeliveriesPage({
                       ["bg-success", "accepted → done"],
                       ["bg-destructive", "→ failed"],
                       ["bg-warn", "→ needs you"],
-                      ["bg-muted-foreground/50", "ignored"],
+                      ["bg-info", "→ in the queue"],
+                      ["bg-primary", "→ running"],
+                      ["bg-muted-foreground", "→ cancelled"],
+                      ["border border-muted-foreground", "ignored"],
                     ] as const
                   ).map(([c, l]) => (
                     <span key={l} className="inline-flex items-center gap-1.5">
@@ -262,7 +264,7 @@ export function DeliveriesPage({
                         </span>
                         <span className="hidden w-[150px] shrink-0 items-center gap-1.5 truncate text-xs text-muted-foreground md:flex">
                           <LedgerAvatar agent={d.agent} className="h-4 w-4" />
-                          <span className={cn("truncate", isDeletedAgent(d.agent) && "line-through")}>{agentName(d.agent)}</span>
+                          <span className={cn("truncate", isDeletedEndpoint(d) && "line-through")}>{endpointName(d)}</span>
                         </span>
                         <span
                           className={cn(
@@ -286,31 +288,11 @@ export function DeliveriesPage({
         </Appear>
       </div>
 
-      {opened && !isMobile && (
-        <aside
-          aria-label="Delivery"
-          className="w-[360px] shrink-0 border-l border-hairline bg-card/40 p-4 animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out"
-        >
-          <DeliveryDetail delivery={opened} onClose={() => setOpenId(null)} onOpenWork={onOpenWork} />
-        </aside>
-      )}
-      {isMobile && (
-        <Sheet open={opened != null} onOpenChange={(o) => !o && setOpenId(null)}>
-          <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
-            <SheetHeader>
-              <SheetTitle>Delivery</SheetTitle>
-            </SheetHeader>
-            <div className="px-4 pb-4">
-              {opened && <DeliveryDetail delivery={opened} onOpenWork={onOpenWork} />}
-            </div>
-          </SheetContent>
-        </Sheet>
-      )}
     </div>
   )
 }
 
-function DeliveryDetail({
+export function DeliveryDetail({
   delivery: d,
   onClose,
   onOpenWork,
@@ -323,7 +305,7 @@ function DeliveryDetail({
   const work = d.work_state ? ledgerTone(d.work_state) : null
   const rows: [string, React.ReactNode][] = [
     ["Received", new Date(d.received_at).toLocaleString(undefined, { hour12: false })],
-    ["Endpoint", agentName(d.agent)],
+    ["Endpoint", endpointName(d)],
     ["Verified with", <span key="p" className="font-mono">{d.profile || "—"}</span>],
     ["Sender's id", <span key="s" className="font-mono">{d.source_delivery_id || "—"}</span>],
     [

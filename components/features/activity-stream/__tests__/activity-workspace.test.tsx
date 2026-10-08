@@ -17,12 +17,12 @@ vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mocks.mobile }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: mocks.role }) }))
 vi.mock("@/hooks/use-work-items", async (original) => ({
   ...await original<typeof import("@/hooks/use-work-items")>(),
-  useWorkItems: mocks.work,
+  useLedgerWork: mocks.work,
   useResolveWorkItem: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useReplayWorkItem: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 vi.mock("@/hooks/use-webhook-deliveries", () => ({
-  useWebhookDeliveries: mocks.deliveries,
+  useLedgerDeliveries: mocks.deliveries,
   useWebhookDelivery: () => ({ delivery: null, loading: false, notFound: false }),
 }))
 vi.mock("@/components/features/work/work-item-detail", () => ({
@@ -46,8 +46,8 @@ beforeEach(() => {
   mocks.role = "OWNER"
   window.history.replaceState(null, "", "/activity")
   mocks.push.mockImplementation((url: string) => window.history.pushState(null, "", url))
-  mocks.work.mockReturnValue({ items: [], nextCursor: null, loading: false, error: null, refetch: vi.fn() })
-  mocks.deliveries.mockReturnValue({ deliveries: [], nextCursor: null, loading: false, error: null, refetch: vi.fn() })
+  mocks.work.mockReturnValue({ items: [], capped: false, loading: false, error: null, refetch: vi.fn() })
+  mocks.deliveries.mockReturnValue({ deliveries: [], capped: false, loading: false, error: null, refetch: vi.fn() })
 })
 afterEach(cleanup)
 
@@ -60,7 +60,7 @@ it("keeps the overview default and loads the ledger only when requested", () => 
   view.rerender(<ActivityWorkspace workspaceId="ws-a" />)
   expect(screen.getByRole("heading", { name: "Work queue" })).toBeInTheDocument()
   expect(screen.queryByText("Execution overview")).toBeNull()
-  expect(mocks.work).toHaveBeenCalledWith("ws-a")
+  expect(mocks.work).toHaveBeenCalledWith("ws-a", expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:00:00\.000Z$/))
 })
 
 it("switches the rail to the ledger's rows and leaves to all activity with legacy parameters kept (#3012)", () => {
@@ -88,7 +88,7 @@ it("names the agent and the event, and narrows every card to an agent picked in 
       work("w1", "succeeded", casey, "invoice.disputed", 2),
       work("w2", "failed", robot, "order.shipped", 5, { state_reason: "sidecar did not start" }),
     ],
-    nextCursor: null, loading: false, error: null, refetch: vi.fn(),
+    capped: false, loading: false, error: null, refetch: vi.fn(),
   })
   render(<ActivityWorkspace workspaceId="ws-a" />)
   const latest = screen.getByRole("region", { name: "Latest work" })
@@ -107,7 +107,7 @@ it("offers to settle work whose outcome is unclear, only to a manager", () => {
       work("w1", "needs_reconciliation", robot, "invoice.export", 6, { state_reason: "The provider rejected the API key" }),
       work("w2", "queued", robot, "invoice.export", 3),
     ],
-    nextCursor: null, loading: false, error: null, refetch: vi.fn(),
+    capped: false, loading: false, error: null, refetch: vi.fn(),
   })
   const view = render(<ActivityWorkspace workspaceId="ws-a" />)
   const needs = screen.getByRole("region", { name: "Needs you" })
@@ -124,7 +124,7 @@ it("opens an accepted delivery's work in the Work queue", () => {
     id: "delivery-1", endpoint_id: casey.id, endpoint_kind: "agent", agent: casey, event_type: "push",
     filter_decision: "accepted", work_id: "work-1", work_state: "succeeded", profile: "crewship-hmac",
     received_at: new Date().toISOString(), raw_body_available: true, body_bytes: 72, body_sha256: "abc",
-  }], nextCursor: null, loading: false, error: null, refetch: vi.fn() })
+  }], capped: false, loading: false, error: null, refetch: vi.fn() })
   const view = render(<ActivityWorkspace workspaceId="ws-a" />)
   fireEvent.click(within(screen.getByRole("region", { name: "Latest deliveries" })).getByRole("button", { name: /push/ }))
   fireEvent.click(screen.getByRole("button", { name: /^work · done/ }))
@@ -137,7 +137,7 @@ it("keeps an agent picked on the Work queue removable on Deliveries, where it ha
   window.history.replaceState(null, "", "/activity?section=work")
   mocks.work.mockReturnValue({
     items: [work("w1", "succeeded", casey, "invoice.disputed", 2)],
-    nextCursor: null, loading: false, error: null, refetch: vi.fn(),
+    capped: false, loading: false, error: null, refetch: vi.fn(),
   })
   const view = render(<ActivityWorkspace workspaceId="ws-a" />)
   fireEvent.click(screen.getByLabelText(/^Casey,/))
@@ -152,7 +152,7 @@ it("keeps an agent picked on the Work queue removable on Deliveries, where it ha
 it("says the ledger did not load, and loads it again on request", () => {
   window.history.replaceState(null, "", "/activity?section=work")
   const refetch = vi.fn()
-  mocks.work.mockReturnValue({ items: [], nextCursor: null, loading: false, error: new Error("server unavailable"), refetch })
+  mocks.work.mockReturnValue({ items: [], capped: false, loading: false, error: new Error("server unavailable"), refetch })
   render(<ActivityWorkspace workspaceId="ws-a" />)
   expect(screen.getByRole("alert")).toHaveTextContent("Could not load the work queue: server unavailable")
   fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Try again" }))
@@ -166,6 +166,44 @@ it("opens on a phone with the rail closed over the page", () => {
   expect(screen.getByRole("heading", { name: "Work queue" })).toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "All activity" })).toBeNull()
   expect(screen.queryByRole("button", { name: "Close filters" })).toBeNull()
+})
+
+it("keeps work stuck for longer than the window in Needs you (#3017)", () => {
+  window.history.replaceState(null, "", "/activity?section=work")
+  mocks.work.mockReturnValue({
+    items: [work("w-old", "needs_reconciliation", robot, "invoice.export", 40 * 60, { state_reason: "The provider rejected the API key" })],
+    capped: false, loading: false, error: null, refetch: vi.fn(),
+  })
+  render(<ActivityWorkspace workspaceId="ws-a" />)
+  expect(screen.getByRole("region", { name: "Needs you" })).toHaveTextContent("invoice.export")
+})
+
+it("names a routine's endpoint as such, never as a deleted agent", () => {
+  window.history.replaceState(null, "", "/activity?section=deliveries")
+  mocks.deliveries.mockReturnValue({ deliveries: [{
+    id: "d-rt", endpoint_id: "rt-1", endpoint_kind: "routine", agent: null, event_type: "push",
+    filter_decision: "accepted", work_id: null, work_state: null, profile: "github",
+    received_at: new Date().toISOString(), raw_body_available: true, body_bytes: 10, body_sha256: "abc",
+  }], capped: false, loading: false, error: null, refetch: vi.fn() })
+  render(<ActivityWorkspace workspaceId="ws-a" />)
+  expect(screen.getByRole("region", { name: "Latest deliveries" })).toHaveTextContent("Routine endpoint")
+  expect(screen.queryByText("Deleted agent")).toBeNull()
+})
+
+it("closes the open work when Back leaves the Work queue for Deliveries", () => {
+  window.history.replaceState(null, "", "/activity?section=work")
+  mocks.work.mockReturnValue({
+    items: [work("w1", "succeeded", casey, "invoice.disputed", 2)],
+    capped: false, loading: false, error: null, refetch: vi.fn(),
+  })
+  const view = render(<ActivityWorkspace workspaceId="ws-a" />)
+  fireEvent.click(within(screen.getByRole("region", { name: "Latest work" })).getAllByRole("button")[0])
+  expect(screen.getByText("Detail w1")).toBeInTheDocument()
+  window.history.replaceState(null, "", "/activity?section=deliveries")
+  view.rerender(<ActivityWorkspace workspaceId="ws-a" />)
+  window.history.replaceState(null, "", "/activity?section=work")
+  view.rerender(<ActivityWorkspace workspaceId="ws-a" />)
+  expect(screen.queryByText("Detail w1")).toBeNull()
 })
 
 it("uses a replacement redirect for old Work bookmarks", () => {

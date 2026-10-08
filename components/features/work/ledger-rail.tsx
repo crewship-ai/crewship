@@ -61,6 +61,8 @@ export interface RailAgentRow {
   id: string
   name: string
   agent: LedgerAgent | null
+  /** An agent removed from the workspace (struck through); never another kind of endpoint. */
+  deleted: boolean
   count: number
   /** A short word beside the name: "blocked", "idle", "2 m", "deleted". */
   note: string
@@ -83,7 +85,7 @@ function AgentRows({
     <SidebarSection label={label} count={rows.length}>
       {rows.map((a) => {
         const on = value === a.id
-        const live = a.agent != null && !a.agent.deleted
+        const live = !a.deleted
         return (
           <SidebarRow
             key={a.id}

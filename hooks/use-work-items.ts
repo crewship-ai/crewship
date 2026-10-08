@@ -35,7 +35,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
 import { useApiMutation } from "@/hooks/use-api-mutation"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
-import type { WebhookDelivery } from "@/hooks/use-webhook-deliveries"
+import { webhookDeliveryKeys, type WebhookDelivery } from "@/hooks/use-webhook-deliveries"
+import { readLedgerPages } from "@/lib/ledger-pages"
 
 // ── Wire types — mirror internal/api/work_items.go exactly ──────────────────
 
@@ -129,6 +130,8 @@ export interface LedgerCrew {
   name: string
   color: string
   icon: string
+  /** Removed from the workspace; the record (and name) remain. */
+  deleted?: boolean
 }
 
 export interface WorkAttempt {
@@ -554,6 +557,41 @@ export function useWorkItems(
   }
 }
 
+/**
+ * The Work queue's read (#3017): all work created since `since`, plus every
+ * piece not yet finished however old — work stuck in needs_reconciliation
+ * holds its agent's queue and must never fall out of a 24 h window.
+ */
+export function useLedgerWork(workspaceId: string | null | undefined, since: string) {
+  useWorkRealtime(workspaceId)
+  const query = useQuery({
+    queryKey: [...workItemKeys.all(workspaceId ?? ""), { view: "ledger", since }] as const,
+    enabled: Boolean(workspaceId),
+    queryFn: async ({ signal }) => {
+      const read = (url: string) => fetchWork<WorkItemPage>(url, signal, "Could not read the work ledger")
+      const root = base(workspaceId as string)
+      const [windowed, open] = await Promise.all([
+        readLedgerPages(read, `${root}?${new URLSearchParams({ since }).toString()}`),
+        readLedgerPages(read, `${root}?open=true`),
+      ])
+      const seen = new Set(windowed.items.map((i) => i.id))
+      return {
+        items: [...windowed.items, ...open.items.filter((i) => !seen.has(i.id))],
+        capped: windowed.capped || open.capped,
+      }
+    },
+    refetchInterval: (query) =>
+      query.state.data?.items.some((item) => !isTerminalWorkState(item.state)) ? WORK_POLL_MS : false,
+  })
+  return {
+    items: query.data?.items ?? [],
+    capped: query.data?.capped ?? false,
+    loading: query.isPending && Boolean(workspaceId),
+    error: query.error as WorkRequestError | null,
+    refetch: query.refetch,
+  }
+}
+
 export function useWorkItem(
   workspaceId: string | null | undefined,
   workItemId: string | null | undefined,
@@ -607,7 +645,7 @@ export function useCancelWorkItem(
       input: `${base(workspaceId ?? "")}/${encodeURIComponent(workItemId)}/cancel`,
       init: { method: "POST" },
     }),
-    invalidateKeys: workspaceId ? [workItemKeys.all(workspaceId)] : [],
+    invalidateKeys: workspaceId ? [workItemKeys.all(workspaceId), webhookDeliveryKeys.all(workspaceId)] : [],
     onOk: (data) => options.onSettled?.(data),
     onAccepted: (data) => options.onSettled?.(data),
     onError: (error) => options.onError?.(error),
@@ -640,7 +678,8 @@ export function useReplayWorkItem(
         ),
       },
     }),
-    invalidateKeys: workspaceId ? [workItemKeys.all(workspaceId)] : [],
+    // The delivery it came from shows the work's state too.
+    invalidateKeys: workspaceId ? [workItemKeys.all(workspaceId), webhookDeliveryKeys.all(workspaceId)] : [],
     onOk: (data) => options.onCreated?.(data),
     onAccepted: (data) => options.onCreated?.(data),
     onError: (error) => options.onError?.(error),
@@ -668,7 +707,7 @@ export function useResolveWorkItem(
         body: JSON.stringify({ state, generation, runtime_stopped: true, reason }),
       },
     }),
-    invalidateKeys: workspaceId ? [workItemKeys.all(workspaceId)] : [],
+    invalidateKeys: workspaceId ? [workItemKeys.all(workspaceId), webhookDeliveryKeys.all(workspaceId)] : [],
     onOk: (data) => options.onResolved?.(data),
     onAccepted: (data) => options.onResolved?.(data),
     onError: (error) => options.onError?.(error),

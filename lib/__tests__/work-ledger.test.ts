@@ -5,7 +5,9 @@ import type { WebhookDelivery } from "@/hooks/use-webhook-deliveries"
 import {
   deliveryLine,
   deliveryTone,
+  deliveryFamily,
   endpointHealth,
+  endpointName,
   formatCost,
   eventFamily,
   failureCauses,
@@ -18,6 +20,7 @@ import {
   ledgerLanes,
   ledgerTone,
   narrowDeliveries,
+  workFamily,
   narrowWork,
   needsYou,
   workLine,
@@ -274,5 +277,57 @@ describe("formatCost", () => {
     expect(formatCost(0)).toBe("—")
     expect(formatCost(0.004)).toBe("<$0.01")
     expect(formatCost(1.25)).toBe("$1.25")
+  })
+})
+
+describe("what the second review found (#3017)", () => {
+  it("reads a multi-line settled reason without the operator boilerplate", () => {
+    expect(humanReason("resolved by cmuxw94hh0001de39519d: runtime confirmed stopped by operator; checked the ERP\nand the bank")).toBe(
+      "checked the ERP\nand the bank — settled by hand",
+    )
+  })
+
+  it("drops ids but not ordinary long words", () => {
+    expect(humanReason("crossreferencingcalendars failed")).toBe("crossreferencingcalendars failed")
+    expect(humanReason("run cmuzox3gm000b2ee652f3 failed")).toBe("run … failed")
+  })
+
+  it("counts the line behind an agent once, on the item that holds the slot", () => {
+    const items = [
+      item("needs_reconciliation", { agent: robot2, agent_id: robot2.id }),
+      item("needs_reconciliation", { agent: robot2, agent_id: robot2.id }),
+      item("queued", { agent: robot2, agent_id: robot2.id }),
+    ]
+    const behind = needsYou(items).map((e) => e.behind)
+    expect(behind.reduce((a, b) => a + b, 0)).toBe(1)
+  })
+
+  it("sums up a lane of only queued or only cancelled work as such", () => {
+    const win = { from: NOW - 86_400_000, to: NOW }
+    expect(ledgerLanes([item("queued")], win)[0].summary.text).toBe("1 in the queue")
+    expect(ledgerLanes([item("cancelled")], win)[0].summary.text).toBe("1 cancelled")
+  })
+
+  it("puts a dot with an unreadable time at the window's start, not at NaN", () => {
+    const [lane] = ledgerLanes([item("succeeded", { created_at: "not a time" })], { from: NOW - 1000, to: NOW })
+    expect(lane.dots[0].left).toBe(0)
+  })
+
+  it("names an endpoint that is not an agent's without calling it deleted", () => {
+    const routine = delivery({ endpoint_id: "rt-1", endpoint_kind: "routine", agent: null, work_state: null, work_id: null })
+    const [h] = endpointHealth([routine], NOW)
+    expect(h.name).toBe("Routine endpoint")
+    expect(h.verdict).toBe("ok")
+    expect(h.kind).toBe("routine")
+    expect(endpointName(routine)).toBe("Routine endpoint")
+    expect(endpointName(delivery({ agent: null }))).toBe("Deleted agent")
+  })
+
+  it("gives work and deliveries without an event a family to narrow to", () => {
+    expect(workFamily(item("succeeded", { event_type: "", source: "chat" }))).toBe("Chat turn")
+    const bare = delivery({ event_type: "" })
+    expect(deliveryFamily(bare)).toBe("(no event)")
+    expect(narrowDeliveries([bare], { family: "(no event)" })).toHaveLength(1)
+    expect(narrowWork([item("succeeded", { event_type: "", source: "chat" })], { family: "Chat turn" })).toHaveLength(1)
   })
 })
