@@ -1935,6 +1935,19 @@ An in-process dispatcher (5s tick) fires due rows highest-priority-first and exp
 
 **A deferred run is pinned to the version it was accepted against.** The receipt carries `pinned_version`, and publishing an edit while the trigger waits does not change what fires — the run executes the recipe that passed its preflight, not whatever HEAD has become by the time the dispatcher reaches it. A debounced burst keeps the first trigger's version, because coalescing makes it one trigger — and a later trigger in the window is judged against that version as well as the current one, so inputs written for a recipe published after the window opened are refused with `409` and the pending run is left as it was accepted; let it fire or cancel it first. `pinned_version` can only be named on an immediate or one-time (`fire_at`) start; a delayed or debounced start answers `400` to it. A routine without an archived version is refused with 409. Publish a version before deferring it; every accepted manual deferred start must have a durable recipe.
 
+**Every accepted start stays visible.** A start that finds its
+`concurrency_key` slot taken waits and retries until its `ttl`; without a `ttl`
+it gives up after ten attempts. The routine's **Plan** view lists waiting starts
+under *One-time starts* with the reason (*Waiting for capacity*, how many tries,
+the earliest next try — not a promised start time), and below them the recent
+starts that left the queue: *Started* with a link to the run once it is
+recorded, *Did not run* or *Expired* with the server's reason, or *Removed*. A
+started start without a run link may still be running; it is never shown as a
+failure. The overview's attention strip names accepted starts that did not run
+in the last seven days, and *Routines running now* says how many wait for a
+free slot. `crewship routine pending list --status all` and
+`crewship routine pending get <id>` show the same receipts.
+
 That is the opposite of a schedule, which deliberately runs current HEAD unless its `target_pipeline_version` says otherwise: a plan is a standing instruction, a deferred run is one start that a person already made.
 
 ## Dry-run preview

@@ -928,11 +928,13 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 			MaxConcurrent:  dsl.MaxConcurrent,
 		})
 		if regErr != nil {
-			// Free the idempotency reservation so the caller can
-			// retry the same key without waiting 24h. Best-effort —
-			// failure here just means the key stays reserved.
+			// Retry is safe only after releasing this pre-run reservation.
+			// Otherwise a retry returns DEDUPED for a run that never existed.
+			// Surface cleanup failure as a dispatch error, not capacity retry.
 			if in.IdempotencyKey != "" && e.idempotency != nil {
-				_ = e.idempotency.Forget(ctx, in.WorkspaceID, p.ID, in.IdempotencyKey)
+				if err := e.idempotency.Forget(ctx, in.WorkspaceID, p.ID, in.IdempotencyKey); err != nil {
+					return nil, fmt.Errorf("executor: release rejected run reservation: %w", err)
+				}
 			}
 			return nil, regErr
 		}

@@ -222,6 +222,22 @@ describe("<RoutinesDashboard>", () => {
     expect(screen.getByTestId("run-outcomes-single-day")).toHaveTextContent("The newest 2 runs all started today")
   })
 
+  // An accepted start that never ran must not leave the page silently, and a
+  // start that waits for a free slot is named as such — no ETA, no position.
+  it("names accepted starts that did not run and those waiting for a free slot", () => {
+    const pendingStarts = [
+      { id: "p_failed", pipeline_slug: "invoice", fire_at: hoursAgo(5), status: "failed", last_error: "The routine is no longer active." },
+      { id: "p_expired", pipeline_slug: "briefing", fire_at: hoursAgo(6), status: "expired" },
+      { id: "p_old", pipeline_slug: "invoice", fire_at: hoursAgo(24 * 10), status: "failed" },
+      { id: "p_wait", pipeline_slug: "briefing", fire_at: hoursAgo(0.1), status: "pending", dispatch_attempts: 2 },
+      { id: "p_fired", pipeline_slug: "invoice", fire_at: hoursAgo(1), status: "fired", run_id: "" },
+      { id: "p_other", pipeline_slug: "not-mine", fire_at: hoursAgo(1), status: "failed" },
+    ]
+    render(<RoutinesDashboard routines={routines} runs={[]} pendingStarts={pendingStarts} schedules={[]} onSelect={vi.fn()} />)
+    expect(screen.getByRole("link", { name: /2 accepted starts did not run/ })).toHaveAttribute("href", "/routines?slug=invoice&view=plan")
+    expect(screen.getByRole("link", { name: /1 start waits for a free slot/ })).toHaveAttribute("href", "/routines?slug=briefing&view=plan")
+  })
+
   it("says so when nothing needs anyone and nothing runs", () => {
     render(<RoutinesDashboard routines={routines.slice(1).map((r) => ({ ...r, last_invocation_status: "completed" }))} runs={[]} schedules={[]} onSelect={vi.fn()} />)
     expect(screen.getByText(/nothing blocking your crews/)).toBeInTheDocument()

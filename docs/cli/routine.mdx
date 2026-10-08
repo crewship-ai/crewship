@@ -1583,7 +1583,7 @@ Backed by `POST /api/v1/workspaces/{ws}/pipelines/runs/bulk_replay`. Output: `Bu
 
 ## `crewship routine pending`
 
-List or cancel deferred routine triggers — the parked dispatches created by `run --delay`, `--ttl`, `--debounce-key`, or `--priority`. A parent command with two children.
+List or cancel deferred routine triggers — the parked dispatches created by `run --delay`, `--ttl`, `--debounce-key`, or `--priority`. The commands inspect waiting, dispatched and terminal receipts, or cancel a waiting start.
 
 ### `pending list`
 
@@ -1591,7 +1591,29 @@ List or cancel deferred routine triggers — the parked dispatches created by `r
 crewship routine pending list
 ```
 
-Requires login and workspace context. Backed by `GET /api/v1/workspaces/{ws}/pipelines/pending` (`200 OK`, member-scoped), which returns at most 100 not-yet-fired rows with `id`, `pipeline_slug`, optional `debounce_key`, `priority`, RFC3339Nano `fire_at`, `pinned_version` (the archived recipe the start will run; `null` for a legacy row that resolves HEAD at dispatch) and a read-only `inputs` preview. **Output columns:** PENDING ID, ROUTINE, PRIORITY, DEBOUNCE KEY, FIRES AT, RECIPE VERSION (`v3`, or `live at dispatch (legacy/deferred)` when unpinned). Nothing pending prints `No deferred triggers pending.` A `run --fire-at` start shows up here pinned to the version that passed preflight.
+Requires login and workspace context. Backed by `GET /api/v1/workspaces/{ws}/pipelines/pending` (`200 OK`, member-scoped). It defaults to at most 100 not-yet-fired rows. Use `--status pending|fired|failed|expired|cancelled|all` to inspect other receipts; terminal/history lists return newest first.
+
+The response retains `id`, `pipeline_slug`, optional `debounce_key`, `priority`, RFC3339Nano `fire_at`, `pinned_version` and the read-only `inputs` preview. It also includes `status`, `run_id` (empty until linked), `dispatch_attempts`, safe `last_error`, nullable `expires_at` and `next_attempt_at`, and `can_cancel` (the start is still pending and the caller has the update capability). The table adds STATUS, ATTEMPTS, RUN ID and REASON alongside the scheduled time and recipe version. Machine formats retain the full receipt. An empty default list prints `No deferred triggers pending.`
+
+```bash
+crewship routine pending list --status failed
+crewship routine pending list --status all -f json
+```
+
+### `pending get <pending_id>`
+
+```bash
+crewship routine pending get pnd_abc123
+crewship routine pending get pnd_abc123 -f json
+```
+
+Backed by `GET /api/v1/workspaces/{ws}/pipeline-pending/{pendingId}`. Returns the same receipt shape for a stable accepted ID, including failed, expired, cancelled and fired starts after they leave the default pending list. An unknown or another workspace's ID returns `404`.
+
+`fired` means the dispatcher claimed the start; it does **not** mean the routine completed. `run_id` may stay empty while the synchronous executor runs. Legacy fired rows without a run link are also returned unchanged; emptiness alone cannot establish whether work was lost. Once a link exists, use `routine result` to inspect the run's own status.
+
+Temporary routine concurrency rejection returns the start to pending with exponential backoff (2, 4, 8, 16, 32, then at most 60 seconds). Retry keeps the accepted ID, recipe pin, payload, priority and original `fire_at`; `next_attempt_at` controls eligibility. An explicit TTL remains the deadline and ends waiting as `expired` with a reason. Starts without TTL fail visibly after ten capacity attempts. The 5-second sweep and available worker slots also affect dispatch time; this is not a FIFO or ETA guarantee.
+
+Other executor errors are not retried automatically: the receipt becomes `failed` with a safe public reason. After a debounce start has been attempted, newer triggers open a separate debounce window so they cannot rewrite its accepted retry payload. Canceling is still possible while a retry is pending. A claimed/running dispatch is canceled through its run once the run link is available.
 
 ### `pending cancel <pending_id>`
 
