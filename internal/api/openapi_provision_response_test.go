@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
+
 	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 
@@ -21,6 +23,12 @@ func TestProvisionResponseSchemaMatchesHandlerWire(t *testing.T) {
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	// JSON Schema needs an adapted copy; preserve the original OpenAPI for
+	// property/contract assertions below.
+	var schemaDoc map[string]any
+	if err := json.Unmarshal(raw, &schemaDoc); err != nil {
 		t.Fatal(err)
 	}
 	var nullable func(any)
@@ -42,8 +50,8 @@ func TestProvisionResponseSchemaMatchesHandlerWire(t *testing.T) {
 			}
 		}
 	}
-	nullable(doc)
-	raw, err = json.Marshal(doc)
+	nullable(schemaDoc)
+	raw, err = json.Marshal(schemaDoc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,15 +64,16 @@ func TestProvisionResponseSchemaMatchesHandlerWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name     string
-		features any
-		job      *ProvisionJob
+		name         string
+		features     any
+		job          *ProvisionJob
+		wantFeatures bool
 	}{
 		{name: "idle without provenance"},
-		{name: "empty provenance", features: "[]"},
-		{name: "null provenance", features: "null"},
+		{name: "empty provenance", features: "[]", wantFeatures: true},
+		{name: "null provenance", features: "null", wantFeatures: true},
 		{name: "invalid provenance", features: "invalid"},
-		{name: "running", features: `[{"ref":"feature:1","id":"feature","pinned":false}]`, job: &ProvisionJob{Status: "running", Step: 1, Total: 2, Message: "building", Steps: []string{"fetch", "build"}, LogTail: []string{"build output"}, StartedAt: time.Now()}},
+		{name: "running", wantFeatures: true, features: `[{"ref":"feature:1","id":"feature","pinned":false}]`, job: &ProvisionJob{Status: "running", Step: 1, Total: 2, Message: "building", Steps: []string{"fetch", "build"}, LogTail: []string{"build output"}, StartedAt: time.Now()}},
 		{name: "failed", job: &ProvisionJob{Status: "failed", Error: "build failed", StartedAt: time.Now(), CompletedAt: func() *time.Time { now := time.Now(); return &now }()}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -76,7 +85,9 @@ func TestProvisionResponseSchemaMatchesHandlerWire(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.job != nil {
+				h.mu.Lock()
 				h.jobs[crew] = tc.job
+				h.mu.Unlock()
 			}
 			req := httptest.NewRequest("GET", "/api/v1/crews/"+crew+"/provision", nil)
 			req.SetPathValue("crewId", crew)
@@ -89,6 +100,18 @@ func TestProvisionResponseSchemaMatchesHandlerWire(t *testing.T) {
 			var payload map[string]any
 			if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 				t.Fatal(err)
+			}
+			features, present := payload["resolved_features"]
+			if present != tc.wantFeatures {
+				t.Fatalf("provenance presence=%v, want %v", present, tc.wantFeatures)
+			}
+			if tc.features == "null" && features != nil {
+				t.Fatalf("null provenance: %v", features)
+			}
+			if tc.features == "[]" {
+				if values, ok := features.([]any); !ok || len(values) != 0 {
+					t.Fatalf("empty provenance: %v", features)
+				}
 			}
 			if err := schema.Validate(payload); err != nil {
 				t.Fatal(err)
@@ -116,12 +139,27 @@ func TestProvisionResponseSchemaMatchesHandlerWire(t *testing.T) {
 	for _, tc := range []struct {
 		role string
 		code int
-	}{{"OWNER", 503}, {"MEMBER", 403}} {
-		t.Run(fmt.Sprintf("rebuild %s", tc.role), func(t *testing.T) {
-			h := newTestProvisioningHandler(t)
-			req := httptest.NewRequest("POST", "/api/v1/crews/schema/rebuild", nil)
-			req.SetPathValue("crewId", "schema")
-			req = withWorkspaceUser(req, "user", "workspace", tc.role)
+	}{{"OWNER", 503}, {"MEMBER", 403}, {"OWNER", 409}, {"OWNER", 429}} {
+		t.Run(fmt.Sprintf("rebuild %s %d", tc.role, tc.code), func(t *testing.T) {
+			var h *ProvisioningHandler
+			crew, workspace := "schema", "workspace"
+			if tc.code == 409 || tc.code == 429 {
+				h, workspace, crew = covProvRig(t, &covCommitClient{}, `{"image":"ubuntu:22.04"}`)
+				if tc.code == 409 {
+					h.mu.Lock()
+					h.jobs[crew] = &ProvisionJob{CrewID: crew, Status: "running"}
+					h.mu.Unlock()
+				} else {
+					h.rateLimiter.mu.Lock()
+					h.rateLimiter.running[workspace] = ratelimitcfg.Int(ratelimitcfg.KeyProvMaxConcurrentWS)
+					h.rateLimiter.mu.Unlock()
+				}
+			} else {
+				h = newTestProvisioningHandler(t)
+			}
+			req := httptest.NewRequest("POST", "/api/v1/crews/"+crew+"/rebuild", nil)
+			req.SetPathValue("crewId", crew)
+			req = withWorkspaceUser(req, "user", workspace, tc.role)
 			rr := httptest.NewRecorder()
 			h.ProvisionRebuild(rr, req)
 			if rr.Code != tc.code {
@@ -138,6 +176,18 @@ func TestProvisionResponseSchemaMatchesHandlerWire(t *testing.T) {
 			}
 			if err := responseSchema.Validate(payload); err != nil {
 				t.Fatal(err)
+			}
+			if tc.code == 409 {
+				body := payload.(map[string]any)
+				if body["job_status"] != "running" {
+					t.Fatalf("missing conflict status: %v", body)
+				}
+				// Unknown extension fields remain legal. A payload satisfying
+				// both permissive envelopes must not fail an exclusive union.
+				body["error"] = "extension diagnostic"
+				if err := responseSchema.Validate(body); err != nil {
+					t.Fatal(err)
+				}
 			}
 		})
 	}

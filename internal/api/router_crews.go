@@ -615,10 +615,8 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/provision", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionStatus))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/provision/revisions", authed(wsCtx(http.HandlerFunc(provisioning.EnvironmentRevisions))))
 	r.authedMut("POST", "/api/v1/crews/{crewId}/provision", roleCreate, provisioning.ProvisionTrigger)
-	// The rebuild handler delegates its enqueue failure response.
-	// openapi: responses 500
 	// ProvisionRebuild delegates admission and responses to ProvisionTrigger.
-	// openapi: responses 202,400,404,409,429,500,503
+	// openapi: responses 202,400,401,403,404,409,429,500,503
 	r.authedMut("POST", "/api/v1/crews/{crewId}/rebuild", roleCreate, provisioning.ProvisionRebuild)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/restart-agents", roleCreate, provisioning.RestartCrewAgents)
 

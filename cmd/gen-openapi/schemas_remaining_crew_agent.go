@@ -150,7 +150,9 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 		// Middleware/role guards use {error}; admitted requests use Problem
 		// Details, with job_status on conflicts. Both are application/json.
 		route.ErrorMedia = []string{"application/json"}
-		route.ErrorResponse = map[string]any{"oneOf": []any{errorSchema(), problem}}
+		// Keep the union inclusive: both envelopes permit extension fields,
+		// so an extended payload can legitimately satisfy both branches.
+		route.ErrorResponse = map[string]any{"anyOf": []any{errorSchema(), problem}}
 		routes["POST "+path] = route
 	}
 	add("POST", "/api/v1/crews/{crewId}/restart-agents", "RemainingCrewAgentsRestartedV1", object(map[string]any{"restarted": integer(), "runtime_removed": boolean()}))

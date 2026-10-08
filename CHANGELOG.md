@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Generated clients described incorrect crew provisioning responses.** OpenAPI now matches the status fields and optional build progress, documents provision/rebuild success as 202, and includes rebuild admission errors and conflict diagnostics (#2897).
+- **Generated clients described incorrect crew provisioning responses.** OpenAPI now matches the status fields and optional build progress, documents provision/rebuild success as 202, and includes rebuild admission errors and conflict diagnostics. ⚠️ **Specification correction:** generated clients no longer expose `crew_id`, `phase`, `updated_at` or trigger `success`, which these handlers never returned; regenerate clients to adopt the corrected contract. HTTP behavior is unchanged (#2897).
 
 - **A stopped installation can reset its application data without losing management state.** `reset --data` validates an explicit local target, removes exact installation-labelled Docker resources, restores clean database defaults and preserves identity, configuration, secrets, logs and backups. Interrupted resets block startup until a successful retry. `paths` shows effective configuration without creating files. (#2977)
 - **Server scratch files and update caches now belong to the selected installation.** Development PID checks refuse unrelated processes after PID reuse; `/api/health` shares `/healthz` liveness and writer-ownership checks while keeping the healthy `status: ok` field. (#2977)
