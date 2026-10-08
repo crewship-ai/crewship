@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- ⚠️ **Behaviour change:** **Skill holders are scoped to your workspace (#3032).** The skills catalog is shared across workspaces, but the agents listed on a skill (`installed_on`), the `?installed=1` / `installed_for_agent_id` filters and a skill's `agent_count` counted agents of every workspace, so a member could see other workspaces' agent names and crews. They now only see the caller's workspace. Skills also report this workspace's usage (`usage`: uses in 7 days, errors, total, last used), `lifecycle_state`, `needs_credentials` and, per agent, the required credentials it is missing; `GET /agents/{id}/skills` carries the same. `crewship skill list` gains AGENTS and USES 7D columns, and `crewship agent skills` prints the skill name and category it showed blank before.
+
 - **An agent's restricted client execution can be changed in the web app again (#3028).** Edit agent › Model and execution has the Restricted client execution field; the change is part of the dialog's draft and applies on Save, after the agent. It had no UI since #3008. The unused Admin memory-configuration card is removed: Admin › Data retention › Memory versions edits the same setting.
 
 - **Settings and Admin read as one product (#3022).** A refused switch in Access & Secrets or Hooks flips back and says why in the bottom-right toast instead of a line in the card. Every field, select and picker has the same size as its neighbours; supporting text (row descriptions, hints, empty states) is 12px instead of 11px and nothing is set below 11px; every table uses one header, cell and row style; person status, Keeper decisions, "No owner" and "Off" are status pills.

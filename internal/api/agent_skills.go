@@ -18,6 +18,8 @@ type agentSkillSkillData struct {
 	Source      string  `json:"source"`
 	Icon        *string `json:"icon"`
 	Version     *string `json:"version"`
+	// NeedsCredentials is the skill's credential_requirements. Never null.
+	NeedsCredentials []string `json:"needs_credentials"`
 }
 
 type agentSkillResponse struct {
@@ -27,6 +29,9 @@ type agentSkillResponse struct {
 	Enabled bool                `json:"enabled"`
 	Config  *string             `json:"config"`
 	Skill   agentSkillSkillData `json:"skill"`
+	// MissingCredentials names the skill's requirements this agent is not
+	// delivered at run start (#3032). Never null.
+	MissingCredentials []string `json:"missing_credentials"`
 }
 
 // ListSkills returns all skills assigned to the specified agent.
@@ -48,7 +53,7 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT as2.id, as2.agent_id, as2.skill_id, as2.enabled, as2.config,
 			s.id, s.name, s.slug, s.display_name, s.description,
-			s.category, s.source, s.icon, s.version
+			s.category, s.source, s.icon, s.version, COALESCE(s.credential_requirements, '[]')
 		FROM agent_skills as2
 		JOIN skills s ON s.id = as2.skill_id
 		WHERE as2.agent_id = ?
@@ -60,17 +65,34 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	var result []agentSkillResponse
+	var has map[string]bool
+	hasLoaded := false
 	for rows.Next() {
 		var s agentSkillResponse
 		var enabled int
+		var credReqs string
 		if err := rows.Scan(&s.ID, &s.AgentID, &s.SkillID, &enabled, &s.Config,
 			&s.Skill.ID, &s.Skill.Name, &s.Skill.Slug, &s.Skill.DisplayName,
 			&s.Skill.Description, &s.Skill.Category, &s.Skill.Source,
-			&s.Skill.Icon, &s.Skill.Version); err != nil {
+			&s.Skill.Icon, &s.Skill.Version, &credReqs); err != nil {
 			replyInternalError(w, h.logger, "scan agent skill", err)
 			return
 		}
 		s.Enabled = enabled == 1
+		s.Skill.NeedsCredentials = decodeCredentialRequirements(credReqs)
+		s.MissingCredentials = []string{}
+		if len(s.Skill.NeedsCredentials) > 0 {
+			if !hasLoaded {
+				var lerr error
+				if has, lerr = deliveredEnvVars(r, h.db, agentID); lerr != nil {
+					h.logger.Warn("skill credential readiness", "agent_id", agentID, "error", lerr)
+				}
+				hasLoaded = true
+			}
+			if has != nil {
+				s.MissingCredentials = missingFrom(s.Skill.NeedsCredentials, has)
+			}
+		}
 		result = append(result, s)
 	}
 	if err := rows.Err(); err != nil {
