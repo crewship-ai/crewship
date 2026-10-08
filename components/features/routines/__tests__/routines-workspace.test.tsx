@@ -129,6 +129,20 @@ describe("<RoutinesWorkspace> — the overview pane", () => {
     expect(screen.getAllByRole("link", { name: /Open run/ })).toHaveLength(1)
   })
 
+  // The run list is the 200 newest rows. A long run that started before them
+  // is still running, so it comes from the active feed, and the summary says
+  // the figures cover only those rows.
+  it("keeps an older active run on the dashboard behind 200 newer results", () => {
+    const now = Date.now()
+    h.runs = [{ id: "long", pipeline_slug: "report", pipeline_name: "Weekly report", status: "running", started_at: new Date(now - 3 * 86_400_000).toISOString() }]
+    h.recorded = Array.from({ length: 200 }, (_, i) => ({
+      id: `done_${i}`, pipeline_slug: "report", pipeline_name: "Weekly report", status: "completed", started_at: new Date(now - (i + 1) * 60_000).toISOString(),
+    }))
+    renderPane()
+    expect(screen.getByText("1 running")).toBeInTheDocument()
+    expect(screen.getByTestId("run-summary-scope")).toHaveTextContent("newest 200 runs")
+  })
+
   it("says what the empty workspace means instead of leaving a pane", () => {
     render(
       <RoutinesWorkspace workspaceId="ws" routines={[]} loading={false} error={null} onSelect={vi.fn()} />,

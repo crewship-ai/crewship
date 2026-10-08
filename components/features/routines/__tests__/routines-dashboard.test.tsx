@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
-import { RoutinesDashboard, outcomeKpis, runOutcomesByDay, groupLatestResults, outcomeVolumeShape, honestPct, type DashboardRun } from "../routines-dashboard"
+import { RoutinesDashboard, outcomeKpis, runOutcomesByDay, groupLatestResults, outcomeVolumeShape, honestPct, windowCoverage, type DashboardRun } from "../routines-dashboard"
 
 vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }))
 vi.mock("@/components/ui/crew-icon", () => ({ CrewIcon: () => <span data-testid="icon" /> }))
@@ -48,6 +48,30 @@ describe("outcomeKpis", () => {
     expect(k).toMatchObject({ total: 5, completed: 1, successOk: 1, successTotal: 2, successPct: 50 })
     expect(k.spendUsd).toBeCloseTo(0.09)
     expect(k.p95Ms).toBe(120_000)
+  })
+
+  // A run the engine finished but whose result is partial or waits on a
+  // person did not succeed for its reader: it counts as finished, not as a
+  // success, as the run detail already says.
+  it("keeps partial and needs-a-person results out of the success count", () => {
+    const k = outcomeKpis([
+      { id: "ok", pipeline_slug: "invoice", status: "completed", started_at: hoursAgo(1) },
+      { id: "partial", pipeline_slug: "invoice", status: "completed", outcome: "PARTIAL", started_at: hoursAgo(2) },
+      { id: "human", pipeline_slug: "invoice", status: "completed", outcome: "NEEDS_HUMAN", started_at: hoursAgo(3) },
+    ])
+    expect(k).toMatchObject({ completed: 1, successOk: 1, successTotal: 3, successPct: 33 })
+  })
+})
+
+describe("windowCoverage", () => {
+  const feed = (n: number, spanHours: number): DashboardRun[] =>
+    Array.from({ length: n }, (_, i) => ({ id: `w${i}`, pipeline_slug: "invoice", status: "completed", started_at: hoursAgo((spanHours * i) / Math.max(1, n - 1)) }))
+  it("names where a full feed stops when it does not reach back the whole window", () => {
+    expect(windowCoverage(feed(200, 30), 200)).toBe(hoursAgo(30))
+  })
+  it("is null when the feed is not full or already reaches past the window", () => {
+    expect(windowCoverage(feed(150, 30), 200)).toBeNull()
+    expect(windowCoverage(feed(200, 24 * 8), 200)).toBeNull()
   })
 })
 
@@ -182,6 +206,20 @@ describe("<RoutinesDashboard>", () => {
     expect(summary).toHaveTextContent("All 2 runs in the window started today")
     expect(summary).toHaveTextContent("1 Completed")
     expect(summary).toHaveTextContent("1 Could not finish")
+  })
+
+  // The page loads the newest runs only. When they do not reach back seven
+  // days the figures describe those runs, and the summary says so instead of
+  // presenting them as the week.
+  it("says the figures cover only the newest runs when the list stops inside the window", () => {
+    const today: DashboardRun[] = [
+      { id: "t1", pipeline_slug: "invoice", status: "completed", started_at: hoursAgo(1) },
+      { id: "t2", pipeline_slug: "invoice", status: "failed", started_at: hoursAgo(2) },
+    ]
+    render(<RoutinesDashboard routines={routines} runs={today} coveredSince={hoursAgo(2)} schedules={[]} onSelect={vi.fn()} />)
+    expect(screen.getByTestId("run-summary-scope")).toHaveTextContent("newest 2 runs · since 2 h ago")
+    expect(screen.getByTestId("run-summary-scope")).not.toHaveTextContent("7d")
+    expect(screen.getByTestId("run-outcomes-single-day")).toHaveTextContent("The newest 2 runs all started today")
   })
 
   it("says so when nothing needs anyone and nothing runs", () => {
