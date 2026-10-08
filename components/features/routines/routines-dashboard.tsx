@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { CalendarClock, ChevronRight, FileEdit, Hourglass, Play, Radio, XCircle } from "lucide-react"
+import { CalendarClock, CalendarX, ChevronRight, FileEdit, Hourglass, Play, Radio, XCircle } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { formatDurationMs } from "@/lib/activity-stream"
@@ -15,6 +15,7 @@ import { AttentionStrip, OutcomeKpis, UpNext, type AttentionItem, type OutcomeKp
 import { STATUS_PALETTE } from "@/app/(dashboard)/dashboard-helpers"
 import { routineRunPresentation, formatAgo, formatUntil } from "@/lib/routine-run-presentation"
 import type { OverviewRun } from "@/lib/routines-overview"
+import { didNotRun, isWaitingForCapacity, type PendingStart } from "@/lib/routine-pending-starts"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import { routineRunHref } from "./routines-workspace"
@@ -50,6 +51,9 @@ interface Props {
   /** Set when `runs` is the newest rows only and stops inside the window:
    * the started_at of the oldest row (see windowCoverage). */
   coveredSince?: string | null
+  /** Accepted deferred starts (receipts), for what did not run and what
+   * waits for capacity. */
+  pendingStarts?: PendingStart[]
   schedules: PipelineSchedule[]
   onSelect: (slug: string) => void
 }
@@ -183,7 +187,7 @@ export function groupLatestResults(runs: DashboardRun[], limit = 8): LatestResul
     .map(({ latest, count }) => ({ latest, count }))
 }
 
-export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince, schedules, onSelect }: Props) {
+export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince, pendingStarts = [], schedules, onSelect }: Props) {
   const now = React.useMemo(() => new Date(), [])
   const visibleRuns = React.useMemo(
     () => runs.filter((r) => routines.some((p) => p.slug === r.pipeline_slug)),
@@ -211,6 +215,10 @@ export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince, s
   const failing = routines
     .filter((r) => r.last_invocation_status === "failed" || r.last_run_outcome === "FAILED")
     .sort((a, b) => (b.last_invoked_at ?? "").localeCompare(a.last_invoked_at ?? ""))
+  const myStarts = pendingStarts.filter((p) => routines.some((r) => r.slug === p.pipeline_slug))
+  // Accepted in the window but never ran: newest first, as the server lists them.
+  const notRun = myStarts.filter((p) => didNotRun(p) && Date.parse(p.fire_at) >= since)
+  const capacityWaits = myStarts.filter(isWaitingForCapacity)
   const drafts = routines.filter((r) => r.draft)
   const mySchedules = schedules.filter((s) => routines.some((p) => p.slug === s.target_pipeline_slug))
   const nextStart = mySchedules
@@ -239,6 +247,15 @@ export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince, s
       href: `/routines?${new URLSearchParams({ slug: failing[0].slug })}`,
       tone: "danger",
       icon: XCircle,
+    })
+  if (notRun.length)
+    attention.push({
+      id: "starts-not-run",
+      label: `${notRun.length} accepted ${notRun.length === 1 ? "start" : "starts"} did not run`,
+      detail: `Newest · ${routineOf(notRun[0].pipeline_slug)?.name ?? notRun[0].pipeline_slug}`,
+      href: routineViewHref(notRun[0].pipeline_slug, "plan"),
+      tone: "danger",
+      icon: CalendarX,
     })
   if (nextStart?.target_pipeline_slug)
     attention.push({
@@ -329,6 +346,14 @@ export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince, s
                   <RunRow key={run.id} run={run} routine={routineOf(run.pipeline_slug)} />
                 ))}
               </div>
+            )}
+            {capacityWaits.length > 0 && (
+              <Link
+                href={routineViewHref(capacityWaits[0].pipeline_slug, "plan")}
+                className="mt-3 block rounded-lg bg-warn/10 px-3 py-2 text-label text-warn"
+              >
+                {capacityWaits.length} {capacityWaits.length === 1 ? "start waits" : "starts wait"} for a free slot · View →
+              </Link>
             )}
             {waiting.length > 0 && (
               <Link
