@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -14,7 +15,7 @@ import (
 // MVP grammar (subset of jq):
 //
 //	.field         — top-level object field
-//	.field.nested  — nested fields (no array index yet)
+//	.field.nested  — nested fields (including array indices)
 //	.[index]       — array index by integer
 //	.field[index]  — combined
 //	.              — identity (returns Input as-is)
@@ -128,54 +129,92 @@ func evalTransform(v any, expr string) (string, error) {
 		return string(b), nil
 	}
 
-	// Path expressions: ".a.b[0].c"
-	if !strings.HasPrefix(expr, ".") {
-		return "", fmt.Errorf("expression %q must start with '.' or be one of: length, keys, tostring, @json (alias tojson)", expr)
+	parts, err := parseTransformPath(expr)
+	if err != nil {
+		return "", err
 	}
 	cursor := v
-	rest := expr[1:]
-	for rest != "" {
-		// Array index: [N]
-		if strings.HasPrefix(rest, "[") {
-			closeIdx := strings.Index(rest, "]")
-			if closeIdx < 0 {
-				return "", fmt.Errorf("unclosed [ in expression")
-			}
-			idxStr := rest[1:closeIdx]
-			var idx int
-			if _, err := fmt.Sscanf(idxStr, "%d", &idx); err != nil {
-				return "", fmt.Errorf("array index %q not integer", idxStr)
-			}
+	for _, part := range parts {
+		if part.array {
 			arr, ok := cursor.([]any)
 			if !ok {
 				return "", fmt.Errorf("cannot index non-array")
 			}
-			if idx < 0 || idx >= len(arr) {
-				return "", fmt.Errorf("index %d out of range (len=%d)", idx, len(arr))
+			if part.index >= len(arr) {
+				return "", fmt.Errorf("index %d out of range (len=%d)", part.index, len(arr))
 			}
-			cursor = arr[idx]
-			rest = strings.TrimPrefix(rest[closeIdx+1:], ".")
+			cursor = arr[part.index]
 			continue
 		}
-		// Field access: name (until next . or [)
-		end := len(rest)
-		for i, r := range rest {
-			if r == '.' || r == '[' {
-				end = i
-				break
-			}
-		}
-		field := rest[:end]
 		obj, ok := cursor.(map[string]any)
 		if !ok {
-			return "", fmt.Errorf("cannot access field %q on non-object", field)
+			return "", fmt.Errorf("cannot access field %q on non-object", part.field)
 		}
-		next, ok := obj[field]
+		next, ok := obj[part.field]
 		if !ok {
-			return "", fmt.Errorf("field %q not found", field)
+			return "", fmt.Errorf("field %q not found", part.field)
 		}
 		cursor = next
-		rest = strings.TrimPrefix(rest[end:], ".")
 	}
 	return stringify(cursor), nil
+}
+
+type transformPathPart struct {
+	field string
+	index int
+	array bool
+}
+
+// Validate syntax independently of runtime JSON. The evaluator uses the same
+// parser so admission cannot promise expressions the runtime does not support.
+func validateTransformExpression(expression string) error {
+	expression = strings.TrimSpace(expression)
+	switch expression {
+	case ".", "length", "keys", "tostring", "@json", "tojson":
+		return nil
+	}
+	_, err := parseTransformPath(expression)
+	return err
+}
+
+func parseTransformPath(expression string) ([]transformPathPart, error) {
+	if !strings.HasPrefix(expression, ".") {
+		return nil, fmt.Errorf("expression %q must start with '.' or be one of: length, keys, tostring, @json (alias tojson)", expression)
+	}
+	rest := expression[1:]
+	var parts []transformPathPart
+	for rest != "" {
+		if strings.HasPrefix(rest, "[") {
+			end := strings.IndexByte(rest, ']')
+			if end < 0 {
+				return nil, fmt.Errorf("unclosed [ in expression")
+			}
+			index, err := strconv.Atoi(rest[1:end])
+			if err != nil || index < 0 {
+				return nil, fmt.Errorf("array index %q must be a non-negative integer", rest[1:end])
+			}
+			parts = append(parts, transformPathPart{array: true, index: index})
+			rest = rest[end+1:]
+		} else {
+			end := strings.IndexAny(rest, ".[")
+			if end < 0 {
+				end = len(rest)
+			}
+			field := rest[:end]
+			if field == "" || field != strings.TrimSpace(field) || strings.ContainsAny(field, "]|*+/><=(){} ,\t\n\r") {
+				return nil, fmt.Errorf("invalid field %q in expression; use code for computation", field)
+			}
+			parts = append(parts, transformPathPart{field: field})
+			rest = rest[end:]
+		}
+		if strings.HasPrefix(rest, ".") {
+			rest = rest[1:]
+			if rest == "" {
+				return nil, fmt.Errorf("expression ends with an empty field")
+			}
+		} else if rest != "" && !strings.HasPrefix(rest, "[") {
+			return nil, fmt.Errorf("expected '.' or '[' in expression at %q", rest)
+		}
+	}
+	return parts, nil
 }

@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -27,6 +30,26 @@ const secretRedactionMarker = "[REDACTED:secret]"
 // scrub is a no-op, so existing routines see byte-for-byte identical output.
 type secretScrub struct {
 	values []string
+}
+
+// add also tracks wire representations: JSON response bodies and URL errors
+// can contain an escaped credential without containing its literal value.
+func (s *secretScrub) add(value string) {
+	if value == "" {
+		return
+	}
+	s.values = append(s.values, value, url.QueryEscape(value), url.PathEscape(value))
+	for _, escapeHTML := range []bool{false, true} {
+		var encoded strings.Builder
+		encoder := json.NewEncoder(&encoded)
+		encoder.SetEscapeHTML(escapeHTML)
+		if err := encoder.Encode(value); err == nil {
+			quoted := strings.TrimSuffix(encoded.String(), "\n")
+			s.values = append(s.values, quoted[1:len(quoted)-1])
+		}
+	}
+	// A shorter literal must not partially replace a longer encoded value.
+	sort.SliceStable(s.values, func(i, j int) bool { return len(s.values[i]) > len(s.values[j]) })
 }
 
 // active reports whether there is anything to scrub.
@@ -166,7 +189,7 @@ func (e *Executor) resolveStepSecrets(ctx context.Context, step Step, parentRend
 			continue
 		}
 		resolved[t] = val
-		scrub.values = append(scrub.values, val)
+		scrub.add(val)
 	}
 	enriched := parentRender // shallow copy — only Secrets diverges
 	enriched.Secrets = resolved
