@@ -100,6 +100,17 @@ describe("emptyLensCopy", () => {
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { vi } from "vitest"
 
+// The routine focus fetches its own runs; the rail's job is to show it and
+// hide everything else (#2998).
+vi.mock("../activity-rail-focus", () => ({
+  RailRoutineFocus: (p: { name: string; onLeave: () => void }) => (
+    <div>
+      Focus on {p.name}
+      <button onClick={p.onLeave}>Leave focus</button>
+    </div>
+  ),
+}))
+
 import type { ChainSummary } from "@/hooks/use-chains"
 import { ActivitySidebar, EMPTY_FACETS, type ActivitySidebarProps } from "../activity-sidebar"
 
@@ -250,5 +261,35 @@ describe("ActivitySidebar — the shared sidebar recipe", () => {
     fireEvent.click(screen.getByRole("button", { name: "Work queue" }))
     fireEvent.click(screen.getByRole("button", { name: "Webhook deliveries" }))
     expect(onOpenSection.mock.calls).toEqual([["work"], ["deliveries"]])
+  })
+})
+
+describe("ActivitySidebar — focusing a routine (#2998)", () => {
+  const routineRow = chainRow({ origin: "run_mp", routine_slug: "match-payments", runs: 1, max_chain_depth: 0 })
+  const workRow = chainRow({ origin: "asg_1", kind: "assignment", task: "Reply on QUA-1", routine_slug: undefined, started_by_kind: "issue", started_by_key: "QUA-1" })
+
+  it("focuses the routine when its row is picked", () => {
+    const onFocusRoutine = vi.fn()
+    const onSelectChain = vi.fn()
+    mount({ chains: [routineRow], onFocusRoutine, onSelectChain, workspaceId: "ws" })
+    fireEvent.click(screen.getByText("match-payments"))
+    expect(onSelectChain).toHaveBeenCalledWith("run_mp")
+    expect(onFocusRoutine).toHaveBeenCalledWith("match-payments")
+  })
+
+  it("shows only the focused routine, and leaves the focus on request", () => {
+    const onFocusRoutine = vi.fn()
+    mount({ chains: [routineRow, workRow], focusedRoutine: "match-payments", onFocusRoutine, workspaceId: "ws" })
+    expect(screen.getByText("Focus on match-payments")).toBeInTheDocument()
+    expect(screen.queryByText("Reply on QUA-1")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Work queue" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Leave focus" }))
+    expect(onFocusRoutine).toHaveBeenCalledWith(null)
+  })
+
+  it("says what each row is — a routine, or work on an issue", () => {
+    mount({ chains: [routineRow, workRow], workspaceId: "ws" })
+    expect(screen.getByText("Routine")).toBeInTheDocument()
+    expect(screen.getByText("Issue")).toBeInTheDocument()
   })
 })

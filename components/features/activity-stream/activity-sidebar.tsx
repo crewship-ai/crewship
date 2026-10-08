@@ -80,6 +80,7 @@ import {
   railSources,
   railStatusRows,
   type RailScope,
+  type RailStatusRow,
   type TimeRangeKey,
 } from "@/lib/activity-rail"
 import {
@@ -98,6 +99,9 @@ import {
   type LensKey,
 } from "@/lib/activity-lenses"
 import { cn } from "@/lib/utils"
+import { StatusRows } from "./activity-status-rows"
+import { RailRoutineFocus } from "./activity-rail-focus"
+import { rowKind } from "@/lib/activity-rail-focus"
 
 // Re-exported so the shell keeps importing the range table from the rail it
 // belongs to; the values themselves moved to lib/activity-rail.ts, where the
@@ -196,15 +200,6 @@ function Count({ n, dim }: { n: number; dim?: boolean }) {
   )
 }
 
-/** The Routines rail's glyph for each status row. */
-const STATUS_ICON: Record<RailScope, React.ComponentType<{ className?: string }>> = {
-  all: Layers,
-  waiting: PauseCircle,
-  active: Activity,
-  done: CheckCircle2,
-  stopped: CircleSlash,
-  failed: XCircle,
-}
 
 /** Tone token per chain status — the same four the overview cards read. */
 const STATUS_TOKEN: Record<ChainStatus, string> = {
@@ -247,6 +242,7 @@ function WorkflowRow({
   const sentence = workflowSentence(chain, routine?.name)
   const title = workflowName(chain, routine?.name)
   const trigger = startedByWord(chain)
+  const kind = rowKind(chain)
   const touched = chainTouched(chain)
   const handle = workflowHandle(chain.origin)
   const startedBy = chain.started_by?.trim() || chain.triggered_via || "unknown trigger"
@@ -338,6 +334,10 @@ function WorkflowRow({
               <span aria-hidden>·</span>
             </>
           )}
+          {/* What the row IS (#2998) — a routine run, issue work or agent
+              work — so "from QUA-1" never leaves a reader guessing which. */}
+          <span className={cn("shrink-0 font-mono text-[9.5px] uppercase tracking-wide", kind.tone)}>{kind.label}</span>
+          <span aria-hidden>·</span>
           {trigger && <span className="truncate">{trigger}</span>}
           {chain.duration_ms != null && (
             <>
@@ -509,9 +509,25 @@ export interface ActivitySidebarProps {
    * rows, the way Inbox lists To handle / Updates / History in its rail.
    */
   onOpenSection?: (section: "work" | "deliveries") => void
+  /** For the routine focus's run fetch (#2998). */
+  workspaceId?: string
+  /**
+   * The routine the rail is narrowed to, by slug (#2998). Owned by the shell
+   * so it survives opening one of the routine's runs.
+   */
+  focusedRoutine?: string | null
+  onFocusRoutine?: (slug: string | null) => void
+  /** The run open in the column, for the focus list's highlight. */
+  openRunId?: string | null
+  onOpenRun?: (runId: string) => void
 }
 
 export function ActivitySidebar({
+  workspaceId,
+  focusedRoutine,
+  onFocusRoutine,
+  openRunId,
+  onOpenRun,
   search,
   onSearchChange,
   facets,
@@ -894,6 +910,20 @@ export function ActivitySidebar({
       </SidebarToolbar>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+        {focusedRoutine && workspaceId ? (
+          <RailRoutineFocus
+            workspaceId={workspaceId}
+            slug={focusedRoutine}
+            name={routineBySlug.get(focusedRoutine)?.name || focusedRoutine}
+            scope={facets.scope}
+            range={facets.range}
+            openRunId={openRunId ?? null}
+            onPickScope={(key) => onChange({ ...facets, scope: key })}
+            onOpenRun={(id) => onOpenRun?.(id)}
+            onLeave={() => onFocusRoutine?.(null)}
+          />
+        ) : (
+        <>
         {/* ── Status ── the same section, rows and count pills as /routines. */}
         <SidebarSection
           label="Status"
@@ -903,38 +933,7 @@ export function ActivitySidebar({
           onToggle={() => setStatusOpen(!statusOpen)}
           className="border-b border-foreground/[0.06] pb-1"
         >
-          <div role="region" aria-label="Status">
-            {statusRows.map((r) => {
-              const Icon = STATUS_ICON[r.key]
-              const isSelected = facets.scope === r.key
-              const empty = r.count === 0 && !isSelected
-              return (
-                <SidebarRow
-                  key={r.key}
-                  as="div"
-                  selected={isSelected}
-                  onSelect={() => onChange({ ...facets, scope: r.key })}
-                >
-                  <Icon className={cn("h-3.5 w-3.5 shrink-0", r.tone, empty && "opacity-40")} />
-                  <span className={cn("flex-1 truncate", empty ? "text-muted-foreground-soft" : "text-foreground/80")}>
-                    {r.label}
-                  </span>
-                  <span
-                    className={cn(
-                      "rounded-full px-1.5 py-px text-[10px] tabular-nums",
-                      r.count === 0
-                        ? "text-muted-foreground-soft"
-                        : isSelected
-                          ? "bg-primary/15 text-primary-hover"
-                          : "bg-foreground/[0.05] text-muted-foreground",
-                    )}
-                  >
-                    {r.count}
-                  </span>
-                </SidebarRow>
-              )
-            })}
-          </div>
+          <StatusRows rows={statusRows} scope={facets.scope} onPick={(key) => onChange({ ...facets, scope: key })} />
         </SidebarSection>
 
         {lensCounts[lens] === 0 ? (
@@ -985,7 +984,13 @@ export function ActivitySidebar({
                   index={i}
                   routine={routineBySlug.get(c.routine_slug ?? "")}
                   selected={selectedChain === c.origin}
-                  onSelect={() => onSelectChain(selectedChain === c.origin ? null : c.origin)}
+                  onSelect={() => {
+                    const picking = selectedChain !== c.origin
+                    onSelectChain(picking ? c.origin : null)
+                    // A routine's row narrows the rail to that routine and
+                    // lists its runs (#2998).
+                    if (picking && c.routine_slug && onFocusRoutine) onFocusRoutine(c.routine_slug)
+                  }}
                 />
               ))}
             </SidebarSection>
@@ -1100,6 +1105,8 @@ export function ActivitySidebar({
               <span className="flex-1 truncate text-foreground/80">Webhook deliveries</span>
             </SidebarRow>
           </SidebarSection>
+        )}
+        </>
         )}
       </div>
     </div>

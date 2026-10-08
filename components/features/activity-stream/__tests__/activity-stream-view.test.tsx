@@ -353,6 +353,17 @@ it("opens agent work outside routines as its own page (#2989)", () => {
   expect(mock.run).not.toHaveBeenCalled()
   expect(mock.workflow).not.toHaveBeenCalled()
 })
+it("keeps the routine focus while one of its runs is open (#2998)", () => {
+  show()
+  act(() => sidebar().onFocusRoutine?.("triage"))
+  expect(sidebar().focusedRoutine).toBe("triage")
+  act(() => sidebar().onOpenRun?.("r_old"))
+  expect(screen.getByText("Run r_old")).toBeVisible()
+  expect(sidebar().focusedRoutine).toBe("triage")
+  expect(sidebar().openRunId).toBe("r_old")
+  act(() => sidebar().onFocusRoutine?.(null))
+  expect(sidebar().focusedRoutine).toBeNull()
+})
 it("opens a run under the Issues back-bar: the way out, then only the stops walked", () => {
   // #2979: /issues reads "‹ Back to issues › OPS-1". The home crumb would
   // repeat the button beside it ("Back to activity › Overview › …").

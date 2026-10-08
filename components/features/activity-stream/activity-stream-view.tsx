@@ -206,6 +206,9 @@ export function ActivityStreamView({
   // selection, the ones before it are only there so back has somewhere to go.
   const [path, setPath] = React.useState<ActivityPath>(initialUrl.path)
   const stop = React.useMemo(() => currentStop(path), [path])
+  // The routine the rail is narrowed to (#2998). Not part of the path: the
+  // focus is where the reader is LOOKING, and it survives opening a run.
+  const [focusedRoutine, setFocusedRoutine] = React.useState<string | null>(null)
   const surface = React.useMemo(() => activitySurface(stop), [stop])
   const focus = surface.focus
   const trail = React.useMemo(() => activityTrail(path), [path])
@@ -937,6 +940,13 @@ export function ActivityStreamView({
               onOpenEntity={(kind, id, label) => setPath(selectStop({ kind, id, label }))}
               onToggleCollapse={() => setRailCollapsed(true)}
               onOpenSection={onOpenSection}
+              // The routine focus (#2998): the rail narrows to one routine and
+              // lists its runs; opening one keeps the focus.
+              workspaceId={workspaceId}
+              focusedRoutine={focusedRoutine}
+              onFocusRoutine={setFocusedRoutine}
+              openRunId={stop?.kind === "run" || stop?.kind === "workflow" ? stop.id : null}
+              onOpenRun={(id) => setPath(selectStop({ kind: "run", id, label: id }))}
             />
           )}
         </aside>

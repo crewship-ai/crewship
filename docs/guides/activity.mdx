@@ -87,6 +87,24 @@ An ask whose answer lies outside the window, or that carries no id to join on, s
 
 One function (`scopeOf` in `lib/activity-stream.ts`) does this for the feed list, every row's status dot and the Overview's **Waiting on you** card, so those three cannot disagree. The rail's **status rows** are the exception, and deliberately so: they count *chains* (`chainScopeCounts` over the `ChainSummary` index, ultimately the server's `status` column) rather than journal rows, because the chain index is fetched independently of the scope facet and so can still answer for the buckets the journal query did not fetch. A status row counts chains; the feed beside it counts entries.
 
+### Focusing a routine
+
+Picking a routine's row narrows the rail to that routine (`activity-rail-focus.tsx`, rules in `lib/activity-rail-focus.ts`). Everything else in the rail goes. The routine's runs are listed by day (Today, Yesterday, then dates), each with its time, its outcome in the rail's words, what started it and how long it took.
+
+The STATUS rows stay and count the routine's runs, so **Could not finish** lists only the runs that failed. The time range from **Filter** decides how far back the list reaches.
+
+Clicking a run opens it in the column, and the focus stays while you step through its runs. **‹ All activity** leaves the focus.
+
+### What a row is
+
+Every row's second line starts with what the row **is**:
+
+- **Routine**: a routine run and what it caused;
+- **Issue**: an agent working an issue;
+- **Agent**: agent work delegated from a chat or assigned by hand.
+
+What started the row follows after it. So *Routine · from QUA-1* (a routine started from an issue) never reads like *Issue · from QUA-1* (the issue being worked).
+
 ### Search and filters
 
 The search box narrows two things at once: the rail's workflow list (client-side, over the loaded index page — matching the routine's name and slug, what started the chain, the handle, and the identifiers, titles and agent names it touched) and the journal query (server-side, as `q`).
