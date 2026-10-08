@@ -72,3 +72,34 @@ describe("BackupsPage panel", () => {
     expect(param("scope")).toBe("instance")
   })
 })
+
+// The panel's toolbar: a search over plans and runs, and a Filter with the
+// dimensions the Runs facets do not cover (kind, proof, when). The facet
+// counts and Backup history apply the same filters.
+describe("BackupsPage toolbar", () => {
+  it("search narrows the plans in the panel", async () => {
+    show()
+    await within(panel()).findByRole("button", { name: /Complete recovery/ })
+    fireEvent.change(within(panel()).getByPlaceholderText("Search runs, plans…"), { target: { value: "memory" } })
+    expect(within(panel()).queryByRole("button", { name: /Complete recovery/ })).toBeNull()
+    expect(within(panel()).getByRole("button", { name: /Memory every 6 h/ })).toBeInTheDocument()
+  })
+
+  it("Filter › Kind narrows the runs the facets count and History shows, kept in the URL", async () => {
+    show("?demo=1&section=history")
+    await within(panel()).findByRole("button", { name: /^All runs\s*5/ })
+    fireEvent.click(within(panel()).getByRole("button", { name: /Filter/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Environments/ }))
+    expect(param("kind")).toBe("environments")
+    expect(within(panel()).getByRole("button", { name: /^All runs\s*1/ })).toBeInTheDocument()
+  })
+
+  it("Filter › Proof keeps only runs proven that far", async () => {
+    show("?demo=1&section=history")
+    await within(panel()).findByRole("button", { name: /^All runs\s*5/ })
+    fireEvent.click(within(panel()).getByRole("button", { name: /Filter/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Test restore/ }))
+    expect(param("proof")).toBe("3")
+    expect(within(panel()).getByRole("button", { name: /^All runs\s*2/ })).toBeInTheDocument()
+  })
+})

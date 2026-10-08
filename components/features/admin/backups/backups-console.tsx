@@ -42,6 +42,16 @@ export interface SectionCtx {
   inDrill?: boolean
   /** The Recovery tab the side panel picked. */
   recoveryView?: "new" | "history" | "drills"
+  /** The side panel's search and Filter, applied to runs before the facet. */
+  runQuery?: RunQuery
+}
+
+/** The panel toolbar's narrowing of runs: text, kind, least proof, last N days. */
+export interface RunQuery {
+  q: string
+  kind: "" | "full" | "custom" | "environments"
+  proof: "" | "1" | "2" | "3"
+  period: "" | "1" | "7" | "30"
 }
 
 /** The Runs facets of the side panel. */

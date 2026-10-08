@@ -12,7 +12,7 @@ import { Chip, Gate, WsName } from "./backups-kit"
 import { formatPhases, formatSize, formatWhen, proofLabel, runPlanLabel, runResult, type BackupRun } from "./backups-model"
 import { checkBundle, downloadHref, pinBundle, useBackupRuns, workspaceFor } from "./use-backup-runs"
 import { perform } from "./use-backups-data"
-import type { RunFilter, SectionCtx } from "./backups-console"
+import type { RunFilter, RunQuery, SectionCtx } from "./backups-console"
 
 const FILTERS: { value: RunFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -26,6 +26,18 @@ const FILTERS: { value: RunFilter; label: string }[] = [
 /** The runs the current scope shows. The side panel counts with it too. */
 export function runsInScope(runs: BackupRun[], ctx: Pick<SectionCtx, "scope" | "selected">, legacy: boolean): BackupRun[] {
   return runs.filter((r) => legacy || (ctx.scope === "instance" ? r.scope === "instance" : r.scope === "workspaces" && !!r.workspace_id && ctx.selected.has(r.workspace_id)))
+}
+
+/** Whether a run passes the panel's search and Filter. The panel counts with it too. */
+export function matchesQuery(r: BackupRun, q: RunQuery | undefined, now: number = Date.now()): boolean {
+  if (!q) return true
+  const text = q.q.trim().toLowerCase()
+  if (text && ![r.plan_name, r.workspace_name, r.note, r.scope === "instance" ? "whole instance" : null]
+    .some((v) => v?.toLowerCase().includes(text))) return false
+  if (q.kind && r.kind !== q.kind) return false
+  if (q.proof && (r.proof_level ?? 0) < Number(q.proof)) return false
+  if (q.period && now - Date.parse(r.started_at) > Number(q.period) * 86_400_000) return false
+  return true
 }
 
 /** Whether a run belongs to a Runs facet. The side panel counts with it too. */
@@ -67,7 +79,7 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
   const [checking, setChecking] = React.useState<BackupRun | null>(null)
   const [checked, setChecked] = React.useState<Record<string, { level: 1 | 2; ok: boolean; detail: string }>>({})
 
-  const inScope = runsInScope(runs, ctx, !!legacy)
+  const inScope = runsInScope(runs, ctx, !!legacy).filter((r) => matchesQuery(r, ctx.runQuery))
   const plans = [...new Set(inScope.filter((r) => r.plan_name).map((r) => r.plan_name!))]
   const list = inScope.filter((r) => matches(r, filter) && (!plan || r.plan_name === plan))
   const current = inScope.find((r) => r.id === open) ?? null

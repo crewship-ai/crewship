@@ -9,14 +9,15 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
 import { WorkspaceScopeSection, type Scope } from "@/components/features/admin/workspace-scope"
+import { SidebarFacet, SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
 import { BACKUP_SECTIONS, initialBackupsSection, type BackupsSection } from "@/app/(dashboard)/admin/navigation"
-import { useBackupsScope, type RunFilter, type SectionCtx } from "./backups-console"
+import { useBackupsScope, type RunFilter, type RunQuery, type SectionCtx } from "./backups-console"
 import { INSTANCE_ONLY, describePlanWhen } from "./backups-model"
 import { useBackupRuns } from "./use-backup-runs"
 import { useBackupPlans } from "./use-backup-plans"
 import { useBackupsOverview } from "./use-backups-overview"
 import { BackupsOverview } from "./backups-overview"
-import { BackupsHistory, matches, runsInScope } from "./backups-history"
+import { BackupsHistory, matches, matchesQuery, runsInScope } from "./backups-history"
 import { BackupsSchedules } from "./backups-schedules"
 import { BackupsStorage } from "./backups-storage"
 import { BackupsRecovery } from "./backups-recovery"
@@ -53,7 +54,19 @@ interface View {
   status: RunFilter
   plan: string | null
   recovery: RecoveryView
+  query: RunQuery
 }
+
+const KINDS: { key: RunQuery["kind"]; label: string }[] = [
+  { key: "full", label: "Full" }, { key: "custom", label: "Partial" }, { key: "environments", label: "Environments" },
+]
+const PROOFS: { key: RunQuery["proof"]; label: string }[] = [
+  { key: "3", label: "Test restore" }, { key: "2", label: "Contents checked or better" }, { key: "1", label: "Checksum or better" },
+]
+const PERIODS: { key: RunQuery["period"]; label: string }[] = [
+  { key: "1", label: "Last 24 hours" }, { key: "7", label: "Last 7 days" }, { key: "30", label: "Last 30 days" },
+]
+const oneOf = <T extends string>(v: string | null, all: { key: T }[]): T | "" => (all.some((o) => o.key === v) ? (v as T) : "")
 
 function readView(search: string): View {
   const p = new URLSearchParams(search)
@@ -64,6 +77,7 @@ function readView(search: string): View {
     status: isRunFilter(status) ? status : "all",
     plan: p.get("plan"),
     recovery: rec === "history" || rec === "drills" ? rec : "new",
+    query: { q: p.get("q") ?? "", kind: oneOf(p.get("kind"), KINDS), proof: oneOf(p.get("proof"), PROOFS), period: oneOf(p.get("period"), PERIODS) },
   }
 }
 
@@ -86,6 +100,10 @@ export function BackupsPage() {
       set("plan", v.section === "schedules" ? v.plan : null)
       set("view", v.section === "recovery" && v.recovery !== "new" ? v.recovery : null)
       if (v.section !== "history") url.searchParams.delete("run")
+      set("q", v.query.q.trim() || null)
+      set("kind", v.query.kind || null)
+      set("proof", v.query.proof || null)
+      set("period", v.query.period || null)
       window.history.replaceState(window.history.state, "", url.toString())
       return v
     })
@@ -96,14 +114,14 @@ export function BackupsPage() {
   const overview = useBackupsOverview(scope, selected, workspaces)
   // The same scope and facet rules Backup history filters with, so a count
   // here is the number of rows the facet opens.
-  const all = runsInScope(runs.data ?? [], { scope, selected }, runs.source === "legacy")
+  const all = runsInScope(runs.data ?? [], { scope, selected }, runs.source === "legacy").filter((r) => matchesQuery(r, view.query))
   const facetCount = Object.fromEntries(RUN_FACETS.map((f) => [f.key, all.filter((r) => matches(r, f.key)).length])) as Record<RunFilter, number>
   const attention = overview.data?.needs_attention?.length ?? 0
 
   const ctx: SectionCtx = {
     scope, selected, workspaces, currentWorkspaceId: workspaceId, demo,
     focusRun: focus.run, focusPath: focus.path, backUpNow, newPlanSignal,
-    focusPlan: view.plan, runFilter: view.status, inDrill: true, recoveryView: view.recovery,
+    focusPlan: view.plan, runFilter: view.status, inDrill: true, recoveryView: view.recovery, runQuery: view.query,
     go: (section, opts) => {
       setFocus({ run: opts?.run ?? null, path: opts?.path ?? null })
       update({ section })
@@ -114,6 +132,36 @@ export function BackupsPage() {
     setNewPlanSignal((x) => x + 1)
     update({ section: "schedules", plan: "new" })
   }
+
+  const setQuery = (next: Partial<RunQuery>) => update({ query: { ...view.query, ...next } })
+  const needle = view.query.q.trim().toLowerCase()
+  const shownPlans = (plans.data ?? []).filter((p) => !needle || p.name.toLowerCase().includes(needle))
+  const filterCount = [view.query.kind, view.query.proof, view.query.period].filter(Boolean).length
+
+  // The panel's toolbar narrows runs (and the plans list, by name) on top of
+  // the Runs facets: what was kept, how far it is proven, and when.
+  const toolbar = (
+    <>
+      <SidebarSearch value={view.query.q} onValueChange={(q) => setQuery({ q })} placeholder="Search runs, plans…" />
+      <SidebarFilterPopover label="Filter runs" activeCount={filterCount} onClear={() => setQuery({ kind: "", proof: "", period: "" })} panelClassName="min-w-[240px]">
+        <SidebarFacet label="Kind" resetLabel="Any kind" resetActive={!view.query.kind} onReset={() => setQuery({ kind: "" })} first>
+          {KINDS.map((k) => (
+            <SidebarFacetOption key={k.key} active={view.query.kind === k.key} onToggle={() => setQuery({ kind: view.query.kind === k.key ? "" : k.key })}>{k.label}</SidebarFacetOption>
+          ))}
+        </SidebarFacet>
+        <SidebarFacet label="Proof" resetLabel="Any proof" resetActive={!view.query.proof} onReset={() => setQuery({ proof: "" })}>
+          {PROOFS.map((k) => (
+            <SidebarFacetOption key={k.key} active={view.query.proof === k.key} onToggle={() => setQuery({ proof: view.query.proof === k.key ? "" : k.key })}>{k.label}</SidebarFacetOption>
+          ))}
+        </SidebarFacet>
+        <SidebarFacet label="When" resetLabel="Any time" resetActive={!view.query.period} onReset={() => setQuery({ period: "" })}>
+          {PERIODS.map((k) => (
+            <SidebarFacetOption key={k.key} active={view.query.period === k.key} onToggle={() => setQuery({ period: view.query.period === k.key ? "" : k.key })}>{k.label}</SidebarFacetOption>
+          ))}
+        </SidebarFacet>
+      </SidebarFilterPopover>
+    </>
+  )
 
   const instanceOnly = INSTANCE_ONLY.has(view.section)
   const wsScope: Scope = { all: urlState.ws === null, ids: selected }
@@ -146,8 +194,8 @@ export function BackupsPage() {
             icon={<span className={cn("h-1.5 w-1.5 rounded-full", f.dot)} aria-hidden />} label={f.label} meta={facetCount[f.key]} />
         ))}
       </DrillNavSection>
-      <DrillNavSection label="Plans" count={plans.data?.length}>
-        {(plans.data ?? []).map((p, i) => (
+      <DrillNavSection label="Plans" count={shownPlans.length}>
+        {shownPlans.map((p, i) => (
           <DrillNavItem key={p.id} index={i} selected={view.section === "schedules" && view.plan === p.id} muted={!p.enabled}
             onSelect={() => update({ section: "schedules", plan: p.id })}
             icon={<CalendarClock className="h-3.5 w-3.5" />} label={p.name} sub={describePlanWhen(p)} meta={p.enabled ? "on" : "off"} />
@@ -189,6 +237,8 @@ export function BackupsPage() {
       title="Backups"
       icon={Database}
       description="What is kept, where, and whether a restore really works"
+      toolbar={toolbar}
+      filterCount={filterCount}
       nav={nav}
       mobileNav={mobileNav}
       actions={
