@@ -50,6 +50,8 @@ vi.mock("../lens-overviews", () => ({ AgentsOverview: mock.agents, IssuesOvervie
 vi.mock("../drill-downs", () => ({ AgentDrillDown: mock.agent, IssueDrillDown: mock.issue }))
 vi.mock("../activity-run-page", () => ({ ActivityRunPage: mock.run }))
 vi.mock("../activity-work-page", () => ({ ActivityWorkPage: mock.work }))
+// The rail focus fetches its own runs; the sidebar is mocked, its import is not.
+vi.mock("../activity-rail-focus", () => ({ RailRoutineFocus: () => null }))
 vi.mock("../feed-row", () => ({ FeedRow: mock.row }))
 import { ActivityStreamView } from "../activity-stream-view"
 import { EMPTY_FACETS } from "../activity-sidebar"
@@ -102,7 +104,7 @@ it("shares counts and metadata and wires live entries to the same journal window
   expect(mock.stream.mock.calls.at(-1)![0].onEntry).toBe(mock.prepend)
   // The home reads runs, not the journal window: it is handed the chain index.
   expect(home()).toMatchObject({ workspaceId: "ws & a" })
-  expect(home().chains.map((c) => c.origin)).toEqual(["r1", "w1", "asg1"])
+  expect(home().chains.map((c) => c.origin)).toEqual(["r1", "w1"])
   act(() => sidebar().onRetryChains?.())
   expect(mock.refreshChains).toHaveBeenCalledOnce()
 })
@@ -346,12 +348,10 @@ it("steps to the next and previous run with the arrow keys, in the rail's order 
   fireEvent.keyDown(input, { key: "ArrowDown" })
   expect(screen.getByText("Run r1")).toBeVisible()
 })
-it("opens agent work outside routines as its own page (#2989)", () => {
+it("keeps agent work outside routines out of Activity for now (#3007)", () => {
   show()
-  act(() => sidebar().onSelectChain("asg1"))
-  expect(screen.getByText("Work asg1")).toBeVisible()
-  expect(mock.run).not.toHaveBeenCalled()
-  expect(mock.workflow).not.toHaveBeenCalled()
+  expect(sidebar().chains.map((c) => c.origin)).not.toContain("asg1")
+  expect(home().chains.map((c) => c.origin)).not.toContain("asg1")
 })
 it("keeps the routine focus while one of its runs is open (#2998)", () => {
   show()
@@ -372,6 +372,17 @@ it("keeps the home for a crew filter, narrowed to the rail's chains, and the eve
   expect([...(home().scope?.origins ?? [])]).toEqual(home().chains.map((c) => c.origin))
   act(() => sidebar().onChange({ ...EMPTY_FACETS, sources: ["run"] }))
   expect(screen.queryByText("Activity home")).toBeNull()
+})
+it("narrows the rail to the runs a journal-only filter's events belong to (#3007)", () => {
+  show()
+  // e1 carries run r1; e2 carries run r2, which is no chain in the index.
+  act(() => sidebar().onChange({ ...EMPTY_FACETS, sources: ["run"] }))
+  expect(sidebar().chains.map((c) => c.origin)).toEqual(["r1"])
+  expect(sidebar().chainsBeforeStatus.map((c) => c.origin)).toEqual(["r1"])
+  // No event left → no run in the rail.
+  mock.list.mockReturnValue(listState({ entries: [] }))
+  act(() => sidebar().onChange({ ...EMPTY_FACETS, severities: ["warn"] }))
+  expect(sidebar().chains).toEqual([])
 })
 it("opens a run under the Issues back-bar: the way out, then only the stops walked", () => {
   // #2979: /issues reads "‹ Back to issues › OPS-1". The home crumb would

@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Activity's rail follows source and severity filters too (#3007).** With a source, severity or telemetry filter, the rail lists only the runs the matching events belong to, and is empty when none match. It no longer keeps listing every run beside an empty column. Agent work started outside a routine is hidden in Activity for now; the index and CLI still list it.
 - **A crew, agent, issue or routine filter keeps Activity's home, narrowed (#3002).** The column used to swap the home for the raw journal list ("morgan runs claude --print …"). It now shows the same cards for the chains the rail shows, titled with the filter. Source, severity and telemetry filters keep the event list. `GET …/pipeline-runs` returns each run's `chain_origin`.
 - **Activity's Filter narrows the rail too (#3000).** With a crew, agent, issue or routine picked, the rail kept listing every run beside a column that showed only the filtered ones. The facets now narrow the chain list that every surface reads. The rail's routine focus slides in and out like the column beside it.
 - **Activity's rail can focus one routine, and says what each row is (#2998).** Picking a routine's row narrows the rail to that routine and lists its runs by day with time and outcome. The status rows and time range apply to those runs, and a run opens beside the list. Every row now leads with **Routine**, **Issue** or **Agent** before what started it.

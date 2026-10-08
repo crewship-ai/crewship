@@ -168,7 +168,7 @@ The time view's home is built from **runs**, not journal events, and answers in 
 
 A crew, an agent, an issue or routine focus, or a search narrows the home to the same chains the rail shows, and the heading names the narrowing (*Today · Operations*). Its runs are the runs of those chains, matched by `chain_origin`. Its asks are the asks of those runs, and *Up next* lists only their routines' schedules.
 
-Narrowings only the journal can express get the filtered event list instead: a source, a severity, the telemetry switch, a pinned crumb.
+Narrowings only the journal can express get the filtered event list instead: a source, a severity, the telemetry switch, a pinned crumb. The rail then lists only the runs those events belong to, matched by the run id an event carries and the issue it names. When no event is left, no run is left either.
 
 ### Issues, Agents, Routines
 
@@ -198,6 +198,10 @@ A rail row whose chain starts at a routine run opens **that run** (`activity-run
 A run id that is not a routine run — agent work — falls back to the typed run detail.
 
 ## Agent work outside routines
+
+<Note>
+Hidden in the UI for now, at the owner's call (#3007). The chain index still returns these rows (`kind: assignment`), and the CLI lists them.
+</Note>
 
 A delegation from a chat, an issue mention or lead planning is listed in the rail as its own row. It wears an agent's face and is titled by its task, and its second line says what started it: `from chat · Lead`, `from OPS-3`, `lead planning · OPS-3`, `by hand`.
 

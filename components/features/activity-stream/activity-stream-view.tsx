@@ -314,12 +314,15 @@ export function ActivityStreamView({
   // and tying it to the same window is what made the rail collapse to a single
   // row the moment an issue was focused.
   const {
-    chains,
+    chains: indexChains,
     hasUnrecordedRuns: chainsHaveUnrecorded,
     hasMore: chainsHaveMore,
     error: chainsError,
     refresh: refreshChains,
   } = useChains(workspaceId)
+  // Agent work started outside a routine (kind "assignment", #2997) stays out
+  // of Activity for now, at the owner's call (#3007). The index keeps it.
+  const chains = React.useMemo(() => indexChains.filter((c) => c.kind !== "assignment"), [indexChains])
 
   // Picking a workflow is a selection like any other, so it goes through the
   // same setter — which is what makes it impossible for the graph to outlive
@@ -495,7 +498,28 @@ export function ActivityStreamView({
       }),
     [chains, search, facets.scope, facets.crewIDs, facets.agentIDs, focus, routineBySlug, lookup.agents, pipelines],
   )
-  const visibleChains = narrowedChains.visible
+  // A filter only the journal can express — a source, a severity, the
+  // telemetry switch, a pinned node — narrows the rail to the runs its events
+  // belong to (#3007): the run an event carries (trace_id, payload.run_id) and
+  // the issue it names. With no event left, no run is left either; the rail
+  // used to keep listing every run beside an empty column.
+  const journalOnlyNarrowing =
+    !!pinned || facets.sources.length > 0 || facets.severities.length > 0 || facets.showTelemetry
+  const railChains = React.useMemo(() => {
+    if (!journalOnlyNarrowing) return narrowedChains
+    const runs = new Set<string>()
+    const missions = new Set<string>()
+    for (const e of visible) {
+      if (e.trace_id) runs.add(e.trace_id)
+      const rid = e.payload?.run_id
+      if (typeof rid === "string" && rid) runs.add(rid)
+      if (e.mission_id) missions.add(e.mission_id)
+    }
+    const keep = (c: (typeof chains)[number]) =>
+      runs.has(c.origin) || (c.issues ?? []).some((i) => missions.has(i.id))
+    return { searched: narrowedChains.searched.filter(keep), visible: narrowedChains.visible.filter(keep) }
+  }, [journalOnlyNarrowing, narrowedChains, visible])
+  const visibleChains = railChains.visible
 
   const labels = React.useMemo<SpineLabels>(() => {
     const issues: Record<string, string> = {}
@@ -938,7 +962,7 @@ export function ActivityStreamView({
           ) : (
             <ActivitySidebar
               chains={visibleChains}
-              chainsBeforeStatus={narrowedChains.searched}
+              chainsBeforeStatus={railChains.searched}
               loadedChainCount={chains.length}
               chainsHaveMore={chainsHaveMore}
               chainsHaveUnrecorded={chainsHaveUnrecorded}
