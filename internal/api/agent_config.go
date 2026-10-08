@@ -108,6 +108,9 @@ type mcpServerEntry struct {
 	// in the [CONNECTED INTEGRATIONS] prompt block so the agent sees WHAT it
 	// can do per integration, not just that one is connected (#862 slice 3).
 	Tools []string `json:"tools,omitempty"`
+	// DisabledTools are the server's switched-off tool names (mcp_tool_bindings
+	// enabled = 0). The sidecar MCP gateway refuses to call them (#2178).
+	DisabledTools []string `json:"disabled_tools,omitempty"`
 }
 
 // mcpServerRow is a raw DB row for an MCP server definition. icon
@@ -1527,21 +1530,26 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 		}
 	}
 
-	// Attach each server's enabled tool names in ONE batch query so the
-	// [CONNECTED INTEGRATIONS] block can name what the agent can DO per
-	// integration (#862). N servers, one query — no per-server round trip.
-	h.attachEnabledToolNames(r, mcpServers)
+	// Attach each server's tool bindings in ONE batch query: enabled names
+	// feed the [CONNECTED INTEGRATIONS] block (#862), disabled names are
+	// enforced by the sidecar gateway (#2178). If the bindings cannot be read,
+	// no server is handed out: shipping one without its deny set would let a
+	// switched-off tool be called.
+	if err := h.attachToolBindings(r, mcpServers); err != nil {
+		h.logger.Error("read MCP tool bindings; withholding MCP servers from agent config", "agent_id", agentID, "error", err)
+		return nil
+	}
 
 	return mcpServers
 }
 
-// attachEnabledToolNames populates entry.Tools for each server from
-// mcp_tool_bindings (enabled != 0) in a single IN-clause query. Best-effort:
-// a query failure leaves Tools empty (the block still lists the integration
-// label), never blanking the whole agent config.
-func (h *InternalHandler) attachEnabledToolNames(r *http.Request, servers []mcpServerEntry) {
+// attachToolBindings populates entry.Tools (enabled != 0) and
+// entry.DisabledTools (enabled = 0) for each server from mcp_tool_bindings in
+// a single IN-clause query. A tool with no binding row is allowed, matching the
+// column default.
+func (h *InternalHandler) attachToolBindings(r *http.Request, servers []mcpServerEntry) error {
 	if len(servers) == 0 {
-		return
+		return nil
 	}
 	placeholders := make([]string, len(servers))
 	args := make([]any, len(servers))
@@ -1550,25 +1558,36 @@ func (h *InternalHandler) attachEnabledToolNames(r *http.Request, servers []mcpS
 		args[i] = s.ID
 	}
 	rows, err := h.db.QueryContext(r.Context(),
-		`SELECT mcp_server_id, tool_name FROM mcp_tool_bindings
-		 WHERE enabled != 0 AND mcp_server_id IN (`+strings.Join(placeholders, ",")+`)
+		`SELECT mcp_server_id, tool_name, enabled != 0 FROM mcp_tool_bindings
+		 WHERE mcp_server_id IN (`+strings.Join(placeholders, ",")+`)
 		 ORDER BY tool_name ASC`, args...)
 	if err != nil {
-		h.logger.Warn("attach tool names for connected integrations", "error", err)
-		return
+		return err
 	}
 	defer rows.Close()
 
-	byServer := make(map[string][]string, len(servers))
+	enabled := make(map[string][]string, len(servers))
+	disabled := make(map[string][]string)
 	for rows.Next() {
 		var sid, tool string
-		if rows.Scan(&sid, &tool) == nil {
-			byServer[sid] = append(byServer[sid], tool)
+		var on bool
+		if err := rows.Scan(&sid, &tool, &on); err != nil {
+			return err
+		}
+		if on {
+			enabled[sid] = append(enabled[sid], tool)
+		} else {
+			disabled[sid] = append(disabled[sid], tool)
 		}
 	}
-	for i := range servers {
-		servers[i].Tools = byServer[servers[i].ID]
+	if err := rows.Err(); err != nil {
+		return err
 	}
+	for i := range servers {
+		servers[i].Tools = enabled[servers[i].ID]
+		servers[i].DisabledTools = disabled[servers[i].ID]
+	}
+	return nil
 }
 
 // buildDefaultComposioEntry synthesises the default Composio MCP server entry
