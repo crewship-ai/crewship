@@ -299,6 +299,22 @@ func (r *RunRegistry) Count(workspaceID, concurrencyKey string) int {
 	return n
 }
 
+// AwaitRelease blocks until the execution currently holding runID's entry
+// releases it, or ctx ends. It reports whether the entry is free (true when
+// nothing held it). A later execution that takes the entry is not awaited.
+func (r *RunRegistry) AwaitRelease(ctx context.Context, runID string) bool {
+	released := r.released(runID)
+	if released == nil {
+		return true
+	}
+	select {
+	case <-released:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 // released returns the current execution's lifetime fence, or nil if it has
 // already released its slot. Observe it under the same lock as release: a
 // decision arriving just before a run parks must not lose its resume request.

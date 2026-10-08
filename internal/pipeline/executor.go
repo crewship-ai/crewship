@@ -262,6 +262,12 @@ type Executor struct {
 	// window instead of guessing at it. Nil in production.
 	onResumeSlotBusy func(runID string)
 
+	// afterResumeRegistryAcquire fires on a resumed Run right after it took
+	// the run's registry entry and before it re-reads the persisted status:
+	// the window in which a cancel can reach the resumed lifetime (#2910).
+	// Test rendezvous; nil in production.
+	afterResumeRegistryAcquire func(runID string)
+
 	// sleepFn / jitterFn make the per-step retry backoff (runStepWithRetry)
 	// injectable so tests drive the retry schedule deterministically without
 	// real wall-clock delays. Nil = production behaviour (real timer sleep,
@@ -286,6 +292,24 @@ type Executor struct {
 	// — can be drained together at shutdown before the journal closes.
 	verdictWG       sync.WaitGroup
 	sharedVerdictWG *sync.WaitGroup
+}
+
+// resumeAdmissionFailed classifies a resume that failed after taking the
+// run's registry entry but before runDSL's terminal persistence took over.
+// A user cancel that reached the lifetime there (#2910: the cancel API found
+// the resumed run live and cancelled it) is a CANCELLED run, not an
+// interrupted one; the caller's generic fallback would record the latter.
+func (e *Executor) resumeAdmissionFailed(runID, pipelineID string, err error) (*RunResult, error) {
+	if e.runs == nil || !e.runs.IsCancelRequested(runID) {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	const msg = "run cancelled while resuming"
+	if markErr := e.runStore.MarkTerminal(ctx, MarkTerminalInput{RunID: runID, Status: RunStatusCancelled, ErrorMessage: msg}); markErr != nil {
+		return nil, fmt.Errorf("executor: record cancelled resume: %w", markErr)
+	}
+	return &RunResult{RunID: runID, PipelineID: pipelineID, Status: "CANCELLED", ErrorMessage: msg}, nil
 }
 
 // verdictWaitGroup returns the group verdict goroutines register on: the
@@ -943,9 +967,12 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	}
 
 	if in.resume && e.runStore != nil {
+		if e.afterResumeRegistryAcquire != nil {
+			e.afterResumeRegistryAcquire(preallocRunID)
+		}
 		rec, err := e.runStore.Get(ctx, preallocRunID)
 		if err != nil {
-			return nil, err
+			return e.resumeAdmissionFailed(preallocRunID, in.PipelineID, err)
 		}
 		if rec.Status != RunStatusQueued && rec.Status != RunStatusRunning && rec.Status != RunStatusWaiting {
 			return &RunResult{RunID: rec.ID, PipelineID: rec.PipelineID, Status: strings.ToUpper(string(rec.Status))}, nil
@@ -957,7 +984,7 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 		// Restore again under the registry slot, never execute from a stale map.
 		outputs, err := e.runStore.GetStepOutputs(ctx, preallocRunID)
 		if err != nil {
-			return nil, err
+			return e.resumeAdmissionFailed(preallocRunID, in.PipelineID, err)
 		}
 		in.restoredOutputs = outputs
 		in.restoredCostUSD = rec.CostUSD

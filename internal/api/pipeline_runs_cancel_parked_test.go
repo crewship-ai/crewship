@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -73,4 +76,214 @@ VALUES ('pln_x', ?, 'x', 'x', '{"name":"x","steps":[]}', 'h', 0, 1, NULL, NULL, 
 	if wpStatus != "cancelled" {
 		t.Errorf("waitpoint status = %q, want cancelled", wpStatus)
 	}
+}
+
+// seedParkedRun inserts a pipeline and a WAITING run of it with one pending
+// approval, the state an approval-parked run leaves behind.
+func seedParkedRun(t *testing.T, h *PipelineHandler, wsID, runID string) (*pipeline.RunStore, *pipeline.SQLWaitpointStore, string) {
+	t.Helper()
+	ctx := context.Background()
+	runStore := pipeline.NewRunStore(h.db)
+	h.SetRunStore(runStore)
+	wpStore := pipeline.NewSQLWaitpointStore(h.db)
+	t.Cleanup(func() { wpStore.Close() })
+	h.SetWaitpointStore(wpStore)
+	if _, err := h.db.ExecContext(ctx, `
+INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, ephemeral, workspace_visible, author_crew_id, author_agent_id, authored_via, last_test_run_at, last_test_run_passed, created_at, updated_at)
+VALUES ('pln_race', ?, 'race', 'race', '{"name":"race","steps":[]}', 'h', 0, 1, NULL, NULL, 'agent_tool_call', datetime('now'), 1, datetime('now'), datetime('now'))`, wsID); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	if err := runStore.Insert(ctx, &pipeline.RunRecord{
+		ID: runID, WorkspaceID: wsID, PipelineID: "pln_race", PipelineSlug: "race",
+		Status: pipeline.RunStatusWaiting, Mode: pipeline.ModeRun,
+	}); err != nil {
+		t.Fatalf("insert waiting run: %v", err)
+	}
+	token, err := wpStore.CreateApproval(ctx, pipeline.WaitpointApprovalRequest{
+		WorkspaceID: wsID, PipelineRunID: runID, StepID: "gate", Prompt: "ship it?",
+	})
+	if err != nil {
+		t.Fatalf("create approval: %v", err)
+	}
+	return runStore, wpStore, token
+}
+
+// #2910 — cancelling a parked run races every resume source (approval,
+// signal, event sweeper, boot). Both re-enter through the run's registry
+// entry, so exactly one side may win, and the response must say which.
+func TestPipelineRuns_CancelRun_ParkedRunRacesResume(t *testing.T) {
+	t.Run("cancel holds the entry: a concurrent resume is refused and the row is cancelled", func(t *testing.T) {
+		h, db, userID, wsID := runsHandlerRig(t)
+		registry := pipeline.NewRunRegistry()
+		h.SetRunRegistry(registry)
+		const runID = "prn_cancel_wins"
+		runStore, _, token := seedParkedRun(t, h, wsID, runID)
+
+		var resumeErr error
+		h.parkedCancelStage = func(stage, id string) {
+			if stage != "fenced" {
+				return
+			}
+			// The resume Executor.Run would perform here: take the run's
+			// registry entry before re-reading the persisted status.
+			_, release, err := registry.Acquire(context.Background(), pipeline.AcquireOpts{RunID: id, WorkspaceID: wsID})
+			release()
+			resumeErr = err
+		}
+		rr := cancelRunRequest(t, h, userID, wsID, runID)
+		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"parked":true`) {
+			t.Fatalf("status = %d body=%s, want 200 parked", rr.Code, rr.Body.String())
+		}
+		if !errors.Is(resumeErr, pipeline.ErrDuplicateRunID) {
+			t.Fatalf("resume admitted while the cancel held the run: %v", resumeErr)
+		}
+		rec, err := runStore.Get(context.Background(), runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rec.Status != pipeline.RunStatusCancelled {
+			t.Errorf("run status = %q, want cancelled", rec.Status)
+		}
+		var wpStatus string
+		if err := db.QueryRow(`SELECT status FROM pipeline_waitpoints WHERE token = ?`, token).Scan(&wpStatus); err != nil {
+			t.Fatal(err)
+		}
+		if wpStatus != "cancelled" {
+			t.Errorf("waitpoint status = %q, want cancelled", wpStatus)
+		}
+		// The entry is released: the next resume is admitted and reads the
+		// committed CANCELLED row (Executor.Run then returns it as terminal).
+		_, release, err := registry.Acquire(context.Background(), pipeline.AcquireOpts{RunID: runID, WorkspaceID: wsID})
+		if err != nil {
+			t.Fatalf("cancel kept the run's registry entry: %v", err)
+		}
+		release()
+	})
+
+	// A lifetime takes the entry after the cancel's registry scan missed it.
+	// onCancel is what that lifetime does once its context is cancelled,
+	// before it releases the entry.
+	holdEntry := func(t *testing.T, h *PipelineHandler, registry *pipeline.RunRegistry, wsID string, onCancel func(runID string)) *bool {
+		cancelled := new(bool)
+		var once sync.Once
+		h.parkedCancelStage = func(stage, id string) {
+			if stage != "before-fence" {
+				return
+			}
+			once.Do(func() {
+				ctx, release, err := registry.Acquire(context.Background(), pipeline.AcquireOpts{RunID: id, WorkspaceID: wsID})
+				if err != nil {
+					t.Errorf("lifetime acquire: %v", err)
+					return
+				}
+				go func() {
+					<-ctx.Done()
+					*cancelled = registry.IsCancelRequested(id)
+					onCancel(id)
+					release()
+				}()
+			})
+		}
+		return cancelled
+	}
+
+	t.Run("a resumed lifetime holds the entry: it is cancelled and records the outcome itself", func(t *testing.T) {
+		h, _, userID, wsID := runsHandlerRig(t)
+		registry := pipeline.NewRunRegistry()
+		h.SetRunRegistry(registry)
+		const runID = "prn_resume_wins"
+		runStore, _, _ := seedParkedRun(t, h, wsID, runID)
+		// What Executor.Run does when a resumed lifetime is cancelled.
+		cancelled := holdEntry(t, h, registry, wsID, func(id string) {
+			if err := runStore.MarkTerminal(context.Background(), pipeline.MarkTerminalInput{RunID: id, Status: pipeline.RunStatusCancelled, ErrorMessage: "run cancelled while resuming"}); err != nil {
+				t.Error(err)
+			}
+		})
+		rr := cancelRunRequest(t, h, userID, wsID, runID)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s, want 200", rr.Code, rr.Body.String())
+		}
+		if strings.Contains(rr.Body.String(), `"parked"`) {
+			t.Errorf("a resumed run was reported as a parked cancel: %s", rr.Body.String())
+		}
+		if !*cancelled {
+			t.Fatal("the resumed lifetime was not cancelled")
+		}
+		rec, err := runStore.Get(context.Background(), runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rec.Status != pipeline.RunStatusCancelled || rec.ErrorMessage != "run cancelled while resuming" {
+			t.Errorf("run = %q (%s), want the lifetime's own cancelled row", rec.Status, rec.ErrorMessage)
+		}
+	})
+
+	t.Run("the parking lifetime still holds the entry: the row is cancelled once it lets go", func(t *testing.T) {
+		h, _, userID, wsID := runsHandlerRig(t)
+		registry := pipeline.NewRunRegistry()
+		h.SetRunRegistry(registry)
+		const runID = "prn_still_parking"
+		runStore, _, token := seedParkedRun(t, h, wsID, runID)
+		// The lifetime that parked the run returns WAITING and writes nothing.
+		cancelled := holdEntry(t, h, registry, wsID, func(string) {})
+		rr := cancelRunRequest(t, h, userID, wsID, runID)
+		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"parked":true`) {
+			t.Fatalf("status = %d body=%s, want 200 parked", rr.Code, rr.Body.String())
+		}
+		if !*cancelled {
+			t.Error("the parking lifetime was not cancelled")
+		}
+		rec, err := runStore.Get(context.Background(), runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rec.Status != pipeline.RunStatusCancelled {
+			t.Errorf("run status = %q, want cancelled (a reported cancel left the run parked)", rec.Status)
+		}
+		var wpStatus string
+		if err := h.db.QueryRow(`SELECT status FROM pipeline_waitpoints WHERE token = ?`, token).Scan(&wpStatus); err != nil {
+			t.Fatal(err)
+		}
+		if wpStatus != "cancelled" {
+			t.Errorf("waitpoint status = %q, want cancelled", wpStatus)
+		}
+	})
+
+	t.Run("a resume that finished before the fence is not overwritten", func(t *testing.T) {
+		h, _, userID, wsID := runsHandlerRig(t)
+		h.SetRunRegistry(pipeline.NewRunRegistry())
+		const runID = "prn_resume_finished"
+		runStore, _, _ := seedParkedRun(t, h, wsID, runID)
+		h.parkedCancelStage = func(stage, id string) {
+			if stage != "before-fence" {
+				return
+			}
+			if err := runStore.MarkTerminal(context.Background(), pipeline.MarkTerminalInput{RunID: id, Status: pipeline.RunStatusCompleted}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		rr := cancelRunRequest(t, h, userID, wsID, runID)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("status = %d body=%s, want 404 (already finished)", rr.Code, rr.Body.String())
+		}
+		rec, err := runStore.Get(context.Background(), runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rec.Status != pipeline.RunStatusCompleted {
+			t.Errorf("run status = %q, want completed", rec.Status)
+		}
+	})
+}
+
+func cancelRunRequest(t *testing.T, h *PipelineHandler, userID, wsID, runID string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/pipelines/runs/"+runID+"/cancel", nil),
+		userID, wsID, "OWNER",
+	)
+	req.SetPathValue("runId", runID)
+	rr := httptest.NewRecorder()
+	h.CancelRun(rr, req)
+	return rr
 }

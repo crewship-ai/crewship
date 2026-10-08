@@ -1356,6 +1356,8 @@ crewship routine cancel run_cmovn40h30001c57bb667
 
 Signals the run goroutine. Run terminates at the next safe point; the row is `cancelled` and the `pipeline.run.failed` journal payload has status `CANCELLED`. Completed effects are not undone. Exceeding the run’s own deadline remains `failed` / `FAILED` in both records. Already-terminal runs return 409.
 
+A run parked at a waitpoint (`waiting`) is cancelled in place: the row becomes `cancelled` and its pending approvals stop being actionable. If an approval, signal or event resumes the same run at that moment, exactly one side wins. Either the resume is refused and later resumes find the run cancelled, or the resumed run is cancelled before its next step and records `cancelled` itself. The response carries `"parked": true` when the cancel itself recorded the row; otherwise the run records `cancelled` when it stops.
+
 ---
 
 ## `crewship routine tree <run_id>`
