@@ -276,10 +276,15 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 	})
 	// Run has returned; release busy admission before waiting on a writer gate.
 	adm.Done()
-	if runErr != nil {
+	if runErr != nil && (res == nil || res.RunID == "") {
 		d.logger.Warn("pending dispatcher: run failed", "error", runErr, "pending_id", pr.ID)
 		d.recordDispatchError(ctx, pr, runErr)
 		return
+	}
+	if runErr != nil {
+		// A run exists, so its own record carries the failure; link it
+		// rather than requeue a start that already ran.
+		d.logger.Warn("pending dispatcher: run failed after it started", "error", runErr, "pending_id", pr.ID, "run_id", res.RunID)
 	}
 	if res == nil || res.RunID == "" {
 		d.recordDispatchError(ctx, pr, errors.New("executor returned no run receipt"))
@@ -316,14 +321,22 @@ func (d *PendingRunDispatcher) recordDispatchError(ctx context.Context, pr Pendi
 	now := d.now().UTC()
 	status, reason := "failed", "Deferred start could not be dispatched. Check server logs using the pending ID."
 	var next *time.Time
-	if errors.Is(runErr, ErrConcurrencyLimitReached) {
+	// A dispatch cut short by cancellation (server shutdown or deploy) never
+	// produced a run, so it is retried like a capacity refusal instead of
+	// being finalized as failed. fireOne only gets here without a run ID.
+	interrupted := errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || ctx.Err() != nil
+	if errors.Is(runErr, ErrConcurrencyLimitReached) || interrupted {
+		waiting := "Waiting for routine execution capacity."
+		if interrupted && !errors.Is(runErr, ErrConcurrencyLimitReached) {
+			waiting = "Dispatch was interrupted before the run started; it will be retried."
+		}
 		switch {
 		case pr.ExpiresAt != nil && !now.Before(*pr.ExpiresAt):
 			status, reason = "expired", "Deferred start expired before execution capacity became available."
 		case pr.ExpiresAt == nil && pr.DispatchAttempts >= maxPendingAttemptsWithoutTTL:
 			reason = "Execution capacity remained unavailable after 10 dispatch attempts; no TTL was supplied."
 		default:
-			status, reason = "pending", "Waiting for routine execution capacity."
+			status, reason = "pending", waiting
 			at := now.Add(pendingCapacityBackoff(pr.DispatchAttempts))
 			if pr.ExpiresAt != nil && at.After(*pr.ExpiresAt) {
 				at = *pr.ExpiresAt
