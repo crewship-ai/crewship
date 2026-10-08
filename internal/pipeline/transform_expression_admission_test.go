@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -26,5 +27,37 @@ func TestTransformExpression_AdmissionDoesNotRequireRuntimeData(t *testing.T) {
 				t.Fatalf("valid expression rejected before inputs exist: %v", err)
 			}
 		})
+	}
+}
+
+func TestTransformExpression_PreservesWhitespaceInArrayIndex(t *testing.T) {
+	for _, expression := range []string{".[ 0 ]", ".items[ 0 ].value"} {
+		dsl := &DSL{Name: "spaced-index", Agentless: true, Steps: []Step{{ID: "extract", Type: StepTransform, Transform: &TransformStep{Input: `{"items":[{"value":7}]}`, Expression: expression}}}}
+		if err := Validate(dsl, nil, nil); err != nil {
+			t.Fatalf("legacy index rejected: %v", err)
+		}
+		var value any = []any{7}
+		if strings.HasPrefix(expression, ".items") {
+			value = map[string]any{"items": []any{map[string]any{"value": 7}}}
+		}
+		output, err := evalTransform(value, expression)
+		if err != nil || output != "7" {
+			t.Fatalf("legacy index output=%q err=%v", output, err)
+		}
+	}
+}
+
+func TestTransformExpression_LegacySkippedStepDoesNotAbortRun(t *testing.T) {
+	definition := `{"name":"legacy-skipped","agentless":true,"steps":[{"id":"unused","type":"transform","if":"false","transform":{"input":"{}","expression":".a + .b"}},{"id":"result","type":"transform","transform":{"input":"ok","expression":"."}}]}`
+	dsl, err := Parse([]byte(definition))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(dsl, nil, nil); err == nil {
+		t.Fatal("authoring must reject unsupported syntax, including skipped branches")
+	}
+	got := runToTerminal(t, "legacy-skipped", definition, newMockRunner(), context.Background())
+	if got.rec.Status != RunStatusCompleted || got.rec.Output != "ok" {
+		t.Fatalf("stored skipped branch blocked execution: %+v", got.rec)
 	}
 }

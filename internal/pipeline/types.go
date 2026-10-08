@@ -624,7 +624,7 @@ func ValidRiskLevel(s string) bool {
 // The shared parser and evaluator live in runner_transform.go.
 type TransformStep struct {
 	Input      string `json:"input"`      // template-substituted; usually {{ steps.X.output }}
-	Expression string `json:"expression"` // jq-flavored projection
+	Expression string `json:"expression"` // field/array path or standalone supported operation
 }
 
 // NotifyStep is a non-blocking inbox notification (Type == StepNotify).

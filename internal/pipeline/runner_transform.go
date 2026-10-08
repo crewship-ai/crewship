@@ -189,7 +189,7 @@ func parseTransformPath(expression string) ([]transformPathPart, error) {
 			if end < 0 {
 				return nil, fmt.Errorf("unclosed [ in expression")
 			}
-			index, err := strconv.Atoi(rest[1:end])
+			index, err := strconv.Atoi(strings.TrimSpace(rest[1:end]))
 			if err != nil || index < 0 {
 				return nil, fmt.Errorf("array index %q must be a non-negative integer", rest[1:end])
 			}

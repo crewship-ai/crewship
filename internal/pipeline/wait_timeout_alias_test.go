@@ -83,3 +83,17 @@ func TestWaitTimeoutAlias_DatetimeExpires(t *testing.T) {
 		t.Fatalf("nested datetime timeout: elapsed=%s err=%v", time.Since(started), err)
 	}
 }
+
+func TestWaitTimeoutAlias_DatetimeExecutorFailsWithFailureHook(t *testing.T) {
+	step := fmt.Sprintf(`{"id":"s1","type":"wait","on_fail":"abort","wait":{"kind":"datetime","until":%q,"timeout_sec":1}}`, time.Now().Add(time.Hour).UTC().Format(time.RFC3339))
+	got := runToTerminal(t, "datetime-alias-executor", failingStepDSL("datetime-alias-executor", step), newMockRunner(), context.Background())
+	if got.rec.Status != RunStatusFailed || got.rec.FailedAtStep != "s1" {
+		t.Fatalf("datetime timeout misclassified: %+v", got.rec)
+	}
+	if got.rec.ErrorFingerprint == "" || got.notified != 1 || got.hookRuns != 1 {
+		t.Fatalf("timeout lost failure effects: fingerprint=%q notifier=%d hook=%d", got.rec.ErrorFingerprint, got.notified, got.hookRuns)
+	}
+	if got.runLevelStatus != "FAILED" {
+		t.Fatalf("journal terminal status=%q", got.runLevelStatus)
+	}
+}

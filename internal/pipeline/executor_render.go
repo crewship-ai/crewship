@@ -32,8 +32,10 @@ type secretScrub struct {
 	values []string
 }
 
-// add also tracks wire representations: JSON response bodies and URL errors
-// can contain an escaped credential without containing its literal value.
+// add tracks common wire representations as best-effort redaction: JSON
+// response bodies and URL errors can escape the literal credential. Arbitrary
+// derived forms (e.g. base64/hex) are not covered. Short credentials can redact
+// unrelated substrings; do not weaken protection with a minimum-length cutoff.
 func (s *secretScrub) add(value string) {
 	if value == "" {
 		return

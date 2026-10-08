@@ -731,6 +731,12 @@ gates at run time, checked pre-flight AND on every redirect hop
 A blocked request fails the step with a structured error naming the step,
 the host, and which layer denied it — before any bytes leave the server.
 
+**Response redaction.** Known resolved credential values and their common JSON
+and URL encodings are redacted from HTTP results and request errors. This is
+best-effort protection, not detection of arbitrary derived values such as base64,
+hex or fragments. Upstream services should not echo credentials. Very short
+credentials may also redact unrelated output substrings.
+
 **Credential injection.** `credential_ref.type` is resolved at run time
 against the workspace credential vault by **type** (case-insensitive match
 on the vault type, e.g. `API_KEY`, `GENERIC_SECRET`), never by ID — so a
@@ -995,13 +1001,22 @@ The `files:` block works in **both** crew manifest shapes — a standalone `kind
 
 ### `transform`
 
+**Transform compatibility.** Transform supports field/array paths and standalone
+`length`, `keys`, `tostring`, `@json`/`tojson`; use `code` for arithmetic or pipes.
+Field names are literal, including `-`, `?` and `!`; this is not a full jq parser.
+Whitespace around an array index is accepted. Save and draft validation check
+all branches, including inactive ones. Existing definitions with unsupported
+syntax need a manual correction before re-saving or draft testing; there is no
+automatic migration. Ordinary execution of an existing routine still skips
+inactive branches and reports an error if an unsupported expression is reached.
+
 ```json
 {
-  "id": "extract_emails",
+  "id": "extract_email",
   "type": "transform",
   "transform": {
     "input": "{{ steps.fetch.output }}",
-    "expression": ".items[] | .email"
+    "expression": ".items[0].email"
   }
 }
 ```

@@ -343,6 +343,11 @@ The signature is required. With `X-Crewship-Timestamp: <unix-seconds>`, sign
 templates or merge payload fields into top-level inputs, and it cannot override
 those three fields. Declared form inputs are validated before accepting a new
 delivery: invalid inputs return `400` without reserving a delivery ID or run ID.
+A malformed target definition returns `409`. These signed, rate-limited
+rejections are recorded as failed deliveries and increment the webhook's failure
+streak; repeated failures can alert managers, and a successful delivery resets
+the streak. Delivery health includes sender configuration/data errors, not only
+server execution errors.
 `Idempotency-Key` (or `X-Crewship-Event-ID`) can select the
 deduplication identity; identical signed deliveries also deduplicate.
 

@@ -45,6 +45,15 @@ func TestFireWebhook_ValidatesInputsBeforeAcceptance(t *testing.T) {
 			t.Fatal("rejected request must not promise a run")
 		}
 	}
+	// Sender validation errors count as failed delivery health, even though
+	// no run or delivery reservation was accepted.
+	var failures int
+	if err := db.QueryRow(`SELECT consecutive_fire_failures FROM pipeline_webhooks WHERE id=?`, wh.ID).Scan(&failures); err != nil {
+		t.Fatal(err)
+	}
+	if failures != 3 {
+		t.Fatalf("invalid delivery streak=%d, want 3", failures)
+	}
 	// Fixing the webhook inputs must allow the SAME delivery id to execute:
 	// rejected requests must not consume its idempotency reservation.
 	if _, err := db.Exec(`UPDATE pipeline_webhooks SET inputs_template='{"qty":9}' WHERE id=?`, wh.ID); err != nil {
@@ -71,5 +80,38 @@ func TestFireWebhook_ValidatesInputsBeforeAcceptance(t *testing.T) {
 	}
 	if id, status := waitForWebhookFire(t, db, wh.ID, time.Second); id != accepted.RunID || status != "COMPLETED" {
 		t.Fatalf("webhook record = %s/%s", id, status)
+	}
+	if err := db.QueryRow(`SELECT consecutive_fire_failures FROM pipeline_webhooks WHERE id=?`, wh.ID).Scan(&failures); err != nil {
+		t.Fatal(err)
+	}
+	if failures != 0 {
+		t.Fatalf("successful delivery did not clear streak: %d", failures)
+	}
+}
+
+func TestFireWebhook_ValidatesInputsBeforeAcceptance_MalformedTarget(t *testing.T) {
+	h, db, _, wsID := webhookHandlerRig(t)
+	h.SetRunner(pipelineAgentRunnerStub{})
+	seedWebhookPipeline(t, db, wsID, "pln_broken", "broken-target")
+	if _, err := db.Exec(`UPDATE pipelines SET definition_json='{' WHERE id='pln_broken'`); err != nil {
+		t.Fatal(err)
+	}
+	wh := seedWebhookRow(t, db, wsID, "pln_broken", "fixture-signing-key", true)
+	t.Cleanup(func() { h.webhookDispatchWG.Wait() })
+	body := `{}`
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token, strings.NewReader(body))
+	req.SetPathValue("token", wh.Token)
+	req.Header.Set("X-Crewship-Signature", covPSWSign("fixture-signing-key", body))
+	rr := httptest.NewRecorder()
+	h.FireWebhook(rr, req)
+	if rr.Code != http.StatusConflict || strings.Contains(rr.Body.String(), "run_id") {
+		t.Fatalf("malformed target response=%d %s", rr.Code, rr.Body.String())
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pipeline_runs WHERE pipeline_id='pln_broken'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("malformed target created %d runs", count)
 	}
 }
