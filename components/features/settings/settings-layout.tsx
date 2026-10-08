@@ -28,6 +28,7 @@ interface Org {
   id: string
   name: string
   slug: string
+  logo_url?: string | null
   preferred_language: string | null
   _count: { crews: number; agents: number; members: number }
 }
@@ -293,12 +294,14 @@ function SettingsPage() {
           workspaceId={workspaceId}
           orgName={org.name}
           orgSlug={org.slug}
+          logoUrl={org.logo_url ?? null}
           preferredLanguage={org.preferred_language}
           agentCount={org._count?.agents ?? 0}
           crewCount={org._count?.crews ?? 0}
           memberCount={org._count?.members ?? 0}
           role={role}
           onUpdated={handleOrgUpdated}
+          onLogoChange={(logo_url) => setOrg((prev) => (prev ? { ...prev, logo_url } : prev))}
           onDelete={() => { window.location.href = "/" }}
         />
       )

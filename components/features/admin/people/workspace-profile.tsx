@@ -62,7 +62,7 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted }: {
     <div className="space-y-4" data-slot="workspace-profile">
       <section aria-label={ws.name} className="overflow-hidden rounded-card border border-border bg-card">
         <div className="flex flex-wrap items-start gap-4 p-4">
-          <WorkspaceTile id={ws.id} name={ws.name} size="lg" />
+          <WorkspaceTile id={ws.id} name={ws.name} size="lg" logoUrl={ws.logo_url} />
           <div className="min-w-0 flex-1">
             <h2 className="flex flex-wrap items-baseline gap-2 text-lg font-semibold tracking-[-0.01em]">
               {ws.name}<span className="font-mono text-[12px] font-normal text-muted-foreground">{ws.slug}</span>

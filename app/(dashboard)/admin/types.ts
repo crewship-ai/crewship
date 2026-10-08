@@ -14,6 +14,8 @@ export interface AdminOrg {
   name: string
   slug: string
   created_at: string
+  /** The workspace's uploaded logo (#3005), or null. */
+  logo_url?: string | null
   _count_members: number
   _count_agents: number
   _count_crews: number

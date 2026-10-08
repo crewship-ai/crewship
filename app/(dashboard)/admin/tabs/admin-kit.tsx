@@ -34,7 +34,12 @@ export function workspaceColor(id: string): string {
 }
 export const initials = (name: string) => name.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?"
 
-export function WorkspaceTile({ id, name, size = "md" }: { id: string; name: string; size?: "xs" | "md" | "lg" }) {
+export function WorkspaceTile({ id, name, size = "md", logoUrl }: { id: string; name: string; size?: "xs" | "md" | "lg"; logoUrl?: string | null }) {
+  const box = size === "xs" ? "h-5 w-5 rounded-[6px]" : size === "lg" ? "h-10 w-10 rounded-xl" : "h-7 w-7 rounded-lg"
+  if (logoUrl) {
+    // The workspace's own logo (#3005) when it has one.
+    return <img src={logoUrl} alt="" title={name} aria-hidden className={cn("shrink-0 object-cover", box)} />
+  }
   return (
     <span
       title={name}
