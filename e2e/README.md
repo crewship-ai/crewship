@@ -170,3 +170,13 @@ The workflows bucket also verifies state written by a routine, read by its next
 run, repaired through the operator API, and removed/cleared. It checks budget
 set/clear and negative-value validation with a zero-cost routine; enforcement
 against actual paid spend still requires a separate authorized model scenario.
+
+Harness failure-path checks (simulated subprocess/API failures, no real run):
+
+```bash
+crewship-heavy env PYTHONDONTWRITEBYTECODE=1 python3 e2e/routines_live_contracts_test.py
+```
+
+Cleanup attempts all fixture resources even when cancellation, logout or a
+workspace deletion fails. Temporary credential removal runs in `finally`;
+the scenario reports cleanup failures after all attempts.

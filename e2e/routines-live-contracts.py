@@ -159,7 +159,9 @@ class Suite:
         warm = sorted(x["evidence"]["duration_ms"] for x in successful if x["test_id"].startswith("RTN-REPEAT-") and "duration_ms" in x.get("evidence", {}))
         if warm:
             report["warm_execution_ms"] = dict(samples=len(warm), p50=warm[(len(warm)-1)//2], p95=warm[max(0, (95*len(warm)+99)//100-1)])
-        report["not_measured"] = ["queue latency", "Inbox delivery latency", "UI display latency"]
+        report["not_measured"] = ["model-agent queue latency", "Inbox delivery latency", "UI display latency"]
+        if not any(x["test_id"] == "RTN-QUEUE-PRIORITY-001" for x in successful):
+            report["not_measured"].append("deferred dispatcher queue latency")
         tmp = self.output / "results.json.tmp"
         tmp.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
         tmp.replace(self.output / "results.json")
@@ -210,22 +212,37 @@ class Suite:
         self.persist()
 
     def cleanup(self):
-        for pending_id in self.deferred:
-            self.api("POST", f"/api/v1/workspaces/{self.workspace}/pipelines/pending/{pending_id}/cancel", {}, (200, 404))
-        for run_id in self.pending:
-            self.api("POST", f"/api/v1/workspaces/{self.workspace}/pipelines/runs/{run_id}/cancel", {}, (200, 409))
-        if self.member_config:
-            proc = self.cli("logout", member=True)
-            assert proc.returncode == 0, "test member logout failed"
-        for workspace_id, slug in self.extra_workspaces:
-            proc = self.cli("workspace", "delete", workspace_id, "--confirm", slug, "--yes")
-            assert proc.returncode == 0, "secondary fixture workspace cleanup failed"
-        if self.workspace:
-            # Exact ID plus the generated slug confirmation: only this workspace.
-            proc = self.cli("workspace", "delete", self.workspace, "--confirm", self.prefix, "--yes")
-            assert proc.returncode == 0, "own workspace cleanup failed"
-        if self.member_tmp:
-            self.member_tmp.cleanup()
+        errors = []
+        def attempt(label, fn):
+            try:
+                fn()
+            except Exception as exc:
+                # Error bodies can carry credentials. Keep only the action and
+                # exception class; per-request evidence retains HTTP status.
+                errors.append(label + ": " + type(exc).__name__)
+
+        def command(label, *args, **kwargs):
+            proc = self.cli(*args, **kwargs)
+            if proc.returncode:
+                raise AssertionError(label + " failed")
+
+        try:
+            for pending_id in self.deferred:
+                attempt("cancel deferred fixture", lambda pending_id=pending_id: self.api("POST", f"/api/v1/workspaces/{self.workspace}/pipelines/pending/{pending_id}/cancel", {}, (200, 404)))
+            for run_id in self.pending:
+                attempt("cancel running fixture", lambda run_id=run_id: self.api("POST", f"/api/v1/workspaces/{self.workspace}/pipelines/runs/{run_id}/cancel", {}, (200, 409)))
+            if self.member_config:
+                attempt("member logout", lambda: command("member logout", "logout", member=True))
+            for workspace_id, slug in self.extra_workspaces:
+                attempt("secondary workspace cleanup", lambda workspace_id=workspace_id, slug=slug: command("secondary workspace cleanup", "workspace", "delete", workspace_id, "--confirm", slug, "--yes"))
+            if self.workspace:
+                # Exact ID plus generated slug confirmation: only our fixture.
+                attempt("own workspace cleanup", lambda: command("own workspace cleanup", "workspace", "delete", self.workspace, "--confirm", self.prefix, "--yes"))
+        finally:
+            if self.member_tmp:
+                attempt("temporary credentials removal", self.member_tmp.cleanup)
+        if errors:
+            raise AssertionError("; ".join(errors))
 
     def execute(self):
         for i, case in enumerate(recipes(), 1):
