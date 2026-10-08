@@ -6285,6 +6285,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Long routine runs no longer drop out of the overview and the Activity menu.** Running and waiting runs load from their own list instead of the 200 newest runs. When those 200 runs do not reach back seven days, the routine run summary reads "newest N runs · since …" instead of "7d"; partial and needs-a-person results count as finished, not as successes. The run detail shows the result and next step before provenance and evidence. (#3011)
 
+- **Every accepted deferred routine start now says what became of it in the UI.** The routine's Plan view lists waiting starts with their state, including waiting for a free slot with tries and the earliest next try, and recent starts that left the queue as Started (with the run link once recorded), Did not run or Expired with the reason, or Removed. The overview names accepted starts that did not run in the last seven days and how many wait for a slot. Requires the receipt API from #3015. (#3011)
+
 ## [1.0.0-rc.1] — 2026-07-12
 
 ### Security
