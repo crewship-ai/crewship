@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -200,5 +201,58 @@ func TestAfterRun_RetryStandsInForTheInterruptedRun(t *testing.T) {
 	h.svc.wg.Wait()
 	if hits.Load() != 1 {
 		t.Fatalf("pings = %d, want 1 once the retry succeeded", hits.Load())
+	}
+}
+
+// Staleness is per workspace: a plan over two workspaces is stale while either
+// has gone without a good backup for too long, even if the other ran an hour
+// ago. Judging by the plan's newest good run let A's success hide B.
+func TestCheckStale_OneWorkspaceWithoutABackupKeepsThePlanStale(t *testing.T) {
+	h := newHarness(t, "2026-10-01T02:00:00Z")
+	p := h.plan(func(p *Plan) { p.WorkspaceIDs = []string{"ws_a", "ws_b"} })
+	if _, err := h.db.Exec(`UPDATE backup_plans SET next_run_at = '2099-01-01T00:00:00Z' WHERE id = ?`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	stale := func() []Incident {
+		var out []Incident
+		for _, in := range incidentsOf(t, h) {
+			if in.Kind == IncidentStale {
+				out = append(out, in)
+			}
+		}
+		return out
+	}
+	check := func(at string) {
+		h.clock.Set(mustTime(t, at))
+		h.svc.lastStale = time.Time{}
+		h.svc.checkStale(context.Background())
+	}
+
+	// Both workspaces back up on the 1st; then only A keeps backing up.
+	due := mustTime(t, "2026-10-01T03:00:00Z")
+	h.clock.Set(mustTime(t, "2026-10-01T03:05:00Z"))
+	h.finish(h.queued(p, "ws_a", &due, mustTime(t, "2026-10-01T03:00:20Z")), StatusDone, p)
+	h.finish(h.queued(p, "ws_b", &due, mustTime(t, "2026-10-01T03:00:20Z")), StatusDone, p)
+	due2 := mustTime(t, "2026-10-02T15:00:00Z")
+	h.clock.Set(mustTime(t, "2026-10-02T15:05:00Z"))
+	h.finish(h.queued(p, "ws_a", &due2, mustTime(t, "2026-10-02T15:00:20Z")), StatusDone, p)
+	h.svc.wg.Wait()
+
+	check("2026-10-02T16:00:00Z") // B's newest is 37 h old; A's is 1 h old
+	got := stale()
+	if len(got) != 1 || got[0].State != "open" {
+		t.Fatalf("stale = %+v, want one open incident while ws_b has no recent backup", got)
+	}
+	if !strings.Contains(got[0].Message, "no backup for over 36 hours") {
+		t.Fatalf("message = %q", got[0].Message)
+	}
+
+	// B backs up: nothing is stale any more.
+	h.clock.Set(mustTime(t, "2026-10-02T16:05:00Z"))
+	h.finish(h.queued(p, "ws_b", nil, mustTime(t, "2026-10-02T16:00:20Z")), StatusDone, p)
+	h.svc.wg.Wait()
+	check("2026-10-02T16:10:00Z")
+	if got := stale(); len(got) != 1 || got[0].State != "resolved" {
+		t.Fatalf("stale = %+v, want resolved once ws_b backed up", got)
 	}
 }

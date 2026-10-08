@@ -357,7 +357,7 @@ func (s *Service) checkStale(ctx context.Context) {
 			s.resolve(ctx, p.ID, IncidentStale)
 			continue
 		}
-		last := lastGoodRun(ctx, s.DB, p.ID)
+		last, who := s.stalestTarget(ctx, p)
 		since := last
 		if since == nil {
 			if t, err := parseTS(p.CreatedAt); err == nil {
@@ -368,9 +368,48 @@ func (s *Service) checkStale(ctx context.Context) {
 			s.resolve(ctx, p.ID, IncidentStale)
 			continue
 		}
-		msg := fmt.Sprintf("%s: no backup for over %d hours. Last successful backup: %s.", p.Name, set.StaleAlertHours, Ago(last, now))
+		about := ""
+		if who != "" {
+			about = " (" + who + ")"
+		}
+		msg := fmt.Sprintf("%s: no backup for over %d hours%s. Last successful backup: %s.", p.Name, set.StaleAlertHours, about, Ago(last, now))
 		s.raise(ctx, set, p.ID, IncidentStale, msg, "", "", false)
 	}
+}
+
+// stalestTarget is the newest good run of the plan's least recently backed-up
+// target, and that workspace's name ("" for an instance plan). A plan that runs
+// once per workspace is as fresh as its stalest workspace: judging by the
+// plan's newest run let one workspace's success hide another going without a
+// backup. A target that never had a good run returns nil.
+func (s *Service) stalestTarget(ctx context.Context, p *Plan) (*time.Time, string) {
+	targets, err := s.Targets(ctx, p)
+	if err != nil || len(targets) == 0 || (len(targets) == 1 && targets[0] == "") {
+		return lastGoodRun(ctx, s.DB, p.ID), ""
+	}
+	var stalest *time.Time
+	who, found := "", false
+	for _, ws := range targets {
+		var ended sql.NullString
+		if err := s.DB.QueryRowContext(ctx, `SELECT MAX(ended_at) FROM backup_runs WHERE status IN ('done','incomplete') AND plan_id = ? AND workspace_id = ?`, p.ID, ws).Scan(&ended); err != nil {
+			continue
+		}
+		t := optTime(ended)
+		if !found || t == nil || (stalest != nil && t.Before(*stalest)) {
+			stalest, who, found = t, ws, true
+		}
+		if t == nil {
+			break
+		}
+	}
+	if !found {
+		return lastGoodRun(ctx, s.DB, p.ID), ""
+	}
+	var name string
+	if s.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = ?`, who).Scan(&name) == nil && name != "" {
+		who = name
+	}
+	return stalest, who
 }
 
 // DrillReminderPeriod is how old the newest test restore may get before
