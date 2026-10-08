@@ -109,7 +109,7 @@ export function UserDataActions({ userId, email, workspaceId, onErased }: UserDa
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="max-w-md text-[11px] leading-snug text-muted-foreground">
+      <p className="max-w-md text-label leading-snug text-muted-foreground">
         If this person asks for a copy of what you hold about them, export it.
         If they ask to be forgotten, erase it. Both are written to an
         append-only trail — who did it, why, what it touched.

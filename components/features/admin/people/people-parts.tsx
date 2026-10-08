@@ -60,8 +60,8 @@ export function PersonLabel({ person, sub }: { person: Person; sub?: React.React
     <span className="flex min-w-0 items-center gap-2.5">
       <PersonAvatar person={person} />
       <span className="min-w-0">
-        <span className="block truncate text-[13px]">{displayName(person)}</span>
-        <span className="block truncate text-[11px] text-muted-foreground">{sub ?? person.email}</span>
+        <span className="block truncate text-control">{displayName(person)}</span>
+        <span className="block truncate text-label text-muted-foreground">{sub ?? person.email}</span>
       </span>
     </span>
   )
@@ -81,8 +81,8 @@ export function SetupLinkBox({ url, expiresAt, onDone }: { url: string; expiresA
     <div className="mx-4 my-3 flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-primary/45 bg-primary/[0.06] px-3 py-2" data-slot="setup-link">
       <Link2 className="h-3.5 w-3.5 shrink-0 text-primary-hover" />
       <Input readOnly value={url} aria-label="Setup link" onFocus={(e) => e.currentTarget.select()}
-        className="h-7 min-w-0 flex-1 border-none bg-transparent px-0 font-mono text-[11px] text-primary-hover shadow-none focus-visible:ring-0" />
-      <span className="text-[11px] text-muted-foreground">valid {daysUntil(expiresAt)} days · shown once</span>
+        className="h-7 min-w-0 flex-1 border-none bg-transparent px-0 font-mono text-micro text-primary-hover shadow-none focus-visible:ring-0" />
+      <span className="text-label text-muted-foreground">valid {daysUntil(expiresAt)} days · shown once</span>
       <Button size="xs" variant="outline" onClick={copy}><Copy />Copy</Button>
       {onDone && <Button size="xs" variant="ghost" onClick={onDone}>Done</Button>}
     </div>
@@ -103,7 +103,7 @@ export function InlineConfirm({ message, confirmLabel, onConfirm, onCancel, type
   const id = React.useId()
   const ok = !typeToConfirm || typed.trim() === typeToConfirm
   return (
-    <div role="alert" className="flex flex-wrap items-center gap-2 px-4 pb-3 text-[11.5px]">
+    <div role="alert" className="flex flex-wrap items-center gap-2 px-4 pb-3 text-label">
       <span className="min-w-0 flex-1 text-warn">{message}</span>
       {typeToConfirm && (
         <>

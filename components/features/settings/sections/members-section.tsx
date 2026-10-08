@@ -149,7 +149,7 @@ function RoleLegend() {
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 px-2 gap-1.5 text-[11px] text-muted-foreground"
+          className="h-7 px-2 gap-1.5 text-label text-muted-foreground"
           aria-label="What do the roles mean?"
         >
           <HelpCircle className="size-3.5" />
@@ -162,7 +162,7 @@ function RoleLegend() {
         </div>
         {roleSummaries.map((item, idx) => (
           <SettingsRow key={item.role} label={item.role} border={idx < roleSummaries.length - 1}>
-            <span className="text-[11px] text-muted-foreground text-right">{item.summary}</span>
+            <span className="text-label text-muted-foreground text-right">{item.summary}</span>
           </SettingsRow>
         ))}
       </PopoverContent>
@@ -205,7 +205,7 @@ function MemberRoleControl({
   const staticBadge = (
     <Badge
       variant="outline"
-      className={cn("text-[10px] font-medium", roleCls[member.role] ?? "")}
+      className={cn("text-micro font-medium", roleCls[member.role] ?? "")}
     >
       {member.role}
     </Badge>
@@ -389,12 +389,12 @@ function MemberRow({
               email={member.user.email}
               src={member.user.avatar_url}
               className="h-7 w-7"
-              textClassName="text-[10px]"
+              textClassName="text-micro"
             />
             <span className="min-w-0">
               <span className="block truncate text-xs text-foreground">{label}</span>
               {(member.user.full_name ?? "").trim() && (
-                <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground-soft">
+                <span className="mt-0.5 block truncate font-mono text-micro text-muted-foreground-soft">
                   {member.user.email}
                 </span>
               )}
@@ -413,7 +413,7 @@ function MemberRow({
           {showCaps && (
             <CapabilityPips granted={granted} isOwner={isOwner} label={label} />
           )}
-          <span className="w-[52px] text-right font-mono text-[10px] tabular-nums text-muted-foreground">
+          <span className="w-[52px] text-right font-mono text-micro tabular-nums text-muted-foreground">
             {relativeTime(member.created_at)}
           </span>
           <div className="flex w-6 justify-center">
@@ -458,14 +458,14 @@ function MemberRow({
       <CollapsibleContent>
         <div className="bg-muted/20 px-4 pb-3.5 pt-1 pl-9">
           <div className="mb-1.5 mt-2 flex items-baseline gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <span className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">
               Role
             </span>
-            <span className="text-[10px] text-muted-foreground-soft">
+            <span className="text-micro text-muted-foreground-soft">
               what the tier grants before any per-person capability
             </span>
           </div>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-label text-muted-foreground">
             <span className="font-mono text-foreground">{member.role}</span>
             {" — "}
             {roleSummaryByRole[member.role] ?? "Permissions are defined by this role."}
@@ -475,10 +475,10 @@ function MemberRow({
           {showCaps && (
             <>
               <div className="mb-1 mt-3.5 flex items-baseline gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <span className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">
                   Capabilities
                 </span>
-                <span className="text-[10px] text-muted-foreground-soft">
+                <span className="text-micro text-muted-foreground-soft">
                   granted individually on top of the role · applies immediately
                 </span>
               </div>
@@ -599,7 +599,7 @@ export function MembersSection({
           controls are tier-gated. Say so once, quietly — this is a normal
           state for MANAGER/MEMBER/VIEWER, not an error. */}
       {!isAdmin && (
-        <p className="text-[11px] text-muted-foreground px-1">
+        <p className="text-label text-muted-foreground px-1">
           {isManager
             ? "Only admins can invite or remove members."
             : "Only managers and admins can make changes here."}

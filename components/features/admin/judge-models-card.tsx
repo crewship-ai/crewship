@@ -698,18 +698,18 @@ function SlotEditor({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={AUX_CREDENTIAL_NONE} className="text-[11px]">
+              <SelectItem value={AUX_CREDENTIAL_NONE} className="text-label">
                 server&apos;s own key
               </SelectItem>
               {credentials.map((c) => (
-                <SelectItem key={c.id} value={c.id} className="text-[11px]">{c.name}</SelectItem>
+                <SelectItem key={c.id} value={c.id} className="text-label">{c.name}</SelectItem>
               ))}
               {/* A pinned key that is no longer listed — revoked, or from a
                   workspace this view cannot see — stays selectable. Rendering
                   the picker blank would let the next save silently clear it, and
                   this is precisely the row that stopped working. */}
               {pinnedKey !== "" && !credentials.some((c) => c.id === pinnedKey) && (
-                <SelectItem value={pinnedKey} className="text-[11px]">
+                <SelectItem value={pinnedKey} className="text-label">
                   {pinnedKey} (unavailable)
                 </SelectItem>
               )}
@@ -793,7 +793,7 @@ function SlotEditor({
         <span
           role="status"
           className={cn(
-            "max-w-[22rem] text-right text-[10px] leading-snug",
+            "max-w-[22rem] text-right text-micro leading-snug",
             runResult.ok ? "text-success" : "text-warn",
           )}
         >

@@ -1261,7 +1261,7 @@ function GovernanceModelCard({
                         onClick={() => form.set("modelId", m)}
                         disabled={!canEdit}
                         className={cn(
-                          "h-[19px] rounded border px-1.5 font-mono text-[10px] transition-colors",
+                          "h-[19px] rounded border px-1.5 font-mono text-micro transition-colors",
                           m === form.draft.modelId.trim()
                             ? "border-primary/50 bg-primary/[0.12] text-primary/90"
                             : "border-border/60 bg-muted/30 text-muted-foreground hover:border-border hover:text-foreground",

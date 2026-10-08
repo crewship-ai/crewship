@@ -133,16 +133,16 @@ export function BackupsConsole({ page, onNavigate }: {
   const n = workspaces.length
 
   return (
-    <div data-slot="backups-console" data-page={page} className="text-[13px]">
+    <div data-slot="backups-console" data-page={page} className="text-control">
       <BackupsScopeBar mode={mode} scope={scope} onScope={(s) => commit(s, selected)} workspaces={workspaces} selected={selected} onToggle={toggle}
         instanceSummary={`${n} workspace${n === 1 ? "" : "s"}, users, instance settings, container environments`} />
       <div className="mx-auto max-w-5xl space-y-3 p-4 md:p-6">
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2">
           <h2 className="text-sm font-semibold">{head.title}</h2>
-          <span className="text-[13px] text-muted-foreground">{head.sub}</span>
+          <span className="text-control text-muted-foreground">{head.sub}</span>
           {actions && <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto">{actions}</div>}
         </div>
-        {demo && <p className="font-mono text-[10.5px] uppercase tracking-wide text-muted-foreground-soft">Demo data · ?demo=1 · nothing is sent</p>}
+        {demo && <p className="font-mono text-micro uppercase tracking-wide text-muted-foreground-soft">Demo data · ?demo=1 · nothing is sent</p>}
         {page === "overview" && <BackupsOverview ctx={ctx} />}
         {page === "history" && <BackupsHistory ctx={ctx} />}
         {page === "schedules" && <BackupsSchedules ctx={ctx} />}

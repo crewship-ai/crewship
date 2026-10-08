@@ -156,7 +156,7 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
         </SettingsRow>
         {!isOwner && (
           <SettingsRow label="Read-only for your role" border={false}>
-            <span className="text-[11px] text-muted-foreground text-right">
+            <span className="text-label text-muted-foreground text-right">
               Only a workspace OWNER can move this switch — the API refuses everyone else, including
               ADMIN.
             </span>
@@ -164,7 +164,7 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
         )}
         {policyError && (
           <SettingsRow label="Problem" border={false}>
-            <span role="alert" className="text-[11px] text-destructive text-right">{policyError}</span>
+            <span role="alert" className="text-label text-destructive text-right">{policyError}</span>
           </SettingsRow>
         )}
       </SettingsCard>
@@ -190,8 +190,8 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
         ) : (
           holders.map((m) => (
             <SettingsRow key={m.id} label={m.user.full_name || m.user.email} description={m.user.email}>
-              <Badge variant="outline" className="text-[10px] px-1.5">{m.role}</Badge>
-              <Badge variant="outline" className="text-[10px] px-1.5 border-warn/40 text-warn">
+              <Badge variant="outline" className="text-micro px-1.5">{m.role}</Badge>
+              <Badge variant="outline" className="text-micro px-1.5 border-warn/40 text-warn">
                 can reveal
               </Badge>
             </SettingsRow>
@@ -199,7 +199,7 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
         )}
         {holders && holders.length > 2 && (
           <SettingsRow label="" border={false}>
-            <span className="inline-flex items-start gap-1.5 text-[11px] text-warn text-right">
+            <span className="inline-flex items-start gap-1.5 text-label text-warn text-right">
               <AlertTriangle className="mt-[1px] h-3 w-3 shrink-0" />
               {holders.length} people can read secrets in plaintext. The recommendation for a
               corporate workspace is two.
@@ -213,12 +213,12 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
         description="What each class means, and who can move a credential between them."
       >
         <SettingsRow label="Standard" description="Dev tokens, read-only keys.">
-          <span className="text-[11px] text-muted-foreground text-right">
+          <span className="text-label text-muted-foreground text-right">
             Revealable with the full ceremony
           </span>
         </SettingsRow>
         <SettingsRow label="Restricted" description="Production API keys, deploy keys.">
-          <span className="text-[11px] text-muted-foreground text-right">
+          <span className="text-label text-muted-foreground text-right">
             Revealable today; earmarked for a second approver
           </span>
         </SettingsRow>
@@ -226,19 +226,19 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
           label="Sealed"
           description="Production databases, root credentials, anything an agent created."
         >
-          <span className="inline-flex items-center gap-1.5 text-[11px] text-destructive text-right">
+          <span className="inline-flex items-center gap-1.5 text-label text-destructive text-right">
             <ShieldAlert className="h-3 w-3 shrink-0" />
             Never revealable — rotate instead
           </span>
         </SettingsRow>
         <SettingsRow label="Changing a class" description="Raise it at any time; lowering is audited." border={false}>
-          <span className="text-[11px] text-muted-foreground text-right">
+          <span className="text-label text-muted-foreground text-right">
             Manager and up can raise · Owner or Admin can lower
           </span>
         </SettingsRow>
       </SettingsCard>
 
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-label text-muted-foreground">
         Set a credential&rsquo;s class on its detail sheet in Credentials.
       </p>
     </div>

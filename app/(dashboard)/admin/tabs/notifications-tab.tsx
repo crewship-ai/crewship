@@ -173,7 +173,7 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
       </SettingsSummary>
 
       {error ? (
-        <div className="rounded-card border border-border bg-card px-4 py-6 text-center text-[11px] text-muted-foreground">
+        <div className="rounded-card border border-border bg-card px-4 py-6 text-center text-label text-muted-foreground">
           Failed to load providers ({error})
         </div>
       ) : (
@@ -183,7 +183,7 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
           return (
             <SettingsCard key={g.key} icon={CATEGORY_ICON[g.key] ?? Bell} tint={CATEGORY_TINT[g.key] ?? "var(--purple)"}
               title={g.label} description={g.hint || undefined}
-              actions={<span className="font-mono text-[11px] text-muted-foreground">{g.items.filter((p) => p.enabled).length}/{g.items.length} allowed</span>}>
+              actions={<span className="font-mono text-micro text-muted-foreground">{g.items.filter((p) => p.enabled).length}/{g.items.length} allowed</span>}>
               {items.map((p) => {
                 const n = usage[p.provider] ?? 0
                 const name = p.label ?? p.provider
@@ -194,11 +194,11 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
                           draws one click away. */}
                       <ProviderMark provider={p.provider} label={name} className={cn("h-7 w-7", !p.enabled && "opacity-60")} />
                       <span className={cn("min-w-0 flex-1", !p.enabled && "opacity-60")}>
-                        <span className="block text-[13px]">{name}</span>
-                        {p.blurb && <span className="block truncate text-[11px] text-muted-foreground-soft" title={p.blurb}>{p.blurb}</span>}
+                        <span className="block text-control">{name}</span>
+                        {p.blurb && <span className="block truncate text-label text-muted-foreground-soft" title={p.blurb}>{p.blurb}</span>}
                       </span>
                       <span className="flex shrink-0 items-center justify-end gap-2 sm:w-64">
-                        {n > 0 && <span className="rounded-full bg-primary/10 px-1.5 font-mono text-[10.5px] text-primary-hover">{n} channel{n === 1 ? "" : "s"}</span>}
+                        {n > 0 && <span className="rounded-full bg-primary/10 px-1.5 font-mono text-micro text-primary-hover">{n} channel{n === 1 ? "" : "s"}</span>}
                         {!p.enabled && <StatusPill tone="muted" label="Off" />}
                         <Switch
                           checked={p.enabled}
@@ -209,7 +209,7 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
                       </span>
                     </div>
                     {pending === p.provider && (
-                      <div role="alert" className="flex flex-wrap items-center gap-2 px-4 pb-3 text-[11.5px]">
+                      <div role="alert" className="flex flex-wrap items-center gap-2 px-4 pb-3 text-label">
                         <span className="flex-1 text-warn">
                           {n} channel{n === 1 ? "" : "s"} stop delivering if you switch {name} off. Nothing more leaves through it.
                         </span>
@@ -234,14 +234,14 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
 
       <SettingsCard icon={Mail} tint="var(--info)" title="Built-in transports" description="Always available; configured on the server, not switched here">
         <SettingsRow label="Email" description="Resend · set RESEND_API_KEY and RESEND_FROM">
-          <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 text-label text-muted-foreground">
             <StatusDot status={emailConfigured ? "COMPLETED" : emailConfigured === false ? "BLOCKED" : "PENDING"} />
             {emailConfigured === null ? "Unknown" : emailConfigured ? "Ready" : "Not set up"}
             {channels !== null && (usage.email ?? 0) > 0 && ` · ${usage.email} channels`}
           </span>
         </SettingsRow>
         <SettingsRow label="Signed webhooks" description="HTTPS POST with an HMAC signature header">
-          <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 text-label text-muted-foreground">
             <StatusDot status="COMPLETED" />Ready{channels !== null && (usage.webhook ?? 0) > 0 && ` · ${usage.webhook} channels`}
           </span>
         </SettingsRow>

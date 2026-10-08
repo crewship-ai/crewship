@@ -121,7 +121,7 @@ function ScopedSoundSettings({ scope }: { scope: string }) {
         )
       })}
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-        <p role="status" className="text-[11px] text-muted-foreground">{statusText}</p>
+        <p role="status" className="text-label text-muted-foreground">{statusText}</p>
         {preferences.enabled && !ready && (
           <Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={busy} onClick={() => { void activate() }}>Activate audio</Button>
         )}

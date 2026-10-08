@@ -11,11 +11,12 @@ import {
 import { PersonLabel, RoleSelect, StatusChip, roleLabel } from "./people-parts"
 import type { usePeople } from "./use-people"
 import { StatusPill } from "@/components/ui/status-pill"
+import { settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
 
 type Actions = ReturnType<typeof usePeople>["actions"]
 
-const th = "whitespace-nowrap px-3 py-2 text-left text-[11px] font-medium text-muted-foreground"
-const td = "px-3 py-2.5 align-middle"
+const th = settingsTh
+const td = settingsTd
 
 /** People who need a hand, one card each, above the table. */
 export function AttentionStrip({ people, onOpen, actions, busy }: {
@@ -52,20 +53,20 @@ export function PeopleTable({ people, onOpen }: { people: Person[]; onOpen: (id:
   return (
     <section aria-label="People" className="overflow-hidden rounded-card border border-border bg-card">
       <div className="overflow-x-auto">
-        <table className="w-full text-[12.5px]">
-          <thead className="border-b border-border">
+        <table className={settingsTable}>
+          <thead>
             <tr><th className={th}>Person</th><th className={th}>Workspaces</th><th className={th}>Last active</th><th className={th}>Status</th><th className={cn(th, "text-right")}>Sessions</th></tr>
           </thead>
           <tbody>
             {people.map((p) => (
               <tr key={p.id} tabIndex={0} onClick={() => onOpen(p.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(p.id) }}
-                className="cursor-pointer border-b border-border last:border-b-0 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none" data-person={p.id}>
+                className={settingsTableRowLink} data-person={p.id}>
                 <td className={td}><PersonLabel person={p} /></td>
                 <td className={td}>
                   <span className="flex flex-wrap gap-1">
                     {p.memberships.length === 0 && <span className="text-muted-foreground">No workspace</span>}
                     {p.memberships.map((m) => (
-                      <span key={m.workspace_id} className="inline-flex items-center gap-1 rounded-md border border-border py-0.5 pl-0.5 pr-1.5 text-[11px]">
+                      <span key={m.workspace_id} className="inline-flex items-center gap-1 rounded-md border border-border py-0.5 pl-0.5 pr-1.5 text-label">
                         <WorkspaceTile id={m.workspace_id} name={m.name} size="xs" />{m.name}<span className="text-muted-foreground">{roleLabel(m.role)}</span>
                       </span>
                     ))}
@@ -88,8 +89,8 @@ export function WorkspacesTable({ workspaces, people, onOpen }: { workspaces: Wo
   return (
     <section aria-label="Workspaces" className="overflow-hidden rounded-card border border-border bg-card">
       <div className="overflow-x-auto">
-        <table className="w-full text-[12.5px]">
-          <thead className="border-b border-border">
+        <table className={settingsTable}>
+          <thead>
             <tr><th className={th}>Workspace</th><th className={th}>Owner</th><th className={cn(th, "text-right")}>People</th><th className={cn(th, "text-right")}>Crews</th><th className={th}>Runs · 7 d</th><th className={th}>Last activity</th></tr>
           </thead>
           <tbody>
@@ -97,16 +98,16 @@ export function WorkspacesTable({ workspaces, people, onOpen }: { workspaces: Wo
               const owner = ownersOf(people, w.id)[0]
               return (
                 <tr key={w.id} tabIndex={0} onClick={() => onOpen(w.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(w.id) }}
-                  className="cursor-pointer border-b border-border last:border-b-0 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none">
+                  className={settingsTableRowLink}>
                   <td className={td}>
                     <span className="flex items-center gap-2.5"><WorkspaceTile id={w.id} name={w.name} logoUrl={w.logo_url} />
-                      <span><span className="block">{w.name}</span><span className="block font-mono text-[11px] text-muted-foreground">{w.slug}</span></span>
+                      <span><span className="block">{w.name}</span><span className="block font-mono text-micro text-muted-foreground">{w.slug}</span></span>
                     </span>
                   </td>
                   <td className={td}>{owner ? <PersonLabel person={owner} /> : <StatusPill tone="warn" label="No owner" />}</td>
                   <td className={cn(td, "text-right font-mono tabular-nums")}>{w._count_members}</td>
                   <td className={cn(td, "text-right font-mono tabular-nums")}>{w._count_crews}</td>
-                  <td className={td}><span className="inline-flex items-center gap-2"><WeekLine values={w.runs_by_day?.length ? w.runs_by_day : [0]} muted={!w.runs_7d} /><span className="font-mono text-[11px] text-muted-foreground">{w.runs_7d ?? 0}</span></span></td>
+                  <td className={td}><span className="inline-flex items-center gap-2"><WeekLine values={w.runs_by_day?.length ? w.runs_by_day : [0]} muted={!w.runs_7d} /><span className="font-mono text-micro text-muted-foreground">{w.runs_7d ?? 0}</span></span></td>
                   <td className={cn(td, "whitespace-nowrap text-muted-foreground")}>{ago(w.last_activity_at)}</td>
                 </tr>
               )
@@ -131,8 +132,8 @@ export function AccessMatrix({ people, allPeople, workspaces, actions, busy }: {
   return (
     <section aria-label="Access" className="overflow-hidden rounded-card border border-border bg-card">
       <div className="overflow-x-auto">
-        <table className="w-full text-[12.5px]">
-          <thead className="border-b border-border">
+        <table className={settingsTable}>
+          <thead>
             <tr>
               <th className={th}>Person</th>
               {workspaces.map((w) => (
@@ -144,7 +145,7 @@ export function AccessMatrix({ people, allPeople, workspaces, actions, busy }: {
           </thead>
           <tbody>
             {people.map((p) => (
-              <tr key={p.id} className="border-b border-border last:border-b-0">
+              <tr key={p.id}>
                 <td className={td}><PersonLabel person={p} /></td>
                 {workspaces.map((w) => {
                   const role = roleIn(p, w.id)
@@ -164,7 +165,7 @@ export function AccessMatrix({ people, allPeople, workspaces, actions, busy }: {
                         <button type="button" disabled={locked} onClick={() => setEditing(key)}
                           aria-label={`${displayName(p)} in ${w.name}: ${role ? roleLabel(role) : "no access"}`}
                           title={locked ? "The only owner; hand the workspace over first" : `Change ${displayName(p)} in ${w.name}`}
-                          className={cn("min-w-20 rounded-md border border-dashed border-transparent px-2 py-1 text-[11.5px] hover:border-control-border disabled:cursor-default disabled:hover:border-transparent",
+                          className={cn("min-w-20 rounded-md border border-dashed border-transparent px-2 py-1 text-label hover:border-control-border disabled:cursor-default disabled:hover:border-transparent",
                             role ? "text-foreground" : "text-muted-foreground-soft")}>
                           {role ? roleLabel(role) : "—"}
                         </button>

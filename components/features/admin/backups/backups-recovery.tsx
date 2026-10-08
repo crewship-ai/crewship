@@ -8,7 +8,7 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { SettingsCard, SettingsEmpty, SettingsRow, SettingsSegmented, settingsControl } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsEmpty, SettingsRow, SettingsSegmented, settingsControl, settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -237,20 +237,20 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
           <Gate resource={runs} what="Backups">
             {() => pool.length === 0 ? <SettingsEmpty>No backup in this scope yet.</SettingsEmpty> : (
               <div className="overflow-x-auto">
-                <table className="w-full text-xs tabular-nums">
-                  <thead><tr className="border-b border-border text-left text-muted-foreground">
-                    {["Started", "Scope", "Plan", "Size", "Checked to"].map((h) => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}
+                <table className={settingsTable}>
+                  <thead><tr>
+                    {["Started", "Scope", "Plan", "Size", "Checked to"].map((h) => <th key={h} className={settingsTh}>{h}</th>)}
                   </tr></thead>
                   <tbody>
                     {pool.slice(0, 8).map((r) => (
-                      <tr key={r.id} tabIndex={0} className="cursor-pointer border-b border-border last:border-b-0 hover:bg-accent"
+                      <tr key={r.id} tabIndex={0} className={settingsTableRowLink}
                         onClick={() => pick({ path: r.bundle_path!, kind: archiveKind(r) })}
                         onKeyDown={(e) => { if (e.key === "Enter") pick({ path: r.bundle_path!, kind: archiveKind(r) }) }}>
-                        <td className="px-4 py-2">{formatWhen(r.started_at, now)}</td>
-                        <td className="px-4 py-2">{r.scope === "instance" ? "Whole instance" : r.workspace_name ?? "—"}</td>
-                        <td className="px-4 py-2">{runPlanLabel(r)}</td>
-                        <td className="px-4 py-2">{formatSize(r.size_bytes)}</td>
-                        <td className="px-4 py-2 text-muted-foreground">{proofLabel(r.proof_level, r.drill_result)}</td>
+                        <td className={settingsTd}>{formatWhen(r.started_at, now)}</td>
+                        <td className={settingsTd}>{r.scope === "instance" ? "Whole instance" : r.workspace_name ?? "—"}</td>
+                        <td className={settingsTd}>{runPlanLabel(r)}</td>
+                        <td className={settingsTd}>{formatSize(r.size_bytes)}</td>
+                        <td className={cn(settingsTd, "text-muted-foreground")}>{proofLabel(r.proof_level, r.drill_result)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -272,8 +272,8 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
                   className="flex w-full items-start gap-3 border-b border-border px-4 py-2.5 text-left last:border-b-0 hover:bg-accent">
                   <span aria-hidden className={cn("mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full border", target === t.key ? "border-[4px] border-primary" : "border-control-border")} />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[13px] text-foreground">{t.label}</span>
-                    <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{t.about}</span>
+                    <span className="block text-control text-foreground">{t.label}</span>
+                    <span className="mt-0.5 block text-label leading-snug text-muted-foreground">{t.about}</span>
                   </span>
                 </button>
               ))}
@@ -485,18 +485,18 @@ function OffsitePicker({ demo, onPicked, onClose }: { demo: boolean; onPicked: (
                 <SettingsEmpty>No bundle at {data.destination_name}.</SettingsEmpty>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs tabular-nums">
-                    <thead><tr className="border-b border-border text-left text-muted-foreground">
-                      {["Bundle", "Scope", "Size", "Copied", ""].map((h) => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}
+                  <table className={settingsTable}>
+                    <thead><tr>
+                      {["Bundle", "Scope", "Size", "Copied", ""].map((h) => <th key={h} className={settingsTh}>{h}</th>)}
                     </tr></thead>
                     <tbody>
                       {data.copies.map((c) => (
-                        <tr key={c.key} className="border-b border-border last:border-b-0">
-                          <td className="px-4 py-2 font-mono">{c.key}</td>
-                          <td className="px-4 py-2">{c.scope === "instance" ? "Whole instance" : `Workspace ${c.workspace_id ?? ""}`}</td>
-                          <td className="px-4 py-2">{formatSize(c.size)}</td>
-                          <td className="px-4 py-2">{shortDate(new Date(c.modified))}</td>
-                          <td className="px-4 py-2 text-right">
+                        <tr key={c.key}>
+                          <td className={cn(settingsTd, "font-mono")}>{c.key}</td>
+                          <td className={settingsTd}>{c.scope === "instance" ? "Whole instance" : `Workspace ${c.workspace_id ?? ""}`}</td>
+                          <td className={settingsTd}>{formatSize(c.size)}</td>
+                          <td className={settingsTd}>{shortDate(new Date(c.modified))}</td>
+                          <td className={cn(settingsTd, "text-right")}>
                             {c.local && c.local_path
                               ? <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => onPicked(c.local_path!, c.scope)} title={`Already on this server: ${c.local_path}`}>Use</Button>
                               : <Button size="sm" className="h-7 text-xs" disabled={fetching !== null} onClick={() => void fetchOne(c.key, c.scope)}>{fetching === c.key ? "Fetching…" : "Fetch"}</Button>}
@@ -600,18 +600,18 @@ function RestoreTable({ rows, now }: { rows: RestoreRecord[]; now: Date }) {
     <SettingsCard icon={History} title="Restore history" description="Every restore and dry run on this server">
       {rows.length === 0 ? <SettingsEmpty>No restore yet.</SettingsEmpty> : (
         <div className="overflow-x-auto">
-          <table className="w-full text-xs tabular-nums">
-            <thead><tr className="border-b border-border text-left text-muted-foreground">
-              {["When", "Who", "From", "Into", "Result"].map((h) => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}
+          <table className={settingsTable}>
+            <thead><tr>
+              {["When", "Who", "From", "Into", "Result"].map((h) => <th key={h} className={settingsTh}>{h}</th>)}
             </tr></thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="border-b border-border last:border-b-0">
-                  <td className="px-4 py-2">{formatWhen(r.created_at, now)}</td>
-                  <td className="px-4 py-2">{r.actor}</td>
-                  <td className="px-4 py-2">{r.source_scope === "instance" ? "Whole instance" : r.source_name} · {formatSourceDate(r.source_date)}</td>
-                  <td className="px-4 py-2">{r.target}{r.kind === "dry_run" ? " · dry run" : ""}</td>
-                  <td className="px-4 py-2">
+                <tr key={r.id}>
+                  <td className={settingsTd}>{formatWhen(r.created_at, now)}</td>
+                  <td className={settingsTd}>{r.actor}</td>
+                  <td className={settingsTd}>{r.source_scope === "instance" ? "Whole instance" : r.source_name} · {formatSourceDate(r.source_date)}</td>
+                  <td className={settingsTd}>{r.target}{r.kind === "dry_run" ? " · dry run" : ""}</td>
+                  <td className={settingsTd}>
                     <span className="inline-flex items-center gap-2">
                       <StatusPill tone={RESULT_TONE[r.result] ?? "muted"} label={r.result === "ok" ? "done" : r.result} />
                       <span className="text-muted-foreground">{r.result === "partial" ? "report kept" : r.warnings ? `${r.warnings} warning${r.warnings === 1 ? "" : "s"}` : ""}</span>

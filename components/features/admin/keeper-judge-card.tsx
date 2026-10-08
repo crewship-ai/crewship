@@ -78,7 +78,7 @@ function ProvenanceChip({ source }: { source: ConfigSource }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center h-[15px] px-1.5 rounded text-[9px] font-medium uppercase tracking-wide border",
+        "inline-flex items-center h-[15px] px-1.5 rounded text-micro font-medium uppercase tracking-wide border",
         source === "instance"
           ? "text-primary/90 border-primary/30 bg-primary/[0.08]"
           : "text-muted-foreground border-border/60 bg-muted/30",
@@ -98,7 +98,7 @@ function ProvenanceChip({ source }: { source: ConfigSource }) {
 function StepLabel({ n, children }: { n: number; children: React.ReactNode }) {
   return (
     <span className="flex items-center gap-2">
-      <span className="grid place-items-center h-4 w-4 rounded-full bg-muted/60 border border-border/60 text-[9px] font-semibold text-muted-foreground shrink-0">
+      <span className="grid place-items-center h-4 w-4 rounded-full bg-muted/60 border border-border/60 text-micro font-semibold text-muted-foreground shrink-0">
         {n}
       </span>
       <span>{children}</span>
@@ -614,7 +614,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
                     title={sg.label}
                     onClick={() => { form.set("endpoint", sg.url); setConnectResult(null) }}
                     className={cn(
-                      "h-[19px] rounded border px-1.5 font-mono text-[10px] transition-colors",
+                      "h-[19px] rounded border px-1.5 font-mono text-micro transition-colors",
                       sg.url === form.draft.endpoint.trim()
                         ? "border-primary/50 bg-primary/[0.12] text-primary/90"
                         : "border-border/60 bg-muted/30 text-muted-foreground hover:border-border hover:text-foreground",

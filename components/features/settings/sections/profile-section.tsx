@@ -88,7 +88,7 @@ function CopyableText({ value, mono }: { value: string; mono?: boolean }) {
             {value}
           </button>
         </TooltipTrigger>
-        <TooltipContent side="top" className="text-[11px]">
+        <TooltipContent side="top" className="text-label">
           {copied ? <span className="flex items-center gap-1"><Check className="h-3 w-3" /> Copied</span> : <span className="flex items-center gap-1"><Copy className="h-3 w-3" /> Copy</span>}
         </TooltipContent>
       </Tooltip>
@@ -491,8 +491,8 @@ export function ProfileSection({
               )}
             </div>
             {avatarError
-              ? <span className="text-[11px] text-destructive">{avatarError}</span>
-              : <span className="text-[10px] text-muted-foreground">PNG, JPEG, or WebP · max 2MB</span>}
+              ? <span className="text-label text-destructive">{avatarError}</span>
+              : <span className="text-micro text-muted-foreground">PNG, JPEG, or WebP · max 2MB</span>}
           </div>
         </SettingsRow>
         <SettingsRow label="Email">
@@ -511,7 +511,7 @@ export function ProfileSection({
               disabled={nameForm.status === "saving"}
             />
             {/* A format problem belongs under its field; a failed write goes to the corner. */}
-            {nameForm.isDirty && !nameValid && <span className="text-[11px] text-destructive">Name must be 1-100 characters</span>}
+            {nameForm.isDirty && !nameValid && <span className="text-label text-destructive">Name must be 1-100 characters</span>}
           </div>
         </SettingsRow>
         <SaveFooter
@@ -529,7 +529,7 @@ export function ProfileSection({
             <Button
               size="sm"
               variant="ghost"
-              className="h-6 text-[10px] px-2"
+              className="h-6 text-micro px-2"
               onClick={() => { resetPwForm(); setPwOpen(true) }}
             >
               Change
@@ -567,7 +567,7 @@ export function ProfileSection({
                 <Input id="pw-confirm" type="password" value={pwConfirm} autoComplete="new-password"
                   onChange={(e) => setPwConfirm(e.target.value)} className={controlHeight} disabled={pwSaving} />
               </div>
-              {pwError && <p className="text-[11px] text-destructive">{pwError}</p>}
+              {pwError && <p className="text-label text-destructive">{pwError}</p>}
             </div>
           )}
 
@@ -602,7 +602,7 @@ export function ProfileSection({
         )}
         {joinedAt && (
           <SettingsRow label="Joined">
-            <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
+            <span className="text-micro text-muted-foreground font-mono tabular-nums">
               {new Date(joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
             </span>
           </SettingsRow>
@@ -625,35 +625,35 @@ export function ProfileSection({
                     {newToken.tier && (
                       <Badge
                         variant="outline"
-                        className={cn("text-[9px] font-medium px-1.5 py-0 leading-none h-4", tierCls[newToken.tier])}
+                        className={cn("text-micro font-medium px-1.5 py-0 leading-none h-4", tierCls[newToken.tier])}
                       >
                         {newToken.tier === "ADMIN" && <Shield className="h-2.5 w-2.5 mr-0.5" />}
                         {newToken.tier}
                       </Badge>
                     )}
                   </h4>
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-label text-muted-foreground">
                     {newToken.tier === "ADMIN"
                       ? "Admin-tier token — short-lived (≤7d), per-use audited. Treat as a single-use disposable."
                       : "Copy now — it won’t be shown again."}
                   </p>
                 </div>
-                <Button variant="ghost" size="sm" className="h-6 text-[10px] text-muted-foreground" onClick={() => setNewToken(null)}>Dismiss</Button>
+                <Button variant="ghost" size="sm" className="h-6 text-micro text-muted-foreground" onClick={() => setNewToken(null)}>Dismiss</Button>
               </div>
               <div className="bg-muted/60 border border-border/60 rounded-md p-2 flex items-center gap-2">
                 <Terminal className="h-3 w-3 text-muted-foreground shrink-0" />
-                <code className="flex-1 text-[11px] font-mono text-foreground break-all select-all leading-relaxed">
+                <code className="flex-1 text-micro font-mono text-foreground break-all select-all leading-relaxed">
                   {tokenVisible ? newToken.token : newToken.token.slice(0, 18) + "•".repeat(24)}
                 </code>
                 <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={() => setTokenVisible(!tokenVisible)} aria-label={tokenVisible ? "Hide token" : "Show token"}>
                   {tokenVisible ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                 </Button>
-                <Button variant="ghost" size="sm" className={cn("h-6 gap-1 text-[10px]", tokenCopied ? "text-foreground" : "text-muted-foreground")} onClick={() => handleCopyToken(newToken.token)}>
+                <Button variant="ghost" size="sm" className={cn("h-6 gap-1 text-micro", tokenCopied ? "text-foreground" : "text-muted-foreground")} onClick={() => handleCopyToken(newToken.token)}>
                   {tokenCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                   {tokenCopied ? "Copied" : "Copy"}
                 </Button>
               </div>
-              <p className="mt-2 text-[10px] text-muted-foreground font-mono">
+              <p className="mt-2 text-micro text-muted-foreground font-mono">
                 $ crewship auth login --token &lt;token&gt;
               </p>
             </div>
@@ -676,11 +676,11 @@ export function ProfileSection({
         <DeviceSessions onSignOut={onSignOut} currentExpiresIn={expiresIn} />
 
         <div className="flex items-center justify-between px-4 pt-3 pb-1.5 border-t border-border/40">
-          <span className="text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground-soft font-semibold">
+          <span className="text-micro uppercase tracking-[0.1em] text-muted-foreground-soft font-semibold">
             CLI tokens
           </span>
           {!showCreateForm && (
-            <Button size="sm" variant="ghost" className="h-6 px-2 gap-1.5 text-[11px]" onClick={() => setShowCreateForm(true)}>
+            <Button size="sm" variant="ghost" className="h-6 px-2 gap-1.5 text-label" onClick={() => setShowCreateForm(true)}>
               <Plus className="size-3" />New token
             </Button>
           )}
@@ -695,7 +695,7 @@ export function ProfileSection({
               <div className="px-4 py-4 border-b border-border/40 space-y-3">
                 {/* Name */}
                 <div className="space-y-1">
-                  <Label htmlFor="token-name" className="text-[11px]">Token name</Label>
+                  <Label htmlFor="token-name" className="text-label">Token name</Label>
                   <Input
                     id="token-name"
                     value={tokenName} onChange={(e) => setTokenName(e.target.value)}
@@ -709,14 +709,14 @@ export function ProfileSection({
                 {/* Tier + expiry on one row — both are short-list selects */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <Label className="text-[11px] flex items-center gap-1.5">
+                    <Label className="text-label flex items-center gap-1.5">
                       Tier
                       <TooltipProvider delayDuration={0}>
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <span className="cursor-help text-muted-foreground">ⓘ</span>
                           </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-xs text-[11px]">
+                          <TooltipContent side="top" className="max-w-xs text-label">
                             <strong>STANDARD</strong> is the normal CLI token — your full
                             workspace role. <strong>ADMIN</strong> is HMAC-keyed,
                             short-lived (≤7d), per-use audited; OWNER role required to
@@ -742,7 +742,7 @@ export function ProfileSection({
                   </div>
 
                   <div className="space-y-1">
-                    <Label className="text-[11px]">Expires</Label>
+                    <Label className="text-label">Expires</Label>
                     <Select
                       value={String(tokenExpirySeconds)}
                       onValueChange={(v) => setTokenExpirySeconds(Number(v))}
@@ -772,29 +772,29 @@ export function ProfileSection({
                     that resource; the per-action checkboxes stay enabled so the
                     user can mix-and-match (backend's canScope handles both shapes). */}
                 <div className="space-y-1.5">
-                  <Label className="text-[11px] flex items-center justify-between">
+                  <Label className="text-label flex items-center justify-between">
                     <span>Scopes {tokenScopes.size > 0 && <span className="text-muted-foreground">({tokenScopes.size} selected)</span>}</span>
                     {tokenScopes.size > 0 && (
                       <button
                         type="button"
                         onClick={() => setTokenScopes(new Set())}
-                        className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                        className="text-micro text-muted-foreground hover:text-foreground transition-colors"
                       >
                         Clear
                       </button>
                     )}
                   </Label>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-micro text-muted-foreground">
                     Leave empty for unrestricted token (full role permissions).
                     Pick scopes to narrow — e.g. <code className="font-mono">agents:write</code> for a CI bot that only manages agents.
                   </p>
                   <div className="grid grid-cols-3 gap-x-3 gap-y-1.5 border border-border/40 rounded-md p-2.5 bg-muted/20">
                     {SCOPE_GROUPS.map((group) => (
                       <div key={group.resource} className="space-y-1">
-                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                        <div className="text-micro font-semibold text-muted-foreground uppercase tracking-wide">
                           {group.resource}
                         </div>
-                        <label className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                        <label className="flex items-center gap-1.5 text-label cursor-pointer">
                           <Checkbox
                             checked={tokenScopes.has(`${group.resource}:*`)}
                             onCheckedChange={(checked) => {
@@ -806,13 +806,13 @@ export function ProfileSection({
                             }}
                             className="h-3 w-3"
                           />
-                          <span className="font-mono text-[10px]">*</span>
-                          <span className="text-muted-foreground text-[10px]">(all)</span>
+                          <span className="font-mono text-micro">*</span>
+                          <span className="text-muted-foreground text-micro">(all)</span>
                         </label>
                         {group.actions.map((action) => {
                           const scope = `${group.resource}:${action}`
                           return (
-                            <label key={scope} className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                            <label key={scope} className="flex items-center gap-1.5 text-label cursor-pointer">
                               <Checkbox
                                 checked={tokenScopes.has(scope)}
                                 onCheckedChange={(checked) => {
@@ -823,7 +823,7 @@ export function ProfileSection({
                                 }}
                                 className="h-3 w-3"
                               />
-                              <span className="font-mono text-[10px]">{action}</span>
+                              <span className="font-mono text-micro">{action}</span>
                             </label>
                           )
                         })}
@@ -834,7 +834,7 @@ export function ProfileSection({
 
                 {/* Inline error from backend (unknown scope, OWNER-only, etc.) */}
                 {createError && (
-                  <div className="text-[11px] text-destructive bg-destructive/10 border border-destructive/30 rounded-md px-2.5 py-1.5 flex items-start gap-1.5">
+                  <div className="text-label text-destructive bg-destructive/10 border border-destructive/30 rounded-md px-2.5 py-1.5 flex items-start gap-1.5">
                     <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
                     <span>{createError}</span>
                   </div>
@@ -881,7 +881,7 @@ export function ProfileSection({
                   type="button"
                   onClick={() => setShowRevokedTokens((v) => !v)}
                   aria-expanded={showRevokedTokens}
-                  className="w-full flex items-center gap-1.5 px-4 py-2 text-[11px] text-muted-foreground hover:text-foreground/80 transition-colors border-b border-border/40 last:border-b-0"
+                  className="w-full flex items-center gap-1.5 px-4 py-2 text-label text-muted-foreground hover:text-foreground/80 transition-colors border-b border-border/40 last:border-b-0"
                 >
                   <ChevronRight className={cn("size-3 transition-transform", showRevokedTokens && "rotate-90")} />
                   {revokedTokens.length} revoked
@@ -889,7 +889,7 @@ export function ProfileSection({
                 {showRevokedTokens && revokedTokens.map((token) => (
                   <div key={token.id} className="flex items-center justify-between px-4 py-2 border-b border-border/40 last:border-b-0 opacity-40">
                     <span className="text-xs text-muted-foreground line-through">{token.name}</span>
-                    <span className="text-[10px] text-muted-foreground font-mono">revoked</span>
+                    <span className="text-micro text-muted-foreground font-mono">revoked</span>
                   </div>
                 ))}
               </>
@@ -959,17 +959,17 @@ function TokenListItem({
         <span className="text-xs font-medium text-foreground truncate">{token.name}</span>
         <Badge
           variant="outline"
-          className={cn("text-[9px] font-medium px-1.5 py-0 leading-none h-4", tierCls[tier])}
+          className={cn("text-micro font-medium px-1.5 py-0 leading-none h-4", tierCls[tier])}
         >
           {tier === "ADMIN" && <Shield className="h-2.5 w-2.5 mr-0.5" />}
           {tier}
         </Badge>
         <div className="flex-1" />
-        <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1 shrink-0">
+        <span className="text-micro text-muted-foreground font-mono flex items-center gap-1 shrink-0">
           <Clock className="h-2.5 w-2.5" />{timeAgo(token.created_at)}
         </span>
         {token.last_used_at && (
-          <span className="text-[10px] text-muted-foreground font-mono hidden sm:inline shrink-0">
+          <span className="text-micro text-muted-foreground font-mono hidden sm:inline shrink-0">
             used {timeAgo(token.last_used_at)}
           </span>
         )}
@@ -984,7 +984,7 @@ function TokenListItem({
                 <Trash2 className="h-3 w-3" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="left" className="text-[11px]">Revoke</TooltipContent>
+            <TooltipContent side="left" className="text-label">Revoke</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>
@@ -998,7 +998,7 @@ function TokenListItem({
           {scopes.map((s) => (
             <span
               key={s}
-              className="text-[9px] font-mono bg-muted text-muted-foreground border border-border/60 rounded-sm px-1 py-0 leading-tight"
+              className="text-micro font-mono bg-muted text-muted-foreground border border-border/60 rounded-sm px-1 py-0 leading-tight"
             >
               {s}
             </span>
@@ -1006,7 +1006,7 @@ function TokenListItem({
           {token.expires_at && expiresIn && (
             <span
               className={cn(
-                "text-[9px] font-mono flex items-center gap-0.5",
+                "text-micro font-mono flex items-center gap-0.5",
                 expiresDestructive ? "text-destructive" : "text-muted-foreground"
               )}
             >

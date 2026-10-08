@@ -81,7 +81,7 @@ function ProvenanceChip({ source }: { source: ConfigSource }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center h-[15px] px-1.5 rounded text-[9px] font-medium uppercase tracking-wide border",
+        "inline-flex items-center h-[15px] px-1.5 rounded text-micro font-medium uppercase tracking-wide border",
         source === "instance"
           ? "text-primary/90 border-primary/30 bg-primary/[0.08]"
           : "text-muted-foreground border-border/60 bg-muted/30",
@@ -250,11 +250,11 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
             prior requests, how many denials in the last 7 days, is there open assigned work —
             placed above the conversation so they outrank what the history claims.
             {allFacts.length > 0 && (
-              <span className="block mt-1 text-[11px] text-muted-foreground">
+              <span className="block mt-1 text-label text-muted-foreground">
                 {facts.length === allFacts.length
                   ? `All ${allFacts.length} facts.`
                   : `${facts.length} of ${allFacts.length} facts.`}{" "}
-                Narrow the selection with <code className="text-[10px]">crewship keeper profile set --evidence-facts</code>.
+                Narrow the selection with <code className="text-micro">crewship keeper profile set --evidence-facts</code>.
               </span>
             )}
           </WithProvenance>
@@ -322,7 +322,7 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
         // is most likely to assume it does.
         <div
           data-testid="autonomy-warning"
-          className="mx-4 mb-3 rounded border border-destructive/40 bg-destructive/[0.06] px-3 py-2 text-[11px] leading-relaxed text-destructive"
+          className="mx-4 mb-3 rounded border border-destructive/40 bg-destructive/[0.06] px-3 py-2 text-label leading-relaxed text-destructive"
         >
           <strong>Every tier is granted without a person</strong>, including L4 production
           credentials. An agent that satisfies the judge gets them with nobody in the loop.
@@ -342,7 +342,7 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
             Caps the assembled prompt. The conversation is what gets trimmed; the watch policy,
             the tier and the request itself never do — without a cap the model server truncates
             from the front and drops the rules the judge was meant to apply.
-            <span className="block mt-1 text-[11px] text-muted-foreground">
+            <span className="block mt-1 text-label text-muted-foreground">
               0 means no cap. Set it to your judge&apos;s context window minus the reply.
             </span>
           </WithProvenance>
@@ -372,9 +372,9 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
       )}
 
       {p.stamp && (
-        <div className="px-4 py-2.5 border-t border-border/60 text-[11px] text-muted-foreground">
+        <div className="px-4 py-2.5 border-t border-border/60 text-label text-muted-foreground">
           Recorded on each decision as{" "}
-          <code className="text-[10px] bg-muted/50 rounded px-1 py-0.5">{p.stamp}</code>
+          <code className="text-micro bg-muted/50 rounded px-1 py-0.5">{p.stamp}</code>
           <span className="block mt-1">
             Two decisions taken under different profiles are not comparable, so the audit trail
             carries the one in force at the time.

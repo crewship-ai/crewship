@@ -71,13 +71,13 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
               {name}
               <StatusChip person={person} />
               {person.instance_admin && (
-                <span className="inline-flex h-5 items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--purple)_16%,transparent)] px-2 font-mono text-[10.5px] text-[var(--purple)]">
+                <span className="inline-flex h-5 items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--purple)_16%,transparent)] px-2 font-mono text-micro text-[var(--purple)]">
                   <ShieldCheck className="h-3 w-3" />Instance admin
                 </span>
               )}
             </h2>
-            <p className="mt-0.5 text-[12.5px] text-muted-foreground">{person.email}</p>
-            <div className="mt-3 flex flex-wrap gap-1.5 text-[11.5px] text-muted-foreground">
+            <p className="mt-0.5 text-label text-muted-foreground">{person.email}</p>
+            <div className="mt-3 flex flex-wrap gap-1.5 text-label text-muted-foreground">
               <Meta label="Joined" value={new Date(person.created_at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })} />
               <Meta label="Last active" value={ago(person.last_active_at)} />
               <Meta value={String(person.memberships.length)} label={person.memberships.length === 1 ? "workspace" : "workspaces"} after />
@@ -89,9 +89,9 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
       </section>
 
       <SettingsCard icon={Building2} tint="var(--primary)" title="Workspace access" description="Where this person works, and as what"
-        actions={<span className="font-mono text-[11px] text-muted-foreground">{person.memberships.length} of {workspaces.length}</span>}>
+        actions={<span className="font-mono text-micro text-muted-foreground">{person.memberships.length} of {workspaces.length}</span>}>
         {person.memberships.length === 0 && (
-          <p className="border-b border-border px-4 py-3 text-[12px] text-muted-foreground">Not in any workspace. They can sign in but see nothing.</p>
+          <p className="border-b border-border px-4 py-3 text-label text-muted-foreground">Not in any workspace. They can sign in but see nothing.</p>
         )}
         {person.memberships.map((m) => {
           const lastOwner = m.role === "OWNER" && isLastOwner(people, m.workspace_id, person.id)
@@ -101,8 +101,8 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
               <div className="flex items-center gap-3 px-4 py-2.5">
                 <WorkspaceTile id={m.workspace_id} name={m.name} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px]">{m.name}</span>
-                  <span className="block truncate text-[11px] text-muted-foreground-soft">
+                  <span className="block truncate text-control">{m.name}</span>
+                  <span className="block truncate text-label text-muted-foreground-soft">
                     {lastOwner ? "Only owner · hand it over from the workspace" : `Member since ${new Date(m.joined_at).toLocaleDateString()}`}
                   </span>
                 </span>
@@ -142,7 +142,7 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
             </div>
           ) : (
             <button type="button" onClick={() => setAdding(true)}
-              className="flex w-full items-center gap-1.5 border-t border-border px-4 py-2.5 text-left text-[12.5px] text-primary-hover hover:bg-accent">
+              className="flex w-full items-center gap-1.5 border-t border-border px-4 py-2.5 text-left text-label text-primary-hover hover:bg-accent">
               <Plus className="size-3.5" />Add {firstName} to a workspace
             </button>
           )
@@ -173,7 +173,7 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
           </>
         ) : (
           <SettingsRow label="Password" description="Chosen by the person. Admins never see or set it.">
-            <span className="text-[11px] text-muted-foreground">{person.email_verified ? "Email verified" : "Email not verified"}</span>
+            <span className="text-label text-muted-foreground">{person.email_verified ? "Email verified" : "Email not verified"}</span>
           </SettingsRow>
         )}
         {status === "locked" ? (
@@ -182,7 +182,7 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
           </SettingsRow>
         ) : (
           <SettingsRow label="Account lock" description={`Not locked · ${person.failed_login_count ?? 0} failed sign-ins`}>
-            <span className="text-[11px] text-muted-foreground">OK</span>
+            <span className="text-label text-muted-foreground">OK</span>
           </SettingsRow>
         )}
         <div className="grid gap-4 border-t border-border px-4 py-3">
@@ -197,7 +197,7 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
             <Button size="sm" variant="outline" disabled={isMe || busy === `a:${person.id}`} title={isMe ? "Another instance admin has to remove you" : undefined}
               onClick={() => void actions.setInstanceAdmin(person.id, false, `${name} no longer administers the instance`)}>Remove</Button>
           ) : person.instance_admin_source === "env" ? (
-            <span className="text-[11px] text-muted-foreground">Set on the server</span>
+            <span className="text-label text-muted-foreground">Set on the server</span>
           ) : (
             <Button size="sm" variant="outline" disabled={status === "suspended" || busy === `a:${person.id}`}
               onClick={() => void actions.setInstanceAdmin(person.id, true, `${name} now administers the instance`)}>
