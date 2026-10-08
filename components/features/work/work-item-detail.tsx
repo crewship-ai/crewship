@@ -44,7 +44,7 @@ import {
 } from "@/hooks/use-work-items"
 import { useWebhookDelivery } from "@/hooks/use-webhook-deliveries"
 import { NeedsReconciliationNotice, WorkStatePill } from "./work-state-pill"
-import { formatCost, isDeletedAgent } from "@/lib/work-ledger"
+import { formatCost, humanReason, isDeletedAgent, sentence } from "@/lib/work-ledger"
 import { CrewChip, LedgerAvatar } from "./ledger-parts"
 import { ReplayButton, ReplayUnavailableReason, WorkReplayDialog } from "./work-replay-dialog"
 
@@ -125,7 +125,8 @@ export function WorkItemDetailBody({
   const streams = workRunStreams(item)
   const itemEvents = ledgerEvents(item)
   const cost = totalCostUSD(item.attempts)
-  const reason = queuedReason(item)
+  // Read as a sentence, without the operator ids the ledger rows already drop.
+  const reason = sentence(humanReason(queuedReason(item)))
   const terminal = isTerminalWorkState(item.state)
   const liveAttempt = item.attempts.find((a) => !a.ended_at) ?? null
 

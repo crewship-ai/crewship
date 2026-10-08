@@ -68,7 +68,7 @@ export function CountPill({ count, selected }: { count: number; selected: boolea
   return (
     <span
       className={cn(
-        "rounded-full px-1.5 py-px text-[10px] tabular-nums",
+        "self-center rounded-full px-1.5 py-px text-[10px] tabular-nums",
         count === 0
           ? "text-muted-foreground-soft"
           : selected
