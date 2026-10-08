@@ -5,6 +5,7 @@ import {
   historyStrip,
   linkedEntities,
   runActions,
+  runStatusLabel,
   runTone,
   stepProgress,
   triggerPhrase,
@@ -188,5 +189,15 @@ describe("historyStrip", () => {
     expect(strip).toHaveLength(20)
     expect(strip[0].id).toBe("r10")
     expect(strip.at(-1)?.id).toBe("r29")
+  })
+})
+
+describe("runStatusLabel", () => {
+  it("keeps a cancel and an interruption apart where the rail says only Stopped (#2981)", () => {
+    expect(runStatusLabel("cancelled")).toBe("Cancelled")
+    expect(runStatusLabel("CANCELLED")).toBe("Cancelled")
+    expect(runStatusLabel("interrupted")).toBe("Interrupted")
+    expect(runStatusLabel("failed")).toBe("Could not finish")
+    expect(runStatusLabel("completed")).toBe("Completed")
   })
 })

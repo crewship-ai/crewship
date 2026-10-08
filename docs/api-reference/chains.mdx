@@ -85,6 +85,9 @@ is the busiest table in the schema. There is no "return everything" mode.
       "failed": true,
       "running_runs": 1,
       "waiting_runs": 0,
+      "completed_runs": 1,
+      "cancelled_runs": 0,
+      "interrupted_runs": 1,
       "first_activity": "2026-08-07T12:00:00.000000000Z",
       "last_activity": "2026-08-07T12:09:00.000000000Z",
       "duration_ms": 540000,
@@ -128,6 +131,9 @@ is the busiest table in the schema. There is no "return everything" mode.
 | `chains[].failed` | boolean | `failed_runs > 0`. True when **any** run in the chain failed, not only the root. |
 | `chains[].running_runs` | integer | Runs still in flight — status `running` or `queued`. A queued run rides with running because from a reader's side it is accepted work that has not finished. **Always present**, including when 0. |
 | `chains[].waiting_runs` | integer | Runs parked on a person — status `waiting` or `paused`. Split from `running_runs` rather than folded into one "active" count because the two ask different things: a running chain resolves itself, a waiting one never will. Both are derived from **status**, not from a missing `ended_at` — that cheaper test would report every interrupted run as running forever. **Always present**, including when 0. |
+| `chains[].completed_runs` | integer | Runs that finished — status `completed`. **Always present**, including when 0. |
+| `chains[].cancelled_runs` | integer | Runs somebody stopped — status `cancelled`. Not a failure and not finished work. **Always present**, including when 0. |
+| `chains[].interrupted_runs` | integer | Runs whose process died before they ended — status `interrupted` (written on boot recovery). Counted apart from `cancelled_runs` because nobody chose to stop them, and apart from `failed_runs` because the work itself may have been fine. **Always present**, including when 0. A client deriving one summary word should let `waiting_runs` and `running_runs` win over these, so a stopped branch never hides a live one. |
 | `chains[].first_activity` | string | Earliest `started_at` in the chain. |
 | `chains[].last_activity` | string | Latest `ended_at`, falling back to `started_at` for a run still going. Rows are ordered by this, descending, with `origin` descending as the tiebreak. |
 | `chains[].duration_ms` | integer \| null | Wall clock from `first_activity` to `last_activity`. **Always present**, and `null` when there is no span to measure between. See [How long it took](#how-long-it-took). |

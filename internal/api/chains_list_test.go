@@ -346,11 +346,15 @@ type chainsListRow struct {
 	FailedRuns    int    `json:"failed_runs"`
 	RunningRuns   int    `json:"running_runs"`
 	WaitingRuns   int    `json:"waiting_runs"`
-	Failed        bool   `json:"failed"`
-	FirstActivity string `json:"first_activity"`
-	LastActivity  string `json:"last_activity"`
-	DurationMS    *int64 `json:"duration_ms"`
-	Issues        []struct {
+	CompletedRuns int    `json:"completed_runs"`
+	CancelledRuns int    `json:"cancelled_runs"`
+	// Interrupted is not "failed": the process died, the work may be fine.
+	InterruptedRuns int    `json:"interrupted_runs"`
+	Failed          bool   `json:"failed"`
+	FirstActivity   string `json:"first_activity"`
+	LastActivity    string `json:"last_activity"`
+	DurationMS      *int64 `json:"duration_ms"`
+	Issues          []struct {
 		ID         string `json:"id"`
 		Identifier string `json:"identifier"`
 		Title      string `json:"title"`
@@ -1267,5 +1271,45 @@ func TestChainsList_LiveCountsAreScopedToTheWorkspace(t *testing.T) {
 	}
 	if got := b.Chains[0].RunningRuns; got != 0 {
 		t.Errorf("running_runs = %d, want 0 — a foreign run must not light up our chain", got)
+	}
+}
+
+// TestChainsList_CountsEveryOutcome is #2981. The index returned failed,
+// running and waiting counts only, so a chain whose runs were cancelled or
+// interrupted could not be told apart from one that finished: the rail filed
+// both under Completed. Each outcome is now counted, and a chain mixing a
+// stopped branch with a live one keeps both counts, so the client can let the
+// live branch decide the summary.
+func TestChainsList_CountsEveryOutcome(t *testing.T) {
+	r := newChainsListRig(t)
+	done := r.seedRun(t, runSpec{id: "prn_done", via: pipeline.TriggeredViaManual})
+	r.finish(t, done, pipeline.RunStatusCompleted)
+	cancelled := r.seedRun(t, runSpec{id: "prn_cancelled", via: pipeline.TriggeredViaManual})
+	r.finish(t, cancelled, pipeline.RunStatusCancelled)
+	interrupted := r.seedRun(t, runSpec{id: "prn_interrupted", via: pipeline.TriggeredViaManual})
+	r.finish(t, interrupted, pipeline.RunStatusInterrupted)
+	mixed := r.seedRun(t, runSpec{id: "prn_mixed", via: pipeline.TriggeredViaManual})
+	r.finish(t, mixed, pipeline.RunStatusCancelled)
+	r.seedRun(t, runSpec{id: "prn_mixed_child", via: pipeline.TriggeredViaCallPipeline, origin: mixed, depth: 1})
+
+	type counts struct{ completed, cancelled, interrupted, failed, running, waiting int }
+	want := map[string]counts{
+		done:        {completed: 1},
+		cancelled:   {cancelled: 1},
+		interrupted: {interrupted: 1},
+		mixed:       {cancelled: 1, running: 1},
+	}
+	b := decodeChainsList(t, r.list(t, ""))
+	if len(b.Chains) != len(want) {
+		t.Fatalf("chains = %v, want %d", b.origins(), len(want))
+	}
+	for _, c := range b.Chains {
+		got := counts{c.CompletedRuns, c.CancelledRuns, c.InterruptedRuns, c.FailedRuns, c.RunningRuns, c.WaitingRuns}
+		if got != want[c.Origin] {
+			t.Errorf("%s: counts %+v, want %+v", c.Origin, got, want[c.Origin])
+		}
+		if c.Failed {
+			t.Errorf("%s: a stopped run is not a failure, but Failed is set", c.Origin)
+		}
 	}
 }

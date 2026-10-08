@@ -41,6 +41,14 @@ export interface ChainSummary {
    */
   running_runs?: number
   waiting_runs?: number
+  /**
+   * Terminal outcomes besides failed (#2981). Optional for the same reason as
+   * the live counts: an older server does not send them. Cancelled (somebody
+   * stopped it) and interrupted (the process died) are kept apart.
+   */
+  completed_runs?: number
+  cancelled_runs?: number
+  interrupted_runs?: number
   first_activity: string
   last_activity: string
   /**

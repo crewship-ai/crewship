@@ -279,10 +279,11 @@ describe("chainScopeCounts / chainsInScope", () => {
     chain({ origin: "r", running_runs: 1 }),
     chain({ origin: "f", failed: true, failed_runs: 1 }),
     chain({ origin: "d" }),
+    chain({ origin: "s", cancelled_runs: 1 }),
   ]
 
   it("counts each chain exactly once, under its one status", () => {
-    expect(chainScopeCounts(set())).toEqual({ active: 1, waiting: 1, failed: 1, done: 1 })
+    expect(chainScopeCounts(set())).toEqual({ active: 1, waiting: 1, failed: 1, done: 1, stopped: 1 })
   })
 
   it("maps running onto the page's 'active' scope word", () => {
@@ -294,10 +295,11 @@ describe("chainScopeCounts / chainsInScope", () => {
     expect(chainsInScope(set(), "active").map((c) => c.origin)).toEqual(["r"])
     expect(chainsInScope(set(), "failed").map((c) => c.origin)).toEqual(["f"])
     expect(chainsInScope(set(), "done").map((c) => c.origin)).toEqual(["d"])
+    expect(chainsInScope(set(), "stopped").map((c) => c.origin)).toEqual(["s"])
   })
 
   it("keeps everything under 'all', including what finished cleanly", () => {
-    expect(chainsInScope(set(), "all")).toHaveLength(4)
+    expect(chainsInScope(set(), "all")).toHaveLength(5)
   })
 
   it("agrees with the segment counts it sits beside", () => {
@@ -306,7 +308,7 @@ describe("chainScopeCounts / chainsInScope", () => {
     // produce exactly that many rows.
     const chains = set()
     const counts = chainScopeCounts(chains)
-    for (const scope of ["active", "waiting", "failed", "done"] as const) {
+    for (const scope of ["active", "waiting", "failed", "done", "stopped"] as const) {
       expect(chainsInScope(chains, scope)).toHaveLength(counts[scope])
     }
   })
@@ -426,5 +428,25 @@ describe("startedByWord", () => {
     expect(startedByWord(chain({ started_by_kind: "automation", started_by: "on issue closed" }))).toBe("rule · on issue closed")
     expect(startedByWord(chain({ started_by_kind: "routine", started_by: "nightly" }))).toBe("called by nightly")
     expect(startedByWord(chain({ started_by_kind: "unknown", started_by: "" }))).toBe("")
+  })
+})
+
+describe("chainStatus — stopped work (#2981)", () => {
+  it("reads a chain whose runs were cancelled or interrupted as stopped, not done", () => {
+    expect(chainStatus(chain({ cancelled_runs: 1 }))).toBe("stopped")
+    expect(chainStatus(chain({ interrupted_runs: 1, completed_runs: 2 }))).toBe("stopped")
+  })
+
+  it("never lets a stopped branch hide live work", () => {
+    expect(chainStatus(chain({ cancelled_runs: 1, running_runs: 1 }))).toBe("running")
+    expect(chainStatus(chain({ interrupted_runs: 1, waiting_runs: 1 }))).toBe("waiting")
+  })
+
+  it("keeps a failure above a stop", () => {
+    expect(chainStatus(chain({ cancelled_runs: 1, failed_runs: 1, failed: true }))).toBe("failed")
+  })
+
+  it("still reads an older server's row, which carries no outcome counts, as done", () => {
+    expect(chainStatus(chain())).toBe("done")
   })
 })

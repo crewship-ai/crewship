@@ -35,6 +35,7 @@ import {
 import {
   Activity,
   CheckCircle2,
+  CircleSlash,
   CircleDot,
   ClipboardList,
   Layers,
@@ -200,6 +201,7 @@ const STATUS_ICON: Record<RailScope, React.ComponentType<{ className?: string }>
   waiting: PauseCircle,
   active: Activity,
   done: CheckCircle2,
+  stopped: CircleSlash,
   failed: XCircle,
 }
 
@@ -208,6 +210,7 @@ const STATUS_TOKEN: Record<ChainStatus, string> = {
   waiting: "--warn",
   failed: "--destructive",
   running: "--primary",
+  stopped: "--muted-foreground",
   done: "--success",
 }
 
@@ -317,6 +320,12 @@ function WorkflowRow({
           {status === "waiting" && (
             <>
               <span className="text-warn">waiting for you</span>
+              <span aria-hidden>·</span>
+            </>
+          )}
+          {status === "stopped" && (
+            <>
+              <span>stopped</span>
               <span aria-hidden>·</span>
             </>
           )}

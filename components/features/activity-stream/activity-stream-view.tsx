@@ -33,6 +33,7 @@ import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { apiFetch } from "@/lib/api-fetch"
 import {
   ACTIVE_ENTRY_TYPES,
+  STOPPED_ENTRY_TYPES,
   ACTIVITY_SCOPES,
   NOISE_ENTRY_TYPES,
   entriesInScope,
@@ -263,6 +264,8 @@ export function ActivityStreamView({
     const entryTypes =
       facets.scope === "active"
         ? ACTIVE_ENTRY_TYPES
+        : facets.scope === "stopped"
+          ? STOPPED_ENTRY_TYPES
         : facets.scope === "waiting"
           ? // The ask types AND the answers that retire them. Asking for the
             // human facet alone excluded `approval.granted` and friends

@@ -63,6 +63,9 @@ const STATUS_ROWS: { key: RailScope; label: string; tone: string }[] = [
   { key: "waiting", label: "Waiting for you", tone: "text-warn" },
   { key: "active", label: "Running", tone: "text-primary" },
   { key: "done", label: "Completed", tone: "text-success" },
+  // Cancelled or interrupted, with nothing live (#2981). Beside Completed,
+  // because it is the other way work ends without breaking.
+  { key: "stopped", label: "Stopped", tone: "text-muted-foreground" },
   { key: "failed", label: "Could not finish", tone: "text-destructive" },
 ]
 

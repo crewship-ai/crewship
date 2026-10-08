@@ -18,6 +18,7 @@ const counts = (over: Partial<Record<ActivityScope, number>> = {}): Record<Activ
   waiting: 0,
   failed: 0,
   done: 0,
+  stopped: 0,
   ...over,
 })
 
@@ -35,7 +36,7 @@ describe("railStatusRows — the STATUS section, in the Routines vocabulary", ()
   it("lists every bucket, always, in the order the Routines rail uses", () => {
     // A bucket that disappears when empty moves every row under it, and the
     // Routines rail — one click away — never does that.
-    expect(railStatusRows(counts(), 0).map((r) => r.key)).toEqual(["all", "waiting", "active", "done", "failed"])
+    expect(railStatusRows(counts(), 0).map((r) => r.key)).toEqual(["all", "waiting", "active", "done", "stopped", "failed"])
   })
 
   it("speaks the Routines words, so one state has one name across the app", () => {
@@ -44,17 +45,19 @@ describe("railStatusRows — the STATUS section, in the Routines vocabulary", ()
       "Waiting for you",
       "Running",
       "Completed",
+      "Stopped",
       "Could not finish",
     ])
   })
 
   it("counts what the list under it holds", () => {
-    const rows = railStatusRows(counts({ active: 2, waiting: 1, failed: 3, done: 9 }), 15)
+    const rows = railStatusRows(counts({ active: 2, waiting: 1, failed: 3, done: 9, stopped: 2 }), 17)
     expect(Object.fromEntries(rows.map((r) => [r.key, r.count]))).toEqual({
-      all: 15,
+      all: 17,
       waiting: 1,
       active: 2,
       done: 9,
+      stopped: 2,
       failed: 3,
     })
   })

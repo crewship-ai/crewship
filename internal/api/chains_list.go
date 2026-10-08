@@ -144,6 +144,17 @@ type ChainSummary struct {
 	RunningRuns int `json:"running_runs"`
 	WaitingRuns int `json:"waiting_runs"`
 
+	// The terminal outcomes besides failed, counted separately (#2981).
+	// Without them a chain whose runs were cancelled or interrupted reads as
+	// finished, because "not failed, not live" was the only thing the client
+	// could derive. Cancelled (someone stopped it) and interrupted (the
+	// process running it died — the work itself may be fine) stay apart, so
+	// the detail can say which. A chain may hold several outcomes at once:
+	// the counts are per run, and the client decides the summary.
+	CompletedRuns   int `json:"completed_runs"`
+	CancelledRuns   int `json:"cancelled_runs"`
+	InterruptedRuns int `json:"interrupted_runs"`
+
 	// FirstActivity/LastActivity bound the chain: the earliest start and the
 	// latest end (falling back to start for a run still going). Rows are
 	// ordered by LastActivity descending.
@@ -321,6 +332,9 @@ WITH grouped AS (
            -- and one predicate meaning two things in two places is how the two
            -- drift apart the day it starts being written.
            SUM(CASE WHEN status IN ('waiting','paused') THEN 1 ELSE 0 END) AS waiting_runs,
+           SUM(CASE WHEN status = 'completed'   THEN 1 ELSE 0 END) AS completed_runs,
+           SUM(CASE WHEN status = 'cancelled'   THEN 1 ELSE 0 END) AS cancelled_runs,
+           SUM(CASE WHEN status = 'interrupted' THEN 1 ELSE 0 END) AS interrupted_runs,
            MIN(started_at)                                    AS first_activity,
            MAX(COALESCE(ended_at, started_at))                AS last_activity
     FROM pipeline_runs
@@ -330,6 +344,7 @@ WITH grouped AS (
     GROUP BY chain_origin
 )
 SELECT g.origin, g.runs, g.max_chain_depth, g.failed_runs, g.running_runs, g.waiting_runs,
+       g.completed_runs, g.cancelled_runs, g.interrupted_runs,
        g.first_activity, g.last_activity,
        COALESCE(root.triggered_via, ''),
        COALESCE(root.triggered_by_id, ''),
@@ -391,6 +406,7 @@ func (h *ChainsListHandler) query(r *http.Request, workspaceID string, limit, of
 		)
 		if err := rows.Scan(
 			&c.Origin, &c.Runs, &c.MaxChainDepth, &c.FailedRuns, &c.RunningRuns, &c.WaitingRuns,
+			&c.CompletedRuns, &c.CancelledRuns, &c.InterruptedRuns,
 			&c.FirstActivity, &c.LastActivity,
 			&c.TriggeredVia, &triggeredBy, &userID, &c.RoutineID, &c.RoutineSlug,
 			&ruleName, &ruleEvent, &issueID, &issueTitle, &scheduleName, &userName,

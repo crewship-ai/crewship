@@ -54263,6 +54263,12 @@
                             },
                             "type": "array"
                           },
+                          "cancelled_runs": {
+                            "type": "integer"
+                          },
+                          "completed_runs": {
+                            "type": "integer"
+                          },
                           "duration_ms": {
                             "nullable": true,
                             "type": "integer"
@@ -54276,6 +54282,9 @@
                           "first_activity": {
                             "format": "date-time",
                             "type": "string"
+                          },
+                          "interrupted_runs": {
+                            "type": "integer"
                           },
                           "issue_count": {
                             "type": "integer"

@@ -128,6 +128,9 @@ describe("runLine", () => {
     expect(runLine(run({ status: "waiting" }))).toBe("Waiting for a decision")
     expect(runLine(run({ status: "running", current_step_id: "query" }))).toBe("Running · step “query”")
     expect(runLine(run({ status: "completed", duration_ms: 4700 }))).toBe("Finished in 4.7s")
+    // #2981: the two stops say which they were.
+    expect(runLine(run({ status: "cancelled" }))).toBe("Cancelled before it finished")
+    expect(runLine(run({ status: "interrupted" }))).toBe("Interrupted — the process running it stopped")
   })
 })
 

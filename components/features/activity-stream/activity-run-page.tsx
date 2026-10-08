@@ -64,6 +64,7 @@ import {
   isActiveRun,
   linkedEntities,
   runActions,
+  runStatusLabel,
   runTone,
   stepProgress,
   triggerPhrase,
@@ -213,7 +214,7 @@ function RunPage({
                   )}
                   <span className={cn("relative h-2 w-2 rounded-full", RUN_TONE_DOT[tone])} />
                 </span>
-                {RUN_TONE_LABEL[tone]}
+                {runStatusLabel(run.status)}
               </span>
             </div>
             <h1 className="min-w-0 truncate text-lg font-semibold tracking-tight">{name}</h1>
@@ -517,7 +518,7 @@ function BranchRow({
           <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate group-hover:underline">{node.label}</span>
         </button>
-        {node.status && <span className={cn("text-[10.5px]", RUN_TONE_CLASS[tone])}>{RUN_TONE_LABEL[tone]}</span>}
+        {node.status && <span className={cn("text-[10.5px]", RUN_TONE_CLASS[tone])}>{runStatusLabel(node.status)}</span>}
         <span className="w-14 text-right font-mono text-[10.5px] tabular-nums text-muted-foreground">
           {node.durationMs != null ? formatDurationMs(node.durationMs) : ""}
         </span>

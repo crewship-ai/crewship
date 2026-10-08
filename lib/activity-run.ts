@@ -46,6 +46,18 @@ export function runTone(status: string | null | undefined): RunTone {
   return "stopped"
 }
 
+/**
+ * The status word for ONE run. The rail folds cancelled and interrupted into
+ * "Stopped" because a chain may hold both; a single run's page says which:
+ * somebody stopped it, or the process running it died (#2981).
+ */
+export function runStatusLabel(status: string | null | undefined): string {
+  const s = (status ?? "").toLowerCase()
+  if (s === "cancelled" || s === "canceled") return "Cancelled"
+  if (s === "interrupted") return "Interrupted"
+  return RUN_TONE_LABEL[runTone(s)]
+}
+
 const ACTIVE = new Set(["running", "queued", "waiting", "paused"])
 
 export function isActiveRun(status: string | null | undefined): boolean {

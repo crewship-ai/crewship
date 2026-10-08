@@ -71,7 +71,7 @@ Each row wears its routine's own icon and colour (the same derivation the Routin
 
 ### Status
 
-A collapsible section with one row per bucket, in the Routines rail's order and words: **All**, **Waiting for you**, **Running**, **Completed**, **Could not finish**. Every row is always there — a bucket holding nothing dims rather than disappearing, so no row moves because its neighbour emptied. The count pill and the selected row are the Routines rail's, to the class (`railStatusRows` in `lib/activity-rail.ts`).
+A collapsible section with one row per bucket, in the Routines rail's order and words: **All**, **Waiting for you**, **Running**, **Completed**, **Stopped**, **Could not finish**. **Stopped** is a chain whose runs were cancelled or interrupted and that holds nothing live: a chain with a stopped branch and a running or waiting one is counted as Running or Waiting, so a stop never hides live work. On a run's page the word says which stop it was — **Cancelled** (somebody stopped it) or **Interrupted** (the process running it died). In the feed, Stopped narrows to `run.cancelled` and `assignment.cancelled`. Every row is always there — a bucket holding nothing dims rather than disappearing, so no row moves because its neighbour emptied. The count pill and the selected row are the Routines rail's, to the class (`railStatusRows` in `lib/activity-rail.ts`).
 
 The counts are taken over the window **with the search applied but not the status**, so a number survives its own selection: counting after the pick would render "Could not finish 3 · Waiting 0 · Running 0" — what is left rather than what there is to pick.
 

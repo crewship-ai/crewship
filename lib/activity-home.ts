@@ -204,7 +204,8 @@ export function runLine(r: HomeRun): string {
   if (tone === "waiting") return "Waiting for a decision"
   if (tone === "running") return r.current_step_id ? `Running · step “${r.current_step_id}”` : "Running"
   if (tone === "done") return r.duration_ms > 0 ? `Finished in ${formatDurationMs(r.duration_ms)}` : "Finished"
-  return "Stopped before it finished"
+  if ((r.status ?? "").toLowerCase() === "interrupted") return "Interrupted — the process running it stopped"
+  return "Cancelled before it finished"
 }
 
 /* ------------------------------------------------------------------ *

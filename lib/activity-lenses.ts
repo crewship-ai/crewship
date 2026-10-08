@@ -146,12 +146,12 @@ export function workflowHandle(origin: string): string {
 // What state a workflow is in.
 // ---------------------------------------------------------------------------
 
-export type ChainStatus = "waiting" | "failed" | "running" | "done"
+export type ChainStatus = "waiting" | "failed" | "running" | "stopped" | "done"
 
 /**
  * The one word for a chain whose runs may be in several states at once.
  *
- * Precedence is waiting → failed → running → done, and the order is a claim
+ * Precedence is waiting → failed → running → stopped → done, and the order is a claim
  * about what the reader should do, not about what is most recent:
  *
  *   waiting  is the only state a PERSON can resolve. A chain holding an
@@ -161,6 +161,10 @@ export type ChainStatus = "waiting" | "failed" | "running" | "done"
  *            broke and another is still going reads "running" under any other
  *            order, and "running" is reassuring about something already wrong.
  *   running  resolves itself.
+ *   stopped  a run was cancelled or interrupted and nothing is live (#2981).
+ *            Below running and waiting, so a stopped branch never hides work
+ *            that is still going; above done, because "somebody stopped it"
+ *            or "the process died" is not "it finished".
  *   done     is everything else.
  *
  * `failed` (the boolean the index has always sent) is honoured on its own so
@@ -171,6 +175,7 @@ export function chainStatus(c: ChainSummary): ChainStatus {
   if ((c.waiting_runs ?? 0) > 0) return "waiting"
   if (c.failed || (c.failed_runs ?? 0) > 0) return "failed"
   if ((c.running_runs ?? 0) > 0) return "running"
+  if ((c.cancelled_runs ?? 0) > 0 || (c.interrupted_runs ?? 0) > 0) return "stopped"
   return "done"
 }
 
@@ -446,8 +451,8 @@ export function routineLens(chains: ChainSummary[]): RoutineLensRow[] {
  * `active` rather than `running` because that is the scope vocabulary the rest
  * of the page speaks; the segment renders it as "Running".
  */
-export function chainScopeCounts(chains: ChainSummary[]): Record<"active" | "waiting" | "failed" | "done", number> {
-  const c = { active: 0, waiting: 0, failed: 0, done: 0 }
+export function chainScopeCounts(chains: ChainSummary[]): Record<"active" | "waiting" | "failed" | "done" | "stopped", number> {
+  const c = { active: 0, waiting: 0, failed: 0, done: 0, stopped: 0 }
   for (const ch of chains) {
     const s = chainStatus(ch)
     c[s === "running" ? "active" : s] += 1
