@@ -35,7 +35,9 @@ import {
 } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
-import { SettingsCard, SettingsRow, SettingsEmpty } from "../shared"
+import { SettingsCard, SettingsRow, SettingsEmpty, settingsControl } from "../shared"
+import { useDirtyForm } from "@/hooks/use-dirty-form"
+import { SaveFooter } from "@/components/ui/save-footer"
 import { DeviceSessions } from "./device-sessions"
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -253,10 +255,11 @@ export function ProfileSection({
       setAvatarUploading(false)
     }
   }, [refreshSession])
-  const [editingName, setEditingName] = useState(false)
-  const [nameDraft, setNameDraft] = useState("")
-  const [savingName, setSavingName] = useState(false)
-  const [nameError, setNameError] = useState<string | null>(null)
+  // The name is a plain field: an edit joins the page's floating Save bar,
+  // and a rejected write is a corner toast that keeps what was typed.
+  const nameForm = useDirtyForm({ name: displayName ?? "" })
+  const nameTrimmed = nameForm.draft.name.trim()
+  const nameValid = nameTrimmed.length >= 1 && nameTrimmed.length <= 100
 
   // ── Change-password dialog state (#867.1) ──
   const [pwOpen, setPwOpen] = useState(false)
@@ -270,41 +273,20 @@ export function ProfileSection({
   const initials = (displayName ?? "U").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
   const expiresIn = useTimeUntil(sessionExpires)
 
-  const startEditName = useCallback(() => {
-    setNameDraft(displayName ?? "")
-    setNameError(null)
-    setEditingName(true)
-  }, [displayName])
-
-  const saveName = useCallback(async () => {
-    const trimmed = nameDraft.trim()
-    if (trimmed.length < 1 || trimmed.length > 100) {
-      setNameError("Name must be 1-100 characters")
-      return
+  const saveName = useCallback(() => nameForm.submit(async ({ name }) => {
+    const trimmed = name.trim()
+    const res = await apiFetch("/api/v1/users/me", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ full_name: trimmed }),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      throw new Error(typeof body?.error === "string" ? body.error : "Failed to save name")
     }
-    setSavingName(true)
-    setNameError(null)
-    try {
-      const res = await apiFetch("/api/v1/users/me", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ full_name: trimmed }),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        setNameError(typeof body?.error === "string" ? body.error : "Failed to save name")
-        return
-      }
-      setDisplayName(trimmed)
-      setEditingName(false)
-      toast.success("Name updated")
-      void refreshSession()
-    } catch {
-      setNameError("Failed to save name")
-    } finally {
-      setSavingName(false)
-    }
-  }, [nameDraft, refreshSession])
+    setDisplayName(trimmed)
+    void refreshSession()
+  }), [nameForm, refreshSession])
 
   const resetPwForm = useCallback(() => {
     setPwCurrent(""); setPwNew(""); setPwConfirm(""); setPwError(null); setPwDone(false)
@@ -517,48 +499,30 @@ export function ProfileSection({
           {userEmail ? <CopyableText value={userEmail} mono /> : <span className="text-xs text-muted-foreground">Not set</span>}
         </SettingsRow>
         <SettingsRow label="Full name">
-          {editingName ? (
-            <div className="flex flex-col items-end gap-1">
-              <div className="flex items-center gap-1.5">
-                <Input
-                  value={nameDraft}
-                  onChange={(e) => setNameDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void saveName()
-                    if (e.key === "Escape") { setNameError(null); setEditingName(false) }
-                  }}
-                  autoFocus
-                  maxLength={100}
-                  aria-label="Full name"
-                  className="h-7 w-48 text-xs"
-                  disabled={savingName}
-                />
-                <Button size="sm" className="h-7 text-xs" onClick={() => void saveName()} disabled={savingName}>
-                  {savingName ? <Spinner className="h-3 w-3" /> : "Save"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 text-xs"
-                  onClick={() => { setNameError(null); setEditingName(false) }}
-                  disabled={savingName}
-                >
-                  Cancel
-                </Button>
-              </div>
-              {/* Show save failures inline while still editing — the user
-                  stays in the editor and can retry. */}
-              {nameError && <span className="text-[11px] text-destructive">{nameError}</span>}
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">{displayName ?? "Not set"}</span>
-              <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={startEditName}>
-                Edit
-              </Button>
-            </div>
-          )}
+          <div className="flex flex-col items-end gap-1">
+            <Input
+              value={nameForm.draft.name}
+              onChange={(e) => nameForm.set("name", e.target.value)}
+              maxLength={100}
+              aria-label="Full name"
+              aria-invalid={(nameForm.isDirty && !nameValid) || undefined}
+              placeholder="Not set"
+              className={settingsControl}
+              disabled={nameForm.status === "saving"}
+            />
+            {/* A format problem belongs under its field; a failed write goes to the corner. */}
+            {nameForm.isDirty && !nameValid && <span className="text-[11px] text-destructive">Name must be 1-100 characters</span>}
+          </div>
         </SettingsRow>
+        <SaveFooter
+          dirty={nameForm.isDirty}
+          count={nameForm.dirtyCount}
+          status={nameForm.status}
+          error={nameForm.error}
+          canSave={nameValid}
+          onCancel={nameForm.reset}
+          onSave={saveName}
+        />
         <SettingsRow label="Password">
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground tracking-[0.2em]">••••••••</span>

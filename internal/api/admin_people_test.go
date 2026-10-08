@@ -151,6 +151,27 @@ func TestAdminPeople_ListWorkspaces_Fields(t *testing.T) {
 	}
 }
 
+// The list carries the workspace's logo, so Admin draws the workspace the way
+// its people know it, not as initials.
+func TestAdminPeople_ListWorkspaces_Logo(t *testing.T) {
+	f := newPeopleFixture(t)
+	t.Setenv(backup.InstanceOwnerEmailEnv, "")
+	if _, err := f.db.Exec(`UPDATE workspaces SET logo_url = 'https://cdn.example.com/a.png' WHERE id = 'ws-a'`); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	NewAdminHandler(f.db, newTestLogger()).ListWorkspaces(rr, peopleReq("GET", "/", "u-admin", "admin@a.test", "ws-a", "ADMIN"))
+	var out []struct {
+		LogoURL *string `json:"logo_url"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil || len(out) != 1 {
+		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
+	}
+	if out[0].LogoURL == nil || *out[0].LogoURL != "https://cdn.example.com/a.png" {
+		t.Errorf("logo_url = %v, want the workspace's logo", out[0].LogoURL)
+	}
+}
+
 func TestAdminPeople_ListUsers(t *testing.T) {
 	f := newPeopleFixture(t)
 	h := NewAdminHandler(f.db, newTestLogger())

@@ -363,7 +363,7 @@ export function IssueCardDetail({
                 <DescriptionEditor
                   key={issue.id}
                   description={issue.description ?? ""}
-                  onSave={(md) => void edit.patch({ description: md })}
+                  onChange={(md) => void edit.patch({ description: md })}
                 />
               ) : issue.description ? (
                 <MarkdownContent>{issue.description}</MarkdownContent>
@@ -1046,26 +1046,18 @@ function RelatedCard({ issue, runs }: { issue: Mission; runs: IssueRun[] }) {
  */
 function DescriptionEditor({
   description,
-  onSave,
+  onChange,
 }: {
   description: string
-  onSave: (markdown: string) => void
+  /** Each edit goes to the page's draft; nothing saves on its own. The
+   *  editor's own autosave only runs through onBlur, which is not passed. */
+  onChange: (markdown: string) => void
 }) {
-  const draft = React.useRef(description)
-  // The prop moves when a save lands (or somebody else edits the issue); the
-  // draft has to follow, or the next blur compares against the text this
-  // component was mounted with and re-saves something already saved.
-  React.useEffect(() => {
-    draft.current = description
-  }, [description])
   return (
     <TiptapEditor
       content={description}
       onChange={(md) => {
-        draft.current = md
-      }}
-      onBlur={() => {
-        if (draft.current !== description) onSave(draft.current)
+        if (md !== description) onChange(md)
       }}
       placeholder="Click to add description…"
       editable

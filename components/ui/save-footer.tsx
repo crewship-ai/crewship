@@ -1,12 +1,13 @@
 "use client"
 
 import { Check, Loader2 } from "lucide-react"
-import { useId } from "react"
+import { useEffect, useId, useRef } from "react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { SaveStatus } from "@/hooks/use-dirty-form"
+import { toastSaveError, usePageSave, usePageSaveFailed, usePageSaveLabel } from "@/components/ui/page-save-bar"
 
 /**
  * SaveFooter — the one Save affordance for cards that edit typed-in values.
@@ -21,6 +22,12 @@ import type { SaveStatus } from "@/hooks/use-dirty-form"
  *    anchorings — not a separate mobile component.
  *  · Optional `reason` turns it into the audit-note form that policy and
  *    agent-autonomy writes require, gating Save until a note is typed.
+ *
+ * Inside a page with a PageSaveProvider (Settings, Admin, nested pages) the
+ * strip is not drawn: the card's edits join the page's one floating Save bar
+ * (components/ui/page-save-bar), a failed save becomes a bottom-right toast,
+ * and only a required reason field stays in the card. The strip below is for
+ * a card rendered on its own.
  *
  * Pair with useDirtyForm, which owns the baseline/draft and status machine.
  * Atomic controls (switches, uploads, deletes) do NOT use this — they commit
@@ -40,6 +47,8 @@ export function SaveFooter({
   saveLabel = "Save",
   testId,
   className,
+  count,
+  label,
 }: {
   dirty: boolean
   status: SaveStatus
@@ -58,6 +67,10 @@ export function SaveFooter({
    *  footer rather than "the Save button", of which there are now four. */
   testId?: string
   className?: string
+  /** Fields edited (useDirtyForm's dirtyCount); the page bar adds these up. */
+  count?: number
+  /** The card's name for the error toast; defaults to the SettingsCard title. */
+  label?: string
 }) {
   const reasonId = useId()
   const saving = status === "saving"
@@ -68,9 +81,49 @@ export function SaveFooter({
   // `saved` outlives `dirty`: submit() rebases the baseline the instant the
   // write lands, so the form is already clean when the confirmation shows.
   // Collapsing on dirty alone would swallow the only success signal.
-  if (!dirty && !saved && !failed) return null
-
   const blocked = saving || !canSave || (wantsReason && reason.trim() === "")
+
+  const cardLabel = usePageSaveLabel()
+  const name = label ?? cardLabel ?? "changes"
+  const inPage = usePageSave({
+    label: name,
+    count: dirty ? Math.max(1, count ?? 1) : 0,
+    saving,
+    canSave: !blocked || saving,
+    save: onSave,
+    discard: onCancel,
+  })
+  // The page bar has no room for a card's error: it goes to the corner.
+  const reportFailed = usePageSaveFailed()
+  const lastStatus = useRef(status)
+  useEffect(() => {
+    if (inPage && status === "error" && lastStatus.current !== "error") {
+      reportFailed()
+      toastSaveError(name, error, onSave)
+    }
+    lastStatus.current = status
+  }, [inPage, status, error, name, onSave, reportFailed])
+
+  if (inPage) {
+    if (!wantsReason || !dirty) return null
+    return (
+      <div className={cn("space-y-1.5 border-t border-primary/25 bg-primary/[0.05] px-4 py-2.5", className)}>
+        <label htmlFor={reasonId} className="block text-[11px] uppercase tracking-wider text-muted-foreground">
+          {reasonLabel}
+        </label>
+        <Input
+          id={reasonId}
+          value={reason}
+          onChange={(e) => onReasonChange(e.target.value)}
+          placeholder={reasonPlaceholder}
+          disabled={saving}
+          className="h-7 text-xs"
+        />
+      </div>
+    )
+  }
+
+  if (!dirty && !saved && !failed) return null
 
   return (
     <div

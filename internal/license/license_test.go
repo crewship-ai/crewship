@@ -45,14 +45,14 @@ func TestNewReturnsDefaults(t *testing.T) {
 	if l.Edition() != EditionCommunity {
 		t.Errorf("expected community edition, got %s", l.Edition())
 	}
-	if l.MaxCrews() != 15 {
-		t.Errorf("expected 15 max crews, got %d", l.MaxCrews())
+	if l.MaxCrews() != 0 {
+		t.Errorf("expected unlimited (0) max crews, got %d", l.MaxCrews())
 	}
-	if l.MaxAgentsPerCrew() != 10 {
-		t.Errorf("expected 10 max agents, got %d", l.MaxAgentsPerCrew())
+	if l.MaxAgentsPerCrew() != 0 {
+		t.Errorf("expected unlimited (0) max agents, got %d", l.MaxAgentsPerCrew())
 	}
-	if l.MaxMembers() != 5 {
-		t.Errorf("expected 5 max members, got %d", l.MaxMembers())
+	if l.MaxMembers() != 0 {
+		t.Errorf("expected unlimited (0) max members, got %d", l.MaxMembers())
 	}
 	if !l.IsCommunity() {
 		t.Error("expected IsCommunity() = true")
@@ -87,14 +87,17 @@ func TestLoadValidLicense(t *testing.T) {
 	if l.Edition() != EditionEnterprise {
 		t.Errorf("expected enterprise, got %s", l.Edition())
 	}
-	if l.MaxCrews() != 100 {
-		t.Errorf("expected 100, got %d", l.MaxCrews())
+	if l.MaxCrews() != 0 {
+		t.Errorf("expected unlimited (0), got %d", l.MaxCrews())
 	}
-	if l.MaxAgentsPerCrew() != 50 {
-		t.Errorf("expected 50, got %d", l.MaxAgentsPerCrew())
+	if l.MaxAgentsPerCrew() != 0 {
+		t.Errorf("expected unlimited (0), got %d", l.MaxAgentsPerCrew())
 	}
-	if l.MaxMembers() != 200 {
-		t.Errorf("expected 200, got %d", l.MaxMembers())
+	if l.MaxMembers() != 0 {
+		t.Errorf("expected unlimited (0), got %d", l.MaxMembers())
+	}
+	if got := l.Claims(); got.MaxCrews != claims.MaxCrews || got.MaxAgents != claims.MaxAgents || got.MaxMembers != claims.MaxMembers {
+		t.Fatal("signed resource claims must remain available for future licensing")
 	}
 	if !l.IsEnterprise() {
 		t.Error("expected IsEnterprise() = true")

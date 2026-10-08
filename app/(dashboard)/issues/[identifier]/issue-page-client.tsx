@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Skeleton } from "@/components/ui/skeleton"
 import { IssueDetailSurface } from "@/components/features/issues/issue-detail-surface"
+import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 // Identifier read from the URL, not useParams() — see useUrlSegment for the
 // static-export "_" placeholder bug this avoids. Module scope so the regex
@@ -32,6 +33,15 @@ import { IssueDetailSurface } from "@/components/features/issues/issue-detail-su
 const ISSUE_PATH_RE = /^\/issues\/([^/]+)\/?$/
 
 export function IssuePageClient() {
+  // The issue's edits wait for one Save bar; Back asks while any wait.
+  return (
+    <PageSaveProvider>
+      <IssuePage />
+    </PageSaveProvider>
+  )
+}
+
+function IssuePage() {
   const router = useRouter()
 
   // An issue is almost always opened FROM somewhere — an agent's Issues cell,
@@ -41,7 +51,8 @@ export function IssuePageClient() {
   const [fromParam] = useShallowSearchParam("from")
   const [fromLabelParam] = useShallowSearchParam("fromLabel")
   const origin = parseReturnTo(fromParam, fromLabelParam)
-  const back = useCallback(() => router.push(origin?.href ?? "/issues"), [router, origin?.href])
+  const guard = usePageSaveGuard()
+  const back = useCallback(() => guard(() => router.push(origin?.href ?? "/issues")), [guard, router, origin?.href])
 
   const identifier = useUrlSegment(ISSUE_PATH_RE)
   const { workspaceId, loading: wsLoading } = useWorkspace()
@@ -94,7 +105,8 @@ export function IssuePageClient() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="relative min-h-0 flex-1">
+      <div className="h-full overflow-y-auto pb-20">
         {wsLoading || !workspaceId || !identifier ? (
           <div className="flex flex-col gap-4 p-4">
             <Skeleton className="h-[132px] w-full rounded-xl" />
@@ -107,6 +119,8 @@ export function IssuePageClient() {
             viewerInitial={session?.user?.name ?? session?.user?.email ?? "U"}
           />
         )}
+      </div>
+      <PageSaveBar />
       </div>
     </div>
   )

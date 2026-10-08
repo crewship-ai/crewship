@@ -385,6 +385,7 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
       {canEdit && (
         <SaveFooter
           dirty={form.isDirty}
+          count={form.dirtyCount}
           status={form.status}
           error={form.error}
           canSave={!budgetInvalid}
