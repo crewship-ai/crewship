@@ -72,7 +72,7 @@ func ledgerSince(raw string) (since string, ok bool) {
 	if raw == "" {
 		return "", true
 	}
-	t, err := time.Parse(time.RFC3339Nano, raw)
+	t, err := time.Parse(time.RFC3339Nano, raw) // tsformat:allow: parses the client's since=; it reaches SQL only through tsformat.Format below
 	if err != nil {
 		return "", false
 	}
