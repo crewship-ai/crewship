@@ -199,8 +199,13 @@ pending queue as a deferred start: `202` with `status: "SCHEDULED"`,
 starts it when a slot frees, retrying as described under
 [Deferred and replay operations](#deferred-and-replay-operations). It waits at
 most `ttl_seconds`, or one hour when none is given, then ends `expired` with a
-reason. A retry with the same `Idempotency-Key` returns the same `pending_id`,
-even after the slot frees, instead of starting a second run. Send
+reason. A retry with the same `Idempotency-Key`, also after the slot frees,
+answers with that start instead of starting a second run: the same
+`SCHEDULED` receipt while it waits, `200 DEDUPED` with its `run_id` once it
+ran, and `409` naming the start when it ended without running (expired,
+failed or cancelled); use a new key to start again. The key stays bound to
+that start. The queued run is attributed to the request's trigger (manual by
+default). Send
 `"queue_if_busy": false` to keep the `429` refusal. The queued start is pinned
 to the published version, so a routine without one answers `409`. Webhooks,
 schedules, replay and agent-invoked runs keep their own concurrency handling. The `Idempotency-Key` header
