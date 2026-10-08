@@ -52,8 +52,17 @@ that selection. A selected run adds `&run=` and keeps its recorded recipe versio
 Steps use an explicit name when provided, otherwise a description of their action.
 Stable IDs remain secondary technical identifiers. Empty schedules and results
 collapse to a short row. The run page leads with its verdict, error and failed
-step, and opens failed, current or waiting steps automatically. Missing evidence
-is distinguished from an empty result. Stopping a run does not undo prior actions.
+step, and opens failed, current or waiting steps automatically. The result and
+the next step come before run provenance and the shareable evidence, which stay
+further down the same page. Missing evidence is distinguished from an empty
+result. Stopping a run does not undo prior actions.
+
+The overview pane and the header Activity menu load running and waiting runs
+from their own list, so a long run stays visible however many runs started
+after it. The run summary is computed from the 200 newest runs: when those do
+not reach back seven days it reads *newest N runs · since …* instead of *7d*.
+A run whose result is partial or needs a person counts as finished, not as a
+success.
 
 A run detail's recipe comes from the run's **own archived record** — resolved by
 content hash, then numeric version, never from the routine's current head — so
