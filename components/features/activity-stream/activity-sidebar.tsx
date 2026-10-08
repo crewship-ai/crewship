@@ -32,20 +32,7 @@ import {
   SidebarToolbar,
   SidebarViewButton,
 } from "@/components/layout/sidebar-kit"
-import {
-  Activity,
-  Bot,
-  CheckCircle2,
-  CircleSlash,
-  CircleDot,
-  ClipboardList,
-  Layers,
-  PauseCircle,
-  Rows3,
-  Webhook,
-  Workflow,
-  XCircle,
-} from "lucide-react"
+import { Bot, CircleDot, ClipboardList, Rows3, Webhook, Workflow } from "lucide-react"
 
 import {
   DropdownMenu,
@@ -79,8 +66,6 @@ import {
   filterFacets,
   railSources,
   railStatusRows,
-  type RailScope,
-  type RailStatusRow,
   type TimeRangeKey,
 } from "@/lib/activity-rail"
 import {
