@@ -12,10 +12,11 @@ tag: Experimental
 
 **Activity** lives at `/activity`, under the **Run** group of the sidebar. It answers the question people arrive with — *what is happening, and where do I look* — as a stream: a left rail listing what has been **active in the loaded window**, and a main column that changes with whatever the reader picked.
 
-The page is built from two independent reads:
+The page is built from three independent reads:
 
 - **The workflow index** — `GET /api/v1/chains` (`hooks/use-chains.ts`), one row per chain. A *chain* is every run sharing one `chain_origin`: the rule or person that started it, the routine runs it caused, and the agent work those dispatched. It is fetched on demand, not streamed.
-- **The journal** — `GET /api/v1/journal`, which feeds the event list, the Overview dashboard and the opened-event detail. It streams over SSE and falls back to polling.
+- **The routine runs** — `GET /api/v1/workspaces/{ws}/pipeline-runs?since=` and the run's own records, which feed the [home](#the-home) and the [run page](#a-run-page).
+- **The journal** — `GET /api/v1/journal`, which feeds the filtered event list and the opened-event detail. It streams over SSE and falls back to polling.
 
 The two are deliberately separate: the rail must still answer "where can I go" when the current filters answer nothing.
 
@@ -25,14 +26,15 @@ The two are deliberately separate: the rail must still answer "where can I go" w
 
 ## When to use it
 
-- **Something ran and you want to know what it caused.** A workflow row opens the whole chain — its runs, its causal graph, the sequence it happened in, and the issues and agents it touched.
+- **Something ran and you want to know how it went.** A row opens [the run](#a-run-page) — its status, why it failed or what it waits for, its steps with every attempt, what it caused further down the chain, what it is linked to and changed, and its routine's previous runs.
+- **You open the page to see the day.** The [home](#the-home) says in one sentence how many runs there were, what is live, what needs you and what could not finish, and draws every run on its routine's lane.
 - **You want a routine's runs, not its definition.** **Group by → Routine** opens a routine's runs grouped by the hour, with each run's own result on the row instead of its id. The definition stays on [Routines](/guides/routines).
 - **You want to know what your agents did.** **Group by → Agent** lists agents that took work in the window, how much, and in which workflows.
 - **An issue moved and you want to know what moved it.** **Group by → Issue** lists issues touched in the window with the routine and agent that reached each one.
 - **You are chasing a failure.** The **Could not finish** status row narrows both the rail and the feed.
 - **You want accepted work or received webhooks.** The **Ledger** rows at the bottom of the rail open the [work queue and webhook deliveries](#ledgers).
 
-To *author* a routine, go to [Routines](/guides/routines). To decide a waitpoint or clear an escalation, go to [Inbox](/guides/inbox) — nothing on this page approves anything. To read the raw event log, use `/journal` or the [Crew Journal](/guides/crew-journal) API.
+To *author* a routine, go to [Routines](/guides/routines). A plain approval can be decided from the home's **Needs you** card or on the run page — it is the same item as in [Inbox](/guides/inbox), and an approval with a decision form opens on the run, where the form is. To read the raw event log, use `/journal` (workspace OWNER and ADMIN only, see [Crew Journal](/guides/crew-journal)).
 
 ## Key concepts
 
@@ -41,8 +43,9 @@ To *author* a routine, go to [Routines](/guides/routines). To decide a waitpoint
 | **Chain** | Every run sharing one `chain_origin`. The unit the index groups by, and a valid anchor for `GET /api/v1/chains/{anchor}`. |
 | **Run row** | One chain in the rail. Every chain of the window is listed — a plain run of a routine as much as one that composed something. |
 | **Group by** | Which catalogue the rail lists: Time (the default), Issue, Agent, Routine — the `?lens=` value. All four are derived from the same loaded chain list, so no two can disagree about what happened. |
-| **Sentence** | A workflow row's first line — the *shape*, not the routine's name: `file a follow-up when an issue closes → Follow up on close → riley → ENG-7`. Two runs of one routine render the same name; what they reached differs. |
-| **Handle** | The last 8 characters of the chain origin, on the right of a row. Derived, never generated — it is what tells two runs of one routine apart. |
+| **Row title** | The routine's name, as on the Routines rail. The second line says what started it in short words — `schedule`, `by hand`, `webhook · contact-form`, `rule · on issue closed`, `from OPS-1` (`startedByWord`) — then the duration and what it touched. The right edge says when. |
+| **Sentence** | The row's tooltip — the whole *shape*: `file a follow-up when an issue closes → Follow up on close → riley → ENG-7`. |
+| **Handle** | The last 8 characters of the chain origin, in the row's tooltip. Derived, never generated. |
 | **Status row** | All · Waiting for you · Running · Completed · Could not finish — the Routines rail's words and order. One choice. Counts **chains**, which is what the list under it holds. |
 | **Stop / trail** | Where the reader is standing. Every pick is one stop on a path; the back-bar above the column is the walk — **‹ Back to activity** returns to the overview (as **‹ Back to issues** does), and each crumb after it jumps to that stop; `Esc` steps one stop up. Styled and animated like the Issues and Routines back-bars. Capped at 6 stops (`ACTIVITY_MAX_DEPTH`), and the trail says when earlier stops fell off. |
 | **Drill-down** | What a row leads to: a run's steps, an issue's "what reached it", an agent's work, a routine's runs. |
@@ -64,7 +67,7 @@ The View button (the rows icon beside Filter) groups the list. Each grouping lis
 
 Under **Time**, every chain of the window is listed and grouped into **Active now**, **Today** and **Earlier**. "Active now" is a *state*, not a time: a chain parked on a human approval since Tuesday is the most urgent row on the page and must not sort to the bottom by its timestamp.
 
-Each row wears its routine's own icon and colour (the same derivation the Routines rail uses), a status dot notched into the corner, a halo while something is live, its sentence, `could not finish / waiting for you · relative time · duration · what it touched`, and its handle.
+Each row wears its routine's own icon and colour (the same derivation the Routines rail uses), a status dot notched into the corner, a halo while something is live, the routine's name, `could not finish / waiting for you · what started it · duration · what it touched`, and how long ago it was active.
 
 ### Status
 
@@ -113,16 +116,30 @@ One selection, one column — never a stack.
 
 | What is selected | What the column draws |
 |------------------|-----------------------|
-| Nothing, grouped by Time, status **All** | The **Overview** dashboard |
+| Nothing, grouped by Time, status **All**, no filter | [The home](#the-home) |
 | Nothing, grouped by Issue / Agent / Routine | That grouping's own dashboard |
-| A status row, or a node walked into from a graph | The feed as a list, with **Load older** |
-| A run row | The [workflow page](#a-workflow-page) |
+| A status row, a search, a crew/agent/issue filter, a pinned crumb, or a node walked into from a graph | The feed as a list, with **Load older** |
+| A run row whose chain starts at a routine run | That [run's page](#a-run-page) |
+| A run row rooted in agent work | The [workflow page](#a-workflow-page) |
 | An issue / agent / run / routine row | Its [drill-down](#where-a-row-leads) |
 | A feed row | That [event, opened](#opening-one-event) |
 
-### Overview (grouped by Time)
+### The home
 
-Four KPI cards — **Running now**, **Waiting on you**, **Failures**, **Spend** — where the first three are places to go rather than numbers to read (clicking one selects that status row). Under them: **Open asks** and **What is broken** side by side with their evidence, then **Latest activity** and, only when the loaded window spans two days or more, a **Failures · N days** bar chart. **Waiting on you** and **Open asks** count asks that are still open — the same join the Waiting-for-you row uses, not a second opinion about it. A zero says *which* zero it is: "nothing broke" is a claim about the world, and this window only ever knew about itself.
+The time view's home is built from **runs**, not journal events, and answers in the order a person asks on arrival (`components/features/activity-stream/activity-home.tsx`, rules in `lib/activity-home.ts`):
+
+| Part | What it says |
+|------|--------------|
+| **Header** | One sentence — `14 runs · 2 running · 1 needs you · 3 could not finish · $0.42` — with a **24 h / 7 d** switch. A zero is left out, except "nothing needs you". |
+| **Needs you** | The approvals waiting (`GET …/pipelines/waitpoints`), the same items as Inbox. A MANAGER or above can **Approve** or **Reject** a plain approval here; one with a decision form, and everyone else, gets **Open run**. |
+| **Right now** | Runs that are running or waiting, and **Up next** — the next planned runs from the routines calendar. |
+| **What ran** | One lane per routine across the window, every run a bar coloured by outcome; click a bar to open the run. Live and failing lanes come first; the quiet tail folds into a count. Drawn from the newest 200 runs of the last 7 days, and it says so when that cap cuts the window. |
+| **Problems** | Failures grouped by cause (`GET …/pipelines/runs/errors`), but only causes that failed in the last 7 days — the server's groups cover all time. Opens the latest failure. |
+| **What changed** | The issues the window's runs created and touched, from the chain index. Page writes are not listed yet: the API has no "pages written by this run" read. |
+| **Outcomes** | Seven days by outcome, with the share that finished. |
+| **Latest runs** | One line per run — what it came to (`HTTP 502 Bad Gateway`, `Finished in 4.7s`, `Waiting for a decision`) and what started it. Admins get a **Raw events in Journal** link. |
+
+The home covers the whole workspace, so it shows only while nothing narrows the page. A crew, an agent, a search or a pinned crumb asks a narrower question, and the filtered event list answers it.
 
 ### Issues, Agents, Routines
 
@@ -132,9 +149,28 @@ Each grouping owns the column, so picking one changes what is *shown* and not on
 - **Agents** — Agents at work (of N hired) / Assignments / In workflows / Busiest, then one line per agent with a proportion bar and what it worked on. "In workflows" is the wall clock of the chains the agent worked in, **not** billed agent time — the index does not carry that.
 - **Routines** — Routines that ran (of N in the catalogue) / Runs / Success / Failing, one line per routine with a success-rate bar, plus a **Firing next** card listing the schedules due next with their cron and a countdown.
 
+## A run page
+
+A rail row whose chain starts at a routine run opens **that run** (`activity-run-page.tsx`), and so does every other way to a run on this page — a sub-run, a dot in Previous runs, a bar on the home, `?run=` from Inbox or the bell. It is built from the parts [Routines](/guides/routines) uses, so a run reads the same on both pages:
+
+| Part | What it says |
+|------|--------------|
+| **Header** | The routine's name, the status in the rail's words (with a ping while running), what started it, when, and the run id. **Retry** / **Run again** replays the run with its original inputs (`POST …/pipelines/runs/{id}/replay`, MANAGER+); **Stop** cancels a live run (`POST …/pipelines/runs/{id}/cancel`, OWNER/ADMIN); **Open routine**. The buttons follow the API's own role gates. |
+| **Banner** | The approval it waits on, decidable here, or **Why it failed** — the step it stopped at, the failure, what was kept and what never ran (`routineRunBanner`, the same sentence as on Routines). |
+| **Facts** | Started · Duration · Cost · Steps (finished of the recipe's) · Trigger. |
+| **Steps** | The routine step spine — attempts, for-each items and agent work inside a step, each with its recorded output. |
+| **Caused by this run** | The work further down the chain, nested: the runs of the routines it called, agent assignments, inbox asks. Each opens. |
+| **Result** | The run's output, once it has finished. |
+| **Linked to** | Its routine (to the routine's history), the issues in its chain, and the agents. |
+| **What it changed** | The issues its chain created or touched — only when the chain starts at this run. |
+| **Previous runs** | The routine's newest runs as a strip, oldest left, this one ringed; each opens. |
+| **Raw events** | `N raw events · Journal` (`GET /api/v1/journal/count?run_id=`), for OWNER and ADMIN only. |
+
+A run id that is not a routine run — agent work — falls back to the typed run detail.
+
 ## A workflow page
 
-Picking a workflow row opens it as a page, answering five questions in order:
+A chain rooted in agent work has no run to open, so its row opens the chain as a page, answering five questions in order:
 
 1. **What was this?** — the sentence as the heading, who started it, the raw `triggered_via`, when (absolute and relative), and the chain origin. Then a strip: Duration, Runs, Failed, Depth, Issues, Agents.
 2. **Which runs?** — the **Runs** card, derived from the chain walk and filtered to *this* chain's origin. Each row opens that run.
@@ -152,7 +188,7 @@ Each kind gets the surface that kind already has elsewhere, not a fifth renderin
 
 | Row | Opens |
 |-----|-------|
-| **Run** | Status, started, duration, cost, trigger and composed depth; the run's **Result** (its output, or the error and the step it failed at); and **Steps** — the live run-activity rail from the journal. The record comes from the run API (`GET /api/v1/runs/{id}`), which resolves the run to an agent or routine detail by its kind and only falls back to the routine run record (`GET /api/v1/workspaces/{ws}/pipeline-runs/{id}`) when the run API has no record. A run with no execution record says so — and says that a missing record does not prove the agent never started. A **Run evidence** card offers a bounded, previewable copy of the run's references and recorded activity (`Copy evidence`), and marks a missing journal as unavailable evidence rather than as proof nothing ran. |
+| **Run** | [The run page](#a-run-page). A run that is not a routine run (agent work) gets the typed detail from the run API (`GET /api/v1/runs/{id}`): status, result, the run-activity rail, and a **Run evidence** card. A run with no execution record says so — and says that a missing record does not prove the agent never started. |
 | **Issue** | What Activity knows that `/issues` does not: which workflows reached this issue, whether it was **created here** or merely changed, which agents did the reaching. An **Open issue ↗** link appears only when the workspace uses issue identifiers — `/issues/[identifier]` resolves nothing else, and a button that 404s is worse than an absent one. |
 | **Agent** | Workflows, assignments, issues reached, and the wall clock of the chains it worked in, with a link to the agent's own page. Its sessions and messages stay there. |
 | **Routine** | That routine's runs, grouped by the reader's local hour. |
