@@ -14,6 +14,7 @@ import { SettingsCard, SettingsRow, SettingsSummary, SummaryItem } from "@/compo
 import { ProviderMark } from "@/components/features/integrations/provider-marks"
 import { apiFetch } from "@/lib/api-fetch"
 import { withWs, wsParam } from "@/lib/admin-workspace-query"
+import { StatusPill } from "@/components/ui/status-pill"
 
 interface ProviderInfo {
   provider: string
@@ -198,7 +199,7 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
                       </span>
                       <span className="flex shrink-0 items-center justify-end gap-2 sm:w-64">
                         {n > 0 && <span className="rounded-full bg-primary/10 px-1.5 font-mono text-[10.5px] text-primary-hover">{n} channel{n === 1 ? "" : "s"}</span>}
-                        {!p.enabled && <span className="rounded-full bg-muted px-1.5 font-mono text-[10.5px] text-muted-foreground">Off</span>}
+                        {!p.enabled && <StatusPill tone="muted" label="Off" />}
                         <Switch
                           checked={p.enabled}
                           disabled={togglingProvider === p.provider}

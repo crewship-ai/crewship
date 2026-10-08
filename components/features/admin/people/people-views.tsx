@@ -10,6 +10,7 @@ import {
 } from "./people-model"
 import { PersonLabel, RoleSelect, StatusChip, roleLabel } from "./people-parts"
 import type { usePeople } from "./use-people"
+import { StatusPill } from "@/components/ui/status-pill"
 
 type Actions = ReturnType<typeof usePeople>["actions"]
 
@@ -102,7 +103,7 @@ export function WorkspacesTable({ workspaces, people, onOpen }: { workspaces: Wo
                       <span><span className="block">{w.name}</span><span className="block font-mono text-[11px] text-muted-foreground">{w.slug}</span></span>
                     </span>
                   </td>
-                  <td className={td}>{owner ? <PersonLabel person={owner} /> : <span className="rounded-full bg-warn/15 px-2 font-mono text-[10.5px] text-warn">No owner</span>}</td>
+                  <td className={td}>{owner ? <PersonLabel person={owner} /> : <StatusPill tone="warn" label="No owner" />}</td>
                   <td className={cn(td, "text-right font-mono tabular-nums")}>{w._count_members}</td>
                   <td className={cn(td, "text-right font-mono tabular-nums")}>{w._count_crews}</td>
                   <td className={td}><span className="inline-flex items-center gap-2"><WeekLine values={w.runs_by_day?.length ? w.runs_by_day : [0]} muted={!w.runs_7d} /><span className="font-mono text-[11px] text-muted-foreground">{w.runs_7d ?? 0}</span></span></td>

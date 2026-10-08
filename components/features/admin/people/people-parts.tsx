@@ -9,6 +9,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { daysUntil, displayName, personStatus, ROLES, STATUS_LABEL, type Person, type PersonStatus, type Role } from "./people-model"
+import { inlineControl, nativeSelect } from "@/components/features/settings/shared"
+import { StatusPill } from "@/components/ui/status-pill"
+import type { StatusTone } from "@/lib/format-status"
 
 export const roleLabel = (r: string) => r.charAt(0) + r.slice(1).toLowerCase()
 
@@ -28,7 +31,7 @@ export function RoleSelect({ value, onChange, disabled, label, allowNone, classN
       value={value ?? ""}
       disabled={disabled}
       onChange={(e) => onChange((e.target.value || null) as Role | null)}
-      className={cn("h-8 w-36 rounded-md border border-control-border bg-surface-subtle px-2 text-control text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50", className)}
+      className={cn(nativeSelect, "w-36", className)}
     >
       {allowNone && <option value="">No access</option>}
       {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
@@ -36,16 +39,16 @@ export function RoleSelect({ value, onChange, disabled, label, allowNone, classN
   )
 }
 
-const STATUS_TONE: Record<PersonStatus, string> = {
-  active: "bg-success/12 text-success",
-  setup: "bg-primary/12 text-primary-hover",
-  locked: "bg-warn/15 text-warn",
-  suspended: "bg-muted text-muted-foreground",
+const STATUS_TONE: Record<PersonStatus, StatusTone> = {
+  active: "success",
+  setup: "blue",
+  locked: "warn",
+  suspended: "muted",
 }
 
 export function StatusChip({ person, now }: { person: Person; now?: number }) {
   const s = personStatus(person, now)
-  return <span className={cn("inline-flex h-5 items-center rounded-full px-2 font-mono text-[10.5px] font-medium", STATUS_TONE[s])}>{STATUS_LABEL[s]}</span>
+  return <StatusPill tone={STATUS_TONE[s]} label={STATUS_LABEL[s]} />
 }
 
 export function PersonAvatar({ person, className }: { person: Person; className?: string }) {
@@ -105,7 +108,7 @@ export function InlineConfirm({ message, confirmLabel, onConfirm, onCancel, type
       {typeToConfirm && (
         <>
           <label htmlFor={id} className="text-muted-foreground">Type <span className="font-mono text-foreground">{typeToConfirm}</span></label>
-          <Input id={id} value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" className="h-7 w-44 font-mono text-xs" />
+          <Input id={id} value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" className={cn(inlineControl, "w-44 font-mono")} />
         </>
       )}
       <Button size="xs" variant="ghost" onClick={onCancel} disabled={busy}>Cancel</Button>

@@ -10,17 +10,19 @@ import { redactSecrets } from "@/app/(dashboard)/admin/utils"
 import type { KeeperLogEntry } from "@/app/(dashboard)/admin/types"
 import type { KeeperWsStatus } from "@/app/(dashboard)/admin/hooks/use-admin-websocket"
 import { STREAMS, filterActivity, streamOf, type DecisionFilter, type Stream } from "./security-model"
+import { StatusPill } from "@/components/ui/status-pill"
+import type { StatusTone } from "@/lib/format-status"
 
-const DECISION_TONE: Record<string, string> = {
-  ALLOW: "bg-success/12 text-success",
-  DENY: "bg-destructive/12 text-destructive",
-  ESCALATE: "bg-warn/15 text-warn",
-  PENDING: "bg-muted text-muted-foreground",
+const DECISION_TONE: Record<string, StatusTone> = {
+  ALLOW: "success",
+  DENY: "danger",
+  ESCALATE: "warn",
+  PENDING: "muted",
 }
 
 export function DecisionChip({ decision }: { decision: string | null | undefined }) {
   const d = decision ?? "PENDING"
-  return <span className={cn("inline-flex h-5 items-center rounded-full px-2 font-mono text-[10.5px] font-medium", DECISION_TONE[d] ?? DECISION_TONE.PENDING)}>{d}</span>
+  return <StatusPill tone={DECISION_TONE[d] ?? DECISION_TONE.PENDING} label={d} />
 }
 
 const when = (iso: string) => new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z").toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
