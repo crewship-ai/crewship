@@ -339,8 +339,16 @@ X-Crewship-Signature: <hex HMAC-SHA256(body, signing_secret)>
 The signature is required. With `X-Crewship-Timestamp: <unix-seconds>`, sign
 `<timestamp>.<raw-body>`; the timestamp must be fresh. The body may be any JSON
 (or raw bytes): the routine receives request-derived `event`, `raw`, and
-`headers` inputs. `inputs_template` may add keys but cannot override those
-three fields. `Idempotency-Key` (or `X-Crewship-Event-ID`) can select the
+`headers` inputs. `inputs_template` adds literal values; it does not evaluate
+templates or merge payload fields into top-level inputs, and it cannot override
+those three fields. Declared form inputs are validated before accepting a new
+delivery: invalid inputs return `400` without reserving a delivery ID or run ID.
+A malformed target definition returns `409`. These signed, rate-limited
+rejections are recorded as failed deliveries and increment the webhook's failure
+streak; repeated failures can alert managers, and a successful delivery resets
+the streak. Delivery health includes sender configuration/data errors, not only
+server execution errors.
+`Idempotency-Key` (or `X-Crewship-Event-ID`) can select the
 deduplication identity; identical signed deliveries also deduplicate.
 
 Success returns `202`:
