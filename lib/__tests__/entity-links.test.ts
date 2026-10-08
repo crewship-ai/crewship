@@ -28,6 +28,12 @@ describe("entityHref", () => {
     expect(entityHref({ kind: "inbox", attention: "run-alerts" })).toBe("/inbox?attention=run-alerts")
   })
 
+  it("opens a skill beside the Skills explorer, or the list filtered to an agent", () => {
+    expect(entityHref({ kind: "skill", id: "sk_1" })).toBe("/skills?skill=sk_1")
+    expect(entityHref({ kind: "skill", id: "sk_1", tab: "agents" })).toBe("/skills?skill=sk_1&tab=agents")
+    expect(entityHref({ kind: "skills", agentId: "agt_1" })).toBe("/skills?agent=agt_1")
+  })
+
   it("opens a crew tool on the integrations page, where Connect lives", () => {
     expect(entityHref({ kind: "integrations", tab: "tools", section: "crew-tools", server: "srv_1" })).toBe("/integrations?tab=tools&section=crew-tools&server=srv_1")
     expect(entityHref({ kind: "integrations" })).toBe("/integrations")

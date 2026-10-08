@@ -126,6 +126,16 @@ Import via the API endpoint `POST /api/v1/workspaces/{id}/skills/import` with th
 
 Skills are assigned to specific agents. The seed data maps agents to skills based on their role.
 
+### On the Skills page
+
+The left panel of **Skills** works like the one on Routines and Issues:
+
+- **View** — All skills, On agents, Not assigned, **Needs a look** (on an agent and flagged, never scanned, or missing a credential) and **Proposed by agents**.
+- **Crews & agents** — pick an agent to see only its skills (or a crew for all of its agents); the number beside each is how many skills it holds. With an agent picked, **Skills for &lt;agent&gt;** edits its whole set at once.
+- **Domain** — the categories in use. **Filter** adds source, trust, maturity and "needs a credential".
+
+Open a skill to see who holds it on the **Agents** tab: one switch per agent applies at once (the agent loads the skill on its next run), and **Give to whole crew** does a crew in one go. An agent that holds a skill without a credential the skill needs is marked "no GITHUB_TOKEN" (or whichever is missing). **New skill** writes a SKILL.md with Claude using the workspace's Anthropic key; **Import** takes a URL, pasted content or a git repository.
+
 <Accordion title="Seed-data agent → skill assignments">
 ```
 Engineering crew:
@@ -204,7 +214,7 @@ The orchestrator watches the agent's tool-call stream. When a tool call maps to 
 
 Recording is **best-effort and off the hot path** -- it runs in a bounded background worker, so a busy agent is never slowed by telemetry, and a tool call that does not correspond to an assigned skill is silently ignored. A non-skill tool (e.g. `Read`, `Bash`) never produces an invocation row.
 
-The skill-review routine reads the `skill_invocations` aggregate (count + error count over a lookback window) to decide whether an assigned skill is still earning its place in the system prompt. Filter the journal Timeline on `skill.invoked` to see, per agent, exactly which skills are pulling their weight.
+The skill-review routine reads the `skill_invocations` aggregate (count + error count over a lookback window) to decide whether an assigned skill is still earning its place in the system prompt. Filter the journal Timeline on `skill.invoked` to see, per agent, exactly which skills are pulling their weight. The Skills page shows the same numbers for your workspace: uses in the last 7 days and last use on each card, and a skill's history on its Activity tab.
 
 ## What's Next
 
