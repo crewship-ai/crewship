@@ -9,7 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- ⚠️ **Behaviour change: a routine `agent_run` step now waits for a busy agent instead of failing at once.** When a chat, an assignment or another routine holds the agent, the step waits up to its `timeout_seconds` (15 minutes without one) or until the run is stopped, then fails with a reason naming the busy agent. Waiting steps take the agent in no guaranteed order, hold their run and do not survive a restart. (#3023)
+- **An agent's restricted client execution can be changed in the web app again (#3028).** Edit agent › Model and execution has the Restricted client execution field; the change is part of the dialog's draft and applies on Save, after the agent. It had no UI since #3008. The unused Admin memory-configuration card is removed: Admin › Data retention › Memory versions edits the same setting.
+
+- **Settings and Admin read as one product (#3022).** A refused switch in Access & Secrets or Hooks flips back and says why in the bottom-right toast instead of a line in the card. Every field, select and picker has the same size as its neighbours; supporting text (row descriptions, hints, empty states) is 12px instead of 11px and nothing is set below 11px; every table uses one header, cell and row style; person status, Keeper decisions, "No owner" and "Off" are status pills.
+
 - **Open-source license capacity showed inactive limits.** The license API, administration and CLI now report unlimited crews, members and agents, including when a signed license contains historical caps. Signed claims and enforcement hooks remain available for future releases; administration explains that resource licensing may change.
 
 - **A workspace can have a logo (#3005).** Settings › General › Identity has a Workspace logo row (Upload, Change, Remove; PNG, JPEG or WebP up to 2MB, the same rules as a profile picture), and `crewship workspace logo set <file>` / `remove` do the same. The workspace switcher and Admin › People draw the logo instead of the initial. API: `POST`/`DELETE`/`GET /api/v1/workspaces/{workspaceId}/logo`; setting or removing it is `ADMIN+` and audited.
@@ -6279,6 +6282,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   a forgone optimization for that one call) if a write landed in between.
 
 - **Repeated crew deletion or idle eviction could accumulate anonymous Docker volumes.** New noexec bind-volume records carry installation ownership and are reaped once unused, preserving host data, home/tools history and other installations; unlabelled historical volumes stay for operator investigation. Runtime recreation now reports container removal failures. (#2970)
+
+- ⚠️ **Behaviour change: a routine `agent_run` step now waits for a busy agent instead of failing at once.** When a chat, an assignment or another routine holds the agent, the step waits up to its `timeout_seconds` (15 minutes without one) or until the run is stopped, then fails with a reason naming the busy agent. Waiting steps take the agent in no guaranteed order, hold their run and do not survive a restart. (#3023)
 
 ## [1.0.0-rc.1] — 2026-07-12
 

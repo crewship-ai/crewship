@@ -242,17 +242,17 @@ export const OverviewTab = React.memo(function OverviewTab({
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-lg font-semibold tracking-[-0.02em]">Crewship</h2>
                 {license ? (
-                  <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary-hover">{editionLabel(license.edition)}</span>
+                  <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-micro font-medium text-primary-hover">{editionLabel(license.edition)}</span>
                 ) : (
                   <Skeleton className="h-5 w-32 rounded-full" />
                 )}
                 {version?.newer && version.latest && (
-                  <a href={version.url ?? undefined} target="_blank" rel="noopener noreferrer" className="rounded-full border border-info/40 bg-info/10 px-2 py-0.5 font-mono text-[10.5px] text-info">
+                  <a href={version.url ?? undefined} target="_blank" rel="noopener noreferrer" className="rounded-full border border-info/40 bg-info/10 px-2 py-0.5 font-mono text-micro text-info">
                     {version.latest} available
                   </a>
                 )}
               </div>
-              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[11.5px] text-muted-foreground [&>span]:whitespace-nowrap">
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-micro text-muted-foreground [&>span]:whitespace-nowrap">
                 {version ? (
                   <>
                     <span className="text-foreground/85">{version.current}</span>
@@ -276,7 +276,7 @@ export const OverviewTab = React.memo(function OverviewTab({
               ) : (
                 <StatusPill tone="success" label="All systems healthy" />
               )}
-              <span className="font-mono text-[11px] text-muted-foreground">{health ? `up ${formatUptime(health.uptime_seconds)}` : ""}</span>
+              <span className="font-mono text-micro text-muted-foreground">{health ? `up ${formatUptime(health.uptime_seconds)}` : ""}</span>
             </div>
           </div>
           <ul className="grid grid-cols-2 border-t border-border sm:grid-cols-3 lg:grid-cols-6" aria-label="Health checks">
@@ -285,8 +285,8 @@ export const OverviewTab = React.memo(function OverviewTab({
                 className="flex min-w-0 items-center gap-2 border-b border-r border-border/60 px-4 py-2.5 lg:border-b-0 [&:nth-child(6)]:border-r-0">
                 <c.icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[12px] font-medium">{c.label}</span>
-                  <span className={cn("flex items-center gap-1.5 truncate text-[11px]", c.state === "bad" ? "text-destructive" : c.state === "warn" ? "text-warn" : "text-muted-foreground")}>
+                  <span className="block text-label font-medium">{c.label}</span>
+                  <span className={cn("flex items-center gap-1.5 truncate text-label", c.state === "bad" ? "text-destructive" : c.state === "warn" ? "text-warn" : "text-muted-foreground")}>
                     {c.state === "pending" ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <StatusDot status={STATE_DOT[c.state]} />}
                     <span className="truncate">{c.detail}</span>
                   </span>
@@ -322,7 +322,7 @@ export const OverviewTab = React.memo(function OverviewTab({
                 title="Needs attention"
                 description={warnings.length === 0 ? "The instance's own read of its security posture" : `${warnings.length} finding${warnings.length === 1 ? "" : "s"} from the instance's own read of its security posture`}>
                 {warnings.length === 0 ? (
-                  <div className="flex items-center gap-2 px-4 py-4 text-[12px] text-muted-foreground">
+                  <div className="flex items-center gap-2 px-4 py-4 text-label text-muted-foreground">
                     <Check className="size-3.5 text-success" />
                     Nothing needs attention — no posture warnings on this instance.
                   </div>
@@ -367,11 +367,11 @@ export const OverviewTab = React.memo(function OverviewTab({
               {/* The data volume is the one that fills in practice. A missing
                   measurement stays missing: "0 B free" would invent an emergency. */}
               {!health?.disk ? (
-                <span className="text-[11px] text-muted-foreground">Not reported</span>
+                <span className="text-label text-muted-foreground">Not reported</span>
               ) : health.disk.error ? (
-                <span className="text-[11px] text-muted-foreground">Unavailable — {health.disk.error}</span>
+                <span className="text-label text-muted-foreground">Unavailable — {health.disk.error}</span>
               ) : (
-                <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <span className="flex items-center gap-2 text-label text-muted-foreground">
                   <Bar pct={health.disk.used_pct ?? 0} className="hidden w-20 sm:block" />
                   <span className="font-mono tabular-nums text-foreground/80">{Math.round(health.disk.used_pct ?? 0)}%</span>
                   <span>{formatBytes(health.disk.free_bytes ?? 0)} free of {formatBytes(health.disk.total_bytes ?? 0)}</span>
@@ -404,7 +404,7 @@ export const OverviewTab = React.memo(function OverviewTab({
               {keeper === null ? "Checking…" : keeper.enabled ? <><StatusDot status="COMPLETED" /> On · {keeper.deny_count} denied of {keeper.total_requests}</> : <><StatusDot status="BLOCKED" /> Off</>}
             </Row>
             <SettingsRow label={<Label icon={Radio}>Telemetry</Label>} description="crewship telemetry on|off" border={false}>
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5 text-label text-muted-foreground">
                 <StatusDot status={telemetry?.enabled ? "COMPLETED" : "PENDING"} />
                 {telemetry === null ? "Unknown" : telemetry.enabled ? "Enabled" : "Disabled"}
               </span>
@@ -419,13 +419,13 @@ export const OverviewTab = React.memo(function OverviewTab({
             {aux === null ? (
               <div className="space-y-2 p-4"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-4/5" /></div>
             ) : aux.subsystems.length === 0 ? (
-              <p className="px-4 py-4 text-[12px] text-muted-foreground">No helper models are configured.</p>
+              <p className="px-4 py-4 text-label text-muted-foreground">No helper models are configured.</p>
             ) : (
               aux.subsystems.map((s) => (
                 <div key={s.id} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0" data-slot="admin-aux">
                   <StatusDot status={s.healthy === false || s.reachable === false ? "FAILED" : s.reachable ? "COMPLETED" : "PENDING"} />
                   <span className="min-w-0 flex-1 truncate text-xs" title={s.label}>{s.label}</span>
-                  <span className="max-w-[55%] shrink-0 truncate rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground" title={[s.provider, s.model].filter(Boolean).join(" · ")}>
+                  <span className="max-w-[55%] shrink-0 truncate rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-micro text-muted-foreground" title={[s.provider, s.model].filter(Boolean).join(" · ")}>
                     {[s.provider, s.model].filter(Boolean).join(" · ") || "not set"}
                   </span>
                 </div>
@@ -447,11 +447,11 @@ export const OverviewTab = React.memo(function OverviewTab({
                   {license.features?.length ? (
                     <span className="flex flex-wrap justify-end gap-1">
                       {license.features.map((f) => (
-                        <span key={f} className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{f}</span>
+                        <span key={f} className="rounded border border-border px-1.5 py-0.5 font-mono text-micro text-muted-foreground">{f}</span>
                       ))}
                     </span>
                   ) : (
-                    <span className="text-[11px] text-muted-foreground">All open-source features</span>
+                    <span className="text-label text-muted-foreground">All open-source features</span>
                   )}
                 </SettingsRow>
                 {license.max_crews === 0 && license.max_members === 0 && license.max_agents_per_crew === 0 && (
@@ -484,7 +484,7 @@ function Label({ icon: Icon, children }: { icon: LucideIcon; children: React.Rea
 function Row({ icon, label, description, children }: { icon: LucideIcon; label: string; description?: string; children: React.ReactNode }) {
   return (
     <SettingsRow label={<Label icon={icon}>{label}</Label>} description={description}>
-      <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">{children}</span>
+      <span className="inline-flex items-center gap-1.5 text-label text-muted-foreground">{children}</span>
     </SettingsRow>
   )
 }
@@ -505,10 +505,10 @@ function Bar({ pct, className }: { pct: number; className?: string }) {
 }
 
 function Limit({ used, limit }: { used?: number; limit?: number }) {
-  if (limit === 0) return <span className="font-mono text-[11px] text-foreground/85">Unlimited</span>
+  if (limit === 0) return <span className="font-mono text-micro text-foreground/85">Unlimited</span>
   if (used === undefined) return <Skeleton className="h-3 w-16" />
   return (
-    <span className={cn("flex items-center gap-2 font-mono text-[11px] tabular-nums", overLimit(used, limit) ? "text-destructive" : "text-foreground/85")}>
+    <span className={cn("flex items-center gap-2 font-mono text-micro tabular-nums", overLimit(used, limit) ? "text-destructive" : "text-foreground/85")}>
       {limit ? <Bar pct={(used / limit) * 100} className="w-20" /> : null}
       {against(used, limit)}
     </span>
@@ -542,7 +542,7 @@ function Meter({ icon: Icon, tint, label, used, limit, note, tone, testId }: {
       <div className="mt-3 flex h-4 items-center">
         {limit ? <Bar pct={((used ?? 0) / limit) * 100} className="w-full" /> : null}
       </div>
-      <p className={cn("mt-1 truncate text-[11px]", over ? "text-destructive" : "text-muted-foreground")} title={note}>
+      <p className={cn("mt-1 truncate text-label", over ? "text-destructive" : "text-muted-foreground")} title={note}>
         {note ?? (limit ? `${Math.max(0, limit - (used ?? 0))} left on this licence` : "\u00a0")}
       </p>
     </div>
@@ -567,20 +567,20 @@ function Finding({ finding }: { finding: { key: string; severity: string; messag
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <StatusPill tone={high ? "danger" : medium ? "warn" : "muted"} label={finding.severity.charAt(0).toUpperCase() + finding.severity.slice(1)} />
-          <p className="min-w-0 flex-1 text-[12.5px] font-medium leading-snug text-foreground">{head}</p>
+          <p className="min-w-0 flex-1 text-label font-medium leading-snug text-foreground">{head}</p>
         </div>
         {rest && (
-          <p className={cn("mt-1 text-[12px] leading-relaxed text-muted-foreground", !open && "line-clamp-1")}>{rest}</p>
+          <p className={cn("mt-1 text-label leading-relaxed text-muted-foreground", !open && "line-clamp-1")}>{rest}</p>
         )}
         {rest && (
-          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="mt-0.5 text-[11px] font-medium text-primary-hover hover:underline">
+          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="mt-0.5 text-label font-medium text-primary-hover hover:underline">
             {open ? "Less" : "Details"}
           </button>
         )}
       </div>
       {action && (
         <Link href={action.href} data-testid="admin-finding-action"
-          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground/90 transition-colors hover:border-primary/50 hover:text-primary-hover">
+          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-label font-medium text-foreground/90 transition-colors hover:border-primary/50 hover:text-primary-hover">
           {action.label} <ChevronRight className="h-3 w-3" />
         </Link>
       )}
@@ -598,7 +598,7 @@ const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 function RunBars({ runs, noWorkspace }: { runs: TimeseriesPoint[] | null; noWorkspace: boolean }) {
   const reduce = useReducedMotion()
   if (runs === null && noWorkspace) {
-    return <p className="flex flex-1 items-center justify-center p-4 text-center text-[12px] text-muted-foreground">Runs are counted per workspace — open one to see its week.</p>
+    return <p className="flex flex-1 items-center justify-center p-4 text-center text-label text-muted-foreground">Runs are counted per workspace — open one to see its week.</p>
   }
   if (runs === null) return <div className="flex-1 p-4"><Skeleton className="h-full min-h-24 w-full" /></div>
   const max = Math.max(1, ...runs.map((r) => r.value))
@@ -608,13 +608,13 @@ function RunBars({ runs, noWorkspace }: { runs: TimeseriesPoint[] | null; noWork
     <div className="flex flex-1 flex-col px-4 pb-3 pt-4" data-slot="admin-run-bars">
       <div className="flex items-baseline gap-2">
         <span className="font-mono text-2xl font-semibold tabular-nums">{total}</span>
-        <span className="text-[12px] text-muted-foreground">runs in the last 7 days</span>
+        <span className="text-label text-muted-foreground">runs in the last 7 days</span>
       </div>
       <div className="relative mt-3 min-h-28 flex-1">
         <div className="absolute inset-0 grid items-end gap-2" style={cols}>
           {runs.map((r, i) => (
             <div key={r.ts} className="flex h-full flex-col justify-end" title={`${WEEKDAY[new Date(r.ts).getUTCDay()]} ${new Date(r.ts).getUTCDate()}: ${r.value} runs`}>
-              {r.value > 0 && <span className="mb-1 text-center font-mono text-[10px] text-muted-foreground">{r.value}</span>}
+              {r.value > 0 && <span className="mb-1 text-center font-mono text-micro text-muted-foreground">{r.value}</span>}
               <motion.span
                 className={cn("block rounded-[4px]", r.value ? "bg-primary/70" : "bg-border/70")}
                 style={{ height: r.value ? `${Math.max(6, (r.value / max) * 80)}%` : 3, transformOrigin: "bottom" }}
@@ -626,7 +626,7 @@ function RunBars({ runs, noWorkspace }: { runs: TimeseriesPoint[] | null; noWork
           ))}
         </div>
       </div>
-      <div className="mt-1.5 grid gap-2 text-center font-mono text-[10px] text-muted-foreground-soft" style={cols} aria-hidden>
+      <div className="mt-1.5 grid gap-2 text-center font-mono text-micro text-muted-foreground-soft" style={cols} aria-hidden>
         {runs.map((r) => <span key={r.ts}>{WEEKDAY[new Date(r.ts).getUTCDay()]}</span>)}
       </div>
     </div>

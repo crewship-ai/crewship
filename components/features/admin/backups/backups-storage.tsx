@@ -5,9 +5,7 @@ import { toast } from "sonner"
 import { Gauge, HardDrive, Info, Server } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import {
-  SettingsCard, SettingsRow, SettingsSaveBar, SettingsSummary, SummaryItem, settingsControl,
-} from "@/components/features/settings/shared"
+import { SettingsCard, SettingsRow, SettingsSaveBar, SettingsSummary, SummaryItem, settingsControl, controlHeight } from "@/components/features/settings/shared"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -49,7 +47,7 @@ export function BackupsStorage({ ctx }: { ctx: SectionCtx }) {
 /** The "Instance" badge the instance-only pages carry (as Security does). */
 export function InstanceBadge() {
   return (
-    <span className="rounded-full bg-primary/10 px-2 font-mono text-[10.5px] text-primary-hover" title="Instance setting · applies to every backup plan">
+    <span className="rounded-full bg-primary/10 px-2 font-mono text-micro text-primary-hover" title="Instance setting · applies to every backup plan">
       Instance
     </span>
   )
@@ -65,7 +63,7 @@ export function InfoTip({ label, children }: { label: string; children: React.Re
             <Info className="h-3.5 w-3.5" />
           </button>
         </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-xs text-[11px]">{children}</TooltipContent>
+        <TooltipContent side="top" className="max-w-xs text-label">{children}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )
@@ -122,7 +120,7 @@ export function StorageBody({ settings, destinations = [], destinationsReady = t
         </SettingsRow>
         {destinations.map((d) => (
           <SettingsRow key={d.id}
-            label={<>{d.name} · <span className="font-mono text-[12px]">{d.bucket}{d.prefix ? `/${d.prefix}` : ""}</span></>}
+            label={<>{d.name} · <span className="font-mono text-label">{d.bucket}{d.prefix ? `/${d.prefix}` : ""}</span></>}
             description={destinationDetail(d)}>
             <StatusPill tone={d.last_test_error ? "danger" : d.copies > 0 ? "success" : "muted"} label="S3" />
             <Button type="button" size="sm" variant="outline" className={rowButton}
@@ -201,10 +199,10 @@ export function AddDestinationForm({ ctx, onDone }: { ctx: SectionCtx; onDone: (
   const valid = /^https?:\/\/\S+$/.test(form.endpoint.trim()) && form.bucket.trim() && form.access_key_id.trim() && form.secret_access_key.trim()
   const field = (k: "name" | "endpoint" | "region" | "bucket" | "prefix" | "access_key_id", label: string, placeholder: string, mono = false) => (
     <Input aria-label={label} placeholder={placeholder} value={form[k]} spellCheck={false} onChange={(e) => set(k, e.target.value)}
-      className={cn("h-8 coarse:h-[2.75rem]", mono && "font-mono text-[12px]")} />
+      className={cn(controlHeight, mono && "font-mono")} />
   )
   return (
-    <div data-slot="add-destination" className="flex flex-col gap-2.5 border-b border-border px-4 py-3 text-[13px] last:border-b-0">
+    <div data-slot="add-destination" className="flex flex-col gap-2.5 border-b border-border px-4 py-3 text-control last:border-b-0">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {field("endpoint", "Endpoint", "https://<account>.r2.cloudflarestorage.com", true)}
         {field("region", "Region", "Region (empty: us-east-1, R2: auto)")}
@@ -212,7 +210,7 @@ export function AddDestinationForm({ ctx, onDone }: { ctx: SectionCtx; onDone: (
         {field("prefix", "Prefix", "Prefix, e.g. crewship/prod", true)}
         {field("access_key_id", "Access key ID", "Access key ID", true)}
         <Input aria-label="Secret access key" placeholder="Secret access key" type="password" autoComplete="off" value={form.secret_access_key}
-          onChange={(e) => set("secret_access_key", e.target.value)} className="h-8 font-mono text-[12px] coarse:h-[2.75rem]" />
+          onChange={(e) => set("secret_access_key", e.target.value)} className={cn(controlHeight, "font-mono")} />
         {field("name", "Name", "Name (default: bucket/prefix)")}
       </div>
       <label className="flex items-center gap-2">

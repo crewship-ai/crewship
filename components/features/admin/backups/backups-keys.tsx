@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { Bell, BellRing, KeyRound, LockKeyhole } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { SettingsCard, SettingsRow, SettingsSaveBar, SettingsSummary, SummaryItem, settingsControl } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsRow, SettingsSaveBar, SettingsSummary, SummaryItem, settingsControl, controlHeight } from "@/components/features/settings/shared"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -86,13 +86,13 @@ export function RecipientsList({ list, ctx, reload }: { list: BackupRecipient[];
         </SettingsRow>
       ))}
       {adding ? (
-        <div className="flex flex-col gap-2 border-t border-border px-4 py-3 text-[13px]">
+        <div className="flex flex-col gap-2 border-t border-border px-4 py-3 text-control">
           <Input aria-label="Key name" placeholder="Name, e.g. ops-2027" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-            className="h-8 coarse:h-[2.75rem]" />
+            className={controlHeight} />
           <Input aria-label="Public key" placeholder="age1…" value={form.public_key} onChange={(e) => setForm({ ...form, public_key: e.target.value })} spellCheck={false}
-            className="h-8 font-mono text-[12px] coarse:h-[2.75rem]" />
+            className={cn(controlHeight, "font-mono")} />
           <Input aria-label="Who holds the private key" placeholder="Who holds the private key" value={form.holder} onChange={(e) => setForm({ ...form, holder: e.target.value })}
-            className="h-8 coarse:h-[2.75rem]" />
+            className={controlHeight} />
           <div className="flex gap-1.5">
             <Button type="button" size="sm" className={rowButton} disabled={!valid} onClick={async () => {
               const out = await perform(ctx.demo, () => addRecipient({ name: form.name.trim(), public_key: form.public_key.trim(), holder: form.holder.trim() }), "Key added · new backups are encrypted to it", "The key could not be added")
@@ -207,7 +207,7 @@ export function AlertRoute({ settings, chosen, onChange, ctx }: {
     setTests((t) => ({ ...t, [c.id]: { busy: false, ok: res.ok, text: res.ok ? "test delivered" : `test not delivered: ${res.error ?? "unknown error"}` } }))
   }
   return (
-    <div className="flex flex-col gap-2 text-[13px]" data-slot="alert-route">
+    <div className="flex flex-col gap-2 text-control" data-slot="alert-route">
       <span className="flex items-center gap-2">
         <label className="flex items-center gap-2">
           <Checkbox checked disabled />
@@ -228,7 +228,7 @@ export function AlertRoute({ settings, chosen, onChange, ctx }: {
             </label>
             <StatusPill tone="muted" label={KIND_LABEL[c.kind] ?? c.kind} />
             <Button type="button" size="sm" variant="outline" className={rowButton} onClick={() => void test(c)} disabled={t?.busy}>{t?.busy ? "Sending…" : "Send test"}</Button>
-            <span className={cn("text-[12px]", t?.text ? (t.ok ? "text-success" : "text-destructive") : line.tone === "bad" ? "text-destructive" : line.tone === "ok" ? "text-success" : "text-muted-foreground")}>
+            <span className={cn("text-label", t?.text ? (t.ok ? "text-success" : "text-destructive") : line.tone === "bad" ? "text-destructive" : line.tone === "ok" ? "text-success" : "text-muted-foreground")}>
               {t?.text ?? line.text}
             </span>
           </div>
@@ -240,10 +240,10 @@ export function AlertRoute({ settings, chosen, onChange, ctx }: {
           <div key={id} className="flex flex-wrap items-center gap-x-2 gap-y-1" data-slot="alert-channel-gone">
             <label className="flex items-center gap-2">
               <Checkbox checked onCheckedChange={() => toggle(id, false)} />
-              <span className="font-mono text-[12px]">{id}</span>
+              <span className="font-mono text-label">{id}</span>
             </label>
             <StatusPill tone="warn" label="no longer available" />
-            <span className={cn("text-[12px]", line.tone === "bad" ? "text-destructive" : "text-muted-foreground")}>{line.text}</span>
+            <span className={cn("text-label", line.tone === "bad" ? "text-destructive" : "text-muted-foreground")}>{line.text}</span>
           </div>
         )
       })}
@@ -269,7 +269,7 @@ export function AlertsBody({ settings, incident, ctx, reload }: { settings: Back
       <SettingsCard icon={Bell} tint="var(--warn)" title="Alerts" description="Who hears when a backup goes wrong">
         <div className="flex flex-col gap-2 border-b border-border px-4 py-3">
           <span className="text-xs text-muted-foreground">What an instance admin sees in the inbox</span>
-          <div className="flex flex-wrap items-start gap-2.5 rounded-lg border border-border bg-background px-3 py-2.5 text-[13px]" data-slot="inbox-preview">
+          <div className="flex flex-wrap items-start gap-2.5 rounded-lg border border-border bg-background px-3 py-2.5 text-control" data-slot="inbox-preview">
             <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-destructive/15 font-bold text-destructive" aria-hidden>!</span>
             <div className="min-w-0 flex-1">
               <div className="font-semibold">Backup needs attention</div>
@@ -288,7 +288,7 @@ export function AlertsBody({ settings, incident, ctx, reload }: { settings: Back
           <span className="text-xs">instance admins ({settings.instance_admins})</span>
         </SettingsRow>
         <div className="border-b border-border px-4 py-2.5 last:border-b-0">
-          <div className="mb-2 text-[13px]">Tell <span className="text-[11px] text-muted-foreground-soft">· one message per incident change</span></div>
+          <div className="mb-2 text-control">Tell <span className="text-label text-muted-foreground-soft">· one message per incident change</span></div>
           <AlertRoute settings={settings} chosen={channels} onChange={setChannels} ctx={ctx} />
         </div>
       </SettingsCard>
