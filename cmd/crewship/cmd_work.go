@@ -131,14 +131,14 @@ func workSinceParam(cmd *cobra.Command, query url.Values) error {
 
 func workDuration(ms *int64) string {
 	if ms == nil {
-		return ""
+		return "—"
 	}
 	return (time.Duration(*ms) * time.Millisecond).String()
 }
 
 func workCost(usd *float64) string {
 	if usd == nil {
-		return ""
+		return "—"
 	}
 	return fmt.Sprintf("$%.4f", *usd)
 }
