@@ -320,7 +320,7 @@ RETURNING id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, 
 		return nil, fmt.Errorf("pending_runs: parse claimed fire_at: %w", err)
 	}
 	if expiresAt.Valid {
-		at, perr := time.Parse(time.RFC3339Nano, expiresAt.String)
+		at, perr := time.Parse(time.RFC3339Nano, expiresAt.String) // tsformat:allow: parsing a persisted timestamp
 		if perr != nil {
 			return nil, fmt.Errorf("pending_runs: parse expires_at: %w", perr)
 		}
