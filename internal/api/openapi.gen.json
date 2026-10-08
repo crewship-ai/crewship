@@ -15738,6 +15738,13 @@
       },
       "WorkspaceMemberResponseV1": {
         "properties": {
+          "access_mode": {
+            "enum": [
+              "trusted",
+              "restricted"
+            ],
+            "type": "string"
+          },
           "created_at": {
             "type": "string"
           },

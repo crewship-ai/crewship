@@ -37,6 +37,7 @@ interface Member {
   id: string
   role: string
   created_at: string
+  access_mode?: "trusted" | "restricted"
   user: { id: string; email: string; full_name: string | null; avatar_url: string | null }
 }
 
