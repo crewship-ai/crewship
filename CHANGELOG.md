@@ -60,6 +60,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **CI: race tests stop re-migrating test databases and skip checkptr inside the transpiled SQLite library.** One migrated template is now shared per source tree across test binaries (it cost 56 s per binary under race), `internal/api` prefetches its per-test database copies, and `cmd/crewship` fixtures start from the template instead of running the migration chain seven more times. Under `-race`, CI compiles `modernc.org/*` with `checkptr` off (migration chain 55 s → 29 s); race detection and checkptr stay on for all Crewship code.
 
+- **Every accepted deferred routine start now says what became of it in the UI.** The routine's Plan view lists waiting starts with their state, including waiting for a free slot with tries and the earliest next try, and recent starts that left the queue as Started (with the run link once recorded), Did not run or Expired with the reason, or Removed. The overview names accepted starts that did not run in the last seven days and how many wait for a slot. Requires the receipt API from #3015. (#3011)
+
 - **CI: Vitest runs in four partitions with one merged coverage gate (#2933).** `Frontend Test` keeps its name, requires every partition plus the type checks, verifies that every discovered test file ran exactly once and evaluates the unchanged coverage thresholds on the merged report.
 
 - **CI: the CLI race suite runs in three partitions, internal/api in six and the remaining race packages in four (#2931).** `Go Race (CLI)` and `Go Race (internal/api)` keep their names and now verify that their partitions cover the full test inventory exactly once. The CLI race job took 16–26 minutes as one process; each partition runs about a third of it.
