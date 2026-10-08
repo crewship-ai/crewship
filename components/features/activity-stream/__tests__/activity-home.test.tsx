@@ -108,6 +108,8 @@ describe("ActivityHome", () => {
   it("narrows to the rail's chains and says so in the heading (#3002)", async () => {
     mount({ scope: { origins: new Set(["r_ok"]), label: "Operations" } })
     expect(screen.getByRole("heading", { name: /Today · Operations/ })).toBeInTheDocument()
+    // The workspace spend ($0.42) is not this scope's cost.
+    expect(screen.getByLabelText("Summary")).not.toHaveTextContent("$0.42")
     const latest = screen.getByRole("region", { name: "Latest runs" })
     expect(await within(latest).findByText("Finished in 4.7s")).toBeInTheDocument()
     expect(within(latest).queryByText("HTTP 502 Bad Gateway")).toBeNull()

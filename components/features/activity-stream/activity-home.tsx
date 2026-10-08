@@ -110,7 +110,11 @@ export function ActivityHome({ workspaceId, chains, scope, onOpenRun, onOpenIssu
   const inWindow = rows.filter((r) => Date.parse(r.started_at) >= from)
   const active = rows.filter((r) => ["running", "waiting"].includes(runTone(r.status)))
   const failedCount = inWindow.filter((r) => runTone(r.status) === "failed").length
-  const cost = spend.data?.total_cost_usd ?? null
+  // Narrowed, the cost is the narrowed runs' own: the workspace's spend
+  // beside "Today · Operations" would be a number about something else.
+  const cost = scope
+    ? inWindow.reduce((sum, r) => sum + (r.cost_usd ?? 0), 0)
+    : (spend.data?.total_cost_usd ?? null)
   const parts = headlineParts({
     runs: inWindow.length,
     running: active.filter((r) => runTone(r.status) === "running").length,
