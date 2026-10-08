@@ -6,7 +6,7 @@ import { AlertTriangle, CalendarDays, HardDrive, LayoutGrid, ShieldCheck } from 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
-import { SettingsCard, SettingsRow, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsRow, SettingsSummary, SummaryItem, settingsTable, settingsTh, settingsTd } from "@/components/features/settings/shared"
 import { Dot, Gate, TONE_PILL, TONE_TEXT } from "./backups-kit"
 import {
   formatAgo, formatSize, proofLabel, stripCells, verdictHeadline,
@@ -93,7 +93,7 @@ function ProtectionRow({ label, row }: { label: string; row: StatusRow }) {
   return (
     <SettingsRow label={label}>
       <div className="flex max-w-[28rem] flex-col items-end gap-1 text-right">
-        <span className="text-[13px]">{row.value}</span>
+        <span className="text-control">{row.value}</span>
         {row.detail && (row.detail_tone && row.detail_tone !== "muted"
           ? <StatusPill tone={TONE_PILL[row.detail_tone]} label={row.detail} />
           : <span className="text-xs text-muted-foreground">{row.detail}</span>)}
@@ -125,7 +125,7 @@ function NeedsAttention({ items, ctx }: { items: AttentionItem[]; ctx: SectionCt
         <div key={it.id} data-attention={it.id} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0">
           <StatusPill tone={it.severity === "bad" ? "danger" : "warn"} label={it.severity === "bad" ? "urgent" : "check"} className="shrink-0" />
           <div className="min-w-0 flex-1">
-            <div className="text-[13px]">{it.title}</div>
+            <div className="text-control">{it.title}</div>
             <div className="text-xs text-muted-foreground">{it.detail}</div>
           </div>
           {it.action && (
@@ -184,16 +184,16 @@ export function NightStrip({ nights, today }: { nights: Night[]; today: string }
 const COVERAGE_LABEL: Record<WorkspaceCoverage["status"], string> = { ok: "covered", warn: "stale", bad: "not covered" }
 
 function CoverageCard({ rows, ctx, now }: { rows: WorkspaceCoverage[]; ctx: SectionCtx; now: Date }) {
-  const th = "border-b border-border px-4 py-2 text-left text-xs font-medium text-muted-foreground"
-  const td = "border-b border-border px-4 py-2.5 text-[13px]"
+  const th = settingsTh
+  const td = settingsTd
   return (
     <SettingsCard icon={LayoutGrid} title="Coverage" description="The newest backup of each selected workspace">
       <div className="overflow-x-auto">
-        <table className="w-full tabular-nums">
+        <table className={settingsTable}>
           <thead><tr><th className={th}>Workspace</th><th className={th}>Last backup</th><th className={th}>Plan</th><th className={th}>Checked to</th><th className={th} /></tr></thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.workspace_id} data-coverage={r.status} className="[&:last-child>td]:border-b-0">
+              <tr key={r.workspace_id} data-coverage={r.status}>
                 <td className={td}>
                   {r.name}
                   {r.workspace_id === ctx.currentWorkspaceId && <span className="ml-1.5 text-xs text-muted-foreground">· here</span>}
@@ -223,7 +223,7 @@ export function SpaceCard({ space }: { space: SpaceInfo }) {
   const used = Math.max(0, space.total_bytes - space.free_bytes)
   const backups = pct(space.backups_bytes)
   const other = Math.max(0, pct(used) - backups)
-  const fig = "font-mono text-[13px] tabular-nums"
+  const fig = "font-mono text-control tabular-nums"
   return (
     <SettingsCard icon={HardDrive} tint="var(--purple)" title="Space"
       description={space.min_free_percent != null ? `A run that would leave less than ${space.min_free_percent} % free does not start` : "This server"}>

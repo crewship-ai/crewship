@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Settings and Admin read as one product (#3022).** A refused switch in Access & Secrets or Hooks flips back and says why in the bottom-right toast instead of a line in the card. Every field, select and picker has the same size as its neighbours; supporting text (row descriptions, hints, empty states) is 12px instead of 11px and nothing is set below 11px; every table uses one header, cell and row style; person status, Keeper decisions, "No owner" and "Off" are status pills.
+
 - **Open-source license capacity showed inactive limits.** The license API, administration and CLI now report unlimited crews, members and agents, including when a signed license contains historical caps. Signed claims and enforcement hooks remain available for future releases; administration explains that resource licensing may change.
 
 - **A workspace can have a logo (#3005).** Settings › General › Identity has a Workspace logo row (Upload, Change, Remove; PNG, JPEG or WebP up to 2MB, the same rules as a profile picture), and `crewship workspace logo set <file>` / `remove` do the same. The workspace switcher and Admin › People draw the logo instead of the initial. API: `POST`/`DELETE`/`GET /api/v1/workspaces/{workspaceId}/logo`; setting or removing it is `ADMIN+` and audited.
