@@ -310,11 +310,19 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		h.enqueueDeferredRun(w, r, workspaceID, invokingUser, p, body, deferredOptions{})
 		return
 	}
-	// A retry of a start that was queued for capacity answers with that
-	// start, even once the slot has freed: running it now as well would
-	// execute the same request twice.
+	// Requests with one Idempotency-Key pass the lookup → run → queue
+	// sequence one at a time, until the run has started (and holds the
+	// executor's key reservation) or its refusal has been queued.
+	releaseKey := func() {}
+	if keyID := queuedStartID(workspaceID, p.ID, idempotencyKey); keyID != "" && h.db != nil {
+		releaseKey = h.queuedKeys.lock(keyID)
+	}
+	defer releaseKey()
+	// A retry of a start that was queued for capacity answers with what
+	// became of that start, even once the slot has freed: running it now as
+	// well would execute the same request twice.
 	if queued := h.queuedStartForKey(r.Context(), workspaceID, p.ID, idempotencyKey); queued != nil {
-		writeQueuedReceipt(w, *queued, false)
+		writeKeyedStartReceipt(w, *queued)
 		return
 	}
 
@@ -337,6 +345,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		Tags:                  body.Tags,
 		MetadataJSON:          marshalMetadata(body.Metadata),
 		IdempotencyKeyTTL:     time.Duration(body.IdempotencyKeyTTLSeconds) * time.Second,
+		OnStarted:             func(string) { releaseKey() },
 	}
 	if dispatch, ok := r.Context().Value(issueRoutineDispatchKey{}).(issueRoutineDispatch); ok {
 		input.RunIDOverride = dispatch.RunID
@@ -390,6 +399,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		started := make(chan string, 1)
 		finished := make(chan finishedRun, 1)
 		input.OnStarted = func(id string) {
+			releaseKey()
 			select {
 			case started <- id:
 			default:
@@ -433,6 +443,8 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 				h.enqueueDeferredRun(w, r, workspaceID, invokingUser, p, body, deferredOptions{
 					queuedForCapacity: true,
 					id:                queuedStartID(workspaceID, p.ID, idempotencyKey),
+					triggeredVia:      triggeredVia,
+					triggeredByID:     body.TriggeredByID,
 				})
 				return
 			}
