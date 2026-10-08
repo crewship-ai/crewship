@@ -23,7 +23,7 @@ import (
 )
 
 // A seam for exercising pre- and post-rename failures of durable publication.
-var aiWriteConnectionFile = memory.WriteFileDurable
+var aiWriteConnectionFile = memory.WriteFileDurableExactMode
 
 var aiConnectionDir = func() (string, error) {
 	path, err := cli.DefaultConfigPath()
