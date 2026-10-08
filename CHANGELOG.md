@@ -80,6 +80,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **CI: a trusted-main guard flags any change to CI control files (#2960).** `CI Inventory Guard` runs main's code against PR files as data. Required-job inventories of the CI, Security and CodeQL workflows, the routing and verdict helpers, and a closed namespace (`.github/`, `scripts/ci/`, every `scripts/` path a workflow references) are compared with main; any change needs a separate administrator dispatch for the exact head SHA.
 
+- ⚠️ **Behaviour change: a routine `agent_run` step now waits for a busy agent instead of failing at once.** When a chat, an assignment or another routine holds the agent, the step waits up to its `timeout_seconds` (15 minutes without one) or until the run is stopped, then fails with a reason naming the busy agent. Waiting steps take the agent in no guaranteed order, hold their run and do not survive a restart. (#3023)
+
 - **CI: the full Go suite and the shuffled suite run in three package partitions each.** `Go` keeps vet and the cross-builds; `Go test` and `Go Shuffle` split `go list ./...` largest-first by measured cost and prove every package runs exactly once (a truncated listing still fails).
 
 - ⚠️ **Behaviour change: an immediate routine start whose concurrency slot is full is now queued instead of refused with `429`.** It returns `202 SCHEDULED` with `pending_id`, `queued: true` and `reason: "concurrency_limit"`, starts when a slot frees, and waits at most `ttl_seconds` (one hour by default) before ending `expired`. A retry with the same `Idempotency-Key` returns the same pending start. Send `queue_if_busy: false` (CLI `--reject-if-busy`) to keep the `429`. Webhooks, schedules, replay and agent-invoked runs are unchanged. (#3025)
