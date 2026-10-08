@@ -62,9 +62,16 @@ export async function fetchAndWait(destinationId: string, key: string, opts: { i
   return { ok: true, data: job.path }
 }
 
+/**
+ * Where the wizard restores to. "crew_in_place" is a crew archive restored as
+ * itself, without --as-crew (the server refuses --replace for a crew archive);
+ * the checks know it as "crew".
+ */
+export type WizardTarget = RestoreTarget | "crew_in_place"
+
 export interface RestoreRequest {
   path: string
-  target: RestoreTarget
+  target: WizardTarget
   identity?: string
   passphrase?: string
   as_workspace?: string
@@ -74,7 +81,7 @@ export interface RestoreRequest {
 
 /** POST …/restore/checks — space, format, runtime, unsafe settings, conflicts. */
 export function restoreChecks(req: Omit<RestoreRequest, "dry_run">): Promise<SendResult<RestoreChecks>> {
-  return send(`${INSTANCE_BACKUPS}/restore/checks`, "POST", req)
+  return send(`${INSTANCE_BACKUPS}/restore/checks`, "POST", { ...req, target: req.target === "crew_in_place" ? "crew" : req.target })
 }
 
 interface RowCountMismatch { table: string; recorded: number; actual: number }
@@ -138,7 +145,17 @@ export function legacyReport(r: LegacyRestoreReport): RestoreReport {
  * member of. A whole-instance target is never sent — the server has no
  * instance restore route; that restore runs offline with `crewship recover`.
  */
-export async function restore(req: RestoreRequest, workspaceId: string | null): Promise<SendResult<RestoreReport>> {
+/** A restore's report plus what the wizard still has to offer after it. */
+export interface RestoreOutcome extends RestoreReport {
+  /** The workspace the data landed in (a new one under a new name). */
+  restoredWorkspaceId?: string | null
+  /** Crew files are not in the containers yet: bring them back (files_only). */
+  crewFilesPending?: boolean
+  /** A complete environment was rebuilt or skipped instead of restored. */
+  environmentsPending?: boolean
+}
+
+export async function restore(req: RestoreRequest, workspaceId: string | null): Promise<SendResult<RestoreOutcome>> {
   if (req.target === "empty_server" || req.target === "isolated") {
     return { ok: false, unavailable: false, error: "A whole-instance restore runs from the command line (crewship recover)" }
   }
@@ -155,7 +172,36 @@ export async function restore(req: RestoreRequest, workspaceId: string | null): 
       }),
     })
     if (!res.ok) return { ok: false, unavailable: isUnavailableStatus(res.status), error: await readError(res, `HTTP ${res.status}`) }
-    return { ok: true, data: legacyReport({ dry_run: req.dry_run, ...((await res.json().catch(() => ({}))) as LegacyRestoreReport) }) }
+    const body = (await res.json().catch(() => ({}))) as LegacyRestoreReport & { restored_workspace_id?: string }
+    return {
+      ok: true,
+      data: {
+        ...legacyReport({ dry_run: req.dry_run, ...body }),
+        restoredWorkspaceId: body.restored_workspace_id || null,
+        crewFilesPending: !req.dry_run && body.docker_phase_skipped === true,
+        environmentsPending: (body.environments ?? []).some((e) => e.result !== "restored"),
+      },
+    }
+  } catch (e) {
+    return { ok: false, unavailable: false, error: e instanceof Error ? e.message : "Network error" }
+  }
+}
+
+/**
+ * The last step of a restore under a new name: copy each crew's files into
+ * the restored workspace's containers, once they exist (POST
+ * /admin/backups/restore with files_only). The server authorises it by the
+ * provenance the restore wrote, never by the flag alone (#1716).
+ */
+export async function bringBackCrewFiles(req: Pick<RestoreRequest, "path" | "identity" | "passphrase">, workspaceId: string): Promise<SendResult<RestoreReport>> {
+  try {
+    const res = await apiFetch(`/api/v1/admin/backups/restore?workspace_id=${encodeURIComponent(workspaceId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: req.path, identity: req.identity, passphrase: req.passphrase, files_only: true }),
+    })
+    if (!res.ok) return { ok: false, unavailable: isUnavailableStatus(res.status), error: await readError(res, `HTTP ${res.status}`) }
+    return { ok: true, data: legacyReport((await res.json().catch(() => ({}))) as LegacyRestoreReport) }
   } catch (e) {
     return { ok: false, unavailable: false, error: e instanceof Error ? e.message : "Network error" }
   }

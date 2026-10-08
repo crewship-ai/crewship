@@ -2,10 +2,19 @@
 
 import * as React from "react"
 import { toast } from "sonner"
+import { Gauge, HardDrive, Info, Server } from "lucide-react"
 
-import { SettingsCard, SettingsSaveBar } from "@/components/features/settings/shared"
+import { cn } from "@/lib/utils"
+import {
+  SettingsCard, SettingsRow, SettingsSaveBar, SettingsSummary, SummaryItem, settingsControl,
+} from "@/components/features/settings/shared"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import { Chip, FieldRow, Gate, InlineInput, ItemRow, LocalOnlyBar, SmallButton, Unavailable } from "./backups-kit"
+import { Input } from "@/components/ui/input"
+import { StatusPill } from "@/components/ui/status-pill"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Gate, Unavailable } from "./backups-kit"
 import { formatSize, formatWhen, verifiedByText, type BackupSettings, type NewOffsiteDestination, type OffsiteDestination, type SpaceInfo } from "./backups-model"
 import { addDestination, removeDestination, saveBackupSettings, testDestination, useBackupSettings, useDestinations } from "./use-backup-settings"
 import { useBackupsOverview } from "./use-backups-overview"
@@ -29,7 +38,6 @@ export function BackupsStorage({ ctx }: { ctx: SectionCtx }) {
           space={overview.data?.space ?? null} ctx={ctx} reload={reload} />
       ) : (
         <>
-          <LocalOnlyBar />
           <Gate resource={settings} what="Storage settings">{() => null}</Gate>
           {overview.data && <RoomCard space={overview.data.space} />}
         </>
@@ -37,6 +45,33 @@ export function BackupsStorage({ ctx }: { ctx: SectionCtx }) {
     </>
   )
 }
+
+/** The "Instance" badge the instance-only pages carry (as Security does). */
+export function InstanceBadge() {
+  return (
+    <span className="rounded-full bg-primary/10 px-2 font-mono text-[10.5px] text-primary-hover" title="Instance setting · applies to every backup plan">
+      Instance
+    </span>
+  )
+}
+
+/** A small (i) whose tooltip carries the explanation that does not fit a row. */
+export function InfoTip({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <TooltipProvider delayDuration={0}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" aria-label={label} className="inline-flex shrink-0 cursor-help align-middle text-muted-foreground hover:text-foreground">
+            <Info className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs text-[11px]">{children}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+const rowButton = "h-7 px-2.5 text-xs coarse:h-[2.75rem]"
 
 export function StorageBody({ settings, destinations = [], destinationsReady = true, space, ctx, reload }: {
   settings: BackupSettings
@@ -53,49 +88,79 @@ export function StorageBody({ settings, destinations = [], destinationsReady = t
   const local = settings.destinations.find((d) => d.kind === "local")
   const verifiedOffsite = settings.destinations.some((d) => d.kind !== "local" && d.verified)
   const setLimit = (k: keyof BackupSettings["limits"]) => (e: React.ChangeEvent<HTMLInputElement>) => setLimits((l) => ({ ...l, [k]: Math.max(0, Number(e.target.value) || 0) }))
+  const count = 1 + destinations.length
+
+  const limitRow = (k: keyof BackupSettings["limits"], label: string, unit: string, description?: string, min = 0) => (
+    <SettingsRow label={label} description={description}>
+      <Input aria-label={label} type="number" min={min} value={limits[k]} onChange={setLimit(k)} className={cn(settingsControl, "sm:w-24")} />
+      <span className="w-24 text-xs text-muted-foreground">{unit}</span>
+    </SettingsRow>
+  )
 
   return (
     <>
-      {!verifiedOffsite && <LocalOnlyBar />}
-      <section aria-label="Destinations" className="overflow-hidden rounded-card border border-border bg-card">
-        <ItemRow lead={<Chip tone="ok">local</Chip>}
-          title={`This server · ${local?.path ?? settings.local_path ?? "~/.crewship/backups"}`}
-          detail={`${formatSize(local?.used_bytes ?? space?.backups_bytes ?? null)} · staging for every upload`} />
+      <SettingsSummary>
+        <InstanceBadge />
+        <SummaryItem n={count}>destination{count === 1 ? "" : "s"}</SummaryItem>
+        {verifiedOffsite
+          ? <SummaryItem tone="success">off-site copy verified</SummaryItem>
+          : <SummaryItem tone="danger">local copy only</SummaryItem>}
+        {space && <SummaryItem n={formatSize(space.free_bytes)}>free</SummaryItem>}
+      </SettingsSummary>
+
+      <SettingsCard icon={Server} tint="var(--info)" title="Destinations" description="Where copies are kept"
+        actions={!adding && <Button type="button" size="sm" variant="outline" className={rowButton} onClick={() => setAdding(true)} disabled={!destinationsReady}>Add…</Button>}>
+        {!verifiedOffsite && (
+          <SettingsRow label={<span className="text-warn">Local copy only. Losing this server is not covered.</span>}
+            description="Every backup sits on the same disk as the data it protects">
+            <StatusPill tone="warn" label="no off-site copy" />
+          </SettingsRow>
+        )}
+        <SettingsRow label={`This server · ${local?.path ?? settings.local_path ?? "~/.crewship/backups"}`}
+          description={`${formatSize(local?.used_bytes ?? space?.backups_bytes ?? null)} · staging for every upload`}>
+          <StatusPill tone="success" label="local" />
+        </SettingsRow>
         {destinations.map((d) => (
-          <ItemRow key={d.id} lead={<Chip tone={d.copies > 0 ? "ok" : "muted"}>S3</Chip>}
-            title={<>{d.name} · <span className="font-mono text-[12px]">{d.bucket}{d.prefix ? `/${d.prefix}` : ""}</span></>}
-            detail={destinationDetail(d)}
-            action={
-              <>
-                <SmallButton onClick={() => void perform(ctx.demo, () => testDestination(d.id), "", "The connection could not be tested").then((r) => {
-                  if (!r) return
-                  if (r.ok) toast.success(`${d.name}: connection ok`)
-                  else toast.error(`${d.name}: ${r.error ?? "the connection test failed"}`)
-                  reload?.()
-                })}>Test</SmallButton>
-                <SmallButton onClick={() => setRemoving(d)} disabled={d.used_by.length > 0}
-                  title={d.used_by.length ? `Used by ${d.used_by.join(", ")}: change the plan first` : undefined}>Remove</SmallButton>
-              </>
-            } />
+          <SettingsRow key={d.id}
+            label={<>{d.name} · <span className="font-mono text-[12px]">{d.bucket}{d.prefix ? `/${d.prefix}` : ""}</span></>}
+            description={destinationDetail(d)}>
+            <StatusPill tone={d.last_test_error ? "danger" : d.copies > 0 ? "success" : "muted"} label="S3" />
+            <Button type="button" size="sm" variant="outline" className={rowButton}
+              onClick={() => void perform(ctx.demo, () => testDestination(d.id), "", "The connection could not be tested").then((r) => {
+                if (!r) return
+                if (r.ok) toast.success(`${d.name}: connection ok`)
+                else toast.error(`${d.name}: ${r.error ?? "the connection test failed"}`)
+                reload?.()
+              })}>Test</Button>
+            <Button type="button" size="sm" variant="outline" className={rowButton} onClick={() => setRemoving(d)} disabled={d.used_by.length > 0}
+              title={d.used_by.length ? `Used by ${d.used_by.join(", ")}: change the plan first` : undefined}>Remove</Button>
+          </SettingsRow>
         ))}
         {adding ? (
           <AddDestinationForm ctx={ctx} onDone={(ok) => { setAdding(false); if (ok) reload?.() }} />
         ) : (
-          <ItemRow lead={<Chip tone="muted">S3</Chip>} title="+ Add S3-compatible storage"
-            detail="R2, B2, Wasabi, MinIO, AWS · counted as a copy only after the upload is checked"
-            action={<SmallButton onClick={() => setAdding(true)} disabled={!destinationsReady}>Add…</SmallButton>} />
+          <SettingsRow label="+ Add S3-compatible storage" description="R2, B2, Wasabi, MinIO, AWS · counted once an upload is checked">
+            <StatusPill tone="muted" label="S3" />
+          </SettingsRow>
         )}
-        <ItemRow className="opacity-60" lead={<Chip tone="muted">Drive</Chip>} title="Google Drive (after S3)" detail="same transfer layer" />
-      </section>
+        <SettingsRow className="opacity-60" label="Google Drive (after S3)" description="Same transfer layer">
+          <StatusPill tone="muted" label="later" />
+        </SettingsRow>
+      </SettingsCard>
 
-      {space ? <RoomCard space={space} /> : <SettingsCard title="Room"><Unavailable what="disk figures" className="m-3" /></SettingsCard>}
+      {space ? <RoomCard space={space} /> : (
+        <SettingsCard icon={HardDrive} tint="var(--success)" title="Room"><Unavailable what="disk figures" className="m-3" /></SettingsCard>
+      )}
 
-      <SettingsCard title="Limits" description="a backup never crowds out the work it protects">
-        <FieldRow label="At once"><InlineInput aria-label="Backup runs at once" type="number" min={1} value={limits.concurrency} onChange={setLimit("concurrency")} />backup run</FieldRow>
-        <FieldRow label="CPU"><InlineInput aria-label="CPU cores" type="number" min={1} value={limits.cpu_cores} onChange={setLimit("cpu_cores")} />cores for packing and compression</FieldRow>
-        <FieldRow label="Disk"><InlineInput aria-label="Disk MB/s" type="number" min={0} value={limits.disk_mbps} onChange={setLimit("disk_mbps")} />MB/s <span className="text-muted-foreground">· 0 is no limit</span></FieldRow>
-        <FieldRow label="Upload"><InlineInput aria-label="Upload MB/s" type="number" min={0} value={limits.upload_mbps} onChange={setLimit("upload_mbps")} />MB/s <span className="text-muted-foreground">· 0 is no limit</span></FieldRow>
-        <FieldRow label="Staging">encrypted before it touches disk; wiped after the run and on the next start after a crash</FieldRow>
+      <SettingsCard icon={Gauge} tint="var(--purple)" title="Limits" description="A backup never crowds out the work it protects">
+        {limitRow("concurrency", "Backup runs at once", "at once", undefined, 1)}
+        {limitRow("cpu_cores", "CPU cores", "cores", "For packing and compression", 1)}
+        {limitRow("disk_mbps", "Disk MB/s", "MB/s", "0 is no limit")}
+        {limitRow("upload_mbps", "Upload MB/s", "MB/s", "0 is no limit")}
+        <SettingsRow label={<span className="inline-flex items-center gap-1.5">Staging <InfoTip label="About staging">Encrypted before it touches disk; wiped after the run and on the next start after a crash.</InfoTip></span>}
+          description="Encrypted before it touches disk">
+          <StatusPill tone="muted" label="automatic" />
+        </SettingsRow>
       </SettingsCard>
       {/* The page's Save bar commits these; it says "Saved" and, on a failure, why not. */}
       <SettingsSaveBar label="Backup limits" count={changed} onDiscard={() => setLimits(settings.limits)}
@@ -135,39 +200,45 @@ export function AddDestinationForm({ ctx, onDone }: { ctx: SectionCtx; onDone: (
   const set = <K extends keyof NewOffsiteDestination>(k: K, v: NewOffsiteDestination[K]) => setForm((f) => ({ ...f, [k]: v }))
   const valid = /^https?:\/\/\S+$/.test(form.endpoint.trim()) && form.bucket.trim() && form.access_key_id.trim() && form.secret_access_key.trim()
   const field = (k: "name" | "endpoint" | "region" | "bucket" | "prefix" | "access_key_id", label: string, placeholder: string, mono = false) => (
-    <input aria-label={label} placeholder={placeholder} value={form[k]} spellCheck={false} onChange={(e) => set(k, e.target.value)}
-      className={`h-8 rounded-md border border-control-border bg-surface-subtle px-2 coarse:h-[2.75rem] ${mono ? "font-mono text-[12px]" : ""}`} />
+    <Input aria-label={label} placeholder={placeholder} value={form[k]} spellCheck={false} onChange={(e) => set(k, e.target.value)}
+      className={cn("h-8 coarse:h-[2.75rem]", mono && "font-mono text-[12px]")} />
   )
   return (
-    <div data-slot="add-destination" className="flex flex-col gap-2 border-b border-border px-4 py-3 text-[13px]">
+    <div data-slot="add-destination" className="flex flex-col gap-2.5 border-b border-border px-4 py-3 text-[13px] last:border-b-0">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {field("endpoint", "Endpoint", "https://<account>.r2.cloudflarestorage.com", true)}
         {field("region", "Region", "Region (empty: us-east-1, R2: auto)")}
         {field("bucket", "Bucket", "Bucket", true)}
         {field("prefix", "Prefix", "Prefix, e.g. crewship/prod", true)}
         {field("access_key_id", "Access key ID", "Access key ID", true)}
-        <input aria-label="Secret access key" placeholder="Secret access key" type="password" autoComplete="off" value={form.secret_access_key}
-          onChange={(e) => set("secret_access_key", e.target.value)}
-          className="h-8 rounded-md border border-control-border bg-surface-subtle px-2 font-mono text-[12px] coarse:h-[2.75rem]" />
+        <Input aria-label="Secret access key" placeholder="Secret access key" type="password" autoComplete="off" value={form.secret_access_key}
+          onChange={(e) => set("secret_access_key", e.target.value)} className="h-8 font-mono text-[12px] coarse:h-[2.75rem]" />
         {field("name", "Name", "Name (default: bucket/prefix)")}
       </div>
-      <label className="flex items-center gap-1.5"><input type="checkbox" checked={form.path_style} onChange={(e) => set("path_style", e.target.checked)} />
-        Path-style addressing <span className="text-muted-foreground">· MinIO and most self-hosted stores</span></label>
-      <label className="flex items-center gap-1.5"><input type="checkbox" checked={form.allow_private_network} onChange={(e) => set("allow_private_network", e.target.checked)} />
-        Allow a private network address</label>
+      <label className="flex items-center gap-2">
+        <Checkbox checked={form.path_style} onCheckedChange={(v) => set("path_style", v === true)} />
+        Path-style addressing <span className="text-muted-foreground">· MinIO and most self-hosted stores</span>
+      </label>
+      <label className="flex items-center gap-2">
+        <Checkbox checked={form.allow_private_network} onCheckedChange={(v) => set("allow_private_network", v === true)} />
+        Allow a private network address
+      </label>
       {form.allow_private_network && (
-        <p className="text-[12.5px] text-warn">The endpoint may then be a loopback or LAN address, over plain http. Cloud metadata and link-local addresses stay blocked.</p>
+        <p className="text-xs text-warn">The endpoint may then be a loopback or LAN address, over plain http. Cloud metadata and link-local addresses stay blocked.</p>
       )}
-      <p className="text-[12px] text-muted-foreground">The secret is sealed with this server&apos;s vault key and never shown again. Saving first writes, checks and deletes one small object.</p>
+      <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        The secret is sealed and never shown again.
+        <InfoTip label="About the secret">It is sealed with this server&apos;s vault key. Saving first writes, checks and deletes one small object in the bucket.</InfoTip>
+      </p>
       <div className="flex gap-1.5">
-        <SmallButton primary disabled={!valid || busy} onClick={async () => {
+        <Button type="button" size="sm" className={rowButton} disabled={!valid || busy} onClick={async () => {
           setBusy(true)
           const out = await perform(ctx.demo, () => addDestination({ ...form, name: form.name.trim(), endpoint: form.endpoint.trim(), bucket: form.bucket.trim() }),
             "Storage added · connection checked", "The storage could not be added")
           setBusy(false)
           if (out) onDone(true)
-        }}>{busy ? "Testing…" : "Test and add"}</SmallButton>
-        <SmallButton onClick={() => onDone(false)}>Cancel</SmallButton>
+        }}>{busy ? "Testing…" : "Test and add"}</Button>
+        <Button type="button" size="sm" variant="ghost" className={rowButton} onClick={() => onDone(false)}>Cancel</Button>
       </div>
     </div>
   )
@@ -175,10 +246,10 @@ export function AddDestinationForm({ ctx, onDone }: { ctx: SectionCtx; onDone: (
 
 function RoomCard({ space }: { space: SpaceInfo }) {
   return (
-    <SettingsCard title="Room">
-      <FieldRow label="Free now">{formatSize(space.free_bytes)} of {formatSize(space.total_bytes)}</FieldRow>
-      <FieldRow label="A run needs" detail="a run that would leave less than 10 % free does not start, and says why">{formatSize(space.staging_need_bytes)} for staging beside the finished backup</FieldRow>
-      <FieldRow label="A restore needs" detail="checked before a restore begins">{formatSize(space.restore_need_bytes)} for the largest backup</FieldRow>
+    <SettingsCard icon={HardDrive} tint="var(--success)" title="Room" description="A run that would leave under 10 % free does not start">
+      <SettingsRow label="Free now"><span className="font-mono text-xs">{formatSize(space.free_bytes)} of {formatSize(space.total_bytes)}</span></SettingsRow>
+      <SettingsRow label="A run needs" description="Staging beside the finished backup"><span className="font-mono text-xs">{formatSize(space.staging_need_bytes)}</span></SettingsRow>
+      <SettingsRow label="A restore needs" description="Checked before a restore begins"><span className="font-mono text-xs">{formatSize(space.restore_need_bytes)}</span></SettingsRow>
     </SettingsCard>
   )
 }

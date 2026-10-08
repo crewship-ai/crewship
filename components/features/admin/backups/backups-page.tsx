@@ -16,7 +16,7 @@ import { useBackupRuns } from "./use-backup-runs"
 import { useBackupPlans } from "./use-backup-plans"
 import { useBackupsOverview } from "./use-backups-overview"
 import { BackupsOverview } from "./backups-overview"
-import { BackupsHistory } from "./backups-history"
+import { BackupsHistory, matches, runsInScope } from "./backups-history"
 import { BackupsSchedules } from "./backups-schedules"
 import { BackupsStorage } from "./backups-storage"
 import { BackupsRecovery } from "./backups-recovery"
@@ -94,14 +94,10 @@ export function BackupsPage() {
   const runs = useBackupRuns(scope, selected, workspaces)
   const plans = useBackupPlans()
   const overview = useBackupsOverview(scope, selected, workspaces)
-  const all = runs.data ?? []
-  const facetCount: Record<RunFilter, number> = {
-    all: all.length,
-    failed: all.filter((r) => r.status === "failed").length,
-    incomplete: all.filter((r) => r.status === "incomplete" || (r.incomplete?.length ?? 0) > 0).length,
-    manual: all.filter((r) => r.trigger === "manual").length,
-    pinned: all.filter((r) => r.pinned).length,
-  }
+  // The same scope and facet rules Backup history filters with, so a count
+  // here is the number of rows the facet opens.
+  const all = runsInScope(runs.data ?? [], { scope, selected }, runs.source === "legacy")
+  const facetCount = Object.fromEntries(RUN_FACETS.map((f) => [f.key, all.filter((r) => matches(r, f.key)).length])) as Record<RunFilter, number>
   const attention = overview.data?.needs_attention?.length ?? 0
 
   const ctx: SectionCtx = {
