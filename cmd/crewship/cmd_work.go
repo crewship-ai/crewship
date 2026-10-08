@@ -80,6 +80,7 @@ type workLedgerAgent struct {
 	Slug        string `json:"slug" yaml:"slug"`
 	AvatarSeed  string `json:"avatar_seed" yaml:"avatar_seed"`
 	AvatarStyle string `json:"avatar_style" yaml:"avatar_style"`
+	Deleted     bool   `json:"deleted" yaml:"deleted"`
 }
 
 type workLedgerCrew struct {
@@ -93,6 +94,8 @@ type workLedgerCrew struct {
 // back to the id only when the server sent no name at all.
 func workAgentCell(agent *workLedgerAgent, id string) string {
 	switch {
+	case agent != nil && agent.Name != "" && agent.Deleted:
+		return "(deleted) " + agent.Name
 	case agent != nil && agent.Name != "":
 		return agent.Name
 	case agent == nil && id != "":

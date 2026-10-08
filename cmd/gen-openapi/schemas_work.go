@@ -212,8 +212,8 @@ func workLedgerSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 			"target_revision", "work_id", "received_at", "dedup_expires_at",
 			"raw_body_available", "raw_body_expires_at", "agent", "work_state"),
 		"LedgerAgent": object(map[string]any{
-			"id": str(), "name": str(), "slug": str(), "avatar_seed": str(), "avatar_style": str(),
-		}, "id", "name", "slug", "avatar_seed", "avatar_style"),
+			"id": str(), "name": str(), "slug": str(), "avatar_seed": str(), "avatar_style": str(), "deleted": boolean(),
+		}, "id", "name", "slug", "avatar_seed", "avatar_style", "deleted"),
 		"LedgerCrew": object(map[string]any{
 			"id": str(), "name": str(), "color": str(), "icon": str(),
 		}, "id", "name", "color", "icon"),
