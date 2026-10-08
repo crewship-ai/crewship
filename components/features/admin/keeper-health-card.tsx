@@ -104,7 +104,7 @@ export function KeeperHealthCard({ workspaceId }: { workspaceId: string | null |
           </p>
         ) : (
           <>
-            <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-[11px]">
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-label">
               <dt className="text-muted-foreground/70">Progressed</dt>
               <dd className={health.progressed_rate < health.alarm_progressed_rate ? "text-warn" : "text-foreground/80"}>
                 {pct(health.progressed_rate)} of {health.samples} — allow {health.allow},

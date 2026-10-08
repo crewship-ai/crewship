@@ -13,7 +13,8 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import { HooksSection } from "../hooks-section"
 import { isSettingsSectionVisible, visibleSettingsSections } from "../../settings-nav"
 
-const h = vi.hoisted(() => ({ apiFetch: vi.fn() }))
+const h = vi.hoisted(() => ({ apiFetch: vi.fn(), toastError: vi.fn() }))
+vi.mock("sonner", () => ({ toast: { error: h.toastError, success: vi.fn() } }))
 
 /** Resolvers for in-flight toggles, keyed by hook id — see `deferToggle`. */
 let pendingToggles: Record<string, () => void> = {}
@@ -167,6 +168,7 @@ async function table() {
 }
 
 beforeEach(() => {
+  h.toastError.mockReset()
   h.apiFetch.mockReset()
   pendingToggles = {}
 })
@@ -378,7 +380,14 @@ describe("HooksSection — the switch", () => {
     expect(sw).toBeChecked()
     fireEvent.click(sw)
 
-    await waitFor(() => expect(screen.getByText(/couldn't change/i)).toBeInTheDocument())
+    // A switch error is a toast (docs/ux/README.md › Saving), never a line in the page.
+    await waitFor(() =>
+      expect(h.toastError).toHaveBeenCalledWith(
+        "Couldn’t change the pre_llm_call hook",
+        expect.objectContaining({ description: expect.stringMatching(/disabling it was refused/i) }),
+      ),
+    )
+    expect(screen.queryByText(/couldn't change/i)).not.toBeInTheDocument()
     expect(within(rowFor(/pre_llm_call/)).getByRole("switch")).toBeChecked()
   })
 })
