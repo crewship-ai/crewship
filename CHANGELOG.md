@@ -6283,6 +6283,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Repeated crew deletion or idle eviction could accumulate anonymous Docker volumes.** New noexec bind-volume records carry installation ownership and are reaped once unused, preserving host data, home/tools history and other installations; unlabelled historical volumes stay for operator investigation. Runtime recreation now reports container removal failures. (#2970)
 
+- **Long routine runs no longer drop out of the overview and the Activity menu.** Running and waiting runs load from their own list instead of the 200 newest runs. When those 200 runs do not reach back seven days, the routine run summary reads "newest N runs · since …" instead of "7d"; partial and needs-a-person results count as finished, not as successes. The run detail shows the result and next step before provenance and evidence. (#3011)
+
 - **Accepted deferred routine starts disappeared when execution capacity was busy or dispatch failed.** Capacity rejection now retries with bounded backoff until TTL, and errors/expiry remain inspectable through `routine pending get` and `pending list --status`. Retry preserves the accepted recipe and occurrence identity. ⚠️ **Behaviour change:** starts without TTL stop after ten capacity rejections; attempted debounce starts keep their payload while newer triggers open a separate window, and attempted one-time starts cannot be rewritten by another save. (#3010)
 
 ## [1.0.0-rc.1] — 2026-07-12
