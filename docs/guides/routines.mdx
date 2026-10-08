@@ -573,6 +573,8 @@ has no services and no notable tools.
 
 `complexity` resolves through the workspace's `execution_tiers_json` mapping into `(adapter, model)`. With `complexity: "fast"`, the agent's CLI gets `--model claude-haiku-4-5-20251001` (or whatever the workspace mapped `fast` to). `model_override` is the explicit pin that wins over `complexity`.
 
+**A busy agent is waited for.** An agent runs one turn at a time. When the step's agent is busy with a chat, an assignment or another routine, the step waits for it instead of failing, for up to its `timeout_seconds` (15 minutes when the step sets none) and until the run is stopped. Steps waiting for the same agent take it as it frees, in no guaranteed order. If the agent stays busy for the whole wait, the step fails with "agent … stayed busy for …", and its `retry` policy and `on_failure` apply as usual. The wait holds the run and does not survive a server restart; the waiting time comes before, and does not shorten, the step's own run time.
+
 `on_fail` lives at the step level (not inside `validation`) and is one of `escalate_tier | abort | retry_step` — `escalate_tier` walks the fallback chain (e.g., Haiku → Sonnet → Opus) until validation passes or the chain exhausts. `retry_step` is sugar for the [default retry policy](#retry-transient-failures) (retry the step on a transient execution error); for the validation/rubric gate it behaves as `escalate_tier`.
 
 ### Retry transient failures
