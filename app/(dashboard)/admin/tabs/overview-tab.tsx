@@ -434,7 +434,7 @@ export const OverviewTab = React.memo(function OverviewTab({
           </SettingsCard>
 
           {/* ── Licence ── */}
-          <SettingsCard icon={BadgeCheck} title="License" description="Edition and what it permits" className="h-full">
+          <SettingsCard icon={BadgeCheck} title="License" description="Current edition and resource capacity" className="h-full">
             {license ? (
               <>
                 <Row icon={BadgeCheck} label="Edition" description={license.licensee_org || undefined}>
@@ -442,7 +442,7 @@ export const OverviewTab = React.memo(function OverviewTab({
                 </Row>
                 <Row icon={Boxes} label="Crews"><Limit used={stats?.crews} limit={license.max_crews} /></Row>
                 <Row icon={Users} label="Members"><Limit used={stats?.users} limit={license.max_members} /></Row>
-                <Row icon={Bot} label="Agents per crew"><span className="font-mono">up to {license.max_agents_per_crew}</span></Row>
+                <Row icon={Bot} label="Agents per crew"><span className="font-mono">{license.max_agents_per_crew > 0 ? `up to ${license.max_agents_per_crew}` : "Unlimited"}</span></Row>
                 <SettingsRow label={<Label icon={Sparkles}>Features</Label>} border={false}>
                   {license.features?.length ? (
                     <span className="flex flex-wrap justify-end gap-1">
@@ -451,9 +451,14 @@ export const OverviewTab = React.memo(function OverviewTab({
                       ))}
                     </span>
                   ) : (
-                    <span className="text-[11px] text-muted-foreground">Core features</span>
+                    <span className="text-[11px] text-muted-foreground">All open-source features</span>
                   )}
                 </SettingsRow>
+                {license.max_crews === 0 && license.max_members === 0 && license.max_agents_per_crew === 0 && (
+                  <p className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+                    Crews, members and agents are currently unlimited under the open-source edition. Resource licensing may change in future releases.
+                  </p>
+                )}
               </>
             ) : (
               <div className="space-y-2 p-4"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-3/5" /></div>
@@ -500,6 +505,7 @@ function Bar({ pct, className }: { pct: number; className?: string }) {
 }
 
 function Limit({ used, limit }: { used?: number; limit?: number }) {
+  if (limit === 0) return <span className="font-mono text-[11px] text-foreground/85">Unlimited</span>
   if (used === undefined) return <Skeleton className="h-3 w-16" />
   return (
     <span className={cn("flex items-center gap-2 font-mono text-[11px] tabular-nums", overLimit(used, limit) ? "text-destructive" : "text-foreground/85")}>

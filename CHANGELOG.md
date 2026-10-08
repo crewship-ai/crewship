@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Open-source license capacity showed inactive limits.** The license API, administration and CLI now report unlimited crews, members and agents, including when a signed license contains historical caps. Signed claims and enforcement hooks remain available for future releases; administration explains that resource licensing may change.
+
 - **A workspace can have a logo (#3005).** Settings › General › Identity has a Workspace logo row (Upload, Change, Remove; PNG, JPEG or WebP up to 2MB, the same rules as a profile picture), and `crewship workspace logo set <file>` / `remove` do the same. The workspace switcher and Admin › People draw the logo instead of the initial. API: `POST`/`DELETE`/`GET /api/v1/workspaces/{workspaceId}/logo`; setting or removing it is `ADMIN+` and audited.
 
 - **A project's detail saves through the page's floating Save bar, and a bulk status or priority change asks first (#2984).** Name, status, priority, health, lead, dates, icon and colour are held as a draft until Save sends them in one request; clicking away from the name keeps it, and stepping through dates no longer writes each day. Setting several issues to a status or priority from the list now confirms, naming the change and that automations reacting to a status change may run.
