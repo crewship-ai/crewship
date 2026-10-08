@@ -11,7 +11,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Private routines and Page actions say why nothing is listed (#2877).** A restricted member on a server without private execution sees "Private execution isn't installed on this server — ask an administrator" instead of "catalog unavailable" and "nothing available" at once. Loading, empty, unavailable and not-installed are now one state each. The routine and Page catalogs, routine runs and restricted Page actions answer `503` with code `restricted_runtime_unavailable` to restricted members only; every access refusal stays an opaque `404`.
 
-- **A tool switched off on an MCP integration is refused by the crew sidecar's gateway (#2178).** `crewship integration crew tools disable` and the per-tool switch now also stop the sidecar's `/mcp/call` from calling the tool and hide it from `/mcp/tools`, from the sidecar's next start. Agent CLIs that connect to an HTTP MCP server directly are not gated per tool yet.
+- **A tool switched off on an MCP integration is refused by the crew sidecar's gateway (#2178).** `crewship integration tools disable` and the per-tool switch now also stop the sidecar's `/mcp/call` from calling the tool and hide it from `/mcp/tools`, from the sidecar's next start. Agent CLIs that connect to an HTTP MCP server directly are not gated per tool yet.
 
 - **A repeated webhook delivery gets its receipt even while the first one is running (#2964).** If the acceptance write could not commit in time, for example because the original delivery's run held the database, a duplicate was answered `503 acceptance unavailable`. It now gets `202` with the original work and its current state; only new work is refused.
 
