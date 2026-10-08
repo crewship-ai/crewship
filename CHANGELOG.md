@@ -9,6 +9,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Private routines and Page actions say why nothing is listed (#2877).** A restricted member on a server without private execution sees "Private execution isn't installed on this server — ask an administrator" instead of "catalog unavailable" and "nothing available" at once. Loading, empty, unavailable and not-installed are now one state each. The routine and Page catalogs, routine runs and restricted Page actions answer `503` with code `restricted_runtime_unavailable` to restricted members only; every access refusal stays an opaque `404`.
+
+- **A tool switched off on an MCP integration is refused by the crew sidecar's gateway (#2178).** `crewship integration crew tools disable` and the per-tool switch now also stop the sidecar's `/mcp/call` from calling the tool and hide it from `/mcp/tools`, from the sidecar's next start. Agent CLIs that connect to an HTTP MCP server directly are not gated per tool yet.
+
+- **A repeated webhook delivery gets its receipt even while the first one is running (#2964).** If the acceptance write could not commit in time, for example because the original delivery's run held the database, a duplicate was answered `503 acceptance unavailable`. It now gets `202` with the original work and its current state; only new work is refused.
+
 - **An agent's restricted client execution can be changed in the web app again (#3028).** Edit agent › Model and execution has the Restricted client execution field; the change is part of the dialog's draft and applies on Save, after the agent. It had no UI since #3008. The unused Admin memory-configuration card is removed: Admin › Data retention › Memory versions edits the same setting.
 
 - **Settings and Admin read as one product (#3022).** A refused switch in Access & Secrets or Hooks flips back and says why in the bottom-right toast instead of a line in the card. Every field, select and picker has the same size as its neighbours; supporting text (row descriptions, hints, empty states) is 12px instead of 11px and nothing is set below 11px; every table uses one header, cell and row style; person status, Keeper decisions, "No owner" and "Off" are status pills.
