@@ -14,6 +14,8 @@ export interface AdminOrg {
   name: string
   slug: string
   created_at: string
+  /** The workspace's uploaded logo (#3005), or null. */
+  logo_url?: string | null
   _count_members: number
   _count_agents: number
   _count_crews: number
@@ -136,7 +138,7 @@ export interface JournalIntegrity {
   error?: string
 }
 
-/** License edition + limits — GET /api/v1/system/license (read-only). */
+/** Effective license capacity — GET /api/v1/system/license. Zero means unlimited. */
 export interface LicenseInfo {
   edition: string
   licensee_org?: string
@@ -202,7 +204,6 @@ export type TabKey =
   | "providers"
   | "security"
   | "reviews"
-  | "backups"
   | "notifications"
   | "ratelimits"
   | "posture"

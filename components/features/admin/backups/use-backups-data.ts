@@ -143,6 +143,21 @@ export async function perform<T>(demo: boolean, fn: () => Promise<SendResult<T>>
   return null
 }
 
+/**
+ * perform() for the page's Save bar: a failure rejects, so the bar reports it
+ * the one way Settings and Admin report a failed save (a corner toast that
+ * stays, with Retry) and keeps the draft. Success is the bar's "Saved".
+ */
+export async function performSave<T>(demo: boolean, fn: () => Promise<SendResult<T>>): Promise<T | null> {
+  if (demo) {
+    toast.message("Demo data · nothing was sent")
+    return null
+  }
+  const r = await fn()
+  if (r.ok) return r.data
+  throw new Error(r.unavailable ? "Not available on this server yet." : r.error)
+}
+
 /** Unwrap `{data: [...]}` or a bare array. */
 export function listOf<T>(json: unknown): T[] {
   if (Array.isArray(json)) return json as T[]

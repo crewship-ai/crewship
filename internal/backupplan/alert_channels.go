@@ -46,7 +46,7 @@ const AlertSourceKind = "backup_incident"
 
 // AlertLink is where a backup alert sends its reader (made absolute at
 // delivery against CREWSHIP_PUBLIC_URL, the instance's public base URL).
-const AlertLink = "/admin?tab=backups&section=overview"
+const AlertLink = "/admin/backups"
 
 // Alert titles.
 const (

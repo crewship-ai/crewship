@@ -165,6 +165,9 @@ func TestInstanceBackupRunAndOverview(t *testing.T) {
 		t.Fatal("manual run left no instance audit entry")
 	}
 
+	// A workspace without a crew gets no coverage row of its own (it is
+	// summed up instead); this one has a crew.
+	mustExec(t, f.db, `INSERT INTO crews (id, workspace_id, slug, name) VALUES ('crew-new', 'ws-new', 'crew-new', 'Crew')`)
 	rr = f.do(f.boss, "GET", "/api/v1/admin/instance/backups/overview?scope=workspaces&ws=ws-new", "")
 	wantCode(t, rr, http.StatusOK, "overview")
 	ov := decodeAs[backupplan.OverviewResponse](t, rr.Body.Bytes())

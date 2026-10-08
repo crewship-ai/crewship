@@ -1924,9 +1924,18 @@ image. `unsafe`: host settings in the crews' devcontainer configuration that a
 restore does not switch back on by itself — Docker socket mounts, privileged
 mode, host path binds; read only when a key is given, otherwise a runtime
 warning says they were not checked. `conflicts`: what the `target`
-(`empty_server`, `isolated`, `replace`, `new_workspace`, `crew`) already holds;
-an instance bundle restores only to `empty_server` (`crewship recover`) or
-`isolated` (`crewship backup drill`). `environments`: one runtime check per
+(`empty_server`, `isolated`, `replace`, `new_workspace`, `crew`, `in_place`) already holds,
+decided by the same rule the restore applies, so a target that passes here is
+never refused by the restore: an instance bundle restores only to
+`empty_server` (`crewship recover`) or `isolated` (`crewship backup drill`),
+and those two take nothing else; `replace` needs a workspace bundle that is not
+custom (a partial bundle would delete what it does not carry); `new_workspace`
+needs a workspace bundle and `crew` a crew bundle, each with the new name in
+`as_workspace` / `as_crew` — a valid slug that no workspace on this server
+holds, deleted workspaces included (the slug stays reserved). The restore
+itself answers `409` for a taken name. `in_place` restores a workspace or crew
+bundle under its own names (no replace, no new name); an instance bundle is
+refused. `environments`: one runtime check per
 complete container environment the bundle carries — `action` is `restore`,
 `rebuild` (built for another architecture than this server's Docker, or
 `missing_blobs` of its layers are neither in the bundle nor in the store
@@ -1939,7 +1948,7 @@ of each environment. Always an array.
 **Auth:** instance administrator. **Request:**
 
 ```json
-{"path": "/var/lib/crewship/backups/crewship-workspace-lab-20260930T020000Z.tar.zst", "target": "replace", "identity": "AGE-SECRET-KEY-1…"}
+{"path": "/var/lib/crewship/backups/crewship-workspace-lab-20260930T020000Z.tar.zst", "target": "new_workspace", "as_workspace": "lab-restored", "identity": "AGE-SECRET-KEY-1…"}
 ```
 
 **Response:**
@@ -3115,6 +3124,7 @@ for the instance owner).
     "id": "ws-uuid",
     "name": "Engineering",
     "slug": "engineering",
+    "logo_url": null,
     "created_at": "2025-01-01T00:00:00Z",
     "updated_at": "2025-06-15T12:00:00Z",
     "_count_members": 12,
@@ -4181,18 +4191,18 @@ Bucketed time-series metrics for the dashboard charts. Returns zero-filled bucke
 ## License System
 
 <Note>
-**Roadmap (v0.2).** The license/edition system below is on the v0.2 roadmap. v0.1 ships as fully open-source Apache-2.0 with no edition gating.
+**Current behavior.** The open-source edition has unlimited crews, members and agents. The license API reports `0` for each resource limit, meaning unlimited. Resource licensing may change in future releases; the signed-license infrastructure remains available for that purpose.
 </Note>
 
-Crewship will use a three-tier licensing model that controls workspace limits and feature availability.
+The edition identifiers below are retained for future licensing. They do not impose resource limits in current releases, even when a loaded signed license contains finite caps.
 
 ### Editions
 
 | Edition | Description | Limits |
 |---------|-------------|--------|
-| **Community** | Free, default edition | 15 crews, 10 agents/crew, 5 members |
-| **Team** | Paid team tier | Higher limits, additional features |
-| **Enterprise** | Full enterprise tier | Unlimited, all features enabled |
+| **Community** | Free, default edition | Unlimited crews, agents/crew and members |
+| **Team** | Paid team tier | Reserved for future licensing |
+| **Enterprise** | Full enterprise tier | Reserved for future licensing |
 
 ### License Claims
 

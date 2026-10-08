@@ -5,18 +5,19 @@ import { AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import { SettingsCard } from "@/components/features/settings/shared"
+import { toastSaveError } from "@/components/ui/page-save-bar"
+import { SettingsCard, SettingsSaveBar } from "@/components/features/settings/shared"
 import { saveDefaults, saveInstanceGovernance, type DefaultsResult, type GovSaveResult, type GovTargets, type InstanceGovRow, type InstanceGovSettings } from "./use-instance-keeper"
 
 /**
  * One form for several workspaces at once. Each field shows the value the
  * selected workspaces share, or "Mixed" with what they hold when they differ;
  * nothing is sent for a field the admin did not touch, so a save changes only
- * what was chosen here. Saving always asks first: the server previews the save
- * (dry_run) and the dialog lists, workspace by workspace, what is overwritten.
+ * what was chosen here. The edits join the page's Save bar, and Save always
+ * asks first: the server previews the save (dry_run) and the dialog lists,
+ * workspace by workspace, what is overwritten. A failure is a corner toast.
  */
 
 export type BulkSection = "workspace-judge" | "watchdog" | "alerts" | "leases"
@@ -117,7 +118,6 @@ export function BulkGovernanceForm({
   // request, never whatever the form holds by then (review R3).
   const [preview, setPreview] = React.useState<{ result: GovSaveResult; targets: GovTargets; set: Partial<InstanceGovSettings> } | null>(null)
   const [busy, setBusy] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
 
   // A draft belongs to the workspaces it was made for: the section, which
   // workspaces, and whether "all" (which also sets the defaults). Another
@@ -134,25 +134,25 @@ export function BulkGovernanceForm({
     scopeRef.current = scopeKey
     epoch.current += 1
     if (Object.keys(draftRef.current).length > 0) toast.info("The selection changed, so the unsaved changes were dropped.")
-    setDraft({}); setError(null); setPreview(null); setBusy(false)
+    setDraft({}); setPreview(null); setBusy(false)
   }, [scopeKey])
 
   const targets: GovTargets = all ? { all: true } : { workspaces: rows.map((r) => r.workspace_id) }
   const set = Object.fromEntries(Object.entries(draft)) as Partial<InstanceGovSettings>
-  const dirty = Object.keys(draft).length > 0
   const n = rows.length
 
+  /** The bar's Save: preview first. A failed preview is thrown for the bar's toast. */
   async function review() {
     const asked = epoch.current
     const req = { targets, set }
-    setBusy(true); setError(null)
+    setBusy(true)
     try {
       const result = await saveInstanceGovernance(req.targets, req.set, true)
       // An answer for a selection that is no longer on screen is dropped.
       if (epoch.current !== asked) return
       setPreview({ result, ...req })
     } catch (e) {
-      if (epoch.current === asked) setError(e instanceof Error ? e.message : "The save could not be checked")
+      if (epoch.current === asked) throw e instanceof Error ? e : new Error("The save could not be checked")
     } finally {
       if (epoch.current === asked) setBusy(false)
     }
@@ -168,7 +168,7 @@ export function BulkGovernanceForm({
       onSaved(r)
     } catch (e) {
       setPreview(null)
-      setError(e instanceof Error ? e.message : "The save failed; nothing was changed")
+      toastSaveError(SECTION_TITLE[section], e instanceof Error ? e.message : "The save failed; nothing was changed.")
     }
   }
 
@@ -232,15 +232,9 @@ export function BulkGovernanceForm({
             )
           })}
         </div>
-        <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2.5">
-          <Button size="sm" variant="destructive" disabled={!dirty || busy} onClick={() => void review()}>
-            {all ? `Overwrite all ${n} workspace${n === 1 ? "" : "s"}…` : `Overwrite ${n} workspaces…`}
-          </Button>
-          <Button size="sm" variant="outline" disabled={!dirty || busy} onClick={() => setDraft({})}>Reset</Button>
-          {!dirty && <span className="text-[12px] text-muted-foreground">Change a value to save</span>}
-          {error && <span role="status" className="text-[12px] text-destructive">{error}</span>}
-        </div>
       </SettingsCard>
+      <SettingsSaveBar label={SECTION_TITLE[section]} count={Object.keys(draft).length} saving={busy}
+        onSave={review} onDiscard={() => setDraft({})} />
 
       <ConfirmDialog
         open={preview !== null}
@@ -304,18 +298,17 @@ export function DefaultsForm({ current, onSaved }: { current: InstanceGovSetting
   const [draft, setDraft] = React.useState<Draft>({})
   const [preview, setPreview] = React.useState<{ result: DefaultsResult; set: Partial<InstanceGovSettings> } | null>(null)
   const [busy, setBusy] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
   const row = { ...current, workspace_id: "defaults", workspace_name: "New workspaces", workspace_slug: "defaults", configured: true } as InstanceGovRow
   const set = Object.fromEntries(Object.entries(draft)) as Partial<InstanceGovSettings>
-  const dirty = Object.keys(draft).length > 0
   const byField = new Map(DEFAULT_FIELDS.map((f) => [f.key as string, f]))
 
+  /** The bar's Save: preview first. A failed preview is thrown for the bar's toast. */
   async function review() {
-    setBusy(true); setError(null)
+    setBusy(true)
     try {
       setPreview({ result: await saveDefaults(set, true), set })
     } catch (e) {
-      setError(e instanceof Error ? e.message : "The change could not be checked")
+      throw e instanceof Error ? e : new Error("The change could not be checked")
     } finally {
       setBusy(false)
     }
@@ -329,7 +322,7 @@ export function DefaultsForm({ current, onSaved }: { current: InstanceGovSetting
       onSaved()
     } catch (e) {
       setPreview(null)
-      setError(e instanceof Error ? e.message : "The save failed; nothing was changed")
+      toastSaveError("Defaults for new workspaces", e instanceof Error ? e.message : "The save failed; nothing was changed.")
     }
   }
 
@@ -357,12 +350,9 @@ export function DefaultsForm({ current, onSaved }: { current: InstanceGovSetting
             )
           })}
         </div>
-        <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2.5">
-          <Button size="sm" disabled={!dirty || busy} onClick={() => void review()}>Save defaults for new workspaces…</Button>
-          <Button size="sm" variant="outline" disabled={!dirty || busy} onClick={() => setDraft({})}>Reset</Button>
-          {error && <span role="status" className="text-[12px] text-destructive">{error}</span>}
-        </div>
       </SettingsCard>
+      <SettingsSaveBar label="Defaults for new workspaces" count={Object.keys(draft).length} saving={busy}
+        onSave={review} onDiscard={() => setDraft({})} />
       <ConfirmDialog
         open={preview !== null}
         onOpenChange={(o) => { if (!o) setPreview(null) }}
