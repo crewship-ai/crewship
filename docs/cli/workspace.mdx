@@ -31,6 +31,8 @@ The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace
 | `workspace create` | Create a new workspace (you become its OWNER). |
 | `workspace update` | Patch mutable fields on the current workspace. |
 | `workspace delete [slug-or-id]` | Delete a workspace (OWNER only, irreversible). Requires `--confirm <slug>`. |
+| `workspace logo set <file>` | Upload or replace the current workspace's logo (PNG, JPEG or WebP, max 2MB; ADMIN+). |
+| `workspace logo remove` | Remove the logo; the workspace is drawn with its initial again (ADMIN+). |
 | `workspace member list` | List members of the active workspace. |
 | `workspace member add <user-id>` | Add an existing user to the workspace. Takes a **user** id. |
 | `workspace member role <member-id-or-user-id> <ROLE>` | Change a member's role (`MANAGER+`, ladder-guarded). |
@@ -90,6 +92,17 @@ meaningful value on all three retention flags (an explicit "keep forever"),
 so an unset flag must not be transmitted as zero. `crewship workspace update
 --name x` never touches your retention windows.
 </Warning>
+
+### `workspace logo`
+
+Sets or removes the logo the current workspace is drawn with (the switcher,
+Admin lists, the Backups and Security scope). Same rules as `auth avatar`:
+PNG, JPEG or WebP, at most 2MB and 4096 px a side. Needs `ADMIN` or `OWNER`.
+
+```bash
+crewship workspace logo set ./logo.png
+crewship workspace logo remove
+```
 
 ### `workspace delete`
 

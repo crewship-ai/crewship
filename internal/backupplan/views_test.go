@@ -3,6 +3,7 @@ package backupplan
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,6 +119,9 @@ func TestOverview_WorkspacesScope(t *testing.T) {
 	h := newHarness(t, "2026-09-30T12:00:00Z")
 	ctx := context.Background()
 	now := mustTime(t, "2026-09-30T12:00:00Z")
+	// Every workspace here holds a crew: workspaces without one fold into a
+	// single summary item (TestOverview_WorkspacesWithoutCrewsFoldIntoOneItem).
+	seedCrews(t, h, "ws_a", "ws_b", "ws_c")
 	p := h.plan(nil) // covers ws_a only
 	h.plan(func(p *Plan) {
 		p.Name, p.Preset, p.WorkspaceIDs, p.Contents = "Memory every 6 h", backup.PresetCustom, []string{"ws_b"}, []string{"memory"}
@@ -214,5 +218,74 @@ func TestDescribeIncomplete_SumsKindsInWords(t *testing.T) {
 	want := "5 crew folders Docker could not copy, 2 crews without their containers, 40 files the server could not read, 2 × something new"
 	if got != want {
 		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+}
+
+// seedCrews gives each workspace one live crew.
+func seedCrews(t *testing.T, h *harness, ws ...string) {
+	t.Helper()
+	for _, w := range ws {
+		if _, err := h.db.Exec(`INSERT INTO crews (id, workspace_id, slug, name) VALUES (?, ?, ?, ?)`, "crew_"+w, w, "crew-"+w, "Crew "+w); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// Every signup gets a workspace of its own, and most hold no crew. Listing
+// each of them as "never backed up" and "on no backup plan" buried the
+// workspaces that matter: one summary item names them instead, and coverage
+// counts only workspaces with crews.
+func TestOverview_WorkspacesWithoutCrewsFoldIntoOneItem(t *testing.T) {
+	h := newHarness(t, "2026-09-30T12:00:00Z")
+	ctx := context.Background()
+	for _, q := range []string{
+		`INSERT INTO workspaces(id,name,slug,created_at) VALUES('ws_d','Delta','delta','2026-01-04 00:00:00')`,
+	} {
+		if _, err := h.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedCrews(t, h, "ws_a")
+	if _, err := h.db.Exec(`INSERT INTO crews (id, workspace_id, slug, name, deleted_at) VALUES ('gone','ws_b','gone','Gone','2026-01-05T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	ov, err := BuildOverview(ctx, h.db, OverviewInput{Scope: ScopeWorkspaces}, mustTime(t, "2026-09-30T12:00:00Z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var perWS, summary []AttentionItem
+	for _, it := range ov.NeedsAttention {
+		switch {
+		case it.ID == "crewless":
+			summary = append(summary, it)
+		case strings.HasPrefix(it.ID, "never:") || strings.HasPrefix(it.ID, "noplan:") || strings.HasPrefix(it.ID, "stale:"):
+			perWS = append(perWS, it)
+		}
+	}
+	for _, it := range perWS {
+		if !strings.HasSuffix(it.ID, ":ws_a") {
+			t.Errorf("a workspace without crews got its own item: %+v", it)
+		}
+	}
+	if len(perWS) != 2 {
+		t.Errorf("ws_a (with a crew, never backed up, on no plan) should keep its two items, got %+v", perWS)
+	}
+	if len(summary) != 1 {
+		t.Fatalf("want one summary item for the workspaces without crews, got %+v", ov.NeedsAttention)
+	}
+	it := summary[0]
+	if it.Severity != "warn" || it.Title != "3 workspaces without crews have no backup" || it.Action != nil {
+		t.Errorf("summary = %+v", it)
+	}
+	if !strings.Contains(it.Detail, "Beta") || !strings.Contains(it.Detail, "Gamma") || !strings.Contains(it.Detail, "Delta") {
+		t.Errorf("summary detail should name them: %q", it.Detail)
+	}
+	if ov.CrewlessWorkspaces != 3 {
+		t.Errorf("crewless_workspaces = %d, want 3", ov.CrewlessWorkspaces)
+	}
+	for _, w := range ov.Workspaces {
+		if w.WorkspaceID != "ws_a" {
+			t.Errorf("coverage lists a workspace without crews: %+v", w)
+		}
 	}
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
 
 import { IssuesListInline } from "../issues-inline"
 import type { Mission } from "@/lib/types/mission"
@@ -46,6 +46,8 @@ function bulkSetDone() {
   expect(screen.getByText("2 selected")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Status" }))
   fireEvent.click(screen.getByRole("button", { name: "Done" }))
+  // A bulk change asks first; the confirm is what sends it.
+  fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: /^Set to/ }))
 }
 
 // IssuesListInline is what /issues actually renders in list mode. It used to

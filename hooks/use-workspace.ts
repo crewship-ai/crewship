@@ -11,6 +11,8 @@ export interface WorkspaceData {
   id: string
   name: string
   slug: string
+  /** The workspace's uploaded logo (#3005); null draws its initial. */
+  logo_url?: string | null
   currentUserRole: string | null
   /** Resolved per-membership capability grants (#1034). Optional so
    *  a client talking to an older backend degrades to role-only

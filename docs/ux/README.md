@@ -43,6 +43,43 @@ A screen that cannot answer 1 says so in one line, not with an empty pane.
 | Long list | `usePagedList` (`hooks/use-paged-list`) | `?limit&offset` + `X-Total-Count`; show `N of TOTAL` and a Show-more |
 | Disabled primary button | a one-line reason beside it | onboarding's `blocking reason` pattern |
 | Irreversible action | `AlertDialog` that says what is lost and where to recover | Skip setup, delete, nuke |
+| Saving typed-in values | `PageSaveProvider` + `PageSaveBar` (`components/ui/page-save-bar`); cards register through `useDirtyForm` + `SaveFooter`, `SettingsSaveBar` or `usePageSave` | see "Saving" below |
+
+### Saving
+
+One rule for every screen in Crewship that edits typed-in values — Settings,
+Admin and nested pages today; crew settings, routines and every other editor
+adopt the same bar, never a Save of their own:
+
+| Control | How it saves |
+|---|---|
+| Switch | at once; on failure it flips back and the error is a toast |
+| Text, number, select, picker | ONE floating bar, bottom centre of the content pane: "N unsaved changes · Discard · Save" (⌘S / Ctrl+S). Never a Save button inside a card |
+| A change across several workspaces | the same bar; its Save opens the dry-run preview, the confirm applies |
+| An issue's fields (title, description, status, priority, assignee, dates, project, milestone, routine, labels) | the same bar, one PATCH for all of them; a status of Done, Cancelled, Duplicate or Review, or a new assignee, asks first and names the automations it starts. Start, Stop, review verbs, comments and links stay instant actions |
+| Delete and other irreversible actions | its own button in the Danger zone and an `AlertDialog` |
+
+Leaving with edits pending (section nav, a link, reload) asks "Leave with N
+unsaved changes?" — Stay / Discard / Save and leave. A failed save is a toast
+in the bottom-right corner that stays until dismissed, offers Retry and keeps
+the edits; errors never sit inside a card. Success is quiet: the bar says
+"Saved" for a moment. On a phone the bar docks above the tab bar. The bar
+wears the success toast's green (`--save-bar-*` tokens in `app/globals.css`)
+with a slow halo and a pinging dot (both off under reduced motion): pending
+edits are one step from done and must not be overlooked.
+
+Adopting it on a new screen:
+
+1. Wrap the page in `PageSaveProvider` (outside its section nav, so the nav
+   can ask before switching) and put `PageSaveBar` once inside a `relative`
+   box around the scrolling content; give the scroller ~6rem bottom padding.
+   `DrillPage` already does both.
+2. Cards register their edits: `useDirtyForm` + `SaveFooter count={form.dirtyCount}`
+   (the card's own strip disappears inside a provider), `SettingsSaveBar` for
+   a list of drafts, or `usePageSave({ label, count, save, discard })` for
+   anything else. `save` rejects on failure; the bar shows the toast.
+3. Navigation that swaps the page's content without a link goes through
+   `usePageSaveGuard()`.
 
 Type scale: `text-micro` / `text-label` / `text-body`; mono only for machine
 text (ids, times, counts, durations). Section labels use the `eyebrow`
@@ -79,16 +116,19 @@ files disagree or any pair drops below AA.
 
 ### Admin › Backups
 
-Data › Backups is one Admin sidebar row that folds out six pages (Overview,
-Backup history, Schedules, Storage, Recovery, Keys & alerts) indented under it,
-with Data retention beside it — `?tab=backups&section=…`, `?tab=retention`.
-The scope (Whole instance / Selected workspaces, workspace chips with "N of
-M") is a strip in the content header, never in the panel, kept in
-`?scope=&ws=`; instance-only pages say "Instance setting · applies to every
-backup plan". Proof is always three levels (checksum, contents checked, test
-restore) and a partial test restore reads as partial, in the warn tone.
-Sections live in `components/features/admin/backups/`; `?demo=1` (never in a
-production build) draws them from `__fixtures__` for review.
+Backups is a nested page, `/admin/backups` (`DrillPage`), like Security and
+People. Its side panel holds the **Scope** (Whole instance, or Selected
+workspaces with the same multi-select as Security, greyed out on the
+instance-only Storage and Keys & alerts), Overview with its attention count,
+**Runs** as facets (All, Failed, Incomplete, Manual, Pinned), **Plans** as rows
+with "+ New plan", Recovery (New restore, Restore history, Drills) and the two
+instance settings. Section, facet, plan, run and scope live in the URL
+(`?section=&status=&plan=&run=&scope=&ws=`); an old `?tab=backups` link lands
+here. Proof is always three levels (checksum, contents checked, test restore)
+and a partial result reads as partial, in the warn tone — the server's verdict,
+never one recomputed in the browser. Data retention is not a backup setting: it
+stays in the Admin console. Sections live in `components/features/admin/backups/`;
+`?demo=1` (never in a production build) draws them from `__fixtures__`.
 
 ## 3. Motion (all under `useReducedMotion`)
 

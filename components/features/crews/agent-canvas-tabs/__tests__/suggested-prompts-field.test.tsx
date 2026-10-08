@@ -53,9 +53,7 @@ function renderTab(overrides: Record<string, unknown> = {}, patch = vi.fn()) {
   render(
     <ConfigTab
       agent={{ ...baseAgent, ...overrides } as AgentRecord}
-      crews={[{ id: "c1", name: "Ops", slug: "ops" }]}
       patch={patch}
-      onSelectCrew={vi.fn()}
     />,
   )
   return { patch, field: screen.getByLabelText("Suggested questions") as HTMLTextAreaElement }

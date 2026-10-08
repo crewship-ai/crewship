@@ -8,7 +8,7 @@ package main
 //	backups vault-keys                        GET  /api/v1/admin/instance/backups/vault-keys
 //	backups recovery-kit on|off               PUT  /api/v1/admin/instance/backups/settings/recovery-kit
 //	backups check <path>                      POST /api/v1/admin/instance/backups/bundles/check
-//	backups restore-checks <path> --target t  POST /api/v1/admin/instance/backups/restore/checks
+//	backups restore-checks <path> --target t [--as-workspace s|--as-crew s]  POST /api/v1/admin/instance/backups/restore/checks
 //	backups drills                            GET  /api/v1/admin/instance/backups/drills
 //	holds list                                GET  /api/v1/admin/instance/holds
 //	holds resume <key>                        POST /api/v1/admin/instance/holds/resume
@@ -263,7 +263,10 @@ var adminInstanceBackupsRestoreChecksCmd = &cobra.Command{
 key (--identity or --passphrase-file) the crews' configuration is also read
 for host settings a restore must not switch back on by itself: Docker socket
 mounts, privileged mode, host path binds. --target is empty_server, isolated,
-replace, new_workspace or crew.`,
+replace, new_workspace, crew or in_place (the backup under its own names);
+new_workspace and crew are judged with the new
+name they land under (--as-workspace / --as-crew), by the same rule the
+restore applies.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := requireInstanceAdminClient()
@@ -272,6 +275,12 @@ replace, new_workspace or crew.`,
 		}
 		target, _ := cmd.Flags().GetString("target")
 		body := map[string]any{"path": args[0], "target": target}
+		if v, _ := cmd.Flags().GetString("as-workspace"); v != "" {
+			body["as_workspace"] = v
+		}
+		if v, _ := cmd.Flags().GetString("as-crew"); v != "" {
+			body["as_crew"] = v
+		}
 		if err := bundleKeyBody(cmd, body); err != nil {
 			return err
 		}
@@ -403,7 +412,9 @@ func init() {
 		c.Flags().String("passphrase-file", "", "Read the passphrase that opens the bundle from a file")
 		c.Flags().Duration("timeout", 30*time.Minute, "How long to wait for the server (a large bundle takes a while to read)")
 	}
-	adminInstanceBackupsRestoreChecksCmd.Flags().String("target", "empty_server", "empty_server | isolated | replace | new_workspace | crew")
+	adminInstanceBackupsRestoreChecksCmd.Flags().String("target", "empty_server", "empty_server | isolated | replace | new_workspace | crew | in_place")
+	adminInstanceBackupsRestoreChecksCmd.Flags().String("as-workspace", "", "New workspace name (slug) a new_workspace target lands under")
+	adminInstanceBackupsRestoreChecksCmd.Flags().String("as-crew", "", "New crew name (slug) a crew target lands under")
 
 	adminInstanceBackupsCmd.AddCommand(adminInstanceBackupsVaultKeysCmd, adminInstanceBackupsRecoveryKitCmd, adminInstanceBackupsCheckCmd,
 		adminInstanceBackupsRestoreChecksCmd, adminInstanceBackupsDrillsCmd)

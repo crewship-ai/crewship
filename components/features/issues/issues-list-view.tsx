@@ -20,6 +20,7 @@ import { getIssueWorker } from "@/lib/issue-execution"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { IssueCard } from "./issue-card"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import type { Mission, MissionStatus, IssuePriority } from "@/lib/types/mission"
 
 interface IssuesListViewProps {
@@ -113,6 +114,14 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
       setSelectedIds(new Set(issues.map((i) => i.id)))
     }
   }, [issues, selectedIds.size])
+
+  // A bulk change asks first: a status change can set off automations on
+  // every selected issue, and one click in the menu used to commit it.
+  const [pendingBulk, setPendingBulk] = useState<{ updates: Record<string, unknown>; label: string; field: "status" | "priority" } | null>(null)
+  const askBulk = useCallback((field: "status" | "priority", value: string, label: string) => {
+    setBulkMenuOpen(null)
+    setPendingBulk({ updates: { [field]: value }, label, field })
+  }, [])
 
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set())
@@ -259,6 +268,20 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
 
   return (
     <div ref={scopeRef} data-slot="issues-list" className="@container/issues overflow-hidden rounded-card border border-border bg-card">
+      <ConfirmDialog
+        open={pendingBulk !== null}
+        onOpenChange={(o) => { if (!o) setPendingBulk(null) }}
+        title={pendingBulk ? `Set ${selectedIds.size} ${selectedIds.size === 1 ? "issue" : "issues"} to ${pendingBulk.label}?` : ""}
+        description={pendingBulk?.field === "status"
+          ? "Automations that react to a status change may run for each of them, and their people are notified."
+          : "Each issue's priority changes; the order of the board follows."}
+        confirmLabel={pendingBulk ? `Set to ${pendingBulk.label}` : "Set"}
+        onConfirm={() => {
+          const p = pendingBulk
+          setPendingBulk(null)
+          if (p) void handleBulkUpdate(p.updates)
+        }}
+      />
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 border-b border-primary/20">
@@ -276,7 +299,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                   {BULK_STATUSES.map((s) => (
                     <button
                       key={s.value}
-                      onClick={() => handleBulkUpdate({ status: s.value })}
+                      onClick={() => askBulk("status", s.value, s.label)}
                       className="w-full px-3 py-1.5 text-xs text-left hover:bg-foreground/[0.06] flex items-center gap-2"
                     >
                       <StatusIcon status={s.value} className="h-3 w-3" />
@@ -298,7 +321,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                   {BULK_PRIORITIES.map((p) => (
                     <button
                       key={p.value}
-                      onClick={() => handleBulkUpdate({ priority: p.value })}
+                      onClick={() => askBulk("priority", p.value, p.label)}
                       className="w-full px-3 py-1.5 text-xs text-left hover:bg-foreground/[0.06] flex items-center gap-2"
                     >
                       <PriorityIcon priority={p.value} className="h-3 w-3" />

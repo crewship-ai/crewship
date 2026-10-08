@@ -51,7 +51,7 @@ export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string
     {contrast !== false && contrast < 4.5 && <p role="status" className="px-4 pb-3 text-sm text-warn">Text contrast is below 4.5:1. Adjust the text or background colors for readability.</p>}
     {editable && <>
       <Button variant="ghost" className="mx-4 mb-3" onClick={() => { for (const key of Object.keys(DEFAULT_PAGE_THEME) as (keyof PageTheme)[]) form.set(key, DEFAULT_PAGE_THEME[key]) }}>Use default colors</Button>
-      <SaveFooter dirty={form.isDirty} status={form.status} error={form.error} canSave={valid} onCancel={form.reset} onSave={() => void form.submit(async draft => {
+      <SaveFooter dirty={form.isDirty} count={form.dirtyCount} status={form.status} error={form.error} canSave={valid} onCancel={form.reset} onSave={() => void form.submit(async draft => {
         const response = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pages_theme: draft }) })
         if (!response.ok) { const body = await response.json().catch(() => null); throw new Error(body?.error ?? "Unable to save Pages colors") }
         await refreshWorkspaceSettings()

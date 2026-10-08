@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/slug"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -334,12 +335,11 @@ func deleteByID(ctx context.Context, db *sql.DB, table, id, wsID string) (bool, 
 	return affected > 0, nil
 }
 
-// validSlugRe matches safe slug values: lowercase alphanumeric, starting with a letter or digit.
-var validSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
-
-// validSlugFormat validates that a slug contains only safe characters.
-func validSlugFormat(slug string) bool {
-	return validSlugRe.MatchString(slug)
+// validSlugFormat validates that a slug contains only safe characters
+// (internal/slug: lowercase alphanumeric, "-" and "_", starting with a letter
+// or digit). The backup restore applies the same rule to a new name.
+func validSlugFormat(s string) bool {
+	return slug.Valid(s)
 }
 
 // validIssuePrefixRe is the format rule for crews.issue_prefix (#2035). The

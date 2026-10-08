@@ -78,6 +78,7 @@ import { RightPanelContent } from "@/components/features/orchestration/right-pan
 import { IssuesToolbarStrip } from "@/components/features/orchestration/issues-toolbar-strip"
 import { RoutinesTab } from "@/components/features/routines/routines-tab"
 import { RunsView } from "@/components/features/activity/runs-view"
+import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 // Issue-scoped drawer tabs. The old set (messages/exec) was agent-scoped
 // and showed nothing on an issue with no agent selected; these are the
@@ -142,7 +143,19 @@ const DEFAULT_TAB_BY_MODE: Record<OrchestrationMode, typeof ORCH_TABS[number]["i
   default: "issues",
 }
 
-export function OrchestrationLayout({
+/**
+ * The issues page holds one page Save bar: an open issue's edits wait for it,
+ * and opening another issue or closing this one asks first while any wait.
+ */
+export function OrchestrationLayout(props: OrchestrationLayoutProps) {
+  return (
+    <PageSaveProvider>
+      <OrchestrationLayoutInner {...props} />
+    </PageSaveProvider>
+  )
+}
+
+function OrchestrationLayoutInner({
   missions,
   crews,
   agents,
@@ -426,10 +439,21 @@ export function OrchestrationLayout({
   // Both selections live in the URL now — /issues?issue=ENG-4&project=p_1.
   // They used to be component state, so the open issue could not be shared,
   // a refresh lost it, and Back left the page instead of closing the detail.
-  const { selectedIdentifier, selectedIssue, handleIssueSelect, handleIssueClose } = useIssueDetail({
+  const issueDetail = useIssueDetail({
     issues,
     onIssueSelected: () => setDetailContext({ type: "none" }),
   })
+  const { selectedIdentifier, selectedIssue } = issueDetail
+  // Switching or closing the open issue throws its unsaved edits away, so it
+  // goes through the Save bar's question first.
+  const saveGuard = usePageSaveGuard()
+  const pickIssue = issueDetail.handleIssueSelect
+  const closeIssue = issueDetail.handleIssueClose
+  const handleIssueSelect = useCallback(
+    (...args: Parameters<typeof pickIssue>) => saveGuard(() => pickIssue(...args)),
+    [saveGuard, pickIssue],
+  )
+  const handleIssueClose = useCallback(() => saveGuard(() => closeIssue()), [saveGuard, closeIssue])
 
   const handleIssueUpdated = useCallback(async () => {
     await fetchIssues()
@@ -820,8 +844,9 @@ export function OrchestrationLayout({
                     transition={{ duration: 0.18, ease: "easeOut" }}
                     className="absolute inset-0 overflow-hidden"
                   >
-                    {/* The same component /issues/<identifier> renders. */}
-                    <div className="h-full overflow-y-auto">
+                    {/* The same component /issues/<identifier> renders.
+                        pb-20: room under the last card for the Save bar. */}
+                    <div className="h-full overflow-y-auto pb-20">
                       <IssueDetailSurface
                         workspaceId={workspaceId}
                         identifier={selectedIdentifier}
@@ -830,6 +855,7 @@ export function OrchestrationLayout({
                     </div>
                   </motion.div>
                 </AnimatePresence>
+                <PageSaveBar />
               </div>
             </div>
           )}
