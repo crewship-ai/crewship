@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -320,5 +321,25 @@ func TestPendingDispatcher_MissingPinnedVersionIsVisibleFailure(t *testing.T) {
 	pr, err := s.Get(t.Context(), "ws_test", "receipt")
 	if err != nil || pr.Status != "failed" || pr.LastError != "The accepted recipe version is no longer available." || pr.FiredRunID != "" || pr.NextAttemptAt != nil {
 		t.Fatalf("missing version disappeared: %+v %v", pr, err)
+	}
+}
+
+// A shutdown cancels the dispatcher's context while a claimed start is being
+// dispatched. The start was accepted and never ran: it must go back to the
+// queue, not end failed (review finding on #3015).
+func TestPendingDispatcher_InterruptedDispatchIsRetried(t *testing.T) {
+	s := enqueueDue(t, 1)
+	// Run returns the cancellation it observed; the row was already claimed.
+	d := NewPendingRunDispatcher(s, rejectedPendingExecutor{fmt.Errorf("load routine: %w", context.Canceled)}, nil)
+	d.fireOne(t.Context(), PendingRun{ID: "pa"})
+	pr, err := s.Get(t.Context(), "w", "pa")
+	if err != nil || pr == nil {
+		t.Fatalf("get: %+v %v", pr, err)
+	}
+	if pr.Status == "failed" {
+		t.Fatalf("an interrupted dispatch was finalized as failed: %+v", pr)
+	}
+	if pr.Status != "pending" || pr.NextAttemptAt == nil || pr.LastError == "" {
+		t.Fatalf("interrupted dispatch not requeued with a reason: %+v", pr)
 	}
 }

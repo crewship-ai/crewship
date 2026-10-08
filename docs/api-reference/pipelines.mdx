@@ -734,7 +734,7 @@ An unavailable database is `503`; listing failure is `500`.
 Capacity rejection retries without occupying a worker during backoff: 2, 4, 8,
 16, 32, then at most 60 seconds. The original TTL ends waiting as `expired` with
 a reason; absent TTL, ten rejected attempts end as `failed`. Other dispatch
-errors become `failed` without automatic retry. `fire_at` retains the occurrence
+errors become `failed` without automatic retry, except a dispatch interrupted by cancellation (server shutdown or deploy) before its run existed, which is retried like a capacity rejection. `fire_at` retains the occurrence
 identity; `next_attempt_at` controls eligibility. Retry preserves pin, payload,
 priority and accepted ID. After an attempted debounce start, newer triggers
 open a separate window. Priority is best effort among eligible rows, not FIFO.
