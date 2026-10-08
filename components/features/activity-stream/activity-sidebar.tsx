@@ -393,7 +393,9 @@ export function emptyLensCopy(f: EmptyLensFacts): string {
       ? "No workflows recorded yet. Runs from before chain recording cannot be grouped — the link was never written."
       : "No workflows yet. One appears the first time something causes something else."
   }
-  if (f.narrowedAway) return "Nothing in this window matches the search. Clear it to see the rest."
+  // Search and the Filter facets both narrow the rail now (#3000, #3007), so
+  // the sentence names both rather than blaming a search box that is empty.
+  if (f.narrowedAway) return "No run in this window matches the search or filters. Clear them to see the rest."
   if (f.scopedAway) return "Nothing in this window has that status. Pick another, or All."
   // Past here the window HAS chains — the lens simply holds none of them, which
   // is an answer about the work rather than about the filters.

@@ -33,6 +33,9 @@ describe("emptyLensCopy", () => {
     // page when the answer was "clear the search".
     expect(emptyLensCopy(facts({ loadedChainCount: 0 }))).toMatch(/No workflows yet/i)
     expect(emptyLensCopy(facts({ narrowedAway: true }))).toMatch(/search/i)
+    // A source or severity filter empties the rail too (#3007); the sentence
+    // must not blame only the search box.
+    expect(emptyLensCopy(facts({ narrowedAway: true }))).toMatch(/filters/i)
   })
 
   it("names the pre-chain-recording era rather than claiming nothing ran", () => {
