@@ -346,7 +346,7 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
                         <div className="flex items-center gap-1.5">
                           <span className="font-mono text-foreground">{hook.event}</span>
                           {retired && (
-                            <Badge variant="outline" className="h-4 px-1 text-micro uppercase">
+                            <Badge variant="outline" className="h-[18px] px-1.5 text-micro uppercase">
                               Retired
                             </Badge>
                           )}
