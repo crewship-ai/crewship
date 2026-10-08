@@ -52,8 +52,17 @@ that selection. A selected run adds `&run=` and keeps its recorded recipe versio
 Steps use an explicit name when provided, otherwise a description of their action.
 Stable IDs remain secondary technical identifiers. Empty schedules and results
 collapse to a short row. The run page leads with its verdict, error and failed
-step, and opens failed, current or waiting steps automatically. Missing evidence
-is distinguished from an empty result. Stopping a run does not undo prior actions.
+step, and opens failed, current or waiting steps automatically. The result and
+the next step come before run provenance and the shareable evidence, which stay
+further down the same page. Missing evidence is distinguished from an empty
+result. Stopping a run does not undo prior actions.
+
+The overview pane and the header Activity menu load running and waiting runs
+from their own list, so a long run stays visible however many runs started
+after it. The run summary is computed from the 200 newest runs: when those do
+not reach back seven days it reads *newest N runs · since …* instead of *7d*.
+A run whose result is partial or needs a person counts as finished, not as a
+success.
 
 A run detail's recipe comes from the run's **own archived record** — resolved by
 content hash, then numeric version, never from the routine's current head — so
@@ -1927,6 +1936,19 @@ crewship routine pending cancel <id>     # cancel before it fires
 An in-process dispatcher (5s tick) fires due rows highest-priority-first and expires rows past their `ttl`. Immediate runs (no `--delay` / `--debounce-key`) are unaffected. Full reference, including the underlying API fields: [Deferred dispatch](/manifest/routine).
 
 **A deferred run is pinned to the version it was accepted against.** The receipt carries `pinned_version`, and publishing an edit while the trigger waits does not change what fires — the run executes the recipe that passed its preflight, not whatever HEAD has become by the time the dispatcher reaches it. A debounced burst keeps the first trigger's version, because coalescing makes it one trigger — and a later trigger in the window is judged against that version as well as the current one, so inputs written for a recipe published after the window opened are refused with `409` and the pending run is left as it was accepted; let it fire or cancel it first. `pinned_version` can only be named on an immediate or one-time (`fire_at`) start; a delayed or debounced start answers `400` to it. A routine without an archived version is refused with 409. Publish a version before deferring it; every accepted manual deferred start must have a durable recipe.
+
+**Every accepted start stays visible.** A start that finds its
+`concurrency_key` slot taken waits and retries until its `ttl`; without a `ttl`
+it gives up after ten attempts. The routine's **Plan** view lists waiting starts
+under *One-time starts* with the reason (*Waiting for capacity*, how many tries,
+the earliest next try — not a promised start time), and below them the recent
+starts that left the queue: *Started* with a link to the run once it is
+recorded, *Did not run* or *Expired* with the server's reason, or *Removed*. A
+started start without a run link may still be running; it is never shown as a
+failure. The overview's attention strip names accepted starts that did not run
+in the last seven days, and *Routines running now* says how many wait for a
+free slot. `crewship routine pending list --status all` and
+`crewship routine pending get <id>` show the same receipts.
 
 That is the opposite of a schedule, which deliberately runs current HEAD unless its `target_pipeline_version` says otherwise: a plan is a standing instruction, a deferred run is one start that a person already made.
 

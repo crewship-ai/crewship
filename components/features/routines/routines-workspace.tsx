@@ -1,11 +1,13 @@
 "use client"
 
+import { useMemo } from "react"
 import Link from "next/link"
 import { ArrowUpRight, Workflow } from "lucide-react"
 
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { usePipelineRuns } from "@/hooks/use-pipeline-runs"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
+import { usePendingStarts } from "@/hooks/use-pending-starts"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { useActiveRoutineRuns, isAwaitingApproval } from "@/hooks/use-active-routine-runs"
 import { InlineEmpty } from "@/components/ui/inline-empty"
@@ -17,7 +19,23 @@ import {
 import { cn } from "@/lib/utils"
 import { routineRunPresentation } from "@/lib/routine-run-presentation"
 import { RoutineCalendar } from "./routine-calendar"
-import { RoutinesDashboard } from "./routines-dashboard"
+import { RoutinesDashboard, windowCoverage } from "./routines-dashboard"
+
+// The server caps a run list at 200 rows.
+const DASHBOARD_RUN_LIMIT = 200
+
+/** The history rows plus every active run they miss: a run that started
+ * before the newest rows is still going and belongs on the dashboard. An
+ * active row replaces its older recorded copy, since the active feed is
+ * the fresher one for a run in flight. */
+export function withActiveRuns<T extends { id: string }>(recorded: T[], active: T[]): T[] {
+  if (active.length === 0) return recorded
+  const live = new Map(active.map((r) => [r.id, r]))
+  const merged = recorded.map((r) => live.get(r.id) ?? r)
+  const seen = new Set(recorded.map((r) => r.id))
+  for (const r of active) if (!seen.has(r.id)) merged.push(r)
+  return merged
+}
 
 export const routineRunHref = (slug: string, id: string) =>
   `/routines?${new URLSearchParams({ slug, run: id })}`
@@ -94,13 +112,16 @@ export function routineLastState(
 export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
   const [selectedTab, setTab] = useUrlSelection("tab")
   const tab: ListTab = TABS.includes(selectedTab as ListTab) ? (selectedTab as ListTab) : "routines"
-  const { bySlug } = useActiveRoutineRuns()
+  const { bySlug, runs: activeRuns } = useActiveRoutineRuns()
   const { schedules } = usePipelineSchedules(props.workspaceId)
-  const { runs: dashboardRuns, loading: dashboardRunsLoading } = usePipelineRuns(
+  const { starts: pendingStarts } = usePendingStarts(props.workspaceId)
+  const { runs: recordedRuns, loading: dashboardRunsLoading } = usePipelineRuns(
     props.workspaceId,
     "all",
-    200,
+    DASHBOARD_RUN_LIMIT,
   )
+  const coveredSince = useMemo(() => windowCoverage(recordedRuns, DASHBOARD_RUN_LIMIT), [recordedRuns])
+  const dashboardRuns = useMemo(() => withActiveRuns(recordedRuns, activeRuns), [recordedRuns, activeRuns])
   const filters = props.filters
   const search = props.search ?? ""
 
@@ -163,6 +184,8 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                 routines={displayed}
                 runs={dashboardRuns}
                 runsLoading={dashboardRunsLoading}
+                coveredSince={coveredSince}
+                pendingStarts={pendingStarts}
                 schedules={schedules}
                 onSelect={props.onSelect}
               />

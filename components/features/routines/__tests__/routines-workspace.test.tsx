@@ -34,6 +34,7 @@ vi.mock("@/hooks/use-active-routine-runs", () => ({
 vi.mock("@/hooks/use-pipeline-schedules", () => ({
   usePipelineSchedules: () => ({ schedules: h.schedules, loading: false, error: null }),
 }))
+vi.mock("@/hooks/use-pending-starts", () => ({ usePendingStarts: () => ({ starts: [], loading: false, error: null, refresh: vi.fn() }) }))
 vi.mock("@/hooks/use-pipeline-runs", () => ({ usePipelineRuns: () => ({ runs: h.recorded ?? [], loading: false, error: null }) }))
 vi.mock("@/hooks/use-automations", () => ({
   useAutomations: () => ({ automations: h.automations, loading: false, error: null }),
@@ -127,6 +128,20 @@ describe("<RoutinesWorkspace> — the overview pane", () => {
     expect(screen.queryByRole("link", { name: /decision waiting/ })).toBeNull()
     expect(screen.getByRole("link", { name: /1 could not finish/ })).toBeInTheDocument()
     expect(screen.getAllByRole("link", { name: /Open run/ })).toHaveLength(1)
+  })
+
+  // The run list is the 200 newest rows. A long run that started before them
+  // is still running, so it comes from the active feed, and the summary says
+  // the figures cover only those rows.
+  it("keeps an older active run on the dashboard behind 200 newer results", () => {
+    const now = Date.now()
+    h.runs = [{ id: "long", pipeline_slug: "report", pipeline_name: "Weekly report", status: "running", started_at: new Date(now - 3 * 86_400_000).toISOString() }]
+    h.recorded = Array.from({ length: 200 }, (_, i) => ({
+      id: `done_${i}`, pipeline_slug: "report", pipeline_name: "Weekly report", status: "completed", started_at: new Date(now - (i + 1) * 60_000).toISOString(),
+    }))
+    renderPane()
+    expect(screen.getByText("1 running")).toBeInTheDocument()
+    expect(screen.getByTestId("run-summary-scope")).toHaveTextContent("newest 200 runs")
   })
 
   it("says what the empty workspace means instead of leaving a pane", () => {
