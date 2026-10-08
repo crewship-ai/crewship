@@ -247,7 +247,17 @@ crewship backup verify nightly.tar.zst
 
 `restore --dry-run` already decrypts and parses the payload for other reasons, so it makes the identical comparison and reports it as `payload_row_count_mismatches` — see [Restore](#restore) below. A bundle written before #2009 carries no recorded counts at all; `verify` reports the same "NOT verified" shape for it, never a bare `VALID` that implies the check happened.
 
-One more limit, worth being precise about: the recorded count is `len(dump.Tables[table])`, read from the exact same in-memory dump that gets written into the payload — not an independent re-derivation. A create-time scoping bug that silently drops every row for a table (the shape of #1973) produces a dump that already agrees with itself, so this check would not have caught THAT bug on its own. What it catches is the payload diverging from what its own manifest claims — a corrupted or hand-edited bundle, or the two numbers drifting apart in a future refactor. "The bundle is intact" is the guarantee; "the bundle is everything" (independent re-derivation, or reconciling against the source instance) is stronger and out of scope here.
+The recorded count is `len(dump.Tables[table])`, read from the same in-memory dump that is written into the payload, so on its own it only proves "the bundle is intact". A create-time scoping bug that silently drops rows (the shape of #1973) produces a dump that agrees with itself.
+
+"The bundle is everything" is checked separately. A workspace backup derives, inside the dump's own read snapshot, which rows the **schema** ties to the workspace: rows whose own `workspace_id` names it, and rows whose foreign key points at a row the dump exported from a workspace-owned parent. Global tables (`users`, `skills`) do not pass ownership on. It then compares those rows with what the scope filters exported. The result is recorded as `manifest.contents.scope_reconciliation` (`checked`, `tables`, `shortfalls`). Because the manifest is readable without the passphrase, `verify` fails **any** bundle that records a shortfall, encrypted or not:
+
+```bash
+crewship backup verify nightly.tar.zst
+# Error: INVALID — nightly.tar.zst: backup: bundle is missing workspace rows its source held: 1 table(s)
+#   page_panel_data: 12 of 12 workspace row(s) in the source were not exported
+```
+
+A shortfall means a scope filter in the backup code left rows behind. The bundle restores what it carries, but not everything the workspace held, so report it as a bug. Bundles written before this check, and crew- or instance-scope bundles, carry no `scope_reconciliation`. A failure to reconcile never fails the backup itself: it is recorded as `checked: false` with a `skip_reason`.
 </Note>
 
 

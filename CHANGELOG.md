@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **`crewship backup verify` catches a workspace bundle that left rows behind (#2009).** A workspace backup now checks, in the same database snapshot, every row the schema ties to the workspace (its own `workspace_id`, or a foreign key into an exported workspace row) against what the backup's scope filters exported. The result is recorded in the manifest as `contents.scope_reconciliation`. `verify` reports `INVALID` with `table: N of M workspace row(s) in the source were not exported` for a bundle that recorded a shortfall, including an encrypted one. The verify API returns the list as `scope_shortfalls`.
+
 - **Private routines and Page actions say why nothing is listed (#2877).** A restricted member on a server without private execution sees "Private execution isn't installed on this server — ask an administrator" instead of "catalog unavailable" and "nothing available" at once. Loading, empty, unavailable and not-installed are now one state each. The routine and Page catalogs, routine runs and restricted Page actions answer `503` with code `restricted_runtime_unavailable` to restricted members only; every access refusal stays an opaque `404`.
 
 - **A tool switched off on an MCP integration is refused by the crew sidecar's gateway (#2178).** `crewship integration tools disable` and the per-tool switch now also stop the sidecar's `/mcp/call` from calling the tool and hide it from `/mcp/tools`, from the sidecar's next start. Agent CLIs that connect to an HTTP MCP server directly are not gated per tool yet.
