@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Admin › Backups no longer shows a partial restore as finished (#2989).** Recovery now shows the server's own verdict and names what did not land: missing attachments, crew files, rows short per table, incomplete items, clamped credentials and dropped columns, and says when crew files still have to be brought back into the containers.
+
 - **Settings and Admin save through one floating bar (#2984).** Edits on any card add up in a bar at the bottom of the page ("3 unsaved changes · Discard · Save", ⌘S / Ctrl+S) instead of a Save button per card. Leaving the page or switching section with edits pending asks first, and a failed save is a toast in the bottom-right corner that keeps the edits and offers Retry. Switches still save at once; changes across several workspaces still go through their preview.
 
 - **A stopped installation can reset its application data without losing management state.** `reset --data` validates an explicit local target, removes exact installation-labelled Docker resources, restores clean database defaults and preserves identity, configuration, secrets, logs and backups. Interrupted resets block startup until a successful retry. `paths` shows effective configuration without creating files. (#2977)

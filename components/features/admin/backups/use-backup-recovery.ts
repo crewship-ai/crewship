@@ -77,36 +77,58 @@ export function restoreChecks(req: Omit<RestoreRequest, "dry_run">): Promise<Sen
   return send(`${INSTANCE_BACKUPS}/restore/checks`, "POST", req)
 }
 
-/** What the legacy restore answers: a report with named lists. */
+interface RowCountMismatch { table: string; recorded: number; actual: number }
+
+/**
+ * What POST /admin/backups/restore answers (backupRestoreResponse in
+ * internal/api/backup.go). `result` is the server's own verdict
+ * (backup.ClassifyRestore); the rest names what did not land. A failed restore
+ * answers with an error status instead, handled by the caller.
+ */
 interface LegacyRestoreReport {
   dry_run?: boolean
-  skipped_crew_files?: string[]
-  downgraded_credentials?: string[]
-  dropped_columns?: string[]
-  missing_rows?: string[]
+  result?: "ok" | "partial" | "failed"
+  attachments_missing?: number
+  attachments_conflicts?: number
+  dropped_crew_filesystems?: string[] | null
+  rows_inserted_shortfalls?: RowCountMismatch[] | null
+  payload_row_count_mismatches?: RowCountMismatch[] | null
+  incomplete?: { kind: string; detail: string; count: number; workspace?: string }[] | null
+  security_level_clamps?: { credential_id: string; name?: string; from: string; to: number }[] | null
+  dropped_columns?: { table: string; column: string; rows: number }[] | null
+  /** The crews' files were not copied into containers (a restore under a new name). */
+  docker_phase_skipped?: boolean
   warnings?: string[]
   /** Complete container environments: restored, rebuilt or skipped. */
-  environments?: EnvironmentOutcome[]
+  environments?: EnvironmentOutcome[] | null
   [k: string]: unknown
 }
 
 export function legacyReport(r: LegacyRestoreReport): RestoreReport {
   const envs = r.environments ?? []
   const notRestored = envs.filter((e) => e.result !== "restored")
+  const crews = r.dropped_crew_filesystems ?? []
   const warnings = [
     ...(r.warnings ?? []),
-    ...(r.skipped_crew_files ?? []).map((f) => `crew file skipped: ${f}`),
-    ...(r.downgraded_credentials ?? []).map((c) => `credential downgraded: ${c}`),
-    ...(r.missing_rows ?? []).map((m) => `missing rows: ${m}`),
+    ...(r.attachments_missing ? [`${r.attachments_missing} attachment file${r.attachments_missing === 1 ? "" : "s"} missing`] : []),
+    ...(r.attachments_conflicts ? [`${r.attachments_conflicts} attachment file${r.attachments_conflicts === 1 ? "" : "s"} conflict with existing ones`] : []),
+    ...(crews.length ? [`crew files not restored: ${crews.join(", ")}`] : []),
+    ...(r.rows_inserted_shortfalls ?? []).map((m) => `${m.table}: ${m.actual} of ${m.recorded} rows landed`),
+    ...(r.payload_row_count_mismatches ?? []).map((m) => `${m.table}: archive holds ${m.actual} rows, its manifest says ${m.recorded}`),
+    ...(r.incomplete ?? []).map((i) => i.detail || `${i.count} × ${i.kind}`),
+    ...(r.security_level_clamps ?? []).map((c) => `credential ${c.name || c.credential_id} clamped to security level ${c.to}`),
     ...notRestored.map((e) => `environment ${e.crew} ${e.result === "rebuilt" ? "rebuilt instead of restored" : "skipped"}${e.reason ? `: ${e.reason}` : ""}`),
   ]
   const unsafe = [...new Set(envs.flatMap((e) => e.unsafe ?? []))]
   const notes = [
-    ...(r.dropped_columns ?? []).map((c) => `column dropped: ${c}`),
+    ...(r.dropped_columns ?? []).map((c) => `column dropped: ${c.table}.${c.column} (${c.rows} row${c.rows === 1 ? "" : "s"})`),
+    ...(r.docker_phase_skipped ? ["Crew files are not in the containers yet: start each crew, then bring back its files"] : []),
     ...(envs.length ? ["Processes start fresh; what was only in memory is not restored"] : []),
     ...(unsafe.length ? [`Not carried over for safety: ${unsafe.join(" · ")}`] : []),
   ]
-  return { result: warnings.length ? "partial" : "ok", summary: r.dry_run ? "Dry run finished" : "Restore finished", warnings, notes }
+  // The server's verdict wins; a reason found here can only make it worse.
+  const result = r.result === "failed" ? "failed" : r.result === "partial" || warnings.length ? "partial" : "ok"
+  return { result, summary: r.dry_run ? "Dry run finished" : "Restore finished", warnings, notes }
 }
 
 /**
