@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/jitter"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -94,6 +95,10 @@ func StartOAuthRefreshWorker(db *sql.DB, hub *ws.Hub, logger *slog.Logger, stop 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		// Spread this loop's phase from the other sweepers started at boot (#1891).
+		if !jitter.StartupStop(stop, 5*time.Minute) {
+			return
+		}
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 

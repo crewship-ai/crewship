@@ -243,6 +243,9 @@ type MCPServerConfig struct {
 	Args        []string          `json:"args,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
 	Credential  *MCPCredential    `json:"credential,omitempty"`
+	// DisabledTools are the server's switched-off mcp_tool_bindings; the
+	// sidecar MCP gateway refuses them (#2178).
+	DisabledTools []string `json:"disabled_tools,omitempty"`
 }
 
 // MCPCredential holds a decrypted credential for MCP server authentication.

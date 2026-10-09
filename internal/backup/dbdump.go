@@ -331,6 +331,11 @@ type DBDump struct {
 	// through a parent row.
 	WorkspaceID string                      `json:"workspace_id"`
 	Tables      map[string][]map[string]any `json:"tables"`
+
+	// scope is DumpWorkspace's independent completeness derivation (#2009),
+	// computed in the dump's own snapshot. Not serialised into the payload:
+	// the create path records it in the manifest.
+	scope *ScopeReconciliation
 }
 
 // tableExists reports whether the given table is present in the current
@@ -560,6 +565,7 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 	// that case — matches the "schema revision skip" pattern the
 	// existing tableExists check already implements for the table
 	// itself. The map values are the sub-query targets.
+	filters := map[string]dumpScopeFilter{}
 	scopingDependencies := map[string][]string{
 		"users":  {"crew_members", "chats", "agent_skills", "skills"},
 		"skills": {"agent_skills"},
@@ -662,6 +668,7 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 			}
 		}
 		query := fmt.Sprintf("SELECT * FROM %s WHERE %s", table, where)
+		filters[table] = dumpScopeFilter{where: where, args: args}
 		rows, err := tx.QueryContext(ctx, query, args...)
 		if err != nil {
 			return nil, fmt.Errorf("backup: select from %s: %w", table, err)
@@ -694,6 +701,9 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 		}
 		_ = rows.Close()
 		dump.Tables[table] = out
+	}
+	if dump.scope, err = reconcileWorkspaceScopeTx(ctx, tx, workspaceID, dump, filters); err != nil {
+		dump.scope = &ScopeReconciliation{SkipReason: err.Error()}
 	}
 	return dump, nil
 }
