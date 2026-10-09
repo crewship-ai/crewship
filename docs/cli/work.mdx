@@ -54,8 +54,14 @@ crewship work list --agent research-agent -f json
 | `--source` | (unset) | Filter by producer: `webhook`, `chat`, `assignment`, `schedule`, `pipeline_step`, `manual` |
 | `--agent` | (unset) | Filter by agent slug or ID. An unknown slug is refused with suggestions rather than answered with an empty page; a CUID-shaped ID of a deleted agent still filters that agent's historical work. |
 | `--after` | (unset) | Resume from a previous page's cursor |
+| `--since` | (unset) | Only work created since then: a duration (`24h`, `7d`) or an RFC3339 time. Pages run oldest first, so this is how to read a recent window |
+| `--open` | false | Only work not yet finished, however old |
 
-**Output columns:** ID, STATE, CLASS, SOURCE, AGENT, ATTEMPTS, CREATED
+**Output columns:** ID, STATE, SOURCE, EVENT, AGENT, ATTEMPTS, CREATED
+
+AGENT is the agent's name, prefixed `(deleted)` once the agent was removed — with its id when no record of it remains. EVENT is
+the webhook event a delivery carried (for a replay, its original's). The capacity class, crew, duration and
+cost are in `-f json`.
 
 A misspelt `--state` is refused rather than answered with an empty page —
 "nothing is running" is the wrong answer to a typo. When more rows remain the
@@ -75,6 +81,8 @@ Show one work item, every attempt, and its whole history.
 crewship work get cwk0000000000000
 crewship work get cwk0000000000000 -f json | jq '.events[-1]'
 ```
+
+The item names its agent and crew (prefixed `(deleted)` once removed), the event, and — once it has finished — its duration and cost.
 
 The attempt rows carry the run id (the same identifier the journal indexes),
 the lease and its owner, the runtime locator recovery consults before deciding
@@ -152,8 +160,12 @@ crewship work deliveries list --endpoint ep_123 --source-id 8f4c1a2e
 | `--decision` | (unset) | Filter by filter decision: `accepted` or `ignored` |
 | `--event-type` | (unset) | Filter by event type, e.g. `issues` or `push` |
 | `--after` | (unset) | Resume from a previous page's cursor |
+| `--since` | (unset) | Only deliveries received since then: a duration (`24h`, `7d`) or an RFC3339 time |
 
-**Output columns:** ID, ENDPOINT, PROFILE, EVENT, DECISION, WORK, PAYLOAD, RECEIVED
+**Output columns:** ID, AGENT, PROFILE, EVENT, DECISION, WORK, WORK STATE, PAYLOAD, RECEIVED
+
+AGENT names the endpoint's agent; an endpoint of another kind reads as its kind and id (`routine rt_…`). WORK STATE is the state of the work item the delivery became, so an accepted
+delivery whose work failed reads as such.
 
 Deliveries the filter rejected are listed too, with their reason and no work
 id: a ping or a filtered event is auditable rather than invisible.

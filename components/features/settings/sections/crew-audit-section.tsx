@@ -423,7 +423,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
 
       {/* Error with stale data */}
       {error && logs.length > 0 && (
-        <div role="alert" className="text-[11px] text-destructive px-4 py-2 border-b border-border/40 bg-destructive/5">
+        <div role="alert" className="text-label text-destructive px-4 py-2 border-b border-border/40 bg-destructive/5">
           {error}
         </div>
       )}
@@ -468,7 +468,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
               <div className="text-sm font-medium text-foreground/80">
                 {filtered ? "No events match these filters" : "No activity yet"}
               </div>
-              <div className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">
+              <div className="text-label text-muted-foreground mt-0.5 max-w-xs">
                 {filtered ? "Widen the time range or clear a filter." : "All state-changing actions will be logged here."}
               </div>
             </div>
@@ -481,9 +481,9 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
               {/* A day is the unit people actually search in ("what happened
                   on the 27th"), and it is free to compute — the server
                   already returns newest-first. */}
-              <h3 className="sticky top-0 z-10 border-b border-border/40 bg-card/95 px-4 py-1.5 font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground backdrop-blur">
+              <h3 className="sticky top-0 z-10 border-b border-border/40 bg-card/95 px-4 py-1.5 font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground backdrop-blur">
                 {dayHeading(bucket.day)}
-                <span className="ml-2 font-mono text-[11px] font-normal normal-case tracking-normal text-muted-foreground-soft">
+                <span className="ml-2 font-mono text-micro font-normal normal-case tracking-normal text-muted-foreground-soft">
                   {bucket.logs.length}
                 </span>
               </h3>
@@ -508,7 +508,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
           {/* Pagination */}
           {total > 0 && (
             <div className="flex items-center justify-between gap-2 flex-wrap px-4 py-2.5 border-t border-border/40">
-              <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
+              <span className="text-micro text-muted-foreground font-mono tabular-nums">
                 {rangeStart}–{rangeEnd} of {total.toLocaleString()} events
               </span>
               <div className="flex items-center gap-1.5">
@@ -569,7 +569,7 @@ function Actor({ user }: { user: AuditLog["user"] }) {
   }
   return (
     <span className="flex min-w-0 items-center gap-2 text-xs">
-      <UserAvatar name={user?.full_name} email={user?.email ?? ""} className="h-5 w-5 shrink-0" textClassName="text-[8px]" />
+      <UserAvatar name={user?.full_name} email={user?.email ?? ""} className="h-5 w-5 shrink-0" textClassName="text-micro" />
       <span className="truncate text-foreground">{label}</span>
     </span>
   )
@@ -606,7 +606,7 @@ function AuditRow({
             expanded && "rotate-90 text-foreground",
           )}
         />
-        <span className="hidden font-mono text-[11px] tabular-nums text-muted-foreground sm:block">
+        <span className="hidden font-mono text-micro tabular-nums text-muted-foreground sm:block">
           {formatTimeOfDay(log.created_at)}
         </span>
         <span className="hidden min-w-0 sm:block"><Actor user={log.user} /></span>
@@ -616,7 +616,7 @@ function AuditRow({
           <span className="truncate font-medium text-foreground" title={label}>{shortIdLabel(label)}</span>
         </span>
         <span className="flex items-center gap-2">
-          <span className="font-mono text-[11px] tabular-nums text-muted-foreground sm:hidden">{formatTimeOfDay(log.created_at)}</span>
+          <span className="font-mono text-micro tabular-nums text-muted-foreground sm:hidden">{formatTimeOfDay(log.created_at)}</span>
           {security && <StatusPill tone="warn" label="Access" />}
         </span>
       </button>
@@ -638,13 +638,13 @@ function AuditRow({
                   <div className="eyebrow mb-1 text-muted-foreground">
                     Action
                   </div>
-                  <div className="font-mono text-[11px] text-foreground/80">{log.action}</div>
+                  <div className="font-mono text-micro text-foreground/80">{log.action}</div>
                 </div>
                 <div>
                   <div className="eyebrow mb-1 text-muted-foreground">
                     Entity
                   </div>
-                  <div className="truncate font-mono text-[11px] text-foreground/80" title={log.entity_id ?? ""}>
+                  <div className="truncate font-mono text-micro text-foreground/80" title={log.entity_id ?? ""}>
                     {log.entity_type} · {log.entity_id ?? "—"}
                   </div>
                 </div>
@@ -652,13 +652,13 @@ function AuditRow({
                   <div className="eyebrow mb-1 text-muted-foreground">
                     IP address
                   </div>
-                  <div className="font-mono text-[11px] text-foreground/80">{log.ip_address ?? "—"}</div>
+                  <div className="font-mono text-micro text-foreground/80">{log.ip_address ?? "—"}</div>
                 </div>
                 <div>
                   <div className="eyebrow mb-1 text-muted-foreground">
                     User agent
                   </div>
-                  <div className="truncate font-mono text-[11px] text-foreground/80" title={log.user_agent ?? ""}>
+                  <div className="truncate font-mono text-micro text-foreground/80" title={log.user_agent ?? ""}>
                     {log.user_agent ?? "—"}
                   </div>
                 </div>
@@ -667,13 +667,13 @@ function AuditRow({
                     <div className="eyebrow mb-1 text-muted-foreground">
                       Details
                     </div>
-                    <pre className="max-h-32 overflow-auto rounded border border-border/60 bg-muted/40 p-2 font-mono text-[10px] text-muted-foreground">
+                    <pre className="max-h-32 overflow-auto rounded border border-border/60 bg-muted/40 p-2 font-mono text-micro text-muted-foreground">
                       {JSON.stringify(log.metadata, null, 2)}
                     </pre>
                   </div>
                 )}
               </div>
-              <div className="mt-3 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <div className="mt-3 flex items-center gap-1.5 text-micro text-muted-foreground">
                 <Shield className="h-3 w-3" />
                 This record is immutable.
               </div>
@@ -716,7 +716,7 @@ function FoldedRun({ group, highlightAccess = true }: { group: AuditGroup; highl
             open && "rotate-90 text-foreground",
           )}
         />
-        <span className="hidden font-mono text-[11px] tabular-nums text-muted-foreground sm:block">
+        <span className="hidden font-mono text-micro tabular-nums text-muted-foreground sm:block">
           {formatTimeOfDay(first.created_at)}
         </span>
         <span className="hidden min-w-0 sm:block"><Actor user={first.user} /></span>
@@ -728,7 +728,7 @@ function FoldedRun({ group, highlightAccess = true }: { group: AuditGroup; highl
           </span>
         </span>
         <span className="flex items-center gap-2">
-          <span className="font-mono text-[11px] tabular-nums text-muted-foreground sm:hidden">{formatTimeOfDay(first.created_at)}</span>
+          <span className="font-mono text-micro tabular-nums text-muted-foreground sm:hidden">{formatTimeOfDay(first.created_at)}</span>
           {security && <StatusPill tone="warn" label="Access" />}
         </span>
       </button>

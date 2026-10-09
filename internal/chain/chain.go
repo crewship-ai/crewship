@@ -209,6 +209,12 @@ type Graph struct {
 type Options struct {
 	MaxDepth int
 	MaxNodes int
+
+	// CanSeeInbox decides, per inbox item, whether the viewer may see it,
+	// given the item's target_user_id and target_role (#2986). The API builds
+	// it with the same rule as /inbox. Nil shows only untargeted items: a
+	// caller that forgot to say who is looking must not see everyone's asks.
+	CanSeeInbox func(targetUserID, targetRole string) bool
 }
 
 // Walk bounds. A chain is a debugging aid, not an export: the caps exist so a
@@ -278,6 +284,9 @@ func nodeID(kind NodeKind, ref string) string { return string(kind) + ":" + ref 
 type neighbour struct {
 	node Node
 	edge Edge
+	// hidden marks a row the viewer may not see. collect drops it and counts
+	// it, so the graph can say items were hidden without naming them.
+	hidden bool
 }
 
 // walker holds the mutable state of one Walk. It is not safe for concurrent
@@ -298,6 +307,9 @@ type walker struct {
 
 	truncated   bool
 	truncatedBy string
+
+	// hiddenInbox counts inbox rows withheld from this viewer.
+	hiddenInbox int
 }
 
 // Walk resolves anchor to a row in workspaceID and returns the connected chain
@@ -382,8 +394,31 @@ func Walk(ctx context.Context, db *sql.DB, workspaceID, anchor string, opt Optio
 		Edges:       w.edges,
 		Truncated:   w.truncated,
 		TruncatedBy: w.truncatedBy,
-		Gaps:        append([]Gap(nil), KnownGaps...),
+		Gaps:        w.gaps(),
 	}, nil
+}
+
+// gaps is KnownGaps plus, when the viewer's audience withheld anything, one
+// entry saying so. It names no item: a hidden ask's title is exactly what the
+// filter exists to keep back.
+func (w *walker) gaps() []Gap {
+	out := append([]Gap(nil), KnownGaps...)
+	if w.hiddenInbox > 0 {
+		out = append(out, Gap{
+			From:   "inbox",
+			To:     "viewer",
+			Reason: "some inbox items in this chain are addressed to other people or roles and are not shown",
+		})
+	}
+	return out
+}
+
+// canSeeInbox applies the viewer's audience to one inbox item.
+func (w *walker) canSeeInbox(targetUserID, targetRole string) bool {
+	if w.opt.CanSeeInbox == nil {
+		return targetUserID == "" && targetRole == ""
+	}
+	return w.opt.CanSeeInbox(targetUserID, targetRole)
 }
 
 func (w *walker) materialise(n Node) {

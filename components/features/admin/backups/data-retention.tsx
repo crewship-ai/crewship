@@ -20,7 +20,7 @@ import type { SectionCtx } from "./backups-console"
  */
 export function DataRetention({ ctx }: { ctx: SectionCtx }) {
   const res = useDataRetention(ctx.selected)
-  if (ctx.selected.size === 0) return <p className="text-[13px] text-muted-foreground">Tick a workspace in the bar above.</p>
+  if (ctx.selected.size === 0) return <p className="text-control text-muted-foreground">Tick a workspace in the bar above.</p>
   return (
     <Gate resource={res} what="Data retention" skeleton="h-[360px]">
       {(data) => <RetentionBody rows={data.rows} ctx={ctx} reload={res.reload} />}
@@ -159,8 +159,8 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
                 return (
                   <tr key={r.key} data-key={r.key} className="[&:last-child>td]:border-b-0">
                     <td className={cn(TD, "whitespace-normal")}>
-                      <div>{r.label}{r.mixed && !(r.key in draft) && <span className="ml-2 font-mono text-[10.5px] text-warn">mixed</span>}</div>
-                      {r.note && <div className="text-[12.5px] text-muted-foreground">{r.note}</div>}
+                      <div>{r.label}{r.mixed && !(r.key in draft) && <span className="ml-2 font-mono text-micro text-warn">mixed</span>}</div>
+                      {r.note && <div className="text-label text-muted-foreground">{r.note}</div>}
                     </td>
                     <td className={TD}>
                       <div className="w-max"><SettingsSegmented<string> label={`Keep ${r.label} for`} value={r.mixed && !(r.key in draft) ? "" : value === null ? "forever" : String(value)}
@@ -175,14 +175,14 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
               {housekeeping.map((r) => (
                 <tr key={r.key} data-key={r.key} className="text-muted-foreground [&:last-child>td]:border-b-0">
                   <td className={TD}>{r.label}</td>
-                  <td className={cn(TD, "font-mono text-[12px]")}>{r.fixed ?? retentionLabel(r.days)}</td>
+                  <td className={cn(TD, "font-mono text-label")}>{r.fixed ?? retentionLabel(r.days)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
-      <p className="rounded-lg border border-border bg-card px-3 py-2 text-[13px] text-muted-foreground">
+      <p className="rounded-lg border border-border bg-card px-3 py-2 text-control text-muted-foreground">
         Turning a limit on says how many rows go at the next sweep, and that older backups still hold them until they age out.
       </p>
       <SettingsSaveBar label="Data retention" count={diff.length} saving={busy} onDiscard={() => setDraft({})} onSave={review} />
@@ -255,8 +255,8 @@ export function RetentionDefaultsCard({ rows, demo }: { rows: RetentionRow[]; de
   return (
     <div className="overflow-hidden rounded-card border border-border bg-card" data-slot="retention-defaults">
       <div className="border-b border-border px-4 py-3">
-        <div className="text-[14px] font-medium">Defaults for new workspaces</div>
-        <div className="text-[13px] text-muted-foreground">What a workspace created from now on starts with. Existing workspaces are not changed.</div>
+        <div className="text-body font-medium">Defaults for new workspaces</div>
+        <div className="text-control text-muted-foreground">What a workspace created from now on starts with. Existing workspaces are not changed.</div>
       </div>
       {stale && <div className="border-b border-border px-4 py-2.5"><WarnBar tone="bad" title={STALE_PREVIEW}>Nothing was written.</WarnBar></div>}
       <div className="overflow-x-auto">

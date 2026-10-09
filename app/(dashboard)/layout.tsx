@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useRouteScrollRestoration } from "@/hooks/use-route-scroll-restoration"
 import { MobileTabBar } from "@/components/layout/mobile-tab-bar"
@@ -17,7 +17,9 @@ import { RealtimeProvider } from "@/hooks/use-realtime"
 import { JournalLookupProvider } from "@/hooks/use-journal-lookup"
 import { ActiveRoutineRunsProvider } from "@/hooks/use-active-routine-runs"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { useAccessMode, useAccessModeWatcher, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
+import { useAccessMode, useAccessModeWatcher, useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
+import { restrictedHome, restrictedPathAllowed } from "@/lib/restricted-surfaces"
+import { RestrictedUnavailable } from "@/components/layout/restricted-unavailable"
 import { Button } from "@/components/ui/button"
 import { RealtimeToasts } from "@/components/layout/realtime-toasts"
 import { RealtimeStatusBanner } from "@/components/layout/realtime-status-banner"
@@ -50,6 +52,17 @@ export default function DashboardLayout({
    * desktop, where a route change usually fits the viewport anyway.
    */
   useRouteScrollRestoration(scrollRef, pathname)
+
+  // A restricted session opens only the screens the server lists (#2861).
+  // Anything else renders the unavailable page instead of the screen, so the
+  // screen's requests are never sent; the root goes to chat.
+  const router = useRouter()
+  const surfaces = useRestrictedSurfaces()
+  const restrictedBlocked = surfaces !== null && !restrictedPathAllowed(pathname, surfaces)
+  const restrictedLanding = restrictedBlocked && pathname === "/" ? restrictedHome(surfaces) : null
+  useEffect(() => {
+    if (restrictedLanding) router.replace(restrictedLanding)
+  }, [restrictedLanding, router])
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -106,7 +119,11 @@ export default function DashboardLayout({
             {trusted && <RuntimeBanner />}
             {trusted && <UpdateBanner />}
             <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
-              {children}
+              {restrictedBlocked
+                ? restrictedLanding
+                  ? <div className="flex justify-center py-16"><Spinner className="h-6 w-6 text-muted-foreground-soft" /></div>
+                  : <RestrictedUnavailable home={surfaces ? restrictedHome(surfaces) : null} />
+                : children}
             </div>
             {/* A flex sibling, not a fixed bar: it takes real space, so the
                 scroll container above it needs no compensating padding and

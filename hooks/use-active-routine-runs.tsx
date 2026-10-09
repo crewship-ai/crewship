@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useMemo, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react"
 import { usePipelineRuns, type PipelineRun } from "@/hooks/use-pipeline-runs"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { useTrustedWorkspaceId } from "@/hooks/use-access-mode"
@@ -18,16 +18,16 @@ import { ACTIVE_STATUSES } from "@/lib/activity/run-filters"
 // renders the dropdown AND the routines surfaces still costs exactly
 // one request stream.
 //
-// The fetch uses the unfiltered feed (`status` absent = all) at the
-// full 200-row budget: the Activity dropdown's RECENT section needs
-// the last few terminal runs, and fetching "all" once is cheaper than
-// a second standing poll just for them. Rows come newest-first, so
-// the tradeoff is theoretical: an active run only falls off if 200+
-// runs started after it — deriveActiveRoutineRuns re-filters, so a
-// terminal row can never leak into a live surface.
+// Two feeds. Active runs come from `status=active`, so a long run stays
+// visible however many runs started after it — one unfiltered feed of the
+// 200 newest rows dropped it once 200 newer runs existed. The RECENT
+// sections read the unfiltered feed, which needs no poll of its own: a run
+// only becomes terminal through the run.completed/failed events it already
+// listens to. deriveActiveRoutineRuns re-filters, so a terminal row can
+// never leak into a live surface.
 //
 // Live refresh piggybacks on usePipelineRuns (pipeline.run.started/
-// completed/failed + 3s poll while anything is active); we add a
+// completed/failed + the active feed's 3s poll while anything runs); we add a
 // pipeline.step.started nudge so the "current step" line advances
 // within a beat of the step boundary instead of waiting for the next
 // poll tick. There is no `pipeline.waitpoint.created` broadcast on the
@@ -98,7 +98,9 @@ export function deriveActiveRoutineRuns(rows: PipelineRun[]): Derived {
 // dropdown answers "what just finished?", the /activity rail owns the
 // full post-mortem), newest ended first, capped so the dropdown never
 // holds more rows than it renders.
-const RECENT_STATUSES: ReadonlySet<string> = new Set(["completed", "failed"])
+// Every terminal outcome, stops included (#2988): a run somebody cancelled or
+// one whose process died is a result the reader wants to see, not one to hide.
+const RECENT_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled", "interrupted"])
 
 export function deriveRecentTerminalRuns(rows: PipelineRun[], limit = 3): PipelineRun[] {
   const terminal = rows.filter((r) => RECENT_STATUSES.has(r.status))
@@ -132,20 +134,27 @@ export function ActiveRoutineRunsProvider({ children }: { children: ReactNode })
   // Pipeline runs are not on the restricted allowlist: null until the session
   // is known to be trusted, which keeps the feed (and its poll) off.
   const workspaceId = useTrustedWorkspaceId()
-  // Unfiltered feed at the full 200-row budget: one stream supplies
-  // both the live derivation and the RECENT terminal slice (see the
-  // header comment for the tradeoff).
-  const { runs, loading, error, refresh } = usePipelineRuns(workspaceId, "all", 200)
+  const active = usePipelineRuns(workspaceId, "active", 200)
+  const history = usePipelineRuns(workspaceId, "all", 200, { poll: false })
+  const { runs } = active
+  const loading = active.loading || history.loading
+  const error = active.error ?? history.error
+  const refreshActive = active.refresh
+  const refreshHistory = history.refresh
+  const refresh = useCallback(() => {
+    void refreshActive()
+    void refreshHistory()
+  }, [refreshActive, refreshHistory])
 
   // Current-step advancement: run.* events only fire at run
   // boundaries; a step boundary mid-run should move the "▶ <step>"
   // line without waiting for the 3s poll.
-  useRealtimeEvent("pipeline.step.started", refresh)
+  useRealtimeEvent("pipeline.step.started", refreshActive)
 
   const value = useMemo<ActiveRoutineRunsValue>(() => {
     const d = deriveActiveRoutineRuns(runs)
-    return { ...d, recentRuns: deriveRecentTerminalRuns(runs), recentDashboardRuns: deriveRecentTerminalRuns(runs, 12), loading, error, refresh }
-  }, [runs, loading, error, refresh])
+    return { ...d, recentRuns: deriveRecentTerminalRuns(history.runs), recentDashboardRuns: deriveRecentTerminalRuns(history.runs, 12), loading, error, refresh }
+  }, [runs, history.runs, loading, error, refresh])
 
   return (
     <ActiveRoutineRunsContext.Provider value={value}>

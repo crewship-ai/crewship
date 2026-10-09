@@ -257,10 +257,10 @@ export function BackupsPage() {
         <DrillNavSection label="Settings" count={2}>
           <DrillNavItem selected={view.section === "storage"} onSelect={() => update({ section: "storage" })}
             icon={<HardDrive className="h-3.5 w-3.5" />} label="Storage" title="Instance setting · applies to every backup plan"
-            meta={<span className="rounded bg-primary/10 px-1 text-[10px] text-primary-hover">Instance</span>} />
+            meta={<span className="rounded bg-primary/10 px-1 text-micro text-primary-hover">Instance</span>} />
           <DrillNavItem selected={view.section === "keys"} onSelect={() => update({ section: "keys" })}
             icon={<KeyRound className="h-3.5 w-3.5" />} label="Keys & alerts" title="Instance setting · applies to every backup plan"
-            meta={<span className="rounded bg-primary/10 px-1 text-[10px] text-primary-hover">Instance</span>} />
+            meta={<span className="rounded bg-primary/10 px-1 text-micro text-primary-hover">Instance</span>} />
         </DrillNavSection>
       </div>
     </>

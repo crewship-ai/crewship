@@ -15,7 +15,8 @@ func oneTimeAuthoringStore(t *testing.T) (*Store, *sql.DB) {
  id TEXT PRIMARY KEY,workspace_id TEXT,pipeline_id TEXT,pipeline_slug TEXT,
  inputs_json TEXT,tags_json TEXT,metadata_json TEXT,priority INTEGER,
  fire_at TEXT,invoking_user_id TEXT,triggered_via TEXT,triggered_by_id TEXT,
- pinned_version INTEGER,status TEXT,created_at TEXT,updated_at TEXT)`)
+ pinned_version INTEGER,status TEXT,created_at TEXT,updated_at TEXT,
+ dispatch_attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',next_attempt_at TEXT,fired_run_id TEXT)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,5 +108,33 @@ func TestOneTimeAuthoringStorageRefusalRollsBackPublishedRecipe(t *testing.T) {
 	var count int
 	if err := db.QueryRow(`SELECT count(*) FROM pipelines`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("failed pending write published recipe: %d, %v", count, err)
+	}
+}
+
+// A capacity retry has already accepted its recipe. Re-saving one-time
+// authoring must not reset attempts, replace inputs or repin it to new HEAD.
+func TestOneTimeAuthoringDoesNotRewriteAnAttemptedStart(t *testing.T) {
+	s, db := oneTimeAuthoringStore(t)
+	in := validSaveInput("attempted-one-time")
+	in.DefinitionJSON = `{"name":"attempted-one-time","steps":[{"id":"result","type":"transform","transform":{"input":"original","expression":"."}}]}`
+	trigger := &TriggerInput{Kind: TriggerKindOnce, FireAt: s.now().Add(time.Hour)}
+	p, _, err := s.SaveWithTrigger(t.Context(), in, trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE pending_runs SET dispatch_attempts=1,last_error='Waiting for capacity.' WHERE id=?`, "pnd_once_"+p.ID); err != nil {
+		t.Fatal(err)
+	}
+	in.DefinitionJSON = `{"name":"attempted-one-time","steps":[{"id":"result","type":"transform","transform":{"input":"replacement","expression":"."}}]}`
+	if _, _, err := s.SaveWithTrigger(t.Context(), in, trigger); !errors.Is(err, ErrInvalidTrigger) {
+		t.Fatalf("attempted receipt rewritten: %v", err)
+	}
+	var pin, attempts int
+	if err := db.QueryRow(`SELECT pinned_version,dispatch_attempts FROM pending_runs WHERE id=?`, "pnd_once_"+p.ID).Scan(&pin, &attempts); err != nil || pin != 1 || attempts != 1 {
+		t.Fatalf("accepted pin/attempts changed: pin=%d attempts=%d err=%v", pin, attempts, err)
+	}
+	saved, err := s.GetByID(t.Context(), p.ID)
+	if err != nil || saved.DefinitionJSON != p.DefinitionJSON {
+		t.Fatalf("refused authoring was partially committed: %+v %v", saved, err)
 	}
 }

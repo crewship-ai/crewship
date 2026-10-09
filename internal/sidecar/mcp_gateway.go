@@ -154,10 +154,14 @@ type mcpClient struct {
 	transport   string
 	endpoint    string
 	credential  *MCPCredInput
-	sessionID   string // Mcp-Session-Id for streamable-http
-	httpClient  *http.Client
-	logger      *slog.Logger
-	nextID      atomic.Int64 // JSON-RPC request ID counter
+	// disabledTools is the server's mcp_tool_bindings deny set (enabled=0),
+	// fixed at construction. CallTool refuses these and the catalog omits
+	// them (#2178).
+	disabledTools map[string]bool
+	sessionID     string // Mcp-Session-Id for streamable-http
+	httpClient    *http.Client
+	logger        *slog.Logger
+	nextID        atomic.Int64 // JSON-RPC request ID counter
 }
 
 // MCPCallRequest is the JSON body for /mcp/call.
@@ -291,13 +295,14 @@ func NewMCPGateway(servers []MCPServerInput, ipc *IPCConfig, logger *slog.Logger
 			scope = "workspace"
 		}
 		g.clients[s.Name] = &mcpClient{
-			serverID:    s.ID,
-			serverName:  s.Name,
-			serverScope: scope,
-			displayName: s.DisplayName,
-			transport:   s.Transport,
-			endpoint:    s.Endpoint,
-			credential:  s.Credential,
+			serverID:      s.ID,
+			serverName:    s.Name,
+			serverScope:   scope,
+			displayName:   s.DisplayName,
+			transport:     s.Transport,
+			endpoint:      s.Endpoint,
+			credential:    s.Credential,
+			disabledTools: toolSet(s.DisabledTools),
 			// #1367: the JSON-RPC client is the shared egresspolicy.Client, whose
 			// CheckRedirect re-gates the crew allowlist on EVERY redirect hop (not
 			// just the configured endpoint at Connect/CallTool) — a malicious but
@@ -364,6 +369,9 @@ func (g *MCPGateway) DiscoverTools(ctx context.Context) ([]MCPTool, error) {
 		}
 		var serverTools []MCPTool
 		for _, t := range tools {
+			if client.disabledTools[t.Name] {
+				continue // switched off in mcp_tool_bindings (#2178)
+			}
 			serverTools = append(serverTools, MCPTool{
 				ServerName:  name,
 				Name:        t.Name,
@@ -375,6 +383,18 @@ func (g *MCPGateway) DiscoverTools(ctx context.Context) ([]MCPTool, error) {
 		allTools = append(allTools, serverTools...)
 	}
 	return allTools, nil
+}
+
+// toolSet turns a tool-name list into a lookup set; nil for an empty list.
+func toolSet(names []string) map[string]bool {
+	if len(names) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(names))
+	for _, n := range names {
+		set[n] = true
+	}
+	return set
 }
 
 // ListTools returns the cached tool catalog.
@@ -402,6 +422,12 @@ func (g *MCPGateway) CallTool(ctx context.Context, serverName, toolName string, 
 
 	if !ok {
 		return nil, fmt.Errorf("MCP server %q not found", serverName)
+	}
+	// A tool switched off in mcp_tool_bindings is refused here, before any
+	// egress, exactly like an unknown server: the binding is access control,
+	// not prompt text (#2178).
+	if client.disabledTools[toolName] {
+		return nil, fmt.Errorf("MCP tool %q on server %q is disabled", toolName, serverName)
 	}
 	// Defense in depth: a blocked endpoint never connects (see Connect), so
 	// this normally short-circuits at the not-connected check below. The

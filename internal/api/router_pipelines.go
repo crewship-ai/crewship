@@ -59,6 +59,8 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// invoking A routine, and fanning one out across a 50-item batch is a
 	// different amount of spend to hand a member.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}", authed(wsCtx(http.HandlerFunc(r.restrictedWorkflowResult))))
+	// 503 carries code restricted_runtime_unavailable when no private runtime is installed (#2877).
+	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routines", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineCatalog))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs", authed(wsCtx(http.HandlerFunc(r.restrictedWorkflowResults))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run", roleInline, pipes.Run)
@@ -224,7 +226,10 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// Deferred dispatch (delay/ttl/debounce/priority) — list + cancel
 	// parked triggers. Registered before {slug} routes so the literal
 	// "pending" segment wins net/http matching.
+	// openapi: query status:string; responses 200,400,500,503
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/pending", authed(wsCtx(http.HandlerFunc(pipes.ListPendingRuns))))
+	// openapi: responses 200,404,500,503
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}", authed(wsCtx(http.HandlerFunc(pipes.GetPendingRun))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel", roleCreate, pipes.CancelPendingRun)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/runs/errors", authed(wsCtx(http.HandlerFunc(pipes.ListErrorGroups))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay", roleCreate, pipes.BulkReplayRuns)

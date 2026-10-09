@@ -58,3 +58,19 @@ This does not yet supply a Settings editor, a production provider, scoped
 prompt/recall, persistent quotas, or restricted chat/CLI/routine dispatch. Granting
 `run` does not make those unintegrated execution routes available. Release 1.0
 acceptance remains open.
+
+## What a restricted session's shell offers
+
+For an account with a restricted membership, every row of `GET /api/v1/workspaces`
+carries `restricted_session: true` and `restricted_surfaces`: the screens the
+session may open, derived by the server from its route allowlist
+(`internal/api/restricted_surfaces.go`). A surface is listed only when **every**
+route it needs is allowlisted. Today the list is `chat`, `routines`, `pages` and
+`account_security`. A trusted account's rows carry neither field.
+
+The web app shows only those screens in the sidebar, the phone menu and the phone
+tab bar. Any other URL shows "Not available with your access" without mounting
+the screen, so none of its requests are sent. `/` goes to Chat. Settings shows
+only account security: password, browser sessions and revoking CLI tokens.
+Profile edits and issuing new tokens are not on the allowlist. A restricted row
+without `restricted_surfaces` allows nothing (fail closed).

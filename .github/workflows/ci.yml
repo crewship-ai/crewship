@@ -70,7 +70,7 @@ permissions:
 env:
   NODE_VERSION: "22"
   PNPM_VERSION: "10"
-  GO_VERSION: "1.27.1"
+  GO_VERSION: "1.27.2"
 
 # ── ⚠ THE STEP-BOUND INVARIANT, AND WHY IT IS STATED HERE TOO ──
 #
@@ -2231,7 +2231,7 @@ jobs:
     # budget is one-time cold-cache buffer.
     timeout-minutes: 15
     env:
-      GOLANGCI_VERSION: v2.13.1
+      GOLANGCI_VERSION: v2.14.0
     steps:
       # fetch-depth: 0 (rather than the default shallow depth-1 clone) so
       # the tsformat proximity-lint step below can resolve origin/main and
@@ -2275,9 +2275,13 @@ jobs:
       # the Go 1.27 bump, v2.1.6 reported 908 phantom `typecheck` errors on
       # valid code and v2.12.2 panicked outright in `honnef.co/go/tools`
       # against the 1.27 standard library. v2.13.1 is the first release that
-      # analyses a 1.27 target cleanly. Re-check this pin whenever GO_VERSION
-      # moves — a green lint job is not evidence on its own, since the failure
-      # mode of a too-old linter here was noise, not silence.
+      # analyses a 1.27 target cleanly. Go 1.27.2 writes export data version 5,
+      # which v2.13.1's golang.org/x/tools v0.49.0 cannot read ("export data
+      # version 5 is greater than maximum supported version 4", #3039);
+      # v2.14.0 carries x/tools v0.50.0, the first with pkgbits V5. Re-check
+      # this pin whenever GO_VERSION moves — a green lint job is not evidence
+      # on its own, since the failure mode of a too-old linter here was noise,
+      # not silence.
       # Costs ~30s on cache miss.
       # Bounded: this reaches the Go module proxy, and a slow proxy is the same
       # class of hazard as the apt mirror in #1998. ~30 s in practice.

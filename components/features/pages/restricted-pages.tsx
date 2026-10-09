@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { RESTRICTED_RUNTIME_MISSING_MESSAGE, restrictedCatalogFailure, type RestrictedCatalogState } from "@/lib/restricted-catalog"
 
 interface ActionInput { name: string; label?: string; type: string; required: boolean; options?: string[] }
 interface PageAction { intent_hash: string; panel_id: string; id: string; label: string; inputs: ActionInput[]; confirm?: { title: string; body: string } }
@@ -17,7 +18,7 @@ export function RestrictedPages({ workspaceId }: { workspaceId: string }) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [run, setRun] = useState<Result | null>(null)
   const [error, setError] = useState("")
-  const [loading, setLoading] = useState(true)
+  const [catalogState, setCatalogState] = useState<RestrictedCatalogState>("loading")
   const [submitting, setSubmitting] = useState(false)
   const request = useRef<{ key: string; body: string; url: string } | null>(null)
   const owner = useRef(workspaceId)
@@ -28,12 +29,12 @@ export function RestrictedPages({ workspaceId }: { workspaceId: string }) {
 
   useEffect(() => {
     const controller = new AbortController()
-    setCatalog([]); setSelected(""); setValues({}); setRun(null); setError(""); setLoading(true); request.current = null
+    setCatalog([]); setSelected(""); setValues({}); setRun(null); setError(""); setCatalogState("loading"); request.current = null
     void apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/restricted-pages`, { signal: controller.signal }).then(async response => {
-      if (!response.ok) throw new Error("Page actions unavailable.")
+      if (!response.ok) { const failure = await restrictedCatalogFailure(response); if (!controller.signal.aborted) setCatalogState(failure); return }
       const body = await response.json() as Page[]
-      if (!controller.signal.aborted) setCatalog(body.flatMap(page => page.actions.map(action => ({ ...action, page, key: JSON.stringify([page.slug, action.panel_id, action.id]) }))))
-    }).catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Page actions unavailable.") }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
+      if (!controller.signal.aborted) { setCatalog(body.flatMap(page => page.actions.map(action => ({ ...action, page, key: JSON.stringify([page.slug, action.panel_id, action.id]) })))); setCatalogState("ready") }
+    }).catch(() => { if (!controller.signal.aborted) setCatalogState("unavailable") })
     return () => controller.abort()
   }, [workspaceId])
 
@@ -95,7 +96,7 @@ export function RestrictedPages({ workspaceId }: { workspaceId: string }) {
     <h1 className="text-xl font-semibold">Page actions</h1>
     <p className="text-sm text-muted-foreground">Run a declared action. Its results are visible to you.</p>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    {loading ? <p>Loading Page actions…</p> : catalog.length === 0 ? <p>No Page actions are available with your current access.</p> : <>
+    {catalogState === "loading" ? <p>Loading Page actions…</p> : catalogState === "runtime_missing" ? <p role="status">{RESTRICTED_RUNTIME_MISSING_MESSAGE}</p> : catalogState === "unavailable" ? <p role="alert" className="text-sm text-destructive">Page actions unavailable.</p> : catalog.length === 0 ? <p>No Page actions are available with your current access.</p> : <>
       <label className="block space-y-2"><span>Action</span><select aria-label="Action" className="min-h-10 w-full rounded-md border bg-background p-2 coarse:min-h-12" value={selected} disabled={active || !!request.current} onChange={event => { setSelected(event.target.value); setValues({}); setRun(null); setError("") }}><option value="">Choose an action</option>{catalog.map(item => <option key={item.key} value={item.key}>{item.page.name} — {item.label}</option>)}</select></label>
       {action && <form className="space-y-4" onSubmit={event => { event.preventDefault(); void submit() }}>
         {action.inputs.map(field => <label key={field.name} className="block space-y-2"><span>{field.label ?? field.name}{field.required ? " (required)" : ""}</span>{field.type === "select" ? <select aria-label={field.name} disabled={active || !!request.current} value={values[field.name] ?? ""} className="min-h-10 w-full rounded-md border bg-background p-2 coarse:min-h-12" onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))}><option value="">Choose a value</option>{field.options?.map(value => <option key={value} value={value}>{value}</option>)}</select> : field.type === "textarea" ? <textarea aria-label={field.name} disabled={active || !!request.current} value={values[field.name] ?? ""} className="min-h-24 w-full rounded-md border bg-background p-2" onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))} /> : <Input aria-label={field.name} disabled={active || !!request.current} value={values[field.name] ?? ""} onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))} />}</label>)}

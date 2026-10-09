@@ -81,9 +81,30 @@ Adopting it on a new screen:
 3. Navigation that swaps the page's content without a link goes through
    `usePageSaveGuard()`.
 
-Type scale: `text-micro` / `text-label` / `text-body`; mono only for machine
-text (ids, times, counts, durations). Section labels use the `eyebrow`
-utility.
+Type scale: `text-micro` / `text-label` / `text-control` / `text-body`, never
+a `text-[Npx]`. Mono only for machine text (ids, times, counts, durations).
+Section labels use the `eyebrow` utility.
+
+| Role | Token | Size |
+|---|---|---|
+| Machine text (id, time, version, path), pill, eyebrow | `text-micro` | 11px |
+| Supporting line: a row's description, a hint, an empty state, meta | `text-label` | 12px |
+| A SettingsRow label, a table cell, a field's value | `text-control` | 13px |
+| Running text | `text-body` | 14px |
+
+Nothing is set under 11px. A supporting line is 12px, not 11: a page of 11px
+descriptions reads as fine print rather than as dense.
+
+Controls and tables in Settings and Admin come from
+`components/features/settings/shared.tsx`:
+
+| Piece | Class | Rule |
+|---|---|---|
+| A field in a SettingsRow | `settingsControl` | one height and width; a number narrows it with `sm:w-20` |
+| A field in a form outside a row | `controlHeight` | the primitive's `text-control` size; a dialog keeps the primitive's default |
+| A picker inside a table row | `inlineControl` | one step smaller, still a full finger on touch |
+| A native `<select>` | `nativeSelect` | dressed as SelectTrigger |
+| A table | `settingsTable`, `settingsTh`, `settingsTd`, `settingsTableRowLink` | 12px sentence-case header, 13px cells, 16px sides, hairlines; hover only on rows that open something; status is a StatusPill |
 
 ### Harbor: where the look lives
 

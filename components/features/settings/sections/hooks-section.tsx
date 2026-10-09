@@ -42,8 +42,9 @@ import { AlertTriangle, Ban, CircleSlash, Globe, Terminal, Bot, Webhook } from "
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Spinner } from "@/components/ui/spinner"
-import { SettingsCard, SettingsEmpty } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsEmpty, settingsTable, settingsTh, settingsTd } from "@/components/features/settings/shared"
 import { apiFetch } from "@/lib/api-fetch"
+import { toastSwitchError } from "@/components/ui/page-save-bar"
 import { isAdminTier } from "@/lib/permissions/tiers"
 import { cn } from "@/lib/utils"
 
@@ -204,7 +205,6 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
    */
   const [windowCapped, setWindowCapped] = React.useState(true)
   const [readError, setReadError] = React.useState<string | null>(null)
-  const [toggleError, setToggleError] = React.useState<string | null>(null)
   // One id per in-flight request. A single id re-enabled every switch as soon
   // as ANY toggle finished, so finishing hook A unlocked hook B mid-flight.
   const [pending, setPending] = React.useState<ReadonlySet<string>>(() => new Set())
@@ -262,7 +262,6 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
     async (hook: HookRow) => {
       const next = !hook.enabled
       setPending((prev) => new Set(prev).add(hook.id))
-      setToggleError(null)
       // Optimistic, then reverted on refusal — the switch is the one control
       // here and a control that lags a round trip reads as broken.
       setHooks((prev) => prev?.map((h) => (h.id === hook.id ? { ...h, enabled: next } : h)) ?? prev)
@@ -275,10 +274,9 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
         if (!res.ok) throw new Error(String(res.status))
       } catch {
         setHooks((prev) => prev?.map((h) => (h.id === hook.id ? { ...h, enabled: hook.enabled } : h)) ?? prev)
-        setToggleError(
-          next
-            ? "Couldn't change the hook — enabling it was refused."
-            : "Couldn't change the hook — disabling it was refused.",
+        toastSwitchError(
+          `the ${hook.event} hook`,
+          next ? "Enabling it was refused." : "Disabling it was refused.",
         )
       } finally {
         setPending((prev) => {
@@ -317,13 +315,13 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
           </SettingsEmpty>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className={settingsTable}>
               <thead>
-                <tr className="border-b border-border/40 text-[10px] uppercase tracking-wider text-muted-foreground">
-                  <th className="px-4 py-2 text-left font-medium">Hook</th>
-                  <th className="px-4 py-2 text-left font-medium">Handler</th>
-                  <th className="px-4 py-2 text-left font-medium">Last result</th>
-                  {mayToggle && <th className="px-4 py-2 text-right font-medium">Enabled</th>}
+                <tr>
+                  <th className={settingsTh}>Hook</th>
+                  <th className={settingsTh}>Handler</th>
+                  <th className={settingsTh}>Last result</th>
+                  {mayToggle && <th className={cn(settingsTh, "text-right")}>Enabled</th>}
                 </tr>
               </thead>
               <tbody>
@@ -344,16 +342,16 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
                           it can veto. Three facts about the same thing, so they
                           share a cell rather than costing three columns the
                           settings pane has no width for. */}
-                      <td className="px-4 py-2.5 align-top">
+                      <td className={cn(settingsTd, "align-top")}>
                         <div className="flex items-center gap-1.5">
                           <span className="font-mono text-foreground">{hook.event}</span>
                           {retired && (
-                            <Badge variant="outline" className="h-4 px-1 text-[9px] uppercase">
+                            <Badge variant="outline" className="h-[18px] px-1.5 text-micro uppercase">
                               Retired
                             </Badge>
                           )}
                         </div>
-                        <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground-soft">
+                        <div className="mt-0.5 flex items-center gap-1.5 text-label text-muted-foreground-soft">
                           <span>{hook.crew_id ? hook.crew_id : "all crews"}</span>
                           <span aria-hidden>·</span>
                           {gateable && hook.blocking ? (
@@ -370,7 +368,7 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-2.5 align-top">
+                      <td className={cn(settingsTd, "align-top")}>
                         <span className="inline-flex items-center gap-1.5 text-muted-foreground">
                           <HandlerIcon className="h-3 w-3" />
                           {hook.handler_kind}
@@ -379,15 +377,15 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
                             printing the command is that someone can audit it,
                             and an ellipsis with a hover title is neither
                             readable on a touch device nor selectable. */}
-                        <span className="mt-0.5 block max-w-[22rem] break-all font-mono text-[11px] text-muted-foreground-soft">
+                        <span className="mt-0.5 block max-w-[22rem] break-all font-mono text-micro text-muted-foreground-soft">
                           {target}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5 align-top whitespace-nowrap">
+                      <td className={cn(settingsTd, "align-top whitespace-nowrap")}>
                         <OutcomeCell result={results[hook.id]} windowCapped={windowCapped} />
                       </td>
                       {mayToggle && (
-                        <td className="px-4 py-2.5 text-right align-top">
+                        <td className={cn(settingsTd, "text-right align-top")}>
                           <Switch
                             checked={hook.enabled}
                             disabled={pending.has(hook.id)}
@@ -407,15 +405,8 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
         )}
       </SettingsCard>
 
-      {toggleError && (
-        <p className="flex items-center gap-1.5 text-[11px] text-destructive">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          {toggleError}
-        </p>
-      )}
-
       {retiredCount > 0 && (
-        <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+        <p className="flex items-start gap-1.5 text-label text-muted-foreground">
           <CircleSlash className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
             A retired event never fires. <code className="font-mono">pre_tool_call</code> was withdrawn
@@ -427,7 +418,7 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
       )}
 
       {!mayToggle && hooks !== null && hooks.length > 0 && (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-label text-muted-foreground">
           Only owners and admins can enable or disable a hook. Creating a shell handler needs owner,
           because it runs a command on the host this instance is installed on.
         </p>
