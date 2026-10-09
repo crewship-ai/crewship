@@ -310,7 +310,7 @@ export function SkillsExplorer({
             return (
               <Stagger key={d} i={row++}>
                 <SidebarRow selected={selected} onSelect={() => pick({ domain: selected ? null : d })}>
-                  <Icon className={cn("h-3.5 w-3.5 shrink-0", n === 0 && !selected && "opacity-40")} style={{ color: meta.color }} />
+                  <Icon className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground", n === 0 && !selected && "opacity-40")} />
                   <span className={cn("flex-1 truncate", n === 0 && !selected ? "text-muted-foreground-soft" : "text-foreground/80")}>{meta.label}</span>
                   <span className="w-5 text-right font-mono text-micro tabular-nums text-muted-foreground-soft">{n}</span>
                 </SidebarRow>

@@ -116,25 +116,23 @@ export interface ProposedSkill {
 export interface DomainMeta {
   label: string
   icon: LucideIcon
-  /** Identity colour of the domain: names it, never carries status. */
-  color: string
 }
 
 const DOMAIN_META: Record<string, DomainMeta> = {
-  CODING: { label: "Coding", icon: Code2, color: "#5b8def" },
-  DATA: { label: "Data", icon: Database, color: "#22d3ee" },
-  DEVOPS: { label: "DevOps", icon: Cloud, color: "#34d399" },
-  WRITING: { label: "Writing", icon: PenLine, color: "#f59e0b" },
-  RESEARCH: { label: "Research", icon: Microscope, color: "#22d3ee" },
-  PM: { label: "Project management", icon: ListChecks, color: "#84cc16" },
-  DESIGN: { label: "Design", icon: Palette, color: "#d946ef" },
-  SUPPORT: { label: "Support", icon: LifeBuoy, color: "#f43f5e" },
-  SECURITY: { label: "Security", icon: Shield, color: "#f43f5e" },
-  FINANCE: { label: "Finance", icon: DollarSign, color: "#34d399" },
-  OPS: { label: "Operations", icon: Settings, color: "#8b5cf6" },
-  AUTOMATION: { label: "Automation", icon: Workflow, color: "#8b5cf6" },
-  SALES: { label: "Sales", icon: HandCoins, color: "#f59e0b" },
-  CUSTOM: { label: "Custom", icon: Box, color: "#84cc16" },
+  CODING: { label: "Coding", icon: Code2 },
+  DATA: { label: "Data", icon: Database },
+  DEVOPS: { label: "DevOps", icon: Cloud },
+  WRITING: { label: "Writing", icon: PenLine },
+  RESEARCH: { label: "Research", icon: Microscope },
+  PM: { label: "Project management", icon: ListChecks },
+  DESIGN: { label: "Design", icon: Palette },
+  SUPPORT: { label: "Support", icon: LifeBuoy },
+  SECURITY: { label: "Security", icon: Shield },
+  FINANCE: { label: "Finance", icon: DollarSign },
+  OPS: { label: "Operations", icon: Settings },
+  AUTOMATION: { label: "Automation", icon: Workflow },
+  SALES: { label: "Sales", icon: HandCoins },
+  CUSTOM: { label: "Custom", icon: Box },
 }
 
 export function domainMeta(category: string | null | undefined): DomainMeta {

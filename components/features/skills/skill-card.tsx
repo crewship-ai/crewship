@@ -20,9 +20,9 @@ import {
 // One skill on the Skills page (#3033). The card answers, in this order:
 // what it is (domain tile, name, vendor/slug), whether to trust it (one
 // StatusPill), what it does, what it needs, who has it and whether it is
-// used. Severity lives only in the pill; the tile wears the domain's colour.
+// used. Severity lives only in the pill; domains share one colour and differ by icon.
 
-/** The domain's icon in a Harbor icon tile, tinted with the domain colour. */
+/** The domain's icon in a Harbor icon tile. Every domain wears the same tint. */
 export function SkillTile({ category, size = "md", className }: { category: string; size?: "sm" | "md" | "lg"; className?: string }) {
   const d = domainMeta(category)
   const Icon = d.icon
@@ -32,7 +32,6 @@ export function SkillTile({ category, size = "md", className }: { category: stri
     <span
       aria-hidden
       className={cn("icon-tile inline-flex shrink-0 items-center justify-center", box, className)}
-      style={{ ["--ic" as string]: d.color }}
     >
       <Icon className={glyph} />
     </span>
@@ -96,7 +95,7 @@ export function SkillCard({ skill, index = 0, onOpen }: { skill: SkillRow; index
       </p>
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-px text-micro text-muted-foreground">
-          <d.icon className="h-3 w-3" style={{ color: d.color }} aria-hidden />
+          <d.icon className="h-3 w-3" aria-hidden />
           {d.label}
         </span>
         <span className="inline-flex items-center rounded-full border border-border px-2 py-px text-micro text-muted-foreground">
