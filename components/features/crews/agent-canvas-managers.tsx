@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { Plus, Trash2 } from "lucide-react"
 import type { AgentCredRow, AgentSkillRow } from "./agent-canvas"
 import { apiFetch } from "@/lib/api-fetch"
+import { toApiError } from "@/lib/api-error"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 interface WorkspaceSkill {
@@ -59,7 +60,7 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ skill_id: skillId }),
       })
-      if (!r.ok) throw new Error(await r.text())
+      if (!r.ok) throw await toApiError(r, `HTTP ${r.status}`)
       toast.success("Skill assigned")
       setPickerOpen(false)
       await refresh()
@@ -76,7 +77,7 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
     setBusy(true)
     try {
       const r = await apiFetch(`/api/v1/agents/${agentId}/skills/${assignmentId}`, { method: "DELETE" })
-      if (!r.ok) throw new Error(await r.text())
+      if (!r.ok) throw await toApiError(r, `HTTP ${r.status}`)
       toast.success(`Skill "${name}" removed`)
       await refresh()
       onChange()
@@ -233,7 +234,7 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ credential_id: cred.id, env_var_name: envVar, priority: 0 }),
       })
-      if (!r.ok) throw new Error(await r.text())
+      if (!r.ok) throw await toApiError(r, `HTTP ${r.status}`)
       toast.success("Credential assigned")
       setPickerOpen(false)
       await refresh()
@@ -250,7 +251,7 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
     setBusy(true)
     try {
       const r = await apiFetch(`/api/v1/agents/${agentId}/credentials/${assignmentId}`, { method: "DELETE" })
-      if (!r.ok) throw new Error(await r.text())
+      if (!r.ok) throw await toApiError(r, `HTTP ${r.status}`)
       toast.success(`Credential "${name}" unassigned`)
       await refresh()
       onChange()
