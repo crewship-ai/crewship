@@ -1,6 +1,6 @@
 ---
 title: "Activity"
-description: "The workspace activity stream — four lenses over the workflows that ran, each row leading to the thing itself: a workflow's causal graph, a run's steps, an issue, an agent."
+description: "The workspace activity stream — every run of the window in a rail shaped like Issues and Routines, each row leading to the thing itself: a run's causal graph, its steps, an issue, an agent."
 icon: "activity"
 stability: experimental
 tag: Experimental
@@ -12,10 +12,11 @@ tag: Experimental
 
 **Activity** lives at `/activity`, under the **Run** group of the sidebar. It answers the question people arrive with — *what is happening, and where do I look* — as a stream: a left rail listing what has been **active in the loaded window**, and a main column that changes with whatever the reader picked.
 
-The page is built from two independent reads:
+The page is built from three independent reads:
 
 - **The workflow index** — `GET /api/v1/chains` (`hooks/use-chains.ts`), one row per chain. A *chain* is every run sharing one `chain_origin`: the rule or person that started it, the routine runs it caused, and the agent work those dispatched. It is fetched on demand, not streamed.
-- **The journal** — `GET /api/v1/journal`, which feeds the event list, the Overview dashboard and the opened-event detail. It streams over SSE and falls back to polling.
+- **The routine runs** — `GET /api/v1/workspaces/{ws}/pipeline-runs?since=` and the run's own records, which feed the [home](#the-home) and the [run page](#a-run-page).
+- **The journal** — `GET /api/v1/journal`, which feeds the filtered event list and the opened-event detail. It streams over SSE and falls back to polling.
 
 The two are deliberately separate: the rail must still answer "where can I go" when the current filters answer nothing.
 
@@ -25,51 +26,54 @@ The two are deliberately separate: the rail must still answer "where can I go" w
 
 ## When to use it
 
-- **Something ran and you want to know what it caused.** A workflow row opens the whole chain — its runs, its causal graph, the sequence it happened in, and the issues and agents it touched.
-- **You want a routine's runs, not its definition.** The Routines lens opens a routine's runs grouped by the hour, with each run's own result on the row instead of its id. The definition stays on [Routines](/guides/routines).
-- **You want to know what your agents did.** The Agents lens lists agents that took work in the window, how much, and in which workflows.
-- **An issue moved and you want to know what moved it.** The Issues lens lists issues touched in the window with the routine and agent that reached each one.
-- **You are chasing a failure.** The **Failed** status segment narrows both the rail and the feed.
+- **Something ran and you want to know how it went.** A row opens [the run](#a-run-page) — its status, why it failed or what it waits for, its steps with every attempt, what it caused further down the chain, what it is linked to and changed, and its routine's previous runs.
+- **You open the page to see the day.** The [home](#the-home) says in one sentence how many runs there were, what is live, what needs you and what could not finish, and draws every run on its routine's lane.
+- **You want a routine's runs, not its definition.** **Group by → Routine** opens a routine's runs grouped by the hour, with each run's own result on the row instead of its id. The definition stays on [Routines](/guides/routines).
+- **You want to know what your agents did.** **Group by → Agent** lists agents that took work in the window, how much, and in which workflows.
+- **An issue moved and you want to know what moved it.** **Group by → Issue** lists issues touched in the window with the routine and agent that reached each one.
+- **You are chasing a failure.** The **Could not finish** status row narrows both the rail and the feed.
+- **You want accepted work or received webhooks.** The **Ledger** rows at the bottom of the rail switch it to the [work queue and webhook deliveries](#ledgers).
 
-To *author* a routine, go to [Routines](/guides/routines). To decide a waitpoint or clear an escalation, go to [Inbox](/guides/inbox) — nothing on this page approves anything. To read the raw event log, use `/journal` or the [Crew Journal](/guides/crew-journal) API.
+To *author* a routine, go to [Routines](/guides/routines). A plain approval can be decided from the home's **Needs you** card or on the run page — it is the same item as in [Inbox](/guides/inbox), and an approval with a decision form opens on the run, where the form is. To read the raw event log, use `/journal` (workspace OWNER and ADMIN only, see [Crew Journal](/guides/crew-journal)).
 
 ## Key concepts
 
 | Term | What it means here |
 |------|--------------------|
 | **Chain** | Every run sharing one `chain_origin`. The unit the index groups by, and a valid anchor for `GET /api/v1/chains/{anchor}`. |
-| **Workflow** | A chain that **composed** something — see [What earns the word "workflow"](#what-earns-the-word-workflow). A bare run of a known routine is a run, and lives under the Routines lens. |
-| **Lens** | Which catalogue the rail lists: Workflows, Issues, Agents, Routines. All four are derived from the same loaded chain list, so no two can disagree about what happened. |
-| **Sentence** | A workflow row's first line — the *shape*, not the routine's name: `file a follow-up when an issue closes → Follow up on close → riley → ENG-7`. Two runs of one routine render the same name; what they reached differs. |
-| **Handle** | The last 8 characters of the chain origin, on the right of a row. Derived, never generated — it is what tells two runs of one routine apart. |
-| **Status segment** | All · Running · Waiting · Failed, one line, one choice. Counts **chains**, which is what the list under it holds. |
-| **Stop / trail** | Where the reader is standing. Every pick is one stop on a path; the breadcrumb above the column is the walk, with Back and a jump to any crumb. Capped at 6 stops (`ACTIVITY_MAX_DEPTH`), and the trail says when earlier stops fell off. |
+| **Run row** | One chain in the rail. Every chain of the window is listed — a plain run of a routine as much as one that composed something. |
+| **Group by** | Which catalogue the rail lists: Time (the default), Issue, Agent, Routine — the `?lens=` value. All four are derived from the same loaded chain list, so no two can disagree about what happened. |
+| **Row title** | The routine's name, as on the Routines rail. The second line says what started it in short words — `schedule`, `by hand`, `webhook · contact-form`, `rule · on issue closed`, `from OPS-1` (`startedByWord`) — then the duration and what it touched. The right edge says when. |
+| **Sentence** | The row's tooltip — the whole *shape*: `file a follow-up when an issue closes → Follow up on close → riley → ENG-7`. |
+| **Handle** | The last 8 characters of the chain origin, in the row's tooltip. Derived, never generated. |
+| **Status row** | All · Waiting for you · Running · Completed · Could not finish — the Routines rail's words and order. One choice. Counts **chains**, which is what the list under it holds. |
+| **Stop / trail** | Where the reader is standing. Every pick is one stop on a path; the back-bar above the column is the walk — **‹ Back to activity** returns to the overview (as **‹ Back to issues** does), and each crumb after it jumps to that stop; `Esc` steps one stop up. Styled and animated like the Issues and Routines back-bars. Capped at 6 stops (`ACTIVITY_MAX_DEPTH`), and the trail says when earlier stops fell off. |
 | **Drill-down** | What a row leads to: a run's steps, an issue's "what reached it", an agent's work, a routine's runs. |
 
 ## The rail
 
-One column, and it is navigation: a search box, a filter popover, four lens tabs, four status segments, then the list. Every *narrowing* lives in the popover; every *place you can go* is a row.
+One column, and it is navigation, built from the same sidebar kit as [Issues](/guides/issue-detail) and [Routines](/guides/routines): a search box, a filter popover, a **Group by** button, then a collapsible **Status** section, the list, and the **Ledger** rows. Every *narrowing* lives in the popover; every *place you can go* is a row. There is no tab strip above the page and no second row of tabs in the rail.
 
-### The four lenses
+### Group by
 
-Each lens lists only the members that were **active in the loaded window**. An issue nobody touched today is in [Issues](/guides/issue-detail), not here.
+The View button (the rows icon beside Filter) groups the list. Each grouping lists only the members that were **active in the loaded window**. An issue nobody touched today is in [Issues](/guides/issue-detail), not here.
 
-| Lens | A row is | Sorted by |
+| Group by | A row is | Sorted by |
 |------|----------|-----------|
-| **Workflows** | One causal run: what started it and everything it caused | Time bucket, then newest first |
-| **Issues** | An issue something touched in this window — not the backlog | Busiest first (chains touching it) |
-| **Agents** | An agent that took work in this window | Busiest first (assignments) |
-| **Routines** | A routine that **ran** in this window — not the catalogue | Busiest first (runs, not chains) |
+| **Time** (default) | One chain: a run of a routine and everything it caused | Time bucket, then newest first |
+| **Issue** | An issue something touched in this window — not the backlog | Busiest first (chains touching it) |
+| **Agent** | An agent that took work in this window | Busiest first (assignments) |
+| **Routine** | A routine that **ran** in this window — not the catalogue | Busiest first (runs, not chains) |
 
-Workflow rows are grouped into **Active now**, **Today** and **Earlier**. "Active now" is a *state*, not a time: a chain parked on a human approval since Tuesday is the most urgent row on the page and must not sort to the bottom by its timestamp.
+Under **Time**, every chain of the window is listed and grouped into **Active now**, **Today** and **Earlier**. "Active now" is a *state*, not a time: a chain parked on a human approval since Tuesday is the most urgent row on the page and must not sort to the bottom by its timestamp.
 
-Each workflow row wears its routine's own icon and colour (the same derivation the Routines rail uses), a status dot notched into the corner, a halo while something is live, its sentence, `relative time · duration · what it touched`, and its handle.
+Each row wears its routine's own icon and colour (the same derivation the Routines rail uses), a status dot notched into the corner, a halo while something is live, the routine's name, `could not finish / waiting for you · what started it · duration · what it touched`, and how long ago it was active.
 
-### Status segments
+### Status
 
-**All · Running · Waiting · Failed** — mutually exclusive. **Completed** joins the line only while it is the current scope, because the Overview's KPI cards can send the page into any scope and a control that cannot draw the state it was handed reads as broken.
+A collapsible section with one row per bucket, in the Routines rail's order and words: **All**, **Waiting for you**, **Running**, **Completed**, **Stopped**, **Could not finish**. **Stopped** is a chain whose runs were cancelled or interrupted and that holds nothing live: a chain with a stopped branch and a running or waiting one is counted as Running or Waiting, so a stop never hides live work. On a run's page the word says which stop it was — **Cancelled** (somebody stopped it) or **Interrupted** (the process running it died). In the feed, Stopped narrows to `run.cancelled` and `assignment.cancelled`. Every row is always there — a bucket holding nothing dims rather than disappearing, so no row moves because its neighbour emptied. The count pill and the selected row are the Routines rail's, to the class (`railStatusRows` in `lib/activity-rail.ts`).
 
-The counts are taken over the window **with the search applied but not the segment**, so a number survives its own selection: counting after the pick would render "Failed 3 · Waiting 0 · Running 0" — what is left rather than what there is to pick. A segment showing no number holds nothing in this window.
+The counts are taken over the window **with the search applied but not the status**, so a number survives its own selection: counting after the pick would render "Could not finish 3 · Waiting 0 · Running 0" — what is left rather than what there is to pick.
 
 The same choice narrows the journal query server-side (`active`/`waiting` become an `entry_type` filter, `failed` becomes `severity=error`); `done` is the one bucket with no server-side expression, so it is filtered client-side.
 
@@ -81,9 +85,35 @@ That costs window. The journal pages by a fixed **row** count from the newest en
 
 An ask whose answer lies outside the window, or that carries no id to join on, stays under Waiting: over-reporting one row is a smaller failure than hiding something a person is blocking on. An escalation in a state this classifier has never seen is treated the same way — unrecognised is not the same as answered.
 
-One function (`scopeOf` in `lib/activity-stream.ts`) does this for the feed list, every row's status dot and the Overview's **Waiting on you** card, so those three cannot disagree. The rail's **status segments** are the exception, and deliberately so: they count *chains* (`chainScopeCounts` over the `ChainSummary` index, ultimately the server's `status` column) rather than journal rows, because the chain index is fetched independently of the scope facet and so can still answer for the buckets the journal query did not fetch. A segment counts workflows; the feed beside it counts entries.
+One function (`scopeOf` in `lib/activity-stream.ts`) does this for the feed list, every row's status dot and the Overview's **Waiting on you** card, so those three cannot disagree. The rail's **status rows** are the exception, and deliberately so: they count *chains* (`chainScopeCounts` over the `ChainSummary` index, ultimately the server's `status` column) rather than journal rows, because the chain index is fetched independently of the scope facet and so can still answer for the buckets the journal query did not fetch. A status row counts chains; the feed beside it counts entries.
+
+### Focusing a routine
+
+Picking a routine's row narrows the rail to that routine (`activity-rail-focus.tsx`, rules in `lib/activity-rail-focus.ts`). Everything else in the rail goes. The routine's runs are listed by day (Today, Yesterday, then dates), each with its time, its outcome in the rail's words, what started it and how long it took.
+
+The STATUS rows stay and count the routine's runs, so **Could not finish** lists only the runs that failed. The time range from **Filter** decides how far back the list reaches.
+
+Clicking a run opens it in the column, and the focus stays while you step through its runs. **‹ All activity** leaves the focus. The rail slides in from the right on entering the focus and from the left on leaving it, the same 12px / 200ms entrance as the column.
+
+### What a row is
+
+Every row's second line starts with what the row **is**:
+
+- **Routine**: a routine run and what it caused;
+- **Issue**: an agent working an issue;
+- **Agent**: agent work delegated from a chat or assigned by hand.
+
+What started the row follows after it. So *Routine · from QUA-1* (a routine started from an issue) never reads like *Issue · from QUA-1* (the issue being worked).
 
 ### Search and filters
+
+The **Filter** facets narrow the rail as well as the column beside it.
+
+- A picked crew keeps the rows whose agents belong to it, or whose routine that crew authored.
+- A picked agent keeps the rows it worked in.
+- A focused issue or routine keeps the rows that reached it.
+
+The index carries at most five agents per row, so a row whose only match is a sixth agent is not found by a crew or agent filter.
 
 The search box narrows two things at once: the rail's workflow list (client-side, over the loaded index page — matching the routine's name and slug, what started the chain, the handle, and the identifiers, titles and agent names it touched) and the journal query (server-side, as `q`).
 
@@ -101,10 +131,10 @@ The **Filter** trigger carries a count of active narrowings and opens a popover 
 | **Noise** | *Show system telemetry* — puts back `container.metrics`, `file.written`, `network.egress`, `exec.output_chunk` and friends, which are excluded by default because they were 86% of the feed. |
 
 <Note>
-`error` is deliberately absent from Severity and `human` from Source: they **are** the Failed and Waiting segments, and one filter reachable from two controls is how the two quietly contradict each other. See `lib/activity-rail.ts`.
+`error` is deliberately absent from Severity and `human` from Source: they **are** the Could-not-finish and Waiting-for-you status rows, and one filter reachable from two controls is how the two quietly contradict each other. See `lib/activity-rail.ts`.
 </Note>
 
-A filter combination that matches nothing says so — "the loaded window holds N events, and none of them satisfies all M filters at once. This is an empty question, not a quiet system." — with one button that clears everything. An empty lens gets one of five distinct sentences depending on *which* emptiness it is (`emptyLensCopy`), because they want different actions from the reader.
+A filter combination that matches nothing says so — "the loaded window holds N events, and none of them satisfies all M filters at once. This is an empty question, not a quiet system." — with one button that clears everything. An empty grouping gets one of five distinct sentences depending on *which* emptiness it is (`emptyLensCopy`), because they want different actions from the reader.
 
 ## The main column
 
@@ -112,28 +142,83 @@ One selection, one column — never a stack.
 
 | What is selected | What the column draws |
 |------------------|-----------------------|
-| Nothing, Workflows lens, scope **All** | The **Overview** dashboard |
-| Nothing, Issues / Agents / Routines lens | That lens's own dashboard |
-| A status segment, or a node walked into from a graph | The feed as a list, with **Load older** |
-| A workflow row | The [workflow page](#a-workflow-page) |
+| Nothing, grouped by Time, status **All**, no filter | [The home](#the-home) |
+| Nothing, grouped by Issue / Agent / Routine | That grouping's own dashboard |
+| A status row, a search, a crew/agent/issue filter, a pinned crumb, or a node walked into from a graph | The feed as a list, with **Load older** |
+| A run row whose chain starts at a routine run | That [run's page](#a-run-page) |
+| A row of agent work started outside any routine | That [work's page](#agent-work-outside-routines) |
+| A run row rooted in agent work | The [workflow page](#a-workflow-page) |
 | An issue / agent / run / routine row | Its [drill-down](#where-a-row-leads) |
 | A feed row | That [event, opened](#opening-one-event) |
 
-### Overview (Workflows lens)
+### The home
 
-Four KPI cards — **Running now**, **Waiting on you**, **Failures**, **Spend** — where the first three are places to go rather than numbers to read (clicking one selects that status segment). Under them: **Open asks** and **What is broken** side by side with their evidence, then **Latest activity** and, only when the loaded window spans two days or more, a **Failures · N days** bar chart. **Waiting on you** and **Open asks** count asks that are still open — the same join the Waiting segment uses, not a second opinion about it. A zero says *which* zero it is: "nothing broke" is a claim about the world, and this window only ever knew about itself.
+The time view's home is built from **runs**, not journal events, and answers in the order a person asks on arrival (`components/features/activity-stream/activity-home.tsx`, rules in `lib/activity-home.ts`):
+
+| Part | What it says |
+|------|--------------|
+| **Header** | One sentence — `14 runs · 2 running · 1 needs you · 3 could not finish · $0.42` — with a **24 h / 7 d** switch. A zero is left out, except "nothing needs you". |
+| **Needs you** | The approvals waiting (`GET …/pipelines/waitpoints`), the same items as Inbox. A MANAGER or above can **Approve** or **Reject** a plain approval here; one with a decision form, and everyone else, gets **Open run**. |
+| **Right now** | Runs that are running or waiting, and **Up next** — the next planned runs from the routines calendar. |
+| **What ran** | One lane per routine across the window, every run a bar coloured by outcome; click a bar to open the run. Live and failing lanes come first; the quiet tail folds into a count. Drawn from the newest 200 runs of the last 7 days, and it says so when that cap cuts the window. |
+| **Problems** | Failures grouped by cause (`GET …/pipelines/runs/errors`), but only causes that failed in the last 7 days — the server's groups cover all time. Opens the latest failure. |
+| **What changed** | The issues the window's runs created and touched, from the chain index. Page writes are not listed yet: the API has no "pages written by this run" read. |
+| **Outcomes** | Seven days by outcome, with the share that finished. |
+| **Latest runs** | One line per run — what it came to (`HTTP 502 Bad Gateway`, `Finished in 4.7s`, `Waiting for a decision`) and what started it. Admins get a **Raw events in Journal** link. |
+
+A crew, an agent, an issue or routine focus, or a search narrows the home to the same chains the rail shows, and the heading names the narrowing (*Today · Operations*). Its runs are the runs of those chains, matched by `chain_origin`. Its asks are the asks of those runs, and *Up next* lists only their routines' schedules.
+
+Narrowings only the journal can express get the filtered event list instead: a source, a severity, the telemetry switch, a pinned crumb. The rail then lists only the runs those events belong to, matched by the run id an event carries and the issue it names. When no event is left, no run is left either.
 
 ### Issues, Agents, Routines
 
-Each lens owns the column, so pressing a tab changes what is *shown* and not only what is selected.
+Each grouping owns the column, so picking one changes what is *shown* and not only what is selected.
 
 - **Issues** — Touched / Created by agents / Changed / Agents involved, then one line per issue carrying the issue's real status and priority glyph, with an indented `↳ routine → agent` line that opens the workflow behind it.
 - **Agents** — Agents at work (of N hired) / Assignments / In workflows / Busiest, then one line per agent with a proportion bar and what it worked on. "In workflows" is the wall clock of the chains the agent worked in, **not** billed agent time — the index does not carry that.
 - **Routines** — Routines that ran (of N in the catalogue) / Runs / Success / Failing, one line per routine with a success-rate bar, plus a **Firing next** card listing the schedules due next with their cron and a countdown.
 
+## A run page
+
+A rail row whose chain starts at a routine run opens **that run** (`activity-run-page.tsx`), and so does every other way to a run on this page — a sub-run, a dot in Previous runs, a bar on the home, `?run=` from Inbox or the bell. It is built from the parts [Routines](/guides/routines) uses, so a run reads the same on both pages:
+
+| Part | What it says |
+|------|--------------|
+| **Header** | The routine's name, the status in the rail's words (with a ping while running), what started it, when, and the run id. **Retry** / **Run again** replays the run with its original inputs (`POST …/pipelines/runs/{id}/replay`, MANAGER+); **Stop** cancels a live run (`POST …/pipelines/runs/{id}/cancel`, OWNER/ADMIN); **Open routine**. The buttons follow the API's own role gates. |
+| **Banner** | The approval it waits on, decidable here, or **Why it failed** — the step it stopped at, the failure, what was kept and what never ran (`routineRunBanner`, the same sentence as on Routines). |
+| **Facts** | Started · Duration · Cost · Steps (finished of the recipe's) · Trigger. |
+| **Steps** | The routine step spine — attempts, for-each items and agent work inside a step, each with its recorded output. |
+| **Caused by this run** | The work further down the chain, nested: the runs of the routines it called, agent assignments, inbox asks. Each opens. |
+| **Result** | The run's output, once it has finished. |
+| **Linked to** | Its routine (to the routine's history), the issues in its chain, and the agents. |
+| **What it changed** | The issues its chain created or touched — only when the chain starts at this run. |
+| **Previous runs** | The routine's newest runs as a strip, oldest left, this one ringed; each opens. |
+| **Raw events** | `N raw events · Journal` (`GET /api/v1/journal/count?run_id=`), for OWNER and ADMIN only. |
+
+A run id that is not a routine run — agent work — falls back to the typed run detail.
+
+## Agent work outside routines
+
+<Note>
+Hidden in the UI for now, at the owner's call (#3007). The chain index still returns these rows (`kind: assignment`), and the CLI lists them.
+</Note>
+
+A delegation from a chat, an issue mention or lead planning is listed in the rail as its own row. It wears an agent's face and is titled by its task, and its second line says what started it: `from chat · Lead`, `from OPS-3`, `lead planning · OPS-3`, `by hand`.
+
+The row opens the work's page (`activity-work-page.tsx`), shaped like a run's page:
+
+- the task;
+- the state in the rail's words;
+- what started it;
+- Started / Duration / Pieces of work / Could not finish / Agents;
+- **Delegations and asks**: the assignments it delegated and the `run_needs_human` asks it raised, nested;
+- **Linked to**: the issue it was for and the agents who did it.
+
+The row is shown only to people who may read the chat it came from, or, for issue work, to the workspace's trusted members. A plain chat turn that dispatched nothing is not listed (`docs/specs/activity-work-index.md`).
+
 ## A workflow page
 
-Picking a workflow row opens it as a page, answering five questions in order:
+A chain rooted in agent work has no run to open, so its row opens the chain as a page, answering five questions in order:
 
 1. **What was this?** — the sentence as the heading, who started it, the raw `triggered_via`, when (absolute and relative), and the chain origin. Then a strip: Duration, Runs, Failed, Depth, Issues, Agents.
 2. **Which runs?** — the **Runs** card, derived from the chain walk and filtered to *this* chain's origin. Each row opens that run.
@@ -151,8 +236,8 @@ Each kind gets the surface that kind already has elsewhere, not a fifth renderin
 
 | Row | Opens |
 |-----|-------|
-| **Run** | Status, started, duration, cost, trigger and composed depth; the run's **Result** (its output, or the error and the step it failed at); and **Steps** — the live run-activity rail from the journal. The record comes from the run API (`GET /api/v1/runs/{id}`), which resolves the run to an agent or routine detail by its kind and only falls back to the routine run record (`GET /api/v1/workspaces/{ws}/pipeline-runs/{id}`) when the run API has no record. A run with no execution record says so — and says that a missing record does not prove the agent never started. A **Run evidence** card offers a bounded, previewable copy of the run's references and recorded activity (`Copy evidence`), and marks a missing journal as unavailable evidence rather than as proof nothing ran. |
-| **Issue** | What Activity knows that `/issues` does not: which workflows reached this issue, whether it was **created here** or merely changed, which agents did the reaching. An **Open issue ↗** link appears only when the workspace uses issue identifiers — `/issues/[identifier]` resolves nothing else, and a button that 404s is worse than an absent one. |
+| **Run** | [The run page](#a-run-page). A run that is not a routine run (agent work) gets the typed detail from the run API (`GET /api/v1/runs/{id}`): status, result, the run-activity rail, and a **Run evidence** card. A run with no execution record says so — and says that a missing record does not prove the agent never started. |
+| **Issue** | The issue's own **History**: its events (`mission_activity`, paged back by `before_seq`), comments (paged by `before_id`) and runs (paged by offset), merged newest first with **Load older**. It is read directly by issue (`hooks/use-issue-timeline.ts`) through the same endpoints `/issues` uses, so it covers the whole history — not the loaded page of chains or their five capped issue refs — and grants nothing `/issues` does not. An item appears only once no stream with older pages could still hold something newer, so the order is never a guess (`lib/issue-timeline.ts`). A run in the history opens its page. Under it, **Workflows in the loaded window** lists the rail's chains that reached the issue, labelled as context. An **Open issue ↗** link appears only when the issue has an identifier. |
 | **Agent** | Workflows, assignments, issues reached, and the wall clock of the chains it worked in, with a link to the agent's own page. Its sessions and messages stay there. |
 | **Routine** | That routine's runs, grouped by the reader's local hour. |
 
@@ -199,11 +284,11 @@ Whatever you are looking at on `/activity` is in the address bar, and a change o
 |-----------|---------|
 | `?run=`, `?pipeline=`, `?mission=` | A single run, routine or issue — and the routine→run pair — in the same spelling the inbound links below use |
 | `?walk=kind:id/kind:id` | Any deeper walk (a workflow, an agent, a crew, two runs) |
-| `?lens=issues\|agents\|routines` | The rail's lens; absent for Workflows |
-| `?status=` | The status segment |
+| `?lens=issues\|agents\|routines` | The rail's grouping; absent for Time |
+| `?status=` | The status row |
 | `?entry=` | The opened journal record, once the window holding it has loaded |
 
-Position (the walk, the opened record) is pushed; lens and status are replaced, so Back does not step through every tab you tried. Ids read from a URL show as ids until the entities they name load, then the trail re-labels them.
+Position (the walk, the opened record) is pushed; grouping and status are replaced, so Back does not step through every choice you tried. Ids read from a URL show as ids until the entities they name load, then the trail re-labels them.
 
 A bare `?run=` with no routine used to render "This run's record is not loaded", because the record lives in the routine's run list and the link carried no routine. The run page now asks the run API for the record and resolves the routine (or agent) behind it from there. Under the run's heading a **Related** row links its routine, its issue, its agent, its crew and its own journal trace — the second leg of the one timeline (issue → run → journal → issue).
 
@@ -216,13 +301,13 @@ Fourteen places across the product link into `/activity` with a query string the
 | `?run=<id>` | That run's drill-down | The Activity Bar, an inbox waitpoint, a routine's run rows |
 | `?pipeline=<slug>` | The overview narrowed to that routine, over the loaded window | A routine's "view runs" |
 | `?mission=<id>` | That issue's drill-down | An issue card's "activity" |
-| `?status=active\|waiting\|failed\|done` | Selects that status segment — a narrowing, not a destination | The Activity Bar's "view all" |
+| `?status=active\|waiting\|failed\|done` | Selects that status row — a narrowing, not a destination | The Activity Bar's "view all" |
 | `?step=<id>` | **Ignored** | The old canvas's own URL bar |
 
 Two rules are worth knowing:
 
 - **Order is by specificity, not by the URL.** `?mission=` then `?pipeline=` then `?run=` are pushed as stops in that order, so `?pipeline=<slug>&run=<id>` — the link routine cards build — lands on the run with the routine *behind* it, and **Back** returns to the routine rather than to the overview.
-- **A status this page has no segment for is ignored rather than obeyed.** A link written against some other vocabulary lands on everything, because a page that renders empty because it did not recognise a word is indistinguishable from a page with no data.
+- **A status this page has no row for is ignored rather than obeyed.** A link written against some other vocabulary lands on everything, because a page that renders empty because it did not recognise a word is indistinguishable from a page with no data.
 
 <Warning>
 `?step=` is accepted and does nothing. The canvas focused one step in a side panel; the stream has no step object. Pasting an old `/activity?run=<id>&step=<id>` URL lands you on the run — the half of it that still means something — and silently drops the rest.
@@ -232,9 +317,9 @@ Two rules are worth knowing:
 
 Every count on this page is a claim about a window, and the page says so where the numbers are. Repeated here so nothing is implied by omission:
 
-- **One page of the index.** The lens tabs, the status segments and every KPI on every lens dashboard are derived from the loaded chain index page — the newest 25 rows in the dashboard. When the workspace holds more, the rail prints *"Newest N workflows. Every count on this page describes these, not the whole workspace."* (`has_more` from the API; the client treats a missing field as "there are more"). The API itself defaults to 50 rows and caps at 200.
-- **The Agents lens sees only routine-dispatched work.** The index groups `pipeline_runs`, so an agent whose work no routine dispatched has no chain to belong to and is not indexed. That is a hole in the index, not in the lens — and the empty state says it rather than reading as "nobody worked".
-- **The Issues lens is issues touched in the window**, not the backlog. An issue with no activity has no row here at all.
+- **One page of the index.** The Group by totals, the status rows and every KPI on every grouping's dashboard are derived from the loaded chain index page — the newest 25 rows in the dashboard. When the workspace holds more, the rail prints *"Newest N workflows. Every count on this page describes these, not the whole workspace."* (`has_more` from the API; the client treats a missing field as "there are more"). The API itself defaults to 50 rows and caps at 200.
+- **Group by → Agent sees only routine-dispatched work.** The index groups `pipeline_runs`, so an agent whose work no routine dispatched has no chain to belong to and is not indexed. That is a hole in the index, not in the grouping — and the empty state says it rather than reading as "nobody worked".
+- **Group by → Issue is issues touched in the window**, not the backlog. An issue with no activity has no row here at all.
 - **Issue writes an agent makes from inside its own assignment do not attach to the chain.** Those journal entries carry the assignment's own journal run id as their trace, and that id is not recorded on the assignments row, so nothing joins them back. The issues a chain's **routine runs** touched are complete; the ones its **agents** touched are not reachable. Stated as a KNOWN GAP on `chainIssuesQuery` in `internal/api/chains_list.go`.
 - **Chains whose runs predate `chain_origin` are not in the index at all.** The link was never written and cannot be reconstructed, so listing them would mean claiming each run was its own chain root. Their existence is reported instead — the rail prints *"Older runs are not indexed here — the link that would group them was never written."*
 - **A row's issue and agent lists are capped at 5 each**, with the exact totals alongside, so a cut list reads as cut ("+N more, not carried on this row").
@@ -242,13 +327,13 @@ Every count on this page is a claim about a window, and the page says so where t
 - **A workflow chip narrows nothing.** The journal has no `chain_origin` column, so a chain is not expressible as a filter over journal rows; picking one re-points the column. It is therefore not counted by the "none satisfies all N filters" banner.
 - **The index is fetched, not streamed.** A row can be picked and then swept from the list — the page says "This workflow is no longer in the index" rather than drawing a graph-shaped hole.
 
-### What earns the word "workflow"
+### Every run is listed
 
-The Workflows lens lists only chains that **composed** something: more than one run, a composed hop, an agent dispatched, or an issue touched. Plus two exceptions that are not about composition — a chain that failed, is running or is waiting on a person (that is why somebody opened this page), and a chain no other lens can list (one whose root run retention swept has no routine slug, so the Routines lens has no row for it).
-
-Nothing is deleted by this. A bare run of a known routine is still a run, and the rail says where it went: *"N runs composed nothing and are listed under Routines."*
+The Time grouping used to list only chains that **composed** something and sent a plain run of a known routine to the Routines lens, with a sentence in its place. On a quiet workspace that left the rail empty while a run had happened. The rail is where a run is *found*, so every chain of the window is a row now; whether it composed anything is what its sentence and its page show.
 
 ## Keyboard
+
+On a run's page, **↑** and **↓** step to the previous and next run in the rail's order (Active now, Today, Earlier). The ends stay put, and the keys do nothing while you type in a field.
 
 - `j` / `k` — step to the next or previous event in the feed, opening it. From nothing open, `j` opens the newest.
 - `Esc` — close an opened event; with nothing open it steps one stop back up the trail, rather than doing nothing once you are already at the top.
@@ -274,13 +359,51 @@ Activity is a shell over existing endpoints; each has a CLI command with the sam
 
 Schemas: [`/api-reference/chains`](/api-reference/chains), [`/api-reference/journal`](/api-reference/journal), [`/api-reference/runs`](/api-reference/runs). CLI pages: [`crewship chain`](/cli/chain), [`crewship activity`](/cli/activity).
 
-The legacy `/orchestration` route still redirects to `/activity` so old bookmarks keep working — and so does the retired Work page: `/work` (with its `?section=work|deliveries` view) opens the corresponding Activity view.
+The legacy `/orchestration` route still redirects to `/activity` so old bookmarks keep working — and so does the retired Work page: `/work` (with its `?section=work|deliveries` view) opens the corresponding ledger.
+
+## Ledgers
+
+Two places sit under **Ledger** at the bottom of the rail: the **Work queue** (`?section=work`), every piece of accepted work — a webhook, a chat turn, a schedule, an assignment — with its attempts and result; and **Webhook deliveries** (`?section=deliveries`), every received webhook, including the ones the filter ignored.
+
+Opening one keeps Activity's shape. The rail slides over to the ledger's own rows — **‹ All activity** leads back, and slides the run list in again from the left:
+
+- a **Work queue · Deliveries** switch;
+- **Status** in Activity's words and colours: *Needs you*, *In the queue*, *Running*, *Done*, *Failed*, *Cancelled* for work; *Accepted* and *Ignored* for deliveries;
+- **Agents** with their own avatars, and whether their queue moves — *idle*, *running*, *blocked*, *deleted*; on deliveries, **Endpoints** with when the last delivery came, or *quiet*, *blocked*, *deleted*;
+- **Events**, grouped by family (`invoice.*`, `ping`).
+
+Every row narrows the whole page beside it. A status row works as in Activity — **All** clears it; an agent or event picked again clears it. Each narrowing also shows as a chip under the switch that removes it, and an agent picked on one ledger stays picked on the other (an agent's endpoint is the agent), keeping its row even where it has nothing. An endpoint of another kind — a routine's — is named by its kind and has no work queue of its own. The **24 h / 7 d** toggle sets the window for both. On a phone the rail is a drawer, closed when the page opens and after each pick.
+
+**Work queue** reads top to bottom:
+
+- one sentence — how many pieces of work, how many need you, are in the queue, finished, failed;
+- **Flow** — *Arrived → In the queue → Running → Done*, with *Needs you*, *Failed* and *Cancelled* beside it; a step narrows to it;
+- **Needs you** — work whose outcome nobody knows (`needs_reconciliation`). It holds the agent's only slot, so everything sent to that agent waits behind it, and the card says how much. A MANAGER or above settles it here: **Retry** (mark failed, then run the same input again under your name), **Mark as failed** or **Mark as done**. Each asks what you checked and that nothing is still running. Retry is two steps: when the input cannot be run again (the webhook payload passed its retention, or the work belongs to a private workflow) its dialog says why and does not run it; if running it again is refused after the work was marked failed, the work stays failed and a message says so;
+- **Why work failed** — failures grouped by cause, with the agents and events affected;
+- **What came in** — one lane per agent, with its crew in its own colour and icon; every piece of work is a dot that opens it. Past eight agents the rest fold into "+ N quieter agents";
+- **Latest work** — one sentence per piece: the event, the agent who took it, and how it ended.
+
+**Webhook deliveries** shows one card per endpoint — is it arriving (in the 7 d view, an endpoint with nothing in the last 24 h reads *quiet*), which profile verified it, and whether its agent's queue is blocked (with a link into the Work queue narrowed to that agent) or the endpoint is gone. Below are the arrivals per event family and the latest deliveries with what each became. A delivery opens beside the list with its decision, sender's id, payload size and retention; its work opens in the Work queue. The body itself is never shown.
+
+A piece of work opens in a panel beside the page, with its agent and crew by name. On a phone, work and deliveries open in a sheet.
+
+Each ledger reads its whole window — and the Work queue also every piece of work not yet finished, however old, so work stuck for days stays in **Needs you**. Past 1,000 rows the lanes card says the view is capped.
+
+Only the open ledger is mounted, so opening one does not start the journal stream.
 
 ## Activity Bar (toolbar)
 
 The `/activity` page answers "what happened" in depth; the **Activity Bar** answers "what is running right now" at a glance, from anywhere in the app. It is the Activity icon in the top toolbar next to the Inbox bell, with a badge counting live runs — amber the moment anything waits on a human approval, blue while routines run.
 
-The dropdown holds **LIVE** (up to six active routine runs with their current step, elapsed time and cost, each with Review / Trace / Cancel, plus any in-flight agent runs) and **RECENT** (the last few terminal routine runs, so "did my run just finish?" costs no page hop). The footer opens `/activity?status=active` while anything is live, and `/activity` otherwise.
+The dropdown speaks the rail's words. It holds two sections:
+
+- **LIVE**: up to six active routine runs, plus any in-flight agent runs. Each routine run shows its current step, elapsed time and cost.
+  - A run that waits on a person says **waiting for you**, and **Decide →** opens the run's page, where the approval is.
+  - **Open run** opens the run's page.
+  - **Cancel** is offered only to OWNER and ADMIN, the roles the cancel API accepts.
+- **RECENT**: the last few finished runs, so "did my run just finish?" costs no page hop. A run reads **Completed**, **Could not finish**, **Cancelled** or **Interrupted**, with the rail's colours; a stopped run is grey, not green.
+
+The footer opens `/activity?status=waiting` when something waits on a person, `/activity?status=active` while anything is live, and `/activity` otherwise.
 
 The server is the source of truth: `GET /api/v1/runs?status=RUNNING` for agent runs and `GET /api/v1/workspaces/{ws}/pipelines/runs/active` for routine runs, re-fetched on a short poll and immediately on `assignment.updated`, `run.*`, `mission.updated`, `pipeline.run.*` and `pipeline.step.started` — so a dropped frame cannot leave the badge stale. Nothing in flight, and the badge disappears.
 
@@ -295,9 +418,9 @@ Individual issue and routine pages carry an inline **Run activity** rail — the
 ## Common pitfalls
 
 - **"Agents 4" is a fact about the window, not the workspace.** Read the line at the bottom of the rail before quoting a number from this page.
-- **An empty Agents lens does not mean nobody worked.** Work no routine dispatched is not in the chain index at all.
+- **An empty Agent grouping does not mean nobody worked.** Work no routine dispatched is not in the chain index at all.
 - **A short "what it touched" list is a cut list.** The row carries at most five issues and five agents; the exact totals are on the workflow page's strip.
-- **`?pipeline=<slug>` narrows, it does not open the routine.** To get a routine's runs, switch the rail to the Routines lens and pick it there.
+- **`?pipeline=<slug>` narrows, it does not open the routine.** To get a routine's runs, set **Group by → Routine** and pick it there.
 - **Two crumbs can intersect to the empty set.** A run pinned from an event's spine plus an issue focused in the rail is one click away; the page says the question is empty rather than reporting a quiet system.
 - **The workflow you picked can vanish.** The index is fetched once per look, so a row can be swept between the click and the render. The runs it held are still in the feed.
 - **A server that records runs in the journal only has no per-run list.** The routine runs page says so instead of rendering an empty table.
@@ -308,5 +431,5 @@ Individual issue and routine pages carry an inline **Run activity** rail — the
 - [Routines](/guides/routines) — the definitions whose runs this page streams.
 - [Crew Journal](/guides/crew-journal) — the event log Activity reads from, and how to query it programmatically.
 - [Orchestration](/guides/orchestration) — the engine behind the runs (lifecycle, retries, deadlock detection).
-- [Harbormaster](/guides/harbormaster) — the approval gates that put a chain into the **Waiting** segment.
+- [Harbormaster](/guides/harbormaster) — the approval gates that put a chain into **Waiting for you**.
 - [Paymaster](/guides/paymaster) — the cost ledger behind the Spend KPI and a run's cost.

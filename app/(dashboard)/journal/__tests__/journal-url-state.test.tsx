@@ -338,16 +338,17 @@ describe("JournalPage — URL as the source of truth", () => {
 })
 
 describe("JournalPage — tab RBAC", () => {
-  it("demotes an admin-only tab for a non-admin and cleans the URL", async () => {
-    role = "MEMBER"
-    mountAt("tab=spend")
-    expect(await screen.findByTestId("logs-panel")).toBeTruthy()
-    expect(screen.queryByTestId("spend-view")).toBeNull()
-    await waitFor(() => {
-      expect(replace.mock.calls.length).toBeGreaterThan(0)
-    })
-    expect(String(replace.mock.calls[0][0])).not.toContain("tab=spend")
-  })
+  it.each(["MEMBER", "MANAGER", "VIEWER"])(
+    "keeps a %s out of the technical log and sends them to Activity (#2979)",
+    async (r) => {
+      role = r
+      mountAt("tab=spend")
+      expect(await screen.findByText(/kept for workspace admins/i)).toBeTruthy()
+      expect(screen.getByRole("link", { name: /Open Activity/ })).toHaveAttribute("href", "/activity")
+      expect(screen.queryByTestId("logs-panel")).toBeNull()
+      expect(screen.queryByTestId("spend-view")).toBeNull()
+    },
+  )
 
   it("keeps an admin-only tab for an admin", async () => {
     role = "ADMIN"

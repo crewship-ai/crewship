@@ -37,3 +37,15 @@ it.each(["OWNER", "ADMIN", "MEMBER"])("does not treat workspace role %s as insta
  expect(isHiddenForRole(admin, role, true)).toBe(false)
  expect(isHiddenForRole(inbox, role, false)).toBe(false)
 })
+
+it.each([
+  ["OWNER", false],
+  ["ADMIN", false],
+  ["MANAGER", true],
+  ["MEMBER", true],
+  ["VIEWER", true],
+  [null, true],
+] as const)("shows the Journal, the technical log, to workspace %s: hidden=%s (#2979)", (role, hidden) => {
+  const journal = navSections.flatMap(section => section.items).find(item => item.href === "/journal")!
+  expect(isHiddenForRole(journal, role)).toBe(hidden)
+})
