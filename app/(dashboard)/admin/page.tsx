@@ -371,7 +371,7 @@ function AdminConsole() {
           ) : undefined
         }
         meta={
-          <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground-soft">Instance admin</span>
+          <span className="text-micro font-mono uppercase tracking-wide text-muted-foreground-soft">Instance admin</span>
         }
       />
 

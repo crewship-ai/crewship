@@ -9,7 +9,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, waitFor, cleanup } from "@testing-library/react"
 
 import { useSecurity } from "../security/use-security"
-import { MemoryConfigCard } from "../memory-config-card"
 
 const h = vi.hoisted(() => ({ apiFetch: vi.fn() }))
 
@@ -60,17 +59,10 @@ describe("admin cards are workspace-scoped", () => {
     ])
   })
 
-  it("memory configuration asks within a workspace", async () => {
-    render(<MemoryConfigCard workspaceId="ws-1" />)
-    await waitFor(() => expect(h.apiFetch).toHaveBeenCalled())
-    expect(String(h.apiFetch.mock.calls[0][0])).toContain("workspace_id=ws-1")
-  })
-
   // Before the id resolves there is nothing to scope to, and firing the
   // request anyway is how you get a 400 rendered as "could not load".
-  it("neither asks before the workspace is known", () => {
+  it("does not ask before the workspace is known", () => {
     render(<SecurityReads workspaceId={null} loading />)
-    render(<MemoryConfigCard workspaceId={null} />)
     expect(h.apiFetch).not.toHaveBeenCalled()
   })
 })

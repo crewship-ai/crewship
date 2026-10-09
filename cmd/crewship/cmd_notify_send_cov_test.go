@@ -80,9 +80,9 @@ func TestNotifySendRunE_DefaultLevel(t *testing.T) {
 // flag value, which is what "err is either nil or the platform-tool error"
 // proves here.
 func TestNotifySendRunE_LevelFlagVariants(t *testing.T) {
+	guardCLIState(t)
 	for _, level := range []string{"info", "warn", "critical", "bogus"} {
 		t.Run(level, func(t *testing.T) {
-			guardCLIState(t)
 			if err := notifySendCmd.Flags().Set("level", level); err != nil {
 				t.Fatal(err)
 			}

@@ -5,7 +5,7 @@ import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { SettingsCard, SettingsDangerCard, SettingsRow, SettingsSaveBar, SettingsSegmented, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsDangerCard, SettingsRow, SettingsSaveBar, SettingsSegmented, SettingsSummary, SummaryItem, inlineControl } from "@/components/features/settings/shared"
 import { RuntimeIcon, runtimeBrand } from "@/components/icons/runtime-icons"
 import { apiFetch } from "@/lib/api-fetch"
 import { withWs } from "@/lib/admin-workspace-query"
@@ -112,13 +112,13 @@ const RuntimeInventory = React.memo(function RuntimeInventory({
                     <RuntimeIcon runtime={rt.runtime} className="h-4 w-4" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline gap-2 text-[13px]">
+                    <div className="flex items-baseline gap-2 text-control">
                       <span>{brand.label}</span>
                       {rt.version && <span className="font-mono text-xs text-muted-foreground">{rt.version}</span>}
                     </div>
-                    {rt.socket && <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground-soft">{rt.socket}</p>}
+                    {rt.socket && <p className="mt-0.5 truncate font-mono text-micro text-muted-foreground-soft">{rt.socket}</p>}
                   </div>
-                  <StatusBadge status={rt.in_use ? "COMPLETED" : "PENDING"} label={rt.in_use ? "In use" : "Detected"} className="text-[10px]" />
+                  <StatusBadge status={rt.in_use ? "COMPLETED" : "PENDING"} label={rt.in_use ? "In use" : "Detected"} className="text-micro" />
                 </div>
                 {/*
                   Attached to the row rather than collected into one notice at
@@ -126,7 +126,7 @@ const RuntimeInventory = React.memo(function RuntimeInventory({
                   at a specific version. Only the in_use entry ever carries any.
                 */}
                 {rt.gaps && rt.gaps.length > 0 && (
-                  <div data-testid={`runtime-gaps-${rt.runtime}`} className="mx-4 mb-2.5 rounded-lg border border-warn/40 bg-warn/5 px-3 py-2 text-[11px] text-warn">
+                  <div data-testid={`runtime-gaps-${rt.runtime}`} className="mx-4 mb-2.5 rounded-lg border border-warn/40 bg-warn/5 px-3 py-2 text-label text-warn">
                     {rt.gaps.map((gap) => (
                       <p key={gap.control} className="flex items-start gap-1.5">
                         <AlertTriangle className="mt-[1px] h-3 w-3 shrink-0" />
@@ -140,7 +140,7 @@ const RuntimeInventory = React.memo(function RuntimeInventory({
           })}
 
           {!anyInUse && (
-            <p data-testid="runtime-none-in-use" className="mx-4 my-2.5 rounded-lg border border-warn/40 bg-warn/5 px-3 py-2 text-[11px] text-warn">
+            <p data-testid="runtime-none-in-use" className="mx-4 my-2.5 rounded-lg border border-warn/40 bg-warn/5 px-3 py-2 text-label text-warn">
               No container runtime in use. These are installed, but this server started without a
               container provider (<code>--no-docker</code>, or the provider failed to start). Agents
               cannot run until it has one.
@@ -471,7 +471,7 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string | null }) {
         </span>
       </SettingsRow>
       {orphans && orphans.orphans.length > 0 && (
-        <ul className="border-b border-border px-4 pb-2.5 text-[11px] text-muted-foreground" data-slot="orphan-list">
+        <ul className="border-b border-border px-4 pb-2.5 text-label text-muted-foreground" data-slot="orphan-list">
           {orphans.orphans.map((o) => (
             <li key={o.container_id} className="flex items-center gap-2 font-mono">
               <StatusDot status={o.reaped ? "COMPLETED" : "BLOCKED"} />{o.slug} · {o.container_id.slice(0, 12)}
@@ -486,7 +486,7 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string | null }) {
           </Button>
         </SettingsRow>
       )}
-      {result && <p className="px-4 py-2.5 text-[11px] text-muted-foreground motion-safe:animate-in motion-safe:fade-in-0" role="status" data-slot="maintenance-result">{result}</p>}
+      {result && <p className="px-4 py-2.5 text-label text-muted-foreground motion-safe:animate-in motion-safe:fade-in-0" role="status" data-slot="maintenance-result">{result}</p>}
     </SettingsCard>
 
     <SettingsDangerCard icon={AlertTriangle} title="Danger zone" description="Irreversible actions on this workspace's crews">
@@ -500,10 +500,10 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string | null }) {
       </SettingsRow>
       {confirmOpen && (
         <div className="flex flex-wrap items-center gap-2 px-4 pb-3" data-slot="runtime-danger">
-          <Label htmlFor="prune-confirm" className="text-[11px] font-normal text-muted-foreground">
+          <Label htmlFor="prune-confirm" className="text-label font-normal text-muted-foreground">
             Type <span className="font-mono text-foreground">remove</span> to delete every crew&apos;s containers and volumes
           </Label>
-          <Input id="prune-confirm" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" className="h-7 w-32 font-mono text-xs" />
+          <Input id="prune-confirm" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" className={cn(inlineControl, "w-32 font-mono")} />
           <Button variant="destructive" size="sm" className="h-7 px-2.5 text-xs" disabled={typed.trim().toLowerCase() !== "remove" || busy === "prune"} onClick={pruneCrews}>
             {busy === "prune" && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Remove every runtime
           </Button>

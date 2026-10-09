@@ -330,9 +330,16 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const [preparingProjectInputs, setPreparingProjectInputs] = useState(false)
   const [sharedRestrictedChat,setSharedRestrictedChat] = useState(false)
   const [executionProfile, setExecutionProfile] = useState<"trusted" | "restricted" | "pending">("pending")
+  // Whether this session's mount-time profile probe has answered. A draft
+  // has no row yet, so the probe answers 404 and the profile stays "pending"
+  // until the first send creates the row (#2898). That answer is what lets
+  // the composer offer the first send — which still goes through
+  // ensureSessionForSend, so nothing is sent on a pending or denied profile.
+  const [profileProbeSettled, setProfileProbeSettled] = useState(false)
   useEffect(() => {
     executionProfileRef.current = "pending"
     setExecutionProfile("pending")
+    setProfileProbeSettled(false)
     setSharedRestrictedChat(false)
     if (!sessionId || !workspaceId) return
     const controller = new AbortController()
@@ -340,7 +347,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       if (!response.ok) return
       const profile = await response.json() as {mode:string;audience?:string}
       if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
-    }).catch(() => {})
+    }).catch(() => {}).finally(() => { if (!controller.signal.aborted) setProfileProbeSettled(true) })
     return () => controller.abort()
   }, [sessionId,workspaceId])
 
@@ -357,6 +364,39 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     onReplyCompleted: onAgentReplyCompleted,
     onOwnMessageSaved: handleOwnMessageSaved,
   })
+  // A send on a just-created row has to wait for the socket the trusted
+  // profile turns on: realtime stays off while the profile is pending, so the
+  // first send of a draft starts from a closed socket (#2898). Waiters resolve
+  // true once connected and false if the connection fails or the session
+  // changes underneath them.
+  const connectionStatusRef = useRef(connectionStatus)
+  connectionStatusRef.current = connectionStatus
+  const currentSessionRef = useRef(sessionId)
+  currentSessionRef.current = sessionId
+  const connectionWaitersRef = useRef<{ session: string; resolve: (ok: boolean) => void }[]>([])
+  useEffect(() => {
+    const waiters = connectionWaitersRef.current
+    if (!waiters.length) return
+    const failed = connectionStatus === "error" || connectionStatus === "unavailable"
+    if (connectionStatus !== "connected" && !failed) return
+    connectionWaitersRef.current = []
+    for (const w of waiters) w.resolve(!failed && w.session === currentSessionRef.current)
+  }, [connectionStatus])
+  useEffect(() => () => {
+    const waiters = connectionWaitersRef.current
+    connectionWaitersRef.current = []
+    for (const w of waiters) w.resolve(false)
+  }, [sessionId])
+  const waitForConnection = useCallback((session: string, timeoutMs = 15000): Promise<boolean> => {
+    if (connectionStatusRef.current === "connected") return Promise.resolve(currentSessionRef.current === session)
+    return new Promise<boolean>((resolve) => {
+      let settled = false
+      const done = (ok: boolean) => { if (!settled) { settled = true; clearTimeout(timer); resolve(ok) } }
+      const timer = setTimeout(() => done(false), timeoutMs)
+      connectionWaitersRef.current.push({ session, resolve: done })
+    })
+  }, [])
+
   const projectInputScope = JSON.stringify([currentUserId, workspaceId, sessionId])
   const [projectInputSelection, setProjectInputSelection] = useState<{ scope: string; ids: string[] }>({ scope: "", ids: [] })
   const selectedProjectInputs = projectInputSelection.scope === projectInputScope ? projectInputSelection.ids : NO_PROJECT_INPUTS
@@ -643,23 +683,33 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
    *  (toastUploadFailure), and the send path leaves the draft in the box where
    *  the user can see it. */
   const ensureSessionForSend = useCallback(async (): Promise<boolean> => {
+    const sid = sessionId
     let ok = await ensureSession()
     if (ok) {
       try {
-        const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(sessionId)}/execution-profile?workspace_id=${encodeURIComponent(workspaceId ?? "")}`)
+        const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(sid)}/execution-profile?workspace_id=${encodeURIComponent(workspaceId ?? "")}`)
         if (!response.ok) ok = false
         else {
           const profile = await response.json() as {mode:string;audience?:string}
+          if (currentSessionRef.current !== sid) return false
           if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
           else ok = false
         }
       } catch {ok = false}
     }
+    // The user moved to another conversation while this one was being
+    // created: its message belongs to the conversation they left, whose
+    // composer keeps the draft. Nothing to say, nothing to send.
+    if (currentSessionRef.current !== sid) return false
+    // A trusted send goes over the socket, which the resolved profile has only
+    // just switched on. Restricted sends are HTTP and report connected.
+    if (ok && executionProfileRef.current === "trusted") ok = await waitForConnection(sid)
+    if (currentSessionRef.current !== sid) return false
     if (!ok) {
       toast.error("Couldn't start this conversation. Check your connection and try again.")
     }
     return ok
-  }, [ensureSession,sessionId,workspaceId])
+  }, [ensureSession,sessionId,workspaceId,waitForConnection])
 
   // #2121 — a suggestion/follow-up chip sends the instant it's clicked, and
   // on a draft session `ensureSessionForSend` awaits a real POST. `isStreaming`
@@ -672,6 +722,10 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   // `isStreaming` disable backwards) rather than latching or queuing. Set
   // synchronously before the await so the very next render reflects it.
   const [creatingSession, setCreatingSession] = useState(false)
+
+  // A draft whose profile probe has answered without a profile can still be
+  // sent: the send creates the row and resolves the profile first.
+  const draftSendable = executionProfile === "pending" && profileProbeSettled
 
   // Bumped on every locally-sent message; arms the pin-to-top spacer so the
   // just-sent question anchors at the viewport top while the reply streams
@@ -706,7 +760,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     if (!autoSendInitial || autoSentRef.current) return
     const text = (initialInput ?? "").trim()
     if (!text) return
-    if (connectionStatus !== "connected" || isStreaming) return
+    if ((connectionStatus !== "connected" && !draftSendable) || isStreaming) return
     autoSentRef.current = true
     void (async () => {
       // No row, no send — the server would refuse it anyway, and the handoff
@@ -717,7 +771,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       if (sendMessageWithPage(text) === false) { setAutoSendRejected(true); return }
       onSend?.(sessionId, text)
     })()
-  }, [autoSendInitial, initialInput, connectionStatus, isStreaming, ensureSessionForSend, sendMessageWithPage, onSend, sessionId])
+  }, [autoSendInitial, initialInput, connectionStatus, draftSendable, isStreaming, ensureSessionForSend, sendMessageWithPage, onSend, sessionId])
 
   const composerInitialInput = autoSendInitial && !autoSendRejected ? undefined : initialInput
   const pageContextChip = pageContextSlug && !pageContextRemoved ? (
@@ -1054,6 +1108,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           mentionMembers={mentionMembers}
           isStreaming={isStreaming}
           connectionStatus={connectionStatus}
+          draftSendable={draftSendable}
           stopGeneration={stopGeneration}
           ensureSession={ensureSessionForSend}
           sendMessage={sendMessageWithPage}
@@ -1180,6 +1235,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           variant="desktop"
           isStreaming={isStreaming}
           connectionStatus={connectionStatus}
+          draftSendable={draftSendable}
           stopGeneration={stopGeneration}
           ensureSession={ensureSessionForSend}
           sendMessage={sendMessageWithPage}

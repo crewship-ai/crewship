@@ -327,7 +327,13 @@ describe("Schedules", () => {
       return new Response("{}", { status: 404 })
     })
     show("schedules", "")
-    const box = await screen.findByLabelText("r2-backups")
+    // Unlike the demo tests above, this one waits on two real fetches in
+    // series — the plans Gate, then the settings the Where card reads — and
+    // then renders the whole editor. Under a loaded CI partition that ran
+    // past findBy's default 1 s and failed intermittently (#3037). Wait for
+    // each hop by its own milestone, with room for a slow runner.
+    expect(await screen.findByText(/No plan yet/, {}, { timeout: 5000 })).toBeInTheDocument()
+    const box = await screen.findByLabelText("r2-backups", {}, { timeout: 5000 })
     expect(box).not.toBeDisabled()
     expect(screen.queryByRole("button", { name: "add S3-compatible storage under Storage" })).toBeNull()
   })

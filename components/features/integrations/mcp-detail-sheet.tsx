@@ -108,13 +108,12 @@ export function MCPDetailSheet({
   const overCeiling = enabledCount > TOOL_CEILING_WARNING
 
   const toggleTool = async (tool: ToolBinding) => {
-    // Advisory, not access control: on the self-hosted/legacy MCP path this
-    // flag only decides whether the tool's name is listed in the agent's
-    // [CONNECTED INTEGRATIONS] prompt block. The sidecar gateway that
-    // dispatches tool calls (internal/sidecar/mcp_gateway.go CallTool) does
-    // no per-tool check, so an agent can still call a "disabled" tool
-    // directly. Composio-routed integrations enforce their own
-    // allowed_tools scope separately — see #2168.
+    // On the self-hosted/legacy MCP path a disabled tool leaves the agent's
+    // [CONNECTED INTEGRATIONS] prompt block and is refused by the crew
+    // sidecar's gateway (internal/sidecar/mcp_gateway.go CallTool) from its
+    // next start. An agent CLI that connects to the server directly is not
+    // gated per tool yet (#2178). Composio-routed integrations enforce their
+    // own allowed_tools scope separately.
     // Optimistic UI
     const next = !tool.enabled
     setTools((prev) => prev.map((t) => t.id === tool.id ? { ...t, enabled: next } : t))
@@ -244,8 +243,9 @@ export function MCPDetailSheet({
 
                 {totalCount > 0 && (
                   <p className="text-[11px] text-muted-foreground">
-                    Advisory only — this controls what the agent is told it can
-                    use, not what it is allowed to call.
+                    Off hides a tool from the agent and the crew&apos;s MCP gateway
+                    refuses it. An agent CLI connected to this server directly can
+                    still call it.
                   </p>
                 )}
 

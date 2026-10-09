@@ -28,6 +28,8 @@ import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import { useTick } from "@/hooks/use-tick"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
+import { RUN_TONE_DOT, runStatusLabel, runTone } from "@/lib/activity-run"
+import { roleAtLeast } from "@/lib/routine-governance"
 
 // ActivityBell — the global "what's running now" surface in the
 // toolbar. The single home for live routine visibility (the header
@@ -58,7 +60,7 @@ import { cn } from "@/lib/utils"
 // had all three. Same panel now, same rows, same footer.
 export function ActivityBell() {
   const router = useRouter()
-  const { workspaceId } = useWorkspace()
+  const { workspaceId, role } = useWorkspace()
   const [open, setOpen] = useState(false)
   const { runs: activeItems } = useActiveRuns(workspaceId)
   const {
@@ -108,6 +110,7 @@ export function ActivityBell() {
           awaitingApproval={awaitingApproval}
           recentRuns={recentRuns}
           refresh={refresh}
+          canCancel={roleAtLeast(role, "ADMIN")}
           onNavigate={() => setOpen(false)}
           onOpenItem={(href) => {
             setOpen(false)
@@ -129,10 +132,12 @@ function ActivityDropdownBody({
   awaitingApproval,
   recentRuns,
   refresh,
+  canCancel,
   onNavigate,
   onOpenItem,
 }: {
   workspaceId: string | null
+  canCancel: boolean
   liveRuns: PipelineRun[]
   agentRuns: ActiveRunItem[]
   liveTotal: number
@@ -163,7 +168,7 @@ function ActivityDropdownBody({
         pill={
           awaitingApproval > 0 ? (
             <Pill tone="warn">
-              {awaitingApproval} awaiting approval
+              {awaitingApproval} waiting for you
             </Pill>
           ) : undefined
         }
@@ -189,6 +194,7 @@ function ActivityDropdownBody({
                     cancelling={cancellingRunId === run.id}
                     onCancel={() => cancelRun(run.id)}
                     onNavigate={onNavigate}
+                    canCancel={canCancel}
                   />
                 ))}
                 {visibleAgents.map((item) => (
@@ -213,7 +219,15 @@ function ActivityDropdownBody({
 
       <BarMenuFooter>
         <BarMenuFooterLink asChild onClick={onNavigate}>
-          <Link href={liveTotal > 0 ? "/activity?status=active" : "/activity"}>
+          <Link
+            href={
+              awaitingApproval > 0
+                ? "/activity?status=waiting"
+                : liveTotal > 0
+                  ? "/activity?status=active"
+                  : "/activity"
+            }
+          >
             View all activity →
           </Link>
         </BarMenuFooterLink>
@@ -255,15 +269,16 @@ function AgentRunRow({ item, onClick }: { item: ActiveRunItem; onClick: () => vo
 // `status · Xm ago · $cost` in mono on the right. Click jumps to the
 // run's trace.
 function RecentRunRow({ run, onClick }: { run: PipelineRun; onClick: () => void }) {
-  const failed = run.status === "failed"
+  // The rail's words and colours (#2988): a cancelled or interrupted run is
+  // Stopped-grey, not finished-green.
+  const tone = runTone(run.status)
+  const failed = tone === "failed"
   return (
     <BarMenuRow
       onClick={onClick}
       leading={
         <span className="flex h-6 w-6 items-center justify-center">
-          <span
-            className={cn("h-2 w-2 rounded-full", failed ? "bg-destructive" : "bg-success")}
-          />
+          <span className={cn("h-2 w-2 rounded-full", RUN_TONE_DOT[tone])} />
         </span>
       }
       title={run.pipeline_name || run.pipeline_slug}
@@ -277,7 +292,7 @@ function RecentRunRow({ run, onClick }: { run: PipelineRun; onClick: () => void 
             failed ? "text-destructive" : "text-muted-foreground-soft",
           )}
         >
-          {run.status} · {relTime(run.ended_at || run.started_at)}
+          {runStatusLabel(run.status)} · {relTime(run.ended_at || run.started_at)}
           {run.cost_usd > 0 ? ` · ${formatStepCost(run.cost_usd)}` : ""}
         </span>
       }

@@ -96,6 +96,15 @@ type workItemView struct {
 	CreatedAt  string  `json:"created_at"`
 	UpdatedAt  string  `json:"updated_at"`
 	TerminalAt *string `json:"terminal_at"`
+
+	// Who, where and what (#3012): the agent and crew by name, null once
+	// deleted; the event a webhook delivery carried; the attempts' wall
+	// clock and summed cost, null until an attempt recorded them.
+	Agent      *ledgerAgentRef `json:"agent"`
+	Crew       *ledgerCrewRef  `json:"crew"`
+	EventType  string          `json:"event_type"`
+	DurationMS *int64          `json:"duration_ms"`
+	CostUSD    *float64        `json:"cost_usd"`
 }
 
 // workAttemptView is one attempt. run_id is the same namespace as
@@ -281,6 +290,21 @@ func (h *WorkItemsHandler) List(w http.ResponseWriter, r *http.Request) {
 		query += ` AND agent_id=?`
 		args = append(args, agentID)
 	}
+	// since= keeps to work created in a window (the Work queue's 24 h / 7 d);
+	// open=true to work not yet finished, however old. Pages are oldest
+	// first, so without them a busy ledger's first page is its oldest work.
+	since, ok := ledgerSince(r.URL.Query().Get("since"))
+	if !ok {
+		replyError(w, http.StatusBadRequest, "since must be an RFC 3339 time, e.g. 2026-10-08T00:00:00Z")
+		return
+	}
+	if since != "" {
+		query += ` AND created_at>=?`
+		args = append(args, since)
+	}
+	if r.URL.Query().Get("open") == "true" {
+		query += ` AND state NOT IN ('succeeded','failed','expired','cancelled')`
+	}
 	query += ` ORDER BY id LIMIT 101`
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
@@ -306,6 +330,10 @@ func (h *WorkItemsHandler) List(w http.ResponseWriter, r *http.Request) {
 	if len(items) > 100 {
 		items = items[:100]
 		next = &items[99].ID
+	}
+	if err := attachWorkContext(r.Context(), h.db, WorkspaceIDFromContext(r.Context()), items); err != nil {
+		replyInternalError(w, h.logger, "name work items", err)
+		return
 	}
 	writeJSON(w, http.StatusOK, workItemPage{Items: items, NextCursor: next})
 }
@@ -341,7 +369,12 @@ func (h *WorkItemsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "read work history", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, workItemDetailView{workItemView: item, Attempts: attempts, Events: events})
+	one := []workItemView{item}
+	if err := attachWorkContext(r.Context(), h.db, WorkspaceIDFromContext(r.Context()), one); err != nil {
+		replyInternalError(w, h.logger, "name work item", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, workItemDetailView{workItemView: one[0], Attempts: attempts, Events: events})
 }
 
 // readItem fetches one item and fences it to the workspace. A work item in
@@ -616,6 +649,10 @@ func (h *WorkItemsHandler) Replay(w http.ResponseWriter, r *http.Request) {
 			fmt.Errorf("replay %s committed but could not be read back: %v", receipt.WorkID, err))
 		return
 	}
+	if err := nameWorkItem(r.Context(), h.db, ws, &created); err != nil {
+		replyInternalError(w, h.logger, "name replayed work item", err)
+		return
+	}
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -743,6 +780,10 @@ func (h *WorkItemsHandler) Resolve(w http.ResponseWriter, r *http.Request) {
 	resolved, found, err := h.readItem(r, ws, item.ID)
 	if err != nil || !found {
 		replyInternalError(w, h.logger, "read resolved work", fmt.Errorf("resolution committed but readback failed: %v", err))
+		return
+	}
+	if err := nameWorkItem(r.Context(), h.db, ws, &resolved); err != nil {
+		replyInternalError(w, h.logger, "name resolved work item", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, resolved)

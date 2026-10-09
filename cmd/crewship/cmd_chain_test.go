@@ -581,3 +581,40 @@ func chainLineFor(t *testing.T, lines []string, ref string) string {
 	t.Fatalf("no line mentions %q; lines = %v", ref, lines)
 	return ""
 }
+
+// #2981: the STATUS column said "ok" for anything that was not failed — a
+// chain parked on an approval, one still running, and one somebody cancelled
+// all read as fine. The word follows the web rail's precedence, and a stopped
+// branch never hides a live one.
+func TestChainStatusWord_FollowsTheRailPrecedence(t *testing.T) {
+	cases := []struct {
+		name string
+		c    chainSummary
+		want string
+	}{
+		{"finished", chainSummary{CompletedRuns: 2}, "ok"},
+		{"waiting beats everything", chainSummary{WaitingRuns: 1, FailedRuns: 1, Failed: true}, "waiting"},
+		{"failed beats running", chainSummary{FailedRuns: 1, Failed: true, RunningRuns: 1}, "FAILED"},
+		{"running beats stopped", chainSummary{RunningRuns: 1, CancelledRuns: 1}, "running"},
+		{"cancelled", chainSummary{CancelledRuns: 1, CompletedRuns: 1}, "cancelled"},
+		{"interrupted", chainSummary{InterruptedRuns: 1}, "interrupted"},
+		{"both stops", chainSummary{InterruptedRuns: 1, CancelledRuns: 1}, "stopped"},
+	}
+	for _, tc := range cases {
+		if got := chainStatusWord(tc.c); got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// #2989: agent work outside routines has no routine; its row names the task.
+func TestRenderChainList_AgentWorkNamesItsTask(t *testing.T) {
+	l := chainList{Chains: []chainSummary{{
+		Origin: "asg_1", Kind: "assignment", Task: "Draft the reply to Ava", StartedByKind: "agent", StartedBy: "Lead",
+		Runs: 2, RunningRuns: 1, FirstActivity: "2026-08-07T12:00:00Z", LastActivity: "2026-08-07T12:01:00Z",
+	}}, Count: 1, Limit: 50}
+	out := strings.Join(renderChainList(l), "\n")
+	if !strings.Contains(out, "work: Draft the reply to Ava") || !strings.Contains(out, "running") {
+		t.Errorf("agent work row does not name its task and state:\n%s", out)
+	}
+}

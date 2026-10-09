@@ -23,6 +23,8 @@ import (
 // stub in tests) so the handler can be wired and tested before the
 // real orchestrator integration lands.
 type PipelineHandler struct {
+	// queuedKeys serialises same-key manual starts around capacity queuing.
+	queuedKeys         queuedKeyLocks
 	restrictedWorkflow func() *restrictedworkflow.Service
 	storagePath        string
 	db                 *sql.DB

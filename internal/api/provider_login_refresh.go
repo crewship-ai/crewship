@@ -39,6 +39,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/jitter"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/providerlogin"
@@ -111,9 +112,14 @@ func (r *ProviderLoginRefresher) refresherFor(provider string) (providerlogin.To
 // (LLM proxy off). With the monitor present its tick calls RefreshDue
 // instead, so the two never run side by side.
 func (r *ProviderLoginRefresher) Run(ctx context.Context) {
+	r.RefreshDue(ctx)
+	// The first refresh stays immediate; only the ticker's phase is spread
+	// from the other sweepers started at boot (#1891).
+	if !jitter.Startup(ctx, r.interval) {
+		return
+	}
 	t := time.NewTicker(r.interval)
 	defer t.Stop()
-	r.RefreshDue(ctx)
 	for {
 		select {
 		case <-ctx.Done():
