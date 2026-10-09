@@ -22,7 +22,8 @@ import { useUserPreference } from "@/hooks/use-user-preference"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
 import { SkillPage, isSkillTab, type SkillTab } from "./skill-page"
-import { AssignDialog, NewSkillDialog, type AssignTarget } from "./skills-dialogs"
+import { AssignDialog, type AssignTarget } from "./skills-dialogs"
+import { SkillEditor, type SkillEditorTarget } from "./skill-editor"
 import { SkillsExplorer } from "./skills-explorer"
 import { SkillsOverview } from "./skills-overview"
 import {
@@ -89,7 +90,8 @@ export function SkillsLayout() {
   const layout = layoutPref === "list" ? "list" : "grid"
 
   const [assignTarget, setAssignTarget] = useState<AssignTarget | null>(null)
-  const [newOpen, setNewOpen] = useState(false)
+  const [editor, setEditor] = useState<SkillEditorTarget | null>(null)
+  const takenSlugs = useMemo(() => new Set(skills.map((x) => x.slug)), [skills])
 
   const closeSkill = () => {
     setTabParam(null, { replace: true })
@@ -180,7 +182,7 @@ export function SkillsLayout() {
                   </span>
                 }
               />
-              <SubBarPrimary icon={Sparkles} onClick={() => setNewOpen(true)} title="Write a new skill with Claude">
+              <SubBarPrimary icon={Sparkles} onClick={() => setEditor({ kind: "new" })} title="Describe a skill for Claude to write, or write one yourself">
                 New skill
               </SubBarPrimary>
             </>
@@ -270,6 +272,7 @@ export function SkillsLayout() {
                       onTab={(t) => setTabParam(t === "overview" ? null : t, { replace: true })}
                       onAssign={() => selectedRow && setAssignTarget({ mode: "skill", skill: selectedRow })}
                       onDeleted={closeSkill}
+                      onEditor={setEditor}
                     />
                   )}
                 </div>
@@ -323,13 +326,15 @@ export function SkillsLayout() {
             crews={crews}
             onClose={() => setAssignTarget(null)}
           />
-          <NewSkillDialog
-            open={newOpen}
+          <SkillEditor
+            target={editor}
             workspaceId={workspaceId}
-            onClose={() => setNewOpen(false)}
-            onCreated={(id) => {
-              setNewOpen(false)
-              openSkill(id)
+            takenSlugs={takenSlugs}
+            onClose={() => setEditor(null)}
+            onSaved={(id) => {
+              const wasEdit = editor?.kind === "edit"
+              setEditor(null)
+              if (!wasEdit) openSkill(id)
             }}
           />
         </>

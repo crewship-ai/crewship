@@ -189,7 +189,7 @@ function SkillsTable({ rows, onOpen }: { rows: SkillRow[]; onOpen: (id: string) 
               >
                 <td className="whitespace-nowrap px-4 py-2">
                   <span className="inline-flex items-center gap-2">
-                    <SkillTile category={s.category} size="sm" />
+                    <SkillTile category={s.category} icon={s.icon} size="sm" />
                     <span className="font-medium">{skillName(s)}</span>
                   </span>
                 </td>

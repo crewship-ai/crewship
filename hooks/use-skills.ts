@@ -161,7 +161,33 @@ export function useGenerateSkill(workspaceId: string | null | undefined) {
         body: JSON.stringify({ slug, prompt }),
       })
       if (!res.ok) throw new Error(await skillsErrorMessage(res, "Could not write the skill"))
-      return (await res.json()) as { skill_id: string; slug: string }
+      return (await res.json()) as { skill_id: string; slug: string; content: string }
+    },
+    onSuccess: () => {
+      if (workspaceId) void queryClient.invalidateQueries({ queryKey: skillsKeys.all(workspaceId) })
+    },
+  })
+}
+
+/**
+ * Save a SKILL.md into the catalog (POST …/skills/import with `content`).
+ *
+ * The importer upserts by the frontmatter `name`, so the same call creates a
+ * skill, edits one the workspace imported or generated, and sets the icon and
+ * domain the generator does not. It refuses to overwrite a built-in skill and
+ * re-runs the import scan on every save.
+ */
+export function useImportSkill(workspaceId: string | null | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ content }: { content: string }) => {
+      const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId!)}/skills/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      })
+      if (!res.ok) throw new Error(await skillsErrorMessage(res, "Could not save the skill"))
+      return (await res.json()) as { skill_id: string; slug: string; name: string; created: boolean }
     },
     onSuccess: () => {
       if (workspaceId) void queryClient.invalidateQueries({ queryKey: skillsKeys.all(workspaceId) })

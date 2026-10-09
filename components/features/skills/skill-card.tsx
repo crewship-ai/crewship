@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 import {
   agentsMissingCredentials,
   domainMeta,
+  skillIcon,
   skillName,
   skillTrust,
   sourceLabel,
@@ -22,10 +23,19 @@ import {
 // StatusPill), what it does, what it needs, who has it and whether it is
 // used. Severity lives only in the pill; domains share one colour and differ by icon.
 
-/** The domain's icon in a Harbor icon tile. Every domain wears the same tint. */
-export function SkillTile({ category, size = "md", className }: { category: string; size?: "sm" | "md" | "lg"; className?: string }) {
-  const d = domainMeta(category)
-  const Icon = d.icon
+/** The skill's own icon (its domain's when it has none) in a Harbor icon tile. Every skill wears the same tint. */
+export function SkillTile({
+  category,
+  icon,
+  size = "md",
+  className,
+}: {
+  category: string
+  icon?: string | null
+  size?: "sm" | "md" | "lg"
+  className?: string
+}) {
+  const Icon = skillIcon({ icon, category })
   const box = size === "lg" ? "h-11 w-11 rounded-xl" : size === "sm" ? "h-6 w-6 rounded-md" : "h-8 w-8 rounded-lg"
   const glyph = size === "lg" ? "h-5 w-5" : size === "sm" ? "h-3 w-3" : "h-4 w-4"
   return (
@@ -80,7 +90,7 @@ export function SkillCard({ skill, index = 0, onOpen }: { skill: SkillRow; index
       className="group card-interactive card-hover flex min-w-0 flex-col gap-2.5 border border-border bg-card px-4 py-3.5 text-left"
     >
       <div className="flex min-w-0 items-start gap-2.5">
-        <SkillTile category={skill.category} className="transition-transform duration-300 group-hover:-rotate-[4deg] group-hover:scale-[1.08]" />
+        <SkillTile category={skill.category} icon={skill.icon} className="transition-transform duration-300 group-hover:-rotate-[4deg] group-hover:scale-[1.08]" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-body font-semibold leading-[18px] text-foreground">{skillName(skill)}</div>
           <div className="truncate font-mono text-micro text-muted-foreground-soft">

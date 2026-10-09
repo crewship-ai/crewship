@@ -15,6 +15,7 @@ import {
   Workflow,
   type LucideIcon,
 } from "lucide-react"
+import { CREW_ICONS } from "@/lib/crew-icons"
 import type { StatusTone } from "@/lib/format-status"
 
 // The Skills page's data model and every rule that decides what a row says:
@@ -58,6 +59,8 @@ export interface SkillRow {
   category: string
   source: string
   icon: string | null
+  /** JSON array of strings, as the skills row stores it. */
+  tags?: string | null
   vendor?: string | null
   homepage?: string | null
   spdx_license?: string | null
@@ -141,6 +144,42 @@ export function domainMeta(category: string | null | undefined): DomainMeta {
 
 /** Domains in display order, for the explorer. */
 export const DOMAIN_ORDER = Object.keys(DOMAIN_META)
+
+// A skill's own icon is a lucide name from its frontmatter. The app draws
+// icons from one catalog (lib/crew-icons, the crew and project pickers), so a
+// few lucide names the bundled skills use are mapped onto catalog entries.
+const ICON_ALIASES: Record<string, string> = {
+  "code-2": "code",
+  "code-xml": "code",
+  "flask-conical": "flask",
+  "git-pull-request": "code",
+  paintbrush: "brush",
+  "swatch-book": "palette",
+}
+const ICON_BY_NAME = new Map(CREW_ICONS.map((d) => [d.name, d]))
+
+/** The catalog name for a skill's stored icon, or null when it has none we can draw. */
+export function skillIconName(icon: string | null | undefined): string | null {
+  if (!icon) return null
+  const name = ICON_ALIASES[icon] ?? icon
+  return ICON_BY_NAME.has(name) ? name : null
+}
+
+/** The skill's own icon when it has one, otherwise its domain's. */
+export function skillIcon(s: { icon?: string | null; category?: string | null }): LucideIcon {
+  const name = skillIconName(s.icon)
+  return name ? ICON_BY_NAME.get(name)!.icon : domainMeta(s.category).icon
+}
+
+/** Tags decoded from the row's JSON column; never throws. */
+export function skillTags(s: { tags?: string | null }): string[] {
+  try {
+    const v = JSON.parse(s.tags ?? "[]")
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []
+  } catch {
+    return []
+  }
+}
 
 const SOURCE_LABEL: Record<string, string> = {
   BUNDLED: "Built-in",

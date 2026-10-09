@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { KeyRound, Sparkles, Users } from "lucide-react"
+import { KeyRound, Users } from "lucide-react"
 
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Button } from "@/components/ui/button"
@@ -16,15 +16,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { StatusPill } from "@/components/ui/status-pill"
-import { Textarea } from "@/components/ui/textarea"
-import { useGenerateSkill, useSetSkillAssignment } from "@/hooks/use-skills"
+import { useSetSkillAssignment } from "@/hooks/use-skills"
 import { SkillTile } from "./skill-card"
 import { skillName, skillTrust, type SkillRow, type SkillsAgent, type SkillsCrew } from "./skills-model"
 
-// The Skills page's two pickers and its New skill form (#3033). Both pickers
+// The Skills page's two pickers (#3033). Both pickers
 // edit a draft and apply the difference on Apply: a list of checkboxes is a
 // form, unlike the Agents tab, whose switches save one at a time.
 
@@ -185,7 +182,7 @@ export function AssignDialog({
                   return (
                     <label key={s.id} className="row-hover flex min-h-11 cursor-pointer items-center gap-2.5 border-b border-border/50 px-5 py-1.5 text-control last:border-0">
                       <Checkbox checked={selected.has(s.id)} onCheckedChange={() => toggle(s.id)} />
-                      <SkillTile category={s.category} size="sm" />
+                      <SkillTile category={s.category} icon={s.icon} size="sm" />
                       <span className="min-w-0 flex-1 truncate">{skillName(s)}</span>
                       <StatusPill tone={t.tone} label={t.label} />
                     </label>
@@ -201,78 +198,6 @@ export function AssignDialog({
           </Button>
           <Button onClick={apply} disabled={busy || (added.length === 0 && removed.length === 0)}>
             {busy ? "Applying…" : "Apply"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-export function NewSkillDialog({
-  open,
-  workspaceId,
-  onClose,
-  onCreated,
-}: {
-  open: boolean
-  workspaceId: string
-  onClose: () => void
-  onCreated: (skillId: string) => void
-}) {
-  const generate = useGenerateSkill(workspaceId)
-  const [slug, setSlug] = useState("")
-  const [prompt, setPrompt] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const ready = slug.trim() !== "" && prompt.trim().length >= 20
-
-  const submit = async () => {
-    setError(null)
-    try {
-      const res = await generate.mutateAsync({ slug: slug.trim(), prompt: prompt.trim() })
-      toast.success(`${res.slug} written. Give it to an agent to use it.`)
-      setSlug("")
-      setPrompt("")
-      onCreated(res.skill_id)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not write the skill")
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && !generate.isPending && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>New skill</DialogTitle>
-          <DialogDescription>
-            Describe what agents should be able to do. Claude writes the SKILL.md with the workspace&apos;s Anthropic key; the import scan checks it before it
-            lands in the catalog.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="new-skill-slug">Name</Label>
-            <Input id="new-skill-slug" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="invoice-matcher" autoComplete="off" />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="new-skill-prompt">What it should do and when to use it</Label>
-            <Textarea
-              id="new-skill-prompt"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={5}
-              placeholder="Match incoming payments to open invoices by amount, date window and reference. Use when a payment arrives without an invoice number."
-            />
-          </div>
-          {error && <p className="rounded-md border border-destructive/30 bg-chip-danger-bg px-3 py-2 text-label text-chip-danger-fg">{error}</p>}
-        </div>
-        <DialogFooter className="items-center gap-2">
-          {!ready && <span className="mr-auto text-label text-muted-foreground">Give it a name and at least a sentence.</span>}
-          <Button variant="ghost" onClick={onClose} disabled={generate.isPending}>
-            Cancel
-          </Button>
-          <Button onClick={submit} disabled={!ready || generate.isPending}>
-            <Sparkles className="h-3.5 w-3.5" />
-            {generate.isPending ? "Writing…" : "Write skill"}
           </Button>
         </DialogFooter>
       </DialogContent>
