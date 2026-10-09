@@ -405,7 +405,7 @@ start agent container". The full raw cause is in the run journal / server logs.
 <Accordion title='An agent's model call fails with "LLM admission unavailable" or "refused by host policy"'>
 
 Before a crew's sidecar forwards a metered model call, it asks the server
-whether the call may go out (`POST /api/v1/internal/cost/admit`). If the server
+whether the call may go out, through its internal admission endpoint. If the server
 does not say yes, the call is not sent. The error the agent sees says why:
 
 | Status | Message contains | Meaning | Fix |
