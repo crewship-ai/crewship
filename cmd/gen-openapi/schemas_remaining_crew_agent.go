@@ -102,7 +102,12 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("PATCH", "/api/v1/crews/{crewId}/missions/{missionId}", "RemainingCrewMissionUpdatedV1", object(map[string]any{"id": str(), "title": str(), "description": str(), "status": str(), "tasks": array(anyObject()), "created_at": str(), "updated_at": str()}))
 	add("PUT", "/api/v1/crews/{crewId}/persona", "RemainingCrewPersonaUpdatedV1", ref("CrewPersonaResponseV1"))
 	add("PUT", "/api/v1/crews/{crewId}/policy", "RemainingCrewPolicyUpdatedV1", ref("CrewPolicyResponseV1"))
-	tool := object(map[string]any{"binary": str(), "version": str(), "path": str(), "status": str()})
+	launchArtifact := object(map[string]any{"path": str(), "sha256": str(), "format": str()})
+	launchArtifact["required"] = []string{"path", "sha256", "format"}
+	tool := object(map[string]any{
+		"binary": str(), "version": str(), "path": str(), "status": str(),
+		"managed_path": str(), "managed_version": str(), "launch_artifact": launchArtifact,
+	})
 	tool["required"] = []string{"binary", "status"}
 	probe := object(map[string]any{"binary": str(), "status": str()})
 	probe["required"] = []string{"binary", "status"}
@@ -117,12 +122,47 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	requestedTools["nullable"] = true
 	toolchain := object(map[string]any{"requested": requestedTools, "built": inventory})
 	toolchain["required"] = []string{"requested", "built"}
-	add("GET", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionStatusV1", object(map[string]any{"crew_id": str(), "status": str(), "phase": str(), "message": str(), "updated_at": str(), "toolchain": toolchain}))
+	nullableString := func() map[string]any { schema := str(); schema["nullable"] = true; return schema }
+	feature := object(map[string]any{"ref": str(), "id": str(), "version": str(), "digest": str(), "pinned": boolean()})
+	feature["required"] = []string{"ref", "id", "pinned"}
+	features := array(feature)
+	features["nullable"] = true // Stored JSON null is decoded to a nil slice.
+	provisionStatus := object(map[string]any{
+		"devcontainer_config": str(), "devcontainer_config_defaulted": boolean(),
+		"cached_image": nullableString(), "config_hash": nullableString(),
+		"toolchain": toolchain, "resolved_features": features,
+		"agents_pending_restart": integer(), "status": str(),
+		"step": integer(), "total": integer(), "message": str(),
+		"steps": array(str()), "log_tail": array(str()),
+		"started_at": str(), "completed_at": str(), "error": str(),
+	})
+	// ProvisionStatus builds a map: provenance and job progress are conditional,
+	// while these base keys are written on every successful response.
+	provisionStatus["required"] = []string{"devcontainer_config", "devcontainer_config_defaulted", "cached_image", "config_hash", "toolchain", "agents_pending_restart", "status"}
+	add("GET", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionStatusV1", provisionStatus)
 	revision := object(map[string]any{"id": str(), "definition_hash": str(), "build_hash": str(), "image_id": str(), "toolchain": inventory, "created_at": str()})
 	revision["required"] = []string{"id", "definition_hash", "build_hash", "image_id", "toolchain", "created_at"}
 	add("GET", "/api/v1/crews/{crewId}/provision/revisions", "EnvironmentRevisionHistoryV1", object(map[string]any{"revisions": array(revision), "limit": integer()}))
-	addAction("POST", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionTriggeredV1")
-	addAction("POST", "/api/v1/crews/{crewId}/rebuild", "RemainingCrewRebuildTriggeredV1")
+	triggered := object(map[string]any{"status": str(), "message": str()})
+	triggered["required"] = []string{"status", "message"}
+	problem := problemSchema()
+	problem["properties"].(map[string]any)["instance"] = str()
+	problem["properties"].(map[string]any)["job_status"] = str()
+	for path, name := range map[string]string{
+		"/api/v1/crews/{crewId}/provision": "RemainingCrewProvisionTriggeredV1",
+		"/api/v1/crews/{crewId}/rebuild":   "RemainingCrewRebuildTriggeredV1",
+	} {
+		add("POST", path, name, triggered)
+		route := routes["POST "+path]
+		route.SuccessStatuses = []string{"202"}
+		// Middleware/role guards use {error}; admitted requests use Problem
+		// Details, with job_status on conflicts. Both are application/json.
+		route.ErrorMedia = []string{"application/json"}
+		// Keep the union inclusive: both envelopes permit extension fields,
+		// so an extended payload can legitimately satisfy both branches.
+		route.ErrorResponse = map[string]any{"anyOf": []any{errorSchema(), problem}}
+		routes["POST "+path] = route
+	}
 	add("POST", "/api/v1/crews/{crewId}/restart-agents", "RemainingCrewAgentsRestartedV1", object(map[string]any{"restarted": integer(), "runtime_removed": boolean()}))
 	// #1845 crew image freshness. Given real shapes rather than the shared
 	// `action` envelope, because both answers are the whole point of the

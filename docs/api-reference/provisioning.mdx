@@ -189,7 +189,7 @@ GET /api/v1/crews/{crewId}/provision
 | `cached_image` | always | The currently selected image. On Docker this is the immutable local image ID (`sha256:…`) of the last successful build — the `crewship-cache:*` tag is only a cache lookup alias. Native build providers report the image tag. Null when nothing is built. |
 | `config_hash` | always | SHA-256 over (base image, devcontainer, mise, generated-build fingerprint, required adapter CLIs, provisioner schema version) used as the cache key — a newly required adapter CLI changes it, an agent on an already-covered adapter does not. |
 | `toolchain` | always | `{requested, built}`: the tool selectors the current config and the crew's live adapters imply, kept separate from the inventory/qualification evidence bound to the selected built image. `built` is null until a build with recorded requirements is selected. |
-| `resolved_features` | when provenance was recorded | Feature provenance records for the last build: `ref`, `id` and `pinned` are always present; `version` and `digest` are omitted when unknown. The key itself is **absent** — not `[]`, not `null` — when the crew predates provenance recording (#1779). |
+| `resolved_features` | when provenance was recorded | Feature provenance records for the last build: `ref`, `id` and `pinned` are always present; `version` and `digest` are omitted when unknown. The key itself is **absent** — not `[]`, not `null` — when the crew predates provenance recording (#1779), and invalid stored provenance JSON is also omitted. Valid stored `[]` and `null` remain an empty array and JSON null respectively. |
 | `agents_pending_restart` | always | Count of crew agents whose live container is on a stale image. |
 | `step` / `total` | active job | Numeric progress (e.g. `3 / 6`). The UI's `CrewProvisioningCard` renders a checklist from this pair. |
 | `message` | active job | Free-form short message for the current step. |
@@ -243,7 +243,7 @@ which provisions first if the crew has no image and then starts it.
 }
 ```
 
-**Errors** (RFC 7807 Problem Details on every 4xx/5xx — `type`, `title`, `status`, `detail`, `instance`):
+**Errors:** provisioning admission failures use RFC 7807 Problem Details (`type`, `title`, `status`, `detail`, `instance`) as `application/json`. Authentication, workspace and role guards use `{ "error": "…" }`; rebuild also uses that envelope for unexpected enqueue failures.
 
 | Status | Condition |
 |---|---|
@@ -261,7 +261,7 @@ which provisions first if the crew has no image and then starts it.
 POST /api/v1/crews/{crewId}/rebuild
 ```
 
-**Auth:** Authenticated caller with the `create` role action. **Request:** `crewId` path parameter; no body. **Response:** the same JSON shape as the trigger endpoint. **Statuses:** `202 Accepted`; `403`, `404`, `409`, `429`, `500`, or `503` when the corresponding provisioning condition applies.
+**Auth:** Authenticated caller with the `create` role action. **Request:** `crewId` path parameter; no body. **Response:** the same JSON shape as the trigger endpoint. **Statuses:** `202 Accepted`; `400`, `401`, `403`, `404`, `409`, `429`, `500`, or `503` when the corresponding provisioning or middleware condition applies.
 
 Triggers a fresh build that bypasses the provisioned-image cache and the installation-layer caches, so floating tool selectors can resolve newer versions. The previously selected image stays in place until the new build publishes: a failed or superseded rebuild leaves the previous image and its requirements selected, and the crew remains startable throughout. Use when upstream features publish breaking updates under the same tag.
 
