@@ -18,6 +18,8 @@ import { CrewMCPConfig } from "@/components/features/crews/crew-mcp-config"
 import { CrewEscalations } from "@/components/features/crews/crew-escalations"
 import { CrewPolicyControls } from "@/components/features/crews/crew-policy-controls"
 import { AVATAR_STYLES } from "@/lib/agent-avatar"
+import { backfillAgentAvatars } from "@/lib/agent-avatar-persist"
+import { AvatarBackfillButton } from "@/components/features/crews/avatar-backfill-button"
 
 import { Collapsible } from "../crew-canvas-banner"
 import { CanvasRow as Row } from "../canvas-base"
@@ -133,7 +135,14 @@ export function SettingsTab({
             <div className="flex items-center gap-2 flex-wrap">
               <EditableField
                 value={crew.avatar_style ?? "bottts-neutral"}
-                onSave={(v) => patch({ avatar_style: v })}
+                onSave={async (v) => {
+                  await patch({ avatar_style: v })
+                  // The server drops the renders of agents that inherit the
+                  // crew's style; store the new faces now, as part of this
+                  // edit, rather than leaving them to whoever looks next
+                  // (#2876). Per-agent outcomes are not an error here.
+                  await backfillAgentAvatars(workspaceId, { crewId: crew.id }).catch(() => undefined)
+                }}
                 ariaLabel="Avatar style"
                 options={STYLE_OPTIONS}
                 format={(v) => STYLE_OPTIONS.find((o) => o.value === v)?.label ?? v}
@@ -155,6 +164,9 @@ export function SettingsTab({
                   >
                     Reset overrides
                   </button>
+                  {canEditRuntime && agentsForCrew.some((a) => !a.avatar_url) && (
+                    <AvatarBackfillButton workspaceId={workspaceId} crewId={crew.id} className="h-6 text-[10px]" />
+                  )}
                 </>
               )}
             </div>

@@ -18,6 +18,7 @@ import {
   sourceSupports,
   type AuditFilters,
 } from "./audit-filters"
+import { controlHeight } from "@/components/features/settings/shared"
 
 export interface AuditPerson {
   id: string
@@ -52,7 +53,7 @@ export function AuditToolbar({
         <TimeRangePicker filters={filters} onChange={onChange} />
         {supports.person && (
           <Select value={filters.userId || "__all"} onValueChange={(v) => onChange({ userId: v === "__all" ? "" : v })}>
-            <SelectTrigger aria-label="Person" className="h-8 w-[170px] text-xs">
+            <SelectTrigger aria-label="Person" className={cn(controlHeight, "w-[170px]")}>
               <SelectValue placeholder="Everyone" />
             </SelectTrigger>
             <SelectContent>
@@ -65,7 +66,7 @@ export function AuditToolbar({
         )}
         {supports.category && (
           <Select value={filters.category} onValueChange={(category) => onChange({ category })}>
-            <SelectTrigger aria-label="Type" className="h-8 w-[140px] text-xs">
+            <SelectTrigger aria-label="Type" className={cn(controlHeight, "w-[140px]")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -130,7 +131,7 @@ function AuditSearch({ value, onChange }: { value: string; onChange: (q: string)
         type="search"
         aria-label="Search the audit log"
         placeholder="Search action, type or person…"
-        className="h-8 pl-8 text-xs"
+        className={cn(controlHeight, "pl-8")}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
       />
@@ -197,11 +198,11 @@ function TimeRangePicker({ filters, onChange }: { filters: AuditFilters; onChang
           <div className="grid grid-cols-2 gap-2">
             <label className="space-y-1 text-micro text-muted-foreground">
               From
-              <Input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="h-8 text-xs" aria-label="From date" />
+              <Input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className={controlHeight} aria-label="From date" />
             </label>
             <label className="space-y-1 text-micro text-muted-foreground">
               To
-              <Input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="h-8 text-xs" aria-label="To date" />
+              <Input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className={controlHeight} aria-label="To date" />
             </label>
           </div>
           {invalid && <p className="text-micro text-destructive">The start is after the end.</p>}

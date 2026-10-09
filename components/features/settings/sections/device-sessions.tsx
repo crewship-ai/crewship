@@ -194,7 +194,7 @@ export function DeviceSessions({
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 px-2 text-[11px] text-destructive hover:text-destructive hover:bg-destructive/10"
+            className="h-6 px-2 text-label text-destructive hover:text-destructive hover:bg-destructive/10"
             onClick={() => setConfirmBulk(true)}
           >
             Sign out everywhere else
@@ -220,7 +220,7 @@ export function DeviceSessions({
                       <StatusPill tone="success" label="This device" />
                     )}
                   </span>
-                  <span className="block text-[11px] text-muted-foreground-soft mt-0.5">
+                  <span className="block text-label text-muted-foreground-soft mt-0.5">
                     {s.ip} · {timeAgo(s.last_used_at)} · signed in {formatShortDate(s.created_at)}
                     {s.is_current && currentExpiresIn ? ` · expires in ${currentExpiresIn}` : ""}
                   </span>
@@ -264,7 +264,7 @@ export function DeviceSessions({
       )}
 
       {others.length === 0 && (
-        <div className="px-4 pb-3 text-[11px] text-muted-foreground">
+        <div className="px-4 pb-3 text-label text-muted-foreground">
           You&rsquo;re not signed in anywhere else.
         </div>
       )}

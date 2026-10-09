@@ -16,6 +16,53 @@ import (
 // cancellation, and is never used as proof that a process has stopped.
 var ErrAgentStopped = errors.New("agent stopped by user")
 
+// AgentStopOutcome is the success half of StopAgentOutcome (#2879).
+type AgentStopOutcome string
+
+const (
+	// AgentStopStopped: at least one invocation existed and its absence is
+	// now confirmed.
+	AgentStopStopped AgentStopOutcome = "stopped"
+	// AgentStopAlreadyStopped: nothing was running, positively established
+	// (see StopAgentOutcome); the stop is idempotent.
+	AgentStopAlreadyStopped AgentStopOutcome = "already_stopped"
+)
+
+// The two refusal classes of StopAgentOutcome, so callers map refusals to
+// stable codes without matching messages. A refusal wraps ErrStopNotConfirmed
+// whenever any failure may hide a live process; only a refusal made purely of
+// unreadable runtime evidence is ErrRuntimeUnavailable alone. Check
+// ErrStopNotConfirmed first.
+var (
+	// ErrStopNotConfirmed: a process of this agent exists or may exist (a
+	// live run this process does not own, a legacy record without a runtime
+	// location, an unrecognised non-terminal record) and its absence could
+	// not be confirmed.
+	ErrStopNotConfirmed = errors.New("stop not confirmed")
+	// ErrRuntimeUnavailable: the evidence needed to decide could not be read
+	// at all — no state store, an unreadable run list, or a container runtime
+	// that does not answer inspection.
+	ErrRuntimeUnavailable = errors.New("runtime unavailable")
+)
+
+// Stable refusal codes for the stop routes, one per refusal class. The
+// daemon's POST /agents/{id}/stop sends them and the public route forwards
+// them unchanged, so CLI and web branch on these, never on sentences.
+const (
+	AgentStopCodeNotConfirmed       = "stop_not_confirmed"
+	AgentStopCodeRuntimeUnavailable = "runtime_unavailable"
+)
+
+// terminalRunStatus lists the agent_runs statuses that name a finished run.
+// Any other status, including one this build does not know, may be live.
+func terminalRunStatus(status string) bool {
+	switch status {
+	case "completed", "error", "failed", "cancelled", "stopped":
+		return true
+	}
+	return false
+}
+
 func (o *Orchestrator) agentStopRequested(runID string) bool {
 	v, ok := o.agentRuns.Load(runID)
 	if !ok {
@@ -85,11 +132,28 @@ func (o *Orchestrator) trackAgentRun(ctx context.Context, req *AgentRunRequest) 
 	}
 }
 
-// StopAgent stops current invocations and durable running records recovered
-// after a server restart. New submissions remain a separate admission decision. It waits
-// for both runtime absence and RunAgent settlement; an unresponsive provider
-// or creation that outlives the deadline is an error, not STOPPED.
+// StopAgent is StopAgentOutcome without the outcome: nil means the agent is
+// confirmed not running, either stopped now or already idle.
 func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
+	_, err := o.StopAgentOutcome(ctx, agentID)
+	return err
+}
+
+// StopAgentOutcome stops current invocations and durable running records
+// recovered after a server restart. New submissions remain a separate
+// admission decision. It waits for both runtime absence and RunAgent
+// settlement; an unresponsive provider or creation that outlives the deadline
+// is a refusal, not STOPPED.
+//
+// AgentStopAlreadyStopped is returned only when all of these hold (#2879):
+// this process owns no invocation of the agent (in-process ownership covers
+// the window before the durable running write); the agent_runs store exists
+// and lists without error; every record decodes or names another agent; and
+// none of this agent's records has a non-terminal status. A running record
+// is restart ownership: it is stopped at its persisted container/session
+// location and yields AgentStopStopped once the runtime confirms absence.
+// Every refusal wraps ErrStopNotConfirmed or ErrRuntimeUnavailable (see there).
+func (o *Orchestrator) StopAgentOutcome(ctx context.Context, agentID string) (AgentStopOutcome, error) {
 	var runs []*agentRunControl
 	o.agentRuns.Range(func(_, v any) bool {
 		c := v.(*agentRunControl)
@@ -120,18 +184,33 @@ func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
 	var errs []error
 	var recovered []RunState
 	var lateOwners []*agentRunControl
-	if o.state != nil {
+	if o.state == nil {
+		// Without durable ownership a run surviving a restart is invisible.
+		// Owned invocations are still stopped; idleness cannot be established.
+		if len(runs) == 0 {
+			errs = append(errs, fmt.Errorf("%w: no runtime ownership store", ErrRuntimeUnavailable))
+		}
+	} else {
 		states, err := o.state.List(ctx, "agent_runs")
 		if err != nil {
-			errs = append(errs, fmt.Errorf("inspect runtime ownership: %w", err))
+			errs = append(errs, fmt.Errorf("%w: inspect runtime ownership: %w", ErrRuntimeUnavailable, err))
 		}
 		for _, raw := range states {
 			var state RunState
 			if err := json.Unmarshal(raw, &state); err != nil {
-				errs = append(errs, fmt.Errorf("decode runtime ownership: %w", err))
+				// A corrupt record that still names another agent says
+				// nothing about this one.
+				if owner := RuntimeRecordAgent(raw); owner != "" && owner != agentID {
+					continue
+				}
+				errs = append(errs, fmt.Errorf("%w: decode runtime ownership: %w", ErrStopNotConfirmed, err))
 				continue
 			}
-			if state.AgentID != agentID || state.Status != "running" {
+			if state.AgentID != agentID || terminalRunStatus(state.Status) {
+				continue
+			}
+			if state.Status != "running" {
+				errs = append(errs, fmt.Errorf("%w: run %s has unrecognised status %q", ErrStopNotConfirmed, state.ID, state.Status))
 				continue
 			}
 			owned := false
@@ -168,6 +247,10 @@ func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
 		}
 		go func() { lateResults <- o.stopAgentInvocation(ctx, c, creating) }()
 	}
+	if len(recovered) > 0 && o.container == nil {
+		errs = append(errs, fmt.Errorf("%w: no container provider to stop %d recovered run(s)", ErrRuntimeUnavailable, len(recovered)))
+		recovered = nil
+	}
 	recoveredResults := make(chan error, len(recovered))
 	for _, state := range recovered {
 		go func() { recoveredResults <- o.stopRecoveredAgentRun(ctx, state) }()
@@ -188,10 +271,29 @@ func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
 			errs = append(errs, err)
 		}
 	}
-	if len(runs) == 0 && len(lateOwners) == 0 && len(recovered) == 0 && len(errs) == 0 {
-		return fmt.Errorf("agent has no runtime owned by this process; stop not confirmed")
+	if len(errs) > 0 {
+		return "", classifyStopRefusal(errs)
 	}
-	return errors.Join(errs...)
+	if len(runs) == 0 && len(lateOwners) == 0 && len(recovered) == 0 {
+		return AgentStopAlreadyStopped, nil
+	}
+	return AgentStopStopped, nil
+}
+
+// classifyStopRefusal reports ErrRuntimeUnavailable only when every failure
+// was an unreadable runtime; any other failure means a process may be live.
+func classifyStopRefusal(errs []error) error {
+	joined := errors.Join(errs...)
+	for _, err := range errs {
+		if errors.Is(err, ErrRuntimeUnavailable) {
+			continue
+		}
+		if errors.Is(err, ErrStopNotConfirmed) {
+			return joined
+		}
+		return fmt.Errorf("%w: %w", ErrStopNotConfirmed, joined)
+	}
+	return joined
 }
 
 // A server restart loses the invocation but not its durable runtime identity.

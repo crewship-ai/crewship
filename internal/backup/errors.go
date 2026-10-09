@@ -108,4 +108,10 @@ var (
 	// built, and it means the bundle cannot be trusted to restore what an
 	// operator expects.
 	ErrIncompleteBundle = errors.New("backup: payload row counts do not match the manifest")
+
+	// ErrBundleShortOfSource is returned by Verify when the manifest's
+	// create-time scope reconciliation (#2009) recorded workspace rows the
+	// source held that the dump did not export — a scope-filter bug of
+	// #1973's shape. The bundle is intact but not everything.
+	ErrBundleShortOfSource = errors.New("backup: bundle is missing workspace rows its source held")
 )

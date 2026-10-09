@@ -19,7 +19,6 @@ import { emptyLensCopy, type EmptyLensFacts } from "../activity-sidebar"
 
 const facts = (over: Partial<EmptyLensFacts> = {}): EmptyLensFacts => ({
   lens: "workflows",
-  bareRuns: 0,
   loadedChainCount: 10,
   narrowedAway: false,
   scopedAway: false,
@@ -34,6 +33,9 @@ describe("emptyLensCopy", () => {
     // page when the answer was "clear the search".
     expect(emptyLensCopy(facts({ loadedChainCount: 0 }))).toMatch(/No workflows yet/i)
     expect(emptyLensCopy(facts({ narrowedAway: true }))).toMatch(/search/i)
+    // A source or severity filter empties the rail too (#3007); the sentence
+    // must not blame only the search box.
+    expect(emptyLensCopy(facts({ narrowedAway: true }))).toMatch(/filters/i)
   })
 
   it("names the pre-chain-recording era rather than claiming nothing ran", () => {
@@ -63,14 +65,12 @@ describe("emptyLensCopy", () => {
     expect(emptyLensCopy(facts({ lens: "routines" }))).toMatch(/Routines page/i)
   })
 
-  it("sends the reader to Routines when runs happened but composed nothing", () => {
-    const copy = emptyLensCopy(facts({ lens: "workflows", bareRuns: 3 }))
-    expect(copy).toContain("3 runs")
-    expect(copy).toMatch(/under Routines/i)
-  })
-
-  it("does not invent a count it does not have", () => {
-    expect(emptyLensCopy(facts({ lens: "workflows", bareRuns: 0 }))).not.toMatch(/\d/)
+  it("says plainly that nothing ran when the time view is empty", () => {
+    // The time view lists every run, so an empty one is a quiet window — not
+    // runs hidden somewhere else on the page.
+    const copy = emptyLensCopy(facts({ lens: "workflows" }))
+    expect(copy).toMatch(/Nothing ran in this window/i)
+    expect(copy).not.toMatch(/\d/)
   })
 
   it("never returns an empty string for any reachable state", () => {
@@ -82,7 +82,6 @@ describe("emptyLensCopy", () => {
         { loadedChainCount: 0, chainsHaveUnrecorded: true },
         { narrowedAway: true },
         { scopedAway: true },
-        { bareRuns: 1 },
       ]) {
         expect(emptyLensCopy(facts({ lens, ...over })).length).toBeGreaterThan(0)
       }
@@ -101,8 +100,19 @@ describe("emptyLensCopy", () => {
 // column that this rail was rebuilt to delete.
 // ---------------------------------------------------------------------------
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { vi } from "vitest"
+
+// The routine focus fetches its own runs; the rail's job is to show it and
+// hide everything else (#2998).
+vi.mock("../activity-rail-focus", () => ({
+  RailRoutineFocus: (p: { name: string; onLeave: () => void }) => (
+    <div>
+      Focus on {p.name}
+      <button onClick={p.onLeave}>Leave focus</button>
+    </div>
+  ),
+}))
 
 import type { ChainSummary } from "@/hooks/use-chains"
 import { ActivitySidebar, EMPTY_FACETS, type ActivitySidebarProps } from "../activity-sidebar"
@@ -153,6 +163,7 @@ function mount(over: Partial<ActivitySidebarProps> = {}) {
       onLens={vi.fn()}
       onOpenEntity={vi.fn()}
       onToggleCollapse={vi.fn()}
+      onOpenSection={vi.fn()}
       {...over}
     />,
   )
@@ -188,5 +199,100 @@ describe("ActivitySidebar — an empty lens says so", () => {
   it("says nothing about the window when it holds everything", () => {
     mount({ chainsHaveMore: false })
     expect(screen.queryByText(/Every count on this page describes these/i)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The rail follows the Issues / Routines recipe (#2979): a STATUS section with
+// the Routines vocabulary, every run of the window under it, the lenses behind
+// the View button and the two ledgers as rows — no second row of tabs.
+// ---------------------------------------------------------------------------
+
+describe("ActivitySidebar — the shared sidebar recipe", () => {
+  it("lists a plain run of a routine instead of hiding it", () => {
+    // One run, nothing composed: the rail used to drop it and print "they are
+    // under Routines" over an empty column.
+    const bare = chainRow({ origin: "run_bare", runs: 1, max_chain_depth: 0, routine_slug: "telemetry" })
+    const onSelectChain = vi.fn()
+    mount({ chains: [bare], onSelectChain })
+    fireEvent.click(screen.getByText(/telemetry/))
+    expect(onSelectChain).toHaveBeenCalledWith("run_bare")
+    expect(screen.queryByText(/under Routines/i)).toBeNull()
+  })
+
+  it("draws status as Routines does: one row per bucket with its count", () => {
+    const failed = chainRow({ origin: "run_f", failed: true, failed_runs: 1 })
+    const waiting = chainRow({ origin: "run_w", waiting_runs: 1 })
+    const done = chainRow({ origin: "run_d" })
+    // #2981: cancelled work is its own bucket, not Completed.
+    const stopped = chainRow({ origin: "run_s", cancelled_runs: 1 })
+    const onChange = vi.fn()
+    mount({ chains: [failed, waiting, done, stopped], onChange })
+    const section = screen.getByRole("region", { name: "Status" })
+    const labels = within(section).getAllByRole("button").map((b) => b.textContent)
+    expect(labels).toEqual(["All4", "Waiting for you1", "Running0", "Completed1", "Stopped1", "Could not finish1"])
+    fireEvent.click(within(section).getByRole("button", { name: /Could not finish/ }))
+    expect(onChange).toHaveBeenCalledWith({ ...EMPTY_FACETS, scope: "failed" })
+  })
+
+  it("keeps the lenses behind the View button rather than a second tab row", () => {
+    const onLens = vi.fn()
+    mount({ onLens })
+    expect(screen.queryByRole("tablist")).toBeNull()
+    expect(screen.queryByRole("group", { name: "Activity status" })).toBeNull()
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Group activity by" }), { button: 0, ctrlKey: false })
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^Issue/ }))
+    expect(onLens).toHaveBeenCalledWith("issues")
+  })
+
+  it("hangs the filter panel from the toolbar so the rail never clips it", () => {
+    // Group by and collapse sit right of the trigger, so a panel hung from the
+    // trigger's right edge grew left past the rail, which clips its overflow —
+    // "FILTERS" read as "LTERS" on dev3. Spanning the toolbar always fits.
+    mount()
+    fireEvent.click(screen.getByRole("button", { name: /filter/i }))
+    const panel = screen.getByRole("group", { name: "Filter activity" })
+    expect(panel.className).toMatch(/\bleft-2\b/)
+    expect(panel.className).toMatch(/\bright-2\b/)
+    expect(panel.className).not.toMatch(/\bright-0\b/)
+    expect(panel.parentElement?.className).toMatch(/\bstatic\b/)
+  })
+
+  it("opens the work and delivery ledgers from the rail", () => {
+    const onOpenSection = vi.fn()
+    mount({ onOpenSection })
+    fireEvent.click(screen.getByRole("button", { name: "Work queue" }))
+    fireEvent.click(screen.getByRole("button", { name: "Webhook deliveries" }))
+    expect(onOpenSection.mock.calls).toEqual([["work"], ["deliveries"]])
+  })
+})
+
+describe("ActivitySidebar — focusing a routine (#2998)", () => {
+  const routineRow = chainRow({ origin: "run_mp", routine_slug: "match-payments", runs: 1, max_chain_depth: 0 })
+  const workRow = chainRow({ origin: "asg_1", kind: "assignment", task: "Reply on QUA-1", routine_slug: undefined, started_by_kind: "issue", started_by_key: "QUA-1" })
+
+  it("focuses the routine when its row is picked", () => {
+    const onFocusRoutine = vi.fn()
+    const onSelectChain = vi.fn()
+    mount({ chains: [routineRow], onFocusRoutine, onSelectChain, workspaceId: "ws" })
+    fireEvent.click(screen.getByText("match-payments"))
+    expect(onSelectChain).toHaveBeenCalledWith("run_mp")
+    expect(onFocusRoutine).toHaveBeenCalledWith("match-payments")
+  })
+
+  it("shows only the focused routine, and leaves the focus on request", () => {
+    const onFocusRoutine = vi.fn()
+    mount({ chains: [routineRow, workRow], focusedRoutine: "match-payments", onFocusRoutine, workspaceId: "ws" })
+    expect(screen.getByText("Focus on match-payments")).toBeInTheDocument()
+    expect(screen.queryByText("Reply on QUA-1")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Work queue" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Leave focus" }))
+    expect(onFocusRoutine).toHaveBeenCalledWith(null)
+  })
+
+  it("says what each row is — a routine, or work on an issue", () => {
+    mount({ chains: [routineRow, workRow], workspaceId: "ws" })
+    expect(screen.getByText("Routine")).toBeInTheDocument()
+    expect(screen.getByText("Issue")).toBeInTheDocument()
   })
 })

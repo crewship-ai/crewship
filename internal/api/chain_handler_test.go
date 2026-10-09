@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -329,6 +330,71 @@ func TestChainHandler_IssueToRunToNestedRun(t *testing.T) {
 	for _, e := range b.Edges {
 		if !present[e.From] || !present[e.To] {
 			t.Errorf("edge %s -%s-> %s references a node that is not in nodes[]", e.From, e.Kind, e.To)
+		}
+	}
+}
+
+// #2986: the walk applies the inbox's own audience. A MEMBER walking a run
+// used to get a MANAGER-targeted ask's title; the rule is the one /inbox uses.
+func TestChainHandler_InboxItemsFollowTheCallersAudience(t *testing.T) {
+	r := newChainRig(t)
+	r.exec(t, `INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash) VALUES ('pl_aud', ?, 'aud', 'Aud', '{}', 'h')`, r.ws)
+	r.exec(t, `INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, status, started_at) VALUES ('run_aud', ?, 'pl_aud', 'aud', 'failed', '2026-10-08T00:00:00Z')`, r.ws)
+	r.exec(t, `INSERT INTO inbox_items (id, workspace_id, kind, source_id, title, payload_json) VALUES ('inb_all', ?, 'failed_run', 's1', 'For everyone', '{"run_id":"run_aud"}')`, r.ws)
+	r.exec(t, `INSERT INTO inbox_items (id, workspace_id, kind, source_id, title, payload_json, target_role) VALUES ('inb_mgr', ?, 'failed_run', 's2', 'Managers only', '{"run_id":"run_aud"}', 'MANAGER')`, r.ws)
+
+	walkAs := func(role string) string {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/chains/run_aud", nil)
+		req.SetPathValue("anchor", "run_aud")
+		req = withWorkspaceUser(req, r.user, r.ws, role)
+		rr := httptest.NewRecorder()
+		r.h.Get(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, body=%s", role, rr.Code, rr.Body.String())
+		}
+		return rr.Body.String()
+	}
+	member := walkAs("MEMBER")
+	if !strings.Contains(member, "For everyone") || strings.Contains(member, "Managers only") {
+		t.Errorf("MEMBER walk: want only the untargeted item, got %s", member)
+	}
+	if owner := walkAs("OWNER"); !strings.Contains(owner, "Managers only") {
+		t.Errorf("OWNER walk lost the manager-targeted item: %s", owner)
+	}
+}
+
+// inboxAudience must stay inboxVisibilityClause. Both run over the same rows
+// for every role; a difference is a walk that shows what /inbox hides, or the
+// other way round.
+func TestInboxAudience_MatchesTheInboxQuery(t *testing.T) {
+	r := newChainRig(t)
+	targets := []struct{ id, user, role string }{
+		{"t_none", "", ""}, {"t_me", r.user, ""}, {"t_other", "usr_other", ""},
+		{"t_viewer", "", "VIEWER"}, {"t_member", "", "MEMBER"}, {"t_manager", "", "MANAGER"},
+		{"t_admin", "", "ADMIN"}, {"t_owner", "", "OWNER"}, {"t_other_mgr", "usr_other", "MANAGER"},
+	}
+	for _, tg := range targets {
+		r.exec(t, `INSERT INTO inbox_items (id, workspace_id, kind, source_id, title, payload_json, target_user_id, target_role)
+			VALUES (?, ?, 'message', ?, ?, '{}', NULLIF(?, ''), NULLIF(?, ''))`, tg.id, r.ws, tg.id, tg.id, tg.user, tg.role)
+	}
+	for _, role := range []string{"", "VIEWER", "MEMBER", "MANAGER", "ADMIN", "OWNER"} {
+		clause, args := inboxVisibilityClause(r.user, role)
+		rows, err := r.db.Query(`SELECT id FROM inbox_items WHERE workspace_id = ?`+clause, append([]any{r.ws}, args...)...)
+		if err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		bySQL := map[string]bool{}
+		for rows.Next() {
+			var id string
+			_ = rows.Scan(&id)
+			bySQL[id] = true
+		}
+		rows.Close()
+		see := inboxAudience(r.user, role)
+		for _, tg := range targets {
+			if got := see(tg.user, tg.role); got != bySQL[tg.id] {
+				t.Errorf("role %q, item %s: predicate %v, inbox query %v", role, tg.id, got, bySQL[tg.id])
+			}
 		}
 	}
 }

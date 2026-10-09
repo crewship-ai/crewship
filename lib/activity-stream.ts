@@ -497,7 +497,7 @@ export function entryCostUSD(entry: JournalEntry): number | undefined {
  *  numbers and series the overview cards read.
  * ------------------------------------------------------------------ */
 
-export type ActivityScope = "active" | "waiting" | "failed" | "done"
+export type ActivityScope = "active" | "waiting" | "failed" | "done" | "stopped"
 
 export interface ActivityScopeMeta {
   key: ActivityScope
@@ -510,12 +510,22 @@ export const ACTIVITY_SCOPES: ActivityScopeMeta[] = [
   { key: "waiting", label: "Waiting on you", token: "--warn" },
   { key: "failed", label: "Failed", token: "--destructive" },
   { key: "done", label: "Completed", token: "--success" },
+  { key: "stopped", label: "Stopped", token: "--muted-foreground" },
 ]
 
 /** Entry types that mean an agent is mid-flight. */
 export const ACTIVE_ENTRY_TYPES = ["run.started", "assignment.running"]
 
 const ACTIVE_SET = new Set(ACTIVE_ENTRY_TYPES)
+
+/**
+ * Entry types that mean somebody stopped the work (#2981). Not "done" — it did
+ * not finish — and not a failure: nothing broke. The run's own terminal write
+ * always emits `run.cancelled`, so the feed has one row to show per stop.
+ */
+export const STOPPED_ENTRY_TYPES = ["run.cancelled", "assignment.cancelled"]
+
+const STOPPED_SET = new Set(STOPPED_ENTRY_TYPES)
 
 /* ------------------------------------------------------------------ *
  *  Asks — what is still waiting on a person, as opposed to what once was
@@ -712,6 +722,7 @@ export function answeredAsks(entries: JournalEntry[]): ReadonlySet<string> {
 export function scopeOf(entry: JournalEntry, answered?: ReadonlySet<string>): ActivityScope {
   if (entry.severity === "error") return "failed"
   if (ACTIVE_SET.has(entry.entry_type)) return "active"
+  if (STOPPED_SET.has(entry.entry_type)) return "stopped"
   if (activitySource(entry.entry_type) === "human") {
     const ask = askRef(entry)
     // Not an ask at all — a resolution, which is a record of what happened.
@@ -738,7 +749,7 @@ export function scopeOf(entry: JournalEntry, answered?: ReadonlySet<string>): Ac
  */
 export function scopeCounts(entries: JournalEntry[]): Record<ActivityScope, number> {
   const answered = answeredAsks(entries)
-  const counts: Record<ActivityScope, number> = { active: 0, waiting: 0, failed: 0, done: 0 }
+  const counts: Record<ActivityScope, number> = { active: 0, waiting: 0, failed: 0, done: 0, stopped: 0 }
   for (const e of entries) counts[scopeOf(e, answered)] += 1
   return counts
 }

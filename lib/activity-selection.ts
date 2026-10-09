@@ -196,8 +196,9 @@ export function activitySurface(selection: ActivityStop | null): ActivitySurface
  */
 export function workflowLabel(
   chain: { routine_slug?: string; started_by?: string } | undefined,
+  routineName?: string,
 ): string {
-  return chain?.routine_slug || chain?.started_by || "this workflow"
+  return routineName?.trim() || chain?.routine_slug || chain?.started_by || "this workflow"
 }
 
 /* ------------------------------------------------------------------ *
@@ -347,6 +348,9 @@ export interface ActivityTrail {
 
 /** How a stop names itself in the trail. Kind first, because "ada" alone does not say what ada is. */
 export function stopLabel(stop: ActivityStop): string {
+  // A rail row's own stop reads as the row did: "Check form delivery", not
+  // "workflow: …" — a word the page never shows the reader anywhere else.
+  if (stop.kind === "workflow") return stop.label
   return `${stop.kind}: ${stop.label}`
 }
 

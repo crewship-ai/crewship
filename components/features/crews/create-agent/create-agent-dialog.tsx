@@ -40,6 +40,7 @@ import {
 import { cn } from "@/lib/utils"
 import { CrewPicker } from "@/components/features/crews/crew-picker"
 import { apiFetch } from "@/lib/api-fetch"
+import { storeAgentAvatar } from "@/lib/agent-avatar-persist"
 import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE, getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { BUILTIN_PERSONAS, type AgentPersona } from "@/lib/entities"
@@ -62,6 +63,7 @@ import {
 import { AskFormsBuilder } from "../ask-forms-builder"
 import { EditorLayout, EditorPanel } from "../editor-layout"
 import { AgentModelSettings } from "./agent-model-settings"
+import { RestrictedExecutionField, saveRestrictedProfile, type RestrictedProfile } from "../agent-canvas-tabs/restricted-execution-profile"
 import { PaysWithRow, applyPaysWith } from "../agent-canvas-tabs/pays-with-row"
 import { saveLearning, type LearningDraft } from "@/components/features/agents/agent-learning-toggle"
 import type { LoginCredential } from "@/lib/credentials/provider-logins"
@@ -120,6 +122,9 @@ export function CreateAgentDialog({
   // after the agent itself.
   const [seatDraft, setSeatDraft] = useState<LoginCredential | null>(null)
   const [learningDraft, setLearningDraft] = useState<LearningDraft | null>(null)
+  // The restricted client execution profile (#3028) has its own endpoint, so
+  // it is a third follow-up write: held here, applied on Save after the agent.
+  const [restrictedDraft, setRestrictedDraft] = useState<RestrictedProfile | null>(null)
   const [submitting, setSubmitting] = useState(false)
   // Ref for the in-flight check inside submit() — using `submitting` state
   // there would close over a stale value and let a fast double-fire through
@@ -314,11 +319,26 @@ export function CreateAgentDialog({
         }
         setLearningDraft(null)
       }
+      if (agent && restrictedDraft) {
+        try {
+          await saveRestrictedProfile(agent.id, workspaceId, restrictedDraft)
+        } catch (err) {
+          throw new Error(`Agent settings saved, but restricted execution could not be changed: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        setRestrictedDraft(null)
+      }
 
       // Bindings are keyed on an agent that exists, so they are spent here
       // rather than in the body above. Failures are reported, not thrown: the
       // agent is created either way, and an agent quietly missing the tool it
       // was created for is worse than being told where to add it.
+      // The agent's face is stored here, by the person who just created or
+      // edited it — not by whoever happens to view it first (#2876). A PATCH
+      // that left the avatar alone comes back with its avatar_url and costs
+      // no request; one that changed it comes back without, and is stored.
+      // Never throws: a missing render only means the face is generated.
+      await storeAgentAvatar(created, workspaceId)
+
       const failed =
         !agent && (access.integrationIds.length || access.channelIds.length)
           ? await applyAgentAccess(workspaceId, created.id, access, accessCatalog)
@@ -342,7 +362,7 @@ export function CreateAgentDialog({
       submittingRef.current = false
       setSubmitting(false)
     }
-  }, [agent, providerConfirmed, persona, baseline, extra, seatDraft, learningDraft, draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, onOpenChange, onCreated, router])
+  }, [agent, providerConfirmed, persona, baseline, extra, seatDraft, learningDraft, restrictedDraft, draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, onOpenChange, onCreated, router])
 
   // ⌘↵ / Ctrl↵ is wired by the shell — this is only the "is it submittable"
   // guard the shell asks callers to keep inside their own handler.
@@ -357,7 +377,7 @@ export function CreateAgentDialog({
         onOpenChange={onOpenChange}
         size="xl"
         className="h-[92dvh] sm:h-[min(85dvh,720px)]"
-        dirty={agent ? persona !== undefined || JSON.stringify(draft) !== JSON.stringify(baseline) || Object.keys(extra).length > 0 || seatDraft !== null || learningDraft !== null : isDraftDirty(draft, baselineCrewSlug) || Object.keys(extra).length > 0 || access.integrationIds.length > 0 || access.channelIds.length > 0}
+        dirty={agent ? persona !== undefined || JSON.stringify(draft) !== JSON.stringify(baseline) || Object.keys(extra).length > 0 || seatDraft !== null || learningDraft !== null || restrictedDraft !== null : isDraftDirty(draft, baselineCrewSlug) || Object.keys(extra).length > 0 || access.integrationIds.length > 0 || access.channelIds.length > 0}
         discardLabel="this agent"
         onSubmit={() => {
           // ⌘↵ inside the picker closes the picker; it must not also create
@@ -750,6 +770,12 @@ WORK STYLE: …`}
           </EditorPanel>
           <EditorPanel active={section === "model"}>
             <AgentModelSettings providerConfirmed={!!agent || providerConfirmed} onProviderConfirmed={() => setProviderConfirmed(true)} workspaceId={workspaceId} draft={draft} setDraft={setDraft} />
+            {agent && (
+              <RestrictedExecutionField
+                value={restrictedDraft ?? (agent.restricted_execution_profile as RestrictedProfile | undefined) ?? "disabled"}
+                onChange={(next) => setRestrictedDraft(next === (agent.restricted_execution_profile ?? "disabled") ? null : next)}
+              />
+            )}
               {draft.agentRole === "LEAD" && (
                 <CreateSurfaceField label="Lead mode" htmlFor="agent-lead-mode">
                   <select

@@ -418,11 +418,15 @@ The same `mission_activity` rows as `activity`, but ordered by `seq` (the B1 eve
 crewship issue events BE-42                    # full history, seq order
 crewship issue events BE-42 --after-seq 42     # only what happened after seq 42
 crewship issue events BE-42 --format json | jq '.latest_seq'
+crewship issue events BE-42 --before-seq 0 --limit 20    # the newest 20 events
+crewship issue events BE-42 --before-seq 81 --limit 20   # the 20 before seq 81
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--after-seq` | `int` | `0` | Only return events with `seq` greater than this. `0` returns the full history. |
+| `--before-seq` | `int` | — | Read ONE page of older events: the newest `--limit` events with `seq` below this (`0` = from the newest). JSON adds `before_seq` and `has_older`. Cannot be combined with `--after-seq`. |
+| `--limit` | `int` | `0` | Page size for `--before-seq` (server cap 500). |
 
 **Output columns:** SEQ, WHEN (relative time), ACTOR (`type/name`), ACTION, DETAILS (truncated to 60 chars). In `--format json`, the response is `{"events": [...], "after_seq": N, "latest_seq": N}` — `latest_seq` is the issue's current high-water mark, so a client with no new events can still tell "caught up at N" from "server has never heard of this issue".
 

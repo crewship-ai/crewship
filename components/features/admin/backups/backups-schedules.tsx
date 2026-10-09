@@ -14,9 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { StatusPill } from "@/components/ui/status-pill"
 import { Switch } from "@/components/ui/switch"
 import { toastSaveError } from "@/components/ui/page-save-bar"
-import {
-  SettingsCard, SettingsDangerCard, SettingsEmpty, SettingsRow, SettingsSaveBar, SettingsSegmented, SettingsSummary, SummaryItem, settingsControl,
-} from "@/components/features/settings/shared"
+import { SettingsCard, SettingsDangerCard, SettingsEmpty, SettingsRow, SettingsSaveBar, SettingsSegmented, SettingsSummary, SummaryItem, settingsControl, settingsTable, settingsTh, settingsTd } from "@/components/features/settings/shared"
 import { Gate } from "./backups-kit"
 import {
   CADENCE_LABEL, CATEGORIES, PRESETS, computeNextRuns, contentsFromPreview, describeKeep, describePlanWhen, formatPlannedRun, formatWhen,
@@ -320,7 +318,7 @@ function WhatCard({ draft, set, rows, ctx, onToggle, onKinds }: {
                 const id = `plan-ws-${w.id}`
                 const on = !draft.workspace_ids.length || draft.workspace_ids.includes(w.id)
                 return (
-                  <label key={w.id} htmlFor={id} className="flex items-center gap-1.5 text-[13px]">
+                  <label key={w.id} htmlFor={id} className="flex items-center gap-1.5 text-control">
                     <Checkbox id={id} checked={on} onCheckedChange={(v) => toggleWs(w.id, v === true)} />{w.name}
                   </label>
                 )
@@ -416,25 +414,25 @@ function planDetail(p: BackupPlan): string {
 export function ContentsTable({ rows, editable, onToggle }: { rows: ContentsRow[]; editable: boolean; onToggle: (k: CategoryKey, on: boolean) => void }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full" data-slot="contents-table">
-        <thead><tr className="border-b border-border text-left text-[11px] font-medium text-muted-foreground">
-          <th className="px-4 py-2 font-medium">Category</th><th className="px-4 py-2 font-medium">In this backup</th><th className="px-4 py-2"><span className="sr-only">Why</span></th>
+      <table className={settingsTable} data-slot="contents-table">
+        <thead><tr>
+          <th className={settingsTh}>Category</th><th className={settingsTh}>In this backup</th><th className={settingsTh}><span className="sr-only">Why</span></th>
         </tr></thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.key} data-cat={r.key} data-state={r.state} className="border-b border-border text-[13px] last:border-b-0">
-              <td className="px-4 py-2">
+            <tr key={r.key} data-cat={r.key} data-state={r.state} >
+              <td className={settingsTd}>
                 <label className="flex items-center gap-2">
                   <Checkbox checked={r.state !== "excluded"} disabled={(!editable && r.key !== "env") || r.state === "required"}
                     onCheckedChange={(v) => onToggle(r.key, v === true)} />
                   {r.label}
                 </label>
               </td>
-              <td className="px-4 py-2">
+              <td className={settingsTd}>
                 <StatusPill tone={r.state === "included" ? "success" : r.state === "required" ? "blue" : "muted"}
                   label={r.state === "included" ? "Included" : r.state === "required" ? "Required dependency" : "Excluded"} />
               </td>
-              <td className="px-4 py-2 text-xs text-muted-foreground">
+              <td className={cn(settingsTd, "text-label text-muted-foreground")}>
                 {r.state === "required" ? requiredWhy(r) : r.warning ? <span className="text-warn">{r.warning}</span> : ""}
               </td>
             </tr>
@@ -613,7 +611,7 @@ function CalendarCard({ draft, dirty, now }: { draft: PlanDraft; dirty: boolean;
     <SettingsCard title="Calendar" description={`${label} · done and planned runs`} icon={CalendarDays}>
       <div className="grid grid-cols-7 gap-1 px-4 py-3" data-slot="plan-calendar">
         {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
-          <div key={d} className="pb-1 text-center text-[11px] text-muted-foreground">{d}</div>
+          <div key={d} className="pb-1 text-center text-label text-muted-foreground">{d}</div>
         ))}
         {days.map((d) => {
           const key = d.toISOString().slice(0, 10)
@@ -621,16 +619,16 @@ function CalendarCard({ draft, dirty, now }: { draft: PlanDraft; dirty: boolean;
           const pills = out ? [] : pillsFrom(resp, key, draft, planned)
           return (
             <div key={key} data-date={key}
-              className={cn("flex min-h-[46px] min-w-0 flex-col gap-[3px] overflow-hidden rounded-[7px] border border-border px-1.5 py-1 text-[12px] text-muted-foreground",
+              className={cn("flex min-h-[46px] min-w-0 flex-col gap-[3px] overflow-hidden rounded-[7px] border border-border px-1.5 py-1 text-label text-muted-foreground",
                 key === todayKey && "border-primary", out && "opacity-35")}>
               <span>{d.getUTCDate()}</span>
-              {pills.map((p, i) => <span key={i} className={cn("w-fit max-w-full truncate rounded-[5px] px-1 text-[11px]", PILL[p.kind].cls)}>{PILL[p.kind].mark} {p.text}</span>)}
+              {pills.map((p, i) => <span key={i} className={cn("w-fit max-w-full truncate rounded-[5px] px-1 text-label", PILL[p.kind].cls)}>{PILL[p.kind].mark} {p.text}</span>)}
             </div>
           )
         })}
       </div>
       <div className="flex flex-wrap items-center gap-2.5 px-4 pb-3" data-slot="calendar-legend">
-        {LEGEND.map((l) => <span key={l.kind} className={cn("rounded-[5px] px-1 text-[11px]", PILL[l.kind].cls)}>{`${PILL[l.kind].mark} ${l.text}`}</span>)}
+        {LEGEND.map((l) => <span key={l.kind} className={cn("rounded-[5px] px-1 text-label", PILL[l.kind].cls)}>{`${PILL[l.kind].mark} ${l.text}`}</span>)}
       </div>
     </SettingsCard>
   )

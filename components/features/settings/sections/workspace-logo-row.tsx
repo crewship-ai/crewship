@@ -109,8 +109,8 @@ export function WorkspaceLogoRow({ workspaceId, name, logoUrl, canEdit, onChange
           )}
         </div>
         {canEdit && (error
-          ? <span className="text-[11px] text-destructive">{error}</span>
-          : <span className="text-[10px] text-muted-foreground">PNG, JPEG, or WebP · max 2MB</span>)}
+          ? <span className="text-label text-destructive">{error}</span>
+          : <span className="text-micro text-muted-foreground">PNG, JPEG, or WebP · max 2MB</span>)}
       </div>
     </SettingsRow>
   )

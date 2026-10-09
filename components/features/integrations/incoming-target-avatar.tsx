@@ -13,7 +13,6 @@ export function IncomingTargetAvatar({ target }: { target: IncomingTarget }) {
       <AgentAvatar
         seed={target.avatar_seed || target.name}
         style={target.avatar_style || target.crew?.avatar_style}
-        agentId={target.id}
         avatarUrl={target.avatar_url}
         className="size-6 shrink-0 rounded-lg"
       />

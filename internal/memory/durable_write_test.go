@@ -79,3 +79,32 @@ func hasTmpMarker(name string) bool {
 	}
 	return false
 }
+
+func TestWriteFileDurableRootExactModeConfinesPublication(t *testing.T) {
+	dir := t.TempDir()
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := WriteFileDurableRootExactMode(nil, "file", []byte("new"), 0600); err == nil {
+		t.Fatal("accepted nil root")
+	}
+	if err := WriteFileDurableRootExactMode(root, "file", []byte("new"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(dir, "file"))
+	if err != nil || info.Mode().Perm() != 0640 {
+		t.Fatalf("exact mode: %v %v", info, err)
+	}
+	if err := WriteFileDurableRootExactMode(root, "../escape", []byte("new"), 0600); err == nil {
+		t.Fatal("publication escaped root")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "file" {
+		t.Fatalf("unexpected files after rejected publication: %v", entries)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/jitter"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -531,6 +532,10 @@ func (r *PortExposeRegistry) StartPurger(interval time.Duration) {
 }
 
 func (r *PortExposeRegistry) purgeLoop(interval time.Duration) {
+	// Spread this loop's phase from the other sweepers started at boot (#1891).
+	if !jitter.StartupStop(r.stop, interval) {
+		return
+	}
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { RESTRICTED_RUNTIME_MISSING_MESSAGE, restrictedCatalogFailure, type RestrictedCatalogState } from "@/lib/restricted-catalog"
 
 interface RoutineInput { name: string; type: string; required: boolean }
 interface Routine { slug: string; name: string; definition_hash: string; execution_hash: string; inputs: RoutineInput[] }
@@ -15,7 +16,7 @@ export function RestrictedRoutines({ workspaceId }: { workspaceId: string }) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [run, setRun] = useState<Result | null>(null)
   const [error, setError] = useState("")
-  const [loading, setLoading] = useState(true)
+  const [catalogState, setCatalogState] = useState<RestrictedCatalogState>("loading")
   const [submitting, setSubmitting] = useState(false)
   const request = useRef<{ key: string; body: string; slug: string } | null>(null)
   const owner = useRef(workspaceId)
@@ -26,12 +27,12 @@ export function RestrictedRoutines({ workspaceId }: { workspaceId: string }) {
 
   useEffect(() => {
     const controller = new AbortController()
-    setCatalog([]); setSelected(""); setValues({}); setRun(null); setError(""); setLoading(true); request.current = null
+    setCatalog([]); setSelected(""); setValues({}); setRun(null); setError(""); setCatalogState("loading"); request.current = null
     void apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/restricted-routines`, { signal: controller.signal }).then(async response => {
-      if (!response.ok) throw new Error("Routine catalog unavailable.")
+      if (!response.ok) { const failure = await restrictedCatalogFailure(response); if (!controller.signal.aborted) setCatalogState(failure); return }
       const body = await response.json() as Routine[]
-      if (!controller.signal.aborted) setCatalog(body)
-    }).catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Routine catalog unavailable.") }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
+      if (!controller.signal.aborted) { setCatalog(body); setCatalogState("ready") }
+    }).catch(() => { if (!controller.signal.aborted) setCatalogState("unavailable") })
     return () => controller.abort()
   }, [workspaceId])
 
@@ -89,7 +90,7 @@ export function RestrictedRoutines({ workspaceId }: { workspaceId: string }) {
     <h1 className="text-xl font-semibold">Private routines</h1>
     <p className="text-sm text-muted-foreground">Run an allowed routine. Its results are visible to you.</p>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    {loading ? <p>Loading routines…</p> : catalog.length === 0 ? <p>No routines are available with your current access.</p> : <>
+    {catalogState === "loading" ? <p>Loading routines…</p> : catalogState === "runtime_missing" ? <p role="status">{RESTRICTED_RUNTIME_MISSING_MESSAGE}</p> : catalogState === "unavailable" ? <p role="alert" className="text-sm text-destructive">Routine catalog unavailable.</p> : catalog.length === 0 ? <p>No routines are available with your current access.</p> : <>
       <label className="block space-y-2"><span>Routine</span><select aria-label="Routine" className="min-h-10 w-full rounded-md border bg-background p-2 coarse:min-h-12" value={selected} disabled={active || !!request.current} onChange={event => { setSelected(event.target.value); setValues({}); setRun(null); setError("") }}><option value="">Choose a routine</option>{catalog.map(item => <option key={item.slug} value={item.slug}>{item.name}</option>)}</select></label>
       {routine && <form className="space-y-4" onSubmit={event => { event.preventDefault(); void submit() }}>
         {routine.inputs.map(field => <label key={field.name} className="block space-y-2"><span>{field.name}{field.required ? " (required)" : ""}</span><Input aria-label={field.name} disabled={active || !!request.current} value={values[field.name] ?? ""} onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))} /></label>)}

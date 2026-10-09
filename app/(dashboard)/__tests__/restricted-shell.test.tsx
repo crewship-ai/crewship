@@ -3,7 +3,7 @@
 // dashboard layout makes is recorded and judged by the same rule the server
 // applies (lib/__tests__/restricted-route-oracle.ts reads the Go source).
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { act, render, screen } from "@testing-library/react"
+import { act, render, screen, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { serverAllowsRestricted } from "@/lib/__tests__/restricted-route-oracle"
@@ -48,6 +48,15 @@ vi.mock("@/hooks/use-auth", async (importOriginal) => {
 let mobile = false
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile }))
 
+// The screen the shell is on, and where it was sent: the restricted shell
+// renders only the surfaces the server lists for the session.
+const nav = vi.hoisted(() => ({ pathname: "/chat", replace: vi.fn() }))
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: nav.replace, prefetch: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => nav.pathname,
+}))
+
 const sockets: string[] = []
 class RecordingWebSocket {
   static OPEN = 1
@@ -63,10 +72,14 @@ class RecordingWebSocket {
 
 import DashboardLayout from "../layout"
 import RoutinesPage from "../routines/page"
+import { SettingsLayout } from "@/components/features/settings/settings-layout"
 import { _resetWorkspaceStoreForTests } from "@/hooks/use-workspace"
 
-const RESTRICTED_A = { id: "ws-a", name: "Alpha", slug: "alpha", currentUserRole: "MEMBER", current_user_role: "MEMBER", currentUserAccessMode: "restricted" }
-const TRUSTED_B = { id: "ws-b", name: "Beta", slug: "beta", currentUserRole: "MEMBER", current_user_role: "MEMBER", currentUserAccessMode: "trusted" }
+// As internal/api/restricted_directory.go answers a restricted account: every
+// row carries the session-wide surfaces derived from the allowlist.
+const SURFACES = ["chat", "routines", "pages", "account_security"]
+const RESTRICTED_A = { id: "ws-a", name: "Alpha", slug: "alpha", currentUserRole: "MEMBER", current_user_role: "MEMBER", currentUserAccessMode: "restricted", restricted_session: true, restricted_surfaces: SURFACES }
+const TRUSTED_B = { id: "ws-b", name: "Beta", slug: "beta", currentUserRole: "MEMBER", current_user_role: "MEMBER", currentUserAccessMode: "trusted", restricted_session: true, restricted_surfaces: SURFACES }
 
 function mount(children: React.ReactNode = <div data-testid="page">page</div>) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -95,6 +108,8 @@ beforeEach(() => {
   workspacesPayload = [RESTRICTED_A]
   workspacesPending = false
   mobile = false
+  nav.pathname = "/chat"
+  nav.replace.mockReset()
   globalThis.WebSocket = RecordingWebSocket as unknown as typeof WebSocket
   ;(localStorage.getItem as ReturnType<typeof vi.fn>).mockImplementation(() => null)
 })
@@ -146,9 +161,68 @@ describe("dashboard shell for a restricted account (#2861)", () => {
   it("renders the private routines surface in a trusted workspace of a restricted account", async () => {
     workspacesPayload = [RESTRICTED_A, TRUSTED_B]
     ;(localStorage.getItem as ReturnType<typeof vi.fn>).mockImplementation(() => "ws-b")
+    nav.pathname = "/routines"
     mount(<RoutinesPage />)
     expect(await screen.findByText("Private routines")).toBeInTheDocument()
     await settle(800)
+    expect(forbidden()).toEqual([])
+  })
+
+  it("offers only the server's surfaces in the sidebar and phone sheet", async () => {
+    mount()
+    expect(await screen.findByTestId("page")).toBeInTheDocument()
+    for (const name of ["Chat", "Routines", "Pages", "Settings"]) {
+      expect(screen.getAllByRole("link", { name }).length).toBeGreaterThan(0)
+    }
+    for (const name of ["Dashboard", "Inbox", "Issues", "Activity", "Crews", "Skills", "Credentials", "Integrations"]) {
+      expect(screen.queryByRole("link", { name })).toBeNull()
+    }
+  })
+
+  it("keeps only allowed tabs in the phone tab bar", async () => {
+    mobile = true
+    mount()
+    const bar = await screen.findByRole("navigation", { name: "Primary" })
+    expect(within(bar).getByRole("link", { name: "Chat" })).toBeInTheDocument()
+    expect(within(bar).queryByRole("link", { name: "Dashboard" })).toBeNull()
+    expect(within(bar).queryByRole("link", { name: "Inbox" })).toBeNull()
+  })
+
+  it("shows the unavailable page for a forbidden URL and never mounts the screen", async () => {
+    nav.pathname = "/issues"
+    mount()
+    expect(await screen.findByText("Not available with your access")).toBeInTheDocument()
+    expect(screen.queryByTestId("page")).toBeNull()
+    expect(screen.getByRole("link", { name: "Go to Chat" })).toHaveAttribute("href", "/chat")
+    await settle(300)
+    expect(forbidden()).toEqual([])
+  })
+
+  it("sends the root to chat", async () => {
+    nav.pathname = "/"
+    mount()
+    await settle(300)
+    expect(nav.replace).toHaveBeenCalledWith("/chat")
+    expect(screen.queryByTestId("page")).toBeNull()
+  })
+
+  it("fails closed when a restricted row carries no surfaces", async () => {
+    workspacesPayload = [{ ...RESTRICTED_A, restricted_surfaces: undefined }]
+    mount()
+    expect(await screen.findByText("Not available with your access")).toBeInTheDocument()
+    expect(screen.queryByTestId("page")).toBeNull()
+  })
+
+  it("restricts Settings to account security without forbidden requests", async () => {
+    nav.pathname = "/settings"
+    mount(<SettingsLayout />)
+    expect(await screen.findByText("Account security")).toBeInTheDocument()
+    await settle(500)
+    expect(screen.queryByRole("button", { name: /New token/ })).toBeNull()
+    // Profile picture and name are not editable; the password is.
+    expect(screen.queryByRole("button", { name: "Upload" })).toBeNull()
+    expect(screen.queryByRole("textbox", { name: "Full name" })).toBeNull()
+    expect(screen.getAllByRole("button", { name: "Change" })).toHaveLength(1)
     expect(forbidden()).toEqual([])
   })
 })

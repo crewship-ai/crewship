@@ -25,7 +25,7 @@ describe("crews waiting on a tool", () => {
   })
 
   it("folds two or more into one call to action and quiets the rows", () => {
-    render(<FleetBoard workspaceId="ws" cards={[card("Coolify", "Needs tool", "warn"), card("Engineering", "Needs tool", "warn"), card("Ops", "Ready", "success")]} />)
+    render(<FleetBoard cards={[card("Coolify", "Needs tool", "warn"), card("Engineering", "Needs tool", "warn"), card("Ops", "Ready", "success")]} />)
     const banner = screen.getByRole("link", { name: /2 crews need a tool/ })
     expect(banner.getAttribute("href")).toBe("/credentials")
     const coolify = screen.getAllByTestId("dashboard-fleet-card")[0]
@@ -33,7 +33,7 @@ describe("crews waiting on a tool", () => {
   })
 
   it("keeps a single waiting crew as a normal warning row", () => {
-    render(<FleetBoard workspaceId="ws" cards={[card("Coolify", "Needs tool", "warn"), card("Ops", "Ready", "success")]} />)
+    render(<FleetBoard cards={[card("Coolify", "Needs tool", "warn"), card("Ops", "Ready", "success")]} />)
     expect(screen.queryByRole("link", { name: /need a tool/ })).toBeNull()
     expect(screen.getByText("Needs tool").closest("[data-tone]")!.getAttribute("data-tone")).toBe("warn")
   })

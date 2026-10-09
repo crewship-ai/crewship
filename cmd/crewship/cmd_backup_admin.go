@@ -52,6 +52,11 @@ var backupVerifyCmd = &cobra.Command{
 			CompletenessChecked     bool                     `json:"completeness_checked" yaml:"completeness_checked"`
 			CompletenessSkipReason  string                   `json:"completeness_skip_reason" yaml:"completeness_skip_reason"`
 			TableRowCountMismatches []verifyRowCountMismatch `json:"table_row_count_mismatches" yaml:"table_row_count_mismatches"`
+			ScopeShortfalls         []struct {
+				Table     string `json:"table" yaml:"table"`
+				Reachable int    `json:"reachable" yaml:"reachable"`
+				Missing   int    `json:"missing" yaml:"missing"`
+			} `json:"scope_shortfalls" yaml:"scope_shortfalls"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -60,6 +65,9 @@ var backupVerifyCmd = &cobra.Command{
 			cli.PrintError(fmt.Sprintf("INVALID — %s: %s", args[0], out.Error))
 			for _, m := range out.TableRowCountMismatches {
 				fmt.Fprintf(os.Stderr, "  %s: manifest recorded %d row(s), payload carries %d\n", m.Table, m.Recorded, m.Actual)
+			}
+			for _, s := range out.ScopeShortfalls {
+				fmt.Fprintf(os.Stderr, "  %s: %d of %d workspace row(s) in the source were not exported\n", s.Table, s.Missing, s.Reachable)
 			}
 			return fmt.Errorf("bundle verification failed")
 		}

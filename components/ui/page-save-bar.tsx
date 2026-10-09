@@ -89,6 +89,19 @@ export function toastSaveError(label: string, message: string | null | undefined
   })
 }
 
+/**
+ * A switch that the server refused: the switch is already back where it was,
+ * and the reason is the same sticky bottom-right toast, never a line in the card.
+ */
+export function toastSwitchError(label: string, message: string | null | undefined, retry?: () => void) {
+  toast.error(`Couldn’t change ${label}`, {
+    id: `switch-error:${label}`,
+    description: message || undefined,
+    duration: Infinity,
+    action: retry ? { label: "Retry", onClick: () => retry() } : undefined,
+  })
+}
+
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : typeof e === "string" ? e : "Save failed."
 }

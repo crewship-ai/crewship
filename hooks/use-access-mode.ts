@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react"
 
 import { useWorkspace, type WorkspaceData } from "@/hooks/use-workspace"
+import { restrictedSurfacesOf, type RestrictedSurface } from "@/lib/restricted-surfaces"
 
 /**
  * What the signed-in ACCOUNT may reach, for the whole session.
@@ -39,6 +40,16 @@ export function deriveAccessMode(
 export function useAccessMode(): AccessMode {
   const { workspaces, loading, error } = useWorkspace()
   return deriveAccessMode(workspaces, loading, error)
+}
+
+/**
+ * The screens a restricted session may open (#2861), or null for a trusted or
+ * still-loading session. Read from the server's `restricted_surfaces`, which
+ * it derives from the route allowlist itself.
+ */
+export function useRestrictedSurfaces(): RestrictedSurface[] | null {
+  const { workspaces } = useWorkspace()
+  return useAccessMode() === "restricted" ? restrictedSurfacesOf(workspaces) ?? [] : null
 }
 
 /**

@@ -4579,6 +4579,46 @@
                     },
                     "type": "array"
                   },
+                  "scope_reconciliation": {
+                    "properties": {
+                      "checked": {
+                        "type": "boolean"
+                      },
+                      "shortfalls": {
+                        "items": {
+                          "properties": {
+                            "missing": {
+                              "type": "integer"
+                            },
+                            "reachable": {
+                              "type": "integer"
+                            },
+                            "table": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "table",
+                            "reachable",
+                            "missing"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "skip_reason": {
+                        "type": "string"
+                      },
+                      "tables": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "checked",
+                      "tables"
+                    ],
+                    "type": "object"
+                  },
                   "table_row_counts": {
                     "additionalProperties": {
                       "type": "integer"
@@ -4926,6 +4966,46 @@
                     },
                     "type": "array"
                   },
+                  "scope_reconciliation": {
+                    "properties": {
+                      "checked": {
+                        "type": "boolean"
+                      },
+                      "shortfalls": {
+                        "items": {
+                          "properties": {
+                            "missing": {
+                              "type": "integer"
+                            },
+                            "reachable": {
+                              "type": "integer"
+                            },
+                            "table": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "table",
+                            "reachable",
+                            "missing"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "skip_reason": {
+                        "type": "string"
+                      },
+                      "tables": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "checked",
+                      "tables"
+                    ],
+                    "type": "object"
+                  },
                   "table_row_counts": {
                     "additionalProperties": {
                       "type": "integer"
@@ -4958,6 +5038,29 @@
               }
             },
             "type": "object"
+          },
+          "scope_shortfalls": {
+            "items": {
+              "properties": {
+                "missing": {
+                  "type": "integer"
+                },
+                "reachable": {
+                  "type": "integer"
+                },
+                "table": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "table",
+                "reachable",
+                "missing"
+              ],
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
           },
           "size_bytes": {
             "type": "integer"
@@ -4996,7 +5099,8 @@
           "error",
           "completeness_checked",
           "completeness_skip_reason",
-          "table_row_count_mismatches"
+          "table_row_count_mismatches",
+          "scope_shortfalls"
         ],
         "type": "object"
       },
@@ -7967,6 +8071,69 @@
         },
         "type": "array"
       },
+      "LedgerAgent": {
+        "properties": {
+          "avatar_seed": {
+            "type": "string"
+          },
+          "avatar_style": {
+            "type": "string"
+          },
+          "avatar_url": {
+            "nullable": true,
+            "type": "string"
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "avatar_seed",
+          "avatar_style",
+          "avatar_url",
+          "deleted"
+        ],
+        "type": "object"
+      },
+      "LedgerCrew": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "color",
+          "icon",
+          "deleted"
+        ],
+        "type": "object"
+      },
       "MCPServerError": {
         "properties": {
           "message": {
@@ -8481,6 +8648,9 @@
       },
       "PipelineRun": {
         "properties": {
+          "chain_origin": {
+            "type": "string"
+          },
           "cost_usd": {
             "type": "number"
           },
@@ -9988,16 +10158,25 @@
       },
       "RemainingAgentStoppedV1": {
         "properties": {
-          "message": {
+          "id": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "stopped",
+              "already_stopped"
+            ],
             "type": "string"
           },
           "status": {
             "type": "string"
-          },
-          "success": {
-            "type": "boolean"
           }
         },
+        "required": [
+          "id",
+          "status",
+          "outcome"
+        ],
         "type": "object"
       },
       "RemainingAgentUpdatedV1": {
@@ -13584,6 +13763,10 @@
       },
       "WebhookDelivery": {
         "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/LedgerAgent",
+            "nullable": true
+          },
           "body_bytes": {
             "type": "integer"
           },
@@ -13657,6 +13840,10 @@
             "nullable": true,
             "type": "string"
           },
+          "work_state": {
+            "nullable": true,
+            "type": "string"
+          },
           "workspace_id": {
             "type": "string"
           }
@@ -13680,7 +13867,9 @@
           "received_at",
           "dedup_expires_at",
           "raw_body_available",
-          "raw_body_expires_at"
+          "raw_body_expires_at",
+          "agent",
+          "work_state"
         ],
         "type": "object"
       },
@@ -13868,6 +14057,10 @@
       },
       "WorkItem": {
         "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/LedgerAgent",
+            "nullable": true
+          },
           "agent_id": {
             "type": "string"
           },
@@ -13884,9 +14077,17 @@
             ],
             "type": "string"
           },
+          "cost_usd": {
+            "nullable": true,
+            "type": "number"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
+          },
+          "crew": {
+            "$ref": "#/components/schemas/LedgerCrew",
+            "nullable": true
           },
           "crew_id": {
             "type": "string"
@@ -13902,8 +14103,15 @@
           "domain_kind": {
             "type": "string"
           },
+          "duration_ms": {
+            "nullable": true,
+            "type": "integer"
+          },
           "eligible_at": {
             "format": "date-time",
+            "type": "string"
+          },
+          "event_type": {
             "type": "string"
           },
           "generation": {
@@ -14001,12 +14209,21 @@
           "replay_reason",
           "created_at",
           "updated_at",
-          "terminal_at"
+          "terminal_at",
+          "agent",
+          "crew",
+          "event_type",
+          "duration_ms",
+          "cost_usd"
         ],
         "type": "object"
       },
       "WorkItemDetail": {
         "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/LedgerAgent",
+            "nullable": true
+          },
           "agent_id": {
             "type": "string"
           },
@@ -14029,9 +14246,17 @@
             ],
             "type": "string"
           },
+          "cost_usd": {
+            "nullable": true,
+            "type": "number"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
+          },
+          "crew": {
+            "$ref": "#/components/schemas/LedgerCrew",
+            "nullable": true
           },
           "crew_id": {
             "type": "string"
@@ -14047,8 +14272,15 @@
           "domain_kind": {
             "type": "string"
           },
+          "duration_ms": {
+            "nullable": true,
+            "type": "integer"
+          },
           "eligible_at": {
             "format": "date-time",
+            "type": "string"
+          },
+          "event_type": {
             "type": "string"
           },
           "events": {
@@ -14153,6 +14385,11 @@
           "created_at",
           "updated_at",
           "terminal_at",
+          "agent",
+          "crew",
+          "event_type",
+          "duration_ms",
+          "cost_usd",
           "attempts",
           "events"
         ],
@@ -14522,6 +14759,9 @@
           },
           "priority": {
             "type": "integer"
+          },
+          "queue_if_busy": {
+            "type": "boolean"
           },
           "tags": {
             "items": {
@@ -15914,10 +16154,94 @@
         },
         "type": "array"
       },
+      "WorkspacePendingRunResponseV1": {
+        "properties": {
+          "can_cancel": {
+            "type": "boolean"
+          },
+          "debounce_key": {
+            "type": "string"
+          },
+          "dispatch_attempts": {
+            "type": "integer"
+          },
+          "expires_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "fire_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "inputs": {
+            "additionalProperties": true,
+            "description": "Read-only preset projection: safe primitives, type markers for credential/file/redacted values, empty containers for structured values. Not replay inputs.",
+            "type": "object"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "next_attempt_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "pinned_version": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "pipeline_slug": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "fired",
+              "failed",
+              "expired",
+              "cancelled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "inputs",
+          "pinned_version",
+          "id",
+          "pipeline_slug",
+          "priority",
+          "fire_at",
+          "expires_at",
+          "next_attempt_at",
+          "status",
+          "run_id",
+          "dispatch_attempts",
+          "last_error",
+          "can_cancel"
+        ],
+        "type": "object"
+      },
       "WorkspacePendingRunsResponseV1": {
         "items": {
           "properties": {
+            "can_cancel": {
+              "type": "boolean"
+            },
             "debounce_key": {
+              "type": "string"
+            },
+            "dispatch_attempts": {
+              "type": "integer"
+            },
+            "expires_at": {
+              "nullable": true,
               "type": "string"
             },
             "fire_at": {
@@ -15931,6 +16255,13 @@
               "description": "Read-only preset projection: safe primitives, type markers for credential/file/redacted values, empty containers for structured values. Not replay inputs.",
               "type": "object"
             },
+            "last_error": {
+              "type": "string"
+            },
+            "next_attempt_at": {
+              "nullable": true,
+              "type": "string"
+            },
             "pinned_version": {
               "nullable": true,
               "type": "integer"
@@ -15940,8 +16271,36 @@
             },
             "priority": {
               "type": "integer"
+            },
+            "run_id": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "pending",
+                "fired",
+                "failed",
+                "expired",
+                "cancelled"
+              ],
+              "type": "string"
             }
           },
+          "required": [
+            "inputs",
+            "pinned_version",
+            "id",
+            "pipeline_slug",
+            "priority",
+            "fire_at",
+            "expires_at",
+            "next_attempt_at",
+            "status",
+            "run_id",
+            "dispatch_attempts",
+            "last_error",
+            "can_cancel"
+          ],
           "type": "object"
         },
         "type": "array"
@@ -50185,24 +50544,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Bad Gateway"
           }
         },
         "security": [
@@ -54403,6 +54744,12 @@
                             },
                             "type": "array"
                           },
+                          "cancelled_runs": {
+                            "type": "integer"
+                          },
+                          "completed_runs": {
+                            "type": "integer"
+                          },
                           "duration_ms": {
                             "nullable": true,
                             "type": "integer"
@@ -54416,6 +54763,9 @@
                           "first_activity": {
                             "format": "date-time",
                             "type": "string"
+                          },
+                          "interrupted_runs": {
+                            "type": "integer"
                           },
                           "issue_count": {
                             "type": "integer"
@@ -54439,6 +54789,13 @@
                               "type": "object"
                             },
                             "type": "array"
+                          },
+                          "kind": {
+                            "enum": [
+                              "run",
+                              "assignment"
+                            ],
+                            "type": "string"
                           },
                           "last_activity": {
                             "format": "date-time",
@@ -54472,6 +54829,9 @@
                             "type": "string"
                           },
                           "started_by_kind": {
+                            "type": "string"
+                          },
+                          "task": {
                             "type": "string"
                           },
                           "triggered_via": {
@@ -75313,6 +75673,22 @@
             }
           },
           {
+            "in": "query",
+            "name": "before_seq",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Workspace ID or slug.",
             "in": "header",
             "name": "X-Workspace-ID",
@@ -75329,6 +75705,9 @@
                 "schema": {
                   "properties": {
                     "after_seq": {
+                      "type": "integer"
+                    },
+                    "before_seq": {
                       "type": "integer"
                     },
                     "events": {
@@ -75379,6 +75758,9 @@
                         "type": "object"
                       },
                       "type": "array"
+                    },
+                    "has_older": {
+                      "type": "boolean"
                     },
                     "latest_seq": {
                       "type": "integer"
@@ -139435,6 +139817,176 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}": {
+      "get": {
+        "description": "Get workspace pipeline pending (GET /api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}).",
+        "operationId": "get_api_v1_workspaces_workspaceId_pipeline-pending_pendingId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pendingId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePendingRunResponseV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace pipeline pending",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/pipeline-runs": {
       "get": {
         "description": "List workspace pipeline runs (GET /api/v1/workspaces/{workspaceId}/pipeline-runs).",
@@ -144205,6 +144757,14 @@
             "in": "path",
             "name": "workspaceId",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -152654,6 +153214,60 @@
               }
             },
             "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -153949,6 +154563,14 @@
           },
           {
             "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "source_delivery_id",
             "required": false,
             "schema": {
@@ -154250,6 +154872,22 @@
           {
             "in": "query",
             "name": "class",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "open",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
             "required": false,
             "schema": {
               "type": "string"

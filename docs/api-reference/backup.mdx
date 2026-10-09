@@ -293,13 +293,14 @@ The request has no body. **Response:** `200 OK` with the verification object.
   "error": "",
   "completeness_checked": true,
   "completeness_skip_reason": "",
-  "table_row_count_mismatches": null
+  "table_row_count_mismatches": null,
+  "scope_shortfalls": null
 }
 ```
 
 `valid: false` sets `error` to a human-readable reason (`checksum mismatch`, `truncated payload`, `unreadable bundle`, a payload/manifest row-count divergence, …).
 
-`completeness_checked` reports whether the row-count comparison ran at all — `false` means **not evaluated**, never "confirmed complete" and never "confirmed incomplete". It is `false` for an encrypted bundle (`completeness_skip_reason` explains and points at `restore --dry-run`, which decrypts and makes the same comparison — see below) and for a bundle written before #2009, which carries no recorded counts to compare against. `table_row_count_mismatches` is non-empty only when `completeness_checked` is `true` and a divergence was found; each entry is `{table, recorded, actual}`.
+`completeness_checked` reports whether the row-count comparison ran at all — `false` means **not evaluated**, never "confirmed complete" and never "confirmed incomplete". It is `false` for an encrypted bundle (`completeness_skip_reason` explains and points at `restore --dry-run`, which decrypts and makes the same comparison — see below) and for a bundle written before #2009, which carries no recorded counts to compare against. `table_row_count_mismatches` is non-empty only when `completeness_checked` is `true` and a divergence was found; each entry is `{table, recorded, actual}`. `scope_shortfalls` repeats the manifest's create-time `contents.scope_reconciliation.shortfalls`: each entry is `{table, reachable, missing}`, the workspace rows the schema tied to the workspace that the dump did not export. It is checked for encrypted bundles too, and a non-empty list makes `valid` false.
 
 ## Retention, transfer, and restore
 
