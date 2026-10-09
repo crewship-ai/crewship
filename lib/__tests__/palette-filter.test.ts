@@ -47,3 +47,22 @@ describe("paletteFilter", () => {
     expect(inName).toBeGreaterThan(inKeyword)
   })
 })
+
+describe("paletteFilter — several words", () => {
+  it("finds a row when every word is in it, in any order, below a row that holds the phrase", () => {
+    const words = paletteFilter("Store missing avatars Settings General", "store avatars")
+    const reversed = paletteFilter("Store missing avatars Settings General", "avatars store")
+    const phrase = paletteFilter("Store avatars now", "store avatars")
+    expect(words).toBeGreaterThan(0)
+    expect(reversed).toBeGreaterThan(0)
+    expect(phrase).toBeGreaterThan(words)
+  })
+
+  it("counts a word that only an alias carries", () => {
+    expect(paletteFilter("API keys Settings", "settings token", ["tokens", "secrets"])).toBeGreaterThan(0)
+  })
+
+  it("still hides a row when one word is missing", () => {
+    expect(paletteFilter("Store missing avatars", "store billing")).toBe(0)
+  })
+})

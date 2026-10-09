@@ -9,6 +9,15 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **⌘K finds every place in the app (#3045).** As you type, the search box finds:
+  - every Settings card, opening the tab and scrolling to the card; `/settings?tab=…&card=<slug>` links to one
+  - the tabs and sections of Integrations, Inbox, Activity, Journal and Routines
+  - actions that live behind a button: Create issue, Invite member, Create CLI token, Change password, Store missing avatars
+  - the Admin console, for instance administrators
+  - missions, routine schedules and automations, each crew tool on its own row, and your other workspaces to switch to
+
+  Several words now match in any order. Every row is gated the way its page is. See [Search (⌘K)](docs/guides/search.mdx).
+
 - ⚠️ **Behaviour change:** **Skill holders are scoped to your workspace (#3032).** The skills catalog is shared across workspaces, but the agents listed on a skill (`installed_on`), the `?installed=1` / `installed_for_agent_id` filters and a skill's `agent_count` counted agents of every workspace, so a member could see other workspaces' agent names and crews. They now only see the caller's workspace. Skills also report this workspace's usage (`usage`: uses in 7 days, errors, total, last used), `lifecycle_state`, `needs_credentials` and, per agent, the required credentials it is missing; `GET /agents/{id}/skills` carries the same. `crewship skill list` gains AGENTS and USES 7D columns, and `crewship agent skills` prints the skill name and category it showed blank before.
 
 - **Settings › Members marks restricted members (#2878).** A restricted member's row shows a Restricted chip next to the role chip, and the expanded panel names the access mode; saving a changed mode in Edit resource access updates the roster. `GET /workspaces/{id}/members` returns `access_mode` to a trusted OWNER/ADMIN (the same gate as a member's access policy) and omits it for everyone else; `crewship workspace member list` has an ACCESS column (`-` when withheld).

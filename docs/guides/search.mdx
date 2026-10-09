@@ -1,0 +1,62 @@
+---
+title: "Search (⌘K)"
+description: "One search box for everything in a workspace: people, agents, work, settings cards, page sections and actions."
+icon: "magnifying-glass"
+---
+
+# Search (⌘K)
+
+Press **⌘K** (`Ctrl+K`) or click **Search…** in the top bar. Type a name or a
+few words, then press **↵** to open the result. **Esc** closes it.
+
+## What it finds
+
+- **Things in the workspace:**
+  - issues, projects, pages, agents, crews, skills, credentials, routines,
+    people and integrations
+  - missions (they open on their timeline)
+  - routine schedules and automations (they open in the routine's Plan view;
+    a schedule scrolls to its row)
+  - crew tools (they open on that server in Integrations › Crew tools)
+  - conversations, matched against the message text
+- **Every card in Settings.** Examples: *Danger zone*, *Sessions & access*,
+  *Who may reveal*, *Pages appearance*. Settings opens on the card's tab,
+  scrolls to the card and marks it for a moment. You can also link to a
+  card yourself with `?card=`, for example `/settings?tab=general&card=danger-zone`.
+- **Tabs and sections inside pages:**
+  - Integrations (notification connections, incoming webhooks, app catalog,
+    connected accounts, MCP endpoints and the rest)
+  - Inbox views, Activity sections, Journal tabs, the routine calendar,
+    missions and model providers
+- **Actions that sit behind a button:** *Create issue*, *Invite member*,
+  *Create CLI token*, *Change password*, *Store missing avatars*, plus
+  *Create new agent* and *Create new crew*.
+- **The Admin console**, for instance administrators: runtime, limits, data
+  retention, people & workspaces, security sections and backups.
+- **Other workspaces you belong to.** Pick one to switch to it.
+
+Cards, sections, actions and workspaces show only once you start typing. An
+empty search box shows your recent results, quick actions and the main pages.
+
+## How it matches
+
+- A result whose name starts with what you typed ranks first. Next come
+  names where a word starts with it, then names that contain it anywhere.
+- Several words match in any order: `avatars store` finds *Store missing
+  avatars*, and `general danger` finds the Danger zone card.
+- Each row carries the words people use for it. For example, `slack` finds
+  *Notification connections* and `cost` finds *Spend*.
+- On the right, each row says where it lives, such as *Settings › General*.
+
+## Who sees what
+
+Search shows only what you can open. Every list comes from the API,
+filtered for your role. Each card, section and action is checked with the
+same rule as the page that holds it:
+
+| What | Who sees it |
+|---|---|
+| Danger zone | the workspace owner |
+| Invite member, Store missing avatars, Spend, Audit log | ADMIN and OWNER |
+| Access & Secrets cards | MANAGER and above |
+| Admin console | instance administrators |

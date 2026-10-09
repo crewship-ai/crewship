@@ -5,7 +5,7 @@ import { useGuardedRouter as useRouter } from "@/hooks/use-navigation-guard"
 import {
   Network, Zap, Key, Activity, Settings, LayoutDashboard, Plus, ShieldCheck,
   CircleDot, Inbox, ClipboardCheck, CalendarClock, Plug, History, MessageSquare,
-  LayoutTemplate,
+  LayoutTemplate, Target, Timer, ArrowLeftRight,
 } from "lucide-react"
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import { PriorityIcon } from "@/components/features/issues/priority-icon"
@@ -13,6 +13,7 @@ import { visibleSettingsSections } from "@/components/features/settings/settings
 import { MCPLogo } from "@/components/icons/mcp-logos"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
 import { paletteFilter } from "@/lib/palette-filter"
+import { paletteDestinations, type PaletteDestination } from "@/lib/palette-destinations"
 import { routineHref } from "@/lib/routine-href"
 import { emitChatEvent } from "@/lib/telemetry"
 import {
@@ -126,6 +127,54 @@ interface IntegrationResult {
   icon: string | null
   crew_name?: string
   enabled: boolean
+}
+
+interface MissionResult {
+  id: string
+  title: string
+  status: string
+  lead_agent_name?: string
+}
+
+interface ScheduleResult {
+  id: string
+  name: string
+  target_pipeline_slug?: string
+  cron_expr?: string
+}
+
+interface AutomationResult {
+  id: string
+  name: string
+  enabled: boolean
+  event_type?: string
+  action?: { routine_slug?: string }
+}
+
+/** A crew's own MCP server (GET /integrations/crews) — the rows /integrations can open one by one. */
+interface CrewToolResult {
+  id: string
+  name: string
+  display_name: string
+  transport: string
+  icon: string | null
+  crew_name: string
+}
+
+/** A list body as an array of objects carrying `fields`, or []. Bodies that are an envelope name it. */
+function rowsOf<T>(body: unknown, envelope: string | null, fields: string[]): T[] {
+  const list = envelope && body && typeof body === "object" && !Array.isArray(body)
+    ? (body as Record<string, unknown>)[envelope]
+    : body
+  if (!Array.isArray(list)) return []
+  return list.filter(
+    (r): r is T => !!r && typeof r === "object" && fields.every((f) => typeof (r as Record<string, unknown>)[f] === "string"),
+  )
+}
+
+/** The plan view of a routine, where its schedules, webhooks and automations live. */
+function routinePlanHref(slug: string, scheduleId?: string): string {
+  return `/routines?slug=${encodeURIComponent(slug)}&view=plan${scheduleId ? `#schedule-${encodeURIComponent(scheduleId)}` : ""}`
 }
 
 /**
@@ -390,7 +439,7 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
 
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const router = useRouter()
-  const { workspaceId, role } = useWorkspace()
+  const { workspaceId, role, workspaces, setWorkspaceId } = useWorkspace()
   // The lists below are not on the restricted allowlist; a restricted (or
   // not-yet-known) session gets the static rows only.
   const listWorkspaceId = useTrustedWorkspaceId()
@@ -416,6 +465,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [members, setMembers] = useState<MemberResult[]>([])
   const [integrations, setIntegrations] = useState<IntegrationResult[]>([])
   const [pages, setPages] = useState<PageResult[]>([])
+  const [missions, setMissions] = useState<MissionResult[]>([])
+  const [schedules, setSchedules] = useState<ScheduleResult[]>([])
+  const [automations, setAutomations] = useState<AutomationResult[]>([])
+  const [crewTools, setCrewTools] = useState<CrewToolResult[]>([])
   // Whether the Pages list of THIS open answered. A Recent row that names a
   // page is shown only against a list that did: while it is pending, or
   // after a 403/500/unreadable body, the row's stored name could be a page
@@ -441,6 +494,14 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   // same predicate it uses, so the palette can never advertise a pane the
   // nav hides or the layout would bounce the caller out of.
   const settingsLinks = useMemo(() => visibleSettingsSections(role), [role])
+
+  // Cards, tabs, sections and button-only actions inside the pages (#3045),
+  // each behind the gate its page applies. They join only once something is
+  // typed: an empty palette stays a short list of where you were and where
+  // you can go, not every card in the product.
+  const destinations = useMemo(() => paletteDestinations({ role, isInstanceAdmin: isAdmin }), [role, isAdmin])
+  const typing = query.trim() !== ""
+  const otherWorkspaces = (workspaces ?? []).filter((w) => w.id !== workspaceId)
 
   // CASL starts "create Crew" and "create Agent" at MANAGER. Offering either
   // to a MEMBER is telling them to try something the server refuses.
@@ -568,6 +629,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     setMembers([])
     setIntegrations([])
     setPages([])
+    setMissions([])
+    setSchedules([])
+    setAutomations([])
+    setCrewTools([])
     setPagesLoaded(false)
     if (!open || !listWorkspaceId || authStatus === "unauthenticated") return
     const ac = new AbortController()
@@ -592,12 +657,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       // searches every page the caller reaches. Metadata only — no panel
       // payloads, no application source.
       apiFetch(`/api/v1/pages?${qs}`, opts),
+      // 200 is the server's ceiling for the workspace mission list.
+      apiFetch(`/api/v1/missions?${qs}&limit=200`, opts),
+      apiFetch(`/api/v1/workspaces/${ws}/pipeline-schedules`, opts),
+      apiFetch(`/api/v1/automations?${qs}`, opts),
+      apiFetch(`/api/v1/integrations/crews?${qs}`, opts),
     ]).then(async (settled) => {
       if (ac.signal.aborted) return
       // A body that is not JSON is a failed list, never a thrown palette.
       const safeJson = async (r: PromiseSettledResult<Response>) =>
         r.status === "fulfilled" && r.value.ok ? r.value.json().catch(() => null) : null
-      const [agentsData, crewsData, skillsData, credsData, issuesData, projectsData, routinesData, membersData, integrationsData, pagesData] =
+      const [agentsData, crewsData, skillsData, credsData, issuesData, projectsData, routinesData, membersData, integrationsData, pagesData, missionsData, schedulesData, automationsData, crewToolsData] =
         await Promise.all(settled.map(safeJson))
       if (ac.signal.aborted) return
       if (agentsData) setAgents(agentsData)
@@ -609,6 +679,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       if (routinesData) setRoutines(routinesData)
       if (membersData) setMembers(membersData)
       if (integrationsData) setIntegrations(integrationsData)
+      setMissions(rowsOf<MissionResult>(missionsData, null, ["id", "title"]))
+      setSchedules(rowsOf<ScheduleResult>(schedulesData, null, ["id", "name"]).filter((x) => x.target_pipeline_slug))
+      setAutomations(rowsOf<AutomationResult>(automationsData, "automations", ["id", "name"]).filter((x) => x.action?.routine_slug))
+      setCrewTools(rowsOf<CrewToolResult>(crewToolsData, null, ["id", "name", "crew_name"]))
       // A body the normaliser does not recognise yields no rows AND no
       // verified list: a malformed answer must not certify anyone's Recent.
       const pageRows = pagesData ? toPageResults(pagesData) : null
@@ -648,7 +722,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       {/* Controlled, because one group (Conversations) searches the server
           with what was typed rather than filtering a list already in hand. */}
       <CommandInput
-        placeholder="Search issues, projects, agents..."
+        placeholder="Search issues, agents, settings…"
         value={query}
         onValueChange={setQuery}
       />
@@ -693,6 +767,41 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               >
                 <action.icon className="h-4 w-4 text-muted-foreground" />
                 <span className="type-row">{action.title}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {typing && destinations.length > 0 && (
+          <>
+            <CommandGroup heading={<GroupLabel>Actions</GroupLabel>} className={PALETTE_GROUP_CLASS}>
+              {destinations.filter((d) => d.kind === "action").map((d) => (
+                <DestinationRow key={d.id} d={d} onSelect={() => go(d.href, d.title, d.trail)} />
+              ))}
+            </CommandGroup>
+            {/* Cards, tabs and sections inside the pages. The trail says
+                where each lives, so "Danger zone" reads as Settings › General
+                rather than as a page of its own. */}
+            <CommandGroup heading={<GroupLabel>Settings &amp; sections</GroupLabel>} className={PALETTE_GROUP_CLASS}>
+              {destinations.filter((d) => d.kind === "place").map((d) => (
+                <DestinationRow key={d.id} d={d} onSelect={() => go(d.href, d.title, d.trail)} />
+              ))}
+            </CommandGroup>
+          </>
+        )}
+
+        {typing && otherWorkspaces.length > 0 && (
+          <CommandGroup heading={<GroupLabel>Switch workspace</GroupLabel>} className={PALETTE_GROUP_CLASS}>
+            {otherWorkspaces.map((w) => (
+              <CommandItem
+                key={w.id}
+                value={`${w.name} ${w.slug ?? ""} workspace switch`}
+                className={PALETTE_ITEM_CLASS}
+                onSelect={() => runCommand(() => setWorkspaceId(w.id))}
+              >
+                <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
+                <span className="type-row flex-1 truncate">{w.name}</span>
+                <span className="type-meta text-muted-foreground-soft">Workspace</span>
               </CommandItem>
             ))}
           </CommandGroup>
@@ -951,6 +1060,69 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           </CommandGroup>
         )}
 
+        {missions.length > 0 && (
+          <CommandGroup heading={<GroupLabel>Missions</GroupLabel>} className={PALETTE_GROUP_CLASS}>
+            {missions.map((m) => {
+              const href = `/missions/${encodeURIComponent(m.id)}/timeline`
+              return (
+                <CommandItem
+                  key={m.id}
+                  value={`${m.title} mission ${m.id}`}
+                  keywords={[m.status, m.lead_agent_name ?? ""]}
+                  className={PALETTE_ITEM_CLASS}
+                  data-href={href}
+                  onSelect={() => go(href, m.title, "Missions")}
+                >
+                  <Target className="h-4 w-4 text-muted-foreground" />
+                  <span className="type-row flex-1 truncate">{m.title}</span>
+                  <span className="type-meta text-muted-foreground-soft">{m.lead_agent_name || m.status.toLowerCase()}</span>
+                </CommandItem>
+              )
+            })}
+          </CommandGroup>
+        )}
+
+        {(schedules.length > 0 || automations.length > 0) && (
+          // A schedule or an automation has no page of its own: it lives in
+          // its routine's Plan view, and a schedule row is anchored there.
+          <CommandGroup heading={<GroupLabel>Schedules &amp; automations</GroupLabel>} className={PALETTE_GROUP_CLASS}>
+            {schedules.map((sc) => {
+              const href = routinePlanHref(sc.target_pipeline_slug!, sc.id)
+              return (
+                <CommandItem
+                  key={`schedule-${sc.id}`}
+                  value={`${sc.name} schedule ${sc.id}`}
+                  keywords={[sc.target_pipeline_slug ?? "", sc.cron_expr ?? "", "cron"]}
+                  className={PALETTE_ITEM_CLASS}
+                  data-href={href}
+                  onSelect={() => go(href, sc.name, "Schedules")}
+                >
+                  <Timer className="h-4 w-4 text-muted-foreground" />
+                  <span className="type-row flex-1 truncate">{sc.name}</span>
+                  <span className="type-meta font-mono text-muted-foreground-soft">{sc.target_pipeline_slug}</span>
+                </CommandItem>
+              )
+            })}
+            {automations.map((a) => {
+              const href = routinePlanHref(a.action!.routine_slug!)
+              return (
+                <CommandItem
+                  key={`automation-${a.id}`}
+                  value={`${a.name} automation ${a.id}`}
+                  keywords={[a.event_type ?? "", a.action?.routine_slug ?? "", a.enabled ? "enabled" : "disabled"]}
+                  className={PALETTE_ITEM_CLASS}
+                  data-href={href}
+                  onSelect={() => go(href, a.name, "Automations")}
+                >
+                  <Zap className="h-4 w-4 text-muted-foreground" />
+                  <span className="type-row flex-1 truncate">{a.name}</span>
+                  <span className="type-meta font-mono text-muted-foreground-soft">{a.action?.routine_slug}</span>
+                </CommandItem>
+              )
+            })}
+          </CommandGroup>
+        )}
+
         {members.length > 0 && (
           <CommandGroup heading={<GroupLabel>People</GroupLabel>} className={PALETTE_GROUP_CLASS}>
             {members.map((m) => {
@@ -1008,6 +1180,30 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           </CommandGroup>
         )}
 
+        {crewTools.length > 0 && (
+          <CommandGroup heading={<GroupLabel>Crew tools</GroupLabel>} className={PALETTE_GROUP_CLASS}>
+            {crewTools.map((t) => {
+              // The one integration list /integrations can open row by row.
+              const href = `/integrations?tab=tools&section=crew-tools&server=${encodeURIComponent(t.id)}`
+              const name = t.display_name || t.name
+              return (
+                <CommandItem
+                  key={t.id}
+                  value={`${name} ${t.name} ${t.crew_name} crew tool ${t.id}`}
+                  keywords={[t.transport, "mcp", "integration"]}
+                  className={PALETTE_ITEM_CLASS}
+                  data-href={href}
+                  onSelect={() => go(href, name, "Crew tools")}
+                >
+                  <MCPLogo name={t.icon || t.name} transport={t.transport} className="h-4 w-4 shrink-0" />
+                  <span className="type-row flex-1 truncate">{name}</span>
+                  <span className="type-meta max-w-[140px] truncate text-muted-foreground-soft">{t.crew_name}</span>
+                </CommandItem>
+              )
+            })}
+          </CommandGroup>
+        )}
+
         <CommandGroup heading={<GroupLabel>Navigation</GroupLabel>} className={PALETTE_GROUP_CLASS}>
           {NAV_ITEMS.filter((item) => item.href !== "/admin" || isAdmin).map((item) => (
             <CommandItem
@@ -1057,6 +1253,25 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         <PaletteHint keys={["esc"]}>close</PaletteHint>
       </div>
     </CommandDialog>
+  )
+}
+
+/** One catalog row: what it is, and on the right where it lives. */
+function DestinationRow({ d, onSelect }: { d: PaletteDestination; onSelect: () => void }) {
+  return (
+    <CommandItem
+      // The trail rides in the value so "general danger" or "integrations
+      // slack" both land; the id keeps two rows with one title distinct.
+      value={`${d.title} ${d.trail} ${d.id}`}
+      keywords={d.keywords}
+      className={PALETTE_ITEM_CLASS}
+      data-href={d.href}
+      onSelect={onSelect}
+    >
+      <d.icon className="h-4 w-4 text-muted-foreground" />
+      <span className="type-row flex-1 truncate">{d.title}</span>
+      <span className="type-meta max-w-[220px] truncate text-muted-foreground-soft">{d.trail}</span>
+    </CommandItem>
   )
 }
 
