@@ -126,6 +126,29 @@ Import via the API endpoint `POST /api/v1/workspaces/{id}/skills/import` with th
 
 Skills are assigned to specific agents. The seed data maps agents to skills based on their role.
 
+### On the Skills page
+
+The left panel of **Skills** works like the one on Routines and Issues:
+
+- **View** — All skills, On agents, Not assigned, **Needs a look** (on an agent and flagged, never scanned, or missing a credential) and **Proposed by agents**.
+- **Crews & agents** — pick an agent to see only its skills (or a crew for all of its agents); the number beside each is how many skills it holds. With an agent picked, **Skills for &lt;agent&gt;** edits its whole set at once.
+- **Domain** — the categories in use. **Filter** adds source, trust, maturity and "needs a credential".
+
+Open a skill and its **Overview** reads the SKILL.md for you: when agents use it (with its trigger words), the steps of its instructions, what it hands back and its guardrails, taken from sections named like *When to Activate*, *Instructions*, *Output Format* and *Guardrails*. A SKILL.md without such sections is listed by its headings instead. Beside it are the agents that hold it, its uses per day over the last week, the credentials it needs and where it came from. The **SKILL.md** tab shows the file with an outline, its frontmatter as a table, and Rendered / Source, Copy and Download.
+
+The **Agents** tab says who holds it: one switch per agent applies at once (the agent loads the skill on its next run), and **Give to whole crew** does a crew in one go. An agent that holds a skill without a credential the skill needs is marked "no GITHUB_TOKEN" (or whichever is missing).
+
+**New skill** offers two ways, both with an icon and a domain picked up front:
+
+- **Describe it** — Claude writes the SKILL.md from your description with the workspace's Anthropic key.
+- **Write it** — fill in when agents should use it, the instructions and the credentials it needs, and see the SKILL.md it becomes.
+
+**Edit** (and clicking the skill's icon) changes an imported or generated skill: its name, icon, domain, description, instructions and credentials. Every save runs the import scan again. **Duplicate as new skill** copies any skill, built-ins included, under a new name; built-in skills themselves cannot be edited or deleted. **Import** takes a URL, pasted content or a git repository.
+
+<Note>
+The icon and domain are the `icon` and `category` keys of the SKILL.md frontmatter. The Skills page saves them through the import endpoint, which upserts by slug — so `crewship skill import` with the same `name` updates a skill the same way.
+</Note>
+
 <Accordion title="Seed-data agent → skill assignments">
 ```
 Engineering crew:
@@ -204,7 +227,7 @@ The orchestrator watches the agent's tool-call stream. When a tool call maps to 
 
 Recording is **best-effort and off the hot path** -- it runs in a bounded background worker, so a busy agent is never slowed by telemetry, and a tool call that does not correspond to an assigned skill is silently ignored. A non-skill tool (e.g. `Read`, `Bash`) never produces an invocation row.
 
-The skill-review routine reads the `skill_invocations` aggregate (count + error count over a lookback window) to decide whether an assigned skill is still earning its place in the system prompt. Filter the journal Timeline on `skill.invoked` to see, per agent, exactly which skills are pulling their weight.
+The skill-review routine reads the `skill_invocations` aggregate (count + error count over a lookback window) to decide whether an assigned skill is still earning its place in the system prompt. Filter the journal Timeline on `skill.invoked` to see, per agent, exactly which skills are pulling their weight. The Skills page shows the same numbers for your workspace: uses in the last 7 days and last use on each card, and a skill's history on its Activity tab.
 
 ## What's Next
 

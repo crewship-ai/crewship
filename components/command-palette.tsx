@@ -12,6 +12,7 @@ import { PriorityIcon } from "@/components/features/issues/priority-icon"
 import { visibleSettingsSections } from "@/components/features/settings/settings-nav"
 import { MCPLogo } from "@/components/icons/mcp-logos"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
+import { entityHref } from "@/lib/entity-links"
 import { paletteFilter } from "@/lib/palette-filter"
 import { routineHref } from "@/lib/routine-href"
 import { emitChatEvent } from "@/lib/telemetry"
@@ -898,8 +899,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 value={`${skill.display_name ?? skill.name} ${skill.slug} skill`}
                 keywords={[skill.category]}
                 className={PALETTE_ITEM_CLASS}
-                data-href={`/skills/${skill.id}`}
-                onSelect={() => go(`/skills/${skill.id}`, skill.display_name ?? skill.name, "Skills")}
+                data-href={entityHref({ kind: "skill", id: skill.id })}
+                onSelect={() => go(entityHref({ kind: "skill", id: skill.id }), skill.display_name ?? skill.name, "Skills")}
               >
                 <Zap className="h-4 w-4 text-muted-foreground" />
                 <span className="type-row flex-1 truncate">{skill.display_name ?? skill.name}</span>
