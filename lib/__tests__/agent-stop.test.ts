@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a) }))
 
-import { stopAgent } from "@/lib/agent-stop"
+import { stopAgent, stopSuccessMessage } from "@/lib/agent-stop"
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -28,14 +28,46 @@ describe("stopAgent", () => {
 
   it("returns the confirmed status on 200", async () => {
     apiFetch.mockResolvedValue(json(200, { id: "a1", status: "STOPPED" }))
-    expect(await stopAgent("a1", "ws1")).toEqual({ ok: true, status: "STOPPED" })
+    expect(await stopAgent("a1", "ws1")).toEqual({ ok: true, status: "STOPPED", alreadyStopped: false })
   })
 
-  // internal/api/proxy.go AgentStop: the daemon answered but did not confirm.
+  // #2879: success for an agent that was already idle; a stable `code` on
+  // each refusal, and the copy follows the code, not the sentence.
+  it("reports an already-stopped agent as success", async () => {
+    apiFetch.mockResolvedValue(json(200, { id: "a1", status: "STOPPED", outcome: "already_stopped" }))
+    expect(await stopAgent("a1", "ws1")).toEqual({ ok: true, status: "STOPPED", alreadyStopped: true })
+  })
+
+  it("words stop_not_confirmed by its code whatever the sentence", async () => {
+    apiFetch.mockResolvedValue(json(502, { error: "something new", code: "stop_not_confirmed" }))
+    expect(await stopAgent("a1", "ws1")).toEqual({
+      ok: false,
+      code: "stop_not_confirmed",
+      message: "The runtime didn't confirm the stop. The agent may still be running; check again in a moment.",
+    })
+  })
+
+  it("words runtime_unavailable by its code", async () => {
+    apiFetch.mockResolvedValue(json(502, { error: "anything", code: "runtime_unavailable" }))
+    expect(await stopAgent("a1", "ws1")).toEqual({
+      ok: false,
+      code: "runtime_unavailable",
+      message: "The runtime can't be reached right now. The agent may still be running.",
+    })
+  })
+
+  it("names the success for each outcome", () => {
+    expect(stopSuccessMessage({ ok: true, status: "STOPPED", alreadyStopped: true })).toBe("Agent was not running")
+    expect(stopSuccessMessage({ ok: true, status: "STOPPED", alreadyStopped: false })).toBe("Agent stopped")
+  })
+
+  // internal/api/proxy.go AgentStop before codes: the sentence alone still
+  // selects the same copy and code.
   it("explains an unconfirmed stop and says the agent may still be running", async () => {
     apiFetch.mockResolvedValue(json(502, { error: "runtime stop not confirmed" }))
     expect(await stopAgent("a1", "ws1")).toEqual({
       ok: false,
+      code: "stop_not_confirmed",
       message: "The runtime didn't confirm the stop. The agent may still be running; check again in a moment.",
     })
   })
@@ -44,6 +76,7 @@ describe("stopAgent", () => {
     apiFetch.mockResolvedValue(json(502, { error: "runtime stop unavailable" }))
     expect(await stopAgent("a1", "ws1")).toEqual({
       ok: false,
+      code: "runtime_unavailable",
       message: "The runtime can't be reached right now. The agent may still be running.",
     })
   })

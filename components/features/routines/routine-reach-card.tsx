@@ -80,7 +80,7 @@ export function RoutineReachCard({
               <AgentRow workspaceId={workspaceId} agent={agent} />
             ) : (
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <RoutineAgentLink slug={slug} workspaceId={workspaceId} />
+                <RoutineAgentLink slug={slug} />
                 <span className="text-[11px] text-muted-foreground">
                   — no such agent in this workspace; the routine would fail here
                 </span>
@@ -120,7 +120,7 @@ function AgentRow({ workspaceId, agent }: { workspaceId: string; agent: Workspac
 
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-      <RoutineAgentLink slug={agent.slug} agent={agent} workspaceId={workspaceId} />
+      <RoutineAgentLink slug={agent.slug} agent={agent} />
 
       {loading ? (
         <Skeleton className="h-4 w-24 rounded" />

@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils"
 import { CrewPicker } from "@/components/features/crews/crew-picker"
 import { apiFetch } from "@/lib/api-fetch"
 import { ApiError, toApiError } from "@/lib/api-error"
+import { storeAgentAvatar } from "@/lib/agent-avatar-persist"
 import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE, getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { BUILTIN_PERSONAS, type AgentPersona } from "@/lib/entities"
@@ -341,6 +342,13 @@ export function CreateAgentDialog({
       // rather than in the body above. Failures are reported, not thrown: the
       // agent is created either way, and an agent quietly missing the tool it
       // was created for is worse than being told where to add it.
+      // The agent's face is stored here, by the person who just created or
+      // edited it — not by whoever happens to view it first (#2876). A PATCH
+      // that left the avatar alone comes back with its avatar_url and costs
+      // no request; one that changed it comes back without, and is stored.
+      // Never throws: a missing render only means the face is generated.
+      await storeAgentAvatar(created, workspaceId)
+
       const failed =
         !agent && (access.integrationIds.length || access.channelIds.length)
           ? await applyAgentAccess(workspaceId, created.id, access, accessCatalog)

@@ -603,3 +603,61 @@ it('edits only changed fields and preserves an unlisted saved model', async () =
   expect(spy.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
   vi.restoreAllMocks()
 })
+
+// #2876 — an agent's face is stored by the person who creates or edits it,
+// not left for whoever views the agent first.
+describe("stored avatar render", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  function avatarPuts(spy: { mock: { calls: unknown[][] } }) {
+    return (spy.mock.calls as Array<[RequestInfo | URL, RequestInit | undefined]>).filter(
+      ([url, init]) => init?.method === "PUT" && String(url).includes("/avatar"),
+    )
+  }
+
+  it("is stored right after the agent is created", async () => {
+    const onCreated = vi.fn()
+    const spy = vi.spyOn(global, "fetch").mockImplementation(async (url, init) => {
+      if (init?.method === "POST") {
+        return new Response(JSON.stringify({ id: "new-1", name: "Filip", slug: "filip", avatar_seed: null, avatar_style: "bottts-neutral" }), { status: 201 })
+      }
+      if (init?.method === "PUT") return new Response('{"avatar_url":"/x"}')
+      return catalogueResponse(String(url)) ?? new Response("{}")
+    })
+    render(<CreateAgentDialog workspaceId="ws-1" open onOpenChange={vi.fn()} defaultCrewSlug="engineering" crews={CREWS} onCreated={onCreated} />)
+    fireEvent.click(screen.getByRole("button", { name: "Model and execution" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Anthropic" }))
+    fireEvent.click(screen.getByRole("button", { name: "Identity" }))
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith("filip"))
+    const puts = avatarPuts(spy)
+    expect(puts).toHaveLength(1)
+    expect(String(puts[0][0])).toContain("/api/v1/agents/new-1/avatar?workspace_id=ws-1")
+    expect(JSON.parse(String(puts[0][1]?.body)).svg).toMatch(/^<svg/)
+  })
+
+  it("is not re-sent when an edit leaves the stored render in place", async () => {
+    const agent = {
+      id: "existing", workspace_id: "ws-1", crew_id: "c1", name: "Alice", slug: "alice",
+      description: null, role_title: null, agent_role: "AGENT", lead_mode: null,
+      status: "IDLE", cli_adapter: "CLAUDE_CODE", llm_provider: "ANTHROPIC", llm_model: "private-model-v9",
+      system_prompt: null, timeout_seconds: 1800, tool_profile: "CODING", memory_enabled: true,
+      avatar_seed: null, avatar_style: null, updated_at: "2026-09-08T00:00:00Z", crew: null,
+    }
+    const onCreated = vi.fn()
+    const spy = vi.spyOn(global, "fetch").mockImplementation(async (url, init) => {
+      if (init?.method === "PATCH") {
+        return new Response(JSON.stringify({ ...agent, name: "Alice revised", avatar_url: "/api/v1/agents/existing/avatar?v=1&workspace_id=ws-1" }))
+      }
+      return catalogueResponse(String(url)) ?? new Response("{}")
+    })
+    render(<CreateAgentDialog workspaceId="ws-1" agent={agent} open onOpenChange={vi.fn()} defaultCrewSlug="engineering" crews={CREWS} onCreated={onCreated} />)
+    const name = screen.getByLabelText(/name/i, { selector: "input" })
+    fireEvent.change(name, { target: { value: "Alice revised" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+    expect(avatarPuts(spy)).toEqual([])
+  })
+})
