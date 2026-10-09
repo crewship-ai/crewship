@@ -21,9 +21,13 @@ const ALLOWED: RegExp[] = [
   /^POST \/api\/auth\/token\/refresh$/,
 ]
 
+// As internal/api/restricted_directory.go answers a restricted account: every
+// row carries the session's surfaces, derived from the allowlist. Without them
+// the shell offers nothing (fail closed).
+const SURFACES = ["chat", "routines", "pages", "account_security"]
 const ROWS = [
-  { id: "ws-a", name: "Alpha", slug: "alpha", currentUserRole: "MEMBER", currentUserAccessMode: "restricted" },
-  { id: "ws-b", name: "Beta", slug: "beta", currentUserRole: "MEMBER", currentUserAccessMode: "trusted" },
+  { id: "ws-a", name: "Alpha", slug: "alpha", currentUserRole: "MEMBER", currentUserAccessMode: "restricted", restricted_session: true, restricted_surfaces: SURFACES },
+  { id: "ws-b", name: "Beta", slug: "beta", currentUserRole: "MEMBER", currentUserAccessMode: "trusted", restricted_session: true, restricted_surfaces: SURFACES },
 ]
 
 for (const width of [1280, 390]) {
@@ -58,6 +62,12 @@ for (const width of [1280, 390]) {
     await page.waitForTimeout(5_000)
     await expect(page.getByText(/Reconnecting|Connection lost/)).toHaveCount(0)
     expect(sockets).toEqual([])
+    expect(forbidden).toEqual([])
+
+    // A screen outside the surfaces is never mounted, so it sends nothing.
+    await page.goto("/issues")
+    await expect(page.getByText("Not available with your access")).toBeVisible()
+    await page.waitForTimeout(1_000)
     expect(forbidden).toEqual([])
   })
 }
