@@ -85,8 +85,12 @@ GET /api/v1/skills?workspace_id={workspaceId}
 | `vendor` | string | Filter by vendor |
 | `maturity` | string | Filter by maturity (`OFFICIAL`, `CURATED`, `COMMUNITY`, `EXPERIMENTAL`) |
 | `runtime` | string | Filter by runtime |
-| `installed` | string | Set to `"1"` to return only skills assigned to at least one agent in the workspace |
-| `installed_for_agent_id` | string | Narrow the list to skills assigned to a specific agent |
+| `installed` | string | Set to `"1"` to return only skills assigned to at least one agent of the caller's workspace |
+| `installed_for_agent_id` | string | Narrow the list to skills assigned to a specific agent; an agent of another workspace matches nothing |
+
+The skills catalog is shared by every workspace on the instance, but every
+agent-derived field (`installed_on`, `agent_count`, `usage`, the `installed`
+filters) only sees the caller's workspace.
 
 **Response:** `200 OK`
 
@@ -112,7 +116,14 @@ GET /api/v1/skills?workspace_id={workspaceId}
     "pricing_tier": "FREE",
     "tool_count": 3,
     "created_at": "2024-01-01T00:00:00Z",
-    "updated_at": "2024-01-15T00:00:00Z"
+    "updated_at": "2024-01-15T00:00:00Z",
+    "lifecycle_state": "active",
+    "needs_credentials": ["GITHUB_TOKEN"],
+    "usage": { "uses_7d": 12, "errors_7d": 1, "uses_total": 40, "last_used_at": "2024-01-15T09:12:00Z" },
+    "installed_on": [
+      { "agent_id": "agt_1", "agent_slug": "viktor", "agent_name": "Viktor", "crew_name": "Engineering",
+        "missing_credentials": [] }
+    ]
   }
 ]
 ```
@@ -146,7 +157,10 @@ GET /api/v1/skills?workspace_id={workspaceId}
 | `maturity` | string | `OFFICIAL`, `CURATED`, `COMMUNITY`, or `EXPERIMENTAL` |
 | `scan_status` | string | Security scan status |
 | `description_quality` | string? | Description quality rating |
-| `installed_on` | array? | Per-agent install metadata (agent + crew info). Populated on the list response for skills installed on at least one agent; omitted (`omitempty`) when the skill is installed nowhere |
+| `lifecycle_state` | string | Curator sweep verdict: `active`, `stale`, `archived` or `deprecated` |
+| `needs_credentials` | string[] | Env-var names the skill expects an agent to hold (decoded `credential_requirements`); `[]` when none |
+| `usage` | object | This workspace's invocations: `uses_7d`, `errors_7d` (non-zero exit), `uses_total`, `last_used_at` (null when never used) |
+| `installed_on` | array? | Agents of the caller's workspace holding the skill, with crew info and `missing_credentials` (the `needs_credentials` the agent is not delivered at run start). Omitted when no agent of the workspace holds it |
 
 ### Get Skill
 
@@ -169,7 +183,7 @@ Additional fields beyond the list response:
 | `mcp_transport` | string? | MCP transport type |
 | `dependencies` | string? | JSON of dependencies |
 | `license` | string? | License identifier |
-| `agent_count` | integer | Number of agents using this skill |
+| `agent_count` | integer | Number of agents of the caller's workspace holding this skill |
 | `security_score` | integer? | Security score (0-100) |
 | `allowed_domains` | string? | JSON of allowed domains |
 | `changelog` | string? | Changelog text |
@@ -701,7 +715,7 @@ See the [Agents](/api-reference/agents) page for per-agent skill management:
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `GET /api/v1/agents/{agentId}/skills` | GET | List skills assigned to agent |
+| `GET /api/v1/agents/{agentId}/skills` | GET | List skills assigned to agent; each row carries `skill.needs_credentials` and `missing_credentials` |
 | `POST /api/v1/agents/{agentId}/skills` | POST | Assign skill to agent |
 | `DELETE /api/v1/agents/{agentId}/skills/{skillId}` | DELETE | Remove skill from agent |
 
