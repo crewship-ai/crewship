@@ -40,6 +40,9 @@ interface Member {
   id: string
   role: string
   created_at: string
+  /** Sent only to a trusted OWNER/ADMIN — the same gate as the member access
+   *  policy it summarises. Absent means "not yours to read", not "trusted". */
+  access_mode?: "trusted" | "restricted"
   user: {
     id: string
     email: string
@@ -403,6 +406,18 @@ function MemberRow({
         </CollapsibleTrigger>
 
         <div className="flex shrink-0 items-center gap-2.5">
+          {/* Access mode is a separate fact from the role (#2878): a
+              restricted MEMBER and a trusted MEMBER share the role chip. Only
+              the exception is marked, so a trusted roster stays quiet. */}
+          {member.access_mode === "restricted" && (
+            <Badge
+              variant="outline"
+              className="bg-muted text-micro font-medium text-foreground border-border"
+              title="Restricted access: only the resources granted in this member's access policy"
+            >
+              Restricted
+            </Badge>
+          )}
           <MemberRoleControl
             member={member}
             workspaceId={workspaceId}
@@ -472,6 +487,28 @@ function MemberRow({
             {isOwner && " The owner's role and capabilities are immutable."}
           </p>
 
+          {member.access_mode && (
+            <>
+              <div className="mb-1.5 mt-3.5 flex items-baseline gap-2">
+                <span className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">
+                  Access
+                </span>
+                <span className="text-micro text-muted-foreground-soft">
+                  separate from the role
+                </span>
+              </div>
+              <p className="text-label text-muted-foreground" data-testid="member-access-mode">
+                <span className="font-mono text-foreground">
+                  {member.access_mode === "restricted" ? "Restricted" : "Trusted"}
+                </span>
+                {" — "}
+                {member.access_mode === "restricted"
+                  ? "Only the resources and operations granted in the access policy below."
+                  : "Everything the role and capabilities allow."}
+              </p>
+            </>
+          )}
+
           {showCaps && (
             <>
               <div className="mb-1 mt-3.5 flex items-baseline gap-2">
@@ -489,7 +526,7 @@ function MemberRow({
                 granted={granted}
                 isLoading={capsLoading}
               />
-              <MemberResourceAccess workspaceId={workspaceId} memberId={member.id} label={label} role={member.role} />
+              <MemberResourceAccess workspaceId={workspaceId} memberId={member.id} label={label} role={member.role} onSaved={onRefresh} />
             </>
           )}
         </div>

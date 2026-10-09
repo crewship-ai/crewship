@@ -79,6 +79,19 @@ export function formatStepCost(usd: number): string {
   return `$${usd.toFixed(4)}`
 }
 
+// A run's cost_usd is what the agent CLIs reported for it, priced at list
+// rates — not money anyone was billed. Under a flat-rate subscription the
+// marginal cost of a call is structurally zero and the cost ledger records
+// nothing (#2193). Surfaces that show the figure call it "reported usage",
+// mark it approximate, and carry this sentence where there is room.
+export const REPORTED_USAGE_HINT =
+  "Usage the agent CLIs reported for this run, priced at list rates. It is not a billed amount: calls under a subscription plan are not charged per call."
+
+export function formatReportedUsage(usd: number | null | undefined): string {
+  if (typeof usd !== "number" || !Number.isFinite(usd) || usd <= 0) return "none reported"
+  return `~$${usd.toFixed(4)}`
+}
+
 // formatElapsedSince — wall-clock elapsed for an in-flight run,
 // rendered with the same duration vocabulary as the step waterfall
 // (formatStepDuration) so "12.0s" means the same thing everywhere.

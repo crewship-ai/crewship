@@ -392,7 +392,7 @@ POST /api/v1/agents?workspace_id={workspaceId}
 | `400` | Invalid name, slug, role, missing required crew_id, or crew_id belongs to another workspace |
 | `402` | Reserved for future license limits; currently unlimited |
 | `403` | Insufficient role |
-| `409` | Slug already taken, or crew already has a LEAD agent |
+| `409` | Slug already taken (`code: agent_slug_taken`), slug reserved by a former agent of the crew (`agent_slug_reserved`), or crew already has a LEAD agent (`crew_lead_exists`). See [Error Format](/api-reference/overview#error-format). |
 
 ---
 
@@ -518,6 +518,10 @@ an agent's **Config -> Ask forms**, or with `crewship agent update <agent>
 agent ask-preview <agent> <form-id> --var k=v`.
 
 **Response:** `200 OK` -- updated agent object.
+
+| Status | Condition |
+|---|---|
+| `409` | Renaming onto a slug another live agent of the workspace holds (`code: agent_slug_taken`, `field: slug`), or onto a slug a former agent of the target crew still owns (`agent_slug_reserved`). A slug held only by a deleted agent of another crew is free. |
 
 ---
 

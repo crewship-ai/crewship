@@ -1,5 +1,6 @@
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { toApiError } from "@/lib/api-error"
 import { backfillAgentAvatars } from "@/lib/agent-avatar-persist"
 import { devWarn } from "@/lib/client-log"
 import { DEFAULT_RUNNER } from "../create-agent/provider-options"
@@ -83,7 +84,7 @@ async function submitBlank(workspaceId: string, state: WizardState): Promise<Sub
       ...containerCreateBody(state),
     }),
   })
-  if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`)
+  if (!res.ok) throw await toApiError(res, `HTTP ${res.status}`)
   const created = await res.json() as { id: string; slug: string; name: string }
 
   // POST doesn't accept mcp_config_json — patch it after create when set.
@@ -110,7 +111,7 @@ async function submitFromTemplate(workspaceId: string, state: WizardState): Prom
       body: JSON.stringify({ crew_name: state.name.trim(), crew_slug: state.slug.trim(), llm_provider: state.provider, cli_adapter: DEFAULT_RUNNER[state.provider], llm_model: defaultModelForProvider(state.provider) }),
     },
   )
-  if (!deployRes.ok) throw new Error(await deployRes.text() || `HTTP ${deployRes.status}`)
+  if (!deployRes.ok) throw await toApiError(deployRes, `HTTP ${deployRes.status}`)
   const deployed = await deployRes.json() as { crew_id: string; crew_name: string; crew_slug: string }
 
   const patchBody: Record<string, unknown> = {

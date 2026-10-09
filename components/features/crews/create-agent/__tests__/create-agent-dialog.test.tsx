@@ -175,6 +175,41 @@ describe("CreateAgentDialog", () => {
     expect(band).toHaveTextContent(/slug taken/i)
   })
 
+  // #2862: a refusal that names a field is shown under that field, in the
+  // server's words — not as a toast of the raw JSON body.
+  it("shows a slug conflict under the Slug field instead of toasting JSON", async () => {
+    const { toast } = await import("sonner")
+    stubFetch(() => new Response(JSON.stringify({
+      error: "Agent slug already taken in this workspace", code: "agent_slug_taken", field: "slug",
+    }), { status: 409 }))
+    const { props } = renderDialog()
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+
+    const slug = screen.getByLabelText("Slug")
+    await waitFor(() => expect(slug).toHaveAttribute("aria-invalid", "true"))
+    const message = document.getElementById("agent-slug-error")
+    expect(message).toHaveTextContent("Agent slug already taken in this workspace")
+    expect(slug).toHaveAttribute("aria-describedby", "agent-slug-error")
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalled()
+    expect(document.body.textContent).not.toContain('{"error"')
+    expect(props.onOpenChange).not.toHaveBeenCalled()
+
+    // A new slug is a new question: the message goes with the old one.
+    fireEvent.change(slug, { target: { value: "filip-2" } })
+    await waitFor(() => expect(document.getElementById("agent-slug-error")).toBeNull())
+  })
+
+  it("shows a second-lead refusal under the Role field", async () => {
+    stubFetch(() => new Response(JSON.stringify({
+      error: "Crew already has a lead agent", code: "crew_lead_exists", field: "agent_role",
+    }), { status: 409 }))
+    renderDialog()
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+    expect(await screen.findByText("Crew already has a lead agent")).toBeInTheDocument()
+  })
+
   it("asks before throwing away typed input on Esc", async () => {
     const onOpenChange = vi.fn()
     renderDialog({ onOpenChange })
