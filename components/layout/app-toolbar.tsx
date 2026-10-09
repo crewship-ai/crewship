@@ -27,7 +27,8 @@ import { useEngineStatus } from "@/hooks/use-engine-status"
 import { useCrewsStatus } from "@/hooks/use-crews-status"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { useAccessMode, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
+import { useAccessMode, useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
+import { restrictedPathAllowed } from "@/lib/restricted-surfaces"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -111,6 +112,7 @@ export function AppToolbar() {
   // allowlist. Their hooks idle on a null workspace, and their widgets are not
   // rendered unless the session is trusted.
   const trusted = useAccessMode() === "trusted"
+  const surfaces = useRestrictedSurfaces()
   const workspaceId = useTrustedWorkspaceId()
   const { status: engineStatus } = useEngineStatus(workspaceId)
   const crewsStatus = useCrewsStatus(workspaceId)
@@ -394,7 +396,7 @@ export function AppToolbar() {
                 <div key={section.label}>
                   <div className="px-3 py-1 text-micro uppercase tracking-wider font-semibold text-muted-foreground">{section.label}</div>
                   {section.items
-                    .filter((item) => !isHiddenForRole(item, role, instanceAdmin))
+                    .filter((item) => !isHiddenForRole(item, role, instanceAdmin) && (!surfaces || restrictedPathAllowed(item.href, surfaces)))
                     .map((item) => {
                       const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))
                       // FUTURE is announced, not built — the row reads as a

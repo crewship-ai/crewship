@@ -42,6 +42,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/jitter"
 )
 
 // defaultRunningSweepInterval is the gap between stuck-RUNNING sweeper
@@ -349,6 +351,10 @@ func (h *AssignmentHandler) StartStuckRunningSweeper(ctx context.Context, interv
 		interval = defaultRunningSweepInterval
 	}
 	go func() {
+		// Spread this loop's phase from the other sweepers started at boot (#1891).
+		if !jitter.Startup(ctx, interval) {
+			return
+		}
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {

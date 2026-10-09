@@ -119,6 +119,10 @@ type MCPServerInput struct {
 	Args        []string          `json:"args,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
 	Credential  *MCPCredInput     `json:"credential,omitempty"`
+	// DisabledTools are the tools switched off in mcp_tool_bindings for this
+	// server. The gateway refuses to call them and leaves them out of
+	// /mcp/tools (#2178).
+	DisabledTools []string `json:"disabled_tools,omitempty"`
 }
 
 // MCPCredInput carries decrypted credential for MCP server authentication.
