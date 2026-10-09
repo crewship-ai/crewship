@@ -18,6 +18,7 @@ import {
   type CreateSurfaceStep,
 } from "@/components/layout/create-surface"
 import { apiFetch } from "@/lib/api-fetch"
+import { toApiError } from "@/lib/api-error"
 import type { CrewRecord } from "./crew-canvas-tabs/types"
 import { StepIdentity } from "./create-crew/step-identity"
 import { StepLineup } from "./create-crew/step-lineup"
@@ -414,6 +415,6 @@ async function saveCrew(workspaceId: string, id: string, state: WizardState, bas
   const old = crewBody(baseline)
   const body = Object.fromEntries(Object.entries(crewBody(state)).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(old[key])))
   const response = await apiFetch(`/api/v1/crews/${id}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-  if (!response.ok) throw new Error(`Crew could not be saved (${response.status}).`)
+  if (!response.ok) throw await toApiError(response, `Crew could not be saved (${response.status}).`)
   return response.json() as Promise<{ id: string; name: string; slug: string; partial?: boolean }>
 }

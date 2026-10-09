@@ -28,6 +28,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
 import { apiFetch } from "@/lib/api-fetch"
+import { toApiError } from "@/lib/api-error"
 import { storeAgentAvatar } from "@/lib/agent-avatar-persist"
 import { stopAgent, stopSuccessMessage } from "@/lib/agent-stop"
 import { entityHref } from "@/lib/entity-links"
@@ -238,8 +239,7 @@ export function AgentCanvas({
         { method: "POST", headers: { "Content-Type": "application/json" } },
       )
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null
-        throw new Error(body?.error ?? `HTTP ${res.status}`)
+        throw await toApiError(res, `HTTP ${res.status}`)
       }
       toast.success("Hire approved — agent is live")
       void fetchAgent()
@@ -261,8 +261,7 @@ export function AgentCanvas({
         },
       )
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null
-        throw new Error(body?.error ?? `HTTP ${res.status}`)
+        throw await toApiError(res, `HTTP ${res.status}`)
       }
       toast.success("Re-hired — agent is live again")
       void fetchAgent()

@@ -17,7 +17,10 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	ref := func(name string) map[string]any { return map[string]any{"$ref": "#/components/schemas/" + name} }
 
 	components := map[string]any{}
-	components["WorkspaceMemberResponseV1"] = object(map[string]any{"id": str(), "workspace_id": str(), "user_id": str(), "role": str(), "created_at": str(), "updated_at": str(), "user": anyObject()})
+	// access_mode is sent only to a trusted OWNER/ADMIN (the member access
+	// policy read gate), so it is optional rather than required.
+	components["WorkspaceMemberResponseV1"] = object(map[string]any{"id": str(), "workspace_id": str(), "user_id": str(), "role": str(), "created_at": str(), "updated_at": str(), "user": anyObject(),
+		"access_mode": map[string]any{"type": "string", "enum": []string{"trusted", "restricted"}}})
 	components["CrewMemberResponseV1"] = object(map[string]any{"id": str(), "crew_id": str(), "user_id": str(), "role": str(), "created_at": str(), "updated_at": str(), "user": anyObject()})
 	routes := map[string]DomainSchema{}
 	add := func(method, path, name string, response map[string]any) {

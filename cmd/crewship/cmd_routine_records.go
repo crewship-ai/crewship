@@ -181,19 +181,17 @@ Examples:
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		if composed {
-			fmt.Fprintln(w, "RUN ID\tSTATUS\tOUTCOME\tMODE\tTRIGGER\tSOURCE\tCHAIN\tDURATION\tCOST\tSTARTED")
+			fmt.Fprintln(w, "RUN ID\tSTATUS\tOUTCOME\tMODE\tTRIGGER\tSOURCE\tCHAIN\tDURATION\tREPORTED USAGE\tSTARTED")
 		} else {
-			fmt.Fprintln(w, "RUN ID\tSTATUS\tOUTCOME\tMODE\tTRIGGER\tSOURCE\tDURATION\tCOST\tSTARTED")
+			fmt.Fprintln(w, "RUN ID\tSTATUS\tOUTCOME\tMODE\tTRIGGER\tSOURCE\tDURATION\tREPORTED USAGE\tSTARTED")
 		}
 		for _, r := range rows {
 			dur := "—"
 			if r.DurationMs > 0 {
 				dur = formatDurMs(r.DurationMs)
 			}
-			cost := "—"
-			if r.CostUSD > 0 {
-				cost = fmt.Sprintf("$%.4f", r.CostUSD)
-			}
+			// Reported usage, not spend: see formatRunCost (#2193).
+			cost := formatRunCost(r.CostUSD)
 			outcome := r.Outcome
 			if outcome == "" {
 				outcome = "—"

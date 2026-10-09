@@ -561,17 +561,21 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 // into HTTPS tunnels (the agent must use HTTP_PROXY path for credential injection).
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	host := r.Host
-	// Opaque TLS cannot provide a trustworthy payer/model/usage contract.
-	if !p.admitLLM(w, r, "", nil, "OPAQUE_TUNNEL") {
-		return
-	}
-
+	// The allowlist first, as on the HTTP path: a domain this crew may not
+	// reach at all is a local policy refusal (403) and needs no host
+	// admission round trip — which, failing for an unrelated reason (#2899),
+	// would otherwise answer a 503 for what is simply a blocked domain.
 	if !p.freeMode && !p.allowlist.IsAllowed(host) {
 		p.logger.Warn("blocked CONNECT to non-allowed domain", "host", host)
 		if p.onEgress != nil {
 			p.onEgress(host, http.MethodConnect, "", http.StatusForbidden, true)
 		}
 		http.Error(w, "domain not allowed", http.StatusForbidden)
+		return
+	}
+
+	// Opaque TLS cannot provide a trustworthy payer/model/usage contract.
+	if !p.admitLLM(w, r, "", nil, "OPAQUE_TUNNEL") {
 		return
 	}
 

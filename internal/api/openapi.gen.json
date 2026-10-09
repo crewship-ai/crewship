@@ -16100,6 +16100,13 @@
       },
       "WorkspaceMemberResponseV1": {
         "properties": {
+          "access_mode": {
+            "enum": [
+              "trusted",
+              "restricted"
+            ],
+            "type": "string"
+          },
           "created_at": {
             "type": "string"
           },
@@ -145587,6 +145594,24 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "500": {
             "content": {

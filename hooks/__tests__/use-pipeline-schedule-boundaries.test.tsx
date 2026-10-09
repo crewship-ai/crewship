@@ -69,7 +69,8 @@ it.each(["create", "update", "remove"])("%s surfaces server rejection without re
     fetch.mockResolvedValueOnce(reply([])).mockResolvedValueOnce(new Response("policy denied", { status: 403 }));
     const { result } = renderHook(() => usePipelineSchedules("ws"));
     await waitFor(() => expect(result.current.loading).toBe(false));
-    await expect(mutate(method, result.current)).rejects.toThrow("403");
+    // create/update throw the server's sentence with the status on the error (#2862).
+    await expect(mutate(method, result.current)).rejects.toThrow(method === "remove" ? "403" : "policy denied");
     expect(fetch).toHaveBeenCalledTimes(2);
 });
 it.each(["create", "update", "remove"])("late %s cannot refresh the previous workspace", async (method) => {
@@ -93,14 +94,14 @@ it("treats a missing deleted schedule as success", async () => {
     expect(fetch).toHaveBeenCalledTimes(3);
 });
 it("previews encoded cron/timezone and count without mutating schedules", async () => {
-    fetch.mockResolvedValueOnce(reply([])).mockResolvedValueOnce(reply({ occurrences: ["tomorrow"] })).mockResolvedValueOnce(reply({ occurrences: [] })).mockResolvedValueOnce(new Response("bad cron", { status: 400 }));
+    fetch.mockResolvedValueOnce(reply([])).mockResolvedValueOnce(reply({ occurrences: ["tomorrow"] })).mockResolvedValueOnce(reply({ occurrences: [] })).mockResolvedValueOnce(new Response(JSON.stringify({ error: "bad cron" }), { status: 400 }));
     const { result } = renderHook(() => usePipelineSchedules("ws"));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(await result.current.preview("*/5 * * * *", "Europe/Prague")).toEqual({ occurrences: ["tomorrow"] });
     expect(new URL(String(fetch.mock.calls[1][0]), "http://localhost").searchParams.get("count")).toBe("5");
     await result.current.preview("* * * * *", "UTC", 2);
     expect(String(fetch.mock.calls[2][0])).toContain("count=2");
-    await expect(result.current.preview("invalid", "UTC")).rejects.toThrow("preview failed: 400 bad cron");
+    await expect(result.current.preview("invalid", "UTC")).rejects.toThrow(/^bad cron$/); // the server's sentence, not the raw JSON body (#2862)
 });
 it("does not perform scoped operations without a workspace", async () => {
     const { result } = renderHook(() => usePipelineSchedules(null));

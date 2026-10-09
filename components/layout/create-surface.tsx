@@ -970,6 +970,7 @@ export function CreateSurfaceGrid({
 export function CreateSurfaceField({
   label,
   hint,
+  error,
   htmlFor,
   required = false,
   className,
@@ -977,6 +978,10 @@ export function CreateSurfaceField({
 }: {
   label: React.ReactNode
   hint?: React.ReactNode
+  /** A refusal that belongs to this field (e.g. a server `field: "slug"`
+   *  conflict). Shown in place of the hint; give the control
+   *  `aria-describedby={`${htmlFor}-error`}` so it is announced with it. */
+  error?: React.ReactNode
   htmlFor?: string
   /** Renders the marker. The FORM still validates — this only says so early. */
   required?: boolean
@@ -997,7 +1002,13 @@ export function CreateSurfaceField({
         )}
       </label>
       {children}
-      {hint != null && <span className="text-[11px] leading-relaxed text-muted-foreground-soft">{hint}</span>}
+      {error != null ? (
+        <span role="alert" id={htmlFor ? `${htmlFor}-error` : undefined} className="text-[11px] leading-relaxed text-destructive">
+          {error}
+        </span>
+      ) : (
+        hint != null && <span className="text-[11px] leading-relaxed text-muted-foreground-soft">{hint}</span>
+      )}
     </div>
   )
 }
