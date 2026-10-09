@@ -39,6 +39,10 @@ interface ChatComposerProps {
   variant: "mobile" | "desktop"
   isStreaming: boolean
   connectionStatus: string
+  /** A draft session with no row and no profile yet (#2898): its first send
+   *  creates the row through ensureSession and waits for the connection, so
+   *  Send is offered although the socket is not open. */
+  draftSendable?: boolean
   stopGeneration: () => void
   /** Make sure this session's `chats` row exists, and report whether it does.
    *  `false` means the message must not go out — see useMessageSubmit.
@@ -115,6 +119,7 @@ export function ChatComposer({
   variant,
   isStreaming,
   connectionStatus,
+  draftSendable = false,
   stopGeneration,
   ensureSession,
   sendMessage,
@@ -280,6 +285,7 @@ export function ChatComposer({
   // breakpoint — that is the point at which the page hands this composer the
   // "mobile" variant, so the variant is the signal rather than a third
   // media query that could disagree with it.
+  const canSend = connectionStatus === "connected" || draftSendable
   const askSheet = renderAskTemplate ? (
     <AskFormSheet
       form={askForm ?? null}
@@ -287,7 +293,7 @@ export function ChatComposer({
       agentId={agentId}
       sessionId={sessionId}
       compact={variant === "mobile" || isMobile}
-      disabled={isStreaming || connectionStatus !== "connected"}
+      disabled={isStreaming || !canSend}
       onSubmit={handleAskSubmit}
       onClose={onCloseAskForm ?? noopCloseAskForm}
     />
@@ -327,7 +333,7 @@ export function ChatComposer({
     !!input.trim() ||
     sendableAttachments(sessionAttachments).length > 0 ||
     hasPendingUploads(sessionAttachments)
-  const submitDisabled = !isStreaming && (!hasContent || connectionStatus !== "connected")
+  const submitDisabled = !isStreaming && (!hasContent || !canSend)
 
   if (variant === "mobile") {
     // The mobile branch used to be a bare input: no attachments at all, so a
