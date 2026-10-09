@@ -4,6 +4,8 @@ package main
 // debug, skills, credentials. Extracted from cmd_agent.go.
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -86,13 +88,38 @@ var agentStopCmd = &cobra.Command{
 			return err
 		}
 		if err := cli.CheckError(resp); err != nil {
-			return err
+			return agentStopRefusal(err, args[0])
 		}
-		resp.Body.Close()
+		defer resp.Body.Close()
+		var stopped struct {
+			Outcome string `json:"outcome" yaml:"outcome"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&stopped)
 
+		if stopped.Outcome == "already_stopped" {
+			cli.PrintSuccess(fmt.Sprintf("Agent %s was not running; nothing to stop.", args[0]))
+			return nil
+		}
 		cli.PrintSuccess(fmt.Sprintf("Agent %s stopped.", args[0]))
 		return nil
 	},
+}
+
+// agentStopRefusal adds what to do next to the stop route's two coded
+// refusals (#2879). Both mean the agent may still be running; the exit code
+// stays the APIError's.
+func agentStopRefusal(err error, slug string) error {
+	var apiErr *cli.APIError
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+	switch apiErr.Extensions["code"] {
+	case "stop_not_confirmed":
+		return fmt.Errorf("%w\n  The agent may still be running and its stop was not confirmed. Retry with `crewship agent stop %s`; check `crewship agent runs %s`.", err, slug, slug)
+	case "runtime_unavailable":
+		return fmt.Errorf("%w\n  The runtime could not be reached, so the agent may still be running. Check `crewship doctor`, then retry.", err)
+	}
+	return err
 }
 
 // agentLogsCmd is an alias for the top-level `crewship logs`, not a second

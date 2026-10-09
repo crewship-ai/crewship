@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { toApiError } from "@/lib/api-error"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 
 // PipelineWebhook mirrors the wire shape returned by /pipeline-webhooks.
@@ -143,8 +144,7 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
         body: JSON.stringify(body),
       })
       if (!res.ok) {
-        const t = await res.text()
-        throw new Error(`create webhook: ${res.status} ${t}`)
+        throw await toApiError(res, `create webhook: HTTP ${res.status}`)
       }
       const out: PipelineWebhook = await res.json()
       await refresh()
@@ -162,8 +162,7 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
         body: JSON.stringify(body),
       })
       if (!res.ok) {
-        const t = await res.text()
-        throw new Error(`update webhook: ${res.status} ${t}`)
+        throw await toApiError(res, `update webhook: HTTP ${res.status}`)
       }
       const out: PipelineWebhook = await res.json()
       await refresh()

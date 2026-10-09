@@ -4,7 +4,7 @@ import { useCallback, useRef } from "react"
 import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query"
 
 import { apiFetch, type ApiFetchInit } from "@/lib/api-fetch"
-import { readApiError, readApiErrorDetail } from "@/lib/api-error"
+import { ApiError, readApiError, readApiErrorDetail } from "@/lib/api-error"
 
 /**
  * The one shared executor behind every write button in the app (PRD
@@ -85,22 +85,16 @@ import { readApiError, readApiErrorDetail } from "@/lib/api-error"
  *  error, abort, DNS) propagates as whatever `fetch` throws, so
  *  `error instanceof ApiMutationError` is exactly rule 4's "catch covers
  *  transport failure only" made checkable. */
-export class ApiMutationError extends Error {
-  readonly status: number
-  /**
-   * The parsed refusal body, when there was one.
-   *
-   * Optional and untyped on purpose: almost every caller wants the message and
-   * nothing else, and the handful that need more — the page import's 422 lists
-   * every reference it could not bind — know the shape of their own endpoint's
-   * refusal and can narrow it themselves.
-   */
-  readonly body: unknown
+export class ApiMutationError extends ApiError {
+  // `body` (inherited) is the parsed refusal body, when there was one.
+  // Optional and untyped on purpose: almost every caller wants the message
+  // and nothing else, and the handful that need more — the page import's 422
+  // lists every reference it could not bind — know the shape of their own
+  // endpoint's refusal and can narrow it themselves. `code` and `field` are
+  // the machine-readable part both error envelopes may carry (#2862).
   constructor(message: string, status: number, body?: unknown) {
-    super(message)
+    super(message, status, body)
     this.name = "ApiMutationError"
-    this.status = status
-    this.body = body
   }
 }
 

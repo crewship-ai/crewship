@@ -237,7 +237,6 @@ function AgentHeader({
       <AgentAvatar
         seed={agent.avatar_seed ?? agent.slug}
         style={agent.avatar_style}
-        agentId={agent.id}
         avatarUrl={agent.avatar_url}
         alt=""
         width={36}

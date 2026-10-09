@@ -110,8 +110,30 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				if reserved {
-					replyError(w, http.StatusConflict, slugReservedMessage(newSlug))
+					replyErrorCode(w, http.StatusConflict, slugReservedMessage(newSlug), errCodeAgentSlugReserved, "slug")
 					return
+				}
+			}
+			// A rename onto a slug a live agent of this workspace holds used
+			// to reach the UPDATE and fail its UNIQUE constraint as a 500.
+			if newSlug != curSlug {
+				var other string
+				err := h.db.QueryRowContext(r.Context(),
+					"SELECT id FROM agents WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL AND id != ?",
+					workspaceID, newSlug, agentID).Scan(&other)
+				if err == nil {
+					replyErrorCode(w, http.StatusConflict, agentSlugTakenMessage, errCodeAgentSlugTaken, "slug")
+					return
+				}
+				if err != sql.ErrNoRows {
+					replyInternalError(w, h.logger, "check agent slug", err)
+					return
+				}
+				// Same as create: a soft-deleted agent's slug must not block it.
+				if _, err := h.db.ExecContext(r.Context(),
+					"UPDATE agents SET slug = slug || '_deleted_' || id WHERE workspace_id = ? AND slug = ? AND deleted_at IS NOT NULL",
+					workspaceID, newSlug); err != nil {
+					h.logger.Warn("free deleted agent slug", "slug", newSlug, "error", err)
 				}
 			}
 		}
@@ -451,6 +473,10 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		query, args := ub.Build("agents", "id = ? AND workspace_id = ? AND deleted_at IS NULL", agentID, workspaceID)
 		if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
+			if isUniqueConstraintErr(err) {
+				replyAgentUniqueConflict(w, err)
+				return
+			}
 			replyInternalError(w, h.logger, "update agent schedule", err)
 			return
 		}
@@ -461,6 +487,10 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	} else {
 		query, args := ub.Build("agents", "id = ? AND workspace_id = ? AND deleted_at IS NULL", agentID, workspaceID)
 		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
+			if isUniqueConstraintErr(err) {
+				replyAgentUniqueConflict(w, err)
+				return
+			}
 			replyInternalError(w, h.logger, "update agent", err)
 			return
 		}

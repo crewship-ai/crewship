@@ -58,7 +58,6 @@ export function HolderStack({ agents, max = 5, size = 18 }: { agents: SkillAgent
           key={a.agent_id}
           seed={a.avatar_seed ?? a.agent_slug}
           style={a.avatar_style}
-          agentId={a.agent_id}
           avatarUrl={a.avatar_url}
           alt={a.agent_name}
           title={`${a.agent_name}${a.crew_name ? ` · ${a.crew_name}` : ""}`}

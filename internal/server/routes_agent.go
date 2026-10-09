@@ -229,23 +229,32 @@ func (s *Server) handleAgentStop(w http.ResponseWriter, r *http.Request) {
 	s.logger.Info("agent stop request", "agent_id", id)
 
 	if s.orchestrator == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime stop unavailable"})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime stop unavailable", "code": orchestrator.AgentStopCodeRuntimeUnavailable})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	if err := s.orchestrator.StopAgent(ctx, id); err != nil {
+	outcome, err := s.orchestrator.StopAgentOutcome(ctx, id)
+	if err != nil {
 		s.logger.Warn("agent stop not confirmed", "agent_id", id, "error", err)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime stop not confirmed"})
+		// A possibly live process outranks an unreadable runtime.
+		if errors.Is(err, orchestrator.ErrStopNotConfirmed) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime stop not confirmed", "code": orchestrator.AgentStopCodeNotConfirmed})
+			return
+		}
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime stop unavailable", "code": orchestrator.AgentStopCodeRuntimeUnavailable})
 		return
 	}
 	if err := s.flushRecoveredStops(ctx); err != nil {
 		s.logger.Warn("confirmed stop history pending retry", "agent_id", id, "error", err)
 	}
 
+	// status stays "stopped" for both outcomes: the agent is confirmed not
+	// running. outcome says whether this request ended anything.
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"agent_id": id,
 		"status":   "stopped",
+		"outcome":  string(outcome),
 	})
 }
 

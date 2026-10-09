@@ -41,6 +41,7 @@ import {
   queuedReason,
   replayAvailability,
   totalCostUSD,
+  useLedgerWork,
   useWorkItem,
   useWorkItems,
   workItemKeys,
@@ -518,5 +519,39 @@ describe("replay availability", () => {
       expect(replayAvailability(workItem({ domain_kind, source: "chat", source_ref: "" }), noDelivery))
         .toEqual({ state: "available", reason: "" })
     }
+  })
+})
+
+describe("useLedgerWork — a window and the open work (#3017)", () => {
+  let qc: QueryClient
+  beforeEach(() => {
+    h.apiFetch.mockReset()
+    qc = newQueryClient()
+  })
+
+  it("reads every page of the window and adds unfinished work older than it", async () => {
+    h.apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("open=true")) return okJSON({ items: [workItem({ id: "w-stuck", state: "needs_reconciliation" }), workItem({ id: "w-2", state: "running" })], next_cursor: null })
+      if (url.includes("after=w-1")) return okJSON({ items: [workItem({ id: "w-2", state: "running" })], next_cursor: null })
+      return okJSON({ items: [workItem({ id: "w-1", state: "succeeded" })], next_cursor: "w-1" })
+    })
+    const { result } = renderHook(() => useLedgerWork("ws-1", "2026-10-08T00:00:00.000Z"), { wrapper: wrapper(qc) })
+    await waitFor(() => expect(result.current.items).toHaveLength(3))
+    expect(result.current.items.map((i) => i.id).sort()).toEqual(["w-1", "w-2", "w-stuck"])
+    expect(result.current.capped).toBe(false)
+    expect(urlsFetched()).toContain("/api/v1/workspaces/ws-1/work-items?since=2026-10-08T00%3A00%3A00.000Z")
+    expect(urlsFetched()).toContain("/api/v1/workspaces/ws-1/work-items?since=2026-10-08T00%3A00%3A00.000Z&after=w-1")
+    expect(urlsFetched()).toContain("/api/v1/workspaces/ws-1/work-items?open=true")
+  })
+
+  it("says it is capped when the window has more pages than it reads", async () => {
+    let n = 0
+    h.apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("open=true")) return okJSON({ items: [], next_cursor: null })
+      n += 1
+      return okJSON({ items: [workItem({ id: `w-${n}`, state: "succeeded" })], next_cursor: `w-${n}` })
+    })
+    const { result } = renderHook(() => useLedgerWork("ws-1", "2026-10-08T00:00:00.000Z"), { wrapper: wrapper(qc) })
+    await waitFor(() => expect(result.current.capped).toBe(true))
   })
 })

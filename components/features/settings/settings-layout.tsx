@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useAuth } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useRestrictedSurfaces } from "@/hooks/use-access-mode"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { apiFetch } from "@/lib/api-fetch"
 import { SubBar } from "@/components/layout/sub-bar"
@@ -37,6 +38,7 @@ interface Member {
   id: string
   role: string
   created_at: string
+  access_mode?: "trusted" | "restricted"
   user: { id: string; email: string; full_name: string | null; avatar_url: string | null }
 }
 
@@ -111,12 +113,33 @@ export function initialFocusedMember(search: string): string {
 }
 
 export function SettingsLayout() {
+  // A restricted session gets account security and nothing else (#2861): the
+  // workspace, members and every other section are off its allowlist, so not
+  // even their requests are made.
+  const surfaces = useRestrictedSurfaces()
+  if (surfaces) return <RestrictedAccountSettings />
   // One Save for the whole page: every card's edits join the floating bar,
   // and leaving with edits pending asks first (components/ui/page-save-bar).
   return (
     <PageSaveProvider>
       <SettingsPage />
     </PageSaveProvider>
+  )
+}
+
+function RestrictedAccountSettings() {
+  const { session, signOut } = useAuth()
+  return (
+    <div className="mx-auto w-full max-w-3xl space-y-4 p-4 md:p-6">
+      <h1 className="text-xl font-semibold">Account security</h1>
+      <ProfileSection
+        restricted
+        userName={session?.user?.name}
+        userEmail={session?.user?.email}
+        sessionExpires={session?.expires}
+        onSignOut={() => signOut().then(() => { window.location.href = "/login" })}
+      />
+    </div>
   )
 }
 

@@ -357,7 +357,6 @@ function OverviewTab({ skill, workspaceId, onTab }: { skill: SkillDetail; worksp
                   <AgentAvatar
                     seed={a.avatar_seed ?? a.agent_slug}
                     style={a.avatar_style ?? a.crew_avatar_style}
-                    agentId={a.agent_id}
                     avatarUrl={a.avatar_url}
                     alt=""
                     width={20}
@@ -662,7 +661,6 @@ function AgentsTab({ skill, agents, crews, workspaceId }: { skill: SkillDetail; 
                   <AgentAvatar
                     seed={a.avatar_seed ?? a.slug}
                     style={a.avatar_style}
-                    agentId={a.id}
                     avatarUrl={a.avatar_url}
                     alt=""
                     width={20}

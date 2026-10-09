@@ -42,7 +42,7 @@ func (h *PageHandler) RestrictedCatalog(w http.ResponseWriter, req *http.Request
 		return
 	}
 	if h.restrictedWorkflow == nil || h.restrictedWorkflow() == nil {
-		replyError(w, 503, "Page execution unavailable")
+		replyRestrictedRuntimeUnavailable(w)
 		return
 	}
 	workspace := WorkspaceIDFromContext(req.Context())

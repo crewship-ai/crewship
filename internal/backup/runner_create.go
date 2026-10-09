@@ -591,6 +591,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	// that does and does not guarantee.
 	if dump != nil {
 		contents.TableRowCounts = tableRowCounts(dump)
+		contents.ScopeReconciliation = dump.scope.forTables(dump)
 	}
 	manifest := &Manifest{
 		FormatVersion:           FormatVersion,

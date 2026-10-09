@@ -106,7 +106,7 @@ Examples:
 				return
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "RUN_ID\tSLUG\tSTATUS\tMODE\tSTARTED\tDURATION\tCOST\tTRIGGER")
+			fmt.Fprintln(w, "RUN_ID\tSLUG\tSTATUS\tMODE\tSTARTED\tDURATION\tREPORTED USAGE\tTRIGGER")
 			for _, r := range body.Rows {
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					truncIDForCLI(r.ID, 24), r.PipelineSlug, r.Status, r.Mode, r.StartedAt,
@@ -136,11 +136,15 @@ func formatRunDuration(ms int64) string {
 
 // formatRunCost renders a run's cost_usd for the runs-all table. See
 // formatRunDuration for why this doesn't reuse formatPayloadCost.
+//
+// cost_usd is what the agent CLIs reported, priced at list rates — not a
+// billed amount (subscription calls are not charged per call, #2193). The
+// column says REPORTED USAGE and the value is marked approximate.
 func formatRunCost(usd float64) string {
 	if usd <= 0 {
 		return "—"
 	}
-	return fmt.Sprintf("$%.4f", usd)
+	return fmt.Sprintf("~$%.4f", usd)
 }
 
 func init() {

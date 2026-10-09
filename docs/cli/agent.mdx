@@ -405,13 +405,29 @@ Stop a running agent.
 crewship agent stop <slug-or-id>
 ```
 
-The command reports `stopped` only after the runtime has **confirmed** the
-stop. When the sidecar cannot be reached, or answers without confirming that
-this agent is stopped, the server answers `502` (`runtime stop unavailable` /
-`runtime stop not confirmed`), the agent's status is left as it was, and the
-command fails with that error and a non-zero exit — it never prints a stop
-that did not happen. Check `crewship agent get <slug-or-id>` and retry once
-the crew's runtime is reachable.
+The command succeeds only after the runtime has **confirmed** the agent is
+not running, and says which way:
+
+| Output | Meaning |
+|---|---|
+| `Agent <slug> stopped.` | A run was live and its end is confirmed. |
+| `Agent <slug> was not running; nothing to stop.` | The server established that nothing was running (see below). Stopping an idle agent is not an error. |
+
+Otherwise the server answers `502` with a stable `code`, the agent's status
+is left as it was, and the command fails with a non-zero exit — it never
+prints a stop that did not happen:
+
+| `code` | Meaning | What to do |
+|---|---|---|
+| `stop_not_confirmed` | A run of this agent exists or may exist — for example a run that outlived a server restart and is still live, or a record without a runtime location — and its end was not confirmed. | Retry; check `crewship agent runs <slug>`. |
+| `runtime_unavailable` | The runtime could not be read: the daemon, its run store or the container runtime did not answer. | Check `crewship doctor`, then retry. |
+
+"Nothing was running" is established only when the daemon owns no invocation
+of the agent, its durable run store lists without error, every stored run
+record is readable (or names another agent), and none of this agent's records
+is in a non-terminal state. A stored `running` record — a run that outlived a
+restart — is stopped at its recorded container and session and reported as
+`stopped` once the runtime confirms it is gone.
 
 ---
 
@@ -560,7 +576,12 @@ upgrading the avatar library repaints every agent. Once a render is stored,
 that exact image is served instead and the face stops moving.
 
 An agent with no stored render is in the normal, pre-persistence state, not
-a broken one.
+a broken one. The CLI cannot draw a render (the generator runs in the
+browser), so agents created with `crewship agent create` start without one.
+The dashboard stores renders when an agent is created or edited there, and
+its **Store missing avatars** action fills in the rest — see
+[Agent avatars](/api-reference/agents#agent-avatars). Viewing an agent never
+stores one.
 
 ### `crewship agent avatar show`
 

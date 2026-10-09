@@ -68,7 +68,68 @@ export async function readApiError(res: Response, fallback: string): Promise<str
 export async function readApiErrorDetail(
   res: Response,
   fallback: string,
-): Promise<{ message: string; body: unknown }> {
+): Promise<{ message: string; body: unknown; code?: string; field?: string }> {
   const body = await res.json().catch(() => null)
-  return { message: apiErrorMessage(body, fallback), body }
+  return { message: apiErrorMessage(body, fallback), body, ...apiErrorCodeAndField(body) }
+}
+
+/**
+ * The machine-readable half of a refusal (#2862).
+ *
+ * Both envelopes may carry an optional `code` (e.g. `agent_slug_taken`) and
+ * the request `field` it concerns (e.g. `slug`): `replyErrorCode` puts them
+ * next to `error`, `writeProblemCode` next to `detail`. Branch on `code`,
+ * never on the sentence — the sentence is for people and may be reworded.
+ */
+export function apiErrorCodeAndField(body: unknown): { code?: string; field?: string } {
+  const out: { code?: string; field?: string } = {}
+  if (body && typeof body === "object") {
+    const b = body as Record<string, unknown>
+    if (typeof b.code === "string" && b.code.trim() !== "") out.code = b.code
+    if (typeof b.field === "string" && b.field.trim() !== "") out.field = b.field
+  }
+  return out
+}
+
+/**
+ * A refused request, as one error type for every caller (#2862): the
+ * server's sentence as `message`, plus the status, the parsed body and the
+ * optional machine `code` and `field`. `ApiMutationError` (use-api-mutation)
+ * is this type too, so a dialog can handle a refusal the same way whichever
+ * helper made the request.
+ */
+export class ApiError extends Error {
+  readonly status: number
+  readonly body: unknown
+  readonly code?: string
+  readonly field?: string
+  constructor(message: string, status: number, body?: unknown) {
+    super(message)
+    this.name = "ApiError"
+    this.status = status
+    this.body = body
+    const { code, field } = apiErrorCodeAndField(body)
+    this.code = code
+    this.field = field
+  }
+}
+
+/** Reads a failed Response into an ApiError, consuming its body.
+ *
+ * A JSON body gives the sentence, code and field. A body that is not JSON
+ * keeps the readable behaviour the callers this replaced had
+ * (`new Error(await res.text())`): a short plain-text refusal is the message,
+ * while an HTML error page or an empty body falls back to `fallback`.
+ */
+export async function toApiError(res: Response, fallback: string): Promise<ApiError> {
+  const text = await res.text().catch(() => "")
+  let body: unknown = null
+  try {
+    body = text ? JSON.parse(text) : null
+  } catch {
+    const plain = text.trim()
+    const readable = plain !== "" && plain.length <= 300 && !plain.startsWith("<")
+    return new ApiError(readable ? plain : fallback, res.status, null)
+  }
+  return new ApiError(apiErrorMessage(body, fallback), res.status, body)
 }

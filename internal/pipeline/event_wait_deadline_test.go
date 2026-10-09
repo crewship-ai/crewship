@@ -91,6 +91,12 @@ func TestEventWaitDeadline_OfflineExpiryDoesNotRenew(t *testing.T) {
 
 // Boot through a fresh executor on a reopened, fully migrated on-disk DB.
 // Exercise pending recovery and delivered-before-deadline precedence.
+// resumeSettleTimeout bounds how long a test waits for a resumed or expired
+// run to reach its terminal status. The work is milliseconds, but a loaded CI
+// shard delayed it past one second (#3026); polling returns as soon as the
+// status lands, so a generous bound costs nothing when the run is quick.
+const resumeSettleTimeout = 10 * time.Second
+
 func TestEventWaitDeadline_ReopenAndBoot(t *testing.T) {
 	for _, delivery := range []string{"pending", "delivered", "consumed"} {
 		t.Run(delivery, func(t *testing.T) {
@@ -147,7 +153,7 @@ func TestEventWaitDeadline_ReopenAndBoot(t *testing.T) {
 			if delivery != "pending" {
 				want = RunStatusCompleted
 			}
-			final := waitForRunStatus(t, restarted.runStore, res.RunID, want, time.Second)
+			final := waitForRunStatus(t, restarted.runStore, res.RunID, want, resumeSettleTimeout)
 			if delivery != "pending" {
 				out, err := restarted.runStore.GetStepOutputs(ctx, res.RunID)
 				if err != nil || out["gate"] != "payload" {
@@ -301,7 +307,7 @@ func TestEventWaitDeadline_SweeperLeaderAndStop(t *testing.T) {
 		t.Fatalf("nonleader resumed: %+v %v", rec, err)
 	}
 	gate.enabled.Store(true)
-	waitForRunStatus(t, deps.RunStore, res.RunID, RunStatusFailed, time.Second)
+	waitForRunStatus(t, deps.RunStore, res.RunID, RunStatusFailed, resumeSettleTimeout)
 	stop()
 	stop() // join is idempotent
 }
@@ -670,7 +676,7 @@ func TestEventWaitDeadline_LiveOriginalsDoNotStarveOtherExpiry(t *testing.T) {
 	}
 	stop := StartEventWaitSweeper(ctx, db, exec, nil, slog.New(slog.NewTextHandler(io.Discard, nil)), 10*time.Millisecond)
 	defer stop()
-	waitForRunStatus(t, deps.RunStore, "live-08", RunStatusFailed, time.Second)
+	waitForRunStatus(t, deps.RunStore, "live-08", RunStatusFailed, resumeSettleTimeout)
 	for i := 0; i < 8; i++ {
 		rec, err := deps.RunStore.Get(ctx, fmt.Sprintf("live-%02d", i))
 		if err != nil || rec.Status != RunStatusWaiting {

@@ -11,11 +11,11 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: toastError } }))
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
 const policy = { membership_id: "membership-1", revision: 7, mode: "restricted", rights: [{ kind: "agent", id: "agent-1", operation: "chat" }] }
 function response(body: unknown, status = 200) { return { ok: status < 400, status, json: async () => body } }
-function show(role = "MEMBER") {
+function show(role = "MEMBER", onSaved?: () => void) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   // Inside the page's save bar, as Settings › Members renders it.
   render(<QueryClientProvider client={client}><PageSaveProvider>
-    <MemberResourceAccess workspaceId="workspace-1" memberId="membership-1" label="Client One" role={role} />
+    <MemberResourceAccess workspaceId="workspace-1" memberId="membership-1" label="Client One" role={role} onSaved={onSaved} />
     <PageSaveBar />
   </PageSaveProvider></QueryClientProvider>)
 }
@@ -44,6 +44,23 @@ describe("member resource access", () => {
     expect(JSON.parse(init.body)).toEqual({ ...policy, rights: [] })
     // The saved revision is the new baseline: nothing left pending.
     await waitFor(() => expect(bar()).not.toHaveTextContent("unsaved"))
+  })
+  it("reloads the roster after a saved mode change, so its Restricted marker follows (#2878)", async () => {
+    const onSaved = vi.fn()
+    mockPolicy(); show("MEMBER", onSaved)
+    fireEvent.click(screen.getByRole("button", { name: "Edit resource access" }))
+    fireEvent.change(await screen.findByLabelText("Access mode"), { target: { value: "trusted" } })
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1))
+  })
+  it("does not reload the roster when only the grants changed", async () => {
+    const onSaved = vi.fn()
+    mockPolicy(); show("MEMBER", onSaved)
+    fireEvent.click(screen.getByRole("button", { name: "Edit resource access" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Remove agent agent-1 chat" }))
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(bar()).not.toHaveTextContent("unsaved"))
+    expect(onSaved).not.toHaveBeenCalled()
   })
   it("shows no Save while nothing has been edited, and Discard restores the saved grants", async () => {
     mockPolicy(); show(); fireEvent.click(screen.getByRole("button", { name: "Edit resource access" }))
