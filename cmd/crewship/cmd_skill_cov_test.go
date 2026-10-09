@@ -234,7 +234,9 @@ func TestSkillListRunECov_FiltersAndQuery(t *testing.T) {
 	vendor := "anthropic"
 	s.OnGet("/api/v1/skills", clitest.JSONResponse(200, []map[string]any{
 		{"id": covSkillID, "slug": "pdf", "display_name": "PDF", "category": "CODING",
-			"maturity": "OFFICIAL", "source": "BUNDLED", "scan_status": "CLEAN", "vendor": vendor},
+			"maturity": "OFFICIAL", "source": "BUNDLED", "scan_status": "CLEAN", "vendor": vendor,
+			"installed_on": []map[string]any{{"agent_slug": "viktor"}, {"agent_slug": "ava"}},
+			"usage":        map[string]any{"uses_7d": 17, "errors_7d": 0, "uses_total": 40}},
 		{"id": "cskill20123456789abcdefg", "slug": "bare", "display_name": "Bare", "category": "DATA",
 			"maturity": "COMMUNITY", "source": "CUSTOM", "scan_status": "CLEAN", "vendor": nil},
 	}))
@@ -253,6 +255,12 @@ func TestSkillListRunECov_FiltersAndQuery(t *testing.T) {
 	}
 	if !strings.Contains(out, "pdf") || !strings.Contains(out, "anthropic") {
 		t.Errorf("table output missing expected rows: %q", out)
+	}
+	// #3032: the workspace's agent count and 7-day uses are columns.
+	for _, want := range []string{"AGENTS", "USES 7D", "17"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table output missing %q: %q", want, out)
+		}
 	}
 
 	skillCalls := s.CallsFor("GET", "/api/v1/skills")

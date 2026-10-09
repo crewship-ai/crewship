@@ -7004,12 +7004,19 @@
           "crew_slug": {
             "nullable": true,
             "type": "string"
+          },
+          "missing_credentials": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
           "agent_id",
           "agent_slug",
-          "agent_name"
+          "agent_name",
+          "missing_credentials"
         ],
         "type": "object"
       },
@@ -13321,11 +13328,20 @@
             },
             "type": "array"
           },
+          "lifecycle_state": {
+            "type": "string"
+          },
           "maturity": {
             "type": "string"
           },
           "name": {
             "type": "string"
+          },
+          "needs_credentials": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "pricing_tier": {
             "type": "string"
@@ -13363,6 +13379,9 @@
           },
           "updated_at": {
             "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/SkillUsage"
           },
           "vendor": {
             "nullable": true,
@@ -13402,7 +13421,10 @@
           "vendor",
           "homepage",
           "spdx_license",
-          "description_quality"
+          "description_quality",
+          "lifecycle_state",
+          "needs_credentials",
+          "usage"
         ],
         "type": "object"
       },
@@ -13479,6 +13501,9 @@
             "nullable": true,
             "type": "string"
           },
+          "lifecycle_state": {
+            "type": "string"
+          },
           "maturity": {
             "type": "string"
           },
@@ -13496,6 +13521,12 @@
           },
           "name": {
             "type": "string"
+          },
+          "needs_credentials": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "pricing_tier": {
             "type": "string"
@@ -13538,6 +13569,9 @@
           "updated_at": {
             "type": "string"
           },
+          "usage": {
+            "$ref": "#/components/schemas/SkillUsage"
+          },
           "vendor": {
             "nullable": true,
             "type": "string"
@@ -13577,6 +13611,9 @@
           "homepage",
           "spdx_license",
           "description_quality",
+          "lifecycle_state",
+          "needs_credentials",
+          "usage",
           "content",
           "credential_requirements",
           "mcp_server_command",
@@ -13596,6 +13633,30 @@
           "$ref": "#/components/schemas/Skill"
         },
         "type": "array"
+      },
+      "SkillUsage": {
+        "properties": {
+          "errors_7d": {
+            "type": "integer"
+          },
+          "last_used_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "uses_7d": {
+            "type": "integer"
+          },
+          "uses_total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "uses_7d",
+          "errors_7d",
+          "uses_total",
+          "last_used_at"
+        ],
+        "type": "object"
       },
       "StateBucket": {
         "properties": {

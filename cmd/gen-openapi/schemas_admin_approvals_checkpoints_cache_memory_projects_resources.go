@@ -179,8 +179,9 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"agent_id": str(), "agent_slug": str(), "agent_name": str(), "avatar_seed": nullable(str()),
 		"avatar_style": nullable(str()), "avatar_url": nullable(str()), "crew_id": nullable(str()),
 		"crew_slug": nullable(str()), "crew_name": nullable(str()), "crew_color": nullable(str()),
-		"crew_icon": nullable(str()), "crew_avatar_style": nullable(str()),
+		"crew_icon": nullable(str()), "crew_avatar_style": nullable(str()), "missing_credentials": stringArray(),
 	})
+	skillUsage := object(map[string]any{"uses_7d": integer(), "errors_7d": integer(), "uses_total": integer(), "last_used_at": nullable(str())})
 	skill := object(map[string]any{
 		"id": str(), "name": str(), "slug": str(), "display_name": str(), "description": nullable(str()),
 		"version": str(), "author": nullable(str()), "category": str(), "source": str(), "icon": nullable(str()),
@@ -188,7 +189,7 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"tags": nullable(str()), "featured": boolean(), "pricing_tier": str(), "tool_count": nullable(integer()),
 		"vendor": nullable(str()), "homepage": nullable(str()), "spdx_license": nullable(str()), "runtime": str(),
 		"maturity": str(), "scan_status": str(), "description_quality": nullable(str()), "created_at": str(),
-		"updated_at": str(), "installed_on": array(skillAgent),
+		"updated_at": str(), "installed_on": array(skillAgent), "lifecycle_state": str(), "needs_credentials": stringArray(), "usage": skillUsage,
 	})
 	skillDetail := object(map[string]any{
 		"id": str(), "name": str(), "slug": str(), "display_name": str(), "description": nullable(str()),
@@ -197,7 +198,7 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"tags": nullable(str()), "featured": boolean(), "pricing_tier": str(), "tool_count": nullable(integer()),
 		"vendor": nullable(str()), "homepage": nullable(str()), "spdx_license": nullable(str()), "runtime": str(),
 		"maturity": str(), "scan_status": str(), "description_quality": nullable(str()), "created_at": str(),
-		"updated_at": str(), "installed_on": array(skillAgent), "content": nullable(str()),
+		"updated_at": str(), "installed_on": array(skillAgent), "lifecycle_state": str(), "needs_credentials": stringArray(), "usage": skillUsage, "content": nullable(str()),
 		"credential_requirements": nullable(str()), "mcp_server_command": nullable(str()), "mcp_server_image": nullable(str()),
 		"mcp_transport": nullable(str()), "dependencies": nullable(str()), "license": nullable(str()), "agent_count": integer(),
 		"security_score": nullable(integer()), "allowed_domains": nullable(str()), "changelog": nullable(str()),

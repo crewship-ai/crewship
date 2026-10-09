@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -72,11 +73,28 @@ type skillResponse struct {
 	DescriptionQuality *string  `json:"description_quality"`
 	CreatedAt          string   `json:"created_at"`
 	UpdatedAt          string   `json:"updated_at"`
-	// InstalledOn is populated only on the Installed list (?installed=1)
-	// — the Browse list omits it because the join would balloon the
-	// payload. Each entry is the agent + crew metadata the SkillCard
-	// needs to render stacked avatars.
+	// LifecycleState is the curator sweep's verdict (active, stale,
+	// archived, deprecated — internal/skills/lifecycle.go).
+	LifecycleState string `json:"lifecycle_state"`
+	// NeedsCredentials is credential_requirements decoded: the env-var
+	// names the skill expects an agent to hold. Never null.
+	NeedsCredentials []string `json:"needs_credentials"`
+	// Usage counts this workspace's skill_invocations only. The skills
+	// row's usage_count/error_count are global across workspaces (the
+	// catalog is shared), so they are never reported here.
+	Usage skillUsage `json:"usage"`
+	// InstalledOn lists the agents of the CALLER'S workspace that hold
+	// the skill (#3032: it used to list every workspace's agents). Each
+	// entry is the agent + crew metadata the card needs for avatars.
 	InstalledOn []skillInstalledAgent `json:"installed_on,omitempty"`
+}
+
+// skillUsage is a skill's invocation summary inside one workspace.
+type skillUsage struct {
+	Uses7d     int     `json:"uses_7d"`
+	Errors7d   int     `json:"errors_7d"`
+	UsesTotal  int     `json:"uses_total"`
+	LastUsedAt *string `json:"last_used_at"`
 }
 
 // skillDetailResponse is what GET /skills/{skillId} serializes: the list row
@@ -114,6 +132,10 @@ type skillInstalledAgent struct {
 	CrewColor       *string `json:"crew_color"`
 	CrewIcon        *string `json:"crew_icon"`
 	CrewAvatarStyle *string `json:"crew_avatar_style"`
+	// MissingCredentials names the skill's credential_requirements this
+	// agent is not delivered at run start (same loader the run uses, read
+	// only). Empty when it has them all or the skill needs none.
+	MissingCredentials []string `json:"missing_credentials"`
 }
 
 // List returns all skills, optionally filtered by category, source, or search text.
@@ -132,20 +154,27 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 	// workspace (workspace-wide installed view).
 	installedForAgent := r.URL.Query().Get("installed_for_agent_id")
 	installedFlag := r.URL.Query().Get("installed") == "1"
+	workspaceID := WorkspaceIDFromContext(r.Context())
 
 	query := `SELECT id, name, slug, display_name, description, version, author,
 		category, source, icon, verification, downloads, rating_avg, rating_count,
 		tags, featured, pricing_tier, tool_count, vendor, homepage, spdx_license,
-		runtime, maturity, scan_status, description_quality, created_at, updated_at
+		runtime, maturity, scan_status, description_quality, created_at, updated_at,
+		lifecycle_state, COALESCE(credential_requirements, '[]')
 		FROM skills WHERE 1=1`
 	var args []interface{}
 
+	// The catalog is global; assignments are not. Both installed filters
+	// only count agents of the caller's workspace (#3032).
 	switch {
 	case installedForAgent != "":
-		query += " AND id IN (SELECT skill_id FROM agent_skills WHERE agent_id = ? AND enabled = 1)"
-		args = append(args, installedForAgent)
+		query += ` AND id IN (SELECT as2.skill_id FROM agent_skills as2 JOIN agents a ON a.id = as2.agent_id
+			WHERE as2.agent_id = ? AND as2.enabled = 1 AND a.workspace_id = ?)`
+		args = append(args, installedForAgent, workspaceID)
 	case installedFlag:
-		query += " AND id IN (SELECT DISTINCT skill_id FROM agent_skills WHERE enabled = 1)"
+		query += ` AND id IN (SELECT as2.skill_id FROM agent_skills as2 JOIN agents a ON a.id = as2.agent_id
+			WHERE as2.enabled = 1 AND a.workspace_id = ?)`
+		args = append(args, workspaceID)
 	}
 
 	if category != "" {
@@ -190,17 +219,19 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var s skillResponse
 		var featured int
+		var credReqs string
 		if err := rows.Scan(&s.ID, &s.Name, &s.Slug, &s.DisplayName, &s.Description,
 			&s.Version, &s.Author, &s.Category, &s.Source, &s.Icon,
 			&s.Verification, &s.Downloads, &s.RatingAvg, &s.RatingCount,
 			&s.Tags, &featured, &s.PricingTier, &s.ToolCount,
 			&s.Vendor, &s.Homepage, &s.SPDXLicense,
 			&s.Runtime, &s.Maturity, &s.ScanStatus, &s.DescriptionQuality,
-			&s.CreatedAt, &s.UpdatedAt); err != nil {
+			&s.CreatedAt, &s.UpdatedAt, &s.LifecycleState, &credReqs); err != nil {
 			replyInternalError(w, h.logger, "scan skill", err)
 			return
 		}
 		s.Featured = featured == 1
+		s.NeedsCredentials = decodeCredentialRequirements(credReqs)
 		// Normalize tags from JSON string
 		if s.Tags != nil && strings.TrimSpace(*s.Tags) == "" {
 			s.Tags = nil
@@ -227,8 +258,88 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("populate installed_on", "error", err)
 		// Non-fatal — the cards will render without avatars.
 	}
+	if err := h.populateUsage(r, result); err != nil {
+		h.logger.Warn("populate skill usage", "error", err)
+		// Non-fatal — the cards read "never used".
+	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// decodeCredentialRequirements turns the stored JSON array into a non-nil
+// slice; anything unparseable reads as "needs nothing", like the prompt
+// builder treats it.
+func decodeCredentialRequirements(raw string) []string {
+	var out []string
+	if err := json.Unmarshal([]byte(raw), &out); err != nil || out == nil {
+		return []string{}
+	}
+	return out
+}
+
+// populateUsage fills each row's Usage from this workspace's
+// skill_invocations in one grouped query. julianday() parses both the
+// RFC3339 the observer writes and SQLite's own datetime format.
+func (h *SkillHandler) populateUsage(r *http.Request, rows []skillResponse) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	idx := make(map[string]int, len(rows))
+	for i, sr := range rows {
+		idx[sr.ID] = i
+	}
+	q, err := h.db.QueryContext(r.Context(), `
+		SELECT skill_id,
+		       COUNT(*),
+		       COALESCE(SUM(CASE WHEN julianday(invoked_at) >= julianday('now', '-7 days') THEN 1 ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN exit_code != 0 AND julianday(invoked_at) >= julianday('now', '-7 days') THEN 1 ELSE 0 END), 0),
+		       MAX(invoked_at)
+		FROM skill_invocations
+		WHERE workspace_id = ?
+		GROUP BY skill_id`, WorkspaceIDFromContext(r.Context()))
+	if err != nil {
+		return err
+	}
+	defer q.Close()
+	for q.Next() {
+		var skillID string
+		var u skillUsage
+		if err := q.Scan(&skillID, &u.UsesTotal, &u.Uses7d, &u.Errors7d, &u.LastUsedAt); err != nil {
+			return err
+		}
+		if i, ok := idx[skillID]; ok {
+			rows[i].Usage = u
+		}
+	}
+	return q.Err()
+}
+
+// deliveredEnvVars is the set of env-var names an agent receives at run
+// start, read through the non-mutating loader (no login refresh).
+func deliveredEnvVars(r *http.Request, db *sql.DB, agentID string) (map[string]bool, error) {
+	delivered, _, err := loadDeliveredCredentials(r.Context(), db, agentID)
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]bool, len(delivered))
+	for _, d := range delivered {
+		set[d.EnvVar] = true
+		for _, f := range d.Fields {
+			set[f.EnvVar] = true
+		}
+	}
+	return set, nil
+}
+
+// missingFrom returns the names in needs that have is not true.
+func missingFrom(needs []string, has map[string]bool) []string {
+	out := []string{}
+	for _, n := range needs {
+		if !has[n] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // populateInstalledOn fans out the agent_skills join into each row's
@@ -255,13 +366,16 @@ func (h *SkillHandler) populateInstalledOn(r *http.Request, rows []skillResponse
 		FROM agent_skills as2
 		JOIN agents a ON a.id = as2.agent_id
 		LEFT JOIN crews c ON c.id = a.crew_id
-		WHERE as2.enabled = 1 AND as2.skill_id IN (` + placeholders + `)
+		WHERE as2.enabled = 1 AND a.workspace_id = ? AND as2.skill_id IN (` + placeholders + `)
 		ORDER BY a.name`
+	args = append([]any{WorkspaceIDFromContext(r.Context())}, args...)
 	queryRows, err := h.db.QueryContext(r.Context(), q, args...)
 	if err != nil {
 		return err
 	}
 	defer queryRows.Close()
+	// One credential load per agent, and only for skills that need any.
+	envByAgent := map[string]map[string]bool{}
 	for queryRows.Next() {
 		var skillID string
 		var ag skillInstalledAgent
@@ -278,6 +392,22 @@ func (h *SkillHandler) populateInstalledOn(r *http.Request, rows []skillResponse
 		i, ok := idx[skillID]
 		if !ok {
 			continue
+		}
+		ag.MissingCredentials = []string{}
+		if needs := rows[i].NeedsCredentials; len(needs) > 0 {
+			has, seen := envByAgent[ag.AgentID]
+			if !seen {
+				var lerr error
+				if has, lerr = deliveredEnvVars(r, h.db, ag.AgentID); lerr != nil {
+					h.logger.Warn("skill credential readiness", "agent_id", ag.AgentID, "error", lerr)
+				}
+				envByAgent[ag.AgentID] = has
+			}
+			// has == nil means the load failed: report nothing missing
+			// rather than a false alarm.
+			if has != nil {
+				ag.MissingCredentials = missingFrom(needs, has)
+			}
 		}
 		rows[i].InstalledOn = append(rows[i].InstalledOn, ag)
 	}
@@ -296,18 +426,19 @@ func (h *SkillHandler) Get(w http.ResponseWriter, r *http.Request) {
 		       s.tags, s.featured, s.pricing_tier, s.tool_count,
 		       s.vendor, s.homepage, s.spdx_license,
 		       s.runtime, s.maturity, s.scan_status, s.description_quality,
-		       s.created_at, s.updated_at,
+		       s.created_at, s.updated_at, s.lifecycle_state,
 		       s.content, s.credential_requirements, s.mcp_server_command, s.mcp_server_image,
 		       s.mcp_transport, s.dependencies, s.license,
-		       (SELECT COUNT(*) FROM agent_skills WHERE skill_id = s.id) as agent_count,
+		       (SELECT COUNT(*) FROM agent_skills as2 JOIN agents a ON a.id = as2.agent_id
+		         WHERE as2.skill_id = s.id AND as2.enabled = 1 AND a.workspace_id = ?) as agent_count,
 		       s.security_score, s.allowed_domains, s.changelog
-		FROM skills s WHERE s.id = ?`, skillID).Scan(
+		FROM skills s WHERE s.id = ?`, WorkspaceIDFromContext(r.Context()), skillID).Scan(
 		&s.ID, &s.Name, &s.Slug, &s.DisplayName, &s.Description, &s.Version, &s.Author,
 		&s.Category, &s.Source, &s.Icon, &s.Verification, &s.Downloads, &s.RatingAvg, &s.RatingCount,
 		&s.Tags, &featured, &s.PricingTier, &s.ToolCount,
 		&s.Vendor, &s.Homepage, &s.SPDXLicense,
 		&s.Runtime, &s.Maturity, &s.ScanStatus, &s.DescriptionQuality,
-		&s.CreatedAt, &s.UpdatedAt,
+		&s.CreatedAt, &s.UpdatedAt, &s.LifecycleState,
 		&s.Content, &s.CredentialRequirements, &s.McpServerCommand, &s.McpServerImage,
 		&s.McpTransport, &s.Dependencies, &s.License, &s.AgentCount,
 		&s.SecurityScore, &s.AllowedDomains, &s.Changelog,
@@ -326,6 +457,20 @@ func (h *SkillHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Featured = featured == 1
+	creds := "[]"
+	if s.CredentialRequirements != nil {
+		creds = *s.CredentialRequirements
+	}
+	s.NeedsCredentials = decodeCredentialRequirements(creds)
+
+	one := []skillResponse{s.skillResponse}
+	if err := h.populateInstalledOn(r, one); err != nil {
+		h.logger.Warn("populate installed_on (detail)", "error", err)
+	}
+	if err := h.populateUsage(r, one); err != nil {
+		h.logger.Warn("populate skill usage (detail)", "error", err)
+	}
+	s.skillResponse = one[0]
 
 	writeJSON(w, http.StatusOK, s)
 }

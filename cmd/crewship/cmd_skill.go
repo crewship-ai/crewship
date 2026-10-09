@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -94,20 +95,33 @@ Examples:
 			Vendor     *string `json:"vendor" yaml:"vendor"`
 			Maturity   string  `json:"maturity" yaml:"maturity"`
 			ScanStatus string  `json:"scan_status" yaml:"scan_status"`
+			// Workspace-scoped (#3032): agents of this workspace holding
+			// the skill, and this workspace's invocations.
+			InstalledOn []struct {
+				AgentSlug          string   `json:"agent_slug" yaml:"agent_slug"`
+				MissingCredentials []string `json:"missing_credentials" yaml:"missing_credentials"`
+			} `json:"installed_on,omitempty" yaml:"installed_on,omitempty"`
+			Usage struct {
+				Uses7d     int     `json:"uses_7d" yaml:"uses_7d"`
+				Errors7d   int     `json:"errors_7d" yaml:"errors_7d"`
+				UsesTotal  int     `json:"uses_total" yaml:"uses_total"`
+				LastUsedAt *string `json:"last_used_at" yaml:"last_used_at"`
+			} `json:"usage" yaml:"usage"`
 		}
 		if err := cli.ReadJSON(resp, &skills); err != nil {
 			return err
 		}
 
 		f := newFormatter()
-		headers := []string{"SLUG", "VENDOR", "NAME", "CATEGORY", "MATURITY", "SOURCE", "SCAN"}
+		headers := []string{"SLUG", "VENDOR", "NAME", "CATEGORY", "MATURITY", "SOURCE", "SCAN", "AGENTS", "USES 7D"}
 		var rows [][]string
 		for _, s := range skills {
 			vendor := "—"
 			if s.Vendor != nil && *s.Vendor != "" {
 				vendor = *s.Vendor
 			}
-			rows = append(rows, []string{s.Slug, vendor, s.Name, s.Category, s.Maturity, s.Source, s.ScanStatus})
+			rows = append(rows, []string{s.Slug, vendor, s.Name, s.Category, s.Maturity, s.Source, s.ScanStatus,
+				strconv.Itoa(len(s.InstalledOn)), strconv.Itoa(s.Usage.Uses7d)})
 		}
 		return f.Auto(skills, headers, rows)
 	},

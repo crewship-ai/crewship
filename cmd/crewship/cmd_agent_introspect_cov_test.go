@@ -173,16 +173,22 @@ func TestAgentSkillsRunE_EmptyAndPopulated(t *testing.T) {
 	}
 
 	stub.OnGet("/api/v1/agents/"+covAgentIDCli4+"/skills", clitest.JSONResponse(200, []map[string]any{
-		{"id": "as-1", "skill_id": "skill0123456789xyz", "skill_name": "code-review", "category": "engineering", "enabled": true},
-		{"id": "as-2", "skill_id": "skill-2", "skill_name": "deploys", "category": "ops", "enabled": false},
+		// The real API shape: the skill is nested (#3032 — this stub used
+		// to be flat, which is how blank NAME/CATEGORY columns shipped).
+		{"id": "as-1", "skill_id": "skill0123456789xyz", "enabled": true, "missing_credentials": []string{"GITHUB_TOKEN"},
+			"skill": map[string]any{"slug": "code-review", "display_name": "Code Review", "category": "CODING", "needs_credentials": []string{"GITHUB_TOKEN"}}},
+		{"id": "as-2", "skill_id": "skill-2", "enabled": false, "missing_credentials": []string{},
+			"skill": map[string]any{"slug": "deploys", "display_name": "Deploys", "category": "DEVOPS", "needs_credentials": []string{}}},
 	}))
 	out, err = covCaptureStdoutCli4(t, func() error { return c.RunE(c, []string{covAgentIDCli4}) })
 	if err != nil {
 		t.Fatalf("RunE populated: %v", err)
 	}
 	// skill_id truncated to 12 chars in the table.
-	if !strings.Contains(out, "skill0123456") || !strings.Contains(out, "code-review") {
-		t.Errorf("populated row missing: %q", out)
+	for _, want := range []string{"skill0123456", "code-review", "Code Review", "CODING", "DEVOPS", "GITHUB_TOKEN"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("populated table missing %q: %q", want, out)
+		}
 	}
 	if !strings.Contains(out, "yes") || !strings.Contains(out, "no") {
 		t.Errorf("enabled yes/no rendering missing: %q", out)

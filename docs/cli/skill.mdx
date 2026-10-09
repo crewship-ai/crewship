@@ -107,8 +107,13 @@ crewship skill list [flags]
 | `--maturity` | One of `OFFICIAL CURATED COMMUNITY EXPERIMENTAL`. |
 | `--runtime` | One of `INSTRUCTIONS SCRIPT MCP HYBRID`. |
 | `--search` | Substring match on name / display_name / description. |
-| `--installed` | Only skills with at least one `agent_skills` row. |
+| `--installed` | Only skills held by at least one agent of the current workspace. |
 | `--installed-for=<agent>` | Only skills assigned to a specific agent. |
+
+**Output columns:** SLUG, VENDOR, NAME, CATEGORY, MATURITY, SOURCE, SCAN,
+AGENTS (agents of this workspace holding it), USES 7D (this workspace's
+invocations in the last seven days). `--format json` carries `installed_on`
+and `usage` in full.
 
 Examples:
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -197,12 +198,20 @@ var agentSkillsCmd = &cobra.Command{
 			return err
 		}
 
+		// The API nests the skill under "skill" (#3032: the flat
+		// skill_name/category fields this used to read never existed, so
+		// NAME and CATEGORY printed blank).
 		var skills []struct {
-			ID        string `json:"id" yaml:"id"`
-			SkillID   string `json:"skill_id" yaml:"skill_id"`
-			SkillName string `json:"skill_name" yaml:"skill_name"`
-			Category  string `json:"category" yaml:"category"`
-			Enabled   bool   `json:"enabled" yaml:"enabled"`
+			ID      string `json:"id" yaml:"id"`
+			SkillID string `json:"skill_id" yaml:"skill_id"`
+			Enabled bool   `json:"enabled" yaml:"enabled"`
+			Skill   struct {
+				Slug             string   `json:"slug" yaml:"slug"`
+				DisplayName      *string  `json:"display_name" yaml:"display_name"`
+				Category         *string  `json:"category" yaml:"category"`
+				NeedsCredentials []string `json:"needs_credentials" yaml:"needs_credentials"`
+			} `json:"skill" yaml:"skill"`
+			MissingCredentials []string `json:"missing_credentials" yaml:"missing_credentials"`
 		}
 		if err := cli.ReadJSON(resp, &skills); err != nil {
 			return err
@@ -213,14 +222,25 @@ var agentSkillsCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		headers := []string{"SKILL ID", "NAME", "CATEGORY", "ENABLED"}
+		headers := []string{"SKILL ID", "SLUG", "NAME", "CATEGORY", "ENABLED", "MISSING CREDENTIALS"}
 		var rows [][]string
 		for _, s := range skills {
 			enabled := "yes"
 			if !s.Enabled {
 				enabled = "no"
 			}
-			rows = append(rows, []string{f.ShortID(s.SkillID, s.SkillID[:min(12, len(s.SkillID))]), s.SkillName, s.Category, enabled})
+			name, category := s.Skill.Slug, ""
+			if s.Skill.DisplayName != nil && *s.Skill.DisplayName != "" {
+				name = *s.Skill.DisplayName
+			}
+			if s.Skill.Category != nil {
+				category = *s.Skill.Category
+			}
+			missing := "—"
+			if len(s.MissingCredentials) > 0 {
+				missing = strings.Join(s.MissingCredentials, ", ")
+			}
+			rows = append(rows, []string{f.ShortID(s.SkillID, s.SkillID[:min(12, len(s.SkillID))]), s.Skill.Slug, name, category, enabled, missing})
 		}
 		return f.Auto(skills, headers, rows)
 	},
