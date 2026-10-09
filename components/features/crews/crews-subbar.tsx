@@ -26,6 +26,8 @@ export interface CrewsSubbarProps {
   /** Server totals; the description must never say "100 crews" for 103. */
   crewsTotal?: number | null
   agentsTotal?: number | null
+  /** Opens New agent with this crew picked; a new `at` reopens it. */
+  addAgentRequest?: { crewSlug: string; at: number } | null
 }
 
 /**
@@ -46,6 +48,7 @@ export function CrewsSubbar({
   crews,
   crewsTotal = null,
   agentsTotal = null,
+  addAgentRequest = null,
 }: CrewsSubbarProps) {
   const router = useRouter()
   const params = useSearchParams()
@@ -70,6 +73,13 @@ export function CrewsSubbar({
     url.searchParams.delete("new")
     router.replace(`${url.pathname}${url.search}`, { scroll: false })
   }, [newParam, router])
+
+  // "Add agent" on an explorer crew row: the same dialog, that crew picked.
+  useEffect(() => {
+    if (!addAgentRequest) return
+    setCreateAgentDefaultCrew(addAgentRequest.crewSlug)
+    setCreateAgentOpen(true)
+  }, [addAgentRequest])
 
   // Live description: breadcrumb path when something is selected, otherwise
   // the fleet's real size (X-Total-Count), pluralised.
