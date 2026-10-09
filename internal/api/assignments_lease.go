@@ -49,6 +49,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/jitter"
 )
 
 const (
@@ -361,6 +363,10 @@ func (h *AssignmentHandler) StartLeaseSweeper(ctx context.Context, interval time
 		interval = defaultLeaseSweepInterval
 	}
 	go func() {
+		// Spread this loop's phase from the other sweepers started at boot (#1891).
+		if !jitter.Startup(ctx, interval) {
+			return
+		}
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
