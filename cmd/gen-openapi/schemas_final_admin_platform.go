@@ -56,6 +56,9 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	// One table whose recorded row count disagrees with what was actually
 	// found (backup.TableRowCountMismatch). Shared by verify and restore.
 	rowCountMismatch := object(map[string]any{"table": str(), "recorded": integer(), "actual": integer()}, "table", "recorded", "actual")
+	// One table whose source held workspace rows the bundle did not export
+	// (backup.ScopeShortfall), found by the create-time scope reconciliation.
+	scopeShortfall := object(map[string]any{"table": str(), "reachable": integer(), "missing": integer()}, "table", "reachable", "missing")
 	// manifest is backup.Manifest; only the fields a client acts on are
 	// spelled out. contents.table_row_counts is the per-table count the
 	// completeness check compares against (#2009).
@@ -67,7 +70,9 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		"format_version": integer(), "crewship_version_at_backup": str(), "schema_migration_versions": array(integer()),
 		"scope": str(), "scope_level": str(), "compatible_targets": array(str()), "created_at": str(),
 		"contents": object(map[string]any{
-			"table_row_counts":     map[string]any{"type": "object", "additionalProperties": integer()},
+			"table_row_counts": map[string]any{"type": "object", "additionalProperties": integer()},
+			// #2009: the independent completeness derivation recorded at create.
+			"scope_reconciliation": object(map[string]any{"checked": boolean(), "skip_reason": str(), "tables": integer(), "shortfalls": array(scopeShortfall)}, "checked", "tables"),
 			"attachments_included": integer(), "attachments_missing": integer(),
 			"memory_blobs_included": integer(), "memory_blobs_missing": integer(),
 			"missing_container_crews": array(str()),
@@ -91,7 +96,8 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	backupVerify := object(map[string]any{
 		"valid": boolean(), "size_bytes": integer(), "manifest": manifest, "error": str(),
 		"completeness_checked": boolean(), "completeness_skip_reason": str(), "table_row_count_mismatches": nullable(array(rowCountMismatch)),
-	}, "valid", "size_bytes", "manifest", "error", "completeness_checked", "completeness_skip_reason", "table_row_count_mismatches")
+		"scope_shortfalls": nullable(array(scopeShortfall)),
+	}, "valid", "size_bytes", "manifest", "error", "completeness_checked", "completeness_skip_reason", "table_row_count_mismatches", "scope_shortfalls")
 	backupCreate := object(map[string]any{"path": str(), "size_bytes": integer(), "payload_sha256": str(), "format_version": integer(), "scope": str(), "scope_level": str(), "created_at": str(), "encrypted": boolean(),
 		// #2612: provisioned crews whose container was absent at create
 		// time — the bundle carries DB rows only for them.

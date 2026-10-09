@@ -4554,6 +4554,46 @@
                     },
                     "type": "array"
                   },
+                  "scope_reconciliation": {
+                    "properties": {
+                      "checked": {
+                        "type": "boolean"
+                      },
+                      "shortfalls": {
+                        "items": {
+                          "properties": {
+                            "missing": {
+                              "type": "integer"
+                            },
+                            "reachable": {
+                              "type": "integer"
+                            },
+                            "table": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "table",
+                            "reachable",
+                            "missing"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "skip_reason": {
+                        "type": "string"
+                      },
+                      "tables": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "checked",
+                      "tables"
+                    ],
+                    "type": "object"
+                  },
                   "table_row_counts": {
                     "additionalProperties": {
                       "type": "integer"
@@ -4901,6 +4941,46 @@
                     },
                     "type": "array"
                   },
+                  "scope_reconciliation": {
+                    "properties": {
+                      "checked": {
+                        "type": "boolean"
+                      },
+                      "shortfalls": {
+                        "items": {
+                          "properties": {
+                            "missing": {
+                              "type": "integer"
+                            },
+                            "reachable": {
+                              "type": "integer"
+                            },
+                            "table": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "table",
+                            "reachable",
+                            "missing"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "skip_reason": {
+                        "type": "string"
+                      },
+                      "tables": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "checked",
+                      "tables"
+                    ],
+                    "type": "object"
+                  },
                   "table_row_counts": {
                     "additionalProperties": {
                       "type": "integer"
@@ -4933,6 +5013,29 @@
               }
             },
             "type": "object"
+          },
+          "scope_shortfalls": {
+            "items": {
+              "properties": {
+                "missing": {
+                  "type": "integer"
+                },
+                "reachable": {
+                  "type": "integer"
+                },
+                "table": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "table",
+                "reachable",
+                "missing"
+              ],
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
           },
           "size_bytes": {
             "type": "integer"
@@ -4971,7 +5074,8 @@
           "error",
           "completeness_checked",
           "completeness_skip_reason",
-          "table_row_count_mismatches"
+          "table_row_count_mismatches",
+          "scope_shortfalls"
         ],
         "type": "object"
       },
@@ -152500,6 +152604,60 @@
               }
             },
             "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [

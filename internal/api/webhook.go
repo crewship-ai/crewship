@@ -691,11 +691,19 @@ func (h *WebhookHandler) acceptDelivery(ctx context.Context, crewID, agentID str
 				"agent_id", agentID, "workspace_id", info.WorkspaceID)
 			return webhook.Acceptance{}, nil, fmt.Errorf("%w: %w", webhook.ErrDeliveryConflict, acceptErr)
 		default:
-			// Budget exceeded, database unavailable, constraint fault — all of
-			// them 503 and none of them a 202. W4: nothing runs.
+			// Budget exceeded, database unavailable, constraint fault — none of
+			// them a 202 for new work. W4: nothing runs.
+			//
+			// But the write transaction is the wrong question for a delivery
+			// that is ALREADY in the ledger: a re-delivery arriving while the
+			// original's run holds the write lock exhausts the budget waiting
+			// for a row it would never have written (#2964). §5 gives an
+			// accepted delivery its receipt, so ask the ledger read-only first;
+			// only genuinely new work gets the 503.
 			h.logger.Error("webhook acceptance did not commit; no agent started",
 				"agent_id", agentID, "workspace_id", info.WorkspaceID, "error", acceptErr)
-			return webhook.Acceptance{}, nil, fmt.Errorf("%w: %w", webhook.ErrUnavailable, acceptErr)
+			return h.receiptOrRefusal(ctx, store, info.WorkspaceID, agentID, sourceDeliveryID, d.BodySHA256,
+				fmt.Errorf("%w: %w", webhook.ErrUnavailable, acceptErr))
 		}
 	}
 
@@ -732,7 +740,7 @@ func (h *WebhookHandler) acceptDelivery(ctx context.Context, crewID, agentID str
 	return acc, nil, nil
 }
 
-// receiptOrRefusal answers a gate rejection.
+// receiptOrRefusal answers a gate rejection or a failed acceptance write.
 //
 // §5: "Duplicate již přijaté práce není odmítnuta kvůli zaplnění" — a delivery
 // that has already been accepted is not refused because the ingress is full, it

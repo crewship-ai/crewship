@@ -7,6 +7,10 @@ import { apiFetch } from "@/lib/api-fetch"
 
 export interface WorkspaceData {
   currentUserAccessMode?: "trusted" | "restricted"
+  /** Present on a restricted account's rows only (#2861): the session is
+   *  behind the restricted allowlist, and these are the screens it may open. */
+  restricted_session?: boolean
+  restricted_surfaces?: string[]
   pages_theme?: Partial<import("@/lib/pages/theme").PageTheme> | null
   id: string
   name: string

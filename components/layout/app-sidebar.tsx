@@ -6,7 +6,8 @@ import { PanelLeft, PanelLeftClose, PanelLeftDashed, type LucideIcon } from "luc
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { navSections, isHiddenForRole } from "@/lib/nav-sections"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
-import { useAccessMode, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
+import { useAccessMode, useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
+import { restrictedPathAllowed } from "@/lib/restricted-surfaces"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useIsInstanceAdmin } from "@/hooks/use-auth"
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher"
@@ -55,6 +56,8 @@ export function AppSidebar() {
   const trustedWorkspaceId = useTrustedWorkspaceId()
   const trusted = useAccessMode() === "trusted"
   const inboxUnread = useInboxUnreadCount(trustedWorkspaceId)
+  // A restricted session sees only the screens the server says it may open.
+  const surfaces = useRestrictedSurfaces()
 
   return (
     <Sidebar variant="sidebar" collapsible="icon">
@@ -64,7 +67,7 @@ export function AppSidebar() {
 
       <SidebarContent className="rail-inset gap-0! overflow-x-hidden! pb-2">
         {navSections.map((section) => {
-          const items = section.items.filter((item) => !isHiddenForRole(item, role, instanceAdmin))
+          const items = section.items.filter((item) => !isHiddenForRole(item, role, instanceAdmin) && (!surfaces || restrictedPathAllowed(item.href, surfaces)))
           if (items.length === 0) return null
           return (
             <SidebarGroup key={section.label} className="p-0!" aria-label={section.label}>
