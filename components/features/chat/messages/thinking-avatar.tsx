@@ -50,7 +50,6 @@ export function ThinkingAvatar({
       <AgentAvatar
         seed={agent.avatarSeed || agent.id}
         style={agent.avatarStyle}
-        agentId={agent.id}
         avatarUrl={agent.avatarUrl}
         alt=""
         className={cn(

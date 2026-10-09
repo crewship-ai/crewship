@@ -28,7 +28,8 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
 import { apiFetch } from "@/lib/api-fetch"
-import { stopAgent } from "@/lib/agent-stop"
+import { storeAgentAvatar } from "@/lib/agent-avatar-persist"
+import { stopAgent, stopSuccessMessage } from "@/lib/agent-stop"
 import { entityHref } from "@/lib/entity-links"
 
 import {
@@ -218,7 +219,7 @@ export function AgentCanvas({
     // none. stopAgent never throws and words the 502s (#2864).
     const result = await stopAgent(agent.id, agent.workspace_id)
     if (result.ok) {
-      toast.success("Agent stopped")
+      toast.success(stopSuccessMessage(result))
     } else {
       toast.error(`Could not stop ${agent.name}`, { description: result.message })
     }
@@ -274,11 +275,16 @@ export function AgentCanvas({
     if (!agent) return
     try {
       await patch(next)
+      // A changed seed or style drops the stored render server-side; store
+      // the new one now, while the person who chose it is here (#2876). If
+      // the save changed nothing the old render is still there and the
+      // server answers 409, which is fine.
+      await storeAgentAvatar({ id: agent.id, slug: agent.slug, crew: agent.crew, ...next }, workspaceId)
       toast.success("Avatar updated")
     } catch (err) {
       toast.error(`Could not save avatar: ${err instanceof Error ? err.message : err}`)
     }
-  }, [agent, patch])
+  }, [agent, patch, workspaceId])
 
   const [confirmDelete, setConfirmDelete] = useState(false)
   const handleDelete = useCallback(async () => {
@@ -341,7 +347,6 @@ export function AgentCanvas({
           <AgentRingAvatar
             seed={agent.avatar_seed || agent.name}
             style={agent.avatar_style || agent.crew?.avatar_style}
-            agentId={agent.id}
             avatarUrl={agent.avatar_url}
             crewColor={agent.crew?.color}
             engine={agent.llm_provider}

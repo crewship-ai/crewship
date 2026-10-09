@@ -11,9 +11,10 @@ package api
 // agent's face at the version that drew it.
 //
 // The generator is JS-only, so the server never draws an avatar: the
-// client posts the SVG it just rendered (at creation, or lazily the first
-// time an editor views an agent that has none). Everything below exists to
-// make accepting that client-supplied markup safe.
+// client posts the SVG it just rendered — when someone creates or edits an
+// agent in the dashboard, or runs the explicit backfill. Never on a page view
+// (#2876). Everything below exists to make accepting that client-supplied
+// markup safe.
 //
 // Threat model. Agent avatars are already SVG today, inlined as data URIs
 // into <img>, which never executes script — so the render path adds no new
@@ -278,9 +279,8 @@ func agentAvatarURL(agentID, hash, workspaceID string) *string {
 //
 // Write-once: it fills an empty slot and refuses to replace a populated one
 // with 409. Replacing means DELETE first. Without that rule this endpoint
-// would be a standing "swap any teammate's agent portrait" primitive that
-// fires on an ordinary page view, since the lazy backfill calls it
-// automatically.
+// would be a standing "swap any teammate's agent portrait" primitive, since
+// the dashboard calls it after every create, edit and backfill.
 func (h *AgentHandler) PutAvatar(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())

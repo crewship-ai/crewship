@@ -256,7 +256,7 @@ export function RoutineStepSpine({
     ? `${steps.length} ${steps.length === 1 ? "step" : "steps"}${layout.nested ? ` (${steps.length + layout.nested} with nested)` : ""}${layout.hookCount ? ` · ${layout.hookCount} ${layout.hookCount === 1 ? "hook" : "hooks"}` : ""}`
     : undefined
   const mapNode = layout.big ? (
-    <RoutineGroupedMap layout={layout} agents={agents} workspaceId={workspaceId} onOpenPhase={openPhase} />
+    <RoutineGroupedMap layout={layout} agents={agents} onOpenPhase={openPhase} />
   ) : typeof map === "function" ? (
     map({ openStep: openFromMap })
   ) : (
@@ -423,7 +423,7 @@ export function RoutineStepSpine({
                   }
                   className="flex w-full items-start gap-3 border-t border-border/60 py-2.5 pl-6 text-left"
                 >
-                  <StepGlyph step={row.steps[0]} agents={agents} workspaceId={workspaceId} />
+                  <StepGlyph step={row.steps[0]} agents={agents} />
                   <span className="min-w-0 flex-1">
                     <span className="block text-[13px] font-medium">
                       {row.name} · {row.steps.length} steps
@@ -442,7 +442,6 @@ export function RoutineStepSpine({
                 row={row}
                 layout={layout}
                 behavior={behavior?.steps.find((s) => s.id === row.step.id)}
-                workspaceId={workspaceId}
                 agents={agents}
                 record={record}
                 running={running}
@@ -500,7 +499,7 @@ export function StepFileChip({ path }: { path: string }) {
   )
 }
 
-function StepGlyph({ step, agents, workspaceId, badge }: { step: Step; agents: AgentDirectory; workspaceId?: string; badge?: number }) {
+function StepGlyph({ step, agents, badge }: { step: Step; agents: AgentDirectory; badge?: number }) {
   const visual = STEP_VISUALS[String(step.type)] ?? { icon: Cog, label: "Step", tone: "bg-muted text-muted-foreground" }
   const Icon = visual.icon
   const agent = agents?.find((a) => a.slug === step.agent_slug)
@@ -510,9 +509,7 @@ function StepGlyph({ step, agents, workspaceId, badge }: { step: Step; agents: A
         <AgentAvatar
           seed={agent.avatar_seed || agent.name}
           style={agent.avatar_style || agent.crew?.avatar_style || undefined}
-          agentId={agent.id}
           avatarUrl={agent.avatar_url}
-          workspaceId={workspaceId}
           className="h-7 w-7"
           alt=""
         />
@@ -532,7 +529,6 @@ function SpineRow({
   row,
   layout,
   behavior,
-  workspaceId,
   agents,
   record,
   running,
@@ -544,7 +540,6 @@ function SpineRow({
   row: Extract<LayoutRow, { kind: "step" }>
   layout: RoutineStepsLayout
   behavior?: RoutineStepBehavior
-  workspaceId?: string
   agents: AgentDirectory
   record: RoutineStepSpineProps["record"]
   running: string | null
@@ -622,7 +617,7 @@ function SpineRow({
       )}
     >
       <summary className="flex cursor-pointer list-none items-start gap-3 rounded-lg focus-visible:outline focus-visible:outline-primary">
-        <StepGlyph step={step} agents={agents} workspaceId={workspaceId} badge={!layout.hasNeeds && !row.nested && !row.hook ? row.position : undefined} />
+        <StepGlyph step={step} agents={agents} badge={!layout.hasNeeds && !row.nested && !row.hook ? row.position : undefined} />
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-[13px] font-medium break-all text-foreground">{name}</span>
@@ -729,7 +724,7 @@ function SpineRow({
           </details>
         )}
         <RoutineStepChecks behavior={behavior} />
-        {typeof step.agent_slug === "string" && <RoutineAgentLink slug={step.agent_slug} agent={agent} workspaceId={workspaceId} />}
+        {typeof step.agent_slug === "string" && <RoutineAgentLink slug={step.agent_slug} agent={agent} />}
         {chips.file && (
           <p className="text-xs text-muted-foreground">
             <span className="font-medium text-foreground">File:</span> <StepFileChip path={chips.file} /> · on the crew share

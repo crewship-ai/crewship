@@ -205,7 +205,17 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	})))
 	addNoContent("DELETE", "/api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId}")
 	add("PUT", "/api/v1/agents/{agentId}/files/save", "RemainingAgentFileSavedV1", object(map[string]any{"path": str(), "saved": boolean(), "message": str()}))
-	addAction("POST", "/api/v1/agents/{agentId}/stop", "RemainingAgentStoppedV1")
+	// Stop answers {id, status: "STOPPED", outcome} (#2879): outcome is
+	// "stopped" when the request ended a run, "already_stopped" when nothing
+	// was running. A refusal is 502 {error, code} with code
+	// stop_not_confirmed or runtime_unavailable (internal/api/proxy.go).
+	agentStopped := object(map[string]any{
+		"id":      str(),
+		"status":  str(),
+		"outcome": map[string]any{"type": "string", "enum": []string{"stopped", "already_stopped"}},
+	})
+	agentStopped["required"] = []string{"id", "status", "outcome"}
+	add("POST", "/api/v1/agents/{agentId}/stop", "RemainingAgentStoppedV1", agentStopped)
 	// Crew DELETE answers its own envelope, not the generic action: the
 	// explicit sidecar teardown outcome, the auto-managed service credentials
 	// removed with the crew (#2771), and the container cleanup observation.

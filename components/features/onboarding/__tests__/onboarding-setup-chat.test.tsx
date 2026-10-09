@@ -56,16 +56,6 @@ vi.mock("@/hooks/use-workspace", () => ({
   useCurrentWorkspaceId: () => "ws-test",
 }))
 
-// AgentAvatar's own render is pure (generates an inline data: URI from the
-// seed), but it also fire-and-forgets a backfill POST when given an agentId
-// with no stored render — exactly what the header's real-agent avatar does.
-// Stubbed for the same reason as useWorkspace above: no real fetch in a unit
-// test, even a fire-and-forget one.
-vi.mock("@/lib/agent-avatar-persist", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/agent-avatar-persist")>()),
-  queueAvatarBackfill: vi.fn(),
-}))
-
 // The onboarding route has no RealtimeProvider in its layout (only the
 // dashboard route mounts one); onboarding-setup-chat.tsx supplies its own so
 // useProvisioningStatus (called both by this component and by the
