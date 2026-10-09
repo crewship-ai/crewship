@@ -73,14 +73,18 @@ func restrictedWorkspaceDirectory(db *sql.DB, w http.ResponseWriter, r *http.Req
 		return true
 	}
 	defer rows.Close()
-	result := []map[string]string{}
+	// The account is behind the restricted allowlist whichever workspace it
+	// names, so every row carries the same session-wide answer: what the shell
+	// may offer (#2861).
+	surfaces := allowedRestrictedSurfaces()
+	result := []map[string]any{}
 	for rows.Next() {
 		var id, name, slug, role, mode string
 		if rows.Scan(&id, &name, &slug, &role, &mode) != nil {
 			replyError(w, http.StatusInternalServerError, "directory unavailable")
 			return true
 		}
-		result = append(result, map[string]string{"id": id, "name": name, "slug": slug, "current_user_role": role, "currentUserRole": role, "currentUserAccessMode": mode})
+		result = append(result, map[string]any{"id": id, "name": name, "slug": slug, "current_user_role": role, "currentUserRole": role, "currentUserAccessMode": mode, "restricted_session": true, "restricted_surfaces": surfaces})
 	}
 	if rows.Err() != nil {
 		replyError(w, http.StatusInternalServerError, "directory unavailable")

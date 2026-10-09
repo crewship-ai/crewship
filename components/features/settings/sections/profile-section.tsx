@@ -169,6 +169,10 @@ interface ProfileSectionProps {
   joinedAt?: string | null
   sessionExpires?: string | null
   onSignOut?: () => void
+  /** A restricted session (#2861): only account security — password, sessions
+   *  and revoking CLI tokens — is on its allowlist, so profile edits, the
+   *  workspace card and issuing a token are not offered. */
+  restricted?: boolean
 }
 
 // Client-side avatar guardrails — mirror the server (#889) so the user gets
@@ -179,7 +183,7 @@ const AVATAR_ACCEPT = "image/png,image/jpeg,image/webp"
 // ── Component ───────────────────────────────────────────────────────
 
 export function ProfileSection({
-  userName, userEmail, userAvatarUrl, role, workspaceName, joinedAt, sessionExpires, onSignOut,
+  userName, userEmail, userAvatarUrl, role, workspaceName, joinedAt, sessionExpires, onSignOut, restricted = false,
 }: ProfileSectionProps) {
   // The avatar and display name also live in the global session, which the
   // top bar renders from. Writing them without re-pulling it is what made an
@@ -461,6 +465,7 @@ export function ProfileSection({
                   {initials}
                 </div>
               )}
+              {!restricted && (<>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -489,15 +494,21 @@ export function ProfileSection({
                   Remove
                 </Button>
               )}
+              </>)}
             </div>
-            {avatarError
+            {!restricted && (avatarError
               ? <span className="text-label text-destructive">{avatarError}</span>
-              : <span className="text-micro text-muted-foreground">PNG, JPEG, or WebP · max 2MB</span>}
+              : <span className="text-micro text-muted-foreground">PNG, JPEG, or WebP · max 2MB</span>)}
           </div>
         </SettingsRow>
         <SettingsRow label="Email">
           {userEmail ? <CopyableText value={userEmail} mono /> : <span className="text-xs text-muted-foreground">Not set</span>}
         </SettingsRow>
+        {restricted ? (
+          <SettingsRow label="Full name">
+            <span className="text-xs text-muted-foreground">{userName || "Not set"}</span>
+          </SettingsRow>
+        ) : (<>
         <SettingsRow label="Full name">
           <div className="flex flex-col items-end gap-1">
             <Input
@@ -523,6 +534,7 @@ export function ProfileSection({
           onCancel={nameForm.reset}
           onSave={saveName}
         />
+        </>)}
         <SettingsRow label="Password">
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground tracking-[0.2em]">••••••••</span>
@@ -586,6 +598,7 @@ export function ProfileSection({
         </AlertDialogContent>
       </AlertDialog>
 
+      {!restricted && (<>
       {/* ── Workspace ── */}
       <SettingsCard icon={Building2} title="Workspace" description="Your current organization and role">
         <SettingsRow label="Role">
@@ -608,6 +621,7 @@ export function ProfileSection({
           </SettingsRow>
         )}
       </SettingsCard>
+      </>)}
 
 
       {/* ── New token reveal ── */}
@@ -679,7 +693,7 @@ export function ProfileSection({
           <span className="text-micro uppercase tracking-[0.1em] text-muted-foreground-soft font-semibold">
             CLI tokens
           </span>
-          {!showCreateForm && (
+          {!showCreateForm && !restricted && (
             <Button size="sm" variant="ghost" className="h-6 px-2 gap-1.5 text-label" onClick={() => setShowCreateForm(true)}>
               <Plus className="size-3" />New token
             </Button>
