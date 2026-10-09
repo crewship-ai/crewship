@@ -23,6 +23,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **A repeated webhook delivery gets its receipt even while the first one is running (#2964).** If the acceptance write could not commit in time, for example because the original delivery's run held the database, a duplicate was answered `503 acceptance unavailable`. It now gets `202` with the original work and its current state; only new work is refused.
 
+- **Security: Go 1.27.2 and golang.org/x/net v0.60.0 (#3039).** Fixes the net/http and HTTP/2 advisories GO-2026-6599, 6600, 6603–6605 and 6607–6613, and GO-2026-6617, that `govulncheck` reports as reachable on 1.27.1 / x/net v0.59.0. The release image builds with `golang:1.27.2-alpine`.
+
 - **The Work queue and Webhook deliveries look like Activity (#3017).** Opening either one keeps the rail and switches it, with a slide, to the ledger's own rows:
   - status in Activity's words — the Waiting and Expired filters, which nothing ever filled, are gone;
   - agents with their avatars, and whether their queue moves;

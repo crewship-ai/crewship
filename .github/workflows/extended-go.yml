@@ -13,7 +13,7 @@ concurrency:
   group: extended-go-${{ github.ref }}
   cancel-in-progress: false
 env:
-  GO_VERSION: '1.27.1'
+  GO_VERSION: '1.27.2'
 
 jobs:
   database-race:

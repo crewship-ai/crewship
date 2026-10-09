@@ -61,7 +61,7 @@ ARG NEXT_PUBLIC_SENTRY_DSN=""
 ENV NEXT_PUBLIC_CREWSHIP_VERSION=$VERSION
 RUN pnpm build
 
-FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine AS backend
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS backend
 ARG TARGETOS
 ARG TARGETARCH
 # This tag is the compiler for the shipped binary, and it is the one Go version
@@ -81,9 +81,9 @@ ARG TARGETARCH
 #
 # What `local` does NOT do — verified against this image, not assumed — is
 # object when go.mod's `toolchain` names something else. That directive is
-# ignored outright under `local`, so a `toolchain go1.27.2` against this 1.27.1
-# tag builds happily and silently with 1.27.1. Only the `go` DIRECTIVE can fail
-# the build ("go.mod requires go >= 1.28; running go 1.27.1"), and that line
+# ignored outright under `local`, so a `toolchain go1.27.3` against this 1.27.2
+# tag builds happily and silently with 1.27.2. Only the `go` DIRECTIVE can fail
+# the build ("go.mod requires go >= 1.28; running go 1.27.2"), and that line
 # tracks the language floor, which moves only when a dependency forces it and
 # so cannot be relied on here. So nothing at build time will ever tell us these
 # two files disagree — which is exactly why the disagreement is checked
