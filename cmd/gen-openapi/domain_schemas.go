@@ -70,6 +70,9 @@ func executionSchemaComponents() map[string]any {
 		// templated summary, plus which top-level steps kept an output and
 		// which never ran. error_message / failed_at_step stay raw.
 		"failure": refOrString("RunFailure"),
+		// chain_origin (#3002) — the chain the run belongs to; the list
+		// carries it so the Activity home can narrow to the rail's chains.
+		"chain_origin": str(),
 	})
 	runFailure := obj(map[string]any{
 		"kind": map[string]any{"type": "string", "enum": []string{

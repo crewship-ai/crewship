@@ -85,6 +85,9 @@ is the busiest table in the schema. There is no "return everything" mode.
       "failed": true,
       "running_runs": 1,
       "waiting_runs": 0,
+      "completed_runs": 1,
+      "cancelled_runs": 0,
+      "interrupted_runs": 1,
       "first_activity": "2026-08-07T12:00:00.000000000Z",
       "last_activity": "2026-08-07T12:09:00.000000000Z",
       "duration_ms": 540000,
@@ -128,6 +131,11 @@ is the busiest table in the schema. There is no "return everything" mode.
 | `chains[].failed` | boolean | `failed_runs > 0`. True when **any** run in the chain failed, not only the root. |
 | `chains[].running_runs` | integer | Runs still in flight — status `running` or `queued`. A queued run rides with running because from a reader's side it is accepted work that has not finished. **Always present**, including when 0. |
 | `chains[].waiting_runs` | integer | Runs parked on a person — status `waiting` or `paused`. Split from `running_runs` rather than folded into one "active" count because the two ask different things: a running chain resolves itself, a waiting one never will. Both are derived from **status**, not from a missing `ended_at` — that cheaper test would report every interrupted run as running forever. **Always present**, including when 0. |
+| `chains[].kind` | string | What the chain is rooted in: `run`, a routine run and everything it caused, or `assignment`, agent work started outside any routine (a delegation from a chat, an issue mention, lead planning). For an `assignment` chain, `origin` is the root assignment's id, `runs` counts the assignments in its tree, the outcome counts come from assignment statuses, and `waiting_runs` counts open `run_needs_human` asks on that work. **Always present.** |
+| `chains[].task` | string | An `assignment` chain's root task. Omitted for `run` chains. |
+| `chains[].completed_runs` | integer | Runs that finished — status `completed`. **Always present**, including when 0. |
+| `chains[].cancelled_runs` | integer | Runs somebody stopped — status `cancelled`. Not a failure and not finished work. **Always present**, including when 0. |
+| `chains[].interrupted_runs` | integer | Runs whose process died before they ended — status `interrupted` (written on boot recovery). Counted apart from `cancelled_runs` because nobody chose to stop them, and apart from `failed_runs` because the work itself may have been fine. **Always present**, including when 0. A client deriving one summary word should let `waiting_runs` and `running_runs` win over these, so a stopped branch never hides a live one. |
 | `chains[].first_activity` | string | Earliest `started_at` in the chain. |
 | `chains[].last_activity` | string | Latest `ended_at`, falling back to `started_at` for a run still going. Rows are ordered by this, descending, with `origin` descending as the tiebreak. |
 | `chains[].duration_ms` | integer \| null | Wall clock from `first_activity` to `last_activity`. **Always present**, and `null` when there is no span to measure between. See [How long it took](#how-long-it-took). |
@@ -251,6 +259,16 @@ Two related cases that are *not* excluded:
   membership, so a former member no longer supplies it — the same rule as the
   deleted rule above: the fact that a person started this outlives their
   membership, and the identifier is what carries it.
+
+### Agent work outside routines
+
+A root assignment is one with no parent assignment, no dispatching run and no inherited `chain_origin`. It forms a chain of its own. Its descendants are the assignments whose `chain_origin` names it, a stored column written when they were delegated, so nothing is grouped by time or agent. `started_by_kind` is one of:
+
+- `issue` or `lead_planning`, with `started_by_key` = the identifier;
+- `user`, a person who assigned it;
+- `agent`, delegated from a chat.
+
+Such a row is listed only when the caller may read the chat the work came from (the chat audience). For issue work, a trusted member of the workspace may also read it, the same reach `/issues` gives over that issue's runs. Agent work dispatched by a routine stays in that routine run's chain. A chat turn that dispatched nothing is not listed; see `docs/specs/activity-work-index.md`.
 
 ### Tenancy
 
@@ -398,11 +416,16 @@ Every edge is backed by a real column. Nothing is inferred.
 | routine → run | `runs` | `pipeline_runs.pipeline_id` (FK) |
 | run → run | `triggers` | `triggered_via='call_pipeline'`, `triggered_by_id` = parent run id |
 | issue → assignment | `triggers` | `mission_tasks.assignment_id` |
+| issue → assignment | `triggers` | `assignments.mission_id` — mention, lead-planning and `/assign` work, and tasks re-pointed by a human reply |
+| issue → run | `triggers` | `issue_executions.routine_run_id` |
+| run → issue | `produces` | `missions.author_run_id` — the issue the run created |
 | assignment → assignment | `triggers` | `assignments.parent_assignment_id` |
 | agent → assignment | `executes` | `assignments.assigned_to_id` |
 | agent → run | `executes` | `journal_entries` where `actor_type='agent'` and (`trace_id` = run id OR `run_id` = run id) |
 | run → inbox | `produces` | `inbox_items.kind='waitpoint'` joined through `pipeline_waitpoints.token` = `source_id` |
 | run → inbox | `produces` | `inbox_items.kind='failed_run'`, `payload_json` → `$.run_id` |
+| run → inbox | `produces` | `inbox_items.kind='run_needs_human'`, `source_id` = the pipeline run id |
+| assignment → inbox | `produces` | `inbox_items.kind='run_needs_human'`, `source_id` = the assignment id (issue work) |
 | automation → run | `triggers` | `pipeline_runs.triggered_via='automation'` and `triggered_by_id` = `automations.id` |
 | automation → routine | `triggers` | `automations.action_config_json` → `$.routine_slug`, resolved against `pipelines.slug` in the same workspace |
 | issue ↔ issue | `relates` | `mission_relations` (author-declared, not causal) |
@@ -536,6 +559,16 @@ attributed to any chain — see [What the index does not cover](#what-the-index-
 — so treat it as unattributable rather than as a member. If **no** run node in a
 response carries the field, you are talking to a server older than this field
 and should keep every run rather than drop them all.
+
+### Who sees which inbox items
+
+Inbox nodes follow the inbox's own audience, the same rule as `/inbox`. A caller sees:
+
+- untargeted items;
+- items addressed to them;
+- items addressed to a role at or below theirs.
+
+Anything else is left out of the walk and never named. A hidden item used as the anchor is a `404`, the same as one that does not exist. When the walk withheld items it adds a gap `{"from": "inbox", "to": "viewer"}`. The full link contract is in `docs/specs/activity-links.md`.
 
 ### Links that do not exist
 

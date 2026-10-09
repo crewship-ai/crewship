@@ -77,6 +77,9 @@ type OrchestratorRunner struct {
 	// before the lock exists at boot" pattern api.AssignmentHandler and
 	// scheduler.Scheduler use.
 	agentRunLock *chatbridge.AgentRunLock
+	// agentBusyWait overrides busyWaitFor's bound; zero uses the step
+	// timeout or defaultAgentBusyWait.
+	agentBusyWait time.Duration
 }
 
 // SetAgentRunLock wires the cross-surface per-agent exclusivity lock after
@@ -188,15 +191,34 @@ func (r *OrchestratorRunner) PrewarmCrew(ctx context.Context, crewID, workspaceI
 	return nil
 }
 
-// ErrAgentBusy is returned by RunStep when the step's target agent already
-// has a live run in progress elsewhere (a chat send, an assignment/@mention
-// dispatch, or another routine) holding chatbridge.AgentRunLock — see its
-// doc comment for why two concurrent execs into the same agent's tmux
-// session corrupt each other. Treated like any other transient step error:
-// the routine's own retry/failure policy decides what happens next: this
-// package adds no bespoke requeue path of its own (#2269 follow-up, defect
-// 6) the way the assignment queue's requeueForLockLoss does.
+// ErrAgentBusy is returned by RunStep when the step's target agent stayed
+// busy for the whole wait bound (busyWaitFor): a chat send, an
+// assignment/@mention dispatch or another routine held
+// chatbridge.AgentRunLock — see its doc comment for why two concurrent execs
+// into the same agent's tmux session corrupt each other. The step waits for
+// the agent first (#3023); this error is what is left when the wait runs
+// out. It is not in the executor's transient-retry classifier, so the
+// routine's own retry/failure policy decides what happens next. The wait is
+// in memory: it holds the run's worker and does not survive a restart; a
+// durable mailbox is #2643.
 var ErrAgentBusy = errors.New("pipeline: target agent has a live run in progress elsewhere")
+
+// defaultAgentBusyWait bounds how long a step waits for a busy agent when
+// the step sets no timeout of its own.
+const defaultAgentBusyWait = 15 * time.Minute
+
+// busyWaitFor is how long a step waits for its agent to become free: the
+// step's own timeout when it sets one, else defaultAgentBusyWait.
+// agentBusyWait overrides both (tests).
+func (r *OrchestratorRunner) busyWaitFor(req AgentStepRequest) time.Duration {
+	if r.agentBusyWait > 0 {
+		return r.agentBusyWait
+	}
+	if req.TimeoutSec > 0 {
+		return time.Duration(req.TimeoutSec) * time.Second
+	}
+	return defaultAgentBusyWait
+}
 
 // RunStep is the AgentRunner contract entry point. Each call is one
 // LLM-equivalent invocation against the agent identified by the
@@ -216,14 +238,24 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		return AgentStepResult{}, fmt.Errorf("resolve agent: %w", err)
 	}
 
-	// Cross-surface exclusivity (#2269 follow-up, defect 6): checked right
+	// Cross-surface exclusivity (#2269 follow-up, defect 6): claimed right
 	// after agentID resolves, before the container/chat cost below is
 	// spent on a step that can't run yet — same cheapest-check-first
 	// placement api.AssignmentHandler.runAssignment uses for its own
-	// TryStart check. Held for the rest of this call via defer.
+	// TryStart check. A busy agent is waited for, bounded by busyWaitFor
+	// and the run's context (#3023). Held for the rest of this call via defer.
 	if r.agentRunLock != nil {
 		if !r.agentRunLock.TryStart(agentID) {
-			return AgentStepResult{}, fmt.Errorf("agent %s: %w", agentID, ErrAgentBusy)
+			wait := r.busyWaitFor(req)
+			waitCtx, cancel := context.WithTimeout(ctx, wait)
+			acquired := r.agentRunLock.Acquire(waitCtx, agentID)
+			cancel()
+			if !acquired {
+				if err := ctx.Err(); err != nil {
+					return AgentStepResult{}, err
+				}
+				return AgentStepResult{}, fmt.Errorf("agent %s stayed busy for %s: %w", agentID, wait, ErrAgentBusy)
+			}
 		}
 		defer r.agentRunLock.End(agentID)
 	}
