@@ -22,9 +22,6 @@ export function LedgerAvatar({ agent, className }: { agent: LedgerAgent | null |
       seed={agent.avatar_seed || agent.id}
       style={agent.avatar_style || undefined}
       avatarUrl={agent.avatar_url}
-      // The stored render is backfilled only for a live agent: a deleted one
-      // has no row to store against (the server answers 404).
-      agentId={deleted ? undefined : agent.id}
       alt=""
       // A deleted agent keeps its face, greyed: the work was still theirs.
       className={cn("shrink-0 rounded-full", deleted && "opacity-50 grayscale", className)}

@@ -12,6 +12,7 @@ import { MemoryWorkspace } from "./memory-workspace"
 import { CrewIconPickerDialog } from "@/components/features/crews/crew-icon-picker-dialog"
 import { usePagedList } from "@/hooks/use-paged-list"
 import { apiFetch } from "@/lib/api-fetch"
+import { backfillAgentAvatars } from "@/lib/agent-avatar-persist"
 
 import { ProvisioningBanner } from "./crew-canvas-banner"
 import { CrewNeedsYou } from "./crew-needs-you"
@@ -182,6 +183,10 @@ export function CrewCanvas({
       const url = `/api/v1/crews/${crew.id}/apply-avatar-style?workspace_id=${workspaceId}${resetOverrides ? "&reset_overrides=true" : ""}`
       const res = await apiFetch(url, { method: "POST" })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      // Applying a style clears every stored render in the crew; store the
+      // new faces as part of this edit (#2876). Per-agent outcomes are not an
+      // error for the apply itself.
+      await backfillAgentAvatars(workspaceId, { crewId: crew.id }).catch(() => undefined)
       toast.success(`${verb} done for ${agentsForCrew.length} agent${agentsForCrew.length === 1 ? "" : "s"}`)
       onCrewChanged()
     } catch (err) {

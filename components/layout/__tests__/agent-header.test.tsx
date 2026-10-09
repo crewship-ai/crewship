@@ -59,6 +59,24 @@ describe("AgentHeader Stop (phone)", () => {
     expect(screen.getByText("RUNNING")).toBeTruthy()
   })
 
+  // #2879: an agent with nothing running is a successful stop, not a 502.
+  it("shows STOPPED when the agent was already idle", async () => {
+    apiFetch.mockResolvedValue(json(200, { id: "agent-1", status: "STOPPED", outcome: "already_stopped" }))
+    render(<AgentHeader agentId="agent-1" />)
+    fireEvent.click(screen.getByRole("button", { name: /stop/i }))
+    await waitFor(() => expect(screen.getByText("STOPPED")).toBeTruthy())
+    expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it("explains an unreachable runtime by its code and keeps RUNNING", async () => {
+    apiFetch.mockResolvedValue(json(502, { error: "runtime stop unavailable", code: "runtime_unavailable" }))
+    render(<AgentHeader agentId="agent-1" />)
+    fireEvent.click(screen.getByRole("button", { name: /stop/i }))
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1))
+    expect(JSON.stringify(toastError.mock.calls[0])).toMatch(/can't be reached/)
+    expect(screen.getByText("RUNNING")).toBeTruthy()
+  })
+
   it("shows STOPPED once the server confirms", async () => {
     apiFetch.mockResolvedValue(json(200, { id: "agent-1", status: "STOPPED" }))
     render(<AgentHeader agentId="agent-1" />)

@@ -155,7 +155,6 @@ export function CrewsExplorer({
         <AgentAvatar
           seed={agent.avatar_seed || agent.name}
           style={agent.avatar_style || agent.crew?.avatar_style}
-          agentId={agent.id}
           avatarUrl={agent.avatar_url}
           className="h-8 w-8 rounded-lg shrink-0"
         />

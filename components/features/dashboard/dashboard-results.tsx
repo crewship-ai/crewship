@@ -79,10 +79,10 @@ function WorkSection({ title, count, children }: { title: string; count: number;
   </section>
 }
 
-export function DashboardResults({ review, inProgress, completed, activeAgentRuns, activeRoutineRuns, recentRoutineRuns, agents, crews, workspaceId, loading, error, routineError, routineLoading, onRetry }: {
+export function DashboardResults({ review, inProgress, completed, activeAgentRuns, activeRoutineRuns, recentRoutineRuns, agents, crews, loading, error, routineError, routineLoading, onRetry }: {
   review: Mission[]; inProgress: Mission[]; completed: Mission[]
   activeAgentRuns: DashboardActiveRun[]; activeRoutineRuns: PipelineRun[]; recentRoutineRuns: PipelineRun[]
-  agents: AgentSummary[]; crews: CrewSummary[]; workspaceId: string | null
+  agents: AgentSummary[]; crews: CrewSummary[]
   loading: boolean; error: boolean; routineError: string | null; routineLoading: boolean; onRetry: () => void
 }) {
   const [filter, setFilter] = useState<Filter>("all")
@@ -102,7 +102,7 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
     const agent = humanOwned ? undefined : agents.find((a) => a.id === (issue.assignee_type === "agent" ? issue.assignee_id : issue.lead_agent_id))
     const crew = crews.find((c) => c.id === issue.crew_id)
     const owner = issue.owner ? issue.owner.name || "Issue owner" : humanOwned ? issue.assignee_name || "Issue owner" : agent?.name || issue.assignee_name || issue.lead_agent_name || crew?.name || "Workspace"
-    const icon = humanOwned ? <UserRound className="h-6 w-6 shrink-0 text-muted-foreground" aria-hidden /> : agent ? <AgentAvatar seed={agent.slug} agentId={agent.id} workspaceId={workspaceId} alt={agent.name} className="h-6 w-6 shrink-0 rounded-md bg-muted" /> : crew ? <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="shrink-0" /> : <CircleDot className="h-6 w-6 shrink-0 text-primary-hover" aria-hidden />
+    const icon = humanOwned ? <UserRound className="h-6 w-6 shrink-0 text-muted-foreground" aria-hidden /> : agent ? <AgentAvatar seed={agent.slug} alt={agent.name} className="h-6 w-6 shrink-0 rounded-md bg-muted" /> : crew ? <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="shrink-0" /> : <CircleDot className="h-6 w-6 shrink-0 text-primary-hover" aria-hidden />
     return <WorkRow key={`issue-${issue.id}`} href={issue.identifier ? entityHref({ kind: "issue", identifier: issue.identifier }) : entityHref({ kind: "issues" })} icon={icon} kind={issue.identifier || "Issue"} status={<StatusPill status={issue.status} tone={finished ? "success" : undefined} />} title={issue.title} meta={`${owner} · ${formatRelativeTime(issue.updated_at)}`} action={issue.status === "REVIEW" ? "Review work" : "Open issue"} />
   }
 
@@ -118,7 +118,7 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
           const agent = agents.find((item) => item.id === run.agent_id)
           const issue = inProgress.find((item) => item.id === run.mission_id)
           const name = run.agent_name || agent?.name || "Agent"
-          return <WorkRow key={`agent-${run.id}`} href={run.mission_identifier ? entityHref({ kind: "issue", identifier: run.mission_identifier }) : run.agent_slug ? entityHref({ kind: "chat", agentSlug: run.agent_slug }) : "/activity"} icon={agent ? <AgentAvatar seed={agent.slug} agentId={agent.id} workspaceId={workspaceId} alt={agent.name} className="h-6 w-6 shrink-0 rounded-md bg-muted" /> : <Bot className="h-6 w-6 shrink-0 text-primary-hover" aria-hidden />} kind="Agent" status={<StatusPill status="RUNNING" live />} title={issue?.title || `${name} is working`} meta={`${name} · ${formatRelativeTime(run.started_at || run.created_at)}`} action="Follow run" />
+          return <WorkRow key={`agent-${run.id}`} href={run.mission_identifier ? entityHref({ kind: "issue", identifier: run.mission_identifier }) : run.agent_slug ? entityHref({ kind: "chat", agentSlug: run.agent_slug }) : "/activity"} icon={agent ? <AgentAvatar seed={agent.slug} alt={agent.name} className="h-6 w-6 shrink-0 rounded-md bg-muted" /> : <Bot className="h-6 w-6 shrink-0 text-primary-hover" aria-hidden />} kind="Agent" status={<StatusPill status="RUNNING" live />} title={issue?.title || `${name} is working`} meta={`${name} · ${formatRelativeTime(run.started_at || run.created_at)}`} action="Follow run" />
         })}
         {liveRoutines.map((run) => <WorkRow key={`routine-live-${run.id}`} href={entityHref({ kind: "run", runId: run.id, pipelineSlug: run.pipeline_slug })} icon={<ScrollText className="h-6 w-6 shrink-0 text-primary-hover" aria-hidden />} kind="Routine" status={<StatusPill status={run.status.toUpperCase()} live />} title={run.pipeline_name || run.pipeline_slug} meta={formatRelativeTime(run.started_at)} action="Follow run" />)}
       </WorkSection>}

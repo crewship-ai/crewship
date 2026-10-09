@@ -1,5 +1,6 @@
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { backfillAgentAvatars } from "@/lib/agent-avatar-persist"
 import { devWarn } from "@/lib/client-log"
 import { DEFAULT_RUNNER } from "../create-agent/provider-options"
 import { defaultModelForProvider } from "../create-agent/llm-models"
@@ -124,6 +125,10 @@ async function submitFromTemplate(workspaceId: string, state: WizardState): Prom
   if (hasMCPOverride(state)) patchBody.mcp_config_json = state.mcpConfig
 
   const ok = await applyOverrides(workspaceId, deployed.crew_id, patchBody)
+  // The template created the agents server-side, which cannot draw their
+  // faces; store them now, as part of this create (#2876). A failure only
+  // leaves them generated from their seeds.
+  await backfillAgentAvatars(workspaceId, { crewId: deployed.crew_id }).catch(() => undefined)
 
   return {
     id: deployed.crew_id,
