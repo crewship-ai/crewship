@@ -392,7 +392,7 @@ POST /api/v1/agents?workspace_id={workspaceId}
 | `400` | Invalid name, slug, role, missing required crew_id, or crew_id belongs to another workspace |
 | `402` | Reserved for future license limits; currently unlimited |
 | `403` | Insufficient role |
-| `409` | Slug already taken, or crew already has a LEAD agent |
+| `409` | Slug already taken (`code: agent_slug_taken`), slug reserved by a former agent of the crew (`agent_slug_reserved`), or crew already has a LEAD agent (`crew_lead_exists`). See [Error Format](/api-reference/overview#error-format). |
 
 ---
 
@@ -518,6 +518,10 @@ an agent's **Config -> Ask forms**, or with `crewship agent update <agent>
 agent ask-preview <agent> <form-id> --var k=v`.
 
 **Response:** `200 OK` -- updated agent object.
+
+| Status | Condition |
+|---|---|
+| `409` | Renaming onto a slug another live agent of the workspace holds (`code: agent_slug_taken`, `field: slug`), or onto a slug a former agent of the target crew still owns (`agent_slug_reserved`). A slug held only by a deleted agent of another crew is free. |
 
 ---
 
@@ -1274,10 +1278,19 @@ header. Rebuilding the URL by hand and dropping that parameter yields a
 
 <Note>
   The server never draws an avatar (the generator is JavaScript-only). The
-  client renders the image and stores it — at creation, or the first time
-  someone with edit rights views an agent that has none. Agents created
-  through the CLI or crew templates therefore start with `avatar_url: null`
-  and get filled in later.
+  dashboard renders the image and stores it when someone **creates or edits**
+  an agent there: the agent editor, the avatar picker, a crew's avatar style
+  and a crew created from a template. Viewing an agent never stores anything —
+  a render is a write, and a read must not cause one.
+
+  Agents created elsewhere (the CLI, the API, Captain) and agents that predate
+  this start with `avatar_url: null`. Store theirs with the explicit backfill:
+  **Settings › General › Agent avatars › Store missing avatars** for the whole
+  workspace (admins), or the same button beside **Avatar style** in a crew's
+  **Settings** tab for that crew (managers and up). It calls the `PUT` below
+  once per agent without a render and reports how many it stored, and how many
+  it skipped because you cannot edit them. To store an SVG of your own instead,
+  use [`crewship agent avatar set`](/cli/agent#crewship-agent-avatar-set).
 </Note>
 
 ### Get stored avatar
@@ -1980,13 +1993,24 @@ List execution history for an agent.
 These endpoints proxy requests through the crewshipd sidecar to the agent's container.
 
 `POST /api/v1/agents/{agentId}/stop` targets the active invocations owned by
-this daemon when it receives the request. A `200` / `STOPPED` response follows
-confirmed process termination and completion of those invocations. Direct
-execs use an isolated process group; tmux runs use their per-run session.
+this daemon and the durably recorded running invocations that outlived a
+restart. A `200` answers `{"id", "status": "STOPPED", "outcome"}` only once
+the agent is confirmed not running. Direct execs use an isolated process
+group; tmux runs use their per-run session.
 
-If the daemon is unavailable, cannot identify the runtime (including an
-unowned run after restart), or cannot confirm termination within its bounded
-wait, the API returns `502` and leaves the stored agent status unchanged.
+| `outcome` | Meaning |
+|---|---|
+| `stopped` | At least one invocation existed; its termination is confirmed. |
+| `already_stopped` | Nothing was running. Established only when the daemon owns no invocation of the agent, its run store lists without error, every record is readable or names another agent, and none of this agent's records is non-terminal. |
+
+Otherwise the API returns `502` `{"error", "code"}` and leaves the stored
+agent status unchanged:
+
+| `code` | `error` | Meaning |
+|---|---|---|
+| `stop_not_confirmed` | `runtime stop not confirmed` | A process of the agent exists or may exist (a live run this daemon does not own, a record without a runtime location, an unreadable record, an unrecognised non-terminal status) and its end was not confirmed within the bounded wait. |
+| `runtime_unavailable` | `runtime stop unavailable` | The daemon, its run store or the container runtime could not be reached, so nothing could be established. |
+
 The request does not disable the agent or prevent a separate new submission.
 
 | Endpoint | Method | Description |

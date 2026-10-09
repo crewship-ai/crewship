@@ -10140,16 +10140,25 @@
       },
       "RemainingAgentStoppedV1": {
         "properties": {
-          "message": {
+          "id": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "stopped",
+              "already_stopped"
+            ],
             "type": "string"
           },
           "status": {
             "type": "string"
-          },
-          "success": {
-            "type": "boolean"
           }
         },
+        "required": [
+          "id",
+          "status",
+          "outcome"
+        ],
         "type": "object"
       },
       "RemainingAgentUpdatedV1": {
@@ -16027,6 +16036,13 @@
       },
       "WorkspaceMemberResponseV1": {
         "properties": {
+          "access_mode": {
+            "enum": [
+              "trusted",
+              "restricted"
+            ],
+            "type": "string"
+          },
           "created_at": {
             "type": "string"
           },
@@ -50471,24 +50487,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Bad Gateway"
           }
         },
         "security": [
@@ -145038,6 +145036,24 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "500": {
             "content": {

@@ -25,6 +25,7 @@ import { PagesAppearanceCard } from "./pages-appearance-card"
 import { WorkspaceLogoRow } from "./workspace-logo-row"
 import { cn } from "@/lib/utils"
 import { PrivilegedCredentialsCard } from "@/components/features/settings/sections/privileged-credentials-card"
+import { AvatarBackfillButton } from "@/components/features/crews/avatar-backfill-button"
 
 interface GeneralSectionProps {
   workspaceId: string
@@ -259,6 +260,14 @@ export function GeneralSection({
             <AnimatedNumber value={agentCount} />
           </span>
         </SettingsRow>
+        {canEdit && agentCount > 0 && (
+          <SettingsRow
+            label="Agent avatars"
+            description="Freeze each agent's face so a generator upgrade cannot repaint it. New and edited agents are stored automatically; this stores the rest."
+          >
+            <AvatarBackfillButton workspaceId={workspaceId} />
+          </SettingsRow>
+        )}
         <SettingsRow
           label={
             <span className="inline-flex items-center gap-2">

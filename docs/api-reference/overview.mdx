@@ -165,6 +165,27 @@ Some older endpoints return a simpler format:
 }
 ```
 
+A refusal that a client needs to act on may also carry a machine-readable
+`code`, and the request `field` it concerns. Both are optional and can appear
+in either format, next to `detail` or `error`:
+
+```json
+{
+  "error": "Agent slug already taken in this workspace",
+  "code": "agent_slug_taken",
+  "field": "slug"
+}
+```
+
+Branch on `code`, not on the sentence: the sentence is for people and may be
+reworded. Codes in use:
+
+| Code | Field | Meaning |
+|---|---|---|
+| `agent_slug_taken` | `slug` | Another live agent in the workspace has this slug (agent create, rename, internal create). |
+| `agent_slug_reserved` | `slug` | An agent of the target crew used this slug before, and its memory and output are still stored under it. |
+| `crew_lead_exists` | `agent_role` | The crew already has a LEAD agent (agent create). |
+
 ### Common Status Codes
 
 | Code | Meaning |

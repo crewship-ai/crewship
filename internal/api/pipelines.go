@@ -94,6 +94,12 @@ type PipelineHandler struct {
 	// on, so shutdown can drain in-flight verdicts (DrainVerdicts) before
 	// the journal writer closes (#1403).
 	verdictWG sync.WaitGroup
+
+	// parkedCancelStage fires in CancelRun's parked-run path at "before-fence"
+	// (the row read WAITING, the run's registry entry not yet taken) and at
+	// "fenced" (entry held, row not yet re-read or committed). Test
+	// rendezvous for the cancel/resume race (#2910); nil in production.
+	parkedCancelStage func(stage, runID string)
 }
 
 // NewPipelineHandler wires the pipeline subsystem against an

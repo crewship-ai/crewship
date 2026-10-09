@@ -123,7 +123,7 @@ func seedInboxRows(now time.Time) []seedRow {
 		},
 		{
 			kind: inbox.KindMessage, title: "Workspace digest — last 24 h",
-			body:   "6 routine runs — 5 completed, 0 failed, 1 waiting. $0.28 total cost.",
+			body:   "6 routine runs — 5 completed, 0 failed, 1 waiting. ~$0.28 usage reported by agent CLIs.",
 			sender: "workspace-digest", priority: "low",
 			payload: map[string]any{"pipeline_run_id": "run_seed_digest", "subkind": "routine_update"},
 		},

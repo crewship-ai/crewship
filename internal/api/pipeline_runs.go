@@ -60,40 +60,34 @@ func (h *PipelineHandler) CancelRun(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	if !found {
-		// Registry fallback for a parked WAITING run (#1426, 3.1). An async
-		// approval-parked run released its concurrency slot + registry entry
-		// when it parked, so the in-memory scan above can't see it — but it is
-		// still cancellable. Mark the persisted row cancelled and cancel its
-		// pending waitpoint(s) so the inbox approval card stops being
-		// actionable (an approve/deny would otherwise resolve a waitpoint whose
-		// run the user just killed).
-		if h.runStore != nil {
-			if rec, gerr := h.runStore.Get(r.Context(), runID); gerr == nil && rec != nil &&
-				rec.WorkspaceID == workspaceID && rec.Status == pipeline.RunStatusWaiting {
-				if err := h.runStore.MarkTerminal(r.Context(), pipeline.MarkTerminalInput{
-					RunID:        runID,
-					Status:       pipeline.RunStatusCancelled,
-					ErrorMessage: "run cancelled while waiting for approval",
-				}); err != nil {
-					h.logger.Warn("cancel parked run: mark terminal", "error", err, "run_id", runID)
-					replyError(w, http.StatusInternalServerError, "failed to cancel run")
-					return
-				}
-				if wc, ok := h.waitpoints.(pipeline.WaitpointCanceller); ok {
-					if _, err := wc.CancelWaitpointsForRun(r.Context(), runID); err != nil {
-						h.logger.Warn("cancel parked run: cancel waitpoints", "error", err, "run_id", runID)
-					}
-				}
-				writeJSON(w, http.StatusOK, map[string]any{
-					"run_id":              runID,
-					"cancel_requested":    true,
-					"parked":              true,
-					"cancel_requested_at": time.Now().UTC().Format(time.RFC3339Nano),
-				})
-				return
-			}
+	// A parked WAITING run (#1426, 3.1) is cancelled through the run store.
+	// An async approval-parked run released its concurrency slot + registry
+	// entry when it parked, so the scan above usually misses it; when it
+	// still lists the run, the lifetime that parked it has not returned yet
+	// and cancelling only that lifetime would leave the row WAITING (#2910).
+	// cancelParkedRun answers parkedRunNotParked for any other run.
+	if h.runStore != nil {
+		outcome, err := h.cancelParkedRun(r.Context(), workspaceID, runID)
+		switch {
+		case err != nil && found:
+			// The live lifetime can still be stopped without the store.
+			h.logger.Warn("cancel run: read parked state", "error", err, "run_id", runID)
+		case err != nil:
+			h.logger.Warn("cancel parked run", "error", err, "run_id", runID)
+			replyError(w, http.StatusInternalServerError, "failed to cancel run")
+			return
+		case outcome == parkedRunCancelled:
+			writeCancelRequested(w, runID, true)
+			return
+		case outcome == parkedRunLiveCancelled:
+			writeCancelRequested(w, runID, false)
+			return
+		case outcome == parkedRunContended:
+			replyError(w, http.StatusConflict, "run is being resumed; retry the cancel")
+			return
 		}
+	}
+	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{
 			"error": "run not found in this workspace (already finished or not started here)",
 		})
@@ -109,11 +103,132 @@ func (h *PipelineHandler) CancelRun(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "failed to cancel run")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeCancelRequested(w, runID, false)
+}
+
+func writeCancelRequested(w http.ResponseWriter, runID string, parked bool) {
+	body := map[string]any{
 		"run_id":              runID,
 		"cancel_requested":    true,
 		"cancel_requested_at": time.Now().UTC().Format(time.RFC3339Nano),
-	})
+	}
+	if parked {
+		body["parked"] = true
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+// parkedRunCancelOutcome is what cancelParkedRun did; CancelRun turns it into
+// the response (so every status the endpoint answers stays in its body).
+type parkedRunCancelOutcome int
+
+const (
+	// parkedRunNotParked: not a WAITING run of this workspace (any more).
+	parkedRunNotParked parkedRunCancelOutcome = iota
+	// parkedRunCancelled: this cancel recorded the row CANCELLED.
+	parkedRunCancelled
+	// parkedRunLiveCancelled: a lifetime owned the run; it was cancelled and
+	// records the outcome itself.
+	parkedRunLiveCancelled
+	// parkedRunContended: resumes kept taking the run; nothing was decided.
+	parkedRunContended
+)
+
+// cancelParkedRun cancels a WAITING run that no lifetime on this process owns.
+//
+// The persisted cancel is fenced against resume admission (#2910). Every
+// resume (approval, signal, event sweeper, boot) re-enters through
+// Executor.Run, which takes the run's registry entry before it re-reads the
+// persisted status. This takes that same entry first, so exactly one side
+// wins:
+//
+//   - cancel holds the entry: a concurrent resume gets ErrDuplicateRunID and
+//     stands down; a later one reads the committed CANCELLED row and stops
+//     before any step runs.
+//   - a lifetime already holds it: that lifetime is cancelled as a live run.
+//     A resumed lifetime lands the CANCELLED row itself; the lifetime that
+//     parked the run and has not returned yet records nothing terminal, so
+//     once the entry is released the row is looked at again and, if it is
+//     still WAITING, cancelled here under the fence.
+func (h *PipelineHandler) cancelParkedRun(ctx context.Context, workspaceID, runID string) (parkedRunCancelOutcome, error) {
+	parked := func() (*pipeline.RunRecord, bool, error) {
+		rec, err := h.runStore.Get(ctx, runID)
+		if errors.Is(err, pipeline.ErrRunNotFoundInStore) {
+			return nil, false, nil
+		}
+		if err != nil {
+			return nil, false, fmt.Errorf("read run: %w", err)
+		}
+		return rec, rec != nil && rec.WorkspaceID == workspaceID && rec.Status == pipeline.RunStatusWaiting, nil
+	}
+	rec, ok, err := parked()
+	if err != nil || !ok {
+		return parkedRunNotParked, err
+	}
+	const attempts = 3
+	for attempt := 0; attempt < attempts; attempt++ {
+		if h.parkedCancelStage != nil {
+			h.parkedCancelStage("before-fence", runID)
+		}
+		_, release, err := h.runs.Acquire(context.Background(), pipeline.AcquireOpts{
+			RunID: runID, WorkspaceID: workspaceID, PipelineID: rec.PipelineID, PipelineSlug: rec.PipelineSlug,
+		})
+		if errors.Is(err, pipeline.ErrDuplicateRunID) {
+			if cerr := h.runs.Cancel(runID); cerr != nil && !errors.Is(cerr, pipeline.ErrRunNotFound) {
+				return parkedRunNotParked, fmt.Errorf("cancel live lifetime: %w", cerr)
+			}
+			waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			released := h.runs.AwaitRelease(waitCtx, runID)
+			cancel()
+			if !released {
+				// Still executing: its cancelled context stops it at the
+				// next step and it records the outcome itself.
+				return parkedRunLiveCancelled, nil
+			}
+			if rec, ok, err = parked(); err != nil {
+				return parkedRunNotParked, err
+			} else if !ok {
+				return parkedRunLiveCancelled, nil
+			}
+			continue
+		}
+		if err != nil {
+			return parkedRunNotParked, fmt.Errorf("fence: %w", err)
+		}
+		return h.cancelParkedRunFenced(ctx, runID, release, parked)
+	}
+	return parkedRunContended, nil
+}
+
+// cancelParkedRunFenced commits the cancel while holding the run's registry
+// entry, then releases it.
+func (h *PipelineHandler) cancelParkedRunFenced(ctx context.Context, runID string, release func(), parked func() (*pipeline.RunRecord, bool, error)) (parkedRunCancelOutcome, error) {
+	defer release()
+	if h.parkedCancelStage != nil {
+		h.parkedCancelStage("fenced", runID)
+	}
+	// Re-read under the fence: a resume that ran to completion (or parked
+	// again on a later step) between the first read and the fence must not
+	// be overwritten by a cancel aimed at the earlier state.
+	if _, ok, err := parked(); err != nil || !ok {
+		return parkedRunNotParked, err
+	}
+	// Mark the persisted row cancelled and cancel its pending waitpoint(s)
+	// so the inbox approval card stops being actionable (an approve/deny
+	// would otherwise resolve a waitpoint whose run the user just killed).
+	if err := h.runStore.MarkTerminal(ctx, pipeline.MarkTerminalInput{
+		RunID:        runID,
+		Status:       pipeline.RunStatusCancelled,
+		ErrorMessage: "run cancelled while waiting for approval",
+	}); err != nil {
+		return parkedRunNotParked, fmt.Errorf("mark terminal: %w", err)
+	}
+	if wc, ok := h.waitpoints.(pipeline.WaitpointCanceller); ok {
+		if _, err := wc.CancelWaitpointsForRun(ctx, runID); err != nil {
+			h.logger.Warn("cancel parked run: cancel waitpoints", "error", err, "run_id", runID)
+		}
+	}
+	return parkedRunCancelled, nil
 }
 
 // GetRun GET /workspaces/{wsId}/pipeline-runs/{runId}

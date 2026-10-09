@@ -27,6 +27,10 @@ type memberResponse struct {
 	CreatedAt   string      `json:"created_at"`
 	UpdatedAt   string      `json:"updated_at"`
 	User        *memberUser `json:"user,omitempty"`
+	// AccessMode is "trusted" or "restricted". It is part of the member
+	// access policy, which only a trusted OWNER/ADMIN may read
+	// (GET /members/{id}/access), so it is omitted for every other caller.
+	AccessMode string `json:"access_mode,omitempty"`
 }
 
 type memberUser struct {
@@ -42,8 +46,14 @@ type memberUser struct {
 func (h *WorkspaceHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
+	seesAccess, err := h.callerReadsMemberAccess(r.Context(), workspaceID)
+	if err != nil {
+		replyInternalError(w, h.logger, "list members access", err)
+		return
+	}
+
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT wm.id, wm.workspace_id, wm.user_id, wm.role, wm.created_at, wm.updated_at,
+		SELECT wm.id, wm.workspace_id, wm.user_id, wm.role, wm.created_at, wm.updated_at, wm.access_mode,
 			u.id, u.email, u.full_name, u.avatar_url
 		FROM workspace_members wm
 		JOIN users u ON u.id = wm.user_id
@@ -60,12 +70,16 @@ func (h *WorkspaceHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var m memberResponse
 		var u memberUser
-		if err := rows.Scan(&m.ID, &m.WorkspaceID, &m.UserID, &m.Role, &m.CreatedAt, &m.UpdatedAt,
+		var mode string
+		if err := rows.Scan(&m.ID, &m.WorkspaceID, &m.UserID, &m.Role, &m.CreatedAt, &m.UpdatedAt, &mode,
 			&u.ID, &u.Email, &u.FullName, &u.AvatarURL); err != nil {
 			replyInternalError(w, h.logger, "scan member", err)
 			return
 		}
 		m.User = &u
+		if seesAccess {
+			m.AccessMode = mode
+		}
 		result = append(result, m)
 	}
 	if err := rows.Err(); err != nil {
@@ -78,6 +92,24 @@ func (h *WorkspaceHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// callerReadsMemberAccess mirrors the member access policy read gate
+// (access.Store.Policy): a workspace:admin token scope and a trusted
+// OWNER/ADMIN membership in this workspace.
+func (h *WorkspaceHandler) callerReadsMemberAccess(ctx context.Context, workspaceID string) (bool, error) {
+	caller := UserFromContext(ctx)
+	if caller == nil || workspaceID == "" || !canScope(ctx, "workspace:admin") {
+		return false, nil
+	}
+	var one int
+	err := h.db.QueryRowContext(ctx, `SELECT 1 FROM workspace_members
+		WHERE user_id = ? AND workspace_id = ? AND access_mode = 'trusted' AND role IN ('OWNER', 'ADMIN')`,
+		caller.ID, workspaceID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 type addMemberRequest struct {
