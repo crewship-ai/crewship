@@ -249,6 +249,58 @@ func TestPipelineRuns_CancelRun_ParkedRunRacesResume(t *testing.T) {
 		}
 	})
 
+	// The cancel can arrive after the run is persisted WAITING but before the
+	// lifetime that parked it returns: the registry scan still lists the run.
+	// Cancelling only the in-memory lifetime would answer 200 while the row
+	// stays WAITING and a later approve resumes the cancelled run.
+	t.Run("the parking lifetime is still listed active: the row is cancelled once it lets go", func(t *testing.T) {
+		h, _, userID, wsID := runsHandlerRig(t)
+		registry := pipeline.NewRunRegistry()
+		h.SetRunRegistry(registry)
+		const runID = "prn_listed_parking"
+		runStore, _, token := seedParkedRun(t, h, wsID, runID)
+		lifetime, release, err := registry.Acquire(context.Background(), pipeline.AcquireOpts{RunID: runID, WorkspaceID: wsID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			<-lifetime.Done()
+			release() // returns WAITING and writes nothing terminal
+		}()
+		rr := cancelRunRequest(t, h, userID, wsID, runID)
+		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"parked":true`) {
+			t.Fatalf("status = %d body=%s, want 200 parked", rr.Code, rr.Body.String())
+		}
+		rec, err := runStore.Get(context.Background(), runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rec.Status != pipeline.RunStatusCancelled {
+			t.Errorf("run status = %q, want cancelled (a reported cancel left the run parked)", rec.Status)
+		}
+		var wpStatus string
+		if err := h.db.QueryRow(`SELECT status FROM pipeline_waitpoints WHERE token = ?`, token).Scan(&wpStatus); err != nil {
+			t.Fatal(err)
+		}
+		if wpStatus != "cancelled" {
+			t.Errorf("waitpoint status = %q, want cancelled", wpStatus)
+		}
+	})
+
+	t.Run("a run store failure is an error, not a cancel or a 404", func(t *testing.T) {
+		h, _, userID, wsID := runsHandlerRig(t)
+		h.SetRunRegistry(pipeline.NewRunRegistry())
+		const runID = "prn_store_down"
+		seedParkedRun(t, h, wsID, runID)
+		if _, err := h.db.Exec(`ALTER TABLE pipeline_runs RENAME TO pipeline_runs_unavailable`); err != nil {
+			t.Fatal(err)
+		}
+		rr := cancelRunRequest(t, h, userID, wsID, runID)
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d body=%s, want 500", rr.Code, rr.Body.String())
+		}
+	})
+
 	t.Run("a resume that finished before the fence is not overwritten", func(t *testing.T) {
 		h, _, userID, wsID := runsHandlerRig(t)
 		h.SetRunRegistry(pipeline.NewRunRegistry())

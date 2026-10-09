@@ -1292,6 +1292,8 @@ Pre-empts an in-flight run by triggering its context. The run loop checks `ctx.E
 
 Idempotent: cancelling an already-cancelled run is a no-op (200 with the same response). Cancelling a **finished** run returns 404 because the in-memory registry only tracks live runs.
 
+A run parked on an approval or event (`WAITING`) is cancelled in the run store too: the row becomes `CANCELLED`, its pending waitpoints are cancelled, and the response carries `"parked": true`. The cancel and any resume of that run (approve, signal, event, restart) exclude each other, so exactly one of them wins. If resumes keep taking the run, the endpoint answers `409` without changing anything; retrying the cancel is safe.
+
 **Auth:** `OWNER` or `ADMIN` (`canRole "manage"`) -- cancelling another user's run is a manage-tier action.
 
 **Response:** `200 OK`
@@ -1308,6 +1310,8 @@ Idempotent: cancelling an already-cancelled run is a no-op (200 with the same re
 |---|---|
 | `403` | Caller below `ADMIN` |
 | `404` | Run not found in this workspace (already finished, or never started here) |
+| `409` | A resume kept taking the parked run; nothing changed, retry the cancel |
+| `500` | The run store could not be read or written |
 | `503` | Run registry not wired |
 
 ---

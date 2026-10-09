@@ -978,7 +978,7 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 			return &RunResult{RunID: rec.ID, PipelineID: rec.PipelineID, Status: strings.ToUpper(string(rec.Status))}, nil
 		}
 		if rec.CurrentStepID != in.resumeCurrentStepID {
-			return nil, errResumePlanStale
+			return e.resumeAdmissionFailed(preallocRunID, in.PipelineID, errResumePlanStale)
 		}
 		// Admission may have waited while another lifetime committed outputs.
 		// Restore again under the registry slot, never execute from a stale map.

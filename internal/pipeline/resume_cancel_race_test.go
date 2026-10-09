@@ -15,8 +15,11 @@ func TestResumeCancelledAfterRegistryEntryRunsNoFurtherStep(t *testing.T) {
 		name string
 		// where the cancel reaches the resumed lifetime
 		beforeStatusRead bool
+		// another lifetime moved the run on before this one re-read it
+		stalePlan bool
 	}{
 		{name: "before the resume re-reads the persisted status", beforeStatusRead: true},
+		{name: "before the re-read finds the plan superseded", beforeStatusRead: true, stalePlan: true},
 		{name: "after admission, before the next step"},
 	}
 	for _, tc := range tests {
@@ -63,7 +66,14 @@ func TestResumeCancelledAfterRegistryEntryRunsNoFurtherStep(t *testing.T) {
 			}
 			var onAdmitted func()
 			if tc.beforeStatusRead {
-				exec.afterResumeRegistryAcquire = func(string) { cancelLive() }
+				exec.afterResumeRegistryAcquire = func(id string) {
+					if tc.stalePlan {
+						if _, err := db.Exec(`UPDATE pipeline_runs SET current_step_id = 'later' WHERE id = ?`, id); err != nil {
+							t.Error(err)
+						}
+					}
+					cancelLive()
+				}
 			} else {
 				onAdmitted = cancelLive
 			}
