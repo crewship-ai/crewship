@@ -523,3 +523,90 @@ func TestAcceptance_WorkResolve_PrivateCannotInventCompletion(t *testing.T) {
 		t.Fatalf("CLI failed resolution: %v: %s", err, out)
 	}
 }
+
+// The ledger names who did the work and what arrived (#3012): an agent by its
+// name, a deleted one as deleted rather than as a bare id, and a webhook item
+// by the event its delivery carried.
+func TestAcceptance_WorkList_NamesTheAgentAndTheEvent(t *testing.T) {
+	cfgPath := startWorkAcceptanceServer(t)
+
+	listOut, err := runWorkCLI(t, cfgPath, "work", "list")
+	if err != nil {
+		t.Fatalf("work list failed: %v\n%s", err, listOut)
+	}
+	for _, want := range []string{"EVENT", "work-agent-a", "work-agent-b", "(deleted) cmucdeletedagent000000001", "issues"} {
+		if !strings.Contains(listOut, want) {
+			t.Fatalf("the work list is missing %q:\n%s", want, listOut)
+		}
+	}
+
+	jsonOut, err := runWorkCLI(t, cfgPath, "work", "get", "wk-replay-0001", "-f", "json")
+	if err != nil {
+		t.Fatalf("work get failed: %v\n%s", err, jsonOut)
+	}
+	for _, want := range []string{`"event_type": "issues"`, `"name": "work-agent-b"`, `"name": "Work crew"`} {
+		if !strings.Contains(jsonOut, want) {
+			t.Fatalf("work get -f json is missing %s:\n%s", want, jsonOut)
+		}
+	}
+
+	dlvOut, err := runWorkCLI(t, cfgPath, "work", "deliveries", "list")
+	if err != nil {
+		t.Fatalf("work deliveries list failed: %v\n%s", err, dlvOut)
+	}
+	for _, want := range []string{"AGENT", "WORK STATE", "failed"} {
+		if !strings.Contains(dlvOut, want) {
+			t.Fatalf("the delivery list is missing %q:\n%s", want, dlvOut)
+		}
+	}
+}
+
+// The Work queue reads a window and the open work (#3017); the CLI asks the
+// same questions, and `work get` names who, where and what like `work list`.
+func TestAcceptance_WorkList_ReadsAWindowAndTheOpenWork(t *testing.T) {
+	cfgPath := startWorkAcceptanceServer(t)
+
+	openOut, err := runWorkCLI(t, cfgPath, "work", "list", "--open")
+	if err != nil {
+		t.Fatalf("work list --open failed: %v\n%s", err, openOut)
+	}
+	if !strings.Contains(openOut, "running") || !strings.Contains(openOut, "queued") {
+		t.Fatalf("--open is missing unfinished work:\n%s", openOut)
+	}
+	if strings.Contains(openOut, "succeeded") || strings.Contains(openOut, "failed") {
+		t.Fatalf("--open lists finished work:\n%s", openOut)
+	}
+
+	futureOut, err := runWorkCLI(t, cfgPath, "work", "list", "--since", "2099-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("work list --since failed: %v\n%s", err, futureOut)
+	}
+	if strings.Contains(futureOut, "running") || strings.Contains(futureOut, "succeeded") {
+		t.Fatalf("--since in the future still lists work:\n%s", futureOut)
+	}
+	recentOut, err := runWorkCLI(t, cfgPath, "work", "list", "--since", "24h", "-f", "json")
+	if err != nil {
+		t.Fatalf("work list --since 24h failed: %v\n%s", err, recentOut)
+	}
+	if !strings.Contains(recentOut, `"avatar_url"`) || !strings.Contains(recentOut, "wk-replay-0001") {
+		t.Fatalf("--since 24h -f json is missing today's work or the agent's avatar_url:\n%s", recentOut)
+	}
+
+	getOut, err := runWorkCLI(t, cfgPath, "work", "get", "wk-replay-0001")
+	if err != nil {
+		t.Fatalf("work get failed: %v\n%s", err, getOut)
+	}
+	for _, want := range []string{"work-agent-b", "Work crew", "issues"} {
+		if !strings.Contains(getOut, want) {
+			t.Fatalf("work get is missing %q:\n%s", want, getOut)
+		}
+	}
+
+	dlvOut, err := runWorkCLI(t, cfgPath, "work", "deliveries", "list", "--since", "2099-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("work deliveries list --since failed: %v\n%s", err, dlvOut)
+	}
+	if !strings.Contains(dlvOut, "(no deliveries)") {
+		t.Fatalf("--since in the future still lists deliveries:\n%s", dlvOut)
+	}
+}

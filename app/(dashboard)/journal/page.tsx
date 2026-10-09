@@ -9,12 +9,16 @@ import {
   ListOrdered,
   Radio,
   RadioTower,
+  ScrollText,
   Zap,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { SubBar } from "@/components/layout/sub-bar"
 import { cn } from "@/lib/utils"
 import { useAbilities } from "@/hooks/use-abilities"
+import { roleAtLeast } from "@/lib/routine-governance"
+import { Button } from "@/components/ui/button"
+import Link from "next/link"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useBatchedPrepend, PREPEND_FLUSH_MS } from "@/hooks/use-batched-prepend"
 import { useJournalList } from "@/hooks/use-journal-list"
@@ -100,7 +104,34 @@ const ALL_TABS: TabDef[] = [
  * Per-tab RBAC hides admin-only tabs entirely from non-admins so they
  * never see a "click here for 403" affordance.
  */
+/**
+ * The Journal is the raw technical log — every event, for the people who run
+ * the workspace. Everyone else reads the same work in Activity, which tells it
+ * as runs (#2979). Hidden from the nav below ADMIN too (lib/nav-sections).
+ */
 export default function JournalPage() {
+  const { role, loading } = useAbilities()
+  if (loading) return null
+  if (!roleAtLeast(role, "ADMIN")) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="flex max-w-md flex-col items-center gap-3 text-center">
+          <ScrollText className="h-5 w-5 text-muted-foreground" />
+          <h1 className="text-base font-semibold">The Journal is the technical log</h1>
+          <p className="text-sm text-muted-foreground">
+            It is kept for workspace admins. What ran, what it changed and what needs you is in Activity.
+          </p>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/activity">Open Activity</Link>
+          </Button>
+        </div>
+      </div>
+    )
+  }
+  return <JournalLog />
+}
+
+function JournalLog() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const { role, loading: rolesLoading } = useAbilities()
   const isAdmin = role === "OWNER" || role === "ADMIN"

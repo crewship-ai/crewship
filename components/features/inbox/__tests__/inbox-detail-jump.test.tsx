@@ -119,4 +119,23 @@ describe("InboxDetail — the jump control", () => {
 
     expect(screen.queryByRole("link", { name: /^open /i })).toBeNull()
   })
+
+  // #2979 — "1 routine run(s) completed quietly" said where the runs were
+  // ("Recorded in the Journal") and gave no way there but Dismiss. The runs it
+  // counts are the Completed bucket of Activity, over the same 24h window.
+  it("links a quiet-runs digest to the completed runs in Activity", () => {
+    renderDetail(
+      item({
+        id: "i7",
+        kind: "message",
+        title: "1 routine run(s) completed quietly",
+        payload: { subkind: "digest", succeeded: 1, no_change: 0, window_seconds: 86400 },
+      }),
+    )
+
+    const link = jumpLink(/view in activity/i)
+    expect(link.tagName).toBe("A")
+    expect(link).toHaveAttribute("href", "/activity?status=done")
+  })
+
 })

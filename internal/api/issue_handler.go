@@ -438,8 +438,12 @@ var validIssueTransitions = statuses.ValidIssueTransitions
 func (h *IssueHandler) resolveMissionID(ctx context.Context, identifier, crewID, wsID string) (string, error) {
 	var id string
 	err := h.db.QueryRowContext(ctx,
-		`SELECT id FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
-		identifier, crewID, wsID).Scan(&id)
+		// The identifier, or the mission id itself (#2983): Activity knows an
+		// issue by its id, and a workspace without identifiers has nothing
+		// else. Fenced to the crew and workspace either way.
+		`SELECT id FROM missions WHERE (identifier = ? OR id = ?) AND crew_id = ? AND workspace_id = ?
+		 ORDER BY (identifier = ?) DESC LIMIT 1`,
+		identifier, identifier, crewID, wsID, identifier).Scan(&id)
 	return id, err
 }
 

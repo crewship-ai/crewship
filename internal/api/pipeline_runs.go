@@ -579,7 +579,7 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 		       r.triggered_via, r.triggered_by_id,
 		       r.invoking_crew_id, r.invoking_agent_id, r.invoking_user_id,
 		       r.error_message, r.failed_at_step,
-		       m.identifier, r.outcome
+		       m.identifier, r.outcome, r.chain_origin
 		FROM pipeline_runs r
 		LEFT JOIN pipelines p ON r.pipeline_id = p.id
 		                     AND p.workspace_id = r.workspace_id
@@ -613,6 +613,7 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 			errorMessage, failedAtStep                            sql.NullString
 			issueIdentifier                                       sql.NullString
 			outcome                                               sql.NullString
+			chainOrigin                                           sql.NullString
 		)
 		if err := rows.Scan(
 			&id, &pipelineID, &pipelineSlug, &pipelineName,
@@ -622,15 +623,18 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 			&triggeredVia, &triggeredByID,
 			&invokingCrewID, &invokingAgentID, &invokingUserID,
 			&errorMessage, &failedAtStep,
-			&issueIdentifier, &outcome,
+			&issueIdentifier, &outcome, &chainOrigin,
 		); err != nil {
 			h.logger.Warn("scan pipeline run", "error", err)
 			continue
 		}
 		out = append(out, map[string]interface{}{
-			"id":                id,
-			"pipeline_id":       pipelineID,
-			"pipeline_slug":     pipelineSlug,
+			"id":            id,
+			"pipeline_id":   pipelineID,
+			"pipeline_slug": pipelineSlug,
+			// The chain the run belongs to (#3002) — what lets the Activity
+			// home narrow its runs to the rail's chains.
+			"chain_origin":      chainOrigin.String,
 			"pipeline_name":     pipelineName.String,
 			"status":            status,
 			"mode":              mode,
