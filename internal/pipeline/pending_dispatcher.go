@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/jitter"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
@@ -118,9 +119,14 @@ func (d *PendingRunDispatcher) run(ctx context.Context) {
 	}
 	d.sem = make(chan struct{}, d.maxConcurrency)
 
+	d.sweep(ctx)
+	// The boot sweep stays immediate; only the ticker's phase is spread from
+	// the other sweepers started at boot (#1891).
+	if !jitter.Wait(ctx, d.stopCh, d.tick) {
+		return
+	}
 	t := time.NewTicker(d.tick)
 	defer t.Stop()
-	d.sweep(ctx)
 	for {
 		select {
 		case <-d.stopCh:

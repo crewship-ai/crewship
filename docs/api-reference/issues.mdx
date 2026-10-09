@@ -871,6 +871,10 @@ One call is not guaranteed to return the whole gap: a response is capped at 500 
 | Query param | Type | Description |
 |---|---|---|
 | `after_seq` | integer | Only return events with `seq` greater than this. Omitted or `0` returns the full history. Must be a non-negative integer. |
+| `before_seq` | integer | Page **backwards**: return the newest `limit` events with `seq` below this, still in `seq` order. `0` means "from the newest". Cannot be combined with `after_seq`. The response then carries `before_seq` and `has_older` — whether events exist below the returned page. Activity reads an issue's history this way, newest first, with "Load older". |
+| `limit` | integer | Page size, 1–500 (default and cap 500). |
+
+The path's `{identifier}` also accepts the issue's id, as does `GET /api/v1/issues/{identifier}`, for issues known only by id.
 
 **Response:** `200 OK`
 

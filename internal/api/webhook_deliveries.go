@@ -69,6 +69,11 @@ type webhookDeliveryView struct {
 	// is the honest answer rather than an empty string that reads like an id.
 	WorkID *string `json:"work_id"`
 
+	// The endpoint's agent and the state of the work this delivery became
+	// (#3012) — null when the agent is gone or nothing was dispatched.
+	Agent     *ledgerAgentRef `json:"agent"`
+	WorkState *string         `json:"work_state"`
+
 	ReceivedAt     string `json:"received_at"`
 	DedupExpiresAt string `json:"dedup_expires_at"`
 
@@ -160,6 +165,16 @@ func (h *WebhookDeliveriesHandler) List(w http.ResponseWriter, r *http.Request) 
 		query += ` AND event_type=?`
 		args = append(args, eventType)
 	}
+	// since= keeps to deliveries received in a window; pages are oldest first.
+	since, ok := ledgerSince(r.URL.Query().Get("since"))
+	if !ok {
+		replyError(w, http.StatusBadRequest, "since must be an RFC 3339 time, e.g. 2026-10-08T00:00:00Z")
+		return
+	}
+	if since != "" {
+		query += ` AND received_at>=?`
+		args = append(args, since)
+	}
 	query += ` ORDER BY id LIMIT 101`
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
@@ -185,6 +200,10 @@ func (h *WebhookDeliveriesHandler) List(w http.ResponseWriter, r *http.Request) 
 	if len(items) > 100 {
 		items = items[:100]
 		next = &items[99].ID
+	}
+	if err := attachDeliveryContext(r.Context(), h.db, WorkspaceIDFromContext(r.Context()), items); err != nil {
+		replyInternalError(w, h.logger, "name webhook deliveries", err)
+		return
 	}
 	writeJSON(w, http.StatusOK, webhookDeliveryPage{Items: items, NextCursor: next})
 }
@@ -228,7 +247,12 @@ func (h *WebhookDeliveriesHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, "Webhook delivery not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	one := []webhookDeliveryView{item}
+	if err := attachDeliveryContext(r.Context(), h.db, WorkspaceIDFromContext(r.Context()), one); err != nil {
+		replyInternalError(w, h.logger, "name webhook delivery", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, one[0])
 }
 
 // readDelivery fetches one delivery fenced to the workspace. A delivery in

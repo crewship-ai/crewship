@@ -254,6 +254,7 @@ func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		CompletenessChecked:     res.CompletenessChecked,
 		CompletenessSkipReason:  res.CompletenessSkipReason,
 		TableRowCountMismatches: res.TableRowCountMismatches,
+		ScopeShortfalls:         res.ScopeShortfalls,
 	})
 }
 
@@ -273,6 +274,9 @@ type backupVerifyResponse struct {
 	CompletenessChecked     bool                           `json:"completeness_checked"`
 	CompletenessSkipReason  string                         `json:"completeness_skip_reason"`
 	TableRowCountMismatches []backup.TableRowCountMismatch `json:"table_row_count_mismatches"`
+	// Workspace rows the source held at create time that the bundle does not
+	// carry (manifest scope_reconciliation, #2009).
+	ScopeShortfalls []backup.ScopeShortfall `json:"scope_shortfalls"`
 }
 
 // Unlock handles DELETE /api/v1/admin/backups/status. Force-releases

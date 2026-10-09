@@ -40,18 +40,20 @@ export interface LensMeta {
 }
 
 /**
- * The four lenses, in reading order.
+ * The four lenses, in reading order — the rail's "Group by" menu (#2979).
  *
- * Workflows first because a causal run is the unit this page is about; the
- * other three are ways of slicing the same runs, and each answers a question a
- * person actually arrives with — "what happened to ENG-7", "what did my agents
- * do", "how is that routine doing".
+ * Time first because a run is the unit this page is about; the other three are
+ * ways of slicing the same runs, and each answers a question a person actually
+ * arrives with — "what happened to ENG-7", "what did my agents do", "how is
+ * that routine doing". The labels finish the sentence "Group by …".
+ *
+ * The key stays `workflows` because it is the `?lens=` value links carry.
  */
 export const ACTIVITY_LENSES: readonly LensMeta[] = [
-  { key: "workflows", label: "Workflows", hint: "One causal run: the rule or person that started it, and everything it caused" },
-  { key: "issues", label: "Issues", hint: "Issues something touched in this window — not the whole backlog" },
-  { key: "agents", label: "Agents", hint: "Agents that took work in this window, and how much" },
-  { key: "routines", label: "Routines", hint: "Routines that RAN in this window — not the catalogue of every routine" },
+  { key: "workflows", label: "Time", hint: "Every run of the window — live ones first, then today, then earlier" },
+  { key: "issues", label: "Issue", hint: "Issues something touched in this window — not the whole backlog" },
+  { key: "agents", label: "Agent", hint: "Agents that took work in this window, and how much" },
+  { key: "routines", label: "Routine", hint: "Routines that RAN in this window — not the catalogue of every routine" },
 ] as const
 
 // ---------------------------------------------------------------------------
@@ -74,6 +76,8 @@ export const ACTIVITY_LENSES: readonly LensMeta[] = [
  * by retention.
  */
 export function workflowName(c: ChainSummary, routineName?: string): string {
+  // Agent work outside routines is named by what it was asked to do (#2989).
+  if (c.kind === "assignment" && c.task?.trim()) return c.task.trim()
   const named = routineName?.trim()
   if (named) return named
   const slug = c.routine_slug?.trim()
@@ -81,6 +85,37 @@ export function workflowName(c: ChainSummary, routineName?: string): string {
   const cause = c.started_by?.trim()
   if (cause) return cause
   return "Workflow"
+}
+
+/**
+ * What set the run off, in the rail's short words — the row's second line
+ * (#2979). The routine's name is the row's title, so the cause no longer
+ * shares a line with it as "schedule → Refresh crew telemetry".
+ */
+export function startedByWord(c: ChainSummary): string {
+  const who = c.started_by?.trim() ?? ""
+  switch (c.started_by_kind) {
+    case "schedule":
+      return "schedule"
+    case "webhook":
+      return who ? `webhook · ${who}` : "webhook"
+    case "user":
+      return "by hand"
+    case "issue":
+      return `from ${c.started_by_key?.trim() || who || "an issue"}`
+    case "automation":
+      return who ? `rule · ${who}` : "rule"
+    case "routine":
+    case "run":
+      return who ? `called by ${who}` : "called by a routine"
+    // Agent work outside routines (#2989).
+    case "lead_planning":
+      return `lead planning · ${c.started_by_key?.trim() || who || "an issue"}`
+    case "agent":
+      return who ? `from chat · ${who}` : "from chat"
+    default:
+      return ""
+  }
 }
 
 /** How many trailing characters of the origin make the handle. */
@@ -118,12 +153,12 @@ export function workflowHandle(origin: string): string {
 // What state a workflow is in.
 // ---------------------------------------------------------------------------
 
-export type ChainStatus = "waiting" | "failed" | "running" | "done"
+export type ChainStatus = "waiting" | "failed" | "running" | "stopped" | "done"
 
 /**
  * The one word for a chain whose runs may be in several states at once.
  *
- * Precedence is waiting → failed → running → done, and the order is a claim
+ * Precedence is waiting → failed → running → stopped → done, and the order is a claim
  * about what the reader should do, not about what is most recent:
  *
  *   waiting  is the only state a PERSON can resolve. A chain holding an
@@ -133,6 +168,10 @@ export type ChainStatus = "waiting" | "failed" | "running" | "done"
  *            broke and another is still going reads "running" under any other
  *            order, and "running" is reassuring about something already wrong.
  *   running  resolves itself.
+ *   stopped  a run was cancelled or interrupted and nothing is live (#2981).
+ *            Below running and waiting, so a stopped branch never hides work
+ *            that is still going; above done, because "somebody stopped it"
+ *            or "the process died" is not "it finished".
  *   done     is everything else.
  *
  * `failed` (the boolean the index has always sent) is honoured on its own so
@@ -143,6 +182,7 @@ export function chainStatus(c: ChainSummary): ChainStatus {
   if ((c.waiting_runs ?? 0) > 0) return "waiting"
   if (c.failed || (c.failed_runs ?? 0) > 0) return "failed"
   if ((c.running_runs ?? 0) > 0) return "running"
+  if ((c.cancelled_runs ?? 0) > 0 || (c.interrupted_runs ?? 0) > 0) return "stopped"
   return "done"
 }
 
@@ -418,8 +458,8 @@ export function routineLens(chains: ChainSummary[]): RoutineLensRow[] {
  * `active` rather than `running` because that is the scope vocabulary the rest
  * of the page speaks; the segment renders it as "Running".
  */
-export function chainScopeCounts(chains: ChainSummary[]): Record<"active" | "waiting" | "failed" | "done", number> {
-  const c = { active: 0, waiting: 0, failed: 0, done: 0 }
+export function chainScopeCounts(chains: ChainSummary[]): Record<"active" | "waiting" | "failed" | "done" | "stopped", number> {
+  const c = { active: 0, waiting: 0, failed: 0, done: 0, stopped: 0 }
   for (const ch of chains) {
     const s = chainStatus(ch)
     c[s === "running" ? "active" : s] += 1
@@ -484,73 +524,63 @@ export interface NarrowedChains {
  * stated by the caller — see ActivitySidebar's window notice — rather than
  * implied by a confident-looking count.
  */
+/**
+ * The Filter popover's facets, applied to chains (#3000). They used to narrow
+ * only the journal beside the rail, so with a crew picked the rail still
+ * listed every run.
+ *
+ * A chain's crews are its agents' crews and its routine's crew; its agents are
+ * the refs the index carries. Both lists are capped at five per row, so a
+ * chain whose only match is a sixth agent is not found — the cap's documented
+ * edge, stated rather than hidden.
+ */
+export interface ChainFilters {
+  crewIDs: string[]
+  agentIDs: string[]
+  focus: { kind: string; id: string } | null
+  crewOfAgent: (agentID: string) => string | undefined
+  crewOfRoutine: (slug: string) => string | undefined
+}
+
+function matchesFilters(c: ChainSummary, f: ChainFilters): boolean {
+  const agentIDs = (c.agents ?? []).map((a) => a.id)
+  if (f.agentIDs.length > 0 && !agentIDs.some((id) => f.agentIDs.includes(id))) return false
+  const crewIDs = [...f.crewIDs]
+  if (f.focus?.kind === "crew") crewIDs.push(f.focus.id)
+  if (crewIDs.length > 0) {
+    const crews = new Set<string>()
+    for (const id of agentIDs) {
+      const crew = f.crewOfAgent(id)
+      if (crew) crews.add(crew)
+    }
+    const routineCrew = c.routine_slug ? f.crewOfRoutine(c.routine_slug) : undefined
+    if (routineCrew) crews.add(routineCrew)
+    if (!crewIDs.some((id) => crews.has(id))) return false
+  }
+  if (f.focus?.kind === "issue" && !(c.issues ?? []).some((i) => i.id === f.focus!.id)) return false
+  if (f.focus?.kind === "routine" && c.routine_slug !== f.focus.id) return false
+  return true
+}
+
 export function narrowChains(
   chains: ChainSummary[],
   query: string,
   scope: string,
   routineNameOf?: (slug: string) => string | undefined,
+  filters?: ChainFilters,
 ): NarrowedChains {
-  const searched = chains.filter((c) =>
-    matchesQuery(c, query, routineNameOf?.(c.routine_slug ?? "")),
+  const searched = chains.filter(
+    (c) => matchesQuery(c, query, routineNameOf?.(c.routine_slug ?? "")) && (!filters || matchesFilters(c, filters)),
   )
   return { searched, visible: chainsInScope(searched, scope) }
 }
 
 // ---------------------------------------------------------------------------
-// What earns the word "workflow".
+// What a row says.
 // ---------------------------------------------------------------------------
 
 /** How many nouns a workflow's sentence names before it starts eliding. */
 const MAX_REACH_NOUNS = 3
-
-/**
- * Whether a chain COMPOSED anything, or is just one run wearing the word.
- *
- * On the live instance twelve of twenty-one rows in the Workflows lens were
- * `crewship routine run X` — one run, depth 0, no issue touched, no agent
- * dispatched. Nothing was bound to anything. Listing those as workflows makes
- * the word mean "a run", and once it means that the Workflows lens is the
- * Routines lens with worse naming: open "Classify support ticket" in either and
- * you see the same eight runs.
- *
- * A workflow is a process that BINDS two or more Crewship things together. So
- * the test is whether anything was bound:
- *
- *   runs > 1              a routine called another
- *   max_chain_depth > 0   something fired something
- *   agent_count > 0       a routine put an agent to work
- *   issue_count > 0       it reached into the tracker
- *
- * Plus two exceptions that are not about composition at all.
- *
- * The first is a chain that FAILED, is still running, or is waiting on a person.
- * A single run that broke is the reason somebody opened this page, and filing it
- * under its routine would hide exactly what the rail exists to surface.
- *
- * The second is a chain NO OTHER LENS CAN LIST. "It belongs in Routines
- * instead" is the argument this whole predicate rests on, and it holds only
- * while there is a Routines row to hold it: routineLens keys on
- * `routine_slug` and skips a chain without one, which is the honest thing for a
- * catalogue of routines to do. A chain whose root run was swept by retention
- * has no slug — so before this clause it was in the Workflows lens (dropped for
- * composing nothing) and in the Routines lens (dropped for having no routine),
- * which is to say nowhere. An index may cap, elide or defer a row; it may not
- * silently have no place for one.
- *
- * The rule, then, is "compose, or need me, or belong to no catalogue".
- *
- * Nothing is deleted by this — a bare run of a KNOWN routine is still a run, and
- * the Routines lens is where runs live. This only decides which list it is in.
- */
-export function isComposed(c: ChainSummary): boolean {
-  if (c.runs > 1) return true
-  if (c.max_chain_depth > 0) return true
-  if ((c.agent_count ?? 0) > 0) return true
-  if ((c.issue_count ?? 0) > 0) return true
-  if (chainStatus(c) !== "done") return true
-  // No slug means routineLens has no row for it. See above.
-  return !c.routine_slug?.trim()
-}
 
 /**
  * The one line that says what a workflow IS, as opposed to what routine it began

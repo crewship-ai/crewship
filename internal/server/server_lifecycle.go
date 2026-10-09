@@ -32,6 +32,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/jitter"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -366,6 +367,10 @@ func (s *Server) Start(ctx context.Context) error {
 		// to offline. The transition itself emits agent.status_change so
 		// the journal records the timeout rather than silent disappearance.
 		go func() {
+			// Spread this loop's phase from the other sweepers started at boot (#1891).
+			if !jitter.Startup(ctx, 60*time.Second) {
+				return
+			}
 			t := time.NewTicker(60 * time.Second)
 			defer t.Stop()
 			for {
