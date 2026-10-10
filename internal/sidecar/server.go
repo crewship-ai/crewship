@@ -145,6 +145,10 @@ type ServerConfig struct {
 	MCPServers        []MCPServerInput
 	ConfigFingerprint string
 	Logger            *slog.Logger
+	// ProxyTransport replaces only the upstream network transport for owned
+	// acceptance fixtures. Production leaves nil and retains the guarded
+	// default transport; this constructor seam is never accepted from JSON.
+	ProxyTransport http.RoundTripper `json:"-"`
 }
 
 // RouteAuth validates self-contained per-agent LLM route tokens. The key is a
@@ -427,6 +431,7 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 
 	proxy := NewProxy(ProxyConfig{
+		Transport: cfg.ProxyTransport,
 		CredStore: credStore,
 		Allowlist: allowlist,
 		// The SAME scrubber the server holds, not a second one. Nothing in
