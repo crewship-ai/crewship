@@ -12,7 +12,8 @@ import {
 } from "@/components/admin/member-capabilities"
 import { ALL_CAPABILITIES, CAPABILITY_LABELS } from "@/lib/capabilities"
 
-import { ROLE_LABEL, capabilityState, type Member } from "./members-model"
+import { capabilityState, type Member } from "./members-model"
+import { RolePill } from "./member-detail"
 
 /**
  * People × capabilities, for the one question a per-person panel answers
@@ -88,7 +89,7 @@ export function MembersMatrix({
                         <UserAvatar name={m.user.full_name} email={m.user.email} src={m.user.avatar_url} className="h-6 w-6" textClassName="text-[9px]" />
                         <span className="min-w-0">
                           <span className="block truncate text-xs">{label}</span>
-                          <span className="block text-micro text-muted-foreground">{ROLE_LABEL[m.role] ?? m.role}</span>
+                          <RolePill role={m.role} className="mt-0.5 h-[18px] px-1.5" />
                         </span>
                       </button>
                     </th>

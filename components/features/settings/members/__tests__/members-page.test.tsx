@@ -27,14 +27,14 @@ vi.mock("sonner", () => ({ toast }))
 vi.mock("@/components/features/members/invite-member-dialog", () => ({
   InviteMemberDialog: () => <div data-testid="invite-dialog" />,
 }))
-const h = vi.hoisted(() => ({ role: "ADMIN" as string | null, userId: "u-caller" }))
+const h = vi.hoisted(() => ({ role: "ADMIN" as string | null, userId: "u-caller", mobile: false }))
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws1", role: h.role, loading: false }),
 }))
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({ session: { user: { id: h.userId, name: "Caller", email: "c@x.io" } } }),
 }))
-vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
+vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => h.mobile }))
 // Reads the real location, so a test sets the URL with history.replaceState
 // the way a browser arrival would.
 vi.mock("next/navigation", () => ({
@@ -98,6 +98,7 @@ beforeEach(() => {
   })
   h.role = "ADMIN"
   h.userId = "u-caller"
+  h.mobile = false
   window.history.replaceState(null, "", "/settings/members")
 })
 afterEach(() => cleanup())
@@ -108,19 +109,30 @@ function renderPage(url = "/settings/members") {
   return render(<QueryClientProvider client={qc}><MembersPage /></QueryClientProvider>)
 }
 
-const people = () => screen.getByRole("list", { name: "People" })
-const rowFor = (name: string) => screen.getByRole("button", { name: `Show ${name}` })
+/** The people in the side panel, in order — each row's title is
+ *  "<name> · <email>". */
+const personRows = () => Array.from(document.querySelectorAll<HTMLElement>("nav button[title]"))
+const names = () => personRows().map((b) => b.getAttribute("title")!.split(" · ")[0])
+const rowFor = (name: string) => personRows().find((b) => b.getAttribute("title")!.startsWith(`${name} · `))!
 const detail = () => screen.queryByRole("region", { name: /^Member details:/ })
-/** Wait for the capability read to land (Mel's extra chip appears). */
+const roster$ = () => screen.findByRole("region", { name: /^Member details:/ })
+/** Wait for the capability read to land (Mel's row says "1 extra"). */
 async function capsLoaded() {
-  await waitFor(() => expect(within(rowFor("Mel Member")).getByText("Create issues")).toBeInTheDocument())
+  await waitFor(() => expect(rowFor("Mel Member")).toHaveTextContent("1 extra"))
 }
+function openCapabilityFilter() {
+  fireEvent.click(document.querySelector<HTMLElement>('[aria-haspopup="dialog"]')!)
+}
+const capOption = (label: string) => screen.getAllByRole("button").find((b) => b.getAttribute("aria-pressed") !== null && b.textContent?.startsWith(label))!
 
-describe("Members page — the sub-bar", () => {
-  it("counts the people and offers Bulk edit and Add member to an ADMIN", async () => {
+describe("Members page — the sub-bar and summary", () => {
+  it("states the numbers first and offers Bulk edit and Add member to an ADMIN", async () => {
     renderPage()
-    await screen.findByRole("list", { name: "People" })
-    expect(screen.getByText("5 people · who can do what in this workspace")).toBeInTheDocument()
+    await roster$()
+    const summary = document.querySelector("[data-slot=members-summary]")!
+    expect(summary).toHaveTextContent("5 people")
+    expect(summary).toHaveTextContent("2 owners and admins")
+    await waitFor(() => expect(summary).toHaveTextContent("1 can reveal secrets"))
     expect(screen.getByTestId("invite-dialog")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Bulk edit capabilities" })).toBeInTheDocument()
   })
@@ -128,125 +140,109 @@ describe("Members page — the sub-bar", () => {
   it("offers neither to a MANAGER — both are ADMIN+ routes", async () => {
     h.role = "MANAGER"
     renderPage()
-    await screen.findByRole("list", { name: "People" })
+    await roster$()
     expect(screen.queryByTestId("invite-dialog")).toBeNull()
     expect(screen.queryByRole("button", { name: "Bulk edit capabilities" })).toBeNull()
     expect(screen.getByText(/only admins can invite or remove members/i)).toBeInTheDocument()
   })
-
-  it("keeps the role ladder behind a help affordance", async () => {
-    renderPage()
-    await screen.findByRole("list", { name: "People" })
-    expect(screen.queryByText(/All permissions except billing transfer/i)).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: /what do the roles mean/i }))
-    expect(await screen.findByText(/All permissions except billing transfer/i)).toBeInTheDocument()
-  })
 })
 
-describe("Members page — the People list", () => {
-  it("lists every person once, by email when they have no name", async () => {
+describe("Members page — the side panel", () => {
+  it("lists every person once, grouped by role, by email when they have no name", async () => {
     renderPage()
-    await screen.findByRole("list", { name: "People" })
-    for (const name of ["Olive Owner", "Ada Admin", "Mo Manager", "Mel Member", "vic@example.com"]) {
-      expect(within(people()).getAllByText(name)).toHaveLength(1)
+    await roster$()
+    expect(names()).toEqual(["Olive Owner", "Ada Admin", "Mo Manager", "Mel Member", "vic@example.com"])
+    for (const g of ["Owners", "Admins", "Managers", "Members", "Viewers"]) expect(screen.getByRole("button", { name: new RegExp(`^${g}`) })).toBeInTheDocument()
+  })
+
+  it("says under each name what they hold beyond the role", async () => {
+    renderPage()
+    await capsLoaded()
+    expect(rowFor("Olive Owner")).toHaveTextContent("Everything")
+    expect(rowFor("Ada Admin")).toHaveTextContent("1 extra · 1 high-stakes")
+    expect(rowFor("Mel Member")).toHaveTextContent("1 extra")
+    expect(rowFor("vic@example.com")).toHaveTextContent("Role defaults")
+  })
+
+  it("never reads capabilities below ADMIN, or with an unknown role (the #866.3 regression)", async () => {
+    for (const role of ["MEMBER", null]) {
+      cleanup()
+      api.mockClear()
+      h.role = role
+      renderPage()
+      await roster$()
+      expect(api.mock.calls.every(([url]) => !String(url).includes("/capabilities"))).toBe(true)
+      expect(writes()).toHaveLength(0)
     }
   })
 
-  it("shows only capabilities granted beyond the role, at most two and a +N", async () => {
-    renderPage()
-    await capsLoaded()
-    // Mel: issue.create, and not the chat every role has.
-    const mel = rowFor("Mel Member")
-    expect(within(mel).queryByText("Chat")).toBeNull()
-    expect(mel.querySelectorAll("[data-capability]")).toHaveLength(1)
-    // Olive holds six beyond chat: two chips and "+4".
-    const olive = rowFor("Olive Owner")
-    expect(olive.querySelectorAll("[data-capability]")).toHaveLength(2)
-    expect(within(olive).getByText("+4")).toBeInTheDocument()
-    // Vic holds only chat: no chips at all.
-    expect(rowFor("vic@example.com").querySelectorAll("[data-capability]")).toHaveLength(0)
-  })
-
-  it("never shows capability chips or reads capabilities below ADMIN", async () => {
-    h.role = "MEMBER"
-    renderPage()
-    await screen.findByRole("list", { name: "People" })
-    expect(document.querySelectorAll("[data-slot=member-extra-caps]")).toHaveLength(0)
-    // The roster is the only request: the capability read is admin-only.
-    expect(api.mock.calls.every(([url]) => !String(url).includes("/capabilities"))).toBe(true)
-    expect(writes()).toHaveLength(0)
-  })
-
-  it("asks for no capabilities when the role is unknown (the #866.3 regression)", async () => {
-    h.role = null
-    renderPage()
-    await screen.findByRole("list", { name: "People" })
-    expect(api.mock.calls.every(([url]) => !String(url).includes("/capabilities"))).toBe(true)
-  })
-})
-
-describe("Members page — filters", () => {
-  it("filters by role from the side panel, with counts", async () => {
+  it("filters by role, with counts, kept in the URL", async () => {
     renderPage()
     await capsLoaded()
     const viewer = screen.getByRole("button", { name: /^Viewer\s*1$/ })
     fireEvent.click(viewer)
     expect(viewer).toHaveAttribute("aria-pressed", "true")
-    expect(within(people()).getAllByRole("button")).toHaveLength(1)
+    expect(names()).toEqual(["vic@example.com"])
     expect(window.location.search).toContain("role=VIEWER")
     expect(screen.getByRole("button", { name: /^All people\s*5$/ })).toBeInTheDocument()
   })
 
-  it("filters by capability, counting its holders, with high-stakes ones in the destructive tone", async () => {
+  it("filters by capability from the Filter popover, high-stakes ones in the destructive tone", async () => {
     renderPage()
     await capsLoaded()
-    const reveal = screen.getByRole("button", { name: /^Reveal secrets\s*1$/ })
+    openCapabilityFilter()
+    const reveal = capOption("Reveal secrets")
+    expect(reveal).toHaveTextContent("1")
     expect(within(reveal).getByText("Reveal secrets")).toHaveClass("text-destructive")
     fireEvent.click(reveal)
-    expect(within(people()).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Show Ada Admin"])
+    expect(names()).toEqual(["Ada Admin"])
   })
 
-  it("combines role, capability and search", async () => {
+  it("combines role, capability and search, and clears them all", async () => {
     renderPage()
     await capsLoaded()
-    fireEvent.click(screen.getByRole("button", { name: /^Create issues\s*2$/ }))
-    expect(within(people()).getAllByRole("button")).toHaveLength(2) // Olive and Mel
+    openCapabilityFilter()
+    fireEvent.click(capOption("Create issues"))
+    expect(names()).toEqual(["Olive Owner", "Mel Member"])
     fireEvent.change(screen.getByRole("textbox", { name: "Search members" }), { target: { value: "mel" } })
-    expect(within(people()).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Show Mel Member"])
+    expect(names()).toEqual(["Mel Member"])
     fireEvent.click(screen.getByRole("button", { name: /^Owner\s*0$/ }))
-    expect(screen.getByText("No one matches these filters.")).toBeInTheDocument()
-    // Every filter is a removable chip; Clear all resets them.
+    expect(names()).toEqual([])
+    expect(screen.getAllByText("Nobody matches these filters.").length).toBeGreaterThan(0)
+    // Close the filter popover (it has a Clear all of its own), then clear
+    // from the chips row.
+    fireEvent.keyDown(document, { key: "Escape" })
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Clear all" })).toHaveLength(1))
     fireEvent.click(screen.getByRole("button", { name: "Clear all" }))
-    expect(within(people()).getAllByRole("button")).toHaveLength(5)
+    expect(names()).toHaveLength(5)
   })
 
   it("searches by email too", async () => {
     renderPage()
-    await screen.findByRole("list", { name: "People" })
+    await roster$()
     fireEvent.change(screen.getByRole("textbox", { name: "Search members" }), { target: { value: "example.com" } })
-    expect(within(people()).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Show vic@example.com"])
+    expect(names()).toEqual(["vic@example.com"])
   })
 
-  it("offers no capability filter below ADMIN", async () => {
+  it("offers no capability filter or matrix below ADMIN", async () => {
     h.role = "MANAGER"
     renderPage()
-    await screen.findByRole("list", { name: "People" })
-    expect(screen.queryByText("Has capability")).toBeNull()
+    await roster$()
+    expect(document.querySelector('[aria-haspopup="dialog"]')).toBeNull()
     expect(screen.queryByRole("group", { name: "View" })).toBeNull()
   })
 })
 
 describe("Members page — one person", () => {
-  it("opens nobody until a row is picked, then that person and only them", async () => {
+  it("always has someone open — the first person, then whoever is picked", async () => {
     renderPage()
-    await screen.findByRole("list", { name: "People" })
-    expect(detail()).toBeNull()
+    expect(await roster$()).toHaveAccessibleName("Member details: Olive Owner")
     fireEvent.click(rowFor("Mel Member"))
     expect(detail()).toHaveAccessibleName("Member details: Mel Member")
-    expect(rowFor("Mel Member")).toHaveAttribute("aria-pressed", "true")
-    expect(rowFor("Mo Manager")).toHaveAttribute("aria-pressed", "false")
+    expect(rowFor("Mel Member")).toHaveAttribute("aria-current", "true")
     expect(window.location.search).toBe("?member=u-mel")
-    // What the person's own role grants, stated in their panel.
+    // The person's profile and what their role means, side by side.
+    expect(within(detail()!).getByRole("region", { name: "Mel Member profile" })).toBeInTheDocument()
     expect(within(detail()!).getByText(/Own resource access only/i)).toBeInTheDocument()
   })
 
@@ -255,27 +251,16 @@ describe("Members page — one person", () => {
     expect(await screen.findByRole("region", { name: "Member details: Mo Manager" })).toBeInTheDocument()
   })
 
-  it("opens nobody when the link names someone who is not a member", async () => {
-    // A stale link, or a person removed since — the roster still renders.
+  it("falls back to the first person when the link names someone who is not a member", async () => {
     renderPage("/settings/members?member=u-ghost")
-    await screen.findByRole("list", { name: "People" })
-    expect(detail()).toBeNull()
-  })
-
-  it("goes back to the list from the panel", async () => {
-    renderPage("/settings/members?member=u-mo")
-    await screen.findByRole("region", { name: "Member details: Mo Manager" })
-    fireEvent.click(screen.getByRole("button", { name: "All people" }))
-    expect(detail()).toBeNull()
-    expect(window.location.search).toBe("")
+    expect(await roster$()).toHaveAccessibleName("Member details: Olive Owner")
   })
 })
 
 describe("Members page — role", () => {
-  it("gives an ADMIN a role control for those below them, and text for the OWNER", async () => {
+  it("gives an ADMIN a role choice for those below them, and plain text for the OWNER", async () => {
     renderPage("/settings/members?member=u-mel")
     const group = await screen.findByRole("radiogroup", { name: "Role for Mel Member" })
-    // ADMIN may grant only below Admin; Admin is shown but cannot be picked.
     expect(within(group).getByRole("radio", { name: "Member" })).toHaveAttribute("aria-checked", "true")
     expect(within(group).getByRole("radio", { name: "Manager" })).toBeEnabled()
     expect(within(group).getByRole("radio", { name: "Admin" })).toBeDisabled()
@@ -285,7 +270,7 @@ describe("Members page — role", () => {
     expect(within(detail()!).getByText(/immutable/)).toBeInTheDocument()
   })
 
-  it("gives a MANAGER a role control only over people they outrank", async () => {
+  it("gives a MANAGER a role choice only over people they outrank", async () => {
     h.role = "MANAGER"
     renderPage("/settings/members?member=u-mel")
     expect(await screen.findByRole("radiogroup", { name: "Role for Mel Member" })).toBeInTheDocument()
@@ -296,18 +281,18 @@ describe("Members page — role", () => {
   it("gives a MEMBER no control at all — read-only, with no switches either", async () => {
     h.role = "MEMBER"
     renderPage("/settings/members?member=u-vic")
-    await screen.findByRole("region", { name: /^Member details:/ })
+    await roster$()
     expect(screen.queryByRole("radiogroup")).toBeNull()
     expect(screen.queryAllByRole("switch")).toHaveLength(0)
     expect(screen.queryByRole("button", { name: /remove member/i })).toBeNull()
-    expect(screen.getByText(/only managers and admins can make changes here/i)).toBeInTheDocument()
+    expect(screen.getByText(/read-only — managers and admins make changes/i)).toBeInTheDocument()
   })
 
   it("never offers a change on the caller's own row", async () => {
     h.role = "OWNER"
     h.userId = "u-olive"
     renderPage("/settings/members?member=u-olive")
-    await screen.findByRole("region", { name: /^Member details:/ })
+    await roster$()
     expect(screen.queryByRole("radiogroup")).toBeNull()
   })
 
@@ -347,7 +332,6 @@ describe("Members page — capabilities", () => {
     expect(within(panel).getByRole("heading", { name: /Credentials/ })).toHaveClass("text-destructive")
     expect(within(panel).getByRole("switch", { name: "Revoke issue.create from Mel Member" })).toHaveAttribute("aria-checked", "true")
     expect(within(panel).getByRole("switch", { name: "Grant memory.write to Mel Member" })).toHaveAttribute("aria-checked", "false")
-    // chat comes with the role: on, and locked.
     const chat = within(panel).getByRole("switch", { name: /Chat is always granted/ })
     expect(chat).toHaveAttribute("aria-checked", "true")
     expect(chat).toBeDisabled()
@@ -387,16 +371,16 @@ describe("Members page — capabilities", () => {
 
   it("keeps resource access with the person, for an ADMIN", async () => {
     renderPage("/settings/members?member=u-mel")
-    await screen.findByRole("region", { name: /^Member details:/ })
+    await roster$()
     expect(screen.getByRole("region", { name: "Resource access for Mel Member" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Edit resource access" })).toBeInTheDocument()
   })
 })
 
 describe("Members page — removal", () => {
-  it("removes after the confirmation with the same DELETE, then closes the panel", async () => {
+  it("removes after the confirmation with the same DELETE, then opens someone else", async () => {
     renderPage("/settings/members?member=u-mel")
-    await screen.findByRole("region", { name: /^Member details:/ })
+    await roster$()
     fireEvent.click(screen.getByRole("button", { name: /remove member/i }))
     expect(writes()).toHaveLength(0)
     roster = ROSTER.filter((m) => m.id !== "m-mel")
@@ -406,18 +390,32 @@ describe("Members page — removal", () => {
     expect(init.method).toBe("DELETE")
     expect(url).toBe("/api/v1/workspaces/ws1/members/m-mel?workspace_id=ws1")
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Member removed"))
-    await waitFor(() => expect(detail()).toBeNull())
+    await waitFor(() => expect(detail()).not.toHaveAccessibleName("Member details: Mel Member"))
   })
 
   it("offers no removal for the OWNER, for yourself, or below ADMIN", async () => {
     renderPage("/settings/members?member=u-olive")
-    await screen.findByRole("region", { name: /^Member details:/ })
+    await roster$()
     expect(screen.queryByRole("button", { name: /remove member/i })).toBeNull()
     cleanup()
     h.role = "MANAGER"
     renderPage("/settings/members?member=u-mel")
-    await screen.findByRole("region", { name: /^Member details:/ })
+    await roster$()
     expect(screen.queryByRole("button", { name: /remove member/i })).toBeNull()
+  })
+})
+
+describe("Members page — on a phone", () => {
+  it("moves the actions into the page and picks the person from a list", async () => {
+    h.mobile = true
+    renderPage()
+    await roster$()
+    // The sub-bar has room for the Filters button only; the actions sit in
+    // the page instead of overflowing it.
+    expect(document.querySelector("[data-slot=members-actions]")).toContainElement(screen.getByTestId("invite-dialog"))
+    const pick = screen.getByRole("combobox", { name: "Person" })
+    fireEvent.change(pick, { target: { value: "u-mo" } })
+    expect(detail()).toHaveAccessibleName("Member details: Mo Manager")
   })
 })
 
@@ -452,7 +450,7 @@ describe("Members page — matrix", () => {
   it("opens People instead for a caller who cannot read capabilities", async () => {
     h.role = "MANAGER"
     renderPage("/settings/members?view=matrix")
-    await screen.findByRole("list", { name: "People" })
+    await screen.findByRole("region", { name: /^Member details:/ })
     expect(screen.queryByRole("region", { name: "Capability matrix" })).toBeNull()
   })
 
