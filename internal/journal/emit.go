@@ -676,7 +676,7 @@ func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 			}
 
 			if e.replay {
-				fingerprint, err := replayFingerprint(e, payload, refs, expiresStr)
+				fingerprint, err := w.replayFingerprint(e, payload, refs, expiresStr)
 				if err != nil {
 					return err
 				}

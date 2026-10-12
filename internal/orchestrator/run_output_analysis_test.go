@@ -18,6 +18,9 @@ func retainedAnalysisFixture(t *testing.T, adapter, stdout, stderr string, code 
 	t.Helper()
 	requireProtectedHostTestUID(t)
 	root := t.TempDir()
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
 	dir := filepath.Join(root, "retained-analysis")
 	if err := os.Mkdir(dir, 0700); err != nil {
 		t.Fatal(err)

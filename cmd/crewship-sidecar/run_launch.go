@@ -45,11 +45,11 @@ func runLaunchCommand(ctx context.Context, mode string, args []string, input io.
 	// Capture the admitted client's environment; an existing tmux server's
 	// environment belongs to a different execution and must not be inherited.
 	spec.Command.Env = os.Environ()
-	if spec.Command.Dir == "" {
-		spec.Command.Dir, err = os.Getwd()
-		if err != nil {
-			return 125
-		}
+	// Admission supplies the workload directory explicitly. An ambient cwd
+	// would silently choose a different filesystem root for a detached client.
+	if !filepath.IsAbs(spec.Command.Dir) {
+		fmt.Fprintln(diagnostics, "absolute workload directory required")
+		return 125
 	}
 	executable, err := os.Executable()
 	if err != nil {

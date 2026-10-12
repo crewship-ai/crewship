@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/provider"
 	"io"
 	"path"
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // Per-run container paths — E0 §4 (docs/prd/WEBHOOKS-AGENT-PARALLELISM-MEMORY-1-0-2026-09-10.md).
@@ -293,20 +294,21 @@ type RunLocation struct {
 }
 
 func (o *Orchestrator) RunIsAliveAt(ctx context.Context, location RunLocation) (bool, error) {
-	if run, host, err := o.hostRunAt(ctx, location); err != nil {
-		return false, err
-	} else if host {
-		return o.probeHostRun(ctx, run, false)
-	}
-
 	containerID, agentSlug, runID := location.ContainerID, location.AgentSlug, location.RunID
 	if containerID == "" || agentSlug == "" || !ValidRunID(runID) {
 		return false, fmt.Errorf("incomplete or invalid runtime location")
 	}
+	run, host, stateErr := o.hostRunAt(ctx, location)
+	if host {
+		if stateErr != nil {
+			return false, stateErr
+		}
+		return o.probeHostRun(ctx, run, false)
+	}
 	session := TmuxSessionName(agentSlug, runID)
 	// PRESENT / ABSENT are distinct tokens, and anything else — including an
 	// empty read — is not an answer.
-	directProbe, err := o.managedRunProbe(ctx, location, false)
+	directProbe, err := o.managedRunProbeFromState(location, run, stateErr, false)
 	if err != nil {
 		absent, inspectErr := o.containerRuntimeAbsent(ctx, containerID)
 		if inspectErr == nil && absent {
@@ -355,18 +357,19 @@ func (o *Orchestrator) StopRun(ctx context.Context, runID string) (bool, error) 
 }
 
 func (o *Orchestrator) StopRunAt(ctx context.Context, location RunLocation) (bool, error) {
-	if run, host, err := o.hostRunAt(ctx, location); err != nil {
-		return false, err
-	} else if host {
-		return o.probeHostRun(ctx, run, true)
-	}
-
 	containerID, agentSlug, runID := location.ContainerID, location.AgentSlug, location.RunID
 	if containerID == "" || agentSlug == "" || !ValidRunID(runID) {
 		return false, fmt.Errorf("incomplete or invalid runtime location")
 	}
+	run, host, stateErr := o.hostRunAt(ctx, location)
+	if host {
+		if stateErr != nil {
+			return false, stateErr
+		}
+		return o.probeHostRun(ctx, run, true)
+	}
 	session := TmuxSessionName(agentSlug, runID)
-	directProbe, err := o.managedRunProbe(ctx, location, true)
+	directProbe, err := o.managedRunProbeFromState(location, run, stateErr, true)
 	if err != nil {
 		absent, inspectErr := o.containerRuntimeAbsent(ctx, containerID)
 		if inspectErr == nil && absent {

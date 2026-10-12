@@ -11,6 +11,13 @@ import (
 // pilot selection is not evidence for an already admitted or recovered run.
 // Legacy locations incur no durable state reads or container inspection.
 func (o *Orchestrator) RetainManagedRunLocation(ctx context.Context, location RunLocation) (RunLocation, error) {
+	if !o.knownManagedRunLocation(location) {
+		return location, nil
+	}
+	return o.readManagedRunLocation(ctx, location, true)
+}
+
+func (o *Orchestrator) knownManagedRunLocation(location RunLocation) bool {
 	known := location.Managed
 	if value, ok := o.agentRuns.Load(location.RunID); ok {
 		owner := value.(*agentRunControl)
@@ -30,10 +37,27 @@ func (o *Orchestrator) RetainManagedRunLocation(ctx context.Context, location Ru
 	}
 	// Legacy callers do not read durable state or gain new refusal/inspect
 	// behavior. Recovery callers carry the host-persisted Managed marker.
-	if !known {
-		return location, nil
+	return known
+}
+
+// managedRunProbeFromState shares the lifecycle probe's already loaded state
+// with host-mode routing. A second read could change the launch mode between
+// classification and signalling, or erase the original durable-read refusal.
+func (o *Orchestrator) managedRunProbeFromState(location RunLocation, state RunState, stateErr error, stop bool) (string, error) {
+	denied := errors.New("managed launch: durable run identity unavailable; runtime absence unconfirmed")
+	if stateErr != nil {
+		return "", denied
 	}
-	return o.readManagedRunLocation(ctx, location, true)
+	if state.ManagedLaunch == nil {
+		if o.knownManagedRunLocation(location) {
+			return "", denied
+		}
+		return directRunProbe(location.RunID, stop), nil
+	}
+	if state.ID != location.RunID || state.ContainerID != location.ContainerID || state.AgentSlug != location.AgentSlug {
+		return "", denied
+	}
+	return managedDirectRunProbe(location.RunID, stop) + "echo UNKNOWN; exit; ", nil
 }
 
 // Only legacy lifecycle probes opt into a durable read. Creation gates retain

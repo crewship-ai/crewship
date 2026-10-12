@@ -70,6 +70,31 @@ func TestReplayEmitRejectsIdentityReuseWithChangedContent(t *testing.T) {
 	}
 }
 
+func TestReplayReceiptRequiresOriginalJournalKey(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	entry := replayEntryFixture()
+	first := NewWriter(db, quietLogger(), WriterOptions{ChainKey: DeriveChainKey("installation-one")})
+	if _, fresh, err := first.EmitReplaySync(t.Context(), entry); err != nil || !fresh {
+		t.Fatalf("first insertion: fresh=%v err=%v", fresh, err)
+	}
+	first.Close()
+	other := NewWriter(db, quietLogger(), WriterOptions{ChainKey: DeriveChainKey("installation-two")})
+	if _, _, err := other.EmitReplaySync(t.Context(), entry); !errors.Is(err, ErrReplayConflict) {
+		t.Fatalf("different journal key accepted receipt: %v", err)
+	}
+	other.Close()
+	restarted := NewWriter(db, quietLogger(), WriterOptions{ChainKey: DeriveChainKey("installation-one")})
+	defer restarted.Close()
+	if _, fresh, err := restarted.EmitReplaySync(t.Context(), entry); err != nil || fresh {
+		t.Fatalf("original key replay: fresh=%v err=%v", fresh, err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM journal_entries`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("receipt key change appended history: rows=%d err=%v", count, err)
+	}
+}
+
 func TestReplayEmitConcurrentDeliveryCreatesOneChainEntry(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()

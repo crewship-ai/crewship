@@ -2,6 +2,7 @@ package journal
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -54,7 +55,9 @@ func (w *Writer) EmitReplaySync(ctx context.Context, e Entry) (string, bool, err
 
 // replayFingerprint commits to exactly the immutable storage representation.
 // JSON strings preserve integer precision and make field boundaries explicit.
-func replayFingerprint(e Entry, payload, refs, expires string) (string, error) {
+// A purpose-separated MAC binds receipts to this installation's journal key
+// without exposing an unkeyed digest of potentially sensitive event content.
+func (w *Writer) replayFingerprint(e Entry, payload, refs, expires string) (string, error) {
 	data, err := json.Marshal([]string{e.ID, e.WorkspaceID, e.CrewID, e.AgentID, e.MissionID,
 		e.TS.UTC().Format("2006-01-02T15:04:05.000Z"), string(e.Type), string(e.Severity),
 		priorityOrNormal(e.Priority), string(e.ActorType), e.ActorID, e.Summary, payload, refs,
@@ -62,8 +65,10 @@ func replayFingerprint(e Entry, payload, refs, expires string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), nil
+	mac := hmac.New(sha256.New, w.chainKey)
+	_, _ = mac.Write([]byte("crewship/journal/replay-receipt/v1\x00"))
+	_, _ = mac.Write(data)
+	return hex.EncodeToString(mac.Sum(nil)), nil
 }
 
 func (w *Writer) matchReplayEntry(ctx context.Context, e Entry) (bool, error) {
@@ -79,7 +84,7 @@ func (w *Writer) matchReplayEntry(ctx context.Context, e Entry) (bool, error) {
 	if e.ExpiresAt != nil {
 		expires = e.ExpiresAt.UTC().Format(time.RFC3339Nano) // tsformat:allow: fingerprint uses the existing journal expiry serialization
 	}
-	wanted, err := replayFingerprint(e, payload, refs, expires)
+	wanted, err := w.replayFingerprint(e, payload, refs, expires)
 	if err != nil {
 		return false, err
 	}
@@ -91,7 +96,7 @@ func (w *Writer) matchReplayEntry(ctx context.Context, e Entry) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("journal replay receipt lookup: %w", err)
 	}
-	if actual != wanted {
+	if !hmac.Equal([]byte(actual), []byte(wanted)) {
 		return false, ErrReplayConflict
 	}
 	return true, nil
