@@ -7,8 +7,8 @@
  * colour an admin typed has no such guarantee — #9FE5BD (the Pages default)
  * under white button text is 1.4:1 — so it is never used as-is. Its HUE and
  * CHROMA are kept and each token's LIGHTNESS is searched, in OKLCH, until the
- * token meets the same floor against every ground it can be drawn on (every
- * base palette's background and card). The result is the admin's colour,
+ * token meets the same floor against every ground it can be drawn on (the
+ * theme's background and card). The result is the admin's colour,
  * taken as light or as dark as legibility requires.
  *
  * Contrast floors, mirroring theme-contrast.test.ts:
@@ -20,7 +20,6 @@
  *   light       brand-foreground (white) on brand ≥ 4.5 (brand = strong)
  */
 
-import { BASES } from "./bases"
 
 export type Rgb = [number, number, number]
 export interface AccentTokens {
@@ -105,9 +104,15 @@ export function oklchToRgb(L: number, C: number, h: number): Rgb {
 
 // ── grounds ──────────────────────────────────────────────────────────
 
-/** Every background/card a brand token can sit on, per mode, across bases. */
+/** The background and card a brand token can sit on, per mode — the
+ *  --background and --card of app/globals.css (pinned by its contrast test). */
+export const GROUNDS = {
+  light: ["#F7F8FA", "#FFFFFF"],
+  dark: ["#0A0B0E", "#121318"],
+} as const
+
 function grounds(mode: "light" | "dark"): Rgb[] {
-  return BASES.flatMap((b) => b[mode].map(hexToRgb))
+  return GROUNDS[mode].map(hexToRgb)
 }
 
 const WHITE: Rgb = [1, 1, 1]

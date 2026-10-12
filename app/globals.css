@@ -2,7 +2,6 @@
 @import "tw-animate-css";
 /* Brand colours per accent theme — see the header of that file. */
 @import "./styles/accents.css";
-@import "./styles/bases.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -87,7 +86,8 @@
 :root {
   /* ── Light surfaces (kept from prior shadcn palette — only Philosophy /
    *    legal pages render light; main app is dark-first) ── */
-  --background: #F4F7FB;
+  /* A quiet grey ground: the white rail, panels and cards sit on it. */
+  --background: #F7F8FA;
   --foreground: #0F1733;
   --scrollbar-thumb: oklch(0.80 0 0);
   --scrollbar-thumb-hover: oklch(0.66 0 0);
@@ -152,13 +152,17 @@
   --chart-4: oklch(0.45 0.108 55);
   --chart-5: oklch(0.62 0.133 105);
 
-  --sidebar: #E6EEF7;
+  /* The light rail is white, like the section panels beside it (Pages,
+   * Routines, Settings); the page ground under the content is the only grey.
+   * It was #E6EEF7, a second blue-grey that read as a separate stripe. The
+   * active row is an accent tint rather than white-on-blue. */
+  --sidebar: #FFFFFF;
   --sidebar-foreground: #0F1733;
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--brand-foreground);
-  --sidebar-accent: #FFFFFF;
+  --sidebar-accent: var(--brand-tint);
   --sidebar-accent-foreground: var(--brand-ink);
-  --sidebar-border: #D8E0EB;
+  --sidebar-border: #E3E7EE;
   --sidebar-ring: var(--brand);
 
   /* ── Semantic palette — Day values. The marketing-site lightness (≥ 0.72)
@@ -1604,22 +1608,6 @@ body {
   transition-duration: 0s !important;
   transition-delay: 0s !important;
   scroll-behavior: auto !important;
-}
-
-/* Light sidebar — Settings › Appearance › Theme › Light sidebar
- * (data-light-rail on <html>, lib/theme/appearance.ts). Light theme only:
- * :not(.dark) keeps the dark rail untouched. Tinted (the default) is the
- * absence of the attribute — the base palette's own --sidebar. (0,3,0)
- * outranks a base block (0,2,0), so the choice holds on every base. */
-:root:not(.dark)[data-light-rail="white"] {
-  --sidebar: #FFFFFF;
-  --sidebar-border: color-mix(in oklab, var(--border), white 25%);
-  --sidebar-accent: var(--brand-tint);
-}
-:root:not(.dark)[data-light-rail="grey"] {
-  --sidebar: #F1F2F4;
-  --sidebar-border: #E2E4E8;
-  --sidebar-accent: #FFFFFF;
 }
 
 /* Text size — Settings › Appearance › Text size (data-text-size on <html>,

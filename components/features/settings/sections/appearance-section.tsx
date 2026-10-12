@@ -1,16 +1,15 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Contrast, Layers, Palette, SlidersHorizontal } from "lucide-react"
+import { Check, Contrast, Palette, SlidersHorizontal, Users } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
-import { AccentPicker, THEME_OPTIONS } from "@/components/layout/theme-switcher"
+import { THEME_OPTIONS } from "@/components/layout/theme-switcher"
 import { useAppearance } from "@/hooks/use-appearance"
-import type { Density, LightRail, MotionChoice, SidebarChoice, TextSize, ThemeChoice } from "@/lib/theme/appearance"
-import { BASES, type BaseId } from "@/lib/theme/bases"
-import { WORKSPACE_ACCENT } from "@/lib/theme/accents"
+import type { Density, MotionChoice, SidebarChoice, TextSize, ThemeChoice } from "@/lib/theme/appearance"
+import { ACCENTS, WORKSPACE_ACCENT, type AccentChoice } from "@/lib/theme/accents"
 import { useWorkspaceAccentHex } from "@/components/layout/workspace-accent"
 import { SettingsCard, SettingsRow, SettingsSegmented } from "../shared"
 
@@ -52,7 +51,7 @@ const MOTION_OPTIONS: { value: MotionChoice; label: string }[] = [
 // Harbor grounds; the accent bar is the live brand colour.
 const PREVIEW = {
   dark: { ground: "#0B1220", rail: "#111A2C", card: "#16213A", line: "#2A3653" },
-  light: { ground: "#F4F7FB", rail: "#E8EDF5", card: "#FFFFFF", line: "#D5DCE8" },
+  light: { ground: "#F7F8FA", rail: "#FFFFFF", card: "#FFFFFF", line: "#E3E7EE" },
 } as const
 
 function ThemePreview({ palette }: { palette: (typeof PREVIEW)[keyof typeof PREVIEW] }) {
@@ -113,52 +112,8 @@ function ThemeTiles({ value, onChange }: { value: ThemeChoice | undefined; onCha
   )
 }
 
-/**
- * One tile per base: its light ground and card on the left, its dark ones on
- * the right, so both modes of a base are judged at once — the choice applies
- * to whichever theme is showing. Literal colours for the same reason as the
- * theme tiles; the bar is the live accent.
- */
-function BaseTiles({ value, onChange }: { value: BaseId; onChange: (b: BaseId) => void }) {
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
-  return (
-    <div role="radiogroup" aria-label="Base palette" className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-4">
-      {BASES.map((b) => {
-        const checked = mounted && value === b.id
-        return (
-          <button
-            key={b.id}
-            type="button"
-            role="radio"
-            aria-checked={checked}
-            aria-label={`${b.label}: ${b.description}`}
-            onClick={() => onChange(b.id)}
-            className={cn(
-              "flex flex-col gap-2 rounded-xl border p-1.5 text-left outline-none transition-colors",
-              "hover:border-line-strong focus-visible:ring-2 focus-visible:ring-ring/50",
-              checked ? "border-primary ring-1 ring-primary" : "border-border",
-            )}
-          >
-            <div aria-hidden className="flex h-14 overflow-hidden rounded-lg border border-border/60">
-              {([b.light, b.dark] as const).map(([ground, card], i) => (
-                <div key={i} className="flex flex-1 flex-col gap-1 p-1.5" style={{ background: ground }}>
-                  <div className="h-1 w-1/2 rounded-full bg-[var(--brand)]" />
-                  <div className="flex-1 rounded" style={{ background: card, boxShadow: `inset 0 0 0 1px ${i ? "#ffffff14" : "#0000000f"}` }} />
-                </div>
-              ))}
-            </div>
-            <span className="px-1 pb-0.5">
-              <span className={cn("block text-control", checked ? "text-foreground" : "text-muted-foreground")}>{b.label}</span>
-              <span className="block text-label text-muted-foreground-soft">{b.description}</span>
-            </span>
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
+// The three light rails, as the wireframe drew them: rail colour, the white
+// section panel beside it, and the page ground.
 /**
  * The accent as it will actually look, drawn with the live app tokens and
  * real components — a swatch alone does not show that the button is the
@@ -178,90 +133,107 @@ function AccentPreview() {
   )
 }
 
-// The three light rails, as the wireframe drew them: rail colour, the white
-// section panel beside it, and the page ground.
-const LIGHT_RAIL_OPTIONS: { value: LightRail; label: string; description: string; rail: string; ground: string; active: string }[] = [
-  { value: "tinted", label: "Tinted", description: "Follows the base palette", rail: "#E6EEF7", ground: "#F4F7FB", active: "#FFFFFF" },
-  { value: "white", label: "White", description: "Rail and panels all white", rail: "#FFFFFF", ground: "#F7F8FA", active: "var(--brand-tint)" },
-  { value: "grey", label: "Grey", description: "Quiet grey rail", rail: "#F1F2F4", ground: "#F7F7F8", active: "#FFFFFF" },
-]
+/**
+ * The presets as one row of large swatches, in spectrum order (blues, then
+ * purples and pink, then the grey), the name under each. A 40px circle is a
+ * real target and the colour reads at a glance; the pressed one carries a
+ * check and an offset ring. The team colour is not a ninth circle: it is a
+ * different KIND of choice (someone else's colour, set elsewhere), so it gets
+ * its own row below — see TeamColourRow.
+ */
+function AccentCircles({ value, onChange }: { value: AccentChoice; onChange: (id: AccentChoice) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Accent colour" className="flex flex-wrap gap-x-2 gap-y-4 px-4 pb-2 pt-5">
+      {ACCENTS.map(({ id, label, swatch }) => {
+        const checked = value === id
+        return (
+          <button
+            key={id}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            aria-label={label}
+            onClick={() => onChange(id)}
+            className="group flex w-16 flex-col items-center gap-2 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "grid h-10 w-10 place-items-center rounded-full transition-transform group-hover:scale-105",
+                "shadow-[inset_0_0_0_1px_rgb(255_255_255_/_0.2),0_1px_3px_rgb(0_0_0_/_0.25)]",
+                checked && "ring-2 ring-foreground/80 ring-offset-2 ring-offset-card",
+              )}
+              style={{ background: swatch }}
+            >
+              {checked && <Check className="h-4 w-4 text-white drop-shadow-[0_1px_1px_rgb(0_0_0_/_0.5)]" strokeWidth={3} />}
+            </span>
+            <span className={cn("text-label", checked ? "font-medium text-foreground" : "text-muted-foreground")}>{label}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 /**
- * Light theme only: how the left rail looks. Shown under the theme tiles
- * whenever the light palette can be on screen (Light, or System), because
- * it changes nothing in dark.
+ * The workspace's brand colour as the accent — or, when no admin has set
+ * one, a note saying where it would come from. Selecting it is a radio in
+ * the same group as the circles above (it is the same choice).
  */
-function LightRailTiles({ value, onChange }: { value: LightRail; onChange: (r: LightRail) => void }) {
+function TeamColourRow({ hex, value, onChange }: { hex: string | null | undefined; value: AccentChoice; onChange: (id: AccentChoice) => void }) {
+  const checked = value === WORKSPACE_ACCENT
   return (
-    <div className="border-t border-border/60 px-4 pb-4 pt-3">
-      <div className="mb-2.5 text-control font-medium">Light mode sidebar</div>
-      <div role="radiogroup" aria-label="Light mode sidebar" className="grid grid-cols-3 gap-3">
-        {LIGHT_RAIL_OPTIONS.map((o) => {
-          const checked = value === o.value
-          return (
-            <button
-              key={o.value}
-              type="button"
-              role="radio"
-              aria-checked={checked}
-              aria-label={`${o.label}: ${o.description}`}
-              onClick={() => onChange(o.value)}
-              className={cn(
-                "flex flex-col gap-2 rounded-xl border p-1.5 text-left outline-none transition-colors",
-                "hover:border-line-strong focus-visible:ring-2 focus-visible:ring-ring/50",
-                checked ? "border-primary ring-1 ring-primary" : "border-border",
-              )}
-            >
-              <div aria-hidden className="flex h-14 overflow-hidden rounded-lg border border-black/[0.08]" style={{ background: o.ground }}>
-                <div className="flex w-[28%] flex-col gap-1 border-r border-black/[0.06] p-1.5" style={{ background: o.rail }}>
-                  <div className="h-1 w-3/4 rounded-full bg-black/15" />
-                  <div className="h-2 w-full rounded" style={{ background: o.active, boxShadow: "inset 0 0 0 1px rgb(0 0 0 / 0.05)" }} />
-                  <div className="h-1 w-2/3 rounded-full bg-black/15" />
-                </div>
-                <div className="w-[26%] border-r border-black/[0.06] bg-white" />
-                <div className="flex flex-1 flex-col gap-1 p-1.5">
-                  <div className="h-1 w-1/2 rounded-full bg-[var(--brand)]" />
-                  <div className="flex-1 rounded bg-white shadow-[inset_0_0_0_1px_rgb(0_0_0_/_0.06)]" />
-                </div>
-              </div>
-              <span className="px-1 pb-0.5">
-                <span className={cn("block text-control", checked ? "text-foreground" : "text-muted-foreground")}>{o.label}</span>
-                <span className="block text-label text-muted-foreground-soft">{o.description}</span>
-              </span>
-            </button>
-          )
-        })}
+    <div className="px-4 pb-4 pt-2">
+      <div className={cn("flex items-center gap-3 rounded-xl border px-3 py-2.5", checked ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-dashed border-border")} data-testid="workspace-accent-hint">
+        <span
+          aria-hidden
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-full shadow-[inset_0_0_0_1px_rgb(255_255_255_/_0.2)]"
+          style={{ background: hex ?? "var(--muted)" }}
+        >
+          {hex ? (checked && <Check className="h-3.5 w-3.5 text-white drop-shadow-[0_1px_1px_rgb(0_0_0_/_0.5)]" strokeWidth={3} />) : <Users className="h-3.5 w-3.5 text-muted-foreground" />}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-control font-medium">Team colour</span>
+          <span className="block text-label text-muted-foreground">
+            {hex
+              ? "Your workspace's brand colour, adjusted where needed so text on it stays readable."
+              : checked
+                ? "This workspace has no brand colour yet, so Blue shows. An admin can set one in General › Pages appearance."
+                : "An admin can set a brand colour in General › Pages appearance."}
+          </span>
+        </span>
+        {(hex || checked) && (
+          <Button
+            size="sm"
+            variant={checked ? "secondary" : "outline"}
+            role="radio"
+            aria-checked={checked}
+            aria-label="Team colour"
+            onClick={() => onChange(WORKSPACE_ACCENT)}
+            disabled={checked}
+          >
+            {checked ? "In use" : "Use"}
+          </Button>
+        )}
       </div>
     </div>
   )
 }
 
 export function AppearanceSection() {
-  const { theme, setTheme, accent, base, setBase, density, setDensity, motion, setMotion, textSize, setTextSize, sidebar, setSidebar, lightRail, setLightRail, syncEnabled, setSyncEnabled } = useAppearance()
+  const { theme, setTheme, accent, setAccent, density, setDensity, motion, setMotion, textSize, setTextSize, sidebar, setSidebar, syncEnabled, setSyncEnabled } = useAppearance()
   const workspaceHex = useWorkspaceAccentHex()
 
   return (
     <div className="space-y-5">
       <SettingsCard icon={Contrast} title="Theme" description="Dark, light, or follow your system">
         <ThemeTiles value={theme} onChange={setTheme} />
-        {(theme === "light" || theme === "system") && <LightRailTiles value={lightRail} onChange={setLightRail} />}
       </SettingsCard>
 
-      <SettingsCard icon={Palette} title="Accent" description="The one brand colour the interface is tinted with">
-        <AccentPicker showLabels className="p-4" />
+      <SettingsCard icon={Palette} title="Accent" description="Buttons, links, selection and focus">
+        <AccentCircles value={accent} onChange={setAccent} />
+        <TeamColourRow hex={workspaceHex} value={accent} onChange={setAccent} />
         <AccentPreview />
-        {/* Where the Workspace swatch comes from — or why it is missing. */}
-        <p className="border-t border-border/60 px-4 py-2.5 text-label text-muted-foreground" data-testid="workspace-accent-hint">
-          {workspaceHex
-            ? "Workspace uses your team's brand colour, adjusted where needed so text on it stays readable."
-            : accent === WORKSPACE_ACCENT
-              ? "This workspace has no brand colour yet, so Workspace shows Blue. An admin can set one in General › Pages appearance."
-              : "An admin can set a team brand colour in General › Pages appearance; it then appears here as Workspace."}
-        </p>
-      </SettingsCard>
-
-      <SettingsCard icon={Layers} title="Base" description="The neutral tone of backgrounds, cards, sidebar and borders">
-        <BaseTiles value={base} onChange={setBase} />
       </SettingsCard>
 
       <SettingsCard icon={SlidersHorizontal} title="Layout & motion">

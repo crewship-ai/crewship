@@ -1,11 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 
-import { BASES } from "../bases"
 import { ACCENT_BOOT_SCRIPT, ACCENT_STORAGE_KEY, WORKSPACE_ACCENT_CSS_KEY, WORKSPACE_ACCENT_CSS_PATTERN, WORKSPACE_ACCENT_STYLE_ID } from "../accents"
-import { blend, contrast, deriveAccent, hexToRgb, rgbToOklch, workspaceAccentCss } from "../derive-accent"
+import { GROUNDS, blend, contrast, deriveAccent, hexToRgb, rgbToOklch, workspaceAccentCss } from "../derive-accent"
 
 // An admin's colour is never used as-is: each token keeps its hue and has its
-// lightness moved until it meets AA on every ground any base can put under it.
+// lightness moved until it meets AA on the theme's background and card.
 // These are the floors theme-contrast.test.ts holds the presets to.
 
 const INPUTS = [
@@ -15,7 +14,7 @@ const INPUTS = [
   "#14532D", "#FDE68A", "#E11D48", "#1F2937", "#C0FFEE", "#123456",
 ]
 const WHITE = hexToRgb("#FFFFFF")
-const grounds = (mode: "light" | "dark") => BASES.flatMap((b) => b[mode].map(hexToRgb))
+const grounds = (mode: "light" | "dark") => GROUNDS[mode].map(hexToRgb)
 
 describe.each(INPUTS)("deriveAccent(%s)", (hex) => {
   const { light, dark } = deriveAccent(hex)
@@ -27,7 +26,7 @@ describe.each(INPUTS)("deriveAccent(%s)", (hex) => {
     expect(c(light["brand-foreground"], light.brand)).toBeGreaterThanOrEqual(4.5)
   })
 
-  it("light: brand and links on every base's ground and card ≥ 4.5:1, chip ink on tint ≥ 4.5:1", () => {
+  it("light: brand and links on the ground and card ≥ 4.5:1, chip ink on tint ≥ 4.5:1", () => {
     for (const g of grounds("light")) {
       expect(contrast(hexToRgb(light.brand), g)).toBeGreaterThanOrEqual(4.5)
       expect(contrast(hexToRgb(light["brand-ink"]), g)).toBeGreaterThanOrEqual(4.5)

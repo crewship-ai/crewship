@@ -31,7 +31,6 @@ beforeEach(() => {
   theme = "dark"
   delete document.documentElement.dataset.density
   delete document.documentElement.dataset.motion
-  delete document.documentElement.dataset.base
   delete document.documentElement.dataset.textSize
   workspaceHex = null
 })
@@ -99,25 +98,17 @@ describe("AppearanceSection", () => {
     expect(apiFetch).not.toHaveBeenCalled()
   })
 
-  it("picks a base palette and remembers it; Cool is the bare default", () => {
-    render(<AppearanceSection />)
-    const group = screen.getByRole("radiogroup", { name: "Base palette" })
-    expect(group.querySelectorAll('[role="radio"]')).toHaveLength(4)
-    fireEvent.click(screen.getByRole("radio", { name: /^Warm/ }))
-    expect(document.documentElement.dataset.base).toBe("warm")
-    expect(store.get("crewship-base")).toBe("warm")
-    fireEvent.click(screen.getByRole("radio", { name: /^Cool/ }))
-    expect(document.documentElement.dataset.base).toBeUndefined()
-  })
 
-  it("says where the Workspace accent comes from", () => {
+  it("offers the team colour as its own row, and says where it comes from", () => {
     render(<AppearanceSection />)
-    expect(screen.getByTestId("workspace-accent-hint")).toHaveTextContent(/admin can set a team brand colour/i)
+    expect(screen.getByTestId("workspace-accent-hint")).toHaveTextContent(/admin can set a brand colour/i)
+    expect(screen.queryByRole("radio", { name: "Team colour" })).toBeNull()
     cleanup()
     workspaceHex = "#E11D48"
     render(<AppearanceSection />)
-    expect(screen.getByTestId("workspace-accent-hint")).toHaveTextContent(/team's brand colour, adjusted/i)
-    expect(screen.getByRole("radio", { name: "Workspace" })).toBeInTheDocument()
+    expect(screen.getByTestId("workspace-accent-hint")).toHaveTextContent(/workspace's brand colour, adjusted/i)
+    fireEvent.click(screen.getByRole("radio", { name: "Team colour" }))
+    expect(document.documentElement.dataset.accent).toBe("workspace")
   })
 
   it("sets text size on <html> and keeps it with the appearance", () => {
@@ -142,19 +133,10 @@ describe("AppearanceSection", () => {
     expect(tiles).toHaveLength(ACCENTS.length)
   })
 
-  it("offers the light sidebar styles only when the light palette can show", () => {
-    theme = "dark"
-    render(<AppearanceSection />)
-    expect(screen.queryByRole("radiogroup", { name: "Light mode sidebar" })).toBeNull()
-    cleanup()
+  it("has no base palette and no light-sidebar choice any more", () => {
     theme = "light"
     render(<AppearanceSection />)
-    const group = screen.getByRole("radiogroup", { name: "Light mode sidebar" })
-    expect(group.querySelectorAll('[role="radio"]')).toHaveLength(3)
-    fireEvent.click(screen.getByRole("radio", { name: /^White/ }))
-    expect(document.documentElement.dataset.lightRail).toBe("white")
-    expect(store.get("crewship-light-rail")).toBe("white")
-    fireEvent.click(screen.getByRole("radio", { name: /^Tinted/ }))
-    expect(document.documentElement.dataset.lightRail).toBeUndefined()
+    expect(screen.queryByRole("radiogroup", { name: "Base palette" })).toBeNull()
+    expect(screen.queryByRole("radiogroup", { name: "Light mode sidebar" })).toBeNull()
   })
 })
