@@ -21,6 +21,7 @@ import (
 type Config struct {
 	ExpectedKey string
 	Model       string
+	BetaQuery   bool // Pinned Claude sends the exact literal ?beta=true.
 	Script      []Step
 }
 
@@ -46,6 +47,7 @@ type Event struct {
 	Role      string
 	Step      int
 	Path      string
+	BetaQuery bool
 	ToolName  string
 	ToolUseID string
 	Stream    bool
@@ -66,6 +68,7 @@ type Transport struct {
 	mu       sync.Mutex
 	key      string
 	model    string
+	query    string
 	roles    map[string]*roleState
 	evidence []Event
 	failed   bool
@@ -87,6 +90,9 @@ func New(config Config) (*Transport, error) {
 		return nil, errors.New("messagesmock: invalid script")
 	}
 	t := &Transport{key: config.ExpectedKey, model: config.Model, roles: map[string]*roleState{}}
+	if config.BetaQuery {
+		t.query = "beta=true"
+	}
 	ids := map[string]bool{}
 	for _, step := range steps {
 		if step.Path == "" {
@@ -232,12 +238,13 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return t.reject(event, "fixture already rejected a request")
 	}
 	if req == nil || req.URL == nil || req.Method != http.MethodPost || req.URL.Scheme != "https" ||
-		req.URL.Host != "api.anthropic.com" || req.URL.User != nil || req.URL.RawQuery != "" || req.URL.ForceQuery || req.URL.Fragment != "" ||
+		req.URL.Host != "api.anthropic.com" || req.URL.User != nil || req.URL.RawQuery != t.query || req.URL.ForceQuery || req.URL.Fragment != "" ||
 		(req.URL.Path != "/v1/messages" && req.URL.Path != "/v1/messages/count_tokens") || req.URL.RawPath != "" ||
 		(req.Host != "" && req.Host != "api.anthropic.com") {
 		return t.reject(event, "unsupported provider request")
 	}
 	event.Path = req.URL.Path
+	event.BetaQuery = t.query == "beta=true"
 	if req.Context().Err() != nil {
 		return t.reject(event, "request cancelled")
 	}

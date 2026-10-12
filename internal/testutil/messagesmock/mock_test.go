@@ -324,3 +324,46 @@ func ExampleConfig() {
 	fmt.Println(err)
 	// Output: <nil>
 }
+
+func TestExplicitPinnedBetaQuery(t *testing.T) {
+	for _, query := range []string{"", "beta=false", "beta=true&beta=true", "beta=true&extra=1", "%62eta=true", "beta=true&"} {
+		t.Run("reject_"+query, func(t *testing.T) {
+			transport, err := New(Config{ExpectedKey: key, Model: model, BetaQuery: true, Script: script("lead")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := wire(t, "lead", false, true)
+			req.URL.RawQuery = query
+			if _, err := transport.RoundTrip(req); err == nil || transport.Complete() == nil {
+				t.Fatal("non-pinned query accepted")
+			}
+		})
+	}
+	t.Run("default rejects beta", func(t *testing.T) {
+		transport := fixture(t, script("lead"))
+		req := wire(t, "lead", false, true)
+		req.URL.RawQuery = "beta=true"
+		if _, err := transport.RoundTrip(req); err == nil {
+			t.Fatal("beta query accepted without explicit configuration")
+		}
+	})
+	t.Run("pinned beta completes correlated script", func(t *testing.T) {
+		transport, err := New(Config{ExpectedKey: key, Model: model, BetaQuery: true, Script: script("lead")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, result := range []bool{false, true} {
+			req := wire(t, "lead", result, true)
+			req.URL.RawQuery = "beta=true"
+			consume(t, transport, req)
+		}
+		if transport.Complete() != nil {
+			t.Fatal("pinned beta script did not complete")
+		}
+		for _, event := range transport.Evidence() {
+			if !event.BetaQuery || !event.Accepted {
+				t.Fatal("pinned beta query not attested")
+			}
+		}
+	})
+}
