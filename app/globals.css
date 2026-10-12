@@ -1606,6 +1606,22 @@ body {
   scroll-behavior: auto !important;
 }
 
+/* Light sidebar — Settings › Appearance › Theme › Light sidebar
+ * (data-light-rail on <html>, lib/theme/appearance.ts). Light theme only:
+ * :not(.dark) keeps the dark rail untouched. Tinted (the default) is the
+ * absence of the attribute — the base palette's own --sidebar. (0,3,0)
+ * outranks a base block (0,2,0), so the choice holds on every base. */
+:root:not(.dark)[data-light-rail="white"] {
+  --sidebar: #FFFFFF;
+  --sidebar-border: color-mix(in oklab, var(--border), white 25%);
+  --sidebar-accent: var(--brand-tint);
+}
+:root:not(.dark)[data-light-rail="grey"] {
+  --sidebar: #F1F2F4;
+  --sidebar-border: #E2E4E8;
+  --sidebar-accent: #FFFFFF;
+}
+
 /* Text size — Settings › Appearance › Text size (data-text-size on <html>,
  * lib/theme/appearance.ts). Every size and most spacing in the app are rem,
  * so moving the root size scales the interface as one, like browser zoom but

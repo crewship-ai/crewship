@@ -8,6 +8,7 @@ import { DEFAULT_BASE, type BaseId } from "@/lib/theme/bases"
 import {
   DEFAULT_DENSITY,
   DEFAULT_MOTION,
+  DEFAULT_LIGHT_RAIL,
   DEFAULT_SIDEBAR,
   DEFAULT_TEXT_SIZE,
   isThemeChoice,
@@ -15,6 +16,7 @@ import {
   readBase,
   readDensity,
   readMotion,
+  readLightRail,
   readSidebar,
   readTextSize,
   readSyncEnabled,
@@ -22,12 +24,14 @@ import {
   setBase,
   setDensity,
   setMotion,
+  setLightRail,
   setSidebarChoice,
   setTextSize,
   setSyncEnabled,
   subscribeAppearance,
   type Density,
   type MotionChoice,
+  type LightRail,
   type SidebarChoice,
   type TextSize,
   type ThemeChoice,
@@ -43,6 +47,7 @@ const serverBase = () => DEFAULT_BASE
 const serverDensity = () => DEFAULT_DENSITY
 const serverMotion = () => DEFAULT_MOTION
 const serverTextSize = () => DEFAULT_TEXT_SIZE
+const serverLightRail = () => DEFAULT_LIGHT_RAIL
 const serverSidebar = () => DEFAULT_SIDEBAR
 const serverSync = () => true
 
@@ -57,6 +62,9 @@ export function useDensity(): Density {
 }
 export function useMotionChoice(): MotionChoice {
   return useSyncExternalStore(subscribeAppearance, readMotion, serverMotion)
+}
+export function useLightRail(): LightRail {
+  return useSyncExternalStore(subscribeAppearance, readLightRail, serverLightRail)
 }
 export function useTextSize(): TextSize {
   return useSyncExternalStore(subscribeAppearance, readTextSize, serverTextSize)
@@ -78,6 +86,7 @@ export interface AppearanceState {
   motion: MotionChoice
   textSize: TextSize
   sidebar: SidebarChoice
+  lightRail: LightRail
   syncEnabled: boolean
   setTheme: (t: ThemeChoice) => void
   setAccent: (id: AccentChoice) => void
@@ -85,6 +94,7 @@ export interface AppearanceState {
   setDensity: (d: Density) => void
   setMotion: (m: MotionChoice) => void
   setTextSize: (t: TextSize) => void
+  setLightRail: (r: LightRail) => void
   setSidebar: (m: SidebarChoice) => void
   setSyncEnabled: (on: boolean) => void
 }
@@ -111,6 +121,7 @@ export function useAppearance(): AppearanceState {
     motion: useMotionChoice(),
     textSize: useTextSize(),
     sidebar: useSidebarChoice(),
+    lightRail: useLightRail(),
     syncEnabled: useAppearanceSyncEnabled(),
     setTheme,
     setAccent: setAccentChoice,
@@ -118,6 +129,7 @@ export function useAppearance(): AppearanceState {
     setDensity,
     setMotion,
     setTextSize,
+    setLightRail,
     setSidebar: setSidebarChoice,
     setSyncEnabled,
   }

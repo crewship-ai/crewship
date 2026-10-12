@@ -53,7 +53,13 @@ export type TextSize = (typeof TEXT_SIZES)[number]
 export const SIDEBAR_CHOICES = ["hover", "collapsed", "pinned"] as const
 export type SidebarChoice = (typeof SIDEBAR_CHOICES)[number]
 
+/** The light theme's rail: the blue-tinted default, plain white, or grey.
+ *  Only the light theme has a choice — the dark rail already sits right. */
+export const LIGHT_RAILS = ["tinted", "white", "grey"] as const
+export type LightRail = (typeof LIGHT_RAILS)[number]
+
 export const DEFAULT_DENSITY: Density = "comfortable"
+export const DEFAULT_LIGHT_RAIL: LightRail = "tinted"
 export const DEFAULT_TEXT_SIZE: TextSize = "default"
 export const DEFAULT_SIDEBAR: SidebarChoice = "hover"
 export const DEFAULT_MOTION: MotionChoice = "system"
@@ -62,6 +68,7 @@ export const DEFAULT_MOTION: MotionChoice = "system"
 export const DENSITY_STORAGE_KEY = "crewship-density"
 export const MOTION_STORAGE_KEY = "crewship-motion"
 export const TEXT_SIZE_STORAGE_KEY = "crewship-text-size"
+export const LIGHT_RAIL_STORAGE_KEY = "crewship-light-rail"
 /** components/ui/sidebar.tsx's own key; read here, written through it. */
 export const SIDEBAR_STORAGE_KEY = "crewship_sidebar_mode"
 /** The sync switch is deliberately per DEVICE: "this laptop keeps its own
@@ -83,6 +90,7 @@ export interface Appearance {
   /** Optional on the wire, like base: absent in values saved before it. */
   textSize: TextSize
   sidebar: SidebarChoice
+  lightRail: LightRail
 }
 
 export function isThemeChoice(v: unknown): v is ThemeChoice {
@@ -93,6 +101,9 @@ export function isDensity(v: unknown): v is Density {
 }
 export function isMotionChoice(v: unknown): v is MotionChoice {
   return typeof v === "string" && (MOTION_CHOICES as readonly string[]).includes(v)
+}
+export function isLightRail(v: unknown): v is LightRail {
+  return typeof v === "string" && (LIGHT_RAILS as readonly string[]).includes(v)
 }
 export function isTextSize(v: unknown): v is TextSize {
   return typeof v === "string" && (TEXT_SIZES as readonly string[]).includes(v)
@@ -117,6 +128,7 @@ export function parseAppearance(value: unknown): Partial<Appearance> {
   if (isDensity(v.density)) out.density = v.density
   if (isMotionChoice(v.motion)) out.motion = v.motion
   if (isTextSize(v.textSize)) out.textSize = v.textSize
+  if (isLightRail(v.lightRail)) out.lightRail = v.lightRail
   if (isSidebarChoice(v.sidebar)) out.sidebar = v.sidebar
   return out
 }
@@ -136,6 +148,12 @@ export function applyMotionAttr(m: MotionChoice): void {
   if (m === "on") document.documentElement.dataset.motion = "reduce"
   else if (m === "off") document.documentElement.dataset.motion = "full"
   else delete document.documentElement.dataset.motion
+}
+
+/** Tinted is the absence of the attribute; CSS applies it in light only. */
+export function applyLightRailAttr(r: LightRail): void {
+  if (r === "tinted") delete document.documentElement.dataset.lightRail
+  else document.documentElement.dataset.lightRail = r
 }
 
 /** Default is the absence of the attribute. */
@@ -185,6 +203,7 @@ function onStorage(e: StorageEvent): void {
   if (e.key === ACCENT_STORAGE_KEY && isAccentChoice(e.newValue)) document.documentElement.dataset.accent = e.newValue
   else if (e.key === BASE_STORAGE_KEY) applyBaseAttr(readBase())
   else if (e.key === TEXT_SIZE_STORAGE_KEY) applyTextSizeAttr(readTextSize())
+  else if (e.key === LIGHT_RAIL_STORAGE_KEY) applyLightRailAttr(readLightRail())
   else if (e.key === SIDEBAR_STORAGE_KEY) {
     // Nothing to paint: the sidebar bridge reads the new mode from the store.
   }
@@ -218,6 +237,14 @@ export function readSyncEnabled(): boolean {
 /** readStoredAccent, plus this page's memory when storage throws. */
 export function readAccent(): AccentChoice {
   return read(ACCENT_STORAGE_KEY, isAccentChoice, DEFAULT_ACCENT)
+}
+export function readLightRail(): LightRail {
+  return read(LIGHT_RAIL_STORAGE_KEY, isLightRail, DEFAULT_LIGHT_RAIL)
+}
+export function setLightRail(r: LightRail): void {
+  applyLightRailAttr(r)
+  write(LIGHT_RAIL_STORAGE_KEY, r)
+  emit()
 }
 export function readTextSize(): TextSize {
   return read(TEXT_SIZE_STORAGE_KEY, isTextSize, DEFAULT_TEXT_SIZE)
@@ -277,6 +304,8 @@ export const APPEARANCE_BOOT_SCRIPT = `(function(){try{var d=document.documentEl
   MOTION_STORAGE_KEY,
 )});if(m==="on")d.setAttribute("data-motion","reduce");else if(m==="off")d.setAttribute("data-motion","full");var t=s.getItem(${JSON.stringify(
   TEXT_SIZE_STORAGE_KEY,
-)});if(t==="small"||t==="large")d.setAttribute("data-text-size",t);var b=s.getItem(${JSON.stringify(
+)});if(t==="small"||t==="large")d.setAttribute("data-text-size",t);var r=s.getItem(${JSON.stringify(
+  LIGHT_RAIL_STORAGE_KEY,
+)});if(r==="white"||r==="grey")d.setAttribute("data-light-rail",r);var b=s.getItem(${JSON.stringify(
   BASE_STORAGE_KEY,
 )});if(${JSON.stringify(BASES_NON_DEFAULT)}.indexOf(b)>-1)d.setAttribute("data-base",b)}catch(e){}})()`

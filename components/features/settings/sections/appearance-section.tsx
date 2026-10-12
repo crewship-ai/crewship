@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 import { AccentPicker, THEME_OPTIONS } from "@/components/layout/theme-switcher"
 import { useAppearance } from "@/hooks/use-appearance"
-import type { Density, MotionChoice, SidebarChoice, TextSize, ThemeChoice } from "@/lib/theme/appearance"
+import type { Density, LightRail, MotionChoice, SidebarChoice, TextSize, ThemeChoice } from "@/lib/theme/appearance"
 import { BASES, type BaseId } from "@/lib/theme/bases"
 import { WORKSPACE_ACCENT } from "@/lib/theme/accents"
 import { useWorkspaceAccentHex } from "@/components/layout/workspace-accent"
@@ -178,14 +178,73 @@ function AccentPreview() {
   )
 }
 
+// The three light rails, as the wireframe drew them: rail colour, the white
+// section panel beside it, and the page ground.
+const LIGHT_RAIL_OPTIONS: { value: LightRail; label: string; description: string; rail: string; ground: string; active: string }[] = [
+  { value: "tinted", label: "Tinted", description: "Follows the base palette", rail: "#E6EEF7", ground: "#F4F7FB", active: "#FFFFFF" },
+  { value: "white", label: "White", description: "Rail and panels all white", rail: "#FFFFFF", ground: "#F7F8FA", active: "var(--brand-tint)" },
+  { value: "grey", label: "Grey", description: "Quiet grey rail", rail: "#F1F2F4", ground: "#F7F7F8", active: "#FFFFFF" },
+]
+
+/**
+ * Light theme only: how the left rail looks. Shown under the theme tiles
+ * whenever the light palette can be on screen (Light, or System), because
+ * it changes nothing in dark.
+ */
+function LightRailTiles({ value, onChange }: { value: LightRail; onChange: (r: LightRail) => void }) {
+  return (
+    <div className="border-t border-border/60 px-4 pb-4 pt-3">
+      <div className="mb-2.5 text-control font-medium">Light mode sidebar</div>
+      <div role="radiogroup" aria-label="Light mode sidebar" className="grid grid-cols-3 gap-3">
+        {LIGHT_RAIL_OPTIONS.map((o) => {
+          const checked = value === o.value
+          return (
+            <button
+              key={o.value}
+              type="button"
+              role="radio"
+              aria-checked={checked}
+              aria-label={`${o.label}: ${o.description}`}
+              onClick={() => onChange(o.value)}
+              className={cn(
+                "flex flex-col gap-2 rounded-xl border p-1.5 text-left outline-none transition-colors",
+                "hover:border-line-strong focus-visible:ring-2 focus-visible:ring-ring/50",
+                checked ? "border-primary ring-1 ring-primary" : "border-border",
+              )}
+            >
+              <div aria-hidden className="flex h-14 overflow-hidden rounded-lg border border-black/[0.08]" style={{ background: o.ground }}>
+                <div className="flex w-[28%] flex-col gap-1 border-r border-black/[0.06] p-1.5" style={{ background: o.rail }}>
+                  <div className="h-1 w-3/4 rounded-full bg-black/15" />
+                  <div className="h-2 w-full rounded" style={{ background: o.active, boxShadow: "inset 0 0 0 1px rgb(0 0 0 / 0.05)" }} />
+                  <div className="h-1 w-2/3 rounded-full bg-black/15" />
+                </div>
+                <div className="w-[26%] border-r border-black/[0.06] bg-white" />
+                <div className="flex flex-1 flex-col gap-1 p-1.5">
+                  <div className="h-1 w-1/2 rounded-full bg-[var(--brand)]" />
+                  <div className="flex-1 rounded bg-white shadow-[inset_0_0_0_1px_rgb(0_0_0_/_0.06)]" />
+                </div>
+              </div>
+              <span className="px-1 pb-0.5">
+                <span className={cn("block text-control", checked ? "text-foreground" : "text-muted-foreground")}>{o.label}</span>
+                <span className="block text-label text-muted-foreground-soft">{o.description}</span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function AppearanceSection() {
-  const { theme, setTheme, accent, base, setBase, density, setDensity, motion, setMotion, textSize, setTextSize, sidebar, setSidebar, syncEnabled, setSyncEnabled } = useAppearance()
+  const { theme, setTheme, accent, base, setBase, density, setDensity, motion, setMotion, textSize, setTextSize, sidebar, setSidebar, lightRail, setLightRail, syncEnabled, setSyncEnabled } = useAppearance()
   const workspaceHex = useWorkspaceAccentHex()
 
   return (
     <div className="space-y-5">
       <SettingsCard icon={Contrast} title="Theme" description="Dark, light, or follow your system">
         <ThemeTiles value={theme} onChange={setTheme} />
+        {(theme === "light" || theme === "system") && <LightRailTiles value={lightRail} onChange={setLightRail} />}
       </SettingsCard>
 
       <SettingsCard icon={Palette} title="Accent" description="The one brand colour the interface is tinted with">

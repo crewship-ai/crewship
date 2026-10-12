@@ -44,6 +44,7 @@ Restricted sessions are not offered Notification preferences or Connect CLI.
 `/settings?tab=appearance`
 
 - **Theme** — Dark, Light or System (follows the OS).
+  - **Light mode sidebar** (shown once Light or System is picked) — **Tinted** (follows the base palette, the default), **White** (rail and panels all white, the active item on an accent tint) or **Grey** (a quiet grey rail). Dark mode is unaffected.
 - **Accent** — Blue (default), Sky, Teal, Indigo, Violet, Fuchsia, Pink or Graphite; tints buttons, links, chips, switches and the focus ring, shown live in a preview strip under the tiles. Green, red and amber are never accents — they mean done, failed and needs-attention.
   - **Workspace** appears once an admin has set a brand colour in **Settings → General → Pages appearance → Brand accent**. Its hue and saturation are kept and each shade's lightness is adjusted until it meets WCAG AA (4.5:1) on every base, so a light brand colour like mint still gets readable buttons and links. Switching workspace switches the colour; a workspace without one shows Blue.
 - **Base** — the neutral tone of backgrounds, cards, sidebar, borders and muted text: **Cool** (blue-tinted, the default), **Neutral** (pure greys), **Warm** (stone and paper) or **Black** (true black in dark mode, crisp white in light). Every base is held to the same contrast floors as the default under every accent.
@@ -63,7 +64,7 @@ Everything on these pages is stored with **your user**, not with the browser, in
 
 | Key | What |
 |---|---|
-| `appearance` | theme, accent, base, text size, density, sidebar, reduce motion |
+| `appearance` | theme, light-mode sidebar, accent, base, text size, density, sidebar mode, reduce motion |
 | `notification-sounds.<workspace-id>` | Notification sounds for that workspace |
 
 A new user starts on the defaults — **Dark**, **Blue**, Cool, Default text size, Comfortable, sidebar rail with hover, motion following the OS, sounds off — and gets their own rows on the first change. The browser keeps a copy so the first paint is already right; on sign-in the server copy wins. Two things stay per device on purpose: the **Sync across devices** switch itself, and the browser's permission to play audio.

@@ -141,4 +141,20 @@ describe("AppearanceSection", () => {
     const tiles = screen.getByRole("radiogroup", { name: "Accent colour" }).querySelectorAll('[role="radio"]')
     expect(tiles).toHaveLength(ACCENTS.length)
   })
+
+  it("offers the light sidebar styles only when the light palette can show", () => {
+    theme = "dark"
+    render(<AppearanceSection />)
+    expect(screen.queryByRole("radiogroup", { name: "Light mode sidebar" })).toBeNull()
+    cleanup()
+    theme = "light"
+    render(<AppearanceSection />)
+    const group = screen.getByRole("radiogroup", { name: "Light mode sidebar" })
+    expect(group.querySelectorAll('[role="radio"]')).toHaveLength(3)
+    fireEvent.click(screen.getByRole("radio", { name: /^White/ }))
+    expect(document.documentElement.dataset.lightRail).toBe("white")
+    expect(store.get("crewship-light-rail")).toBe("white")
+    fireEvent.click(screen.getByRole("radio", { name: /^Tinted/ }))
+    expect(document.documentElement.dataset.lightRail).toBeUndefined()
+  })
 })

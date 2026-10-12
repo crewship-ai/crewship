@@ -72,13 +72,14 @@ beforeEach(() => {
   delete document.documentElement.dataset.density
   delete document.documentElement.dataset.base
   delete document.documentElement.dataset.textSize
+  delete document.documentElement.dataset.lightRail
   delete document.documentElement.dataset.motion
 })
 afterEach(() => vi.unstubAllGlobals())
 
 describe("useAppearanceSync", () => {
   it("applies the server's appearance on load, and does not echo it back", async () => {
-    apiFetch.mockResolvedValue(ok({ appearance: { theme: "light", accent: "violet", base: "warm", density: "compact", motion: "on", textSize: "large", sidebar: "pinned" } }))
+    apiFetch.mockResolvedValue(ok({ appearance: { theme: "light", accent: "violet", base: "warm", density: "compact", motion: "on", textSize: "large", sidebar: "pinned", lightRail: "white" } }))
     const { result } = renderSync()
 
     await waitFor(() => expect(result.current.theme).toBe("light"))
@@ -88,6 +89,7 @@ describe("useAppearanceSync", () => {
     expect(document.documentElement.dataset.density).toBe("compact")
     expect(document.documentElement.dataset.base).toBe("warm")
     expect(document.documentElement.dataset.textSize).toBe("large")
+    expect(document.documentElement.dataset.lightRail).toBe("white")
     expect(store.get("crewship_sidebar_mode")).toBe("pinned")
     expect(document.documentElement.dataset.motion).toBe("reduce")
     expect(store.get(DENSITY_STORAGE_KEY)).toBe("compact")
@@ -100,7 +102,7 @@ describe("useAppearanceSync", () => {
   })
 
   it("writes a local change back, debounced into one PUT", async () => {
-    apiFetch.mockResolvedValue(ok({ appearance: { theme: "dark", accent: "blue", base: "cool", density: "comfortable", motion: "system", textSize: "default", sidebar: "hover" } }))
+    apiFetch.mockResolvedValue(ok({ appearance: { theme: "dark", accent: "blue", base: "cool", density: "comfortable", motion: "system", textSize: "default", sidebar: "hover", lightRail: "tinted" } }))
     const { result } = renderSync()
     await waitFor(() => expect(apiFetch).toHaveBeenCalledWith(PREFS))
     await new Promise((r) => setTimeout(r, 0))
@@ -114,7 +116,7 @@ describe("useAppearanceSync", () => {
     await waitFor(() => expect(puts()).toHaveLength(1))
     const [, init] = puts()[0]
     expect(init.method).toBe("PUT")
-    expect(JSON.parse(init.body)).toEqual({ theme: "light", accent: "teal", base: "cool", density: "compact", motion: "system", textSize: "default", sidebar: "hover" })
+    expect(JSON.parse(init.body)).toEqual({ theme: "light", accent: "teal", base: "cool", density: "compact", motion: "system", textSize: "default", sidebar: "hover", lightRail: "tinted" })
   })
 
   it("seeds the server with this device's look when it has none yet", async () => {
@@ -123,7 +125,7 @@ describe("useAppearanceSync", () => {
     renderSync()
 
     await waitFor(() => expect(puts()).toHaveLength(1))
-    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "dark", accent: "graphite", base: "cool", density: "comfortable", motion: "system", textSize: "default", sidebar: "hover" })
+    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "dark", accent: "graphite", base: "cool", density: "comfortable", motion: "system", textSize: "default", sidebar: "hover", lightRail: "tinted" })
   })
 
   it("completes a partial server value from local and writes the whole thing back", async () => {
@@ -132,7 +134,7 @@ describe("useAppearanceSync", () => {
 
     await waitFor(() => expect(result.current.theme).toBe("light"))
     await waitFor(() => expect(puts()).toHaveLength(1))
-    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "light", accent: "blue", base: "cool", density: "comfortable", motion: "system", textSize: "default", sidebar: "hover" })
+    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "light", accent: "blue", base: "cool", density: "comfortable", motion: "system", textSize: "default", sidebar: "hover", lightRail: "tinted" })
   })
 
   it("completes a value saved before bases existed, keeping its fields", async () => {
@@ -143,7 +145,7 @@ describe("useAppearanceSync", () => {
 
     await waitFor(() => expect(result.current.accent).toBe("workspace"))
     await waitFor(() => expect(puts()).toHaveLength(1))
-    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "light", accent: "workspace", base: "cool", density: "comfortable", motion: "system", textSize: "default", sidebar: "hover" })
+    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "light", accent: "workspace", base: "cool", density: "comfortable", motion: "system", textSize: "default", sidebar: "hover", lightRail: "tinted" })
   })
 
   it("sends nothing at all with sync off on this device", async () => {
