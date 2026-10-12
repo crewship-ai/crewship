@@ -38,5 +38,11 @@ func crewBudgetExpression(ctx context.Context, tx *sql.Tx, crewID string) (strin
 	if n, parseErr := strconv.Atoi(raw); parseErr == nil && n >= 6 && n <= 262144 {
 		minMB = n
 	}
-	return `(COALESCE((SELECT COALESCE(max_concurrent_agents,MAX(1,COALESCE(container_memory_mb,0)/` + strconv.Itoa(minMB) + `)) FROM crews WHERE id=` + crewID + `),1))`, nil
+	return `(COALESCE((SELECT CASE
+ WHEN max_concurrent_agents IS NOT NULL THEN
+  CASE WHEN typeof(max_concurrent_agents)='integer' AND max_concurrent_agents>0 THEN max_concurrent_agents ELSE 0 END
+ WHEN container_memory_mb IS NULL THEN 1
+ WHEN typeof(container_memory_mb)<>'integer' THEN 0
+ ELSE MAX(1,container_memory_mb/` + strconv.Itoa(minMB) + `) END
+ FROM crews WHERE id=` + crewID + `),1))`, nil
 }

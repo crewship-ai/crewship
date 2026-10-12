@@ -327,7 +327,7 @@ func (s *Store) MarkRuntimeRequested(ctx context.Context, workID, runID string, 
 		UPDATE work_attempts
 		SET runtime_phase = 'requested'
 		WHERE run_id = ? AND work_id = ? AND generation = ? AND ended_at IS NULL
-		  AND runtime_phase = 'starting'`,
+		  AND runtime_phase = 'starting' AND cancel_requested_at IS NULL`,
 		runID, workID, generation)
 	if err != nil {
 		return fmt.Errorf("work: record creation request: %w", err)
@@ -538,7 +538,23 @@ func (s *Store) RequestCancel(ctx context.Context, workID, requestedBy, reason s
 		return CancelResult{}, fmt.Errorf("work: begin cancel: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	result, err := s.RequestCancelTx(ctx, tx, workID, requestedBy, reason)
+	if err != nil {
+		return CancelResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
+	}
+	return result, nil
+}
 
+// RequestCancelTx records the same fenced cancellation inside the caller's
+// domain transaction. It never commits: a domain stop and its execution gate
+// must become visible together, or a creation can race between the two writes.
+func (s *Store) RequestCancelTx(ctx context.Context, tx *sql.Tx, workID, requestedBy, reason string) (CancelResult, error) {
+	if tx == nil {
+		return CancelResult{}, errors.New("work: cancel requires a transaction")
+	}
 	it, err := getItemTx(ctx, tx, workID)
 	if err != nil {
 		return CancelResult{}, err
@@ -546,9 +562,6 @@ func (s *Store) RequestCancel(ctx context.Context, workID, requestedBy, reason s
 	now := s.now().UTC()
 
 	if it.State.Terminal() {
-		if err := tx.Commit(); err != nil {
-			return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
-		}
 		return CancelResult{Outcome: CancelOutcomeAlreadyTerminal, State: it.State}, nil
 	}
 
@@ -569,9 +582,6 @@ func (s *Store) RequestCancel(ctx context.Context, workID, requestedBy, reason s
 			if err := appendEventTx(ctx, tx, it.ID, string(it.State), StateCancelled, "", it.Generation, reason, now); err != nil {
 				return CancelResult{}, err
 			}
-			if err := tx.Commit(); err != nil {
-				return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
-			}
 			return CancelResult{Outcome: CancelOutcomeCancelled, State: StateCancelled}, nil
 		}
 		// Lost the race inside our own transaction, which under an immediate
@@ -581,9 +591,6 @@ func (s *Store) RequestCancel(ctx context.Context, workID, requestedBy, reason s
 			return CancelResult{}, err
 		}
 		if it.State.Terminal() {
-			if err := tx.Commit(); err != nil {
-				return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
-			}
 			return CancelResult{Outcome: CancelOutcomeAlreadyTerminal, State: it.State}, nil
 		}
 	}
@@ -606,17 +613,11 @@ func (s *Store) RequestCancel(ctx context.Context, workID, requestedBy, reason s
 		// reconciliation rather than reporting a stop nobody performed —
 		// once, so repeated asks do not grow the history.
 		if it.State == StateNeedsReconciliation {
-			if err := tx.Commit(); err != nil {
-				return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
-			}
 			return CancelResult{Outcome: CancelOutcomeRequested, State: it.State}, nil
 		}
 		if err := s.setStateTx(ctx, tx, it, StateNeedsReconciliation, "", it.Generation,
 			"cancel requested for "+string(it.State)+" work with no open attempt", now); err != nil {
 			return CancelResult{}, err
-		}
-		if err := tx.Commit(); err != nil {
-			return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
 		}
 		return CancelResult{Outcome: CancelOutcomeRequested, State: StateNeedsReconciliation}, nil
 	}
@@ -628,9 +629,6 @@ func (s *Store) RequestCancel(ctx context.Context, workID, requestedBy, reason s
 	// row, and not the history either: three presses of a button are one
 	// decision, and three events would read as three.
 	if alreadyRequested.Valid {
-		if err := tx.Commit(); err != nil {
-			return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
-		}
 		return CancelResult{
 			Outcome: CancelOutcomeRequested, State: it.State, RunID: runID, Generation: generation,
 		}, nil
@@ -656,9 +654,6 @@ func (s *Store) RequestCancel(ctx context.Context, workID, requestedBy, reason s
 	if err := appendEventTx(ctx, tx, it.ID, string(it.State), it.State, runID, generation,
 		"cancel requested: "+reason, now); err != nil {
 		return CancelResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
 	}
 	return CancelResult{
 		Outcome: CancelOutcomeRequested, State: it.State, RunID: runID, Generation: generation,

@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
+	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/work"
 )
@@ -52,6 +54,78 @@ func TestAssignmentWorkReviewAcceptanceIsAtomic(t *testing.T) {
 		if err := memory.authorizeRun(f.wsID, bad.agent, claimed.RunID, bad.generation)(context.Background()); err == nil {
 			t.Fatalf("foreign/stale memory authority accepted: %+v", bad)
 		}
+	}
+}
+
+func TestAssignmentWorkReviewHumanHandoffBeforeCreation(t *testing.T) {
+	f := setupDelegationFixture(t)
+	ctx := context.Background()
+	mission := seedIssue(t, f.db, f.wsID, "crewD", f.lead, "ENG-1", "TODO")
+	var user string
+	if err := f.db.QueryRow(`SELECT user_id FROM workspace_members WHERE workspace_id=?`, f.wsID).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	f.insertRootDispatch(t, "prelaunch", f.lead, f.work1, "PENDING")
+	execOrFatal(t, f.db, `UPDATE assignments SET mission_id=? WHERE id='prelaunch'`, mission)
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := acceptAssignmentTx(ctx, tx, "prelaunch")
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	store := work.NewStore(f.db)
+	claimed, err := store.Claim(ctx, work.ClaimOptions{LeaseOwner: "review", WorkID: r.WorkID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.MarkStarting(ctx, r.WorkID, claimed.RunID, claimed.Generation, "agent-run:"+claimed.RunID); err != nil {
+		t.Fatal(err)
+	}
+	a := dispatch.Assignment{Item: claimed.Item, RunID: claimed.RunID, Attempt: claimed.Attempt, Generation: claimed.Generation}
+	f.h.agentRunLock = chatbridge.NewAgentRunLock()
+	if !f.h.agentRunLock.TryStart(f.work1) {
+		t.Fatal("fixture lock unavailable")
+	}
+	defer f.h.agentRunLock.End(f.work1)
+	ownedCtx := context.WithValue(ctx, assignmentExecutionKey{}, &assignmentExecution{assignment: a})
+	auth := assignmentWorkAuthorizer{h: f.h}
+	if d, err := auth.Authorize(ownedCtx, a); err != nil || d != dispatch.Allow() {
+		t.Fatalf("own lock refused: %v %v", d, err)
+	}
+	tx, err = f.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = holdIssueWorkTx(ctx, tx, mission, user, "human takes over", time.Now().UTC().Format(time.RFC3339)); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err = f.db.QueryRow(`SELECT status FROM assignments WHERE id='prelaunch'`).Scan(&status); err != nil || status != "PENDING" {
+		t.Fatalf("unsettled domain prematurely terminal: %s err=%v", status, err)
+	}
+	// The stop commits after authorization and before the creation write.
+	// No repeated authorization, dispatcher poll or background flush can be
+	// required to close this race.
+	cancelled, err := store.CancelRequested(ctx, claimed.RunID)
+	if err != nil || !cancelled {
+		t.Fatalf("handoff cancellation lost: %v %v", cancelled, err)
+	}
+	launch := &webhookLaunch{store: store, workID: r.WorkID, runID: claimed.RunID, generation: claimed.Generation}
+	if err = launch.RequestCreation(ownedCtx); err == nil {
+		t.Fatal("exec creation admitted after human handoff")
+	}
+	if launch.requested {
+		t.Fatal("creation crossed the durable gate")
 	}
 }
 

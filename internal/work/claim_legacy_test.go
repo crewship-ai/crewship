@@ -194,3 +194,46 @@ func TestClaimMixedLegacyCrewLastSlotAtomic(t *testing.T) {
 		t.Fatalf("claimed=%d blocked=%d", claimed, blocked)
 	}
 }
+
+func TestClaimCorruptCrewOverrideCannotBypassCapacity(t *testing.T) {
+	s, db, _ := newTestStore(t)
+	seedLegacyAssignment(t, db)
+	if _, err := db.Exec(`UPDATE crews SET max_concurrent_agents='bogus' WHERE id='crew'`); err != nil {
+		t.Fatal(err)
+	}
+	r := backgroundReq("new-agent")
+	r.CrewID = "crew"
+	blocked := accept(t, s, db, r)
+	it, err := s.Get(context.Background(), blocked.WorkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := s.countLiveTx(context.Background(), tx)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	allowed, err := s.admitsTx(context.Background(), tx, it, DefaultLimits(), live)
+	_ = tx.Rollback()
+	if err != nil || allowed {
+		t.Fatalf("authoritative pass admitted corrupt override: %v %v", allowed, err)
+	}
+	if c, err := s.Claim(context.Background(), ClaimOptions{LeaseOwner: "test", WorkID: blocked.WorkID}); !errors.Is(err, ErrNoWork) {
+		t.Fatalf("invalid override bypassed cap: claim=%v err=%v", c, err)
+	}
+	// The SQL prefilter must not hide another crew behind invalid configuration.
+	free := accept(t, s, db, backgroundReq("free"))
+	if c, err := s.Claim(context.Background(), ClaimOptions{LeaseOwner: "test"}); err != nil || c.Item.ID != free.WorkID {
+		t.Fatalf("unrelated work blocked: claim=%v err=%v", c, err)
+	}
+	if _, err := db.Exec(`UPDATE crews SET max_concurrent_agents=2 WHERE id='crew'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Claim(context.Background(), ClaimOptions{LeaseOwner: "test", WorkID: blocked.WorkID}); err != nil {
+		t.Fatalf("valid override refused: %v", err)
+	}
+}
