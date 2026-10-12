@@ -10,6 +10,9 @@ vi.mock("next-themes", () => ({ useTheme: () => ({ theme, setTheme }) }))
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a) }))
 
+let workspaceHex: string | null | undefined = null
+vi.mock("@/components/layout/workspace-accent", () => ({ useWorkspaceAccentHex: () => workspaceHex }))
+
 import { AppearanceSection } from "../appearance-section"
 import { ACCENTS } from "@/lib/theme/accents"
 import { APPEARANCE_SYNC_STORAGE_KEY, DENSITY_STORAGE_KEY, MOTION_STORAGE_KEY } from "@/lib/theme/appearance"
@@ -28,6 +31,8 @@ beforeEach(() => {
   theme = "dark"
   delete document.documentElement.dataset.density
   delete document.documentElement.dataset.motion
+  delete document.documentElement.dataset.base
+  workspaceHex = null
 })
 afterEach(() => {
   cleanup()
@@ -91,5 +96,26 @@ describe("AppearanceSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Compact" }))
     fireEvent.click(screen.getByRole("radio", { name: "Teal" }))
     expect(apiFetch).not.toHaveBeenCalled()
+  })
+
+  it("picks a base palette and remembers it; Cool is the bare default", () => {
+    render(<AppearanceSection />)
+    const group = screen.getByRole("radiogroup", { name: "Base palette" })
+    expect(group.querySelectorAll('[role="radio"]')).toHaveLength(4)
+    fireEvent.click(screen.getByRole("radio", { name: /^Warm/ }))
+    expect(document.documentElement.dataset.base).toBe("warm")
+    expect(store.get("crewship-base")).toBe("warm")
+    fireEvent.click(screen.getByRole("radio", { name: /^Cool/ }))
+    expect(document.documentElement.dataset.base).toBeUndefined()
+  })
+
+  it("says where the Workspace accent comes from", () => {
+    render(<AppearanceSection />)
+    expect(screen.getByTestId("workspace-accent-hint")).toHaveTextContent(/admin can set a team brand colour/i)
+    cleanup()
+    workspaceHex = "#E11D48"
+    render(<AppearanceSection />)
+    expect(screen.getByTestId("workspace-accent-hint")).toHaveTextContent(/team's brand colour, adjusted/i)
+    expect(screen.getByRole("radio", { name: "Workspace" })).toBeInTheDocument()
   })
 })

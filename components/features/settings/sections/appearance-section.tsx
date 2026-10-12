@@ -1,13 +1,16 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Contrast, Palette, SlidersHorizontal } from "lucide-react"
+import { Contrast, Layers, Palette, SlidersHorizontal } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Switch } from "@/components/ui/switch"
 import { AccentPicker, THEME_OPTIONS } from "@/components/layout/theme-switcher"
 import { useAppearance } from "@/hooks/use-appearance"
 import type { Density, MotionChoice, ThemeChoice } from "@/lib/theme/appearance"
+import { BASES, type BaseId } from "@/lib/theme/bases"
+import { WORKSPACE_ACCENT } from "@/lib/theme/accents"
+import { useWorkspaceAccentHex } from "@/components/layout/workspace-accent"
 import { SettingsCard, SettingsRow, SettingsSegmented } from "../shared"
 
 // Settings › Account › Appearance.
@@ -96,8 +99,55 @@ function ThemeTiles({ value, onChange }: { value: ThemeChoice | undefined; onCha
   )
 }
 
+/**
+ * One tile per base: its light ground and card on the left, its dark ones on
+ * the right, so both modes of a base are judged at once — the choice applies
+ * to whichever theme is showing. Literal colours for the same reason as the
+ * theme tiles; the bar is the live accent.
+ */
+function BaseTiles({ value, onChange }: { value: BaseId; onChange: (b: BaseId) => void }) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  return (
+    <div role="radiogroup" aria-label="Base palette" className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-4">
+      {BASES.map((b) => {
+        const checked = mounted && value === b.id
+        return (
+          <button
+            key={b.id}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            aria-label={`${b.label}: ${b.description}`}
+            onClick={() => onChange(b.id)}
+            className={cn(
+              "flex flex-col gap-2 rounded-xl border p-1.5 text-left outline-none transition-colors",
+              "hover:border-line-strong focus-visible:ring-2 focus-visible:ring-ring/50",
+              checked ? "border-primary ring-1 ring-primary" : "border-border",
+            )}
+          >
+            <div aria-hidden className="flex h-14 overflow-hidden rounded-lg border border-border/60">
+              {([b.light, b.dark] as const).map(([ground, card], i) => (
+                <div key={i} className="flex flex-1 flex-col gap-1 p-1.5" style={{ background: ground }}>
+                  <div className="h-1 w-1/2 rounded-full bg-[var(--brand)]" />
+                  <div className="flex-1 rounded" style={{ background: card, boxShadow: `inset 0 0 0 1px ${i ? "#ffffff14" : "#0000000f"}` }} />
+                </div>
+              ))}
+            </div>
+            <span className="px-1 pb-0.5">
+              <span className={cn("block text-control", checked ? "text-foreground" : "text-muted-foreground")}>{b.label}</span>
+              <span className="block text-label text-muted-foreground-soft">{b.description}</span>
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export function AppearanceSection() {
-  const { theme, setTheme, density, setDensity, motion, setMotion, syncEnabled, setSyncEnabled } = useAppearance()
+  const { theme, setTheme, accent, base, setBase, density, setDensity, motion, setMotion, syncEnabled, setSyncEnabled } = useAppearance()
+  const workspaceHex = useWorkspaceAccentHex()
 
   return (
     <div className="space-y-5">
@@ -107,6 +157,18 @@ export function AppearanceSection() {
 
       <SettingsCard icon={Palette} title="Accent" description="The one brand colour the interface is tinted with">
         <AccentPicker showLabels className="p-4" />
+        {/* Where the Workspace swatch comes from — or why it is missing. */}
+        <p className="border-t border-border/60 px-4 py-2.5 text-label text-muted-foreground" data-testid="workspace-accent-hint">
+          {workspaceHex
+            ? "Workspace uses your team's brand colour, adjusted where needed so text on it stays readable."
+            : accent === WORKSPACE_ACCENT
+              ? "This workspace has no brand colour yet, so Workspace shows Blue. An admin can set one in General › Pages appearance."
+              : "An admin can set a team brand colour in General › Pages appearance; it then appears here as Workspace."}
+        </p>
+      </SettingsCard>
+
+      <SettingsCard icon={Layers} title="Base" description="The neutral tone of backgrounds, cards, sidebar and borders">
+        <BaseTiles value={base} onChange={setBase} />
       </SettingsCard>
 
       <SettingsCard icon={SlidersHorizontal} title="Layout & motion">

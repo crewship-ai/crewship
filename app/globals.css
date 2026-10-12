@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 /* Brand colours per accent theme — see the header of that file. */
 @import "./styles/accents.css";
+@import "./styles/bases.css";
 
 @custom-variant dark (&:is(.dark *));
 

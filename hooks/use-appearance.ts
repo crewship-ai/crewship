@@ -3,16 +3,19 @@
 import { useCallback, useSyncExternalStore } from "react"
 import { useTheme } from "next-themes"
 
-import { DEFAULT_ACCENT, type AccentId } from "@/lib/theme/accents"
+import { DEFAULT_ACCENT, type AccentChoice } from "@/lib/theme/accents"
+import { DEFAULT_BASE, type BaseId } from "@/lib/theme/bases"
 import {
   DEFAULT_DENSITY,
   DEFAULT_MOTION,
   isThemeChoice,
   readAccent,
+  readBase,
   readDensity,
   readMotion,
   readSyncEnabled,
   setAccentChoice,
+  setBase,
   setDensity,
   setMotion,
   setSyncEnabled,
@@ -28,12 +31,16 @@ import {
 // its own copy. The <html> attributes are already right before that: the boot
 // scripts in app/layout.tsx painted them from storage.
 const serverAccent = () => DEFAULT_ACCENT
+const serverBase = () => DEFAULT_BASE
 const serverDensity = () => DEFAULT_DENSITY
 const serverMotion = () => DEFAULT_MOTION
 const serverSync = () => true
 
-export function useAccentChoice(): AccentId {
+export function useAccentChoice(): AccentChoice {
   return useSyncExternalStore(subscribeAppearance, readAccent, serverAccent)
+}
+export function useBase(): BaseId {
+  return useSyncExternalStore(subscribeAppearance, readBase, serverBase)
 }
 export function useDensity(): Density {
   return useSyncExternalStore(subscribeAppearance, readDensity, serverDensity)
@@ -49,12 +56,14 @@ export interface AppearanceState {
   /** The stored theme choice (System stays "system"); undefined until
    *  next-themes knows it. */
   theme: ThemeChoice | undefined
-  accent: AccentId
+  accent: AccentChoice
+  base: BaseId
   density: Density
   motion: MotionChoice
   syncEnabled: boolean
   setTheme: (t: ThemeChoice) => void
-  setAccent: (id: AccentId) => void
+  setAccent: (id: AccentChoice) => void
+  setBase: (b: BaseId) => void
   setDensity: (d: Density) => void
   setMotion: (m: MotionChoice) => void
   setSyncEnabled: (on: boolean) => void
@@ -77,11 +86,13 @@ export function useAppearance(): AppearanceState {
   return {
     theme,
     accent: useAccentChoice(),
+    base: useBase(),
     density: useDensity(),
     motion: useMotionChoice(),
     syncEnabled: useAppearanceSyncEnabled(),
     setTheme,
     setAccent: setAccentChoice,
+    setBase,
     setDensity,
     setMotion,
     setSyncEnabled,

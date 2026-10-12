@@ -40,6 +40,11 @@ describe("parseAppearance", () => {
     })
   })
 
+  it("accepts a base and the workspace accent", () => {
+    expect(parseAppearance({ accent: "workspace", base: "warm" })).toEqual({ accent: "workspace", base: "warm" })
+    expect(parseAppearance({ accent: "#ff0000", base: "sepia" })).toEqual({})
+  })
+
   // Written by another build of the UI: one field it does not know must not
   // cost the user the rest of their look.
   it("drops only the fields it does not recognise", () => {

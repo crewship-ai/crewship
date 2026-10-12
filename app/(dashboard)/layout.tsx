@@ -25,6 +25,7 @@ import { RealtimeToasts } from "@/components/layout/realtime-toasts"
 import { RealtimeStatusBanner } from "@/components/layout/realtime-status-banner"
 import { NotificationSoundEvents } from "@/components/layout/notification-sound-events"
 import { AppearanceSync } from "@/components/layout/appearance-sync"
+import { WorkspaceAccentStyle } from "@/components/layout/workspace-accent"
 
 export default function DashboardLayout({
   children,
@@ -136,6 +137,9 @@ export default function DashboardLayout({
         {trusted && <NotificationSoundEvents />}
         {/* GET/PUT /api/v1/me/preferences are not on the restricted allowlist. */}
         {trusted && <AppearanceSync />}
+        {/* Paints the workspace brand accent for a user who picked it; reads
+            only the already-loaded workspace list, so no session is refused. */}
+        <WorkspaceAccentStyle />
       </ActiveRoutineRunsProvider>
       </JournalLookupProvider>
     </RealtimeProvider>

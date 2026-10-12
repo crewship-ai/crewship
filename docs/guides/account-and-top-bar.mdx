@@ -45,9 +45,11 @@ Restricted sessions are not offered Notification preferences or Connect CLI.
 
 - **Theme** — Dark, Light or System (follows the OS).
 - **Accent** — Blue, Indigo, Violet, Teal or Graphite; tints buttons, links and selection.
+  - **Workspace** appears once an admin has set a brand colour in **Settings → General → Pages appearance → Brand accent**. Its hue and saturation are kept and each shade's lightness is adjusted until it meets WCAG AA (4.5:1) on every base, so a light brand colour like mint still gets readable buttons and links. Switching workspace switches the colour; a workspace without one shows Blue.
+- **Base** — the neutral tone of backgrounds, cards, sidebar, borders and muted text: **Cool** (blue-tinted, the default), **Neutral** (pure greys), **Warm** (stone and paper) or **Black** (true black in dark mode, crisp white in light). Every base is held to the same contrast floors as the default under every accent.
 - **Density** — Comfortable or Compact. Compact tightens the vertical padding of sidebar rows, settings rows and table cells on mouse/trackpad devices; text size and touch targets do not change.
 - **Reduce motion** — System (the OS setting), On (no transitions or animations), Off (full motion even if the OS asks for less).
-- **Sync across devices** — on by default. Theme, accent, density and motion are stored with your account under the `appearance` key of the per-user preference store (`GET`/`PUT /api/v1/me/preferences/appearance`; CLI: `crewship preferences`). Turning sync on adopts the value already saved on the account; with sync off nothing is sent and the choices stay in this browser.
+- **Sync across devices** — on by default. Theme, accent, base, density and motion are stored with your account under the `appearance` key of the per-user preference store (`GET`/`PUT /api/v1/me/preferences/appearance`; CLI: `crewship preferences`). Turning sync on adopts the value already saved on the account; with sync off nothing is sent and the choices stay in this browser.
 
 ## Settings → Sessions & tokens
 

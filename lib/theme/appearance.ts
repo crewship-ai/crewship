@@ -27,7 +27,10 @@
  * by a stale copy.
  */
 
-import { ACCENT_STORAGE_KEY, DEFAULT_ACCENT, applyAccent, isAccentId, type AccentId } from "@/lib/theme/accents"
+import { ACCENT_STORAGE_KEY, DEFAULT_ACCENT, applyAccent, isAccentChoice, type AccentChoice } from "@/lib/theme/accents"
+import { BASES, BASE_STORAGE_KEY, DEFAULT_BASE, applyBaseAttr, isBaseId, type BaseId } from "@/lib/theme/bases"
+
+const BASES_NON_DEFAULT = BASES.map((b) => b.id).filter((id) => id !== DEFAULT_BASE)
 
 export const THEME_CHOICES = ["dark", "light", "system"] as const
 export type ThemeChoice = (typeof THEME_CHOICES)[number]
@@ -55,7 +58,10 @@ export const APPEARANCE_PREFERENCE_KEY = "appearance"
 /** What syncs across devices. */
 export interface Appearance {
   theme: ThemeChoice
-  accent: AccentId
+  accent: AccentChoice
+  /** The neutral ground (lib/theme/bases.ts). Optional on the wire: a value
+   *  saved by a build before bases existed simply has none. */
+  base: BaseId
   density: Density
   motion: MotionChoice
 }
@@ -81,7 +87,8 @@ export function parseAppearance(value: unknown): Partial<Appearance> {
   const v = value as Record<string, unknown>
   const out: Partial<Appearance> = {}
   if (isThemeChoice(v.theme)) out.theme = v.theme
-  if (isAccentId(v.accent)) out.accent = v.accent
+  if (isAccentChoice(v.accent)) out.accent = v.accent
+  if (isBaseId(v.base)) out.base = v.base
   if (isDensity(v.density)) out.density = v.density
   if (isMotionChoice(v.motion)) out.motion = v.motion
   return out
@@ -142,7 +149,8 @@ function emit(): void {
 
 function onStorage(e: StorageEvent): void {
   // Another tab changed a choice. Paint it here too, then let readers re-read.
-  if (e.key === ACCENT_STORAGE_KEY && isAccentId(e.newValue)) document.documentElement.dataset.accent = e.newValue
+  if (e.key === ACCENT_STORAGE_KEY && isAccentChoice(e.newValue)) document.documentElement.dataset.accent = e.newValue
+  else if (e.key === BASE_STORAGE_KEY) applyBaseAttr(readBase())
   else if (e.key === DENSITY_STORAGE_KEY) applyDensityAttr(readDensity())
   else if (e.key === MOTION_STORAGE_KEY) applyMotionAttr(readMotion())
   else if (e.key !== APPEARANCE_SYNC_STORAGE_KEY) return
@@ -171,8 +179,16 @@ export function readSyncEnabled(): boolean {
   return read(APPEARANCE_SYNC_STORAGE_KEY, (v): v is "0" | "1" => v === "0" || v === "1", "1") === "1"
 }
 /** readStoredAccent, plus this page's memory when storage throws. */
-export function readAccent(): AccentId {
-  return read(ACCENT_STORAGE_KEY, isAccentId, DEFAULT_ACCENT)
+export function readAccent(): AccentChoice {
+  return read(ACCENT_STORAGE_KEY, isAccentChoice, DEFAULT_ACCENT)
+}
+export function readBase(): BaseId {
+  return read(BASE_STORAGE_KEY, isBaseId, DEFAULT_BASE)
+}
+export function setBase(b: BaseId): void {
+  applyBaseAttr(b)
+  write(BASE_STORAGE_KEY, b)
+  emit()
 }
 
 export function setDensity(d: Density): void {
@@ -190,19 +206,21 @@ export function setSyncEnabled(on: boolean): void {
   emit()
 }
 /** applyAccent plus a same-tab notification, so every picker agrees. */
-export function setAccentChoice(id: AccentId): void {
+export function setAccentChoice(id: AccentChoice): void {
   applyAccent(id)
   memory.set(ACCENT_STORAGE_KEY, id)
   emit()
 }
 
 /**
- * Inline in <head> (app/layout.tsx), beside the accent script, so a compact
- * or reduced-motion user does not see one frame of the comfortable, animated
- * layout on every load. Only the two known attribute values are ever written.
+ * Inline in <head> (app/layout.tsx), beside the accent script, so a compact,
+ * reduced-motion or non-Cool-base user does not see one frame of the default
+ * look on every load. Only known attribute values are ever written.
  */
 export const APPEARANCE_BOOT_SCRIPT = `(function(){try{var d=document.documentElement,s=localStorage;if(s.getItem(${JSON.stringify(
   DENSITY_STORAGE_KEY,
 )})==="compact")d.setAttribute("data-density","compact");var m=s.getItem(${JSON.stringify(
   MOTION_STORAGE_KEY,
-)});if(m==="on")d.setAttribute("data-motion","reduce");else if(m==="off")d.setAttribute("data-motion","full")}catch(e){}})()`
+)});if(m==="on")d.setAttribute("data-motion","reduce");else if(m==="off")d.setAttribute("data-motion","full");var b=s.getItem(${JSON.stringify(
+  BASE_STORAGE_KEY,
+)});if(${JSON.stringify(BASES_NON_DEFAULT)}.indexOf(b)>-1)d.setAttribute("data-base",b)}catch(e){}})()`

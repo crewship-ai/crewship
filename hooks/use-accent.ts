@@ -1,6 +1,6 @@
 "use client"
 
-import type { AccentId } from "@/lib/theme/accents"
+import type { AccentChoice } from "@/lib/theme/accents"
 import { setAccentChoice } from "@/lib/theme/appearance"
 import { useAccentChoice } from "@/hooks/use-appearance"
 
@@ -14,6 +14,6 @@ import { useAccentChoice } from "@/hooks/use-appearance"
  * the same swatch pressed, and another tab's change still arrives through the
  * store's storage listener. Kept as its own hook for existing callers.
  */
-export function useAccent(): [AccentId, (id: AccentId) => void] {
+export function useAccent(): [AccentChoice, (id: AccentChoice) => void] {
   return [useAccentChoice(), setAccentChoice]
 }

@@ -5,7 +5,8 @@ import { Monitor, Moon, Sun, type LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useAppearance } from "@/hooks/use-appearance"
-import { ACCENTS } from "@/lib/theme/accents"
+import { ACCENTS, WORKSPACE_ACCENT, type AccentChoice } from "@/lib/theme/accents"
+import { useWorkspaceAccentHex } from "@/components/layout/workspace-accent"
 import type { ThemeChoice } from "@/lib/theme/appearance"
 
 export const THEME_OPTIONS: { value: ThemeChoice; label: string; icon: LucideIcon }[] = [
@@ -82,15 +83,25 @@ export function ThemeSwitcher({ className, size = "default" }: { className?: str
  * `showLabels` prints each name under its swatch — Settings › Appearance has
  * the room, the menu does not (there the name is the tooltip and aria-label).
  */
+type AccentOption = { id: AccentChoice; label: string; swatch: string }
+
 export function AccentPicker({ className, showLabels = false }: { className?: string; showLabels?: boolean }) {
   const { accent, setAccent } = useAppearance()
+  const workspaceHex = useWorkspaceAccentHex()
+  // The workspace's brand colour, offered once an admin has set one — or kept
+  // in the row while it is the user's choice, so the pressed swatch never
+  // vanishes (it then paints Blue until a colour exists again).
+  const options: AccentOption[] = ACCENTS.map(({ id, label, swatch }): AccentOption => ({ id, label, swatch }))
+  if (workspaceHex || accent === WORKSPACE_ACCENT) {
+    options.push({ id: WORKSPACE_ACCENT, label: "Workspace", swatch: workspaceHex ?? "var(--brand)" })
+  }
   return (
     <div
       role="radiogroup"
       aria-label="Accent colour"
       className={cn("flex items-center", showLabels ? "flex-wrap gap-3" : "gap-1.5", className)}
     >
-      {ACCENTS.map(({ id, label, swatch }) => {
+      {options.map(({ id, label, swatch }) => {
         const checked = accent === id
         const button = (
           <button

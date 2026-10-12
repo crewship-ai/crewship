@@ -1,0 +1,168 @@
+/* ── Base palettes ─────────────────────────────────────────────────────────
+ *
+ * The neutral ground under the accent: background, cards, sidebar, borders,
+ * muted text. Settings › Appearance › Base sets data-base on <html>; the list
+ * the picker offers is lib/theme/bases.ts.
+ *
+ * Cool is not here — it is the bare :root / .dark palette in globals.css, so
+ * a missing attribute is Cool. Every other base has one light and one dark
+ * block, written with exactly these selectors (the tests parse them):
+ *     :root[data-base="<id>"]          light
+ *     :root.dark[data-base="<id>"]     dark
+ * Specificity does the switching: :root.dark[data-base] (0,3,0) beats the
+ * light block of the same base (0,2,0), which beats globals' .dark (0,1,0) —
+ * so every block MUST define every token, or a light value leaks into dark.
+ *
+ * lib/__tests__/theme-base-contrast.test.ts holds each base, under every
+ * accent, to the same AA floors as the default ground.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* Neutral — pure greys, no hue */
+:root[data-base="neutral"] {
+  --background: #F7F7F8;
+  --foreground: #18181B;
+  --card: #FFFFFF;
+  --card-foreground: #18181B;
+  --popover: #FFFFFF;
+  --popover-foreground: #18181B;
+  --muted: #EFEFF1;
+  --muted-foreground: #55555F;
+  --muted-foreground-soft: #64646E;
+  --accent: #EFEFF1;
+  --accent-foreground: #18181B;
+  --border: #DEDEE2;
+  --input: #DEDEE2;
+  --control-border: #87878F;
+  --sidebar: #EBEBED;
+  --sidebar-foreground: #18181B;
+  --sidebar-accent: #FFFFFF;
+  --sidebar-border: #DEDEE2;
+  --surface-subtle: #FBFBFB;
+  --surface-raised: #FFFFFF;
+  --scrollbar-thumb: oklch(0.80 0 0);
+  --scrollbar-thumb-hover: oklch(0.66 0 0);
+}
+:root.dark[data-base="neutral"] {
+  --background: #0B0B0C;
+  --foreground: #EDEDEF;
+  --card: #141416;
+  --card-foreground: #EDEDEF;
+  --popover: #141416;
+  --popover-foreground: #EDEDEF;
+  --muted: #18181B;
+  --muted-foreground: #9A9AA3;
+  --muted-foreground-soft: #84848D;
+  --accent: #1F1F23;
+  --accent-foreground: #EDEDEF;
+  --border: #27272A;
+  --input: #2D2D31;
+  --control-border: oklch(0.54 0 0);
+  --sidebar: #0E0E10;
+  --sidebar-foreground: #EDEDEF;
+  --sidebar-accent: #1F1F23;
+  --sidebar-border: #27272A;
+  --surface-subtle: #101012;
+  --surface-raised: #18181B;
+  --scrollbar-thumb: oklch(0.38 0 0);
+  --scrollbar-thumb-hover: oklch(0.52 0 0);
+}
+
+/* Warm — stone and paper */
+:root[data-base="warm"] {
+  --background: #F7F5F2;
+  --foreground: #1C1917;
+  --card: #FFFFFF;
+  --card-foreground: #1C1917;
+  --popover: #FFFFFF;
+  --popover-foreground: #1C1917;
+  --muted: #F0EDE8;
+  --muted-foreground: #5C554B;
+  --muted-foreground-soft: #6A6358;
+  --accent: #F0EDE8;
+  --accent-foreground: #1C1917;
+  --border: #E2DDD5;
+  --input: #E2DDD5;
+  --control-border: #8E877B;
+  --sidebar: #EFEBE5;
+  --sidebar-foreground: #1C1917;
+  --sidebar-accent: #FFFFFF;
+  --sidebar-border: #E2DDD5;
+  --surface-subtle: #FCFBF9;
+  --surface-raised: #FFFFFF;
+  --scrollbar-thumb: oklch(0.80 0.01 70);
+  --scrollbar-thumb-hover: oklch(0.66 0.012 70);
+}
+:root.dark[data-base="warm"] {
+  --background: #0D0B0A;
+  --foreground: #EFEBE6;
+  --card: #161412;
+  --card-foreground: #EFEBE6;
+  --popover: #161412;
+  --popover-foreground: #EFEBE6;
+  --muted: #1B1816;
+  --muted-foreground: #A39C93;
+  --muted-foreground-soft: #8C857C;
+  --accent: #221F1C;
+  --accent-foreground: #EFEBE6;
+  --border: #2B2724;
+  --input: #322D29;
+  --control-border: oklch(0.54 0.012 70);
+  --sidebar: #100E0C;
+  --sidebar-foreground: #EFEBE6;
+  --sidebar-accent: #221F1C;
+  --sidebar-border: #2B2724;
+  --surface-subtle: #12100E;
+  --surface-raised: #1B1816;
+  --scrollbar-thumb: oklch(0.38 0.01 70);
+  --scrollbar-thumb-hover: oklch(0.52 0.012 70);
+}
+
+/* Black — true black for OLED in dark mode; crisp white paper in light */
+:root[data-base="black"] {
+  --background: #FAFAFA;
+  --foreground: #0A0A0A;
+  --card: #FFFFFF;
+  --card-foreground: #0A0A0A;
+  --popover: #FFFFFF;
+  --popover-foreground: #0A0A0A;
+  --muted: #F2F2F2;
+  --muted-foreground: #545454;
+  --muted-foreground-soft: #636363;
+  --accent: #F2F2F2;
+  --accent-foreground: #0A0A0A;
+  --border: #E3E3E3;
+  --input: #E3E3E3;
+  --control-border: #878787;
+  --sidebar: #F4F4F4;
+  --sidebar-foreground: #0A0A0A;
+  --sidebar-accent: #FFFFFF;
+  --sidebar-border: #E3E3E3;
+  --surface-subtle: #FDFDFD;
+  --surface-raised: #FFFFFF;
+  --scrollbar-thumb: oklch(0.80 0 0);
+  --scrollbar-thumb-hover: oklch(0.66 0 0);
+}
+:root.dark[data-base="black"] {
+  --background: #000000;
+  --foreground: #EDEDEF;
+  --card: #0B0B0C;
+  --card-foreground: #EDEDEF;
+  --popover: #0F0F11;
+  --popover-foreground: #EDEDEF;
+  --muted: #111113;
+  --muted-foreground: #9A9AA3;
+  --muted-foreground-soft: #85858E;
+  --accent: #18181B;
+  --accent-foreground: #EDEDEF;
+  --border: #1F1F23;
+  --input: #26262A;
+  --control-border: oklch(0.52 0 0);
+  --sidebar: #050506;
+  --sidebar-foreground: #EDEDEF;
+  --sidebar-accent: #18181B;
+  --sidebar-border: #1F1F23;
+  --surface-subtle: #060607;
+  --surface-raised: #111113;
+  --scrollbar-thumb: oklch(0.36 0 0);
+  --scrollbar-thumb-hover: oklch(0.50 0 0);
+}
