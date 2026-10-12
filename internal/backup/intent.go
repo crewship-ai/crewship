@@ -80,6 +80,12 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"chats":                    IntentInclude,
 	"agent_mcp_bindings":       IntentInclude,
 	"journal_entries":          IntentInclude,
+	// Replay receipts authenticate execution against this installation's
+	// protected spool and run identities, which workspace bundles do not carry.
+	// Their opaque fingerprints cannot be re-keyed for a forked workspace.
+	// Visible output remains in journal_entries; whole-instance DB copies retain
+	// receipts without transplanting them through the workspace restore path.
+	"journal_replay_receipts": IntentExcludeRuntime,
 	// journal_entry_priorities (v166) is the append-only ledger of operator
 	// pin/permanent edits. It rides with journal_entries: without it a restored
 	// bundle's live `priority` values would have no ledger to reconcile against,

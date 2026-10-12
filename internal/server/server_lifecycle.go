@@ -258,6 +258,9 @@ func (s *Server) Start(ctx context.Context) error {
 					s.logger.Info("deleted agent runs", "stopped", res.Stopped, "pending", res.Pending, "error", errors.Join(res.Errors...))
 				}
 				s.reconcileRecoveredRuntimes(ctx)
+				if err := s.flushRetainedOutput(ctx); err != nil {
+					s.logger.Warn("retained output pending projection", "error", err)
+				}
 				if err := s.flushRecoveredStops(ctx); err != nil {
 					s.logger.Warn("confirmed stop history pending retry", "error", err)
 				}

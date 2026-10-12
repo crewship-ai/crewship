@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ func TestRunProjection_RequiresFencedOutcomeAndPreservesResult(t *testing.T) {
 			}
 			code := 1
 			message := "captured failure"
-			result := RunResult{ExitCode: &code, ErrorMessage: &message, Metadata: map[string]any{"total_cost_usd": 0.125, "usage": map[string]any{"input_tokens": 12}}}
+			result := RunResult{ExitCode: &code, ErrorMessage: &message, Metadata: map[string]any{"total_cost_usd": 0.125, "usage": map[string]any{"input_tokens": json.Number("9007199254740993")}}}
 			if err := s.StageRunResult(ctx, receipt.WorkID, a.RunID, a.Generation, result); err != nil {
 				t.Fatal(err)
 			}
@@ -66,8 +67,11 @@ func TestRunProjection_RequiresFencedOutcomeAndPreservesResult(t *testing.T) {
 			if !p.Ready {
 				return
 			}
-			if p.Result.Metadata["total_cost_usd"] != 0.125 {
+			if p.Result.Metadata["total_cost_usd"] != json.Number("0.125") {
 				t.Fatalf("lost usage: %+v", p.Result)
+			}
+			if p.Result.Metadata["usage"].(map[string]any)["input_tokens"] != json.Number("9007199254740993") {
+				t.Fatalf("large integer usage rounded: %+v", p.Result)
 			}
 			if tc.state == StateCancelled && p.Result.ExitCode != nil {
 				t.Fatal("cancel fabricated exit code")
@@ -76,7 +80,7 @@ func TestRunProjection_RequiresFencedOutcomeAndPreservesResult(t *testing.T) {
 				t.Fatal(err)
 			}
 			p, _, err = s.RunProjection(ctx, a.RunID)
-			if err != nil || p.Result.Metadata["total_cost_usd"] != 0.125 {
+			if err != nil || p.Result.Metadata["total_cost_usd"] != json.Number("0.125") {
 				t.Fatalf("late duplicate overwrote result: %+v %v", p, err)
 			}
 			if ids, err := s.PendingRunProjections(ctx, 10); err != nil || len(ids) != 1 || ids[0] != a.RunID {
@@ -176,7 +180,7 @@ func TestRunProjection_ResolutionThenLateCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, owned, err := NewStore(db).RunProjection(ctx, a.RunID)
-	if err != nil || !owned || !p.Ready || p.Status != "CANCELLED" || p.Result.Metadata["total_cost_usd"] != 0.5 {
+	if err != nil || !owned || !p.Ready || p.Status != "CANCELLED" || p.Result.Metadata["total_cost_usd"] != json.Number("0.5") {
 		t.Fatalf("late capture/resolution: %+v %v", p, err)
 	}
 }

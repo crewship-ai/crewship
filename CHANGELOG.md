@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Local Linux Docker runs retain output across controller loss (#2845).** A private host helper keeps the actual CLI execution and redacted output independent of its reader. Recovery projects output and terminal results with durable acknowledgements, preserves work-generation ownership, and refuses duplicate launches. Capture has per-run and aggregate bounds and acknowledgement-based retention. Unsupported providers keep the existing transport; uncertain forced stops retain reconciliation rather than report completion.
+
 - **⌘K finds every place in the app (#3045).** As you type, the search box finds:
   - every Settings card, opening the tab and scrolling to the card; `/settings?tab=…&card=<slug>` links to one
   - the tabs and sections of Integrations, Inbox, Activity, Journal and Routines

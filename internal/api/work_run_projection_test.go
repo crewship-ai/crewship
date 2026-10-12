@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -121,7 +122,7 @@ func TestWorkRunProjection_RejectsPrematureAndCrossWorkspaceTerminalWrites(t *te
 		t.Fatal(kind)
 	}
 	p, _, err := s.RunProjection(t.Context(), a.RunID)
-	if err != nil || p.Result.Metadata["total_cost_usd"] != 0.25 {
+	if err != nil || p.Result.Metadata["total_cost_usd"] != json.Number("0.25") {
 		t.Fatalf("caller overrode stored result: %+v %v", p, err)
 	}
 }

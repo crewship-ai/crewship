@@ -319,6 +319,8 @@ func (rt *WebhookRuntime) Classify(a dispatch.Assignment, err error) dispatch.Ou
 	switch {
 	case err == nil:
 		return dispatch.OutcomeSucceeded
+	case errors.Is(err, orchestrator.ErrHostCaptureUnconfirmed):
+		return dispatch.OutcomeRetained
 	case errors.Is(err, orchestrator.ErrDetachedStillRunning):
 		// Nonterminal (#2626): the exec is alive and unsupervised by Run.
 		// The dispatcher must keep the attempt and monitor the runtime, not

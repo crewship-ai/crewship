@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/providerlogin"
+	"github.com/crewship-ai/crewship/internal/runoutput"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
@@ -100,8 +102,17 @@ type AgentRunRequest struct {
 	MissionID   string // mission this run belongs to; threaded into every journal emit so Cartographer checkpoints can anchor on per-mission journal cursors.
 	WorkspaceID string
 	ContainerID string
-	CLIAdapter  string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID
-	LLMModel    string // optional model override (e.g. claude-haiku-4-5-20251001)
+	// DurableOutputDir enables the experimental detached capture transport for
+	// this run. It must be an absolute, provisioned, instance-local persistent
+	// parent directory. No production dispatch enables this until replay and
+	// recovery ownership are wired. It is not accepted from user YAML/API.
+	DurableOutputDir string
+	// HostOutputDir selects the protected host capture transport. It is an
+	// internal admission input, never a workload path or public request field.
+	HostOutputDir   string
+	durableDeadline time.Time
+	CLIAdapter      string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID
+	LLMModel        string // optional model override (e.g. claude-haiku-4-5-20251001)
 	// LLMProvider is the agent's configured provider (ANTHROPIC, OPENAI,
 	// GOOGLE, OLLAMA, …). Used by the OPENCODE adapter to qualify a bare
 	// model name into OpenCode's required "provider/model" form (#1007);
@@ -399,9 +410,14 @@ func (c Credential) loginMode() string {
 // RunState tracks the runtime state of an active agent run, persisted in the
 // state provider for crash recovery.
 type RunState struct {
+	// Non-nil marks a replay-capable transport. Process absence alone must not
+	// terminalize it before its retained output/result has been reconciled.
+	Output        *RunOutputState           `json:"output,omitempty"`
 	ManagedLaunch *managedlaunch.Descriptor `json:"managed_launch,omitempty"`
 	// WorkspaceID preserves the original history scope even without run.started.
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	CrewID      string `json:"crew_id,omitempty"`
+	MissionID   string `json:"mission_id,omitempty"`
 	// RuntimeImageID is source-image evidence, not the mutable filesystem or
 	// proof of the binary eventually selected by PATH. Empty means unknown.
 	RuntimeImageID string    `json:"runtime_image_id,omitempty"`
@@ -424,6 +440,20 @@ type RunState struct {
 	StopJournalPending bool `json:"stop_journal_pending,omitempty"`
 	// StopOrigin distinguishes detected absence from an explicit user stop.
 	StopOrigin string `json:"stop_origin,omitempty"`
+}
+
+type RunOutputState struct {
+	Acknowledged bool            `json:"acknowledged,omitempty"`
+	Collected    bool            `json:"collected,omitempty"`
+	Endpoint     string          `json:"endpoint,omitempty"`
+	Version      int             `json:"version"`
+	Directory    string          `json:"directory"`
+	Deadline     time.Time       `json:"deadline"`
+	Adapter      string          `json:"adapter"`
+	Authority    json.RawMessage `json:"authority,omitempty"`
+	// RetainedResult is observed terminal evidence, not acknowledgement of
+	// output projection. Status cannot become successful until replay commits.
+	RetainedResult *runoutput.Snapshot `json:"retained_result,omitempty"`
 }
 
 // AgentEvent is a streaming event emitted during an agent run, such as text
@@ -496,12 +526,15 @@ type ContainerBusyProbe func(ctx context.Context, crewID, containerID string) bo
 type StatsRegisterFunc func(containerID, crewID, workspaceID string)
 
 type Orchestrator struct {
-	managedLaunchCrews     map[string]bool
-	managedLaunchResolver  ManagedLaunchResolver
-	runRecoveryMu          sync.Mutex // serializes recovered publication with local admission
-	agentRuns              sync.Map   // run id -> *agentRunControl; independent of credential HOME cleanup
-	userModelReader        func(context.Context, string, string) (string, error)
-	personalizationAllowed func(context.Context, string, string) (bool, error)
+	hostOutputRoot          string
+	hostOutputCapacityBytes int64
+	hostOutputCapacityRuns  int
+	managedLaunchCrews      map[string]bool
+	managedLaunchResolver   ManagedLaunchResolver
+	runRecoveryMu           sync.Mutex // serializes recovered publication with local admission
+	agentRuns               sync.Map   // run id -> *agentRunControl; independent of credential HOME cleanup
+	userModelReader         func(context.Context, string, string) (string, error)
+	personalizationAllowed  func(context.Context, string, string) (bool, error)
 	// agentLive refuses process creation for an agent that may no longer run
 	// (soft-deleted). Asked at the creation boundary of every run.
 	agentLive      func(context.Context, string) error

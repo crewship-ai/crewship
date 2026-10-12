@@ -21,7 +21,8 @@ compatible. Resolving a root does not create it.
 Explicit environment values win over YAML, which wins over derived defaults.
 An explicit YAML path equal to a historical default is still explicit. Empty
 environment values retain the configured value; an empty YAML memory root
-disables file-based workspace memory. Mandatory empty paths are rejected.
+disables file-based workspace memory. An empty YAML `storage.run_output_path`
+disables protected execution-output capture. Mandatory empty paths are rejected.
 The existing database flag wins over `DATABASE_URL`.
 
 | Server resource | Derived location |
@@ -30,11 +31,15 @@ The existing database flag wins over `DATABASE_URL`.
 | Crew storage | `<root>/output` |
 | Agent logs | `<root>/logs` |
 | Workspace memory | `<root>/memory` |
+| Protected execution output | `<root>/run-output` |
 | Bolt | `<root>/state.db` |
 | IPC | Existing platform socket derivation from the root |
 
 Setting an explicit database no longer changes derivation of other paths.
-Explicit relative SQLite URLs emit a deprecation warning; they and relative
+The protected execution-output path must be clean and absolute and must not be
+mounted into workloads; its host ownership checks are documented in
+[`internal/runoutput/README.md`](../../internal/runoutput/README.md).
+Explicit relative SQLite URLs emit a deprecation warning; they and other relative
 path overrides retain their working-directory interpretation for compatibility.
 They are not a portable
 installation configuration; use absolute paths. The socket length fallback and
