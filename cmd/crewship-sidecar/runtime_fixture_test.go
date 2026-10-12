@@ -124,6 +124,13 @@ func fixtureSupervisor(cmd *exec.Cmd, receiptDir string) int {
 }
 
 func TestMain(m *testing.M) {
+	// These private production helpers use their original argv and stdin
+	// protocol. Wrapping them as a serving child changes that protocol and
+	// must never fabricate a fixture completion receipt for a helper.
+	if fixtureProductionHelper(os.Args) {
+		main()
+		os.Exit(0)
+	}
 	if fixtureScenarioBase64 == "" {
 		os.Exit(m.Run())
 	}
@@ -160,6 +167,28 @@ func TestMain(m *testing.M) {
 		}
 	}
 	os.Exit(0)
+}
+
+func fixtureProductionHelper(args []string) bool {
+	return len(args) >= 2 && (args[1] == "--host-capture-probe-v1" || args[1] == "run-stop-process")
+}
+
+func TestFixtureProductionHelperDispatch(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"sidecar", "--host-capture-probe-v1"}, true},
+		{[]string{"sidecar", "run-stop-process", "--input-fd", "0"}, true},
+		{[]string{"sidecar"}, false},
+		{[]string{"sidecar", "--runtime-fixture-child", "run-stop-process"}, false},
+		{[]string{"sidecar", "--host-capture-probe-v1=other"}, false},
+		{[]string{"sidecar", "--version"}, false},
+	} {
+		if got := fixtureProductionHelper(tc.args); got != tc.want {
+			t.Errorf("helper dispatch %q = %v; want %v", tc.args, got, tc.want)
+		}
+	}
 }
 
 func TestFixtureTransportRejectsMalformedEmbeddedConfiguration(t *testing.T) {
