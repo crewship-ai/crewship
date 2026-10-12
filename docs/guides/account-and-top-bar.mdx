@@ -51,6 +51,17 @@ Restricted sessions are not offered Notification preferences or Connect CLI.
 - **Reduce motion** — System (the OS setting), On (no transitions or animations), Off (full motion even if the OS asks for less).
 - **Sync across devices** — on by default. Theme, accent, base, density and motion are stored with your account under the `appearance` key of the per-user preference store (`GET`/`PUT /api/v1/me/preferences/appearance`; CLI: `crewship preferences`). Turning sync on adopts the value already saved on the account; with sync off nothing is sent and the choices stay in this browser.
 
+## Where personal settings are stored
+
+Everything on these pages is stored with **your user**, not with the browser, in the per-user preference store (`user_preferences`, one row per user and key; `GET /api/v1/me/preferences`, CLI `crewship preferences list`):
+
+| Key | What |
+|---|---|
+| `appearance` | theme, accent, base, density, reduce motion |
+| `notification-sounds.<workspace-id>` | Notification sounds for that workspace |
+
+A new user starts on the defaults — Dark, **Blue**, Cool, Comfortable, motion following the OS, sounds off — and gets their own rows on the first change. The browser keeps a copy so the first paint is already right; on sign-in the server copy wins. Two things stay per device on purpose: the **Sync across devices** switch itself, and the browser's permission to play audio.
+
 ## Settings → Sessions & tokens
 
 `/settings?tab=sessions` — every browser session and CLI token that can act as you, each revocable. This used to be the bottom card of Profile.
