@@ -28,7 +28,7 @@ func TestResolvePathsSourcesAndDatabaseIndependence(t *testing.T) {
 				cfg := Default()
 				if origin == "yaml" {
 					filename := filepath.Join(t.TempDir(), "config.yaml")
-					content := "storage:\n  base_path: /var/lib/crewship\n  log_path: /var/log/crewship\n  memory_root: ''\nstate:\n  bolt_path: /var/lib/crewship/state.db\nipc:\n  socket_path: /tmp/crewship.sock\n"
+					content := "storage:\n  base_path: /var/lib/crewship\n  log_path: /var/log/crewship\n  memory_root: ''\n  run_output_path: ''\nstate:\n  bolt_path: /var/lib/crewship/state.db\nipc:\n  socket_path: /tmp/crewship.sock\n"
 					if err := os.WriteFile(filename, []byte(content), 0600); err != nil {
 						t.Fatal(err)
 					}
@@ -53,11 +53,11 @@ func TestResolvePathsSourcesAndDatabaseIndependence(t *testing.T) {
 					}
 				}
 				if origin == "derived" {
-					if cfg.Storage.BasePath != filepath.Join(root, "output") || cfg.Storage.MemoryRoot != filepath.Join(root, "memory") || cfg.Storage.LogPath != filepath.Join(root, "logs") || cfg.State.BoltPath != filepath.Join(root, "state.db") {
+					if cfg.Storage.BasePath != filepath.Join(root, "output") || cfg.Storage.MemoryRoot != filepath.Join(root, "memory") || cfg.Storage.RunOutputPath != filepath.Join(root, "run-output") || cfg.Storage.LogPath != filepath.Join(root, "logs") || cfg.State.BoltPath != filepath.Join(root, "state.db") {
 						t.Fatalf("incorrect root paths: %+v", result.Paths)
 					}
 				}
-				if origin == "yaml" && (cfg.Storage.BasePath != "/var/lib/crewship" || cfg.Storage.MemoryRoot != "" || cfg.State.BoltPath != "/var/lib/crewship/state.db") {
+				if origin == "yaml" && (cfg.Storage.BasePath != "/var/lib/crewship" || cfg.Storage.MemoryRoot != "" || cfg.Storage.RunOutputPath != "" || cfg.State.BoltPath != "/var/lib/crewship/state.db") {
 					t.Fatal("explicit defaults or disabled memory overwritten")
 				}
 			})

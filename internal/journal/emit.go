@@ -675,6 +675,20 @@ func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 				expires = sql.NullString{String: expiresStr, Valid: true}
 			}
 
+			if e.replay {
+				fingerprint, err := w.replayFingerprint(e, payload, refs, expiresStr)
+				if err != nil {
+					return err
+				}
+				exitCode, err := terminalReplayExitCode(e.Type, payload)
+				if err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, `INSERT INTO journal_replay_receipts(id,fingerprint,workspace_id,agent_id,trace_id,entry_type,terminal_exit_code) VALUES(?,?,?,?,?,?,?)`, e.ID, fingerprint, e.WorkspaceID, e.AgentID, e.TraceID, string(e.Type), exitCode); err != nil {
+					return fmt.Errorf("journal: insert replay receipt: %w", err)
+				}
+			}
+
 			head, ok := heads[e.WorkspaceID]
 			if !ok {
 				head, err = loadChainHead(ctx, tx, e.WorkspaceID)

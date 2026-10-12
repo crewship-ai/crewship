@@ -849,7 +849,7 @@ jobs:
     if: needs.changes.outputs.go == 'true'
     name: Managed environment Docker conformance
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -863,10 +863,19 @@ jobs:
           docker version
           docker pull alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
           docker tag alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 alpine:3
-      - name: Require executed Docker fixtures
-        timeout-minutes: 14
-        # The runner keeps existing fixtures non-root and elevates only the
-        # managed launcher fixture (UID1001 cannot own the trusted launcher).
+      - name: Require detached launch dependency
+        timeout-minutes: 3
+        run: |
+          if ! command -v tmux >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends tmux
+          fi
+          tmux -V
+      - name: Require executed Docker and protected capture fixtures
+        timeout-minutes: 24
+        # Existing fixtures retain their privilege profiles. Protected capture
+        # binaries are built once, then required tests run as UID65534 with the
+        # Docker socket GID, an empty environment and private disposable HOME.
         run: python3 scripts/ci/managed-environments.py
 
   # Required evidence for Pages: no Docker env opt-in can silently skip this lane.

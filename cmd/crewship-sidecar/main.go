@@ -17,6 +17,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
+	"github.com/crewship-ai/crewship/internal/runoutput"
 	"github.com/crewship-ai/crewship/internal/sidecar"
 )
 
@@ -42,6 +43,26 @@ type sidecarInput struct {
 }
 
 func main() {
+	// A flag is intentional: old binaries reject it rather than starting the
+	// proxy after flag parsing stops at an unrecognized positional command.
+	if len(os.Args) == 2 && os.Args[1] == "--host-capture-probe-v1" {
+		os.Exit(runStopProcessCommand([]string{"--probe"}, os.Stdout))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "run-stop-process" {
+		os.Exit(runStopProcessCommand(os.Args[2:], os.Stderr))
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "run-launch" || os.Args[1] == "run-execute") {
+		ctx, stop := signal.NotifyContext(context.Background(), runoutput.ExecutionSignals()...)
+		code := runLaunchCommand(ctx, os.Args[1], os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
+		stop()
+		os.Exit(code)
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "run-capture" || os.Args[1] == "run-read" || os.Args[1] == "run-result") {
+		ctx, stop := signal.NotifyContext(context.Background(), runoutput.ExecutionSignals()...)
+		code := runOutputCommand(ctx, os.Args[1], os.Args[2:], os.Stdout, os.Stderr)
+		stop()
+		os.Exit(code)
+	}
 	// Parse this mode before the sidecar flags: CLI arguments belong to the
 	// admitted native executable, never to a shell or the flag parser.
 	if len(os.Args) > 1 && os.Args[1] == "--managed-launch" {

@@ -32,7 +32,10 @@ func TestStopAgent_StateFailureStillCancelsOwnedPreparation(t *testing.T) {
 			}}
 			o := New(nil, state, slog.Default())
 			req := AgentRunRequest{AgentID: "a", RunID: "preparation"}
-			ctx, finish := o.trackAgentRun(context.Background(), &req)
+			ctx, finish, trackErr := o.trackAgentRun(context.Background(), &req)
+			if trackErr != nil {
+				t.Fatal(trackErr)
+			}
 			defer finish()
 			bounded, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 			defer cancel()
@@ -66,7 +69,10 @@ func TestStopAgent_AllOwnedRuntimesReceiveStopBeforeWaiting(t *testing.T) {
 	o := New(c, nil, slog.Default())
 	for _, id := range []string{"one", "two"} {
 		req := AgentRunRequest{AgentID: "a", AgentSlug: "a", ContainerID: "c", RunID: id}
-		_, finish := o.trackAgentRun(context.Background(), &req)
+		_, finish, trackErr := o.trackAgentRun(context.Background(), &req)
+		if trackErr != nil {
+			t.Fatal(trackErr)
+		}
 		defer finish()
 		if err := req.ExecGate(context.Background()); err != nil {
 			t.Fatal(err)

@@ -10,7 +10,10 @@ import (
 func TestStopAgent_PreparingClosesCreationGate(t *testing.T) {
 	o := New(nil, nil, slog.Default())
 	req := AgentRunRequest{AgentID: "a", RunID: "preparing"}
-	ctx, finish := o.trackAgentRun(context.Background(), &req)
+	ctx, finish, trackErr := o.trackAgentRun(context.Background(), &req)
+	if trackErr != nil {
+		t.Fatal(trackErr)
+	}
 	go func() { <-ctx.Done(); finish() }()
 	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -26,7 +29,10 @@ func TestStopAgent_CanCancelWhilePriorGateWaits(t *testing.T) {
 	o := New(nil, nil, slog.Default())
 	entered := make(chan struct{})
 	req := AgentRunRequest{AgentID: "a", RunID: "gate-waits", ExecGate: func(ctx context.Context) error { close(entered); <-ctx.Done(); return ctx.Err() }}
-	ctx, finish := o.trackAgentRun(context.Background(), &req)
+	ctx, finish, trackErr := o.trackAgentRun(context.Background(), &req)
+	if trackErr != nil {
+		t.Fatal(trackErr)
+	}
 	go func() { _ = req.ExecGate(ctx); finish() }()
 	<-entered
 	bounded, cancel := context.WithTimeout(context.Background(), time.Second)

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -194,14 +195,15 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	// Look up workspace_id + agent_id from the run.started journal entry
 	// belonging to this trace. Without this we can't broadcast events.
 	var agentID, workspaceID string
+	var startedTS string
 	var agentName, agentCrew sql.NullString
 	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT je.workspace_id, je.agent_id, a.name, a.crew_id
+		`SELECT je.workspace_id, je.agent_id, a.name, a.crew_id, je.ts
 		 FROM journal_entries je
 		 LEFT JOIN agents a ON a.id = je.agent_id AND a.workspace_id = je.workspace_id
 		 WHERE je.trace_id = ? AND je.entry_type = 'run.started'
 		 LIMIT 1`, runID,
-	).Scan(&workspaceID, &agentID, &agentName, &agentCrew); err != nil {
+	).Scan(&workspaceID, &agentID, &agentName, &agentCrew, &startedTS); err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "run not found")
 			return
@@ -248,7 +250,7 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if workOwned {
-		if projection.WorkspaceID != workspaceID {
+		if projection.WorkspaceID != workspaceID || projection.AgentID != agentID || (projection.CrewID != "" && projection.CrewID != agentCrew.String) {
 			replyError(w, http.StatusConflict, "Work outcome is not confirmed")
 			return
 		}
@@ -315,7 +317,7 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	emit := h.journal.Emit
-	entryID := ""
+	entryID := "run-terminal:" + runID
 	if workOwned {
 		synchronous, ok := h.journal.(journal.SyncEmitter)
 		if !ok {
@@ -326,6 +328,24 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		// Stable identity prevents two concurrent projectors from appending
 		// duplicate terminal entries, including across server processes.
 		entryID = "work-terminal:" + runID
+	}
+	if replay, ok := h.journal.(journal.ReplaySyncEmitter); ok {
+		started, err := time.Parse(time.RFC3339Nano, startedTS)
+		if err != nil {
+			replyError(w, http.StatusInternalServerError, "Invalid original run timestamp")
+			return
+		}
+		var metadata map[string]any
+		if body.Metadata != nil {
+			decoder := json.NewDecoder(bytes.NewReader(body.Metadata))
+			decoder.UseNumber()
+			_ = decoder.Decode(&metadata)
+		}
+		entry := journal.RunTerminalReplay(runID, workspaceID, agentID, started, entryType, workOwned, body.ExitCode, body.ErrorMessage, metadata)
+		emit = func(ctx context.Context, _ journal.Entry) (string, error) {
+			id, _, err := replay.EmitReplaySync(ctx, entry)
+			return id, err
+		}
 	}
 	if _, err := emit(r.Context(), journal.Entry{
 		ID:          entryID,

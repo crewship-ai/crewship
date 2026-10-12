@@ -1,6 +1,7 @@
 package work
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -26,6 +27,8 @@ type RunResult struct {
 type RunProjection struct {
 	RunID       string
 	WorkspaceID string
+	AgentID     string
+	CrewID      string
 	Status      string
 	Result      RunResult
 	Ready       bool
@@ -64,9 +67,9 @@ func (s *Store) RunProjection(ctx context.Context, runID string) (p RunProjectio
 	p.RunID = runID
 	var data sql.NullString
 	var reason string
-	err = s.db.QueryRowContext(ctx, `SELECT w.workspace_id, a.run_status, a.run_result_json, a.end_reason
+	err = s.db.QueryRowContext(ctx, `SELECT w.workspace_id, w.agent_id, COALESCE(w.crew_id,''), a.run_status, a.run_result_json, a.end_reason
  FROM work_attempts a JOIN work_items w ON w.id = a.work_id WHERE a.run_id = ?`, runID).
-		Scan(&p.WorkspaceID, &p.Status, &data, &reason)
+		Scan(&p.WorkspaceID, &p.AgentID, &p.CrewID, &p.Status, &data, &reason)
 	if err == sql.ErrNoRows {
 		return p, false, nil
 	}
@@ -77,7 +80,9 @@ func (s *Store) RunProjection(ctx context.Context, runID string) (p RunProjectio
 	if !p.Ready {
 		return p, true, nil
 	}
-	if err = json.Unmarshal([]byte(data.String), &p.Result); err != nil {
+	decoder := json.NewDecoder(bytes.NewBufferString(data.String))
+	decoder.UseNumber()
+	if err = decoder.Decode(&p.Result); err != nil {
 		return p, true, fmt.Errorf("work: decode run result: %w", err)
 	}
 	if p.Status == "CANCELLED" {

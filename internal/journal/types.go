@@ -863,6 +863,10 @@ type Entry struct {
 	SpanID      string
 	ExpiresAt   *time.Time
 
+	// replay marks an idempotent projection. Its receipt commits atomically
+	// with the journal row and survives retention of that visible row.
+	replay bool
+
 	// flushBarrierAck is an internal sentinel used by Writer.Flush.
 	// When non-nil, the worker treats this Entry as a barrier rather
 	// than a row to persist — the barrier rides the same queue as

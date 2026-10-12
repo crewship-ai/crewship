@@ -516,6 +516,8 @@ func (d *Dispatcher) settle(ctx context.Context, live *liveAttempt, runErr error
 	// can make an external change and then fail, and repeating it repeats
 	// whatever it did — the one outcome a durable queue is supposed to prevent.
 	switch d.runtime.Classify(a, runErr) {
+	case OutcomeRetained:
+		d.park(ctx, a, RetainedCapturePendingReason)
 	case OutcomeRetryable:
 		d.finish(ctx, a, work.StateRetryWait, runErr.Error())
 	case OutcomeFailed:

@@ -11,7 +11,10 @@ import (
 func TestReconcileAgentActivityProtectsPreparationBeforeDurableState(t *testing.T) {
 	o := New(nil, nil, slog.Default())
 	req := AgentRunRequest{AgentID: "a", RunID: "preparing"}
-	_, finish := o.trackAgentRun(context.Background(), &req)
+	_, finish, trackErr := o.trackAgentRun(context.Background(), &req)
+	if trackErr != nil {
+		t.Fatal(trackErr)
+	}
 	defer finish()
 	for _, test := range []struct {
 		agent  string
@@ -48,7 +51,12 @@ func TestReconcileAgentActivitySerializesAdmissionWithProjection(t *testing.T) {
 	go func() {
 		close(attempted)
 		req := AgentRunRequest{AgentID: "a", RunID: "new"}
-		_, finish := o.trackAgentRun(context.Background(), &req)
+		_, finish, trackErr := o.trackAgentRun(context.Background(), &req)
+		if trackErr != nil {
+			t.Error(trackErr)
+			admitted <- func() {}
+			return
+		}
 		admitted <- finish
 	}()
 	<-attempted

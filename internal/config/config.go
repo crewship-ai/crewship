@@ -155,6 +155,11 @@ type ContainerConfig struct {
 
 // StorageConfig holds file storage settings for agent outputs and logs.
 type StorageConfig struct {
+	// RunOutputPath is host-private retained execution output, never mounted
+	// into workloads. Empty explicitly disables host capture.
+	RunOutputPath                    string `yaml:"run_output_path"`
+	RunOutputMaxBytes                int64  `yaml:"run_output_max_bytes"`
+	RunOutputMaxRuns                 int    `yaml:"run_output_max_runs"`
 	PageStudioOrigin                 string `yaml:"page_studio_origin"`                   // Public browser origin; independent of internal API transport.
 	PageRuntimeDevelopmentSameOrigin bool   `yaml:"page_runtime_development_same_origin"` // Reviewed demos only; no process isolation guarantee.
 	PageBuildImage                   string `yaml:"page_build_image"`                     // Pinned image digest; empty disables builds.
@@ -404,6 +409,15 @@ var (
 // Validate checks that all configuration values are within acceptable ranges
 // and required fields are set. Returns an error describing the first invalid value.
 func (c *Config) Validate() error {
+	if value := c.Storage.RunOutputPath; value != "" && (!filepath.IsAbs(value) || filepath.Clean(value) != value || strings.ContainsRune(value, 0)) {
+		return fmt.Errorf("storage.run_output_path must be a clean absolute host-private path")
+	}
+	if value := c.Storage.RunOutputMaxBytes; value != 0 && (value < 64*1024*1024+64*1024 || value > 1024*1024*1024*1024) {
+		return fmt.Errorf("storage.run_output_max_bytes must be zero (default) or between 64 MiB plus 64 KiB and 1 TiB")
+	}
+	if value := c.Storage.RunOutputMaxRuns; value < 0 || value > 1000000 {
+		return fmt.Errorf("storage.run_output_max_runs must be zero (default) or between 1 and 1000000")
+	}
 	if err := validatePageRuntime(c.Storage.PageRuntimeOrigin, c.PageStudioOrigin(), c.Storage.PageRuntimeDevelopmentSameOrigin); err != nil {
 		return err
 	}
@@ -600,6 +614,9 @@ func applyEnvOverrides(cfg *Config) {
 	// tier and memory versioning.
 	if v := os.Getenv("CREWSHIP_STORAGE_MEMORY_ROOT"); v != "" {
 		cfg.Storage.MemoryRoot = v
+	}
+	if v := os.Getenv("CREWSHIP_RUN_OUTPUT_PATH"); v != "" {
+		cfg.Storage.RunOutputPath = v
 	}
 	if v := os.Getenv("CREWSHIP_LOG_PATH"); v != "" {
 		cfg.Storage.LogPath = v
