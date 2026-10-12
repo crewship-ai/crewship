@@ -1,9 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"

@@ -63,7 +63,7 @@ func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	since30 := now.Add(-30 * 24 * time.Hour).Format(time.RFC3339)
 
 	q := `
-		SELECT w.id, w.name, w.slug, w.logo_url, w.created_at, w.updated_at,
+		SELECT w.id, w.name, w.slug, w.kind, w.logo_url, w.created_at, w.updated_at,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id),
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL),
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL),
@@ -93,6 +93,7 @@ func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		ID                         string    `json:"id"`
 		Name                       string    `json:"name"`
 		Slug                       string    `json:"slug"`
+		Kind                       string    `json:"kind"`
 		LogoURL                    *string   `json:"logo_url"`
 		CreatedAt                  string    `json:"created_at"`
 		UpdatedAt                  string    `json:"updated_at"`
@@ -118,7 +119,7 @@ func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		var lang, last, logo sql.NullString
 		var retention sql.NullInt64
 		var priv int64
-		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug, &logo, &ws.CreatedAt, &ws.UpdatedAt,
+		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Kind, &logo, &ws.CreatedAt, &ws.UpdatedAt,
 			&ws.MemberCount, &ws.AgentCount, &ws.CrewCount,
 			&lang, &retention, &priv, &ws.PendingInvitations, &last, &ws.Cost30dUSD); err != nil {
 			replyInternalError(w, h.logger, "scan workspace (admin)", err)

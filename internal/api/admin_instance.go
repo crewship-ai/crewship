@@ -863,6 +863,86 @@ func (h *InstanceAdminHandler) TransferOwnership(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, map[string]any{"workspace_id": wsID, "owner_user_id": req.UserID, "previous_owner_user_ids": previous})
 }
 
+type updateInstanceWorkspaceRequest struct {
+	Name *string `json:"name"`
+	Kind *string `json:"kind"`
+}
+
+// UpdateWorkspace renames any workspace, or says what it is for (team or
+// personal), on its owner's behalf: the workspace's own settings are open
+// only to its members, and an instance admin is usually not one. The slug
+// stays — links and the CLI address the workspace by it.
+// PATCH /api/v1/admin/instance/workspaces/{workspaceId}
+func (h *InstanceAdminHandler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
+	wsID := strings.TrimSpace(r.PathValue("workspaceId"))
+	var req updateInstanceWorkspaceRequest
+	if err := readJSON(r, &req); err != nil {
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if req.Name == nil && req.Kind == nil {
+		replyError(w, http.StatusBadRequest, "name or kind is required")
+		return
+	}
+	if req.Name != nil {
+		n := strings.TrimSpace(*req.Name)
+		if len(n) < 2 || len(n) > 100 {
+			replyError(w, http.StatusBadRequest, "name must be 2-100 characters")
+			return
+		}
+		req.Name = &n
+	}
+	if req.Kind != nil && *req.Kind != "team" && *req.Kind != "personal" {
+		replyError(w, http.StatusBadRequest, "kind must be team or personal")
+		return
+	}
+	ctx := r.Context()
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "update workspace: begin", err)
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+	var name, slug, kind string
+	err = tx.QueryRowContext(ctx, `SELECT name, slug, kind FROM workspaces WHERE id = ? AND deleted_at IS NULL`, wsID).Scan(&name, &slug, &kind)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "update workspace: lookup", err)
+		return
+	}
+	changes := map[string]any{}
+	if req.Name != nil && *req.Name != name {
+		changes["name"] = map[string]string{"from": name, "to": *req.Name}
+		name = *req.Name
+	}
+	if req.Kind != nil && *req.Kind != kind {
+		changes["kind"] = map[string]string{"from": kind, "to": *req.Kind}
+		kind = *req.Kind
+	}
+	if len(changes) > 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET name = ?, kind = ?, updated_at = ? WHERE id = ?`,
+			name, kind, time.Now().UTC().Format(time.RFC3339), wsID); err != nil {
+			replyInternalError(w, h.logger, "update workspace", err)
+			return
+		}
+		if err := auditInstance(ctx, r, tx, "instance.workspace_updated", "workspace", wsID, wsID, changes); err != nil {
+			replyInternalError(w, h.logger, "update workspace: audit", err)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "update workspace: commit", err)
+		return
+	}
+	if len(changes) > 0 {
+		broadcastWorkspaceEvent(h.hub, wsID, "workspace.updated", map[string]string{"workspace_id": wsID})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": wsID, "name": name, "slug": slug, "kind": kind})
+}
+
 // DeleteWorkspace deletes any workspace, confirmed by typing its slug. The
 // workspace route's "not your only workspace" guard is a self-service rule;
 // an instance admin deletes on someone else's behalf.

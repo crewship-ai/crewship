@@ -32,6 +32,7 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `PUT` | [/api/v1/admin/instance/workspaces/\{workspaceId\}/members/\{userId\}](#put-api-v1-admin-instance-workspaces-workspaceid-members-userid) | Give access to any workspace, or change the role |
 | `DELETE` | [/api/v1/admin/instance/workspaces/\{workspaceId\}/members/\{userId\}](#delete-api-v1-admin-instance-workspaces-workspaceid-members-userid) | Take a person out of a workspace |
 | `POST` | [/api/v1/admin/instance/workspaces](#post-api-v1-admin-instance-workspaces) | Create a workspace owned by someone else |
+| `PATCH` | [/api/v1/admin/instance/workspaces/\{workspaceId\}](#patch-api-v1-admin-instance-workspaces-workspaceid) | Rename any workspace, or mark it team or personal |
 | `POST` | [/api/v1/admin/instance/workspaces/\{workspaceId\}/transfer-ownership](#post-api-v1-admin-instance-workspaces-workspaceid-transfer-ownership) | Hand a workspace to another member |
 | `DELETE` | [/api/v1/admin/instance/workspaces/\{workspaceId\}](#delete-api-v1-admin-instance-workspaces-workspaceid) | Delete any workspace |
 | `POST` | [/api/v1/admin/instance/people/\{userId\}/suspend](#post-api-v1-admin-instance-people-userid-suspend) | Block an account and end its sessions |
@@ -513,6 +514,42 @@ added to it.
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
 | `409` | The slug is taken, or the owner is suspended. |
+| `500` | A write failed. |
+
+## `PATCH /api/v1/admin/instance/workspaces/{workspaceId}`
+
+Renames any workspace on its owner's behalf, and says what it is for. The
+workspace's own settings are open only to its members; an instance
+administrator usually is not one, and is not added by this call. The slug
+stays, so links and the CLI keep working.
+
+`kind` is `team` (a workspace people share — the default) or `personal` (the
+empty "Name's Workspace" a sign-up without an invitation gets). Admin ›
+People & workspaces lists the two apart. Existing sign-up workspaces were
+marked `personal` when this field arrived, if they still had one member,
+their owner, and the name sign-up gave them.
+
+**Auth:** instance administrator.
+
+**Request:** `{ "name": "Demo", "kind": "team" }` — either field, or both.
+
+**Response:**
+
+```json
+{ "id": "ws-cuid", "name": "Demo", "slug": "demo-user-s-workspace-1a2b3c4d", "kind": "team" }
+```
+
+A change is recorded in the instance audit as `instance.workspace_updated`
+with each field's old and new value; sending the current values changes
+nothing and records nothing.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Updated, or already as asked. |
+| `400` | Invalid JSON, neither field, a name outside 2–100 characters, or an unknown `kind`. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No such workspace, or it is deleted. |
 | `500` | A write failed. |
 
 ## `POST /api/v1/admin/instance/workspaces/{workspaceId}/transfer-ownership`

@@ -69,7 +69,7 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"last_active_at", "active_sessions", "cli_tokens", "locked_until", "failed_login_count", "email_verified",
 		"instance_admin", "instance_admin_source", "suspended_at", "suspended_reason", "setup_link_expires_at")
 	adminWorkspace := object(map[string]any{
-		"id": str(), "name": str(), "slug": str(), "logo_url": nullable(str()), "created_at": str(), "updated_at": str(),
+		"id": str(), "name": str(), "slug": str(), "kind": str(), "logo_url": nullable(str()), "created_at": str(), "updated_at": str(),
 		"_count_members": integer(), "_count_agents": integer(), "_count_crews": integer(),
 		"preferred_language": nullable(str()), "run_retention_days": nullable(integer()),
 		"allow_privileged_credentials": boolean(), "pending_invitations": integer(),
@@ -314,6 +314,9 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 			Request: object(map[string]any{"user_id": str()}, "user_id"),
 			Response: object(map[string]any{"workspace_id": str(), "owner_user_id": str(), "previous_owner_user_ids": array(str())},
 				"workspace_id", "owner_user_id", "previous_owner_user_ids")},
+		"PATCH /api/v1/admin/instance/workspaces/{workspaceId}": {
+			Request:  object(map[string]any{"name": str(), "kind": str()}),
+			Response: object(map[string]any{"id": str(), "name": str(), "slug": str(), "kind": str()}, "id", "name", "slug", "kind")},
 		"DELETE /api/v1/admin/instance/workspaces/{workspaceId}": {SuccessStatuses: []string{"204"},
 			Request: object(map[string]any{"confirm_slug": str()}, "confirm_slug")},
 		"GET /api/v1/admin/instance/keeper/governance": {Response: object(map[string]any{

@@ -124,6 +124,16 @@ func TestSignup_WithoutInvitation_GetsItsOwnWorkspace(t *testing.T) {
 	if n := ownedWorkspaces(t, db, "solo@example.com"); n != 1 {
 		t.Errorf("OWNER memberships = %d, want 1", n)
 	}
+	// It is that person's own space, kept apart from shared ones in Admin.
+	var kind string
+	if err := db.QueryRow(`SELECT w.kind FROM workspaces w
+		JOIN workspace_members wm ON wm.workspace_id = w.id JOIN users u ON u.id = wm.user_id
+		WHERE u.email = 'solo@example.com'`).Scan(&kind); err != nil {
+		t.Fatalf("read kind: %v", err)
+	}
+	if kind != "personal" {
+		t.Errorf("kind = %q, want personal", kind)
+	}
 }
 
 func TestSignup_IgnoresExpiredAndAcceptedInvitations(t *testing.T) {
