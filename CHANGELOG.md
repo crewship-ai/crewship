@@ -9,6 +9,15 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **⌘K finds every place in the app (#3045).** As you type, the search box finds:
+  - every Settings card, opening the tab and scrolling to the card; `/settings?tab=…&card=<slug>` links to one
+  - the tabs and sections of Integrations, Inbox, Activity, Journal and Routines
+  - actions that live behind a button: Create issue, Invite member, Create CLI token, Change password, Store missing avatars
+  - the Admin console, for instance administrators
+  - missions, routine schedules and automations, each crew tool on its own row, and your other workspaces to switch to
+
+  Several words now match in any order. Every row is gated the way its page is. See [Search (⌘K)](docs/guides/search.mdx).
+
 - **The Crews sidebar has Status, Filter and View, like Routines and Skills (#3043).** Status counts agents (Needs you, Working, Idle, Expired hires) and lists the ones you pick. Filter narrows by role, model, runtime, hire type, activity and crew health, with removable chips. View groups by crew, by status or not at all and sorts by crew size, name or last active. Leads come first with a crown; rows show each agent's role and when it last worked, and each crew's running missions or last activity. Hover adds Chat on an agent and Add agent on a crew, and the collapsed sidebar keeps the crew icons with an attention dot. Status, filters and view are kept in the URL (`?status=needs&role=lead&group=status`).
 
 - **Security: the server image's docker CLI is Docker's static 29.9.0 build (#3047).** Alpine's `docker-cli` package in alpine:3.24 was built with go1.26.8, so the image carried the critical net/http advisories GO-2026-6612 and GO-2026-6604 that #3039 fixed for Crewship's own binaries, and the image scan failed on every build. The Dockerfile now downloads the static docker CLI for the target architecture, checks it against a pinned SHA-256 and copies only the `docker` binary.

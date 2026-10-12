@@ -61,6 +61,19 @@ export const settingsPickerButton = cn(
   "inline-flex items-center justify-between gap-2 rounded-md border border-control-border bg-surface-subtle px-3 text-control text-foreground outline-none transition-colors hover:border-line-strong focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50",
 )
 
+/**
+ * The DOM id a settings card answers to, from its title: "Danger zone" →
+ * `settings-card-danger-zone`. The ⌘K palette links to a card with
+ * `?card=<slug>` and the settings layout scrolls to this id (#3045).
+ */
+export function settingsCardSlug(title: string): string {
+  return title.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+}
+
+export function settingsCardId(title: string): string {
+  return `settings-card-${settingsCardSlug(title)}`
+}
+
 export function SettingsCard({
   title,
   description,
@@ -89,9 +102,10 @@ export function SettingsCard({
   const titleId = useId()
   return (
     <section
+      id={settingsCardId(title)}
       data-slot="settings-card"
       aria-labelledby={titleId}
-      className={cn("overflow-hidden rounded-card border border-border bg-card", className)}
+      className={cn("scroll-mt-4 overflow-hidden rounded-card border border-border bg-card transition-shadow duration-500 data-[focused=true]:ring-2 data-[focused=true]:ring-primary/50", className)}
     >
       <SettingsCardHeader title={title} titleId={titleId} description={description} actions={actions} icon={icon} tint={tint} />
       <PageSaveLabel label={title}>
@@ -217,9 +231,10 @@ export function SettingsDangerCard({
   const titleId = useId()
   return (
     <section
+      id={settingsCardId(title)}
       data-slot="settings-card"
       aria-labelledby={titleId}
-      className="overflow-hidden rounded-card border border-destructive/30 bg-card"
+      className="scroll-mt-4 overflow-hidden rounded-card border border-destructive/30 bg-card transition-shadow duration-500 data-[focused=true]:ring-2 data-[focused=true]:ring-destructive/50"
     >
       <SettingsCardHeader title={title} titleId={titleId} description={description} actions={actions} icon={icon} danger />
       <PageSaveLabel label={title}>{children}</PageSaveLabel>

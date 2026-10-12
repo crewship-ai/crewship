@@ -90,6 +90,7 @@
               "guides/issue-detail",
               "guides/issue-mentions",
               "guides/inbox",
+              "guides/search",
               {
                 "group": "Routines",
                 "icon": "workflow",
