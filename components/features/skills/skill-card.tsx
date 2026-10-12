@@ -1,292 +1,151 @@
 "use client"
 
-import {
-  Blocks, Code, Search, Hammer, Server, MessageCircle, Settings,
-  Palette, ShieldCheck, Download, Clock,
-  FileText, Plug, Users,
-} from "lucide-react"
-import { Card, CardContent } from "@/components/ui/card"
-import { StatusPill } from "@/components/ui/status-pill"
-import type { StatusTone } from "@/lib/format-status"
-import { selection } from "@/lib/interaction"
-import { cn } from "@/lib/utils"
+import { motion, useReducedMotion } from "motion/react"
+import { KeyRound } from "lucide-react"
+
 import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { StatusPill } from "@/components/ui/status-pill"
+import { formatRelativeShort } from "@/lib/time"
+import { cn } from "@/lib/utils"
+import {
+  agentsMissingCredentials,
+  domainMeta,
+  skillIcon,
+  skillName,
+  skillTrust,
+  sourceLabel,
+  type SkillAgentRef,
+  type SkillRow,
+} from "./skills-model"
 
-// SkillInstalledAgent mirrors the backend skillInstalledAgent struct
-// — only populated on the Installed list (?installed=1) so the card
-// can show real avatars + crew badges of the agents using this skill.
-export interface SkillInstalledAgent {
-  agent_id: string
-  agent_slug: string
-  agent_name: string
-  avatar_seed: string | null
-  avatar_style: string | null
-  /** Stored avatar render (#1297); null means generate from the seed. */
-  avatar_url?: string | null
-  crew_id: string | null
-  crew_slug: string | null
-  crew_name: string | null
-  crew_color: string | null
-  crew_icon: string | null
-  crew_avatar_style: string | null
-}
+// One skill on the Skills page (#3033). The card answers, in this order:
+// what it is (domain tile, name, vendor/slug), whether to trust it (one
+// StatusPill), what it does, what it needs, who has it and whether it is
+// used. Severity lives only in the pill; domains share one colour and differ by icon.
 
-// SkillCardData mirrors the skillResponse JSON the backend emits after
-// the Sprint 1 v65 schema changes. New fields (vendor, maturity, runtime,
-// scan_status) are optional in the type so the card still renders for
-// rows imported before the migration ran.
-export interface SkillCardData {
-  id: string
-  name: string
-  slug: string
-  display_name: string | null
-  description: string | null
-  version: string | null
-  author: string | null
+/** The skill's own icon (its domain's when it has none) in a Harbor icon tile. Every skill wears the same tint. */
+export function SkillTile({
+  category,
+  icon,
+  size = "md",
+  className,
+}: {
   category: string
-  source: string
-  icon: string | null
-  vendor?: string | null
-  maturity?: string | null
-  runtime?: string | null
-  scan_status?: string | null
-  description_quality?: string | null
-  downloads: number | null
-  featured: boolean
-  updated_at?: string
-  installed_on?: SkillInstalledAgent[]
-}
-
-// Source badge — Composio's auth-method badge proved that a single
-// trust glyph reads faster than a publisher avatar. Map the 5 source
-// enum values onto StatusPill tones (MARKETPLACE / VERIFIED share).
-export const SOURCE_BADGE: Record<string, { label: string; tone: StatusTone }> = {
-  BUNDLED:     { label: "Official",  tone: "blue" },
-  GENERATED:   { label: "Generated", tone: "purple" },
-  MARKETPLACE: { label: "Verified",  tone: "success" },
-  CUSTOM:      { label: "Community", tone: "muted" },
-  MANAGED:     { label: "Managed",   tone: "muted" },
-}
-
-const DOMAIN_ICONS: Record<string, React.ElementType> = {
-  CODING:     Code,
-  AUTOMATION: Plug,
-  DATA:       Search,
-  DEVOPS:     Server,
-  WRITING:    FileText,
-  RESEARCH:   Search,
-  PM:         Hammer,
-  DESIGN:     Palette,
-  SECURITY:   ShieldCheck,
-  SUPPORT:    MessageCircle,
-  FINANCE:    Settings,
-  OPS:        Server,
-  CUSTOM:     Settings,
-}
-
-// Maturity badge — rendered only when NOT OFFICIAL (which already
-// shows a source shield). Stable=COMMUNITY without a maturity badge
-// would be the silent default once we promote skills via review.
-const MATURITY_BADGE: Record<string, { label: string; tone: StatusTone }> = {
-  EXPERIMENTAL: { label: "Experimental", tone: "purple" },
-  COMMUNITY:    { label: "Beta",         tone: "warn" },
-  CURATED:      { label: "Curated",      tone: "blue" },
-}
-
-function formatRelative(iso?: string): string {
-  if (!iso) return ""
-  const ts = new Date(iso).getTime()
-  if (Number.isNaN(ts)) return ""
-  const days = Math.floor((Date.now() - ts) / 86_400_000)
-  if (days < 1) return "Updated today"
-  if (days === 1) return "Updated 1d ago"
-  if (days < 30) return `Updated ${days}d ago`
-  const months = Math.floor(days / 30)
-  if (months < 12) return `Updated ${months}mo ago`
-  return `Updated ${Math.floor(months / 12)}y ago`
-}
-
-function formatCount(n: number | null | undefined): string {
-  if (n == null || n === 0) return "0 installs"
-  if (n < 1000) return `${n} installs`
-  if (n < 10_000) return `${(n / 1000).toFixed(1)}k installs`
-  return `${Math.round(n / 1000)}k installs`
-}
-
-interface SkillCardProps {
-  skill: SkillCardData
-  selected?: boolean
-  onSelect?: (skill: SkillCardData) => void
-}
-
-// SkillCard renders the 7-field layout from .claude/mockups/skills-page.html:
-// namespace+name, one-line description, domain chip, install count,
-// updated relative, source badge, maturity badge (only when non-OFFICIAL).
-// Plus a flag chip when scan_status=FLAGGED.
-export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
-  const sourceCfg = SOURCE_BADGE[skill.source] ?? SOURCE_BADGE.CUSTOM
-  const DomainIcon = DOMAIN_ICONS[skill.category] ?? Blocks
-  const matCfg = skill.maturity && skill.maturity !== "OFFICIAL" ? MATURITY_BADGE[skill.maturity] : undefined
-  const flagged = skill.scan_status === "FLAGGED"
-  const vendor = skill.vendor || "community"
-  const displayName = skill.display_name ?? skill.name
-
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect?.(skill)}
-      aria-label={`${vendor}/${skill.slug}: ${skill.description ?? "no description"}`}
-      aria-pressed={selected}
-      data-selected={selected || undefined}
-      // h-full + flex column lets the card stretch to fill its grid
-      // cell. Combined with auto-rows-fr on the parent grid, every
-      // card in the same row matches its tallest sibling — fixes the
-      // "card heights jump around in a row" feedback the user pointed at.
-      className={cn(
-        "group w-full h-full text-left flex rounded-card",
-        selected ? selection.card.selected : selection.card.default,
-      )}
-    >
-      <Card className="border-0 bg-transparent shadow-none w-full flex flex-col">
-        <CardContent className="p-4 flex flex-col h-full">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-1 truncate">
-                <span className="font-mono text-[11px] text-muted-foreground-soft truncate">{vendor}/</span>
-                <span className="text-sm font-semibold text-foreground truncate">{displayName}</span>
-              </div>
-            </div>
-            <StatusPill tone={sourceCfg.tone} label={sourceCfg.label} />
-          </div>
-
-          <p className="mt-2 line-clamp-2 min-h-[2.4em] text-xs text-muted-foreground leading-relaxed">
-            {skill.description ?? <span className="italic text-muted-foreground-soft">No description</span>}
-          </p>
-
-          <div className="mt-3 flex flex-wrap items-center gap-1.5">
-            <span className="inline-flex items-center gap-1 rounded-full bg-foreground/[0.05] px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-              <DomainIcon className="h-3 w-3" />
-              {skill.category.charAt(0) + skill.category.slice(1).toLowerCase()}
-            </span>
-            {matCfg && (
-              <StatusPill tone={matCfg.tone} label={matCfg.label} />
-            )}
-            {flagged && (
-              <StatusPill tone="danger" label="Flagged" />
-            )}
-          </div>
-
-          {/* Spacer keeps the install-count + updated row anchored to
-              the bottom of the card so cards in the same row align
-              even when descriptions are different lengths. */}
-          <div className="flex-1" />
-
-          <div className="mt-3 flex items-center gap-3 font-mono text-[11px] text-muted-foreground-soft tabular-nums">
-            <span className="flex items-center gap-1">
-              <Download className="h-3 w-3" />
-              {formatCount(skill.downloads)}
-            </span>
-            {skill.updated_at && (
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {formatRelative(skill.updated_at)}
-              </span>
-            )}
-          </div>
-
-          {skill.installed_on && skill.installed_on.length > 0 && (
-            <InstalledAgents agents={skill.installed_on} />
-          )}
-        </CardContent>
-      </Card>
-    </button>
-  )
-}
-
-// InstalledAgents renders the row of stacked agent avatars + unique
-// crew badges that the user asked for on the Installed tab. Avatars
-// stack with -ml overlap (max 5 visible, "+N" overflow); crew icons
-// dedupe so a skill installed on five agents from one crew shows one
-// badge, not five.
-function InstalledAgents({ agents }: { agents: SkillInstalledAgent[] }) {
-  const visible = agents.slice(0, 5)
-  const overflow = agents.length - visible.length
-  // Dedupe crews by id so we don't render the same colour chip five
-  // times when a whole crew shares a skill.
-  const crews = new Map<string, { name: string; color: string | null; slug: string }>()
-  for (const a of agents) {
-    if (a.crew_id && !crews.has(a.crew_id)) {
-      crews.set(a.crew_id, { name: a.crew_name ?? a.crew_slug ?? "crew", color: a.crew_color, slug: a.crew_slug ?? "" })
-    }
-  }
-  return (
-    <div className="mt-3 pt-2 border-t border-border flex items-center gap-2">
-      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground-soft shrink-0">
-        <Users className="h-3 w-3" />
-        Installed on
-      </span>
-      <div className="flex -space-x-1.5 shrink-0">
-        {visible.map((a) => (
-          <AgentAvatar
-            key={a.agent_id}
-            seed={a.avatar_seed ?? a.agent_slug}
-            style={a.avatar_style}
-            avatarUrl={a.avatar_url}
-            alt={a.agent_name}
-            title={`${a.agent_name}${a.crew_name ? ` · ${a.crew_name}` : ""}`}
-            width={20}
-            height={20}
-            className="h-5 w-5 rounded-full ring-2 ring-card bg-foreground/[0.04]"
-          />
-        ))}
-        {overflow > 0 && (
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground/[0.06] ring-2 ring-card px-1 text-[9px] font-medium text-foreground/65 tabular-nums">
-            +{overflow}
-          </span>
-        )}
-      </div>
-      {crews.size > 0 && (
-        <div className="flex flex-wrap items-center gap-1 min-w-0">
-          {Array.from(crews.values()).slice(0, 2).map((c) => (
-            <CrewChip key={c.slug} name={c.name} color={c.color} />
-          ))}
-          {crews.size > 2 && (
-            <span className="text-[9px] text-foreground/45">+{crews.size - 2}</span>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// CrewChip renders one tinted pill per crew. Crew colours are stored
-// per-row as user-configurable hex strings, so we cannot pre-generate
-// Tailwind utility classes — JIT cannot statically analyse runtime
-// values. The pattern Tailwind v4 documents for this case is to inject
-// the colour as a CSS custom property and reference it from arbitrary-
-// value utilities, which keeps the layout/state styling in className
-// and confines the dynamic injection to a single var. The fallback
-// classes apply when crew_color is null (default neutral chip).
-function CrewChip({ name, color }: { name: string; color: string | null }) {
-  if (!color) {
-    return (
-      <span
-        title={name}
-        className="inline-flex items-center gap-1 rounded-full border border-foreground/[0.08] bg-foreground/[0.03] px-1.5 py-0.5 text-[9px] font-medium text-foreground/65"
-      >
-        <span className="h-1.5 w-1.5 rounded-full bg-foreground/40" />
-        <span className="truncate max-w-[80px]">{name}</span>
-      </span>
-    )
-  }
+  icon?: string | null
+  size?: "sm" | "md" | "lg"
+  className?: string
+}) {
+  const Icon = skillIcon({ icon, category })
+  const box = size === "lg" ? "h-11 w-11 rounded-xl" : size === "sm" ? "h-6 w-6 rounded-md" : "h-8 w-8 rounded-lg"
+  const glyph = size === "lg" ? "h-5 w-5" : size === "sm" ? "h-3 w-3" : "h-4 w-4"
   return (
     <span
-      title={name}
-      style={{ "--crew-color": color } as React.CSSProperties}
-      className="inline-flex items-center gap-1 rounded-full border border-[var(--crew-color)]/25 bg-foreground/[0.03] px-1.5 py-0.5 text-[9px] font-medium text-[var(--crew-color)]"
+      aria-hidden
+      className={cn("icon-tile inline-flex shrink-0 items-center justify-center", box, className)}
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-[var(--crew-color)]" />
-      <span className="truncate max-w-[80px]">{name}</span>
+      <Icon className={glyph} />
     </span>
+  )
+}
+
+/** Up to `max` overlapping agent faces. */
+export function HolderStack({ agents, max = 5, size = 18 }: { agents: SkillAgentRef[]; max?: number; size?: 16 | 18 | 20 }) {
+  const box = size === 16 ? "h-4 w-4" : size === 20 ? "h-5 w-5" : "h-[18px] w-[18px]"
+  return (
+    <span className="flex shrink-0 -space-x-1.5">
+      {agents.slice(0, max).map((a) => (
+        <AgentAvatar
+          key={a.agent_id}
+          seed={a.avatar_seed ?? a.agent_slug}
+          style={a.avatar_style}
+          avatarUrl={a.avatar_url}
+          alt={a.agent_name}
+          title={`${a.agent_name}${a.crew_name ? ` · ${a.crew_name}` : ""}`}
+          width={size}
+          height={size}
+          className={cn("rounded-full bg-foreground/[0.04] ring-2 ring-card", box)}
+        />
+      ))}
+    </span>
+  )
+}
+
+export function SkillCard({ skill, index = 0, onOpen }: { skill: SkillRow; index?: number; onOpen: (id: string) => void }) {
+  const reduce = useReducedMotion()
+  const trust = skillTrust(skill)
+  const d = domainMeta(skill.category)
+  const holders = skill.installed_on ?? []
+  const missing = agentsMissingCredentials(skill)
+  const usage = skill.usage
+  const vendor = skill.vendor && skill.vendor !== "—" ? `${skill.vendor}/` : ""
+  return (
+    <motion.button
+      type="button"
+      data-testid="skill-card"
+      onClick={() => onOpen(skill.id)}
+      initial={reduce ? false : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1], delay: Math.min(index, 12) * 0.025 }}
+      className="group card-interactive card-hover flex min-w-0 flex-col gap-2.5 border border-border bg-card px-4 py-3.5 text-left"
+    >
+      <div className="flex min-w-0 items-start gap-2.5">
+        <SkillTile category={skill.category} icon={skill.icon} className="transition-transform duration-300 group-hover:-rotate-[4deg] group-hover:scale-[1.08]" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-body font-semibold leading-[18px] text-foreground">{skillName(skill)}</div>
+          <div className="truncate font-mono text-micro text-muted-foreground-soft">
+            {vendor}
+            {skill.slug}
+          </div>
+        </div>
+        <StatusPill tone={trust.tone} label={trust.label} />
+      </div>
+      <p className="line-clamp-2 min-h-[34px] text-label leading-[17px] text-muted-foreground">
+        {skill.description || "No description."}
+      </p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-px text-micro text-muted-foreground">
+          <d.icon className="h-3 w-3" aria-hidden />
+          {d.label}
+        </span>
+        <span className="inline-flex items-center rounded-full border border-border px-2 py-px text-micro text-muted-foreground">
+          {sourceLabel(skill.source)}
+        </span>
+        {(skill.needs_credentials ?? []).map((c) => (
+          <span
+            key={c}
+            title="Needs this credential"
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-px font-mono text-micro text-muted-foreground"
+          >
+            <KeyRound className="h-3 w-3" aria-hidden />
+            {c}
+          </span>
+        ))}
+      </div>
+      <div className="mt-auto flex items-center gap-2 border-t border-border/60 pt-2.5 text-micro text-muted-foreground">
+        {holders.length > 0 ? (
+          <>
+            <HolderStack agents={holders} />
+            <span className="tabular-nums">
+              {holders.length} {holders.length === 1 ? "agent" : "agents"}
+            </span>
+          </>
+        ) : (
+          <span className="text-muted-foreground-soft">Not on any agent</span>
+        )}
+        <span className="flex-1" />
+        {missing.length > 0 && (
+          <span className="text-warn" title={`${missing.length} agent${missing.length === 1 ? "" : "s"} missing a credential`}>
+            <KeyRound className="h-3.5 w-3.5" aria-label="Missing credential" />
+          </span>
+        )}
+        {usage && usage.uses_total > 0 ? (
+          <span className="font-mono tabular-nums">
+            {usage.uses_7d} uses · {formatRelativeShort(usage.last_used_at)}
+          </span>
+        ) : (
+          <span className="font-mono text-muted-foreground-soft">never used</span>
+        )}
+      </div>
+    </motion.button>
   )
 }
