@@ -21,6 +21,7 @@ type demoUser struct {
 	FullName string
 	Password string
 	Role     string // OWNER | ADMIN | MANAGER | MEMBER | VIEWER
+	Capabilities []string // nil preserves role defaults; non-nil is an explicit fixture
 }
 
 // demoUsers is a fixed 4-row roster spanning the four non-OWNER roles
@@ -40,6 +41,10 @@ var demoUsers = []demoUser{
 // existing accounts require proof of their documented fixture credentials and
 // are never assigned a new password. Public signup need not be enabled.
 func seedRBACUsers(ctx context.Context, client *cli.Client) error {
+	return seedUserRoster(ctx, client, demoUsers)
+}
+
+func seedUserRoster(ctx context.Context, client *cli.Client, roster []demoUser) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -50,44 +55,51 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 	}
 	fmt.Fprintln(os.Stderr, "Seeding RBAC fixture through authenticated member provisioning...")
 	placed := 0
-	for _, u := range demoUsers {
+	for _, u := range roster {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := provisionSeedUser(ctx, client, wsID, u); err != nil {
+		created, err := provisionSeedUser(ctx, client, wsID, u)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "  X %s: %v\n", u.Email, err)
 			continue
 		}
-		_, role, err := findWorkspaceMemberByEmail(client, wsID, u.Email)
+		userID, role, err := findWorkspaceMemberByEmail(client, wsID, u.Email)
 		if err != nil || !strings.EqualFold(role, u.Role) {
 			fmt.Fprintf(os.Stderr, "  X %s: fixture role could not be verified (existing roles and passwords preserved)\n", u.Email)
 			continue
 		}
+		if u.Capabilities != nil {
+			if err := configureSeedCapabilities(client, wsID, userID, u.Capabilities, created); err != nil {
+				fmt.Fprintf(os.Stderr, "  X %s: %v\n", u.Email, err)
+				continue
+			}
+		}
 		placed++
 		fmt.Fprintf(os.Stderr, "  ✓ %s: %s\n", u.Email, u.Role)
 	}
-	if placed != len(demoUsers) {
-		return fmt.Errorf("incomplete RBAC fixture (%d of %d): see per-user failures; existing passwords were never reset", placed, len(demoUsers))
+	if placed != len(roster) {
+		return fmt.Errorf("incomplete RBAC fixture (%d of %d): see per-user failures; existing passwords were never reset", placed, len(roster))
 	}
 	fmt.Fprintln(os.Stderr, "RBAC fixture ready. New accounts use the documented demo credentials; existing accounts retain their passwords.")
 	return nil
 }
 
-func provisionSeedUser(ctx context.Context, client *cli.Client, wsID string, u demoUser) error {
+func provisionSeedUser(ctx context.Context, client *cli.Client, wsID string, u demoUser) (bool, error) {
 	resp, err := client.Post("/api/v1/workspaces/"+url.PathEscape(wsID)+"/members/provision", map[string]any{
 		"email": u.Email, "full_name": u.FullName, "role": u.Role, "create_only": true,
 	})
 	if err != nil {
-		return fmt.Errorf("provision request failed: %w", err)
+		return false, fmt.Errorf("provision request failed: %w", err)
 	}
 	if resp.StatusCode == http.StatusConflict {
 		resp.Body.Close()
 		// Even existing members must prove the fixture login still works.
 		// Member-add is idempotent and never resets passwords or roles.
-		return placeExistingSeedUser(ctx, client, wsID, u)
+		return false, placeExistingSeedUser(ctx, client, wsID, u)
 	}
 	if err := cli.CheckError(resp); err != nil {
-		return fmt.Errorf("provision failed: %w", err)
+		return false, fmt.Errorf("provision failed: %w", err)
 	}
 	var result struct {
 		UserID      string `json:"user_id" yaml:"user_id"`
@@ -95,26 +107,26 @@ func provisionSeedUser(ctx context.Context, client *cli.Client, wsID string, u d
 		SetupURL    string `json:"setup_url" yaml:"setup_url"`
 	}
 	if err := cli.ReadJSON(resp, &result); err != nil {
-		return fmt.Errorf("read provision response: %w", err)
+		return false, fmt.Errorf("read provision response: %w", err)
 	}
 	if !result.CreatedUser || result.UserID == "" {
-		return fmt.Errorf("server did not confirm creation of a new account; no password was changed")
+		return false, fmt.Errorf("server did not confirm creation of a new account; no password was changed")
 	}
 	link, err := url.Parse(result.SetupURL)
 	if err != nil || link.Query().Get("token") == "" {
-		return fmt.Errorf("server did not return an account setup token")
+		return false, fmt.Errorf("server did not return an account setup token")
 	}
 	// Never navigate the returned URL: redeem only against the explicit seed
 	// target. The URL's hostname cannot redirect credentials to a third party.
 	resp, err = client.Post("/api/v1/auth/reset", map[string]string{"token": link.Query().Get("token"), "new_password": u.Password})
 	if err != nil {
-		return fmt.Errorf("new account setup failed: %w", err)
+		return false, fmt.Errorf("new account setup failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if err := cli.CheckError(resp); err != nil {
-		return fmt.Errorf("new account setup failed: %w", err)
+		return false, fmt.Errorf("new account setup failed: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // placeExistingSeedUser obtains an ID only through authenticated self identity,

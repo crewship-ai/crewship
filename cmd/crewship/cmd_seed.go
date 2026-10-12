@@ -60,7 +60,7 @@ func init() {
 	seedCmd.Flags().Bool("with-team-chat", false, "Add six fictional colleagues with real roles, local avatars and human Chat examples; signup is not required")
 	seedCmd.Flags().String("state-dir", "", "Private team-chat credential directory outside Git (isolated per server/workspace)")
 	seedCmd.AddCommand(newSeedTeamChatCmd())
-	seedCmd.Flags().Bool("with-users", false, "Add four extra users (ADMIN, MANAGER, MEMBER, VIEWER) to the workspace for RBAC matrix testing; uses authenticated member provisioning (signup may remain disabled)")
+	seedCmd.Flags().Bool("with-users", false, "Add role accounts and named single-capability/full variants (ADMIN, MANAGER, MEMBER, VIEWER) to the workspace for RBAC matrix testing; uses authenticated member provisioning (signup may remain disabled)")
 	seedCmd.Flags().String("codex-auth-file", "", "Absolute path to a private Codex auth.json (0600, outside the repo) that switches the demo agents to Codex CLI; overrides "+seedCodexAuthFileEnv)
 }
 
@@ -221,9 +221,12 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		// one and did not get it must not be told the seed succeeded: that is
 		// how the nightly harness matrix ran for the whole life of the flag
 		// against workspaces with exactly one user (#1829). Partial fixtures
-		// still return nil — see seedRBACUsers.
+		// fail the seed — see seedRBACUsers.
 		if err := seedRBACUsers(ctx, client); err != nil {
 			return fmt.Errorf("--with-users: %w", err)
+		}
+		if err := seedUserRoster(ctx, client, demoCapabilityUsers()); err != nil {
+			return fmt.Errorf("--with-users capability matrix: %w", err)
 		}
 	}
 

@@ -33,10 +33,13 @@ afterEach(() => cleanup())
 // what is listed, the run facets only on Backup history, nothing on the
 // instance settings.
 describe("BackupsPage panel", () => {
-  it("is headed by ← Admin and navigates by Overview, Backup history, Plans, Recovery and Settings", async () => {
+  it("leads back to Admin from the sub-bar and navigates by Overview, Backup history, Plans, Recovery and Settings", async () => {
     show()
     const p = panel()
-    expect(within(p).getByRole("link", { name: /Admin/ })).toHaveAttribute("href", "/admin")
+    // The way back is the sub-bar's "← Admin" button, once — not repeated
+    // at the top of the panel.
+    expect(screen.getByRole("link", { name: "Back to Admin" })).toHaveAttribute("href", "/admin")
+    expect(within(p).queryByRole("link", { name: /Admin/ })).toBeNull()
     for (const label of ["Overview", "Backup history", "New plan", "New restore", "Storage", "Keys & alerts"]) {
       expect(within(p).getByRole("button", { name: new RegExp(label) })).toBeInTheDocument()
     }

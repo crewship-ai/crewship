@@ -18,9 +18,16 @@ import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui
  *
  * The rule it keeps: at most two navigation columns on screen — the app rail
  * and ONE side panel. Opening a nested page swaps the parent's panel (e.g.
- * the Settings sections) for this page's own, headed by "← <parent>", so the
- * reader knows they went one level in and how to get out. The arrow always
- * goes to the parent, not to browser history. Never nest a nested page.
+ * the Settings sections) for this page's own. The way out is the first thing
+ * on the sub-bar: a bordered "← <parent>" button, then the page's name and
+ * what it is for. It always goes to the parent, not to browser history.
+ * Never nest a nested page.
+ *
+ * The panel used to repeat all of that at its top — "← Settings", the icon,
+ * "Crew links" and the description — directly under a sub-bar that already
+ * read "Settings / Crew links". Two copies of the path, and the one that
+ * actually led back was small grey text. Now there is one header and the
+ * back control looks like a control; the panel starts with its search.
  *
  * The panel is built like every other explorer sidebar (sidebar-kit): a
  * toolbar (search, Filter) with the collapse button, then collapsible
@@ -28,7 +35,8 @@ import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui
  * sheet behind a "Filters" button in the sub-bar; `mobileNav` (usually the
  * page's view tabs) stays on the page.
  *
- * Used by Settings › Crew links and Settings › Audit log.
+ * Used by Settings › Crew links, Settings › Audit log, and Admin › People &
+ * workspaces, Security and Backups.
  */
 export function DrillPage({
   parent,
@@ -91,17 +99,32 @@ export function DrillPage({
     <PageSaveProvider>
     <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col">
       <SubBar
-        icon={BackIcon}
-        title={parent.label}
-        section={title}
+        icon={Icon}
+        title={title}
+        description={description}
         ariaLabel={`${parent.label} / ${title}`}
         actions={isMobile ? <>{actions}{filtersButton}</> : actions}
         leading={
-          isMobile ? (
-            <Link href={parent.href} aria-label={`Back to ${parent.label}`} className="-ml-1 grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
-              <ArrowLeft className="h-4 w-4" />
+          <span className="flex items-center gap-2">
+            <Link
+              href={parent.href}
+              data-slot="drill-back"
+              aria-label={`Back to ${parent.label}`}
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background text-xs font-medium text-foreground/85 shadow-xs transition-colors hover:bg-accent hover:text-foreground",
+                isMobile ? "w-7 justify-center" : "pl-1.5 pr-2.5",
+              )}
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              {!isMobile && (
+                <>
+                  {BackIcon && <BackIcon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />}
+                  {parent.label}
+                </>
+              )}
             </Link>
-          ) : undefined
+            <span className="text-muted-foreground-soft" aria-hidden>/</span>
+          </span>
         }
       />
       <div className="flex min-h-0 flex-1">
@@ -120,16 +143,9 @@ export function DrillPage({
             {collapsed ? (
               <div className="flex flex-col items-center gap-2 py-2">
                 <SidebarCollapseButton collapsed onToggle={() => setCollapsed(false)} />
-                <Link href={parent.href} aria-label={`Back to ${parent.label}`} title={`Back to ${parent.label}`} className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                </Link>
-                <span className="icon-tile inline-flex h-8 w-8 items-center justify-center rounded-lg" title={title} aria-hidden>
-                  <Icon className="h-4 w-4" />
-                </span>
               </div>
             ) : (
               <>
-                <DrillHeader parent={parent} title={title} icon={Icon} description={description} />
                 <SidebarToolbar>
                   {toolbar ?? <span className="flex-1" />}
                   <SidebarCollapseButton collapsed={false} onToggle={() => setCollapsed(true)} />
@@ -170,30 +186,6 @@ export function DrillPage({
       )}
     </div>
     </PageSaveProvider>
-  )
-}
-
-function DrillHeader({ parent, title, icon: Icon, description }: { parent: { href: string; label: string }; title: string; icon: LucideIcon; description?: string }) {
-  return (
-    <div className="border-b border-sidebar-border px-3 pb-3 pt-2.5">
-      <Link
-        href={parent.href}
-        data-slot="drill-back"
-        className="-ml-1 inline-flex h-7 items-center gap-1.5 rounded-md px-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" />
-        {parent.label}
-      </Link>
-      <div className="mt-2 flex items-center gap-2.5">
-        <span className="icon-tile inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" aria-hidden>
-          <Icon className="h-4 w-4" />
-        </span>
-        <div className="min-w-0">
-          <h1 className="truncate text-sm font-semibold tracking-[-0.01em]">{title}</h1>
-          {description && <p className="text-[11.5px] leading-snug text-muted-foreground">{description}</p>}
-        </div>
-      </div>
-    </div>
   )
 }
 
