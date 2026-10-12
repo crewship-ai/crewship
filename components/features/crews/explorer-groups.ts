@@ -63,7 +63,7 @@ export interface ExplorerGroups {
 }
 
 /** Status words that mean "a person is needed", beyond ERROR. */
-const WAITING = new Set(["PENDING_REVIEW", "WAITING", "PAUSED", "AWAITING_APPROVAL"])
+export const WAITING_STATUSES: ReadonlySet<string> = new Set(["PENDING_REVIEW", "WAITING", "PAUSED", "AWAITING_APPROVAL"])
 
 function live(a: ExplorerAgent): boolean {
   return !a.expired_at
@@ -81,7 +81,7 @@ export function crewPill(
   if (provisioning === "failed") return { tone: "danger", label: "Build failed" }
   if (provisioning === "needs_provision") return { tone: "warn", label: "Rebuild" }
   if (gaps > 0) return { tone: "warn", label: gaps === 1 ? "1 gap" : `${gaps} gaps` }
-  const waiting = liveAgents.filter((a) => WAITING.has(a.status)).length
+  const waiting = liveAgents.filter((a) => WAITING_STATUSES.has(a.status)).length
   if (waiting > 0) return { tone: "warn", label: waiting === 1 ? "Waiting" : `${waiting} waiting` }
   if (provisioning === "running") return { tone: "blue", label: "Building" }
   const running = liveAgents.filter((a) => a.status === "RUNNING").length
@@ -105,44 +105,55 @@ function matches(q: string, ...fields: (string | null | undefined)[]): boolean {
   return fields.some((f) => f != null && f.toLowerCase().includes(q))
 }
 
-export function groupExplorerCrews({
+export function groupExplorerCrews<A extends ExplorerAgent = ExplorerAgent>({
   crews,
   agents,
   search = "",
   provisioningByCrew,
   gapsByCrew,
+  match,
+  sortAgents,
+  crewOrder,
 }: {
   crews: ExplorerCrew[]
-  agents: ExplorerAgent[]
+  agents: A[]
   search?: string
   provisioningByCrew?: ReadonlyMap<string, ProvisioningState>
   gapsByCrew?: ReadonlyMap<string, number>
+  /** The Status and Filter picks. While set, a crew shows only with an agent
+   *  that passes — a crew name alone is not a reason to list it. */
+  match?: (a: A) => boolean
+  /** Order of the agents under each crew; API order without it. */
+  sortAgents?: (agents: A[]) => A[]
+  /** Order of the crews inside a group; roster size, then name, without it. */
+  crewOrder?: (a: ExplorerCrewRow, b: ExplorerCrewRow) => number
 }): ExplorerGroups {
   const q = search.trim().toLowerCase()
-  const byCrew = new Map<string | null, ExplorerAgent[]>()
+  const byCrew = new Map<string | null, A[]>()
   for (const a of agents) {
     const list = byCrew.get(a.crew_id) ?? []
     list.push(a)
     byCrew.set(a.crew_id, list)
   }
-  const agentMatches = (a: ExplorerAgent) => !q || matches(q, a.name, a.slug, a.role_title)
+  const agentMatches = (a: A) => (!q || matches(q, a.name, a.slug, a.role_title)) && (!match || match(a))
 
   const rows: ExplorerCrewRow[] = []
   let matchedAgents = 0
   for (const crew of crews) {
     const all = byCrew.get(crew.id) ?? []
-    const shown = q ? all.filter(agentMatches) : all
-    const crewHit = !q || matches(q, crew.name, crew.slug) || shown.length > 0
+    const shown = q || match ? all.filter(agentMatches) : all
+    const crewHit = match ? shown.length > 0 : !q || matches(q, crew.name, crew.slug) || shown.length > 0
     if (!crewHit) continue
     matchedAgents += shown.length
     rows.push({
       crew,
-      agents: shown,
+      agents: sortAgents ? sortAgents(shown) : shown,
       agentCount: crew._count?.agents ?? all.length,
       pill: crewPill(all, provisioningByCrew?.get(crew.id), gapsByCrew?.get(crew.id) ?? 0),
     })
   }
-  const unassigned = (byCrew.get(null) ?? []).filter(agentMatches)
+  const unassignedAll = (byCrew.get(null) ?? []).filter(agentMatches)
+  const unassigned = sortAgents ? sortAgents(unassignedAll) : unassignedAll
   matchedAgents += unassigned.length
 
   const groups: ExplorerGroup[] = (["attention", "running", "idle"] as const)
@@ -152,7 +163,7 @@ export function groupExplorerCrews({
   // stable between refreshes, and a hundred empty "Crew 0xx" rows never push
   // the three real crews out of view.
   for (const g of groups) {
-    g.rows.sort((a, b) => b.agentCount - a.agentCount || a.crew.name.localeCompare(b.crew.name))
+    g.rows.sort(crewOrder ?? ((a, b) => b.agentCount - a.agentCount || a.crew.name.localeCompare(b.crew.name)))
   }
   return { groups, unassigned, matchedCrews: rows.length, matchedAgents }
 }
@@ -168,18 +179,21 @@ export function foldRows<T>(rows: T[], showAll: boolean, fold = EXPLORER_FOLD): 
 /** "103 crews · 308 agents", or the matched counts with the search. */
 export function explorerCountLine({
   search,
+  narrowed = false,
   crewsTotal,
   agentsTotal,
   matchedCrews,
   matchedAgents,
 }: {
   search: string
+  /** A Status or Filter pick is on: the line counts matches, like a search. */
+  narrowed?: boolean
   crewsTotal: number | null
   agentsTotal: number | null
   matchedCrews: number
   matchedAgents: number
 }): string {
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`
-  if (search.trim()) return `${plural(matchedCrews, "crew")} · ${plural(matchedAgents, "agent")} match`
+  if (search.trim() || narrowed) return `${plural(matchedCrews, "crew")} · ${plural(matchedAgents, "agent")} match`
   return `${plural(crewsTotal ?? matchedCrews, "crew")} · ${plural(agentsTotal ?? matchedAgents, "agent")}`
 }

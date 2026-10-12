@@ -147,6 +147,18 @@ export function CrewsLayout({
     }
     return out
   }, [readiness.gapsByCredential])
+  // Missions in progress per crew, for the line under each crew's name.
+  const runningMissionsByCrew = useMemo(() => {
+    const out = new Map<string, number>()
+    for (const m of missions) {
+      if (m.status === "IN_PROGRESS" || m.status === "PLANNING" || m.status === "REVIEW") {
+        out.set(m.crew_id, (out.get(m.crew_id) ?? 0) + 1)
+      }
+    }
+    return out
+  }, [missions])
+  // "Add agent" on a crew row opens the subbar's New agent dialog for that crew.
+  const [addAgentRequest, setAddAgentRequest] = useState<{ crewSlug: string; at: number } | null>(null)
   const {
     selectedAgentSlug,
     selectedCrewSlug,
@@ -255,6 +267,7 @@ export function CrewsLayout({
         crews={crews}
         crewsTotal={crewsTotal}
         agentsTotal={agentsTotal ?? agents.length}
+        addAgentRequest={addAgentRequest}
       />
 
       {/* Main grid: explorer | canvas */}
@@ -305,6 +318,8 @@ export function CrewsLayout({
                     onLoadMore={onLoadMore}
                     provisioningByCrew={provisioningByCrew}
                     gapsByCrew={gapsByCrew}
+                    runningMissionsByCrew={runningMissionsByCrew}
+                    onAddAgent={(crewSlug) => { setExplorerOverlayOpen(false); setAddAgentRequest({ crewSlug, at: Date.now() }) }}
                   />
                 </motion.div>
               </>
@@ -330,7 +345,9 @@ export function CrewsLayout({
               loadingMore={loadingMore}
               onLoadMore={onLoadMore}
               provisioningByCrew={provisioningByCrew}
-                    gapsByCrew={gapsByCrew}
+              gapsByCrew={gapsByCrew}
+              runningMissionsByCrew={runningMissionsByCrew}
+              onAddAgent={(crewSlug) => setAddAgentRequest({ crewSlug, at: Date.now() })}
             />
           </div>
         )}
