@@ -32,6 +32,7 @@ beforeEach(() => {
   delete document.documentElement.dataset.density
   delete document.documentElement.dataset.motion
   delete document.documentElement.dataset.base
+  delete document.documentElement.dataset.textSize
   workspaceHex = null
 })
 afterEach(() => {
@@ -117,5 +118,27 @@ describe("AppearanceSection", () => {
     render(<AppearanceSection />)
     expect(screen.getByTestId("workspace-accent-hint")).toHaveTextContent(/team's brand colour, adjusted/i)
     expect(screen.getByRole("radio", { name: "Workspace" })).toBeInTheDocument()
+  })
+
+  it("sets text size on <html> and keeps it with the appearance", () => {
+    render(<AppearanceSection />)
+    fireEvent.click(screen.getByRole("button", { name: "Large" }))
+    expect(document.documentElement.dataset.textSize).toBe("large")
+    expect(store.get("crewship-text-size")).toBe("large")
+    fireEvent.click(screen.getByRole("button", { name: "Default" }))
+    expect(document.documentElement.dataset.textSize).toBeUndefined()
+  })
+
+  it("chooses the sidebar mode through the synced store", () => {
+    render(<AppearanceSection />)
+    fireEvent.click(screen.getByRole("button", { name: "Pinned open" }))
+    expect(store.get("crewship_sidebar_mode")).toBe("pinned")
+  })
+
+  it("previews the accent with real controls, and offers every preset as a tile", () => {
+    render(<AppearanceSection />)
+    expect(screen.getByRole("group", { name: "Accent preview" })).toHaveTextContent("Primary action")
+    const tiles = screen.getByRole("radiogroup", { name: "Accent colour" }).querySelectorAll('[role="radio"]')
+    expect(tiles).toHaveLength(ACCENTS.length)
   })
 })

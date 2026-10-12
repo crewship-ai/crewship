@@ -44,12 +44,18 @@ Restricted sessions are not offered Notification preferences or Connect CLI.
 `/settings?tab=appearance`
 
 - **Theme** — Dark, Light or System (follows the OS).
-- **Accent** — Blue, Indigo, Violet, Teal or Graphite; tints buttons, links and selection.
+- **Accent** — Blue (default), Sky, Teal, Indigo, Violet, Fuchsia, Pink or Graphite; tints buttons, links, chips, switches and the focus ring, shown live in a preview strip under the tiles. Green, red and amber are never accents — they mean done, failed and needs-attention.
   - **Workspace** appears once an admin has set a brand colour in **Settings → General → Pages appearance → Brand accent**. Its hue and saturation are kept and each shade's lightness is adjusted until it meets WCAG AA (4.5:1) on every base, so a light brand colour like mint still gets readable buttons and links. Switching workspace switches the colour; a workspace without one shows Blue.
 - **Base** — the neutral tone of backgrounds, cards, sidebar, borders and muted text: **Cool** (blue-tinted, the default), **Neutral** (pure greys), **Warm** (stone and paper) or **Black** (true black in dark mode, crisp white in light). Every base is held to the same contrast floors as the default under every accent.
+- **Text size** — Small, Default or Large. Scales text, spacing and controls together (the interface is rem-based), like browser zoom but kept with your account.
 - **Density** — Comfortable or Compact. Compact tightens the vertical padding of sidebar rows, settings rows and table cells on mouse/trackpad devices; text size and touch targets do not change.
+- **Sidebar** — Rail · expand on hover (default), Rail, or Pinned open; the same modes as the switch at the bottom of the rail and ⌘B, which now also sync.
 - **Reduce motion** — System (the OS setting), On (no transitions or animations), Off (full motion even if the OS asks for less).
-- **Sync across devices** — on by default. Theme, accent, base, density and motion are stored with your account under the `appearance` key of the per-user preference store (`GET`/`PUT /api/v1/me/preferences/appearance`; CLI: `crewship preferences`). Turning sync on adopts the value already saved on the account; with sync off nothing is sent and the choices stay in this browser.
+- **Sync across devices** — on by default. Theme, accent, base, text size, density, sidebar and motion are stored with your account under the `appearance` key of the per-user preference store (`GET`/`PUT /api/v1/me/preferences/appearance`; CLI: `crewship preferences`). Turning sync on adopts the value already saved on the account; with sync off nothing is sent and the choices stay in this browser.
+
+## Settings → General → Pages appearance
+
+The workspace palette for Page applications (ADMIN and up edit, everyone reads): start from a preset — **Mint**, **Midnight blue**, **Paper**, **Graphite** — then adjust Brand, Surfaces and Text colours with a swatch or hex. Text and Secondary text show their live contrast on the background and on cards (`AA 12.3:1`, or `Low 3.1:1` below 4.5:1), and a live mini Page previews the result. The Brand accent is also what everyone can pick as the **Workspace** accent in Appearance.
 
 ## Where personal settings are stored
 
@@ -57,10 +63,10 @@ Everything on these pages is stored with **your user**, not with the browser, in
 
 | Key | What |
 |---|---|
-| `appearance` | theme, accent, base, density, reduce motion |
+| `appearance` | theme, accent, base, text size, density, sidebar, reduce motion |
 | `notification-sounds.<workspace-id>` | Notification sounds for that workspace |
 
-A new user starts on the defaults — Dark, **Blue**, Cool, Comfortable, motion following the OS, sounds off — and gets their own rows on the first change. The browser keeps a copy so the first paint is already right; on sign-in the server copy wins. Two things stay per device on purpose: the **Sync across devices** switch itself, and the browser's permission to play audio.
+A new user starts on the defaults — **Dark**, **Blue**, Cool, Default text size, Comfortable, sidebar rail with hover, motion following the OS, sounds off — and gets their own rows on the first change. The browser keeps a copy so the first paint is already right; on sign-in the server copy wins. Two things stay per device on purpose: the **Sync across devices** switch itself, and the browser's permission to play audio.
 
 ## Settings → Sessions & tokens
 

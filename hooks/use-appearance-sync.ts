@@ -23,7 +23,8 @@ function put(body: string, keepalive = false): void {
 }
 
 /**
- * Keeps this browser's appearance (theme, accent, base, density, motion) in step
+ * Keeps this browser's appearance (theme, accent, base, density, motion,
+ * text size, sidebar mode) in step
  * with the signed-in user's `appearance` preference on the server.
  *
  * - On activation the server value wins: it is applied field by field, so a
@@ -53,11 +54,11 @@ function put(body: string, keepalive = false): void {
  * send them.
  */
 export function useAppearanceSync(enabled: boolean): void {
-  const { theme, accent, base, density, motion, syncEnabled, setTheme, setAccent, setBase, setDensity, setMotion } = useAppearance()
+  const { theme, accent, base, density, motion, textSize, sidebar, syncEnabled, setTheme, setAccent, setBase, setDensity, setMotion, setTextSize, setSidebar } = useAppearance()
   const active = enabled && syncEnabled
 
   // The look as it would be stored; null until next-themes knows the theme.
-  const current: Appearance | null = theme ? { theme, accent, base, density, motion } : null
+  const current: Appearance | null = theme ? { theme, accent, base, density, motion, textSize, sidebar } : null
   const serialized = current ? JSON.stringify(current) : null
   const currentRef = useRef(current)
   currentRef.current = current
@@ -88,12 +89,16 @@ export function useAppearanceSync(enabled: boolean): void {
           if (remote.base && remote.base !== local?.base) setBase(remote.base)
           if (remote.density && remote.density !== local?.density) setDensity(remote.density)
           if (remote.motion && remote.motion !== local?.motion) setMotion(remote.motion)
+          if (remote.textSize && remote.textSize !== local?.textSize) setTextSize(remote.textSize)
+          if (remote.sidebar && remote.sidebar !== local?.sidebar) setSidebar(remote.sidebar)
           // A complete server value is what the server holds, so it is not
           // sent back. A partial one (an older build, or a field this build
           // rejected) is left unmarked: the push effect then writes the
           // completed value — server fields plus local ones — back up.
-          const { theme: t, accent: a, base: b, density: d, motion: m } = remote
-          lastSentRef.current = t && a && b && d && m ? JSON.stringify({ theme: t, accent: a, base: b, density: d, motion: m }) : null
+          const { theme: t, accent: a, base: b, density: d, motion: m, textSize: ts, sidebar: sb } = remote
+          lastSentRef.current = t && a && b && d && m && ts && sb
+            ? JSON.stringify({ theme: t, accent: a, base: b, density: d, motion: m, textSize: ts, sidebar: sb })
+            : null
         } else {
           // Nothing on the server yet: leaving lastSent empty makes the push
           // effect seed it with this device's look.

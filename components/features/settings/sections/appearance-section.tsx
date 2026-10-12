@@ -5,9 +5,10 @@ import { Contrast, Layers, Palette, SlidersHorizontal } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Switch } from "@/components/ui/switch"
+import { Button } from "@/components/ui/button"
 import { AccentPicker, THEME_OPTIONS } from "@/components/layout/theme-switcher"
 import { useAppearance } from "@/hooks/use-appearance"
-import type { Density, MotionChoice, ThemeChoice } from "@/lib/theme/appearance"
+import type { Density, MotionChoice, SidebarChoice, TextSize, ThemeChoice } from "@/lib/theme/appearance"
 import { BASES, type BaseId } from "@/lib/theme/bases"
 import { WORKSPACE_ACCENT } from "@/lib/theme/accents"
 import { useWorkspaceAccentHex } from "@/components/layout/workspace-accent"
@@ -24,6 +25,19 @@ import { SettingsCard, SettingsRow, SettingsSegmented } from "../shared"
 const DENSITY_OPTIONS: { value: Density; label: string }[] = [
   { value: "comfortable", label: "Comfortable" },
   { value: "compact", label: "Compact" },
+]
+
+const TEXT_SIZE_OPTIONS: { value: TextSize; label: string }[] = [
+  { value: "small", label: "Small" },
+  { value: "default", label: "Default" },
+  { value: "large", label: "Large" },
+]
+
+// The rail's three modes, in the words the rail's own menu uses.
+const SIDEBAR_OPTIONS: { value: SidebarChoice; label: string }[] = [
+  { value: "hover", label: "Rail · expand on hover" },
+  { value: "collapsed", label: "Rail" },
+  { value: "pinned", label: "Pinned open" },
 ]
 
 const MOTION_OPTIONS: { value: MotionChoice; label: string }[] = [
@@ -145,8 +159,27 @@ function BaseTiles({ value, onChange }: { value: BaseId; onChange: (b: BaseId) =
   )
 }
 
+/**
+ * The accent as it will actually look, drawn with the live app tokens and
+ * real components — a swatch alone does not show that the button is the
+ * deeper "strong" shade or what a link or a chip turns into.
+ */
+function AccentPreview() {
+  const [on, setOn] = useState(true)
+  return (
+    <div aria-label="Accent preview" role="group" className="flex flex-wrap items-center gap-x-4 gap-y-3 border-t border-border/60 bg-surface-subtle/60 px-4 py-3">
+      <Button size="sm" tabIndex={-1}>Primary action</Button>
+      <Button size="sm" variant="outline" tabIndex={-1}>Secondary</Button>
+      <span className="text-control text-primary-hover underline-offset-2 hover:underline">A link</span>
+      <span className="rounded-full bg-chip-info-bg px-2 py-0.5 text-label font-medium text-chip-info-fg">Chip</span>
+      <Switch checked={on} onCheckedChange={setOn} aria-label="Preview switch" />
+      <span className="flex h-7 items-center rounded-md border border-input bg-card px-2.5 text-label text-muted-foreground ring-2 ring-ring/50">Focused field</span>
+    </div>
+  )
+}
+
 export function AppearanceSection() {
-  const { theme, setTheme, accent, base, setBase, density, setDensity, motion, setMotion, syncEnabled, setSyncEnabled } = useAppearance()
+  const { theme, setTheme, accent, base, setBase, density, setDensity, motion, setMotion, textSize, setTextSize, sidebar, setSidebar, syncEnabled, setSyncEnabled } = useAppearance()
   const workspaceHex = useWorkspaceAccentHex()
 
   return (
@@ -157,6 +190,7 @@ export function AppearanceSection() {
 
       <SettingsCard icon={Palette} title="Accent" description="The one brand colour the interface is tinted with">
         <AccentPicker showLabels className="p-4" />
+        <AccentPreview />
         {/* Where the Workspace swatch comes from — or why it is missing. */}
         <p className="border-t border-border/60 px-4 py-2.5 text-label text-muted-foreground" data-testid="workspace-accent-hint">
           {workspaceHex
@@ -172,8 +206,14 @@ export function AppearanceSection() {
       </SettingsCard>
 
       <SettingsCard icon={SlidersHorizontal} title="Layout & motion">
+        <SettingsRow label="Text size" description="Scales text, spacing and controls together, like zoom — kept with your account.">
+          <SettingsSegmented label="Text size" options={TEXT_SIZE_OPTIONS} value={textSize} onChange={setTextSize} />
+        </SettingsRow>
         <SettingsRow label="Density" description="Compact tightens list, table and settings rows. Text size stays the same.">
           <SettingsSegmented label="Density" options={DENSITY_OPTIONS} value={density} onChange={setDensity} />
+        </SettingsRow>
+        <SettingsRow label="Sidebar" description="How the left rail behaves. Same as the switch at the bottom of the rail and ⌘B.">
+          <SettingsSegmented label="Sidebar" options={SIDEBAR_OPTIONS} value={sidebar} onChange={setSidebar} />
         </SettingsRow>
         <SettingsRow label="Reduce motion" description="System follows your operating system's setting.">
           <SettingsSegmented label="Reduce motion" options={MOTION_OPTIONS} value={motion} onChange={setMotion} />

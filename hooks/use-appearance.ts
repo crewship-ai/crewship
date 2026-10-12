@@ -8,20 +8,28 @@ import { DEFAULT_BASE, type BaseId } from "@/lib/theme/bases"
 import {
   DEFAULT_DENSITY,
   DEFAULT_MOTION,
+  DEFAULT_SIDEBAR,
+  DEFAULT_TEXT_SIZE,
   isThemeChoice,
   readAccent,
   readBase,
   readDensity,
   readMotion,
+  readSidebar,
+  readTextSize,
   readSyncEnabled,
   setAccentChoice,
   setBase,
   setDensity,
   setMotion,
+  setSidebarChoice,
+  setTextSize,
   setSyncEnabled,
   subscribeAppearance,
   type Density,
   type MotionChoice,
+  type SidebarChoice,
+  type TextSize,
   type ThemeChoice,
 } from "@/lib/theme/appearance"
 
@@ -34,6 +42,8 @@ const serverAccent = () => DEFAULT_ACCENT
 const serverBase = () => DEFAULT_BASE
 const serverDensity = () => DEFAULT_DENSITY
 const serverMotion = () => DEFAULT_MOTION
+const serverTextSize = () => DEFAULT_TEXT_SIZE
+const serverSidebar = () => DEFAULT_SIDEBAR
 const serverSync = () => true
 
 export function useAccentChoice(): AccentChoice {
@@ -48,6 +58,12 @@ export function useDensity(): Density {
 export function useMotionChoice(): MotionChoice {
   return useSyncExternalStore(subscribeAppearance, readMotion, serverMotion)
 }
+export function useTextSize(): TextSize {
+  return useSyncExternalStore(subscribeAppearance, readTextSize, serverTextSize)
+}
+export function useSidebarChoice(): SidebarChoice {
+  return useSyncExternalStore(subscribeAppearance, readSidebar, serverSidebar)
+}
 export function useAppearanceSyncEnabled(): boolean {
   return useSyncExternalStore(subscribeAppearance, readSyncEnabled, serverSync)
 }
@@ -60,12 +76,16 @@ export interface AppearanceState {
   base: BaseId
   density: Density
   motion: MotionChoice
+  textSize: TextSize
+  sidebar: SidebarChoice
   syncEnabled: boolean
   setTheme: (t: ThemeChoice) => void
   setAccent: (id: AccentChoice) => void
   setBase: (b: BaseId) => void
   setDensity: (d: Density) => void
   setMotion: (m: MotionChoice) => void
+  setTextSize: (t: TextSize) => void
+  setSidebar: (m: SidebarChoice) => void
   setSyncEnabled: (on: boolean) => void
 }
 
@@ -89,12 +109,16 @@ export function useAppearance(): AppearanceState {
     base: useBase(),
     density: useDensity(),
     motion: useMotionChoice(),
+    textSize: useTextSize(),
+    sidebar: useSidebarChoice(),
     syncEnabled: useAppearanceSyncEnabled(),
     setTheme,
     setAccent: setAccentChoice,
     setBase,
     setDensity,
     setMotion,
+    setTextSize,
+    setSidebar: setSidebarChoice,
     setSyncEnabled,
   }
 }

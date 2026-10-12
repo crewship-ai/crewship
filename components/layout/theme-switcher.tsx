@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Monitor, Moon, Sun, type LucideIcon } from "lucide-react"
+import { Check, Monitor, Moon, Sun, type LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useAppearance } from "@/hooks/use-appearance"
@@ -80,8 +80,8 @@ export function ThemeSwitcher({ className, size = "default" }: { className?: str
  * swatch colour comes from the registry, so adding an accent there adds it
  * here with no change to this component.
  *
- * `showLabels` prints each name under its swatch — Settings › Appearance has
- * the room, the menu does not (there the name is the tooltip and aria-label).
+ * `showLabels` is the Settings form: a grid of named tiles. Without it, the
+ * compact row of dots for tight spots (the name is the tooltip and label).
  */
 type AccentOption = { id: AccentChoice; label: string; swatch: string }
 
@@ -95,15 +95,51 @@ export function AccentPicker({ className, showLabels = false }: { className?: st
   if (workspaceHex || accent === WORKSPACE_ACCENT) {
     options.push({ id: WORKSPACE_ACCENT, label: "Workspace", swatch: workspaceHex ?? "var(--brand)" })
   }
+  if (showLabels) {
+    // Settings: a grid of named tiles. A 20px dot with a caption under it was
+    // hard to aim at and read as a row of loose dots; a tile is a target the
+    // size of its name and says which one is on with more than a thin ring.
+    return (
+      <div role="radiogroup" aria-label="Accent colour" className={cn("grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4", className)}>
+        {options.map(({ id, label, swatch }) => {
+          const checked = accent === id
+          return (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={checked}
+              aria-label={label}
+              onClick={() => setAccent(id)}
+              className={cn(
+                "group flex h-11 items-center gap-2.5 rounded-xl border px-2.5 text-left outline-none transition-colors",
+                "hover:border-line-strong hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/50",
+                checked ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border",
+              )}
+            >
+              <span
+                aria-hidden
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-full shadow-[inset_0_0_0_1px_rgb(255_255_255_/_0.25),0_1px_2px_rgb(0_0_0_/_0.25)] transition-transform group-hover:scale-110"
+                style={{ background: swatch }}
+              >
+                {checked && <Check className="h-3.5 w-3.5 text-white drop-shadow-[0_1px_1px_rgb(0_0_0_/_0.5)]" strokeWidth={3} />}
+              </span>
+              <span className={cn("truncate text-control", checked ? "font-medium text-foreground" : "text-muted-foreground")}>{label}</span>
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
   return (
     <div
       role="radiogroup"
       aria-label="Accent colour"
-      className={cn("flex items-center", showLabels ? "flex-wrap gap-3" : "gap-1.5", className)}
+      className={cn("flex items-center gap-1.5", className)}
     >
       {options.map(({ id, label, swatch }) => {
         const checked = accent === id
-        const button = (
+        return (
           <button
             key={id}
             type="button"
@@ -119,20 +155,11 @@ export function AccentPicker({ className, showLabels = false }: { className?: st
             className={cn(
               "grid h-7 w-7 place-items-center rounded-full outline-none transition-transform",
               "hover:scale-110 focus-visible:ring-2 focus-visible:ring-ring/50",
-              // The offset ring is cut from whatever the picker sits on: the menu's
-              // popover, or the settings card.
-              checked && cn("ring-2 ring-foreground/70 ring-offset-2", showLabels ? "ring-offset-card" : "ring-offset-popover"),
+              checked && "ring-2 ring-foreground/70 ring-offset-2 ring-offset-popover",
             )}
           >
             <span className="h-5 w-5 rounded-full shadow-[inset_0_0_0_1px_rgb(255_255_255_/_0.25)]" style={{ background: swatch }} aria-hidden />
           </button>
-        )
-        if (!showLabels) return button
-        return (
-          <div key={id} className="flex w-14 flex-col items-center gap-1.5">
-            {button}
-            <span aria-hidden className={cn("text-label", checked ? "text-foreground" : "text-muted-foreground")}>{label}</span>
-          </div>
         )
       })}
     </div>

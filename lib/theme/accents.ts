@@ -20,9 +20,12 @@
 
 export const ACCENTS = [
   { id: "blue", label: "Blue", swatch: "#1E7BFE" },
+  { id: "sky", label: "Sky", swatch: "#38BDF8" },
+  { id: "teal", label: "Teal", swatch: "#0EA5C4" },
   { id: "indigo", label: "Indigo", swatch: "#6366F1" },
   { id: "violet", label: "Violet", swatch: "#8B5CF6" },
-  { id: "teal", label: "Teal", swatch: "#0EA5C4" },
+  { id: "fuchsia", label: "Fuchsia", swatch: "#D946EF" },
+  { id: "pink", label: "Pink", swatch: "#EC4899" },
   { id: "graphite", label: "Graphite", swatch: "#64748B" },
 ] as const
 

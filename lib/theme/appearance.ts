@@ -42,12 +42,28 @@ export type Density = (typeof DENSITIES)[number]
 export const MOTION_CHOICES = ["system", "on", "off"] as const
 export type MotionChoice = (typeof MOTION_CHOICES)[number]
 
+/** Interface text size. Every size in the app is rem-based, so this scales
+ *  text, spacing and controls together — a zoom, not a font swap. */
+export const TEXT_SIZES = ["small", "default", "large"] as const
+export type TextSize = (typeof TEXT_SIZES)[number]
+
+/** How the left rail behaves; the same three modes components/ui/sidebar.tsx
+ *  stores under its own key (the sidebar keeps owning that state — this is
+ *  the copy that syncs). */
+export const SIDEBAR_CHOICES = ["hover", "collapsed", "pinned"] as const
+export type SidebarChoice = (typeof SIDEBAR_CHOICES)[number]
+
 export const DEFAULT_DENSITY: Density = "comfortable"
+export const DEFAULT_TEXT_SIZE: TextSize = "default"
+export const DEFAULT_SIDEBAR: SidebarChoice = "hover"
 export const DEFAULT_MOTION: MotionChoice = "system"
 
 /** localStorage keys; per browser, like the theme and the accent. */
 export const DENSITY_STORAGE_KEY = "crewship-density"
 export const MOTION_STORAGE_KEY = "crewship-motion"
+export const TEXT_SIZE_STORAGE_KEY = "crewship-text-size"
+/** components/ui/sidebar.tsx's own key; read here, written through it. */
+export const SIDEBAR_STORAGE_KEY = "crewship_sidebar_mode"
 /** The sync switch is deliberately per DEVICE: "this laptop keeps its own
  *  look" is exactly the choice it exists for, so it can never itself sync. */
 export const APPEARANCE_SYNC_STORAGE_KEY = "crewship-appearance-sync"
@@ -64,6 +80,9 @@ export interface Appearance {
   base: BaseId
   density: Density
   motion: MotionChoice
+  /** Optional on the wire, like base: absent in values saved before it. */
+  textSize: TextSize
+  sidebar: SidebarChoice
 }
 
 export function isThemeChoice(v: unknown): v is ThemeChoice {
@@ -74,6 +93,12 @@ export function isDensity(v: unknown): v is Density {
 }
 export function isMotionChoice(v: unknown): v is MotionChoice {
   return typeof v === "string" && (MOTION_CHOICES as readonly string[]).includes(v)
+}
+export function isTextSize(v: unknown): v is TextSize {
+  return typeof v === "string" && (TEXT_SIZES as readonly string[]).includes(v)
+}
+export function isSidebarChoice(v: unknown): v is SidebarChoice {
+  return typeof v === "string" && (SIDEBAR_CHOICES as readonly string[]).includes(v)
 }
 
 /**
@@ -91,6 +116,8 @@ export function parseAppearance(value: unknown): Partial<Appearance> {
   if (isBaseId(v.base)) out.base = v.base
   if (isDensity(v.density)) out.density = v.density
   if (isMotionChoice(v.motion)) out.motion = v.motion
+  if (isTextSize(v.textSize)) out.textSize = v.textSize
+  if (isSidebarChoice(v.sidebar)) out.sidebar = v.sidebar
   return out
 }
 
@@ -109,6 +136,12 @@ export function applyMotionAttr(m: MotionChoice): void {
   if (m === "on") document.documentElement.dataset.motion = "reduce"
   else if (m === "off") document.documentElement.dataset.motion = "full"
   else delete document.documentElement.dataset.motion
+}
+
+/** Default is the absence of the attribute. */
+export function applyTextSizeAttr(t: TextSize): void {
+  if (t === "default") delete document.documentElement.dataset.textSize
+  else document.documentElement.dataset.textSize = t
 }
 
 /** The motion/react MotionConfig setting for a choice. */
@@ -151,6 +184,10 @@ function onStorage(e: StorageEvent): void {
   // Another tab changed a choice. Paint it here too, then let readers re-read.
   if (e.key === ACCENT_STORAGE_KEY && isAccentChoice(e.newValue)) document.documentElement.dataset.accent = e.newValue
   else if (e.key === BASE_STORAGE_KEY) applyBaseAttr(readBase())
+  else if (e.key === TEXT_SIZE_STORAGE_KEY) applyTextSizeAttr(readTextSize())
+  else if (e.key === SIDEBAR_STORAGE_KEY) {
+    // Nothing to paint: the sidebar bridge reads the new mode from the store.
+  }
   else if (e.key === DENSITY_STORAGE_KEY) applyDensityAttr(readDensity())
   else if (e.key === MOTION_STORAGE_KEY) applyMotionAttr(readMotion())
   else if (e.key !== APPEARANCE_SYNC_STORAGE_KEY) return
@@ -181,6 +218,23 @@ export function readSyncEnabled(): boolean {
 /** readStoredAccent, plus this page's memory when storage throws. */
 export function readAccent(): AccentChoice {
   return read(ACCENT_STORAGE_KEY, isAccentChoice, DEFAULT_ACCENT)
+}
+export function readTextSize(): TextSize {
+  return read(TEXT_SIZE_STORAGE_KEY, isTextSize, DEFAULT_TEXT_SIZE)
+}
+export function setTextSize(t: TextSize): void {
+  applyTextSizeAttr(t)
+  write(TEXT_SIZE_STORAGE_KEY, t)
+  emit()
+}
+export function readSidebar(): SidebarChoice {
+  return read(SIDEBAR_STORAGE_KEY, isSidebarChoice, DEFAULT_SIDEBAR)
+}
+/** Records the rail mode in the store. The sidebar itself is switched by the
+ *  bridge inside SidebarProvider (components/layout/sidebar-preference.tsx). */
+export function setSidebarChoice(m: SidebarChoice): void {
+  write(SIDEBAR_STORAGE_KEY, m)
+  emit()
 }
 export function readBase(): BaseId {
   return read(BASE_STORAGE_KEY, isBaseId, DEFAULT_BASE)
@@ -221,6 +275,8 @@ export const APPEARANCE_BOOT_SCRIPT = `(function(){try{var d=document.documentEl
   DENSITY_STORAGE_KEY,
 )})==="compact")d.setAttribute("data-density","compact");var m=s.getItem(${JSON.stringify(
   MOTION_STORAGE_KEY,
-)});if(m==="on")d.setAttribute("data-motion","reduce");else if(m==="off")d.setAttribute("data-motion","full");var b=s.getItem(${JSON.stringify(
+)});if(m==="on")d.setAttribute("data-motion","reduce");else if(m==="off")d.setAttribute("data-motion","full");var t=s.getItem(${JSON.stringify(
+  TEXT_SIZE_STORAGE_KEY,
+)});if(t==="small"||t==="large")d.setAttribute("data-text-size",t);var b=s.getItem(${JSON.stringify(
   BASE_STORAGE_KEY,
 )});if(${JSON.stringify(BASES_NON_DEFAULT)}.indexOf(b)>-1)d.setAttribute("data-base",b)}catch(e){}})()`

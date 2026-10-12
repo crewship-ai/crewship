@@ -1591,6 +1591,13 @@ body {
   scroll-behavior: auto !important;
 }
 
+/* Text size — Settings › Appearance › Text size (data-text-size on <html>,
+ * lib/theme/appearance.ts). Every size and most spacing in the app are rem,
+ * so moving the root size scales the interface as one, like browser zoom but
+ * kept with the account. Default is the absence of the attribute. */
+:root[data-text-size="small"] { font-size: 93.75%; }
+:root[data-text-size="large"] { font-size: 112.5%; }
+
 /* ─────────────────────────────────────────────────────────────────────────
  * Compact density — Settings › Appearance › Density (data-density="compact"
  * on <html>, lib/theme/appearance.ts).

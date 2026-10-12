@@ -26,6 +26,7 @@ import { RealtimeStatusBanner } from "@/components/layout/realtime-status-banner
 import { NotificationSoundEvents } from "@/components/layout/notification-sound-events"
 import { AppearanceSync } from "@/components/layout/appearance-sync"
 import { WorkspaceAccentStyle } from "@/components/layout/workspace-accent"
+import { SidebarPreference } from "@/components/layout/sidebar-preference"
 
 export default function DashboardLayout({
   children,
@@ -112,6 +113,8 @@ export default function DashboardLayout({
           must sit inside RealtimeProvider (it consumes WS events). */}
       <ActiveRoutineRunsProvider>
         <SidebarProvider>
+          {/* Syncs the rail's mode with Settings › Appearance and the account. */}
+          <SidebarPreference />
           <AppSidebar />
           <SidebarInset>
             <AppToolbar />
