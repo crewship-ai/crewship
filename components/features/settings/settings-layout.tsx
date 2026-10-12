@@ -21,7 +21,6 @@ import { AppearanceSection } from "./sections/appearance-section"
 import { SessionsSection } from "./sections/sessions-section"
 import { PrivacySection } from "./sections/privacy-section"
 import { GeneralSection } from "./sections/general-section"
-import { MembersSection } from "./sections/members-section"
 import { AccessSecretsSection } from "./sections/access-secrets-section"
 import { HooksSection } from "./sections/hooks-section"
 import { SectionMoved } from "./sections/section-moved"
@@ -52,7 +51,6 @@ const sectionTitles: Record<string, { title: string; description?: string }> = {
   privacy: { title: "Privacy", description: "Agent memory about you (peer cards, opt-out, deletion)" },
   general: { title: "General", description: "Workspace identity, usage and settings" },
   connections: { title: "Crew links", description: "Cross-crew communication links" },
-  members: { title: "Members", description: "Team members and permissions" },
   "access-secrets": {
     title: "Access & Secrets",
     description: "Who may read a stored secret in plaintext, and what each classification means",
@@ -93,6 +91,9 @@ export const MOVED_SECTIONS: Record<string, { href: string; label: string }> = {
   // its own side panel. The Settings row opens them; old ?tab= links follow.
   connections: { href: "/settings/crew-links", label: "Crew links" },
   audit: { href: "/settings/audit", label: "Audit log" },
+  // A ?member= on the old link survives the move (movedSectionHref): the ⌘K
+  // palette and other pages linked to one person, not to the roster.
+  members: { href: "/settings/members", label: "Members" },
 }
 
 // Resolve the initial tab from the URL `?tab=` param, falling back to
@@ -107,12 +108,24 @@ export function initialSettingsTab(search: string): string {
 /**
  * The user whose row a `?member=` deep link names, or "".
  *
- * Read alongside the tab, and for the same reason: the ⌘K palette can find a
- * person by name or email, and landing on the roster without saying which of
- * them you picked makes the caller search a second time by eye.
+ * The ⌘K palette can find a person by name or email, and landing on the
+ * roster without saying which of them you picked makes the caller search a
+ * second time by eye. Members is its own page now; this keeps an old
+ * /settings?tab=members&member=… link naming the same person there.
  */
 export function initialFocusedMember(search: string): string {
   return new URLSearchParams(search).get("member") ?? ""
+}
+
+/**
+ * Where a moved section's `?tab=` link goes, or null if `tab` did not move.
+ * Members carries its `?member=` along; the others have nothing to carry.
+ */
+export function movedSectionHref(tab: string, search: string): string | null {
+  const moved = MOVED_SECTIONS[tab]
+  if (!moved) return null
+  const member = tab === "members" ? initialFocusedMember(search) : ""
+  return member ? `${moved.href}?member=${encodeURIComponent(member)}` : moved.href
 }
 
 export function SettingsLayout() {
@@ -181,14 +194,12 @@ function SettingsPage() {
   const searchParams = useSearchParams()
   const search = searchParams.toString()
   const [requestedTab, _setActiveTab] = useState(() => initialSettingsTab(search))
-  const [focusedMember, setFocusedMember] = useState(() => initialFocusedMember(search))
   const appliedSearch = useRef(search)
 
   useEffect(() => {
     if (appliedSearch.current === search) return
     appliedSearch.current = search
     _setActiveTab(initialSettingsTab(search))
-    setFocusedMember(initialFocusedMember(search))
   }, [search])
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -205,10 +216,11 @@ function SettingsPage() {
   // before the role is known, before anything renders — so a stale link costs
   // one frame rather than a page of the wrong content.
   const moved = MOVED_SECTIONS[activeTab]
+  const movedHref = movedSectionHref(activeTab, search)
   const router = useRouter()
   useEffect(() => {
-    if (moved) router.replace(moved.href)
-  }, [moved, router])
+    if (movedHref) router.replace(movedHref)
+  }, [movedHref, router])
 
   // The active tab used to be mirrored into the zustand store on every change
   // (plus an initial-set / clear-on-unmount effect) for one reader: the global
@@ -229,7 +241,6 @@ function SettingsPage() {
   const [members, setMembers] = useState<Member[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     // No workspace fetch for a tab we are already leaving.
@@ -260,14 +271,10 @@ function SettingsPage() {
 
     fetchData()
     return () => { cancelled = true }
-  }, [workspaceId, refreshKey, moved])
+  }, [workspaceId, moved])
 
   const handleOrgUpdated = useCallback((updated: { name: string; slug: string; preferred_language: string | null }) => {
     setOrg((prev) => prev ? { ...prev, ...updated } : prev)
-  }, [])
-
-  const handleRefresh = useCallback(() => {
-    setRefreshKey((k) => k + 1)
   }, [])
 
   const isLoading = wsLoading || loading
@@ -275,7 +282,7 @@ function SettingsPage() {
 
   function renderContent() {
     // Before the skeleton: a moved section has nothing to load.
-    if (moved) return <SectionMoved href={moved.href} label={moved.label} />
+    if (moved) return <SectionMoved href={movedHref ?? moved.href} label={moved.label} />
 
     if (activeTab === "sounds" && !wsLoading) return <NotificationSoundSettings />
     // Personal sections that read nothing from the workspace fetch: no
@@ -344,18 +351,6 @@ function SettingsPage() {
           onUpdated={handleOrgUpdated}
           onLogoChange={(logo_url) => setOrg((prev) => (prev ? { ...prev, logo_url } : prev))}
           onDelete={() => { window.location.href = "/" }}
-        />
-      )
-    }
-    if (activeTab === "members" && workspaceId) {
-      return (
-        <MembersSection
-          members={members}
-          workspaceId={workspaceId}
-          focusUserId={focusedMember || undefined}
-          currentUserId={session?.user?.id}
-          callerRole={role ?? undefined}
-          onRefresh={handleRefresh}
         />
       )
     }

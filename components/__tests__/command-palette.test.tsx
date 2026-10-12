@@ -312,11 +312,11 @@ describe("CommandPalette — people deep-link", () => {
     ]
     openPalette()
     const g = await group(/people/i)
-    // Landing on /settings?tab=members alone left the caller to find the row
+    // Landing on /settings/members alone left the caller to find the row
     // they had just searched for, by eye.
     expect(within(g).getByRole("option")).toHaveAttribute(
       "data-href",
-      "/settings?tab=members&member=u-fredy",
+      "/settings/members?member=u-fredy",
     )
   })
 })
@@ -376,6 +376,6 @@ describe("CommandPalette — every row opens the thing, not its index", () => {
     expect(hrefOf("Prod GitHub token")).toBe("/credentials?id=cr1")
     expect(hrefOf("Harborlight")).toBe("/issues?project=p1")
     expect(hrefOf("Classify")).toBe("/routines?slug=classify-ticket")
-    expect(hrefOf("A")).toBe("/settings?tab=members&member=u1")
+    expect(hrefOf("A")).toBe("/settings/members?member=u1")
   })
 })

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { Check, Lock, ArrowRight, SlidersHorizontal } from "lucide-react"
+import { Lock, ArrowRight, SlidersHorizontal } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -28,7 +28,6 @@ import { apiFetch } from "@/lib/api-fetch"
 import { devWarn } from "@/lib/client-log"
 import { cn } from "@/lib/utils"
 import {
-  ALL_CAPABILITIES,
   CAPABILITY_BUNDLES,
   CAPABILITY_LABELS,
   Capability,
@@ -37,31 +36,32 @@ import {
 } from "@/lib/capabilities"
 
 /**
- * Per-member capabilities for Settings → Members.
+ * Per-member capabilities for Settings › Members (/settings/members).
  *
  * This used to be `capability-grid.tsx`: a second list of the same people
- * the roster above already listed, as a horizontally-scrolling table with a
- * sticky first column. Two lists keyed by the same identity meant answering
- * "what can this person do?" required reading both and reconciling them
- * (#1517). The table is gone; what is left are the three pieces the Members
- * roster composes into ONE row per person:
+ * the roster above already listed. Two lists keyed by the same identity meant
+ * answering "what can this person do?" required reading both and reconciling
+ * them (#1517). What is left are the pieces the Members page composes:
  *
  *   - `useMemberCapabilities` — the bulk query, still one round-trip for the
  *     whole roster (the N+1 fan-out this replaced was quadratic for the
  *     500-user tenant the PRD targets).
- *   - `CapabilityPips` — the collapsed-row summary. Fixed columns in
- *     `ALL_CAPABILITIES` order, so a single capability is still scannable
- *     DOWN the roster: the one thing a table was good at, kept at ~60px
- *     instead of a scrolling grid.
- *   - `MemberCapabilityToggles` — the expanded-row control. Inline toggle,
- *     no save button: each click is its own PATCH so one failure doesn't
- *     roll back the row. Optimistic, with rollback on 4xx.
+ *   - `useToggleCapability` — the single-grant PATCH, optimistic with
+ *     rollback on 4xx. The person's detail panel and the matrix both use it,
+ *     so a cell and a switch can never disagree about what a click sends.
+ *   - `MemberCapabilityToggles` — the detail panel's switches, grouped
+ *     Routines / Content / Credentials. No save button: each click is its own
+ *     PATCH so one failure doesn't roll back the rest.
  *   - `BulkPresetAction` — workspace-wide presets. They act on the whole
- *     roster, so they belong to the card header rather than to any row.
+ *     roster, so they belong to the page's sub-bar rather than to any person.
+ *
+ * Role is not a capability. `requireCapabilityOrForbid` gates on the stored
+ * set alone, with no OWNER bypass; the only grant that "comes with" every
+ * role is `chat`, which is implied and can never be toggled. So the stored
+ * set IS the effective set, and "beyond the role" means "stored, minus chat".
  *
  * OWNER capabilities are locked (server PATCH would 403); the caller's own
- * row is locked (defence against downgrade-then-restore); the chat column is
- * always checked + disabled.
+ * row is locked (defence against downgrade-then-restore).
  *
  * Admin-only — every caller is responsible for hiding this when the current
  * user is not ADMIN+.
@@ -119,104 +119,98 @@ export function useMemberCapabilities(workspaceId: string, enabled: boolean) {
   })
 }
 
-// ── Collapsed-row summary ────────────────────────────────────────────
+// ── Grouping and stakes ──────────────────────────────────────────────
 
 /**
- * Eight pips, one per capability, in `ALL_CAPABILITIES` order — the same
- * x-position in every row, so scanning a column down the roster still works
- * without a table. `chat` renders in the muted treatment because it is
- * implied and can never be toggled.
- *
- * An OWNER's pips show that OWNER's *stored* set, exactly like everyone
- * else's. Role is not a capability: `requireCapabilityOrForbid` gates on the
- * membership row alone (internal/api/capabilities_check.go) and there is no
- * OWNER bypass, so painting an OWNER as holding everything would claim
- * `credentials:reveal` — which is deliberately in no bundle, not even the
- * OWNER backfill (internal/api/capabilities.go, migration v109). The row is
- * still immutable; being immutable is not the same as being full.
+ * The switches in a person's detail panel, grouped by what they touch. The
+ * groups follow ALL_CAPABILITIES' low → high stakes order, so the
+ * Credentials group — the one that can hand someone a plaintext secret —
+ * is last and drawn in the destructive tone.
  */
-export function CapabilityPips({
-  granted,
-  isOwner,
-  label,
-}: {
-  granted: string[]
-  isOwner: boolean
-  label: string
-}) {
-  const grantedSet = useMemo(() => new Set(granted), [granted])
-  const on = ALL_CAPABILITIES.filter(
-    (c) => c === Capability.Chat || grantedSet.has(c),
-  )
-  const summary = isOwner
-    ? `${label}: ${on.join(", ")} (OWNER — immutable)`
-    : `${label}: ${on.join(", ")}`
+export const CAPABILITY_GROUPS: { key: string; label: string; caps: CapabilityValue[]; highStakes?: boolean }[] = [
+  { key: "routines", label: "Routines", caps: [Capability.RoutineCreate, Capability.RoutineRun] },
+  {
+    key: "content",
+    label: "Content",
+    caps: [Capability.Chat, Capability.IssueCreate, Capability.PageCreate, Capability.MemoryWrite, Capability.SkillCreate],
+  },
+  {
+    key: "credentials",
+    label: "Credentials",
+    caps: [Capability.CredentialCreate, Capability.CredentialRotate, Capability.CredentialReveal],
+    highStakes: true,
+  },
+]
 
-  return (
-    <span
-      // role="img" so the summary is announced: aria-label on a bare span is
-      // not reliably exposed, and the pips themselves carry no text.
-      role="img"
-      className="flex items-center gap-[3px]"
-      title={summary}
-      aria-label={summary}
-    >
-      {ALL_CAPABILITIES.map((cap) => {
-        const isChat = cap === Capability.Chat
-        const active = isChat || grantedSet.has(cap)
-        return (
-          <span
-            key={cap}
-            aria-hidden="true"
-            data-capability={cap}
-            data-granted={active ? "true" : "false"}
-            className={cn(
-              "h-1.5 w-1.5 rounded-[2px]",
-              !active && "bg-input/70",
-              active && isChat && "bg-muted-foreground/60",
-              active && !isChat && "bg-primary",
-            )}
-          />
-        )
-      })}
-    </span>
-  )
+/** Grants an admin should think twice about: the ones whose own descriptions
+ *  call them high-stakes (skills run inside agent prompts; credentials reach
+ *  the vault). Drawn in the destructive tone wherever they are listed. */
+export const HIGH_STAKES_CAPABILITIES: ReadonlySet<CapabilityValue> = new Set<CapabilityValue>([
+  Capability.SkillCreate,
+  Capability.CredentialCreate,
+  Capability.CredentialRotate,
+  Capability.CredentialReveal,
+])
+
+/**
+ * Why a capability cannot be toggled for this person, or null when it can.
+ * "role" is the one grant every role carries (chat); "owner" and "self" are
+ * whole-row locks; "readonly" is a caller who may look but not change.
+ */
+export type CapabilityLock = "role" | "owner" | "self" | "readonly" | null
+
+export function capabilityLock(
+  member: CapabilityMember,
+  cap: CapabilityValue,
+  currentUserId: string | undefined,
+  canEdit = true,
+): CapabilityLock {
+  if (cap === Capability.Chat) return "role"
+  if (member.role === "OWNER") return "owner"
+  if (member.user.id === currentUserId) return "self"
+  if (!canEdit) return "readonly"
+  return null
 }
 
-// ── Expanded-row control ─────────────────────────────────────────────
+/**
+ * The accessible name of one capability control. `title` is unreliable for
+ * screen-reader and keyboard users; this names the action a click would take,
+ * or why there is none. Shared by the switches and the matrix cells.
+ */
+export function capabilityAriaLabel(cap: CapabilityValue, memberLabel: string, granted: boolean, lock: CapabilityLock): string {
+  switch (lock) {
+    case "role":
+      return `Chat is always granted for ${memberLabel}`
+    case "owner":
+      return `OWNER capabilities are immutable: ${cap} for ${memberLabel}`
+    case "self":
+      return `You cannot modify your own capabilities: ${cap}`
+    case "readonly":
+      return `${memberLabel} ${granted ? "has" : "does not have"} ${cap}`
+    default:
+      return granted ? `Revoke ${cap} from ${memberLabel}` : `Grant ${cap} to ${memberLabel}`
+  }
+}
+
+// ── Saving one grant ─────────────────────────────────────────────────
+
+export interface ToggleCapabilityVars {
+  userId: string
+  cap: CapabilityValue
+  next: boolean
+}
 
 /**
- * The eight capability grants for one person, as a two-column checklist
- * with the description inline. The old table put the descriptions in a
- * `title` attribute on a column header — invisible to anyone deciding
- * whether `credentials:reveal` is safe to hand out.
+ * Grant or revoke one capability for one person. Optimistic: the cached set
+ * flips now and rolls back on a refusal, with a sanitized toast.
  */
-export function MemberCapabilityToggles({
-  member,
-  workspaceId,
-  currentUserId,
-  granted,
-  isLoading,
-}: {
-  member: CapabilityMember
-  workspaceId: string
-  currentUserId: string
-  granted: string[]
-  isLoading: boolean
-}) {
-  const isSelf = member.user.id === currentUserId
-  const isOwner = member.role === "OWNER"
-  const locked = isSelf || isOwner
-
+export function useToggleCapability(workspaceId: string) {
   const queryClient = useQueryClient()
-  const grantedSet = useMemo(() => new Set(granted), [granted])
-  const memberLabel = personLabel(member.user.full_name, member.user.email)
-
-  const mutation = useMutation({
-    mutationFn: async ({ cap, next }: { cap: CapabilityValue; next: boolean }) => {
+  return useMutation({
+    mutationFn: async ({ userId, cap, next }: ToggleCapabilityVars) => {
       const body = next ? { grant: [cap] } : { revoke: [cap] }
       const res = await apiFetch(
-        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(member.user.id)}/capabilities?workspace_id=${encodeURIComponent(workspaceId)}`,
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}/capabilities?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -235,8 +229,8 @@ export function MemberCapabilityToggles({
       }
       return (await res.json()) as CapabilitiesResponse
     },
-    onMutate: async ({ cap, next }) => {
-      // Optimistic: flip the checkbox now, roll back in onError.
+    onMutate: async ({ userId, cap, next }) => {
+      // Optimistic: flip the control now, roll back in onError.
       await queryClient.cancelQueries({ queryKey: memberCapabilitiesKey(workspaceId) })
       const prev = queryClient.getQueryData<Record<string, string[]>>(
         memberCapabilitiesKey(workspaceId),
@@ -245,10 +239,10 @@ export function MemberCapabilityToggles({
         memberCapabilitiesKey(workspaceId),
         (old) => {
           if (!old) return old
-          const current = new Set(old[member.user.id] ?? [])
+          const current = new Set(old[userId] ?? [])
           if (next) current.add(cap)
           else current.delete(cap)
-          return { ...old, [member.user.id]: Array.from(current) }
+          return { ...old, [userId]: Array.from(current) }
         },
       )
       return { prev }
@@ -259,86 +253,121 @@ export function MemberCapabilityToggles({
       }
       toast.error((err as Error).message)
     },
-    onSuccess: (data) => {
+    onSuccess: (data, { userId }) => {
       // Sync with the server's canonical set in case the optimistic diff
       // missed a derived field (e.g. the server stripping a chat entry to
       // keep the stored form canonical).
       queryClient.setQueryData<Record<string, string[]>>(
         memberCapabilitiesKey(workspaceId),
-        (old) => (old ? { ...old, [member.user.id]: data.capabilities } : old),
+        (old) => (old ? { ...old, [userId]: data.capabilities } : old),
       )
     },
   })
+}
+
+// ── The detail panel's switches ──────────────────────────────────────
+
+/**
+ * Every capability for one person as labelled switches, grouped Routines /
+ * Content / Credentials, with each description inline. The old table put the
+ * descriptions in a `title` attribute on a column header — invisible to
+ * anyone deciding whether `credentials:reveal` is safe to hand out.
+ */
+export function MemberCapabilityToggles({
+  member,
+  workspaceId,
+  currentUserId,
+  granted,
+  isLoading,
+}: {
+  member: CapabilityMember
+  workspaceId: string
+  currentUserId: string
+  granted: string[]
+  isLoading: boolean
+}) {
+  const grantedSet = useMemo(() => new Set(granted), [granted])
+  const memberLabel = personLabel(member.user.full_name, member.user.email)
+  const mutation = useToggleCapability(workspaceId)
 
   return (
-    <div className="grid gap-x-5 gap-y-0.5 sm:grid-cols-2">
-      {ALL_CAPABILITIES.map((cap) => {
-        const isChat = cap === Capability.Chat
-        // Same rule as the pips: the stored set is the truth for every row,
-        // OWNER included. `locked` still makes the OWNER row un-toggleable.
-        const isGranted = isChat || grantedSet.has(cap)
-        const cellLocked = locked || isChat
-        const meta = CAPABILITY_LABELS[cap]
-        // `title` is unreliable for screen-reader and keyboard users;
-        // aria-label carries the accessible name and role="switch" +
-        // aria-checked expose the toggle state.
-        const ariaLabel = isChat
-          ? `Chat is always granted for ${memberLabel}`
-          : isOwner
-            ? `OWNER capabilities are immutable: ${cap} for ${memberLabel}`
-            : isSelf
-              ? `You cannot modify your own capabilities: ${cap}`
-              : isGranted
-                ? `Revoke ${cap} from ${memberLabel}`
-                : `Grant ${cap} to ${memberLabel}`
-        return (
-          <button
-            key={cap}
-            type="button"
-            role="switch"
-            aria-checked={isGranted}
-            aria-label={ariaLabel}
-            aria-disabled={cellLocked}
-            disabled={cellLocked || isLoading || mutation.isPending}
-            onClick={() => mutation.mutate({ cap, next: !isGranted })}
+    <div className="space-y-3">
+      {CAPABILITY_GROUPS.map((group) => (
+        <section key={group.key} aria-label={group.label}>
+          <h4
             className={cn(
-              "flex items-start gap-2.5 rounded-md px-1.5 py-1.5 text-left transition-colors",
-              cellLocked ? "cursor-not-allowed" : "cursor-pointer hover:bg-muted/40",
+              "mb-1 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em]",
+              group.highStakes ? "text-destructive" : "text-muted-foreground-soft",
             )}
           >
-            <span
-              aria-hidden="true"
-              className={cn(
-                "mt-px inline-flex size-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors",
-                isGranted
-                  ? "bg-primary border-primary text-primary-foreground"
-                  // Translucent, matching components/ui/checkbox — bg-background
-                  // is the page colour and renders as a dark square on a card.
-                  : "bg-input/30 border-border",
-                cellLocked && "opacity-60",
-              )}
-            >
-              {isChat ? (
-                <Lock className="size-2.5" />
-              ) : isGranted ? (
-                <Check className="size-3" />
-              ) : null}
-            </span>
-            <span className="min-w-0">
-              <span className="block text-xs leading-tight text-foreground">
-                {meta.en}
-                <code className="ml-1.5 font-mono text-[10px] text-muted-foreground/80">
-                  {cap}
-                </code>
-              </span>
-              <span className="mt-0.5 block text-[10px] leading-snug text-muted-foreground">
-                {meta.description}
-              </span>
-            </span>
-          </button>
-        )
-      })}
+            {group.label}
+            {group.highStakes && <span className="ml-1.5 normal-case tracking-normal">· high-stakes</span>}
+          </h4>
+          <div className="flex flex-col">
+            {group.caps.map((cap) => {
+              // Same rule as everywhere: the stored set is the truth for every
+              // row, OWNER included. The lock only decides whether it can change.
+              const isGranted = cap === Capability.Chat || grantedSet.has(cap)
+              const lock = capabilityLock(member, cap, currentUserId)
+              const meta = CAPABILITY_LABELS[cap]
+              return (
+                <button
+                  key={cap}
+                  type="button"
+                  role="switch"
+                  aria-checked={isGranted}
+                  aria-label={capabilityAriaLabel(cap, memberLabel, isGranted, lock)}
+                  aria-disabled={lock !== null}
+                  disabled={lock !== null || isLoading || mutation.isPending}
+                  data-capability={cap}
+                  onClick={() => mutation.mutate({ userId: member.user.id, cap, next: !isGranted })}
+                  className={cn(
+                    "flex items-start gap-2.5 rounded-md px-1.5 py-1.5 text-left transition-colors",
+                    lock ? "cursor-not-allowed" : "cursor-pointer hover:bg-muted/40",
+                  )}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className={cn("block text-xs leading-tight", HIGH_STAKES_CAPABILITIES.has(cap) ? "text-destructive" : "text-foreground")}>
+                      {meta.en}
+                      <code className="ml-1.5 font-mono text-[10px] text-muted-foreground/80">{cap}</code>
+                    </span>
+                    <span className="mt-0.5 block text-[10px] leading-snug text-muted-foreground">
+                      {lock === "role" ? "Comes with every role." : meta.description}
+                    </span>
+                  </span>
+                  <SwitchTrack on={isGranted} locked={lock !== null} />
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      ))}
     </div>
+  )
+}
+
+/** The switch's look, drawn inside a real button so the whole row (label
+ *  and description included) is the hit target. A lock replaces the thumb's
+ *  emptiness when the grant cannot change, so "on and fixed" reads at once. */
+function SwitchTrack({ on, locked }: { on: boolean; locked: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "relative mt-0.5 inline-flex h-[1.15rem] w-8 shrink-0 items-center rounded-full transition-colors",
+        on ? "bg-primary" : "bg-input",
+        locked && "opacity-60",
+      )}
+    >
+      <span
+        className={cn(
+          "grid size-4 place-items-center rounded-full bg-background shadow-xs transition-transform",
+          on ? "translate-x-[calc(100%-2px)]" : "translate-x-px",
+        )}
+      >
+        {locked && <Lock className="size-2.5 text-muted-foreground" />}
+      </span>
+    </span>
   )
 }
 
@@ -346,7 +375,7 @@ export function MemberCapabilityToggles({
 
 /**
  * Presets apply to every eligible member at once (eligible = not OWNER, not
- * the caller's own row), so they hang off the card header rather than off a
+ * the caller's own row), so they hang off the page's sub-bar rather than off a
  * person's row. Per-row preset selection is a future iteration.
  */
 export function BulkPresetAction({
@@ -367,13 +396,17 @@ export function BulkPresetAction({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
+          {/* Same weight as "Add member" beside it on the sub-bar: two equal
+              page actions, neither the page's single main CTA. The label
+              hides on a phone, so the accessible name stays on the button. */}
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
-            className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground"
+            className="h-7 gap-1.5 px-2.5 text-xs"
+            aria-label="Bulk edit capabilities"
           >
             <SlidersHorizontal className="size-3.5" />
-            <span className="hidden sm:inline">Bulk preset</span>
+            <span className="hidden sm:inline">Bulk edit…</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64">

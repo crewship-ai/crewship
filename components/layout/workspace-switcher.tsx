@@ -161,10 +161,10 @@ function WorkspaceMenuItems({ onCreate, onNavigate }: { onCreate: () => void; on
             </Link>
           </DropdownMenuItem>
           {/* The roster is readable at every role; inviting is ADMIN+ there
-              (members-section isAdmin), so the label only promises it to
+              (the Members page's isAdmin), so the label only promises it to
               those who can. */}
           <DropdownMenuItem asChild className="text-xs gap-2">
-            <Link href="/settings?tab=members" onClick={onNavigate}>
+            <Link href="/settings/members" onClick={onNavigate}>
               <UserPlus className="h-3.5 w-3.5" />
               {isAdminTier(role) ? "Invite members" : "Members"}
             </Link>

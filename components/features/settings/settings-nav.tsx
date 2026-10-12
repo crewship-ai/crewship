@@ -109,8 +109,9 @@ const sections: NavSection[] = [
       // instance is wired into.
       { key: "connections", label: "Crew links", icon: Link2, href: "/settings/crew-links" },
       // The roster is readable by every role; the invite/role controls inside
-      // are gated separately.
-      { key: "members", label: "Members", icon: Users },
+      // are gated separately. A nested page (/settings/members) like Crew
+      // links: filtering people by role and capability needs its own panel.
+      { key: "members", label: "Members", icon: Users, href: "/settings/members" },
       // Workspace-wide secret policy (PRD-CREDENTIALS-V2-2026 §2.6). MANAGER
       // reads it — they have to know the rules they work under — and the
       // controls inside go read-only for them and for ADMIN, because the

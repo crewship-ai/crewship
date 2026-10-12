@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { initialFocusedMember, initialSettingsTab, MOVED_SECTIONS } from "../settings-layout"
+import { initialFocusedMember, initialSettingsTab, movedSectionHref, MOVED_SECTIONS } from "../settings-layout"
 
 describe("initialSettingsTab", () => {
   it("opens personal sound settings directly", () => { expect(initialSettingsTab("?tab=sounds")).toBe("sounds") })
@@ -68,5 +68,18 @@ describe("initialFocusedMember", () => {
   it("parses a bare param string, with or without the leading ?", () => {
     expect(initialSettingsTab("tab=audit")).toBe("audit")
     expect(initialFocusedMember("tab=members&member=u-1")).toBe("u-1")
+  })
+})
+
+describe("movedSectionHref", () => {
+  it("sends Members to its own page, keeping the person an old link named", () => {
+    expect(movedSectionHref("members", "?tab=members")).toBe("/settings/members")
+    expect(movedSectionHref("members", "?tab=members&member=u-fredy")).toBe("/settings/members?member=u-fredy")
+    expect(movedSectionHref("members", "tab=members&member=a%20b")).toBe("/settings/members?member=a%20b")
+  })
+
+  it("passes every other moved section through unchanged, and ignores sections that did not move", () => {
+    expect(movedSectionHref("audit", "?tab=audit&member=u-1")).toBe("/settings/audit")
+    expect(movedSectionHref("profile", "?tab=profile")).toBeNull()
   })
 })

@@ -145,7 +145,7 @@ describe("isSettingsSectionVisible", () => {
   it("lets a moved section's key through so the redirect can run", () => {
     // The gate must not swallow `?tab=crews` into the Profile fallback — the
     // layout has to see the key to know where the section went.
-    for (const key of ["notifications", "notification-prefs", "crews"]) {
+    for (const key of ["notifications", "notification-prefs", "crews", "members"]) {
       expect(isSettingsSectionVisible(key, "MEMBER"), key).toBe(true)
     }
   })
@@ -163,14 +163,14 @@ describe("isSettingsSectionVisible", () => {
 
 /* ------------------------------------------------------- deep-link fallback */
 
-const h = vi.hoisted(() => ({ role: "MEMBER" as string | null, replace: vi.fn() }))
+const h = vi.hoisted(() => ({ role: "MEMBER" as string | null, replace: vi.fn(), push: vi.fn() }))
 
 // The global setup mock hands out a fresh router per call, which cannot be
 // asserted on. This one keeps the same `replace` so a redirect is observable.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     replace: h.replace,
-    push: vi.fn(),
+    push: h.push,
     prefetch: vi.fn(),
     back: vi.fn(),
     forward: vi.fn(),
@@ -261,6 +261,7 @@ describe("SettingsLayout deep-link into a section that moved", () => {
     ["notifications", "/integrations?tab=notifications&section=connections"],
     ["notification-prefs", "/integrations?tab=notifications&section=preferences"],
     ["crews", "/crews"],
+    ["members", "/settings/members"],
   ]
 
   for (const [tab, href] of cases) {
@@ -275,6 +276,47 @@ describe("SettingsLayout deep-link into a section that moved", () => {
       expect(screen.queryByTestId("profile-section")).toBeNull()
     })
   }
+})
+
+// Members is a nested page now. The ⌘K palette, docs and old bookmarks linked
+// to ONE person (?tab=members&member=…); forwarding to the bare roster would
+// drop which person they meant.
+describe("SettingsLayout — an old link to one member", () => {
+  beforeEach(() => {
+    cleanup()
+    h.replace.mockClear()
+    h.role = "MEMBER"
+  })
+
+  it("carries ?member= to the Members page", async () => {
+    window.history.replaceState(null, "", "/settings?tab=members&member=u-fredy")
+    const { SettingsLayout } = await import("../settings-layout")
+    render(<SettingsLayout />)
+    await waitFor(() => expect(h.replace).toHaveBeenCalledWith("/settings/members?member=u-fredy"))
+    // The no-JS floor points at the same place.
+    expect(screen.getByRole("link", { name: /go to members/i })).toHaveAttribute("href", "/settings/members?member=u-fredy")
+  })
+})
+
+describe("SettingsNav — nested pages", () => {
+  beforeEach(() => {
+    cleanup()
+    h.push.mockClear()
+  })
+
+  it("lists the workspace sections in order, Members right after Crew links", () => {
+    renderNav("OWNER")
+    const labels = Array.from(document.querySelectorAll("nav [role=button]")).map((el) => el.getAttribute("aria-label"))
+    expect(labels.slice(labels.indexOf("General"))).toEqual(["General", "Crew links", "Members", "Access & Secrets", "Lifecycle hooks", "Audit Log"])
+  })
+
+  it("opens Members as its own page, with the chevron a nested page carries", () => {
+    renderNav("MEMBER")
+    const members = row("Members")!
+    expect(members.querySelector(".lucide-chevron-right")).toBeTruthy()
+    fireEvent.click(members)
+    expect(h.push).toHaveBeenCalledWith("/settings/members")
+  })
 })
 
 // ── A second deep link, while Settings stays mounted ────────────────────────

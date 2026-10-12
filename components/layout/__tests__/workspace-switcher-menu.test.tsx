@@ -42,14 +42,14 @@ describe("MobileWorkspaceSwitcher", () => {
     open()
     expect(await screen.findByText("Acme")).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: "Workspace settings" })).toHaveAttribute("href", "/settings?tab=general")
-    expect(screen.getByRole("menuitem", { name: "Invite members" })).toHaveAttribute("href", "/settings?tab=members")
+    expect(screen.getByRole("menuitem", { name: "Invite members" })).toHaveAttribute("href", "/settings/members")
     expect(screen.getByRole("menuitem", { name: "Create workspace" })).toBeInTheDocument()
   })
 
   it("promises an invite only to roles that can send one", async () => {
     role = "MEMBER"
     open()
-    expect(await screen.findByRole("menuitem", { name: "Members" })).toHaveAttribute("href", "/settings?tab=members")
+    expect(await screen.findByRole("menuitem", { name: "Members" })).toHaveAttribute("href", "/settings/members")
     expect(screen.queryByRole("menuitem", { name: "Invite members" })).not.toBeInTheDocument()
   })
 })
