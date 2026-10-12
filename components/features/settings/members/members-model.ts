@@ -188,48 +188,92 @@ export function cellState(p: AccessProfile, granted: readonly string[] | undefin
   return hasCapability(granted, cap) ? "profile" : "off"
 }
 
+// ── What a person can do, by area ─────────────────────────────────────
+
+/**
+ * The roster's "Can do" column: the nine grants (chat comes with every role)
+ * read as three areas, so a row says "Routines · Content 3/4" instead of
+ * drawing nine dots. An area is held in full, in part (n of m) or not at all;
+ * Reveal is named on its own because it is the one grant that hands a person
+ * a plaintext secret.
+ */
+export type AreaKey = "routines" | "content" | "secrets"
+export const AREAS = CAPABILITY_COLUMNS as { key: AreaKey; label: string; danger?: boolean; caps: { cap: CapabilityValue; short: string }[] }[]
+
+export interface AreaHeld { key: AreaKey; label: string; held: number; total: number }
+
+export function areasHeld(granted: readonly string[] | undefined): AreaHeld[] {
+  return AREAS.map((a) => ({
+    key: a.key, label: a.label, total: a.caps.length,
+    held: a.caps.filter((c) => hasCapability(granted, c.cap)).length,
+  }))
+}
+
+/** True when nothing beyond chat is held. */
+export function chatOnly(granted: readonly string[] | undefined): boolean {
+  return extraCapabilities(granted).length === 0
+}
+
+/** One line per capability, for the person panel: the long description lives
+ *  in a tooltip, this is what fits beside a switch. */
+export const CAPABILITY_HINT: Record<string, string> = {
+  [Capability.RoutineCreate]: "Schedule recurring runs",
+  [Capability.RoutineRun]: "Start an existing routine now",
+  [Capability.IssueCreate]: "File tickets from a conversation",
+  [Capability.PageCreate]: "Workspace pages with crew panels",
+  [Capability.MemoryWrite]: "Keep facts with /remember",
+  [Capability.SkillCreate]: "Instructions that run inside agents",
+  [Capability.CredentialCreate]: "Add secrets to the vault",
+  [Capability.CredentialRotate]: "Change the value of an existing secret",
+  [Capability.CredentialReveal]: "Read a stored secret in plaintext",
+}
+
 // ── Filters ──────────────────────────────────────────────────────────
 
-export type MemberFlag = "" | "reveal" | "exceptions" | "risky-low-role"
+export type MemberFlag = "" | "reveal" | "risky-low-role"
 
 export interface MemberFilters {
   /** A role's wire value, or "" for everyone. */
   role: string
   /** A capability, or "" for any. */
   cap: string
-  /** An access profile ("chat" | "power" | "admin") held exactly, "custom"
-   *  for anyone with exceptions, or "" for any. */
-  profile: string
+  /** An area held at least in part, "chat" for chat only, or "" for any. */
+  area: string
   /** One of the "needs a look" lists. */
   flag: MemberFlag
+  /** "invited" lists pending invitations instead of people. */
+  status: "" | "invited"
   q: string
 }
 
-export const DEFAULT_MEMBER_FILTERS: MemberFilters = { role: "", cap: "", profile: "", flag: "", q: "" }
+export const DEFAULT_MEMBER_FILTERS: MemberFilters = { role: "", cap: "", area: "", flag: "", status: "", q: "" }
 
 export const MEMBER_FLAGS: { key: Exclude<MemberFlag, "">; label: string; hint: string }[] = [
   { key: "reveal", label: "Can reveal secrets", hint: "Reads stored secrets in plaintext" },
-  { key: "exceptions", label: "Has exceptions", hint: "Differs from every access profile" },
-  { key: "risky-low-role", label: "High-stakes below Manager", hint: "A Member or Viewer holding skills or credentials" },
+  { key: "risky-low-role", label: "Above their role", hint: "Member or Viewer with skills or secrets" },
 ]
 
 const HIGH_STAKES: ReadonlySet<string> = new Set([
   Capability.SkillCreate, Capability.CredentialCreate, Capability.CredentialRotate, Capability.CredentialReveal,
 ])
 
+/** The high-stakes grants a Member or Viewer holds — what their role does not
+ *  suggest. Empty for Manager and up. */
+export function aboveRole(m: Member, granted: readonly string[] | undefined): CapabilityValue[] {
+  if (m.role !== "MEMBER" && m.role !== "VIEWER") return []
+  return extraCapabilities(granted).filter((c) => HIGH_STAKES.has(c))
+}
+
 function flagMatches(m: Member, flag: MemberFlag, granted: readonly string[] | undefined): boolean {
   if (!flag) return true
   if (flag === "reveal") return hasCapability(granted, Capability.CredentialReveal)
-  if (flag === "exceptions") return m.role !== "OWNER" && exceptionCount(accessProfile(granted)) > 0
-  return (m.role === "MEMBER" || m.role === "VIEWER") && extraCapabilities(granted).some((c) => HIGH_STAKES.has(c))
+  return aboveRole(m, granted).length > 0
 }
 
-function profileMatches(m: Member, profile: string, granted: readonly string[] | undefined): boolean {
-  if (!profile) return true
-  if (m.role === "OWNER") return false
-  const p = accessProfile(granted)
-  if (profile === "custom") return exceptionCount(p) > 0
-  return p.key === profile && exceptionCount(p) === 0
+function areaMatches(area: string, granted: readonly string[] | undefined): boolean {
+  if (!area) return true
+  if (area === "chat") return chatOnly(granted)
+  return (areasHeld(granted).find((a) => a.key === area)?.held ?? 0) > 0
 }
 
 /** Name or email, case-insensitive. */
@@ -248,14 +292,15 @@ export function matchesSearch(m: Member, q: string): boolean {
 export function memberMatches(m: Member, f: MemberFilters, caps: Record<string, string[]> | undefined): boolean {
   if (f.role && m.role !== f.role) return false
   if (f.cap && caps && !hasCapability(caps[m.user.id], f.cap as CapabilityValue)) return false
-  if (caps && !profileMatches(m, f.profile, caps[m.user.id])) return false
+  if (caps && !areaMatches(f.area, caps[m.user.id])) return false
   if (caps && !flagMatches(m, f.flag, caps[m.user.id])) return false
   return matchesSearch(m, f.q)
 }
 
 export function activeFilterCount(f: MemberFilters, capsReadable: boolean): number {
   return Number(Boolean(f.role)) + Number(Boolean(f.q.trim())) +
-    (capsReadable ? Number(Boolean(f.cap)) + Number(Boolean(f.profile)) + Number(Boolean(f.flag)) : 0)
+    Number(Boolean(f.status)) +
+    (capsReadable ? Number(Boolean(f.cap)) + Number(Boolean(f.area)) + Number(Boolean(f.flag)) : 0)
 }
 
 /** Highest role first, then by name — the order an admin scans a roster in. */
@@ -275,7 +320,7 @@ export interface MembersUrlState {
 }
 
 /**
- * ?member= (a USER id) and the filters (?role= ?cap= ?profile= ?flag= ?q=) keep the
+ * ?member= (a USER id) and the filters (?role= ?cap= ?area= ?flag= ?status= ?q=) keep the
  * page shareable and reload-safe. Defaults stay out of the URL.
  *
  * `member` names the person, not the membership row: a link is about a
@@ -285,15 +330,16 @@ export interface MembersUrlState {
 export function parseMembersUrl(search: string): MembersUrlState {
   const p = new URLSearchParams(search)
   const role = p.get("role") ?? ""
-  const profile = p.get("profile") ?? ""
+  const area = p.get("area") ?? ""
   const flag = p.get("flag") ?? ""
   return {
     member: p.get("member") ?? "",
     filters: {
       role: (ROLES as readonly string[]).includes(role) ? role : "",
       cap: (ALL_CAPABILITIES as readonly string[]).includes(p.get("cap") ?? "") ? (p.get("cap") as string) : "",
-      profile: ["chat", "power", "admin", "custom"].includes(profile) ? profile : "",
+      area: ["routines", "content", "secrets", "chat"].includes(area) ? area : "",
       flag: MEMBER_FLAGS.some((f) => f.key === flag) ? (flag as MemberFlag) : "",
+      status: p.get("status") === "invited" ? "invited" : "",
       q: p.get("q") ?? "",
     },
   }
@@ -305,8 +351,9 @@ export function membersUrlQuery({ member, filters }: MembersUrlState): string {
   if (member) p.set("member", member)
   if (filters.role) p.set("role", filters.role)
   if (filters.cap) p.set("cap", filters.cap)
-  if (filters.profile) p.set("profile", filters.profile)
+  if (filters.area) p.set("area", filters.area)
   if (filters.flag) p.set("flag", filters.flag)
+  if (filters.status) p.set("status", filters.status)
   if (filters.q) p.set("q", filters.q)
   return p.toString()
 }

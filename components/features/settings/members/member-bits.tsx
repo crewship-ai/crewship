@@ -1,43 +1,88 @@
 "use client"
 
+import {
+  Bookmark, CircleDot, Crown, Eye, FileText, KeyRound, MessageSquare, PanelsTopLeft, Play, Plus, RotateCcw,
+  Shield, Sparkles, Workflow, type LucideIcon,
+} from "lucide-react"
+
 import { cn } from "@/lib/utils"
+import { Capability, hasCapability } from "@/lib/capabilities"
 
-import { ROLE_LABEL, type CellState } from "./members-model"
+import { ROLE_LABEL, areasHeld, chatOnly, type AreaKey } from "./members-model"
 
-/** A role's colour, the same in the matrix, the panel and the phone list, so a
- *  role reads the same wherever it appears. */
-export const ROLE_TONE: Record<string, string> = {
-  OWNER: "border-purple/30 bg-purple/10 text-purple-hover",
-  ADMIN: "border-info/30 bg-info/10 text-info",
-  MANAGER: "border-notice/30 bg-notice/10 text-notice",
-  MEMBER: "border-gold/30 bg-gold/10 text-gold",
-  VIEWER: "border-border bg-surface-subtle text-muted-foreground",
+/** An icon per area and per capability, the same in the roster, the panel and
+ *  the phone list. */
+export const AREA_ICON: Record<AreaKey, LucideIcon> = { routines: Workflow, content: FileText, secrets: KeyRound }
+export const CAPABILITY_ICON: Record<string, LucideIcon> = {
+  [Capability.RoutineCreate]: Plus,
+  [Capability.RoutineRun]: Play,
+  [Capability.IssueCreate]: CircleDot,
+  [Capability.PageCreate]: PanelsTopLeft,
+  [Capability.MemoryWrite]: Bookmark,
+  [Capability.SkillCreate]: Sparkles,
+  [Capability.CredentialCreate]: Plus,
+  [Capability.CredentialRotate]: RotateCcw,
+  [Capability.CredentialReveal]: Eye,
 }
-export const ROLE_DOT: Record<string, string> = {
-  OWNER: "bg-purple", ADMIN: "bg-info", MANAGER: "bg-notice", MEMBER: "bg-gold", VIEWER: "bg-muted-foreground",
-}
+const ROLE_ICON: Record<string, LucideIcon> = { OWNER: Crown, ADMIN: Shield }
 
+/** A role, neutral: severity on this page belongs to the access chips and the
+ *  findings, so a role never competes with them for colour. */
 export function RolePill({ role, className }: { role: string; className?: string }) {
+  const Icon = ROLE_ICON[role]
   return (
-    <span className={cn("inline-flex h-[22px] items-center gap-1.5 rounded-md border px-2 font-mono text-[10.5px] font-medium lowercase", ROLE_TONE[role] ?? ROLE_TONE.VIEWER, className)}>
-      <span className={cn("h-1.5 w-1.5 rounded-full", ROLE_DOT[role] ?? ROLE_DOT.VIEWER)} aria-hidden />
+    <span data-slot="role-pill" className={cn("inline-flex h-[22px] shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface-subtle px-2 text-label text-foreground/90", className)}>
+      {Icon && <Icon className="h-3 w-3 text-muted-foreground" aria-hidden />}
       {ROLE_LABEL[role] ?? role}
     </span>
   )
 }
 
-/** One capability, at a glance: filled when held, an orange ring when it is
- *  an exception to the profile. */
-export function Dot({ state, danger, className }: { state: CellState; danger?: boolean; className?: string }) {
-  const fill = danger ? "bg-destructive" : "bg-primary"
+/**
+ * What a person may do, as at most three chips: an area held in full reads
+ * "Routines", in part "Content 3/4"; Reveal turns the secrets chip red and
+ * names it. Nothing beyond chat reads "Chat only".
+ */
+export function AreaChips({ granted, className }: { granted: readonly string[] | undefined; className?: string }) {
+  if (chatOnly(granted)) {
+    return (
+      <span className={cn("inline-flex h-[22px] items-center gap-1.5 rounded-md border border-dashed border-border px-2 text-label text-muted-foreground", className)} data-area="chat">
+        <MessageSquare className="h-3 w-3" aria-hidden />Chat only
+      </span>
+    )
+  }
+  const reveal = hasCapability(granted, Capability.CredentialReveal)
   return (
-    <span aria-hidden className={cn(
-      "block rounded-full transition-transform group-hover:scale-105",
-      state === "profile" && cn("h-3 w-3", fill),
-      state === "added" && cn("h-3 w-3 ring-2 ring-warn ring-offset-2 ring-offset-card", fill),
-      state === "removed" && "h-3 w-3 border-2 border-warn",
-      state === "off" && "h-2.5 w-2.5 border-[1.5px] border-border",
-      className,
-    )} />
+    <span className={cn("flex min-w-0 flex-wrap gap-1.5", className)}>
+      {areasHeld(granted).filter((a) => a.held > 0).map((a) => {
+        const Icon = AREA_ICON[a.key]
+        const danger = a.key === "secrets" && reveal
+        return (
+          <span key={a.key} data-area={a.key}
+            title={`${a.label}: ${a.held} of ${a.total}${danger ? " · can reveal secrets" : ""}`}
+            className={cn("inline-flex h-[22px] items-center gap-1.5 whitespace-nowrap rounded-md border px-2 text-label",
+              danger ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-primary/25 bg-primary/[0.08] text-foreground/90")}>
+            <Icon className={cn("h-3 w-3", danger ? "text-destructive" : "text-primary-hover")} aria-hidden />
+            {a.label}
+            {danger ? <span>· reveal</span> : a.held < a.total && <span className="font-mono text-micro text-muted-foreground">{a.held}/{a.total}</span>}
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
+/** The same, as bare icons — a phone row's second line. */
+export function AreaIcons({ granted }: { granted: readonly string[] | undefined }) {
+  if (chatOnly(granted)) return <span>Chat only</span>
+  const reveal = hasCapability(granted, Capability.CredentialReveal)
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {areasHeld(granted).filter((a) => a.held > 0).map((a) => {
+        const Icon = AREA_ICON[a.key]
+        const danger = a.key === "secrets" && reveal
+        return <Icon key={a.key} data-area={a.key} className={cn("h-3.5 w-3.5", danger ? "text-destructive" : "text-primary-hover")} aria-label={danger ? "Secrets, can reveal" : a.label} />
+      })}
+    </span>
   )
 }

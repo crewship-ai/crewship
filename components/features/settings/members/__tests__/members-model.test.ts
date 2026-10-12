@@ -8,6 +8,8 @@ import {
   byRoleThenName,
   accessProfile,
   cellState,
+  areasHeld,
+  aboveRole,
   profileText,
   CAPABILITY_COLUMNS,
   extraCapabilities,
@@ -117,14 +119,28 @@ describe("accessProfile — the nearest preset plus what differs", () => {
   })
 })
 
-describe("memberMatches — profile and needs-a-look filters", () => {
+describe("memberMatches — area and needs-a-look filters", () => {
   const f = (over: Partial<typeof DEFAULT_MEMBER_FILTERS>) => ({ ...DEFAULT_MEMBER_FILTERS, ...over })
-  it("finds exact profiles, exceptions, revealers and high-stakes below Manager", () => {
+  it("finds chat-only people, an area's holders, revealers and high-stakes below Manager", () => {
     const all = [olive, mel, vic]
-    expect(all.filter((m) => memberMatches(m, f({ profile: "chat" }), caps)).map((m) => m.user.id)).toEqual(["u-vic"])
-    expect(all.filter((m) => memberMatches(m, f({ profile: "custom" }), caps)).map((m) => m.user.id)).toEqual(["u-mel"])
+    expect(all.filter((m) => memberMatches(m, f({ area: "chat" }), caps)).map((m) => m.user.id)).toEqual(["u-vic"])
+    expect(all.filter((m) => memberMatches(m, f({ area: "routines" }), caps)).map((m) => m.user.id)).toEqual(["u-olive"])
+    expect(all.filter((m) => memberMatches(m, f({ area: "secrets" }), caps)).map((m) => m.user.id)).toEqual(["u-mel"])
     expect(all.filter((m) => memberMatches(m, f({ flag: "reveal" }), caps)).map((m) => m.user.id)).toEqual(["u-mel"])
     expect(all.filter((m) => memberMatches(m, f({ flag: "risky-low-role" }), caps)).map((m) => m.user.id)).toEqual(["u-mel"])
+  })
+})
+
+describe("areasHeld and aboveRole", () => {
+  it("counts each area's grants, in full or in part", () => {
+    expect(areasHeld(["chat", "routine.create", "routine.run", "issue.create"]).map((a) => [a.key, a.held, a.total])).toEqual([
+      ["routines", 2, 2], ["content", 1, 4], ["secrets", 0, 3],
+    ])
+  })
+
+  it("names the high-stakes grants a Member or Viewer holds, and none for a Manager", () => {
+    expect(aboveRole(mel, caps["u-mel"])).toEqual(["credentials:reveal"])
+    expect(aboveRole(member("u-mo", "MANAGER", "Mo"), ["chat", "credentials:reveal"])).toEqual([])
   })
 })
 
@@ -162,7 +178,7 @@ describe("roleChoices — the server's ladder, drawn the same way", () => {
 
 describe("URL state", () => {
   it("round-trips the person and the filters", () => {
-    const state = { member: "u-mel", filters: { role: "ADMIN", cap: "credentials:reveal", profile: "custom", flag: "reveal" as const, q: "ann" } }
+    const state = { member: "u-mel", filters: { role: "ADMIN", cap: "credentials:reveal", area: "secrets", flag: "reveal" as const, status: "invited" as const, q: "ann" } }
     expect(parseMembersUrl(membersUrlQuery(state))).toEqual(state)
   })
 

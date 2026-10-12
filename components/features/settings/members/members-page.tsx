@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useSearchParams } from "next/navigation"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { ChevronDown, ChevronRight, Download, Settings as SettingsIcon, Users, X } from "lucide-react"
+import { ChevronDown, Crown, Download, Mail, MessageSquare, Settings as SettingsIcon, Shield, Users, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -13,7 +13,7 @@ import { ALL_CAPABILITIES, CAPABILITY_BUNDLES, CAPABILITY_LABELS, Capability, ty
 import { useIsMobile } from "@/hooks/use-mobile"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
+import { personLabel } from "@/components/ui/user-avatar"
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -24,23 +24,24 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
 import { SidebarFacet, SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
-import { SettingsCard } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import { HIGH_STAKES_CAPABILITIES, useMemberCapabilities } from "@/components/admin/member-capabilities"
 import { PageSaveBar, usePageSave } from "@/components/ui/page-save-bar"
 
 import {
   ACCESS_PROFILES,
+  AREAS,
   ASSIGNABLE_ROLES,
   DEFAULT_MEMBER_FILTERS,
   MEMBER_FLAGS,
   PROFILE_LABEL,
   ROLES,
   ROLE_LABEL,
+  aboveRole,
   accessProfile,
   activeFilterCount,
   byRoleThenName,
-  exceptionCount,
   memberMatches,
   membersUrlQuery,
   parseMembersUrl,
@@ -52,11 +53,13 @@ import {
 } from "./members-model"
 import { useMembers } from "./use-members"
 import { useAccessWrites } from "./use-access"
-import { AccessMatrix, ProfileText, type MatrixGroup } from "./access-matrix"
 import { MemberDetail } from "./member-detail"
-import { Dot, ROLE_DOT, RolePill } from "./member-bits"
+import { AREA_ICON } from "./member-bits"
+import { InvitationList, PeopleList, PeopleTable, type PeopleGroup } from "./people-table"
+import { MembersAttention, membersFindings } from "./members-attention"
+import { useInvitations } from "./use-invitations"
 
-type GroupBy = "role" | "profile"
+type GroupBy = "role" | "name"
 
 interface Confirm {
   title: string
@@ -70,23 +73,21 @@ interface Confirm {
  * Settings › Members: who is here, what each person manages, and what each
  * person may do — for everyone at once.
  *
- * The page separates the two things the old one blurred. The ROLE is what a
- * person manages (people, crews, settings); the ACCESS PROFILE is what they
- * may do, described as the nearest of the server's three presets plus its
- * exceptions ("Power user +Reveal"). The main view is a matrix: people grouped
- * by role (or by profile), one dot per capability in three groups, exceptions
- * ringed in orange. Assigning is mostly picking a profile — one call — and a
- * dot is the exception, not the rule.
+ * The ROLE is what a person manages (people, crews, settings); what they may
+ * DO is nine grants, read here as three areas — Routines, Content, Secrets —
+ * so a row says "Routines · Content 3/4 · Secrets · reveal" instead of nine
+ * dots. Top to bottom the page answers what needs a person (who reads secrets
+ * in plaintext, who holds more than their role suggests, invitations running
+ * out), then the roster grouped by role.
  *
- *   - one person: the profile button in their row, or a dot;
- *   - many people: tick the rows, then Apply profile / Grant / Revoke / Role;
- *   - one person in full: click the name — a side panel (full screen on a
- *     phone) with role, profile, every capability, resource access, removal.
+ *   - one person: click the row — a side panel (full screen on a phone) with
+ *     the role, a preset, every ability by area, crews and removal;
+ *   - many people: tick the rows, then Set access / Grant / Revoke / Role.
  *
- * Granting anything high-stakes, replacing someone's exceptions and every
- * bulk change ask first. The filters live in the URL (?role= ?profile= ?flag=
- * ?cap= ?q=); ?member= is what ⌘K and old /settings?tab=members links resolve
- * to, and opens that person.
+ * Granting anything high-stakes and every role change ask first; capability
+ * edits are drafts until Save. The filters live in the URL (?role= ?area=
+ * ?flag= ?status= ?cap= ?q=); ?member= is what ⌘K and old
+ * /settings?tab=members links resolve to, and opens that person.
  */
 export function MembersPage() {
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
@@ -164,21 +165,18 @@ export function MembersPage() {
       return next.size === prev.size ? prev : next
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown.length, filters.q, filters.role, filters.profile, filters.flag, filters.cap])
+  }, [shown.length, filters.q, filters.role, filters.area, filters.flag, filters.status, filters.cap])
 
-  const groups: MatrixGroup[] = React.useMemo(() => {
-    if (groupBy === "profile" && caps) {
-      const owners = shown.filter((m) => m.role === "OWNER")
-      const rest = shown.filter((m) => m.role !== "OWNER")
-      const exact = (key: string) => rest.filter((m) => { const p = accessProfile(caps[m.user.id]); return p.key === key && exceptionCount(p) === 0 })
-      return [
-        { key: "owner", label: "Owners", people: owners },
-        ...ACCESS_PROFILES.map((p) => ({ key: p.key, label: p.label, people: exact(p.key) })),
-        { key: "custom", label: "With exceptions", people: rest.filter((m) => exceptionCount(accessProfile(caps[m.user.id])) > 0) },
-      ].filter((g) => g.people.length > 0)
+  const invitationsQuery = useInvitations(workspaceId, isManager)
+  const invitations = invitationsQuery.data ?? []
+
+  const groups: PeopleGroup[] = React.useMemo(() => {
+    if (groupBy === "name") {
+      const byName = [...shown].sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
+      return byName.length ? [{ key: "all", label: "A–Z", people: byName }] : []
     }
     return ROLES.map((r) => ({ key: r, label: `${ROLE_LABEL[r]}s`, people: shown.filter((m) => m.role === r) })).filter((g) => g.people.length > 0)
-  }, [groupBy, caps, shown])
+  }, [groupBy, shown])
 
   // ── Writes, each asking first when it should ─────────────────────────
 
@@ -206,6 +204,10 @@ export function MembersPage() {
       <>This grants high-stakes access: {gains.map((c) => CAPABILITY_LABELS[c].en).join(", ")}. It takes effect when you save.</>,
       `Set to ${PROFILE_LABEL[preset]}`, gains, () => stage([m], () => [...CAPABILITY_BUNDLES[preset]]))
   }
+
+  /** Take high-stakes grants away (the panel's "Turn … off"): a draft, no
+   *  question — taking access away is what Discard undoes. */
+  const onRevoke = (m: Member, revoke: CapabilityValue[]) => stage([m], (cur) => cur.filter((c) => !revoke.includes(c as CapabilityValue)))
 
   const clearSelection = () => setSelected(new Set())
   const bulk = {
@@ -283,27 +285,37 @@ export function MembersPage() {
   )
 
   const dot = (cls: string) => <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", cls)} aria-hidden />
+  const ico = (Icon: React.ElementType, cls = "text-muted-foreground") => <Icon className={cn("h-3.5 w-3.5 shrink-0", cls)} aria-hidden />
+  const roleIcon: Record<string, React.ReactNode> = { OWNER: ico(Crown), ADMIN: ico(Shield) }
+  const pick = (next: Partial<MemberFilters>) => setFilters({ ...next, status: "" })
   const nav = (
     <>
-      <DrillNavSection label="Role" count={members.length}>
-        <DrillNavItem index={0} selected={!filters.role} pressed={!filters.role} onSelect={() => setFilters({ role: "" })}
-          icon={dot("bg-border")} label="All people" meta={countWith({ role: "" })} />
+      <DrillNavSection label="People" count={members.length}>
+        <DrillNavItem index={0} selected={!filters.status && !filters.role && !filters.area && !filters.flag} onSelect={() => setFilters({ ...DEFAULT_MEMBER_FILTERS, q: filters.q })}
+          icon={ico(Users)} label="Everyone" meta={members.length} />
+        {isManager && (
+          <DrillNavItem index={1} selected={filters.status === "invited"} pressed={filters.status === "invited"} muted={!invitations.length}
+            onSelect={() => setFilters({ status: filters.status === "invited" ? "" : "invited" })}
+            icon={ico(Mail)} label="Invited" meta={invitationsQuery.isLoading ? "…" : invitations.length} />
+        )}
+      </DrillNavSection>
+      <DrillNavSection label="Role">
         {ROLES.map((r, i) => {
           const n = countWith({ role: r })
           return (
-            <DrillNavItem key={r} index={i + 1} selected={filters.role === r} pressed={filters.role === r} muted={!n}
-              onSelect={() => setFilters({ role: filters.role === r ? "" : r })} icon={dot(ROLE_DOT[r])} label={ROLE_LABEL[r]} meta={n} />
+            <DrillNavItem key={r} index={i} selected={filters.role === r && !filters.status} pressed={filters.role === r} muted={!n}
+              onSelect={() => pick({ role: filters.role === r ? "" : r })} icon={roleIcon[r] ?? dot("bg-muted-foreground/50")} label={ROLE_LABEL[r]} meta={n} />
           )
         })}
       </DrillNavSection>
       {capsReadable && (
-        <DrillNavSection label="Access profile">
-          {[...ACCESS_PROFILES.map((p) => ({ key: p.key as string, label: p.label })), { key: "custom", label: "With exceptions" }].map((p, i) => {
-            const n = countWith({ profile: p.key })
+        <DrillNavSection label="Can do">
+          {[...AREAS.map((a) => ({ key: a.key as string, label: a.label, sub: a.caps.map((c) => c.short.toLowerCase()).join(" · "), icon: ico(AREA_ICON[a.key], "text-primary-hover") })),
+            { key: "chat", label: "Chat only", sub: undefined, icon: ico(MessageSquare) }].map((a, i) => {
+            const n = countWith({ area: a.key })
             return (
-              <DrillNavItem key={p.key} index={i} selected={filters.profile === p.key} pressed={filters.profile === p.key} muted={!n}
-                onSelect={() => setFilters({ profile: filters.profile === p.key ? "" : p.key })}
-                icon={p.key === "custom" ? dot("bg-warn") : dot("bg-primary")} label={p.label} meta={capsLoading ? "…" : n} />
+              <DrillNavItem key={a.key} index={i} selected={filters.area === a.key && !filters.status} pressed={filters.area === a.key} muted={!n}
+                onSelect={() => pick({ area: filters.area === a.key ? "" : a.key })} icon={a.icon} label={a.label} sub={a.sub} meta={capsLoading ? "…" : n} />
             )
           })}
         </DrillNavSection>
@@ -313,9 +325,9 @@ export function MembersPage() {
           {MEMBER_FLAGS.map((f, i) => {
             const n = countWith({ flag: f.key })
             return (
-              <DrillNavItem key={f.key} index={i} selected={filters.flag === f.key} pressed={filters.flag === f.key} muted={!n}
-                onSelect={() => setFilters({ flag: filters.flag === f.key ? "" : f.key })}
-                icon={dot(f.key === "exceptions" ? "bg-warn" : "bg-destructive")} label={f.label} sub={f.hint} meta={capsLoading ? "…" : n} />
+              <DrillNavItem key={f.key} index={i} selected={filters.flag === f.key && !filters.status} pressed={filters.flag === f.key} muted={!n}
+                onSelect={() => pick({ flag: filters.flag === f.key ? "" : f.key })}
+                icon={dot(f.key === "reveal" ? "bg-destructive" : "bg-warn")} label={f.label} sub={f.hint} meta={capsLoading ? "…" : n} />
             )
           })}
         </DrillNavSection>
@@ -328,23 +340,30 @@ export function MembersPage() {
   const chips: { key: string; label: string; clear: Partial<MemberFilters> }[] = []
   if (filters.q.trim()) chips.push({ key: "q", label: `“${filters.q.trim()}”`, clear: { q: "" } })
   if (filters.role) chips.push({ key: "role", label: ROLE_LABEL[filters.role], clear: { role: "" } })
-  if (filters.profile && capsReadable) chips.push({ key: "profile", label: filters.profile === "custom" ? "With exceptions" : PROFILE_LABEL[filters.profile], clear: { profile: "" } })
+  if (filters.status) chips.push({ key: "status", label: "Invited", clear: { status: "" } })
+  if (filters.area && capsReadable) chips.push({ key: "area", label: filters.area === "chat" ? "Chat only" : `Can do: ${AREAS.find((a) => a.key === filters.area)?.label ?? filters.area}`, clear: { area: "" } })
   if (filters.flag && capsReadable) chips.push({ key: "flag", label: MEMBER_FLAGS.find((f) => f.key === filters.flag)?.label ?? filters.flag, clear: { flag: "" } })
   if (filters.cap && capsReadable) chips.push({ key: "cap", label: `Has: ${CAPABILITY_LABELS[filters.cap as CapabilityValue]?.en ?? filters.cap}`, clear: { cap: "" } })
 
-  const nonOwners = members.filter((m) => m.role !== "OWNER")
-  const withExceptions = caps ? nonOwners.filter((m) => exceptionCount(accessProfile(caps[m.user.id])) > 0).length : null
   const revealers = caps ? members.filter((m) => (caps[m.user.id] ?? []).includes(Capability.CredentialReveal)).length : null
+  const aboveCount = caps ? members.filter((m) => aboveRole(m, caps[m.user.id]).length > 0).length : null
+  const chatOnlyCount = caps ? countWith({ ...DEFAULT_MEMBER_FILTERS, area: "chat" }) : null
+  const findings = capsReadable && caps && !capsLoading ? membersFindings({
+    members, caps: caps as Record<string, string[]>, invitations,
+    onFlag: (flag) => pick({ ...DEFAULT_MEMBER_FILTERS, flag }),
+    onOpen: open,
+    onInvited: () => setFilters({ status: "invited" }),
+  }) : null
 
   const addMember = isAdmin && workspaceId ? <InviteMemberDialog workspaceId={workspaceId} onInvited={roster.refresh} /> : null
   const cardActions = (
     <>
-      {capsReadable && !isMobile && (
+      {!isMobile && (
         <div role="group" aria-label="Group by" className="inline-flex gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5">
-          {(["role", "profile"] as const).map((g) => (
+          {([["role", "By role"], ["name", "A–Z"]] as const).map(([g, l]) => (
             <button key={g} type="button" aria-pressed={groupBy === g} onClick={() => setGroupBy(g)}
-              className={cn("h-6 rounded-md px-2.5 text-xs font-medium transition-colors", groupBy === g ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
-              By {g}
+              className={cn("h-6 rounded-md px-2.5 text-xs transition-colors", groupBy === g ? "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--border)]" : "text-muted-foreground hover:text-foreground")}>
+              {l}
             </button>
           ))}
         </div>
@@ -355,6 +374,24 @@ export function MembersPage() {
     </>
   )
 
+  const tabs: { key: string; label: string; n?: number | null; on: boolean; run: () => void; tone?: string }[] = [
+    { key: "all", label: "Everyone", n: members.length, on: !filters.status && !filters.flag, run: () => setFilters({ status: "", flag: "" }) },
+    ...(isManager ? [{ key: "invited", label: "Invited", n: invitations.length, on: filters.status === "invited", run: () => setFilters({ status: "invited", flag: "" }) }] : []),
+    ...(capsReadable && revealers ? [{ key: "reveal", label: "Can reveal", n: revealers, tone: "bg-destructive", on: filters.flag === "reveal" && !filters.status, run: () => pick({ flag: "reveal" }) }] : []),
+    ...(capsReadable && aboveCount ? [{ key: "above", label: "Above role", n: aboveCount, tone: "bg-warn", on: filters.flag === "risky-low-role" && !filters.status, run: () => pick({ flag: "risky-low-role" }) }] : []),
+  ]
+  const mobileNav = (
+    <div className="-mx-1 flex gap-1 overflow-x-auto px-1" role="tablist" aria-label="Show">
+      {tabs.map((t) => (
+        <button key={t.key} type="button" role="tab" aria-selected={t.on} onClick={t.run}
+          className={cn("inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium", t.on ? "bg-[var(--selection-bg)] text-foreground" : "text-muted-foreground")}>
+          {t.tone && <span className={cn("h-1.5 w-1.5 rounded-full", t.tone)} aria-hidden />}
+          {t.label}{t.n != null && <span className="font-mono text-micro text-muted-foreground">{t.n}</span>}
+        </button>
+      ))}
+    </div>
+  )
+
   return (
     <DrillPage
       parent={{ href: "/settings", label: "Settings", icon: SettingsIcon }}
@@ -363,6 +400,7 @@ export function MembersPage() {
       description="Who is in this workspace, what each person manages and what they may do"
       toolbar={toolbar}
       nav={nav}
+      mobileNav={mobileNav}
       filterCount={activeFilterCount(filters, capsReadable)}
       actions={isMobile ? undefined : addMember}
     >
@@ -386,22 +424,23 @@ export function MembersPage() {
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground" data-slot="members-summary">
-            <Stat n={members.length} one="person" many="people" />
-            {withExceptions != null && <Stat n={nonOwners.length - withExceptions} one="on a standard profile" many="on a standard profile" />}
-            {withExceptions != null && (
-              <button type="button" onClick={() => setFilters({ profile: filters.profile === "custom" ? "" : "custom" })} className="hover:text-foreground">
-                <span className={cn("font-mono tabular-nums", withExceptions ? "text-warn" : "text-foreground")}>{withExceptions}</span> with exceptions
-              </button>
-            )}
+          <SettingsSummary slot="members-summary">
+            <SummaryItem n={members.length}>{members.length === 1 ? "person" : "people"}</SummaryItem>
+            {isManager && invitations.length > 0 && <SummaryItem n={invitations.length}>invited</SummaryItem>}
+            {chatOnlyCount != null && <SummaryItem n={chatOnlyCount}>chat only</SummaryItem>}
             {revealers != null && (
-              <button type="button" onClick={() => setFilters({ flag: filters.flag === "reveal" ? "" : "reveal" })} className="hover:text-foreground">
-                <span className="font-mono tabular-nums text-destructive">{revealers}</span> can reveal secrets
+              <button type="button" onClick={() => pick({ flag: filters.flag === "reveal" ? "" : "reveal" })} className="hover:text-foreground">
+                <SummaryItem n={revealers} tone={revealers ? "danger" : undefined}>can reveal secrets</SummaryItem>
               </button>
             )}
-            {shown.length !== members.length && <span><span className="font-mono tabular-nums text-foreground">{shown.length}</span> of {members.length} shown</span>}
+            {aboveCount != null && aboveCount > 0 && (
+              <button type="button" onClick={() => pick({ flag: filters.flag === "risky-low-role" ? "" : "risky-low-role" })} className="hover:text-foreground">
+                <SummaryItem n={aboveCount} tone="warn">above their role</SummaryItem>
+              </button>
+            )}
+            {!filters.status && shown.length !== members.length && <SummaryItem n={shown.length}>of {members.length} shown</SummaryItem>}
             {!isAdmin && <span className="ml-auto">{isManager ? "Only admins change what people may do." : "Read-only — managers and admins make changes."}</span>}
-          </div>
+          </SettingsSummary>
 
           {roster.error && (
             <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
@@ -409,22 +448,29 @@ export function MembersPage() {
             </p>
           )}
 
-          <SettingsCard icon={Users} title={capsReadable ? "Access" : "People"}
-            description={capsReadable ? "The role says what they manage · the profile says what they may do" : `${members.length} people, by role`}
-            actions={cardActions}>
-            {shown.length === 0 ? (
-              <p className="px-4 py-8 text-center text-xs text-muted-foreground">Nobody matches these filters.</p>
-            ) : isMobile ? (
-              <PeopleList groups={groups} caps={caps} currentUserId={currentUserId} onOpen={open} />
-            ) : (
-              <AccessMatrix groups={groups} caps={caps} serverCaps={serverCaps} currentUserId={currentUserId} canEdit={isAdmin} busy={busy}
-                selected={selected}
-                onSelect={(id, on) => setSelected((s) => { const n = new Set(s); if (on) n.add(id); else n.delete(id); return n })}
-                onSelectMany={(ids, on) => setSelected(on ? new Set(ids) : new Set())}
-                onOpen={open} onCell={onCell} onProfile={onProfile} />
-            )}
-          </SettingsCard>
-          {capsReadable && !isMobile && shown.length > 0 && <Legend />}
+          {findings && !filters.status && <MembersAttention findings={findings} />}
+
+          {filters.status === "invited" ? (
+            <SettingsCard icon={Mail} title="Invitations" description="Sent, not accepted yet. An expired one cannot be accepted — invite again.">
+              {invitationsQuery.isLoading ? <div className="p-4"><Skeleton className="h-10 w-full" /></div> : <InvitationList invitations={invitations} />}
+            </SettingsCard>
+          ) : (
+            <SettingsCard icon={Users} title="People"
+              description={capsReadable ? "The role says what they manage · the chips say what they may do" : `${members.length} people, by role`}
+              actions={cardActions}>
+              {shown.length === 0 ? (
+                <p className="px-4 py-8 text-center text-xs text-muted-foreground">Nobody matches these filters.</p>
+              ) : isMobile ? (
+                <PeopleList groups={groups} caps={caps} currentUserId={currentUserId} onOpen={open} />
+              ) : (
+                <PeopleTable groups={groups} caps={caps} serverCaps={serverCaps} currentUserId={currentUserId} canSelect={isAdmin}
+                  selected={selected} openedId={openedId}
+                  onSelect={(id, on) => setSelected((s) => { const n = new Set(s); if (on) n.add(id); else n.delete(id); return n })}
+                  onSelectMany={(ids, on) => setSelected(on ? new Set(ids) : new Set())}
+                  onOpen={open} />
+              )}
+            </SettingsCard>
+          )}
         </div>
       )}
 
@@ -438,13 +484,13 @@ export function MembersPage() {
       </AnimatePresence>
 
       <Sheet open={opened !== null} onOpenChange={(o) => { if (!o) open(null) }}>
-        <SheetContent side="right" className="w-full gap-0 overflow-y-auto p-5 sm:max-w-[440px]" data-slot="member-sheet">
+        <SheetContent side="right" className="w-full gap-0 overflow-y-auto bg-background p-5 sm:max-w-[520px]" data-slot="member-sheet">
           <SheetTitle className="sr-only">{opened ? nameOf(opened) : "Member"}</SheetTitle>
-          <SheetDescription className="sr-only">Role, access profile and capabilities</SheetDescription>
+          <SheetDescription className="sr-only">Role, what they may do and where</SheetDescription>
           {opened && (
             <MemberDetail member={opened} workspaceId={ws} currentUserId={currentUserId} callerRole={role} isAdmin={isAdmin}
               granted={caps?.[opened.user.id] ?? []} serverGranted={serverCaps?.[opened.user.id] ?? []} capsLoading={capsLoading} busy={busy}
-              onChangeRole={roster.changeRole} onRemove={onRemove} onCell={onCell} onProfile={onProfile} />
+              onChangeRole={roster.changeRole} onRemove={onRemove} onCell={onCell} onProfile={onProfile} onRevoke={onRevoke} />
           )}
           {/* The page's own save bar sits under the sheet's overlay; the same
               bar, from the same context, docks to the bottom of the sheet. */}
@@ -478,61 +524,6 @@ export function MembersPage() {
 function RegisterDraft({ count, saving, save, discard }: { count: number; saving: boolean; save: () => Promise<void>; discard: () => void }) {
   usePageSave({ label: "Members", count, saving, save, discard })
   return null
-}
-
-function Stat({ n, one, many }: { n: number; one: string; many: string }) {
-  return <span><span className="font-mono tabular-nums text-foreground">{n}</span> {n === 1 ? one : many}</span>
-}
-
-function Legend() {
-  return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-label text-muted-foreground" data-slot="members-legend">
-      <span className="inline-flex items-center gap-2"><Dot state="profile" />held, from the profile</span>
-      <span className="inline-flex items-center gap-2"><Dot state="added" />exception — added</span>
-      <span className="inline-flex items-center gap-2"><Dot state="removed" />exception — taken away</span>
-      <span className="inline-flex items-center gap-2"><Dot state="profile" danger />high-stakes</span>
-      <span className="inline-flex items-center gap-2"><Dot state="off" />not held</span>
-      <span className="ml-auto">Owners and your own row cannot be changed.</span>
-    </div>
-  )
-}
-
-/** The phone's roster: grouped like the matrix, one tappable row per person
- *  with their profile under the name and the role on the right. */
-function PeopleList({ groups, caps, currentUserId, onOpen }: {
-  groups: MatrixGroup[]
-  caps: Record<string, string[]> | undefined
-  currentUserId?: string
-  onOpen: (m: Member) => void
-}) {
-  return (
-    <div data-slot="members-list">
-      {groups.map((g) => (
-        <section key={g.key} aria-label={g.label}>
-          <h3 className="border-b border-border/40 bg-card px-4 py-1.5 font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground">
-            {g.label}<span className="ml-2 font-normal normal-case tracking-normal text-muted-foreground-soft">{g.people.length}</span>
-          </h3>
-          {g.people.map((m) => {
-            const label = personLabel(m.user.full_name, m.user.email)
-            return (
-              <button key={m.id} type="button" onClick={() => onOpen(m)} title={`${label} · ${m.user.email}`}
-                className="flex min-h-[52px] w-full items-center gap-3 border-b border-border/40 px-4 py-2 text-left active:bg-[var(--row-hover-bg)]">
-                <UserAvatar name={m.user.full_name} email={m.user.email} src={m.user.avatar_url} className="h-8 w-8" textClassName="text-[10px]" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-control">{label}{m.user.id === currentUserId && <span className="ml-1.5 text-micro text-muted-foreground">you</span>}</span>
-                  <span className="block truncate text-label text-muted-foreground">
-                    {caps ? (m.role === "OWNER" ? "Owner · fixed" : <ProfileText profile={accessProfile(caps[m.user.id])} />) : m.user.email}
-                  </span>
-                </span>
-                <RolePill role={m.role} />
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-              </button>
-            )
-          })}
-        </section>
-      ))}
-    </div>
-  )
 }
 
 /** What to do with the ticked rows: a bar floating over the bottom of the
@@ -571,7 +562,7 @@ function BulkBar({ count, busy, lifted, canChangeRole, callerRole, onProfile, on
       initial={reduce ? false : { y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={reduce ? undefined : { y: 24, opacity: 0 }} transition={{ duration: 0.18 }}
       className={cn("fixed left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-primary/30 bg-popover px-3 py-2 shadow-lg transition-[bottom]", lifted ? "bottom-20" : "bottom-6")}>
       <span className="px-1 text-xs"><span className="font-mono font-semibold tabular-nums">{count}</span> selected</span>
-      {menu("Apply profile", ACCESS_PROFILES.map((p) => ({ key: p.key, label: p.label, run: () => onProfile(p.key) })), "Access profile")}
+      {menu("Set access", ACCESS_PROFILES.map((p) => ({ key: p.key, label: p.label, run: () => onProfile(p.key) })), "Preset")}
       {menu("Grant", caps.map((c) => ({ key: c, label: CAPABILITY_LABELS[c].en, danger: HIGH_STAKES_CAPABILITIES.has(c), run: () => onCap(c, true) })), "Grant to all selected")}
       {menu("Revoke", caps.map((c) => ({ key: c, label: CAPABILITY_LABELS[c].en, run: () => onCap(c, false) })), "Revoke from all selected")}
       {canChangeRole && roles.length > 0 && menu("Role", roles.map((r) => ({ key: r, label: ROLE_LABEL[r], run: () => onRole(r) })), "Change role")}
