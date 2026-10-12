@@ -2,7 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
-import { ActivityBell } from "../activity-bell"
+import {
+  ActivityBell,
+  activityFooterHref,
+  defaultActivityChip,
+  failedRuns,
+  type ActivityChip,
+} from "../activity-bell"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type { ActiveRunItem } from "@/hooks/use-active-runs"
 import { deriveActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
@@ -48,6 +54,7 @@ vi.mock("@/hooks/use-active-routine-runs", async (importOriginal) => {
     useActiveRoutineRuns: () => ({
       ...mod.deriveActiveRoutineRuns(h.runs as PipelineRun[]),
       recentRuns: mod.deriveRecentTerminalRuns(h.runs as PipelineRun[]),
+      recentDashboardRuns: mod.deriveRecentTerminalRuns(h.runs as PipelineRun[], 12),
       loading: false,
       error: null,
       refresh: h.refresh,
@@ -260,6 +267,9 @@ describe("<ActivityBell> dropdown", () => {
     ]
     render(<ActivityBell />)
     openDropdown()
+    // A run is live, so the panel opens on the Live chip; Recent is one click.
+    expect(screen.queryByText("Cost spike probe")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("activity-chip-recent"))
 
     await waitFor(() => {
       expect(screen.getByText("Cost spike probe")).toBeInTheDocument()
@@ -430,5 +440,129 @@ describe("<ActivityBell> recent rows — markup", () => {
     openDropdown()
     await screen.findByRole("link", { name: /open run/i })
     expect(screen.queryByRole("button", { name: /cancel run/i })).toBeNull()
+  })
+})
+
+// The chips (approved wireframe, 2026-10): a failed run used to be one red
+// word among three Recent rows, gone as soon as two newer runs finished.
+describe("<ActivityBell> chips", () => {
+  beforeEach(() => {
+    h.runs = []
+    h.agentItems = []
+    h.role = "OWNER"
+  })
+
+  const ended = (mins: number) => new Date(Date.now() - mins * 60_000).toISOString()
+
+  it("opens on Live while anything is live, and shows only that section", () => {
+    h.runs = [
+      run({ id: "live" }),
+      run({ id: "done", pipeline_name: "Done one", status: "completed", ended_at: ended(2) }),
+    ]
+    render(<ActivityBell />)
+    openDropdown()
+    expect(screen.getByTestId("activity-chip-live")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("activity-chip-live")).toHaveTextContent("Live (1)")
+    expect(screen.getByTestId("bar-menu-section-live")).toBeInTheDocument()
+    expect(screen.queryByTestId("bar-menu-section-recent")).not.toBeInTheDocument()
+  })
+
+  it("opens on Recent when nothing is live", () => {
+    h.runs = [run({ id: "done", status: "completed", ended_at: ended(2) })]
+    render(<ActivityBell />)
+    openDropdown()
+    expect(screen.getByTestId("activity-chip-recent")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("bar-menu-section-recent")).toBeInTheDocument()
+  })
+
+  it("keeps a failure findable under Failed after newer runs succeeded", () => {
+    // Three newer successes push the failure out of the old 3-row Recent; the
+    // Failed chip counts over the wider window and still lists it.
+    h.runs = [
+      run({ id: "ok1", pipeline_slug: "a", status: "completed", ended_at: ended(1) }),
+      run({ id: "ok2", pipeline_slug: "b", status: "completed", ended_at: ended(2) }),
+      run({ id: "ok3", pipeline_slug: "c", status: "completed", ended_at: ended(3) }),
+      run({ id: "boom", pipeline_slug: "d", pipeline_name: "Flaky sync", status: "failed", ended_at: ended(4) }),
+    ]
+    render(<ActivityBell />)
+    openDropdown()
+    const failed = screen.getByTestId("activity-chip-failed")
+    expect(failed).toHaveTextContent("Failed (1)")
+    fireEvent.click(failed)
+    expect(screen.getByTestId("bar-menu-section-failed")).toBeInTheDocument()
+    expect(screen.getByText("Flaky sync")).toBeInTheDocument()
+    expect(screen.getAllByRole("button").filter((b) => /Could not finish/.test(b.textContent ?? ""))).toHaveLength(1)
+    expect(screen.getByRole("link", { name: /view all activity/i })).toHaveAttribute("href", "/activity?status=failed")
+  })
+
+  it("says so when there are no failures", () => {
+    h.runs = [run({ id: "ok", status: "completed", ended_at: ended(1) })]
+    render(<ActivityBell />)
+    openDropdown()
+    fireEvent.click(screen.getByTestId("activity-chip-failed"))
+    expect(screen.getByText("No recent failures")).toBeInTheDocument()
+  })
+
+  it("shows no chips on an empty panel", () => {
+    render(<ActivityBell />)
+    openDropdown()
+    expect(screen.queryByTestId("activity-chip")).not.toBeInTheDocument()
+    expect(screen.getByText("Nothing running right now")).toBeInTheDocument()
+  })
+})
+
+describe("<ActivityBell> icon active state", () => {
+  beforeEach(() => {
+    h.runs = []
+    h.agentItems = []
+  })
+
+  it.each([
+    { name: "nothing live", runs: [], agents: [], active: false },
+    { name: "a routine running", runs: [run({ id: "r" })], agents: [], active: true },
+    { name: "a routine waiting", runs: [run({ id: "w", status: "waiting" })], agents: [], active: true },
+    { name: "an agent run only", runs: [], agents: [{ id: "a", kind: "agent", label: "Casey", href: "/chat/casey" }], active: true },
+    { name: "terminal runs only", runs: [run({ id: "d", status: "failed", ended_at: new Date().toISOString() })], agents: [], active: false },
+  ])("$name → active=$active", ({ runs, agents, active }) => {
+    h.runs = runs
+    h.agentItems = agents
+    render(<ActivityBell />)
+    const trigger = screen.getByTestId("activity-trigger")
+    if (active) {
+      expect(trigger).toHaveAttribute("data-active", "true")
+      expect(trigger.className).toContain("bg-primary/10")
+    } else {
+      expect(trigger).not.toHaveAttribute("data-active")
+    }
+  })
+})
+
+describe("activity chip helpers", () => {
+  it.each([
+    { live: 0, want: "recent" },
+    { live: 1, want: "live" },
+    { live: 9, want: "live" },
+  ])("defaultActivityChip($live) → $want", ({ live, want }) => {
+    expect(defaultActivityChip(live)).toBe(want)
+  })
+
+  it.each([
+    { statuses: [], want: [] },
+    { statuses: ["completed", "cancelled", "interrupted"], want: [] },
+    { statuses: ["failed", "completed", "error", "FAILED"], want: ["s0", "s2", "s3"] },
+  ])("failedRuns($statuses)", ({ statuses, want }) => {
+    const runs = statuses.map((status, i) => run({ id: `s${i}`, status }))
+    expect(failedRuns(runs).map((r) => r.id)).toEqual(want)
+  })
+
+  it.each<{ chip: ActivityChip; live: number; waiting: number; want: string }>([
+    { chip: "live", live: 2, waiting: 1, want: "/activity?status=waiting" },
+    { chip: "failed", live: 2, waiting: 1, want: "/activity?status=waiting" },
+    { chip: "live", live: 2, waiting: 0, want: "/activity?status=active" },
+    { chip: "live", live: 0, waiting: 0, want: "/activity" },
+    { chip: "recent", live: 2, waiting: 0, want: "/activity" },
+    { chip: "failed", live: 0, waiting: 0, want: "/activity?status=failed" },
+  ])("activityFooterHref($chip, $live, $waiting) → $want", ({ chip, live, waiting, want }) => {
+    expect(activityFooterHref(chip, live, waiting)).toBe(want)
   })
 })

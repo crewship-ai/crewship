@@ -4,29 +4,16 @@ import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useAuth, useIsInstanceAdmin } from "@/hooks/use-auth"
-import {
-  BookOpen, ChevronDown, GitBranch, HelpCircle,
-  LogOut, Search, User, X,
-} from "lucide-react"
+import { LogOut, Search, X } from "lucide-react"
 
 import { navSections, isHiddenForRole } from "@/lib/nav-sections"
 import { useRealtime } from "@/hooks/use-realtime"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useEngineStatus } from "@/hooks/use-engine-status"
 import { useCrewsStatus } from "@/hooks/use-crews-status"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
-import { useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode, useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
 import { restrictedPathAllowed } from "@/lib/restricted-surfaces"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
@@ -39,15 +26,8 @@ import { useAppStore } from "@/lib/store"
 
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
 import { SystemStatusPill } from "./status-pill"
-import { Volume2 } from "lucide-react"
-import { AccentPicker, ThemeSwitcher } from "./theme-switcher"
-
-// External destinations for the user menu. Kept here (not env-driven) because
-// they are stable public properties; the docs site is the Mintlify source of
-// truth and Help & Support routes to the GitHub issue tracker.
-const DOCS_URL = "https://docs.crewship.ai"
-const GITHUB_URL = "https://github.com/crewship-ai/crewship"
-const SUPPORT_URL = "https://github.com/crewship-ai/crewship/issues"
+import { UserMenu } from "./user-menu"
+import { MobileWorkspaceSwitcher } from "./workspace-switcher"
 
 /**
  * The phone sheet carries the same unread count the desktop rail does — it was
@@ -107,7 +87,6 @@ function InboxUnreadBadge({ workspaceId }: { workspaceId: string | null }) {
 // back — chat — has the breadcrumb below pointing exactly there.
 export function AppToolbar() {
   const pathname = usePathname()
-  const { workspace, role: workspaceRole } = useWorkspace()
   // Engine, crews, provisioning, inbox and runs are not on the restricted
   // allowlist. Their hooks idle on a null workspace, and their widgets are not
   // rendered unless the session is trusted.
@@ -253,7 +232,7 @@ export function AppToolbar() {
         {trusted && (
           <div className="hidden lg:flex items-center gap-1.5 mr-1">
             <ProvisioningBadge provisioning={provisioning} workspaceId={workspaceId} />
-            <SystemStatusPill engineStatus={engineStatus} wsStatus={wsStatus} crews={crewsStatus} />
+            <SystemStatusPill engineStatus={engineStatus} wsStatus={wsStatus} crews={crewsStatus} workspaceId={workspaceId} />
           </div>
         )}
 
@@ -299,6 +278,10 @@ export function AppToolbar() {
           * does not belong behind a closed dropdown. */}
         {trusted && (
           <div className="hidden md:flex items-center gap-0.5">
+            {/* The strip reads in two halves: the system (status, search) and
+                you (what is running for you, what is asked of you, your
+                account). The rule marks where one ends. */}
+            <span className="mx-1 h-5 w-px bg-foreground/[0.1]" aria-hidden />
             <ActivityBell />
             <InboxBell />
           </div>
@@ -306,72 +289,7 @@ export function AppToolbar() {
 
 
         {/* Personal settings live in the profile menu on every screen size. */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-2 rounded-md px-1.5 py-1 coarse:min-h-12 hover:bg-accent transition-colors" aria-label="User menu">
-              <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-7 w-7" textClassName="text-micro" />
-              <span className="text-xs font-medium hidden sm:inline">{userName.split(" ")[0]}</span>
-              <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64">
-            <div className="px-2 py-3">
-              <div className="flex items-center gap-3">
-                <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-10 w-10" textClassName="text-sm" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium" title={userName}>{userName}</div>
-                  <div className="truncate text-xs text-muted-foreground" title={userEmail}>{userEmail}</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 mt-2">
-                <Badge variant="outline" className="shrink-0 text-micro px-1.5 py-0.5">{workspaceRole ? workspaceRole.charAt(0) + workspaceRole.slice(1).toLowerCase() : "Loading role…"}</Badge>
-                <span className="truncate text-micro text-muted-foreground" title={workspace?.name}>{workspace?.name}</span>
-              </div>
-            </div>
-            <div className="px-2 pb-2">
-              <div className="eyebrow mb-1.5 text-muted-foreground">Theme</div>
-              <ThemeSwitcher />
-              <div className="eyebrow mb-1.5 mt-3 text-muted-foreground">Accent</div>
-              <AccentPicker />
-            </div>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild className="gap-3 text-xs">
-              <Link href="/settings">
-                <User className="h-4 w-4 text-muted-foreground" />
-                Profile & Settings
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild className="gap-3 text-xs">
-              <Link href="/settings?tab=sounds">
-                <Volume2 className="h-4 w-4 text-muted-foreground" />
-                Notification sounds
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild className="gap-3 text-xs">
-              <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer">
-                <HelpCircle className="h-4 w-4 text-muted-foreground" />
-                Help & Support
-              </a>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild className="gap-3 text-xs">
-              <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">
-                <BookOpen className="h-4 w-4 text-muted-foreground" />
-                Documentation
-              </a>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild className="gap-3 text-xs">
-              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
-                <GitBranch className="h-4 w-4 text-muted-foreground" />
-                GitHub
-              </a>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="gap-3 text-xs text-destructive" onClick={() => { signOut().then(() => window.location.href = "/login") }}>
-              <LogOut className="h-4 w-4" />
-              Log out
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <UserMenu />
 
       </div>
 
@@ -382,10 +300,11 @@ export function AppToolbar() {
             <div className="w-12 h-1.5 rounded-full bg-border mx-auto mt-3 mb-1" />
             <SheetHeader className="px-4 py-2 border-b">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-6 w-6 items-center justify-center rounded bg-primary text-[8px] font-bold text-primary-foreground">U</div>
-                  <SheetTitle className="text-sm">Unify Technology</SheetTitle>
-                </div>
+                {/* The workspace switcher — the phone has no rail, so this is
+                    its only home. This slot used to print a hardcoded
+                    placeholder ("Unify Technology") for every workspace. */}
+                <SheetTitle className="sr-only">Navigation</SheetTitle>
+                <MobileWorkspaceSwitcher onNavigate={() => setMobileNavOpen(false)} />
                 <button onClick={() => setMobileNavOpen(false)} aria-label="Close navigation" className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent">
                   <X className="h-4 w-4" />
                 </button>

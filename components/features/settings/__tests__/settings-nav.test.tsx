@@ -13,7 +13,7 @@ import { SettingsNav, isSettingsSectionVisible } from "../settings-nav"
 
 // Privacy is deliberately absent — it is `enabled: false` until peer-card
 // extraction stops being a no-op. See the dedicated test below.
-const ACCOUNT_ITEMS = ["Profile", "Notification sounds"]
+const ACCOUNT_ITEMS = ["Profile", "Appearance", "Notification sounds", "Sessions & tokens"]
 const WORKSPACE_ITEMS = [
   "General",
   "Crew links",
@@ -312,5 +312,27 @@ describe("SettingsLayout — a changed link on a mounted page", () => {
     rerender(<SettingsLayout />)
     rerender(<SettingsLayout />)
     expect(screen.getByTestId("hooks-section")).toBeTruthy()
+  })
+})
+
+describe("SettingsNav — Account order", () => {
+  beforeEach(() => cleanup())
+
+  // The user menu deep-links to Appearance and Sessions & tokens; in the nav
+  // they read as one personal group: who you are, how it looks, how it
+  // sounds, what can act as you.
+  it("lists Profile, Appearance, Notification sounds, Sessions & tokens in that order", () => {
+    renderNav("MEMBER")
+    const labels = Array.from(document.querySelectorAll("nav [role=button]"))
+      .map((el) => el.getAttribute("aria-label"))
+      .filter((l): l is string => ACCOUNT_ITEMS.includes(l ?? ""))
+    expect(labels).toEqual(ACCOUNT_ITEMS)
+  })
+
+  it("offers both new sections to every role, before the role is known too", () => {
+    for (const role of [null, "VIEWER", "MEMBER", "OWNER"]) {
+      expect(isSettingsSectionVisible("appearance", role), String(role)).toBe(true)
+      expect(isSettingsSectionVisible("sessions", role), String(role)).toBe(true)
+    }
   })
 })

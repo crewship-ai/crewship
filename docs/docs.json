@@ -58,6 +58,7 @@
                   "guides/installation",
                   "guides/onboarding",
                   "guides/auth",
+                  "guides/account-and-top-bar",
                   "guides/admin-cli"
                 ]
               },

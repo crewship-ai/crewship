@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import {
-  User, Building, Users, Volume2,
+  User, Building, Users, Volume2, Palette, MonitorSmartphone,
   Link2, Activity, Shield, KeyRound, Webhook, ChevronRight,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
@@ -61,7 +61,15 @@ const sections: NavSection[] = [
     label: "Account",
     items: [
       { key: "profile", label: "Profile", icon: User },
+      // Theme, accent, density and motion. The top-bar user menu offers the
+      // two quick ones inline and links here for the rest.
+      { key: "appearance", label: "Appearance", icon: Palette },
       { key: "sounds", label: "Notification sounds", icon: Volume2 },
+      // Browser sessions and CLI tokens: everything that can act as you.
+      // Its own row (it used to be the last card on Profile) so "where do I
+      // revoke that token" has an answer in the nav and a deep link
+      // (/settings?tab=sessions) the user menu can point at.
+      { key: "sessions", label: "Sessions & tokens", icon: MonitorSmartphone },
       // Hidden until peer-card extraction actually exists. The routine runs
       // daily and the endpoints are real, but the extractor wired in
       // production is consolidate.NoopExtractor (cmd/crewship/cmd_start.go)

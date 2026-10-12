@@ -223,6 +223,9 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     expect(screen.queryByRole("button", { name: "Upload" })).toBeNull()
     expect(screen.queryByRole("textbox", { name: "Full name" })).toBeNull()
     expect(screen.getAllByRole("button", { name: "Change" })).toHaveLength(1)
+    // Sessions and token revoke live in their own section now; the
+    // restricted page still shows them under the password.
+    expect(screen.getByRole("region", { name: /Sessions & access/ })).toBeInTheDocument()
     expect(forbidden()).toEqual([])
   })
 })

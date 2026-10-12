@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react"
 import { Monitor, Moon, Sun, type LucideIcon } from "lucide-react"
-import { useTheme } from "next-themes"
 
 import { cn } from "@/lib/utils"
-import { useAccent } from "@/hooks/use-accent"
+import { useAppearance } from "@/hooks/use-appearance"
 import { ACCENTS } from "@/lib/theme/accents"
+import type { ThemeChoice } from "@/lib/theme/appearance"
 
-const OPTIONS: { value: string; label: string; icon: LucideIcon }[] = [
+export const THEME_OPTIONS: { value: ThemeChoice; label: string; icon: LucideIcon }[] = [
   { value: "dark", label: "Dark", icon: Moon },
   { value: "light", label: "Light", icon: Sun },
   { value: "system", label: "System", icon: Monitor },
@@ -18,9 +18,17 @@ const OPTIONS: { value: string; label: string; icon: LucideIcon }[] = [
  * Harbor theme picker: Dark, Light, System. A radio group rather than a
  * cycling button, because three states behind one icon hide which one you are
  * in. The stored choice is what shows as pressed; next-themes resolves System.
+ *
+ * Goes through useAppearance like every other appearance picker, so a change
+ * here is the same change Settings › Appearance makes and the shell's
+ * AppearanceSync writes it back for the user's other devices.
+ *
+ * `size="sm"` is the inline form for a menu row: 24px buttons, about 84px
+ * wide in all, so it sits beside a label instead of taking a row of its own.
  */
-export function ThemeSwitcher({ className }: { className?: string }) {
-  const { theme, setTheme } = useTheme()
+export function ThemeSwitcher({ className, size = "default" }: { className?: string; size?: "default" | "sm" }) {
+  const { theme, setTheme } = useAppearance()
+  const sm = size === "sm"
   // next-themes only knows the stored theme after hydration; render the
   // group unpressed until then instead of flashing the wrong option.
   const [mounted, setMounted] = useState(false)
@@ -30,9 +38,13 @@ export function ThemeSwitcher({ className }: { className?: string }) {
     <div
       role="radiogroup"
       aria-label="Theme"
-      className={cn("grid grid-cols-3 gap-0.5 rounded-xl border bg-surface-subtle p-0.5", className)}
+      className={cn(
+        "grid grid-cols-3 gap-0.5 border bg-surface-subtle p-0.5",
+        sm ? "w-[84px] rounded-lg" : "rounded-xl",
+        className,
+      )}
     >
-      {OPTIONS.map(({ value, label, icon: Icon }) => {
+      {THEME_OPTIONS.map(({ value, label, icon: Icon }) => {
         const checked = mounted && theme === value
         return (
           <button
@@ -48,12 +60,13 @@ export function ThemeSwitcher({ className }: { className?: string }) {
               setTheme(value)
             }}
             className={cn(
-              "flex h-8 items-center justify-center gap-1 rounded-lg text-micro font-medium text-muted-foreground transition-colors outline-none",
+              "flex items-center justify-center gap-1 text-micro font-medium text-muted-foreground transition-colors outline-none",
+              sm ? "h-6 rounded-md" : "h-8 rounded-lg",
               "hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
               checked && "bg-card text-primary-hover shadow-xs",
             )}
           >
-            <Icon className="h-3.5 w-3.5" aria-hidden />
+            <Icon className={sm ? "h-3 w-3" : "h-3.5 w-3.5"} aria-hidden />
           </button>
         )
       })}
@@ -65,14 +78,21 @@ export function ThemeSwitcher({ className }: { className?: string }) {
  * Accent theme picker: one swatch per entry in lib/theme/accents.ts. The
  * swatch colour comes from the registry, so adding an accent there adds it
  * here with no change to this component.
+ *
+ * `showLabels` prints each name under its swatch — Settings › Appearance has
+ * the room, the menu does not (there the name is the tooltip and aria-label).
  */
-export function AccentPicker({ className }: { className?: string }) {
-  const [accent, setAccent] = useAccent()
+export function AccentPicker({ className, showLabels = false }: { className?: string; showLabels?: boolean }) {
+  const { accent, setAccent } = useAppearance()
   return (
-    <div role="radiogroup" aria-label="Accent colour" className={cn("flex items-center gap-1.5", className)}>
+    <div
+      role="radiogroup"
+      aria-label="Accent colour"
+      className={cn("flex items-center", showLabels ? "flex-wrap gap-3" : "gap-1.5", className)}
+    >
       {ACCENTS.map(({ id, label, swatch }) => {
         const checked = accent === id
-        return (
+        const button = (
           <button
             key={id}
             type="button"
@@ -88,11 +108,20 @@ export function AccentPicker({ className }: { className?: string }) {
             className={cn(
               "grid h-7 w-7 place-items-center rounded-full outline-none transition-transform",
               "hover:scale-110 focus-visible:ring-2 focus-visible:ring-ring/50",
-              checked && "ring-2 ring-foreground/70 ring-offset-2 ring-offset-popover",
+              // The offset ring is cut from whatever the picker sits on: the menu's
+              // popover, or the settings card.
+              checked && cn("ring-2 ring-foreground/70 ring-offset-2", showLabels ? "ring-offset-card" : "ring-offset-popover"),
             )}
           >
             <span className="h-5 w-5 rounded-full shadow-[inset_0_0_0_1px_rgb(255_255_255_/_0.25)]" style={{ background: swatch }} aria-hidden />
           </button>
+        )
+        if (!showLabels) return button
+        return (
+          <div key={id} className="flex w-14 flex-col items-center gap-1.5">
+            {button}
+            <span aria-hidden className={cn("text-label", checked ? "text-foreground" : "text-muted-foreground")}>{label}</span>
+          </div>
         )
       })}
     </div>

@@ -1563,12 +1563,59 @@ body {
 }
 
 /* Preserve the state and loading label without requiring motion to read it.
- * Covers CSS spinners and Radix enter/exit animations, including pseudo-elements. */
+ * Covers CSS spinners and Radix enter/exit animations, including pseudo-elements.
+ *
+ * Settings › Appearance › Reduce motion (lib/theme/appearance.ts) drives the
+ * same rule from the app: On sets data-motion="reduce" on <html> and applies
+ * it whatever the OS says; Off sets data-motion="full", which lifts this
+ * catch-all for a user who wants motion here although their OS asks for less.
+ * The handful of per-component reduce rules above stay on the OS query — they
+ * only still a pulse or a slide, and the catch-all already covers them for On. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  :root:not([data-motion="full"]) *,
+  :root:not([data-motion="full"]) *::before,
+  :root:not([data-motion="full"]) *::after {
     animation: none !important;
     transition-duration: 0s !important;
     transition-delay: 0s !important;
     scroll-behavior: auto !important;
+  }
+}
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after {
+  animation: none !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Compact density — Settings › Appearance › Density (data-density="compact"
+ * on <html>, lib/theme/appearance.ts).
+ *
+ * Deliberately a short list of SHARED row shapes, not a second size for every
+ * component: tightening the kits moves every surface built on them, and a
+ * surface that spelled out its own padding keeps it. Only vertical padding
+ * changes — text sizes, control heights and touch targets stay as they are,
+ * so nothing gets harder to read or to hit; coarse pointers are excluded
+ * outright, because there the row height IS the touch target (.kit-tap).
+ *
+ *   - Sidebar kit rows (SidebarRow: `.kit-tap.type-nav`) — every rail list.
+ *   - Settings card rows and settings tables (SettingsRow and settingsTd are
+ *     `px-4 py-2.5` inside a [data-slot=settings-card]).
+ *   - shadcn table cells ([data-slot=table-cell]).
+ *
+ * Unlayered on purpose: it then outranks the Tailwind utilities it adjusts
+ * without !important. */
+@media (pointer: fine) {
+  :root[data-density="compact"] .kit-tap.type-nav {
+    padding-block: 0.125rem;
+  }
+  :root[data-density="compact"] [data-slot="settings-card"] .px-4.py-2\.5 {
+    padding-block: 0.375rem;
+  }
+  :root[data-density="compact"] [data-slot="table-cell"] {
+    padding-block: 0.25rem;
   }
 }

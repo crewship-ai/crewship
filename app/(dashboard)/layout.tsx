@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button"
 import { RealtimeToasts } from "@/components/layout/realtime-toasts"
 import { RealtimeStatusBanner } from "@/components/layout/realtime-status-banner"
 import { NotificationSoundEvents } from "@/components/layout/notification-sound-events"
+import { AppearanceSync } from "@/components/layout/appearance-sync"
 
 export default function DashboardLayout({
   children,
@@ -133,6 +134,8 @@ export default function DashboardLayout({
         </SidebarProvider>
         <RealtimeToasts />
         {trusted && <NotificationSoundEvents />}
+        {/* GET/PUT /api/v1/me/preferences are not on the restricted allowlist. */}
+        {trusted && <AppearanceSync />}
       </ActiveRoutineRunsProvider>
       </JournalLookupProvider>
     </RealtimeProvider>

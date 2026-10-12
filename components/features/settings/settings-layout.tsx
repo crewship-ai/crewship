@@ -17,6 +17,8 @@ import { SubBar } from "@/components/layout/sub-bar"
 import { SettingsNav, isSettingsSectionVisible } from "./settings-nav"
 import { NotificationSoundSettings } from "./sections/notification-sounds-section"
 import { ProfileSection } from "./sections/profile-section"
+import { AppearanceSection } from "./sections/appearance-section"
+import { SessionsSection } from "./sections/sessions-section"
 import { PrivacySection } from "./sections/privacy-section"
 import { GeneralSection } from "./sections/general-section"
 import { MembersSection } from "./sections/members-section"
@@ -44,7 +46,9 @@ interface Member {
 // Section titles for the content area header
 const sectionTitles: Record<string, { title: string; description?: string }> = {
   profile: { title: "Profile", description: "Your account details" },
+  appearance: { title: "Appearance", description: "Theme, accent colour, density and motion" },
   sounds: { title: "Notification sounds", description: "Personal Chat and Inbox audio" },
+  sessions: { title: "Sessions & tokens", description: "Browser sessions and CLI tokens that can act as you" },
   privacy: { title: "Privacy", description: "Agent memory about you (peer cards, opt-out, deletion)" },
   general: { title: "General", description: "Workspace identity, usage and settings" },
   connections: { title: "Crew links", description: "Cross-crew communication links" },
@@ -131,13 +135,19 @@ function RestrictedAccountSettings() {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4 p-4 md:p-6">
       <h1 className="text-xl font-semibold">Account security</h1>
-      <ProfileSection
-        restricted
-        userName={session?.user?.name}
-        userEmail={session?.user?.email}
-        sessionExpires={session?.expires}
-        onSignOut={() => signOut().then(() => { window.location.href = "/login" })}
-      />
+      {/* One page, as before the Sessions split: password, then sessions and
+          token revoke. space-y-5 is the gap ProfileSection used between the
+          same cards when they lived in one component. The ?tab= param is
+          ignored here — /settings?tab=sessions from the user menu lands on
+          this same page, which already shows sessions. */}
+      <div className="space-y-5">
+        <ProfileSection restricted userName={session?.user?.name} userEmail={session?.user?.email} />
+        <SessionsSection
+          restricted
+          sessionExpires={session?.expires}
+          onSignOut={() => signOut().then(() => { window.location.href = "/login" })}
+        />
+      </div>
     </div>
   )
 }
@@ -268,6 +278,17 @@ function SettingsPage() {
     if (moved) return <SectionMoved href={moved.href} label={moved.label} />
 
     if (activeTab === "sounds" && !wsLoading) return <NotificationSoundSettings />
+    // Personal sections that read nothing from the workspace fetch: no
+    // skeleton while it runs, and a failed org load does not hide them.
+    if (activeTab === "appearance" && !wsLoading) return <AppearanceSection />
+    if (activeTab === "sessions" && !wsLoading) {
+      return (
+        <SessionsSection
+          sessionExpires={session?.expires}
+          onSignOut={() => signOut().then(() => { window.location.href = "/login" })}
+        />
+      )
+    }
 
     if (isLoading) {
       return (
@@ -296,8 +317,6 @@ function SettingsPage() {
           role={role}
           workspaceName={org?.name}
           joinedAt={currentMember?.created_at}
-          sessionExpires={session?.expires}
-          onSignOut={() => signOut().then(() => { window.location.href = "/login" })}
         />
       )
     }

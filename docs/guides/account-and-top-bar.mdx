@@ -1,0 +1,54 @@
+---
+title: "Top bar & account settings"
+description: "What the status pill, the Activity and Inbox bells and the user menu show, and the personal settings behind them — Appearance, Notification sounds and Sessions & tokens."
+icon: "user-gear"
+stability: experimental
+tag: Experimental
+---
+
+# Top bar & account settings
+
+## Overview
+
+The top bar reads in two halves, split by a thin rule: the **system** (the status pill and Search) and **you** (Activity, Inbox and the user menu). Workspace switching is not in the top bar — it is the top of the left rail, because the workspace is the context of everything in that rail. On a phone, where there is no rail, the switcher heads the navigation sheet.
+
+## Status pill
+
+One message in one tone, the worst state winning:
+
+| Pill | Meaning |
+|---|---|
+| Wi-Fi icon only (green) | Engine and real-time connection are up; nothing needs attention |
+| **N agent errors** (red) | At least one agent is in `ERROR` |
+| **N queued** (amber) | Assignments are waiting in the admission queue |
+| **No agents** (grey) | The workspace has no agents, so nothing can run |
+| **Connecting** / **Reconnecting** (amber), **Offline** (red) | The engine or the real-time channel is not up. Fleet counts are hidden — they would be last-known, not current |
+
+Clicking the pill opens **System status**: engine and real-time state separately, the agent breakdown (total, running, idle, queued) while it is current, and — when agents are in error — the agents themselves, each linking to `/crews?agent=<slug>`. Data comes from `GET /api/v1/agents/crews-status`; the errored list reads `GET /api/v1/agents` only while the popover is open.
+
+## User menu
+
+- The header (avatar, name, e-mail) opens **Settings → Profile**; under it, your role in the current workspace.
+- **Theme** — Dark / Light / System inline. Accent and the rest live in Settings → Appearance.
+- **Notification sounds** — the master on/off switch; detail in Settings → Notification sounds.
+- **Notification preferences** — your category × channel matrix (`/integrations?tab=notifications&section=preferences`).
+- **Sessions & CLI tokens** — with the number of active browser sessions.
+- **Connect CLI…** — signs a terminal in with a one-time code; see [CLI pairing](/guides/cli-pairing).
+- **Help & resources** — Documentation, What's new, Report an issue, GitHub.
+- **Log out**, with the running build (`v0.x` or `dev · <commit>`) beside it.
+
+Restricted sessions are not offered Notification preferences or Connect CLI.
+
+## Settings → Appearance
+
+`/settings?tab=appearance`
+
+- **Theme** — Dark, Light or System (follows the OS).
+- **Accent** — Blue, Indigo, Violet, Teal or Graphite; tints buttons, links and selection.
+- **Density** — Comfortable or Compact. Compact tightens the vertical padding of sidebar rows, settings rows and table cells on mouse/trackpad devices; text size and touch targets do not change.
+- **Reduce motion** — System (the OS setting), On (no transitions or animations), Off (full motion even if the OS asks for less).
+- **Sync across devices** — on by default. Theme, accent, density and motion are stored with your account under the `appearance` key of the per-user preference store (`GET`/`PUT /api/v1/me/preferences/appearance`; CLI: `crewship preferences`). Turning sync on adopts the value already saved on the account; with sync off nothing is sent and the choices stay in this browser.
+
+## Settings → Sessions & tokens
+
+`/settings?tab=sessions` — every browser session and CLI token that can act as you, each revocable. This used to be the bottom card of Profile.

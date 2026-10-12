@@ -3,6 +3,11 @@ import { initialFocusedMember, initialSettingsTab, MOVED_SECTIONS } from "../set
 
 describe("initialSettingsTab", () => {
   it("opens personal sound settings directly", () => { expect(initialSettingsTab("?tab=sounds")).toBe("sounds") })
+  // The top-bar user menu links straight to both.
+  it("opens Appearance and Sessions & tokens directly", () => {
+    expect(initialSettingsTab("?tab=appearance")).toBe("appearance")
+    expect(initialSettingsTab("?tab=sessions")).toBe("sessions")
+  })
   it("returns the tab from a valid ?tab= param (deep-link lands on the right section)", () => {
     expect(initialSettingsTab("?tab=audit")).toBe("audit")
     expect(initialSettingsTab("?tab=members")).toBe("members")

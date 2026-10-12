@@ -19,7 +19,7 @@ Four mutually exclusive modes — pick one. Interactive is the default when no m
 |---|---|---|---|
 | `--token <api-token>` | string | (unset) | Non-interactive: validates the token via `GET /api/v1/auth/cli-token/validate` and saves it. Use this in CI. |
 | `--google` | bool | `false` | Browser-based Google OAuth. Opens `/api/v1/auth/google/redirect`; after sign-in, you mint a CLI token from **Settings → CLI tokens** and paste it. Requires `GOOGLE_CLIENT_ID` on the server. |
-| `--pair` | bool | `false` | Device-code pairing — use with `--code XXXX-XXXX` from the browser's onboarding wizard. The code's TTL is 10 minutes. |
+| `--pair` | bool | `false` | Device-code pairing — use with `--code XXXX-XXXX` from the browser's onboarding wizard or **user menu → Connect CLI…**. The code's TTL is 10 minutes. |
 | `--code <code>` | string | (unset) | Pairing code from the browser. Required when `--pair` is set. |
 | `--adapter <name>` | string | (unset) | Optional telemetry hint, one of `CLAUDE_CODE`, `GEMINI_CLI`, `CODEX_CLI`, `OPENCODE`, `CURSOR_CLI`, `FACTORY_DROID`. Server never routes on this — it's adapter-blind. |
 | `--email <email>` | string | (unset) | Skips the interactive `Email:` prompt for the default email+password flow. Combine with `--password-stdin` or `CREWSHIP_PASSWORD` for a fully non-interactive login. |
