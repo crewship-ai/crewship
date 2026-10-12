@@ -112,7 +112,7 @@ export function DrillPage({
             transition={{ duration: 0.22, ease: [0.2, 0.7, 0.2, 1] }}
             data-collapsed={collapsed || undefined}
             className={cn(
-              "flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-200",
+              "flex shrink-0 flex-col border-r border-foreground/[0.06] bg-card transition-[width] duration-200",
               collapsed ? "w-11" : SIDEBAR_WIDTH,
             )}
             aria-label={`${title} navigation`}
@@ -151,7 +151,7 @@ export function DrillPage({
       </div>
       {isMobile && (
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-          <SheetContent side="bottom" className="max-h-[85dvh] gap-0 rounded-t-2xl bg-sidebar p-0" data-slot="drill-sheet">
+          <SheetContent side="bottom" className="max-h-[85dvh] gap-0 rounded-t-2xl bg-card p-0" data-slot="drill-sheet">
             <div className="mx-auto mt-2 h-1 w-9 rounded-full bg-border" aria-hidden />
             <SheetTitle className="px-4 pt-2 text-sm">{title}</SheetTitle>
             <SheetDescription className="sr-only">Filters and sections for {title}</SheetDescription>

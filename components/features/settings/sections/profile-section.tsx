@@ -282,7 +282,9 @@ export function ProfileSection({
               aria-label="Full name"
               aria-invalid={(nameForm.isDirty && !nameValid) || undefined}
               placeholder="Not set"
-              className={settingsControl}
+              // Right-aligned like every other value in this card (email,
+              // password, role): the column reads down one edge.
+              className={cn(settingsControl, "text-right")}
               disabled={nameForm.status === "saving"}
             />
             {/* A format problem belongs under its field; a failed write goes to the corner. */}

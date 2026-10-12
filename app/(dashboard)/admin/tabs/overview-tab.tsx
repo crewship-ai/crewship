@@ -233,7 +233,7 @@ export const OverviewTab = React.memo(function OverviewTab({
     <div className="space-y-4">
       <AppearStack>
         {/* ── Identity + verdict ── */}
-        <section aria-label="Instance status" className="panel-surface overflow-hidden rounded-card border border-border" data-slot="admin-hero">
+        <section aria-label="Instance status" className="hero-surface overflow-hidden rounded-card" data-slot="admin-hero">
           <div className="flex flex-wrap items-center gap-4 px-5 py-4">
             <span className="icon-tile grid h-12 w-12 shrink-0 place-items-center rounded-xl" aria-hidden>
               <CrewshipLogo tight className="h-6 w-auto" />

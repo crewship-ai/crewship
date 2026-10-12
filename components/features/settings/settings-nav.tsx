@@ -202,7 +202,7 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
   const firstMatch = filtered[0]?.items[0]?.key
 
   return (
-    <aside className={cn(SIDEBAR_WIDTH, "shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col")}>
+    <aside className={cn(SIDEBAR_WIDTH, "shrink-0 bg-card border-r border-foreground/[0.06] flex flex-col")}>
       <SidebarToolbar>
         <SidebarSearch
           value={query}
