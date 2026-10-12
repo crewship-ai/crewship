@@ -322,16 +322,15 @@ describe("CommandPalette — people deep-link", () => {
 })
 
 describe("CommandPalette — skills", () => {
-  it("opens the skill, which has had a detail route all along", async () => {
-    // This row landed on /skills for the whole PR, excused as "that surface is
-    // being reworked" — but /skills/[skillId] exists and the detail panel
-    // already links to it.
+  it("opens the skill beside the Skills explorer", async () => {
+    // A skill opens in /skills' content pane (#3033); the old /skills/<id>
+    // route only redirects there.
     FIXTURES["/skills"] = [
       { id: "sk1", name: "Routine Author", slug: "ra", display_name: null, category: "AUTOMATION" },
     ]
     openPalette()
     const g = await group(/skills/i)
-    expect(within(g).getByRole("option")).toHaveAttribute("data-href", "/skills/sk1")
+    expect(within(g).getByRole("option")).toHaveAttribute("data-href", "/skills?skill=sk1")
   })
 })
 
