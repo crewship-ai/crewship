@@ -46,6 +46,7 @@ export function rowLocked(m: Member, currentUserId: string | undefined, canEdit:
 export function AccessMatrix({
   groups,
   caps,
+  serverCaps,
   currentUserId,
   canEdit,
   selected,
@@ -57,8 +58,11 @@ export function AccessMatrix({
   busy,
 }: {
   groups: MatrixGroup[]
-  /** user id → capabilities, or undefined when the caller cannot read them. */
+  /** user id → capabilities as drafted, or undefined when the caller cannot
+   *  read them. */
   caps: Record<string, string[]> | undefined
+  /** The same before the draft: a cell that differs is marked unsaved. */
+  serverCaps?: Record<string, string[]>
   currentUserId?: string
   canEdit: boolean
   selected: ReadonlySet<string>
@@ -122,7 +126,7 @@ export function AccessMatrix({
               </th>
             </tr>
             {g.people.map((m) => (
-              <Row key={m.id} m={m} caps={caps} currentUserId={currentUserId} canEdit={canEdit} selected={selected.has(m.user.id)}
+              <Row key={m.id} m={m} caps={caps} saved={serverCaps?.[m.user.id]} currentUserId={currentUserId} canEdit={canEdit} selected={selected.has(m.user.id)}
                 onSelect={onSelect} onOpen={onOpen} onCell={onCell} onProfile={onProfile} busy={busy} />
             ))}
           </tbody>
@@ -132,9 +136,10 @@ export function AccessMatrix({
   )
 }
 
-function Row({ m, caps, currentUserId, canEdit, selected, onSelect, onOpen, onCell, onProfile, busy }: {
+function Row({ m, caps, saved, currentUserId, canEdit, selected, onSelect, onOpen, onCell, onProfile, busy }: {
   m: Member
   caps: Record<string, string[]> | undefined
+  saved?: string[]
   currentUserId?: string
   canEdit: boolean
   selected: boolean
@@ -182,11 +187,12 @@ function Row({ m, caps, currentUserId, canEdit, selected, onSelect, onOpen, onCe
         const on = state === "profile" || state === "added"
         const lock = capabilityLock(m, c.cap, currentUserId, canEdit)
         const danger = g.danger || c.cap === "skill.create"
+        const unsaved = saved !== undefined && on !== saved.includes(c.cap)
         return (
-          <td key={c.cap} className={cn(cell, "p-0 text-center", i === 0 && "border-l border-l-border/40")}>
+          <td key={c.cap} data-unsaved={unsaved || undefined} className={cn(cell, "p-0 text-center", i === 0 && "border-l border-l-border/40", unsaved && "bg-[var(--save-bar-bg)]")}>
             <button type="button" role="checkbox" aria-checked={on} data-state={state}
               aria-label={capabilityAriaLabel(c.cap, label, on, lock)}
-              title={`${CAPABILITY_LABELS[c.cap].en}${state === "added" ? " — added on top of the profile" : state === "removed" ? " — taken away from the profile" : ""}`}
+              title={`${CAPABILITY_LABELS[c.cap].en}${state === "added" ? " — added on top of the profile" : state === "removed" ? " — taken away from the profile" : ""}${unsaved ? " · not saved yet" : ""}`}
               disabled={lock !== null || busy}
               onClick={() => onCell(m, c.cap, !on)}
               className={cn("grid h-10 w-full place-items-center", lock === null ? "cursor-pointer" : "cursor-default")}>

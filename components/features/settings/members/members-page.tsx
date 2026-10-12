@@ -26,12 +26,12 @@ import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/dr
 import { SidebarFacet, SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
 import { SettingsCard } from "@/components/features/settings/shared"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
-import { HIGH_STAKES_CAPABILITIES, useMemberCapabilities, useToggleCapability } from "@/components/admin/member-capabilities"
+import { HIGH_STAKES_CAPABILITIES, useMemberCapabilities } from "@/components/admin/member-capabilities"
+import { PageSaveBar, usePageSave } from "@/components/ui/page-save-bar"
 
 import {
   ACCESS_PROFILES,
   ASSIGNABLE_ROLES,
-  CAPABILITY_SHORT,
   DEFAULT_MEMBER_FILTERS,
   MEMBER_FLAGS,
   PROFILE_LABEL,
@@ -102,10 +102,33 @@ export function MembersPage() {
   const isManager = isManagerTier(role)
   const capsReadable = isAdmin && Boolean(currentUserId)
   const { data: capsByUser, isLoading: capsLoading } = useMemberCapabilities(ws, capsReadable && members.length > 0)
-  const caps = React.useMemo(() => (capsReadable ? capsByUser ?? {} : undefined), [capsReadable, capsByUser])
-  const toggle = useToggleCapability(ws)
+  const serverCaps = React.useMemo(() => (capsReadable ? capsByUser ?? {} : undefined), [capsReadable, capsByUser])
   const access = useAccessWrites(ws, roster.refresh)
-  const busy = toggle.isPending || access.busy
+
+  // Capability edits are a draft until Save, like every other editor in
+  // Settings (components/ui/page-save-bar): a dot, a profile or a bulk action
+  // changes `drafts` — user id → the whole set they would hold — and the
+  // page's one floating bar commits them all, or Discard drops them. What the
+  // matrix, the counts and the filters show is the set WITH the draft.
+  const [drafts, setDrafts] = React.useState<Record<string, string[]>>({})
+  const caps = React.useMemo(() => (serverCaps ? { ...serverCaps, ...drafts } : undefined), [serverCaps, drafts])
+  const pendingCount = Object.entries(drafts).reduce((n, [id, set]) => n + capabilityDiff(serverCaps?.[id], set), 0)
+  const stage = (people: Member[], next: (current: string[]) => string[]) => setDrafts((d) => {
+    const out = { ...d }
+    for (const m of people) {
+      const set = canonical(next(out[m.user.id] ?? serverCaps?.[m.user.id] ?? []))
+      if (capabilityDiff(serverCaps?.[m.user.id], set) === 0) delete out[m.user.id]
+      else out[m.user.id] = set
+    }
+    return out
+  })
+  const saveDrafts = async () => {
+    const entries = Object.entries(drafts)
+    const done = await access.setCapabilities(entries.map(([id, set]) => [members.find((m) => m.user.id === id), set] as const).filter((e): e is readonly [Member, string[]] => Boolean(e[0])))
+    setDrafts((d) => { const out = { ...d }; for (const id of done) delete out[id]; return out })
+    if (done.length < entries.length) throw new Error(`${entries.length - done.length} of ${entries.length} people could not be changed`)
+  }
+  const busy = access.busy
 
   const [state, setState] = useMembersUrl()
   const { filters } = state
@@ -159,61 +182,47 @@ export function MembersPage() {
 
   // ── Writes, each asking first when it should ─────────────────────────
 
-  const onCell = (m: Member, cap: CapabilityValue, next: boolean) => {
-    const label = CAPABILITY_LABELS[cap].en
-    const apply = () => toggle.mutate({ userId: m.user.id, cap, next })
-    if (next && HIGH_STAKES_CAPABILITIES.has(cap)) {
-      setConfirm({
-        title: `Grant ${label}?`,
-        body: <><span className="font-medium text-foreground">{nameOf(m)}</span> will be able to: {CAPABILITY_LABELS[cap].description}</>,
-        action: `Grant ${label}`,
-        danger: true,
-        run: apply,
-      })
-      return
-    }
-    apply()
+  // Asking first is kept for one thing: putting a high-stakes grant into the
+  // draft. Everything else is undone by Discard.
+  const askHighStakes = (title: string, body: React.ReactNode, action: string, gains: CapabilityValue[], run: () => void) => {
+    if (gains.length === 0) { run(); return }
+    setConfirm({ title, body, action, danger: true, run })
   }
 
+  const onCell = (m: Member, cap: CapabilityValue, next: boolean) => {
+    const label = CAPABILITY_LABELS[cap].en
+    askHighStakes(`Grant ${label}?`,
+      <><span className="font-medium text-foreground">{nameOf(m)}</span> will be able to: {CAPABILITY_LABELS[cap].description} It takes effect when you save.</>,
+      `Grant ${label}`, next && HIGH_STAKES_CAPABILITIES.has(cap) ? [cap] : [],
+      () => stage([m], (cur) => (next ? [...cur, cap] : cur.filter((c) => c !== cap))))
+  }
+
+  const highStakesGains = (people: Member[], add: readonly string[]) =>
+    [...new Set(add.filter((c) => HIGH_STAKES_CAPABILITIES.has(c as CapabilityValue) && people.some((m) => !(caps?.[m.user.id] ?? []).includes(c))))] as CapabilityValue[]
+
   const onProfile = (m: Member, preset: CapabilityBundle) => {
-    const p = accessProfile(caps?.[m.user.id])
-    const gains = CAPABILITY_BUNDLES[preset].filter((c) => HIGH_STAKES_CAPABILITIES.has(c) && !(caps?.[m.user.id] ?? []).includes(c))
-    const diff = exceptionCount(p)
-    const run = () => access.applyProfile([m], preset)
-    if (diff === 0 && gains.length === 0) { void run(); return }
-    setConfirm({
-      title: `Set ${nameOf(m)} to ${PROFILE_LABEL[preset]}?`,
-      body: (
-        <>
-          {diff > 0 && <>Their {diff === 1 ? "exception" : `${diff} exceptions`} ({[...p.added.map((c) => `+${CAPABILITY_SHORT[c]}`), ...p.removed.map((c) => `−${CAPABILITY_SHORT[c]}`)].join(" ")}) will be replaced. </>}
-          {gains.length > 0 && <>This grants high-stakes access: {gains.map((c) => CAPABILITY_LABELS[c].en).join(", ")}.</>}
-        </>
-      ),
-      action: `Set to ${PROFILE_LABEL[preset]}`,
-      danger: gains.length > 0,
-      run,
-    })
+    const gains = highStakesGains([m], CAPABILITY_BUNDLES[preset])
+    askHighStakes(`Set ${nameOf(m)} to ${PROFILE_LABEL[preset]}?`,
+      <>This grants high-stakes access: {gains.map((c) => CAPABILITY_LABELS[c].en).join(", ")}. It takes effect when you save.</>,
+      `Set to ${PROFILE_LABEL[preset]}`, gains, () => stage([m], () => [...CAPABILITY_BUNDLES[preset]]))
   }
 
   const clearSelection = () => setSelected(new Set())
   const bulk = {
-    profile: (preset: CapabilityBundle) => setConfirm({
-      title: `Set ${selectedPeople.length} people to ${PROFILE_LABEL[preset]}?`,
-      body: <>Every exception they have is replaced by the profile: {ACCESS_PROFILES.find((p) => p.key === preset)?.summary}</>,
-      action: "Apply profile",
-      danger: CAPABILITY_BUNDLES[preset].some((c) => HIGH_STAKES_CAPABILITIES.has(c)),
-      run: async () => { await access.applyProfile(selectedPeople, preset); clearSelection() },
-    }),
-    cap: (cap: CapabilityValue, next: boolean) => setConfirm({
-      title: `${next ? "Grant" : "Revoke"} ${CAPABILITY_LABELS[cap].en} ${next ? "to" : "from"} ${selectedPeople.length} people?`,
-      body: next ? CAPABILITY_LABELS[cap].description : "Anyone who has it loses it now; the rest are unchanged.",
-      action: next ? "Grant" : "Revoke",
-      danger: next && HIGH_STAKES_CAPABILITIES.has(cap),
-      run: async () => {
-        await (next ? access.grant : access.revoke)(selectedPeople, cap, CAPABILITY_LABELS[cap].en)
-        clearSelection()
-      },
-    }),
+    profile: (preset: CapabilityBundle) => {
+      const people = selectedPeople
+      const gains = highStakesGains(people, CAPABILITY_BUNDLES[preset])
+      askHighStakes(`Set ${people.length} people to ${PROFILE_LABEL[preset]}?`,
+        <>This grants high-stakes access: {gains.map((c) => CAPABILITY_LABELS[c].en).join(", ")}. It takes effect when you save.</>,
+        "Apply profile", gains, () => { stage(people, () => [...CAPABILITY_BUNDLES[preset]]); clearSelection() })
+    },
+    cap: (cap: CapabilityValue, next: boolean) => {
+      const people = selectedPeople
+      askHighStakes(`Grant ${CAPABILITY_LABELS[cap].en} to ${people.length} people?`,
+        <>{CAPABILITY_LABELS[cap].description} It takes effect when you save.</>,
+        "Grant", next && HIGH_STAKES_CAPABILITIES.has(cap) ? [cap] : [],
+        () => { stage(people, (cur) => (next ? [...cur, cap] : cur.filter((c) => c !== cap))); clearSelection() })
+    },
     role: (r: string) => {
       const eligible = selectedPeople.filter((m) => m.role !== r && roleChoices(role, m, m.user.id === currentUserId).includes(r))
       setConfirm({
@@ -408,7 +417,7 @@ export function MembersPage() {
             ) : isMobile ? (
               <PeopleList groups={groups} caps={caps} currentUserId={currentUserId} onOpen={open} />
             ) : (
-              <AccessMatrix groups={groups} caps={caps} currentUserId={currentUserId} canEdit={isAdmin} busy={busy}
+              <AccessMatrix groups={groups} caps={caps} serverCaps={serverCaps} currentUserId={currentUserId} canEdit={isAdmin} busy={busy}
                 selected={selected}
                 onSelect={(id, on) => setSelected((s) => { const n = new Set(s); if (on) n.add(id); else n.delete(id); return n })}
                 onSelectMany={(ids, on) => setSelected(on ? new Set(ids) : new Set())}
@@ -419,9 +428,11 @@ export function MembersPage() {
         </div>
       )}
 
+      <RegisterDraft count={pendingCount} saving={access.busy} save={saveDrafts} discard={() => setDrafts({})} />
+
       <AnimatePresence>
         {selected.size > 0 && !isMobile && (
-          <BulkBar count={selected.size} busy={busy} canChangeRole={isManager} callerRole={role}
+          <BulkBar count={selected.size} busy={busy} lifted={pendingCount > 0} canChangeRole={isManager} callerRole={role}
             onProfile={bulk.profile} onCap={bulk.cap} onRole={bulk.role} onClear={clearSelection} reduce={Boolean(reduce)} />
         )}
       </AnimatePresence>
@@ -432,9 +443,14 @@ export function MembersPage() {
           <SheetDescription className="sr-only">Role, access profile and capabilities</SheetDescription>
           {opened && (
             <MemberDetail member={opened} workspaceId={ws} currentUserId={currentUserId} callerRole={role} isAdmin={isAdmin}
-              granted={capsByUser?.[opened.user.id] ?? []} capsLoading={capsLoading} busy={busy}
+              granted={caps?.[opened.user.id] ?? []} serverGranted={serverCaps?.[opened.user.id] ?? []} capsLoading={capsLoading} busy={busy}
               onChangeRole={roster.changeRole} onRemove={onRemove} onCell={onCell} onProfile={onProfile} />
           )}
+          {/* The page's own save bar sits under the sheet's overlay; the same
+              bar, from the same context, docks to the bottom of the sheet. */}
+          <div className="pointer-events-none sticky bottom-0 mt-4 flex justify-center pb-1 [&>*]:pointer-events-auto">
+            <PageSaveBar className="static left-auto bottom-auto translate-x-0 max-sm:static max-sm:rounded-xl max-sm:border-x max-sm:border-b" />
+          </div>
         </SheetContent>
       </Sheet>
 
@@ -455,6 +471,13 @@ export function MembersPage() {
       </AlertDialog>
     </DrillPage>
   )
+}
+
+/** Hands the capability draft to the page's save bar. It renders inside
+ *  DrillPage, which is where the bar's provider lives. */
+function RegisterDraft({ count, saving, save, discard }: { count: number; saving: boolean; save: () => Promise<void>; discard: () => void }) {
+  usePageSave({ label: "Members", count, saving, save, discard })
+  return null
 }
 
 function Stat({ n, one, many }: { n: number; one: string; many: string }) {
@@ -514,9 +537,11 @@ function PeopleList({ groups, caps, currentUserId, onOpen }: {
 
 /** What to do with the ticked rows: a bar floating over the bottom of the
  *  page, like a mail client's selection bar. */
-function BulkBar({ count, busy, canChangeRole, callerRole, onProfile, onCap, onRole, onClear, reduce }: {
+function BulkBar({ count, busy, lifted, canChangeRole, callerRole, onProfile, onCap, onRole, onClear, reduce }: {
   count: number
   busy: boolean
+  /** The save bar is showing: sit above it, not on it. */
+  lifted: boolean
   canChangeRole: boolean
   callerRole?: string | null
   onProfile: (p: CapabilityBundle) => void
@@ -544,7 +569,7 @@ function BulkBar({ count, busy, canChangeRole, callerRole, onProfile, onCap, onR
   return (
     <motion.div role="toolbar" aria-label="Change the selected people" data-slot="members-bulk"
       initial={reduce ? false : { y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={reduce ? undefined : { y: 24, opacity: 0 }} transition={{ duration: 0.18 }}
-      className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-primary/30 bg-popover px-3 py-2 shadow-lg">
+      className={cn("fixed left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-primary/30 bg-popover px-3 py-2 shadow-lg transition-[bottom]", lifted ? "bottom-20" : "bottom-6")}>
       <span className="px-1 text-xs"><span className="font-mono font-semibold tabular-nums">{count}</span> selected</span>
       {menu("Apply profile", ACCESS_PROFILES.map((p) => ({ key: p.key, label: p.label, run: () => onProfile(p.key) })), "Access profile")}
       {menu("Grant", caps.map((c) => ({ key: c, label: CAPABILITY_LABELS[c].en, danger: HIGH_STAKES_CAPABILITIES.has(c), run: () => onCap(c, true) })), "Grant to all selected")}
@@ -587,4 +612,20 @@ function useMembersUrl(): [MembersUrlState, (s: MembersUrlState) => void] {
   }, [])
 
   return [state, set]
+}
+
+/** Every capability the server stores, chat included (a `set` without chat
+ *  is refused), sorted so two sets compare as strings. */
+function canonical(set: string[]): string[] {
+  return [...new Set([Capability.Chat as string, ...set])].sort()
+}
+
+/** How many capabilities differ between what the server holds and a draft. */
+function capabilityDiff(server: readonly string[] | undefined, draft: readonly string[]): number {
+  const a = new Set((server ?? []).filter((c) => c !== Capability.Chat))
+  const b = new Set(draft.filter((c) => c !== Capability.Chat))
+  let n = 0
+  for (const c of a) if (!b.has(c)) n++
+  for (const c of b) if (!a.has(c)) n++
+  return n
 }

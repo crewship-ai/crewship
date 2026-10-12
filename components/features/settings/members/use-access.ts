@@ -6,17 +6,14 @@ import { toast } from "sonner"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { humanizePatchError, memberCapabilitiesKey } from "@/components/admin/member-capabilities"
-import type { CapabilityBundle, CapabilityValue } from "@/lib/capabilities"
 
-import { PROFILE_LABEL, ROLE_LABEL, type Member } from "./members-model"
-
-type CapabilityBody = { preset: CapabilityBundle } | { grant: CapabilityValue[] } | { revoke: CapabilityValue[] }
+import { ROLE_LABEL, type Member } from "./members-model"
 
 /**
- * The writes the access matrix makes for one or many people at once: apply a
- * profile (`{"preset"}`), grant or revoke one capability, change the role.
- * Each person is one PATCH — the API has no batch endpoint — and the result
- * is one toast that counts what went through, never one toast per person.
+ * The writes Members makes for one or many people at once: commit the drafted
+ * capability sets (`{"set"}`, behind the page's Save) and change the role.
+ * Each person is one PATCH — the API has no batch endpoint — and a role change
+ * ends in one toast that counts what went through, never one per person.
  *
  * Capabilities are addressed by USER id, the role by MEMBERSHIP id; that is
  * the API's split, kept here so the page never has to know it.
@@ -49,26 +46,36 @@ export function useAccessWrites(workspaceId: string, onRoleChanged: () => void) 
     }
   }, [])
 
-  const patchCapabilities = useCallback(async (people: Member[], body: CapabilityBody, done: string) => {
-    const ok = await run(people, (m) => apiFetch(`/api/v1/workspaces/${ws}/members/${encodeURIComponent(m.user.id)}/capabilities?workspace_id=${ws}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }), done)
-    if (ok > 0) await queryClient.invalidateQueries({ queryKey: memberCapabilitiesKey(workspaceId) })
-    return ok
-  }, [run, ws, workspaceId, queryClient])
-
   const who = (people: Member[]) => (people.length === 1 ? (people[0].user.full_name?.trim() || people[0].user.email) : `${people.length} people`)
 
   return {
     busy,
-    applyProfile: (people: Member[], preset: CapabilityBundle) =>
-      patchCapabilities(people, { preset }, `${who(people)}: ${PROFILE_LABEL[preset]}`),
-    grant: (people: Member[], cap: CapabilityValue, label: string) =>
-      patchCapabilities(people, { grant: [cap] }, `Granted ${label} to ${who(people)}`),
-    revoke: (people: Member[], cap: CapabilityValue, label: string) =>
-      patchCapabilities(people, { revoke: [cap] }, `Revoked ${label} from ${who(people)}`),
+    /** Commit drafted capability sets, one `{"set"}` PATCH per person. Resolves
+     *  to the user ids the server took; the caller keeps the rest drafted.
+     *  Quiet on success — the page's save bar says "Saved". */
+    setCapabilities: async (entries: readonly (readonly [Member, string[]])[]): Promise<string[]> => {
+      if (entries.length === 0) return []
+      setBusy(true)
+      try {
+        const results = await Promise.all(entries.map(async ([m, set]) => {
+          try {
+            const res = await apiFetch(`/api/v1/workspaces/${ws}/members/${encodeURIComponent(m.user.id)}/capabilities?workspace_id=${ws}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ set }),
+            })
+            return res.ok ? m.user.id : null
+          } catch {
+            return null
+          }
+        }))
+        const done = results.filter((id): id is string => id !== null)
+        if (done.length > 0) await queryClient.invalidateQueries({ queryKey: memberCapabilitiesKey(workspaceId) })
+        return done
+      } finally {
+        setBusy(false)
+      }
+    },
     changeRole: async (people: Member[], role: string) => {
       const ok = await run(people, (m) => apiFetch(`/api/v1/workspaces/${ws}/members/${encodeURIComponent(m.id)}?workspace_id=${ws}`, {
         method: "PATCH",

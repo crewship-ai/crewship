@@ -51,6 +51,7 @@ export function MemberDetail({
   callerRole,
   isAdmin,
   granted,
+  serverGranted,
   capsLoading,
   busy,
   onChangeRole,
@@ -63,7 +64,10 @@ export function MemberDetail({
   currentUserId?: string
   callerRole?: string | null
   isAdmin: boolean
+  /** As drafted, and as the server holds it: a switch that differs is
+   *  marked unsaved. */
   granted: string[]
+  serverGranted?: string[]
   capsLoading: boolean
   busy: boolean
   onChangeRole: (member: Member, role: string) => Promise<boolean>
@@ -134,7 +138,7 @@ export function MemberDetail({
       )}
 
       {showCaps && (
-        <Section title="Capabilities" hint={isOwner || isSelf ? undefined : "applies at once"}>
+        <Section title="Capabilities" hint={isOwner || isSelf ? undefined : "save when you are done"}>
           <div className="overflow-hidden rounded-lg border border-border">
             {CAPABILITY_COLUMNS.map((g) => (
               <div key={g.key} role="group" aria-label={g.label}>
@@ -144,15 +148,18 @@ export function MemberDetail({
                   const on = state === "profile" || state === "added"
                   const lock = capabilityLock(member, cap, currentUserId, isAdmin)
                   const danger = g.danger || cap === "skill.create"
+                  const unsaved = serverGranted !== undefined && on !== serverGranted.includes(cap)
                   return (
                     <button key={cap} type="button" role="switch" aria-checked={on} data-capability={cap}
                       aria-label={capabilityAriaLabel(cap, label, on, lock)} title={CAPABILITY_LABELS[cap].description}
                       disabled={lock !== null || busy || capsLoading}
                       onClick={() => onCell(member, cap, !on)}
-                      className={cn("flex w-full items-center gap-3 border-b border-border/40 px-3 py-2 text-left last:border-b-0", lock === null && "hover:bg-[var(--row-hover-bg)]")}>
+                      data-unsaved={unsaved || undefined}
+                      className={cn("flex w-full items-center gap-3 border-b border-border/40 px-3 py-2 text-left last:border-b-0", lock === null && "hover:bg-[var(--row-hover-bg)]", unsaved && "bg-[var(--save-bar-bg)]")}>
                       <Dot state={state} danger={danger} />
                       <span className={cn("min-w-0 flex-1 text-control", danger && "text-destructive")}>{CAPABILITY_LABELS[cap].en}</span>
-                      {(state === "added" || state === "removed") && <span className="font-mono text-[10px] text-warn">exception</span>}
+                      {unsaved ? <span className="font-mono text-[10px] text-[var(--save-bar-fg)]">unsaved</span>
+                        : (state === "added" || state === "removed") && <span className="font-mono text-[10px] text-warn">exception</span>}
                       <SwitchTrack on={on} locked={lock !== null} />
                     </button>
                   )

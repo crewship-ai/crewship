@@ -118,6 +118,10 @@ const sheet = () => waitFor(() => {
   return el
 })
 const confirmWith = async (name: RegExp) => fireEvent.click(await screen.findByRole("button", { name }))
+/** The page's save bar (the first one: the person panel docks a second). */
+const saveBar = () => screen.findAllByRole("region", { name: "Unsaved changes" }).then((r) => r[0])
+const save = async () => fireEvent.click(within(await saveBar()).getByRole("button", { name: "Save" }))
+const bodyOf = (i = 0) => JSON.parse(String((writes()[i][1] as RequestInit).body))
 
 describe("Members — the access matrix", () => {
   it("groups people by role and describes each as a profile plus exceptions", async () => {
@@ -134,36 +138,51 @@ describe("Members — the access matrix", () => {
     expect(summary).toHaveTextContent("1 can reveal secrets")
   })
 
-  it("marks an exception and grants a plain capability at once", async () => {
+  it("drafts a change and sends it only on Save", async () => {
     renderPage()
     await matrix()
     const reveal = await within(rowOf("u-ada")).findByRole("checkbox", { name: "Revoke credentials:reveal from Ada Admin" })
     expect(reveal).toHaveAttribute("data-state", "added")
     fireEvent.click(within(rowOf("u-mel")).getByRole("checkbox", { name: "Grant memory.write to Mel Member" }))
+    expect(within(rowOf("u-mel")).getByRole("checkbox", { name: "Revoke memory.write from Mel Member" })).toHaveAttribute("aria-checked", "true")
+    expect(rowOf("u-mel").querySelector("[data-unsaved]")).not.toBeNull()
+    expect(await saveBar()).toHaveTextContent("1 unsaved change")
+    expect(writes()).toHaveLength(0)
+    await save()
     await waitFor(() => expect(writes()).toHaveLength(1))
     expect(writes()[0][0]).toBe("/api/v1/workspaces/ws1/members/u-mel/capabilities?workspace_id=ws1")
-    expect(JSON.parse(String((writes()[0][1] as RequestInit).body))).toEqual({ grant: ["memory.write"] })
+    expect(bodyOf()).toEqual({ set: ["chat", "issue.create", "memory.write"] })
+  })
+
+  it("drops the draft on Discard", async () => {
+    renderPage()
+    await matrix()
+    fireEvent.click(await within(rowOf("u-mel")).findByRole("checkbox", { name: "Grant memory.write to Mel Member" }))
+    fireEvent.click(within(await saveBar()).getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(within(rowOf("u-mel")).getByRole("checkbox", { name: "Grant memory.write to Mel Member" })).toHaveAttribute("aria-checked", "false"))
+    expect(writes()).toHaveLength(0)
   })
 
   it("asks before granting anything high-stakes", async () => {
     renderPage()
     await matrix()
     fireEvent.click(await within(rowOf("u-mel")).findByRole("checkbox", { name: "Grant credentials:reveal to Mel Member" }))
-    expect(writes()).toHaveLength(0)
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
     await confirmWith(/Grant Reveal secrets/)
+    await save()
     await waitFor(() => expect(writes()).toHaveLength(1))
-    expect(JSON.parse(String((writes()[0][1] as RequestInit).body))).toEqual({ grant: ["credentials:reveal"] })
+    expect(bodyOf()).toEqual({ set: ["chat", "credentials:reveal", "issue.create"] })
   })
 
-  it("sets a profile with one preset call, confirming when it replaces exceptions", async () => {
+  it("sets a profile as a draft of the whole preset", async () => {
     renderPage()
     await matrix()
     fireEvent.pointerDown(await within(rowOf("u-ada")).findByRole("button", { name: /Access profile for Ada Admin/ }), { button: 0, ctrlKey: false })
     fireEvent.click(await screen.findByRole("menuitem", { name: /^Power user/ }))
-    await confirmWith(/Set to Power user/)
+    await save()
     await waitFor(() => expect(writes()).toHaveLength(1))
     expect(writes()[0][0]).toBe("/api/v1/workspaces/ws1/members/u-ada/capabilities?workspace_id=ws1")
-    expect(JSON.parse(String((writes()[0][1] as RequestInit).body))).toEqual({ preset: "power" })
+    expect(bodyOf()).toEqual({ set: ["chat", "issue.create", "memory.write", "routine.create", "routine.run"] })
   })
 
   it("locks the owner and the caller's own row", async () => {
@@ -184,13 +203,11 @@ describe("Members — the access matrix", () => {
     expect(bar).toHaveTextContent("2 selected")
     fireEvent.pointerDown(within(bar).getByRole("button", { name: /Revoke/ }), { button: 0, ctrlKey: false })
     fireEvent.click(await screen.findByRole("menuitem", { name: "Create issues" }))
-    await confirmWith(/^Revoke$/)
-    await waitFor(() => expect(writes()).toHaveLength(2))
-    expect(writes().map(([u]) => u)).toEqual([
-      "/api/v1/workspaces/ws1/members/u-mel/capabilities?workspace_id=ws1",
-      "/api/v1/workspaces/ws1/members/u-vic/capabilities?workspace_id=ws1",
-    ])
-    expect(JSON.parse(String((writes()[0][1] as RequestInit).body))).toEqual({ revoke: ["issue.create"] })
+    // Mel loses issue.create; Vic never had it, so only one person changes.
+    await save()
+    await waitFor(() => expect(writes()).toHaveLength(1))
+    expect(writes()[0][0]).toBe("/api/v1/workspaces/ws1/members/u-mel/capabilities?workspace_id=ws1")
+    expect(bodyOf()).toEqual({ set: ["chat"] })
   })
 
   it("filters by profile, by exceptions and by who can reveal", async () => {
