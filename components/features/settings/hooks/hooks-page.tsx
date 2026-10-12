@@ -2,9 +2,9 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { motion, useReducedMotion } from "motion/react"
+import { useReducedMotion } from "motion/react"
 import { useSearchParams } from "next/navigation"
-import { Bot, Globe, Pencil, Plus, Settings as SettingsIcon, ShieldAlert, Terminal, Trash2, Webhook, X, Zap } from "lucide-react"
+import { ArrowRight, Bot, Globe, List, Map as MapIcon, Pencil, Plus, Search, Settings as SettingsIcon, ShieldAlert, Terminal, Trash2, Webhook, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
@@ -15,16 +15,18 @@ import { isAdminTier } from "@/lib/permissions/tiers"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
-import { SidebarFacet, SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
+import { DrillPage } from "@/components/layout/drill-page"
+import { SettingsCard } from "@/components/features/settings/shared"
 
 import {
   DEFAULT_HOOK_FILTERS,
-  HOOK_GROUPS,
+  LIFECYCLE_STEPS,
+  POLICY_EVENTS,
   RETIRED_EVENTS,
   ago,
   eventInfo,
@@ -32,6 +34,7 @@ import {
   outcomeTone,
   runsByHook,
   shortTarget,
+  slotOf,
   targetOf,
   type HookFilters,
   type HookRow,
@@ -39,65 +42,52 @@ import {
 } from "./hooks-model"
 import { HookEditor } from "./hook-editor"
 
-const KIND: Record<string, { label: string; icon: React.ElementType; tone: string }> = {
-  http: { label: "Webhook", icon: Globe, tone: "bg-chip-info-bg text-chip-info-fg" },
-  shell: { label: "Shell", icon: Terminal, tone: "bg-chip-danger-bg text-chip-danger-fg" },
-  subagent: { label: "Agent", icon: Bot, tone: "bg-chip-violet-bg text-chip-violet-fg" },
+const KIND: Record<string, { label: string; tag: string; icon: React.ElementType; tone: string }> = {
+  http: { label: "Webhook", tag: "HTTP", icon: Globe, tone: "bg-chip-info-bg text-chip-info-fg" },
+  shell: { label: "Command on the server", tag: "SHELL", icon: Terminal, tone: "bg-chip-danger-bg text-chip-danger-fg" },
+  subagent: { label: "Agent", tag: "AGENT", icon: Bot, tone: "bg-chip-violet-bg text-chip-violet-fg" },
 }
 const TONE_DOT = { ok: "bg-success", warn: "bg-warn", bad: "bg-destructive", none: "bg-muted-foreground/40" } as const
 const TONE_TEXT = { ok: "text-success", warn: "text-warn", bad: "text-destructive", none: "text-muted-foreground" } as const
+/** `.eyebrow` without its colour, so a heading can be amber or red. */
+const EYEBROW = "font-mono text-[11px] font-medium uppercase leading-4 tracking-[0.08em]"
 
-/** The hook's kind as a tile, the way Crew links shows a crew's icon. */
-function KindTile({ kind, size = "sm" }: { kind: string; size?: "sm" | "lg" }) {
-  const k = KIND[kind] ?? KIND.http
-  return (
-    <span aria-hidden className={cn("inline-grid shrink-0 place-items-center", k.tone, size === "lg" ? "h-12 w-12 rounded-xl" : "h-7 w-7 rounded-lg")}>
-      <k.icon className={size === "lg" ? "h-6 w-6" : "h-3.5 w-3.5"} />
-    </span>
-  )
-}
+const STATES: { key: HookFilters["state"]; label: string }[] = [
+  { key: "", label: "All" },
+  { key: "enabled", label: "On" },
+  { key: "disabled", label: "Off" },
+  { key: "blocking", label: "Can stop" },
+  { key: "failing", label: "Failed last time" },
+]
 
-function Fact({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <span className={cn("inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-surface-subtle px-2.5 text-xs text-muted-foreground", className)}>{children}</span>
-}
-
-function Block({ title, count, hint, tone, children }: { title: string; count?: React.ReactNode; hint?: string; tone?: "danger"; children: React.ReactNode }) {
-  return (
-    <section className={cn("min-w-0 overflow-hidden rounded-card border bg-card", tone === "danger" ? "border-destructive/30" : "border-border")} aria-label={title}>
-      <header className={cn("flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b px-4 py-2.5", tone === "danger" ? "border-destructive/20 bg-destructive/5" : "border-border/60 bg-surface-subtle")}>
-        <h3 className={cn("text-sm font-semibold", tone === "danger" && "text-destructive")}>{title}</h3>
-        {count != null && <span className="font-mono text-micro text-muted-foreground">{count}</span>}
-        {hint && <span className="ml-auto text-xs text-muted-foreground">{hint}</span>}
-      </header>
-      {children}
-    </section>
-  )
-}
-
-function Stat({ n, one, many, className }: { n: number; one: string; many: string; className?: string }) {
-  return <span className={className}><span className="font-mono tabular-nums text-foreground">{n}</span> {n === 1 ? one : many}</span>
-}
+type View = "map" | "list"
 
 /**
- * Settings › Lifecycle hooks, as a nested page like Crew links and Members.
+ * Settings › Lifecycle hooks: a map of where in an agent run your own code
+ * can run, and what is hooked in there now.
  *
- * It was a read-only list in the Settings column: the registry, the last
- * outcome, an enable switch — and no way to add or change a hook except the
- * CLI, so an empty list read as "nothing here" rather than "nothing set up
- * yet". Now the side panel lists hooks by what they react to, the main area
- * shows the open hook — what fires it, what it runs, where, whether it can
- * block — with its recent runs from the journal (hook.fired), and a hook is
- * created or edited in three plain steps (HookEditor).
+ * Fourteen events read as a flat list hid the two things that matter: they
+ * are BEFORE / AFTER pairs around seven steps of a run, and only the BEFORE
+ * side can stop anything. So the page is the run itself — rows are the steps
+ * in order, columns are "before · can stop it" and "after · gets told", and
+ * policy alerts (approval, budget, guardrail) sit in their own row because
+ * they can come at any point. Every slot shows its hooks as cards; an empty
+ * one offers "+ Add" with the event already chosen. With nothing registered
+ * the map still explains what hooks can do, which a blank list never did.
+ *
+ * A hook opens in a side panel (full screen on a phone): what it runs, its
+ * scope and mode, its recent runs from the journal, on/off, edit, delete.
+ * List view is the same hooks as rows, for searching.
  *
  * Reading is open to every member (GET /hooks is authed + workspace); every
- * write is ADMIN+ (roleManage), and a shell handler OWNER only — the editor
- * and the controls here follow the same lines.
+ * write is ADMIN+ (roleManage), and a shell handler OWNER only.
  */
 export function HooksPage() {
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
   const isMobile = useIsMobile()
   const reduce = useReducedMotion()
   const canWrite = isAdminTier(role)
+  const isOwner = role === "OWNER"
   const search = useSearchParams().toString()
 
   const [hooks, setHooks] = React.useState<HookRow[] | null>(null)
@@ -106,11 +96,25 @@ export function HooksPage() {
   const [runsCapped, setRunsCapped] = React.useState(false)
   const [crews, setCrews] = React.useState<{ id: string; name: string; slug: string }[]>([])
   const [filters, setFiltersState] = React.useState<HookFilters>(DEFAULT_HOOK_FILTERS)
-  const [selectedId, setSelectedId] = React.useState(() => new URLSearchParams(search).get("hook") ?? "")
+  const [view, setView] = React.useState<View>("map")
+  const [openId, setOpenId] = React.useState("")
   const [editorOpen, setEditorOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<HookRow | null>(null)
+  const [presetEvent, setPresetEvent] = React.useState<string | undefined>()
   const [pending, setPending] = React.useState<Set<string>>(new Set())
   const [reload, setReload] = React.useState(0)
+
+  // ?hook= (a link to one hook) is read on arrival, then dropped: the side
+  // panel keeps its own history entry for the back button, and a URL written
+  // under it would come back when that entry unwinds.
+  React.useEffect(() => {
+    const id = new URLSearchParams(search).get("hook")
+    if (!id) return
+    setOpenId(id)
+    const url = new URL(window.location.href)
+    url.searchParams.delete("hook")
+    window.history.replaceState(window.history.state, "", url.toString())
+  }, [search])
 
   React.useEffect(() => {
     if (!workspaceId) return
@@ -127,7 +131,7 @@ export function HooksPage() {
       })
       .catch(() => { if (!cancelled) { setHooks([]); setLoadError(true) } })
     // The run history is a bonus on top of the registry: an unreachable
-    // journal leaves the hooks listed, just without "last fired".
+    // journal leaves the hooks on the map, just without "last fired".
     apiFetch(`/api/v1/journal?workspace_id=${ws}&entry_type=hook.fired,hook.blocked&limit=200`)
       .then(async (res) => { if (!res.ok) throw new Error(String(res.status)); return res.json() })
       .then((body: { entries?: unknown[]; next_cursor?: string }) => {
@@ -148,21 +152,12 @@ export function HooksPage() {
   }, [workspaceId, reload])
 
   const setFilters = (next: Partial<HookFilters>) => setFiltersState((prev) => ({ ...prev, ...next }))
-  const select = (id: string) => {
-    setSelectedId(id)
-    const url = new URL(window.location.href)
-    if (id) url.searchParams.set("hook", id)
-    else url.searchParams.delete("hook")
-    window.history.replaceState(window.history.state, "", url.toString())
-  }
-
-  const all = hooks ?? []
-  const order = (h: HookRow) => HOOK_GROUPS.findIndex((g) => g.id === eventInfo(h.event).group)
-  const sorted = [...all].sort((a, b) => order(a) - order(b) || a.event.localeCompare(b.event) || a.created_at.localeCompare(b.created_at))
-  const shown = sorted.filter((h) => hookMatches(h, filters, runs))
-  const current = all.find((h) => h.id === selectedId) ?? shown[0] ?? null
+  const all = React.useMemo(() => hooks ?? [], [hooks])
+  const shown = all.filter((h) => hookMatches(h, filters, runs))
+  const filtering = filters.q.trim() !== "" || filters.state !== ""
+  const opened = all.find((h) => h.id === openId) ?? null
   const crewName = (id?: string) => (id ? crews.find((c) => c.id === id)?.name ?? "A crew" : "Whole workspace")
-  const countWhere = (f: Partial<HookFilters>) => sorted.filter((h) => hookMatches(h, { ...filters, ...f }, runs)).length
+  const inSlot = (event: string) => shown.filter((h) => h.event === event || (event === "pre_tool_call" && RETIRED_EVENTS.has(h.event)))
 
   const toggle = async (hook: HookRow) => {
     const next = !hook.enabled
@@ -183,98 +178,21 @@ export function HooksPage() {
     const res = await apiFetch(`/api/v1/hooks/${encodeURIComponent(hook.id)}?workspace_id=${encodeURIComponent(workspaceId ?? "")}`, { method: "DELETE" }).catch(() => null)
     if (!res?.ok) { toast.error(res?.status === 403 ? "Your role cannot delete this hook." : "Deleting the hook failed."); return }
     setHooks((prev) => prev?.filter((h) => h.id !== hook.id) ?? prev)
-    if (selectedId === hook.id) select("")
+    if (openId === hook.id) setOpenId("")
     toast.success("Hook deleted")
   }
 
-  const openNew = () => { setEditing(null); setEditorOpen(true) }
-  const openEdit = (h: HookRow) => { setEditing(h); setEditorOpen(true) }
+  const openNew = (event?: string) => { setEditing(null); setPresetEvent(event); setEditorOpen(true) }
+  const openEdit = (h: HookRow) => { setOpenId(""); setEditing(h); setPresetEvent(undefined); setEditorOpen(true) }
 
-  // ── Panel ──────────────────────────────────────────────────────────
-  const popoverCount = Number(Boolean(filters.kind)) + Number(Boolean(filters.state))
-  const toolbar = (
-    <>
-      <SidebarSearch value={filters.q} onValueChange={(q) => setFilters({ q })} placeholder="Search event, URL, command…" aria-label="Search hooks" />
-      <SidebarFilterPopover label="Filter hooks" activeCount={popoverCount} onClear={() => setFilters({ kind: "", state: "" })} panelClassName="min-w-[220px]">
-        <SidebarFacet label="Runs" resetLabel="Any handler" resetActive={!filters.kind} onReset={() => setFilters({ kind: "" })} first>
-          {(["http", "shell", "subagent"] as const).map((k) => (
-            <SidebarFacetOption key={k} active={filters.kind === k} onToggle={() => setFilters({ kind: filters.kind === k ? "" : k })}>
-              {KIND[k].label}<span className="ml-auto font-mono text-micro text-muted-foreground">{countWhere({ kind: k })}</span>
-            </SidebarFacetOption>
-          ))}
-        </SidebarFacet>
-        <SidebarFacet label="State" resetLabel="Any state" resetActive={!filters.state} onReset={() => setFilters({ state: "" })}>
-          {([["enabled", "Enabled"], ["disabled", "Disabled"], ["blocking", "Can block"], ["failing", "Failed last time"]] as const).map(([k, label]) => (
-            <SidebarFacetOption key={k} active={filters.state === k} onToggle={() => setFilters({ state: filters.state === k ? "" : k })}>
-              <span className={cn(k === "failing" && "text-destructive", k === "blocking" && "text-warn")}>{label}</span>
-              <span className="ml-auto font-mono text-micro text-muted-foreground">{countWhere({ state: k })}</span>
-            </SidebarFacetOption>
-          ))}
-        </SidebarFacet>
-      </SidebarFilterPopover>
-    </>
-  )
-
-  const hookItem = (h: HookRow, i: number) => {
-    const last = runs[h.id]?.[0]
-    const tone = outcomeTone(last?.outcome)
-    return (
-      <DrillNavItem key={h.id} index={i} selected={current?.id === h.id} onSelect={() => select(h.id)} muted={!h.enabled}
-        title={`${eventInfo(h.event).label} · ${targetOf(h)}`}
-        icon={<KindTile kind={h.handler_kind} />}
-        label={eventInfo(h.event).label}
-        sub={shortTarget(h)}
-        meta={<span className={cn("inline-block h-2 w-2 rounded-full", h.enabled ? TONE_DOT[tone] : "bg-border")} title={h.enabled ? (last ? `${last.outcome} · ${ago(last.ts)}` : "Never fired") : "Disabled"} />} />
-    )
-  }
-  const groups = HOOK_GROUPS.map((g) => ({ ...g, hooks: shown.filter((h) => eventInfo(h.event).group === g.id) })).filter((g) => g.hooks.length)
-
-  const nav = (
-    <>
-      <DrillNavSection label="React to" count={all.length}>
-        <DrillNavItem index={0} selected={!filters.group} pressed={!filters.group} onSelect={() => setFilters({ group: "" })}
-          icon={<span className="h-1.5 w-1.5 shrink-0 rounded-full bg-border" aria-hidden />} label="Every event" meta={countWhere({ group: "" })} />
-        {HOOK_GROUPS.map((g, i) => {
-          const n = countWhere({ group: g.id })
-          return (
-            <DrillNavItem key={g.id} index={i + 1} selected={filters.group === g.id} pressed={filters.group === g.id} muted={!n}
-              onSelect={() => setFilters({ group: filters.group === g.id ? "" : g.id })}
-              icon={<span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", n ? "bg-primary" : "bg-muted-foreground/40")} aria-hidden />} label={g.label} meta={n} />
-          )
-        })}
-      </DrillNavSection>
-      {groups.map((g, gi) => (
-        <DrillNavSection key={g.id} label={g.label} count={g.hooks.length}>
-          {g.hooks.map((h, i) => hookItem(h, gi * 10 + i))}
-        </DrillNavSection>
-      ))}
-    </>
-  )
-
-  const mobileNav = all.length > 0 && current ? (
-    <select aria-label="Hook" value={current.id} onChange={(e) => select(e.target.value)}
-      className="h-10 w-full rounded-md border border-control-border bg-surface-subtle px-3 text-control">
-      {groups.map((g) => (
-        <optgroup key={g.id} label={g.label}>
-          {g.hooks.map((h) => <option key={h.id} value={h.id}>{eventInfo(h.event).label} · {shortTarget(h)}</option>)}
-        </optgroup>
-      ))}
-    </select>
-  ) : undefined
-
-  const newButton = canWrite && (
-    <Button size="sm" className="h-7 gap-1.5 px-3 text-xs" onClick={openNew}><Plus className="h-3.5 w-3.5" />New hook</Button>
-  )
-
-  // ── Summary and chips ──────────────────────────────────────────────
   const enabled = all.filter((h) => h.enabled).length
   const blocking = all.filter((h) => h.enabled && h.blocking && eventInfo(h.event).canBlock).length
   const failing = all.filter((h) => outcomeTone(runs[h.id]?.[0]?.outcome) === "bad").length
-  const chips: { key: string; label: string; clear: Partial<HookFilters> }[] = []
-  if (filters.q.trim()) chips.push({ key: "q", label: `“${filters.q.trim()}”`, clear: { q: "" } })
-  if (filters.group) chips.push({ key: "group", label: HOOK_GROUPS.find((g) => g.id === filters.group)!.label, clear: { group: "" } })
-  if (filters.kind) chips.push({ key: "kind", label: KIND[filters.kind].label, clear: { kind: "" } })
-  if (filters.state) chips.push({ key: "state", label: { enabled: "Enabled", disabled: "Disabled", blocking: "Can block", failing: "Failed last time" }[filters.state], clear: { state: "" } })
+
+  const newButton = canWrite && (
+    <Button size="sm" className="h-7 gap-1.5 px-3 text-xs" onClick={() => openNew()}><Plus className="h-3.5 w-3.5" />New hook</Button>
+  )
+  const slotProps = { inSlot, runs, canWrite, filtering, onOpen: (h: HookRow) => setOpenId(h.id), onAdd: openNew }
 
   return (
     <>
@@ -282,66 +200,337 @@ export function HooksPage() {
         parent={{ href: "/settings", label: "Settings", icon: SettingsIcon }}
         title="Lifecycle hooks"
         icon={Webhook}
-        description="Code this workspace runs when something happens on the platform"
-        toolbar={toolbar}
-        nav={nav}
-        mobileNav={mobileNav}
-        filterCount={chips.length}
-        actions={isMobile ? undefined : newButton || undefined}
+        description="Your code, run at fixed points of every agent run"
+        actions={newButton || undefined}
       >
         {wsLoading || hooks === null ? (
-          <div className="space-y-3 p-4 md:p-6"><Skeleton className="h-10 rounded-lg" /><Skeleton className="h-[320px] rounded-card" /></div>
+          <div className="space-y-3 p-4 md:p-6"><Skeleton className="h-10 rounded-lg" /><Skeleton className="h-[420px] rounded-card" /></div>
         ) : (
           <div className="space-y-4 p-4 md:p-6">
-            {isMobile && newButton && <div data-slot="hooks-actions">{newButton}</div>}
-            {chips.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {chips.map((c) => (
-                  <motion.span key={c.key} initial={reduce ? false : { scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.18 }}
-                    className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-micro font-medium text-primary-hover">
-                    {c.label}
-                    <button type="button" onClick={() => setFilters(c.clear)} aria-label={`Remove filter ${c.label}`} className="grid h-4 w-4 place-items-center rounded-full hover:bg-primary/20"><X className="h-3 w-3" /></button>
-                  </motion.span>
-                ))}
-                <button type="button" onClick={() => setFiltersState(DEFAULT_HOOK_FILTERS)} className="px-1.5 text-label text-muted-foreground hover:text-foreground">Clear all</button>
-              </div>
-            )}
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground" data-slot="hooks-summary">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground" data-slot="hooks-summary">
               <Stat n={all.length} one="hook" many="hooks" />
-              <Stat n={enabled} one="enabled" many="enabled" />
-              <Stat n={blocking} one="can block an action" many="can block an action" className={cn(blocking > 0 && "text-warn")} />
-              <Stat n={failing} one="failed last time" many="failed last time" className={cn(failing > 0 && "text-destructive")} />
-              {!canWrite && <span className="ml-auto">Read-only — admins add and change hooks.</span>}
+              <Stat n={enabled} one="on" many="on" />
+              <button type="button" onClick={() => setFilters({ state: filters.state === "blocking" ? "" : "blocking" })} className="hover:text-foreground">
+                <Stat n={blocking} one="can stop an action" many="can stop an action" className={cn(blocking > 0 && "text-warn")} />
+              </button>
+              <button type="button" onClick={() => setFilters({ state: filters.state === "failing" ? "" : "failing" })} className="hover:text-foreground">
+                <Stat n={failing} one="failed last time" many="failed last time" className={cn(failing > 0 && "text-destructive")} />
+              </button>
+              {!canWrite && <span>Read-only — admins add and change hooks.</span>}
             </div>
+
             {loadError && (
               <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                 The hooks could not be loaded. <button type="button" className="underline" onClick={() => setReload((n) => n + 1)}>Retry</button>
               </p>
             )}
 
-            {all.length === 0 && !loadError ? (
-              <EmptyState canWrite={canWrite} onNew={openNew} />
-            ) : current ? (
-              <motion.div key={current.id} initial={reduce ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: [0.2, 0.7, 0.2, 1] }}>
-                <HookDetail hook={current} runs={runs[current.id] ?? []} runsCapped={runsCapped} crewName={crewName(current.crew_id)}
-                  canWrite={canWrite} isOwner={role === "OWNER"} pending={pending.has(current.id)}
-                  onToggle={() => void toggle(current)} onEdit={() => openEdit(current)} onDelete={() => remove(current)} />
-              </motion.div>
+            <Toolbar filters={filters} setFilters={setFilters} view={view} setView={setView} hasHooks={all.length > 0} />
+
+            <FlowStrip reduce={Boolean(reduce)} />
+
+            {all.length === 0 && !loadError && (
+              <p className="rounded-lg border border-primary/25 bg-primary/[0.06] px-3 py-2 text-xs text-foreground/85" data-slot="hooks-intro">
+                No hooks yet. Each slot below is a point where your code can run — <span className="text-warn">before</span> a step it can stop it, <span className="text-primary-hover">after</span> it hears what happened.{canWrite ? " “+ Add” starts a hook right there." : " An admin can add hooks."}
+              </p>
+            )}
+
+            {view === "list" && all.length > 0 ? (
+              <HookList hooks={shown} runs={runs} crewName={crewName} onOpen={(h) => setOpenId(h.id)} />
+            ) : isMobile ? (
+              <MapStack {...slotProps} />
             ) : (
-              <p className="rounded-card border border-border bg-card px-4 py-8 text-center text-xs text-muted-foreground">No hook matches these filters.</p>
+              <MapGrid {...slotProps} />
             )}
           </div>
         )}
       </DrillPage>
+
+      <Sheet open={opened !== null} onOpenChange={(o) => { if (!o) setOpenId("") }}>
+        <SheetContent side="right" className="w-full gap-0 overflow-y-auto p-5 sm:max-w-[440px]" data-slot="hook-sheet">
+          <SheetTitle className="sr-only">{opened ? eventInfo(opened.event).label : "Hook"}</SheetTitle>
+          <SheetDescription className="sr-only">What the hook runs, where, and its recent runs</SheetDescription>
+          {opened && (
+            <HookDetail hook={opened} runs={runs[opened.id] ?? []} runsCapped={runsCapped} crewName={crewName(opened.crew_id)}
+              canWrite={canWrite} isOwner={isOwner} pending={pending.has(opened.id)}
+              onToggle={() => void toggle(opened)} onEdit={() => openEdit(opened)} onDelete={() => remove(opened)} />
+          )}
+        </SheetContent>
+      </Sheet>
+
       {workspaceId && (
-        <HookEditor open={editorOpen} onOpenChange={setEditorOpen} workspaceId={workspaceId} role={role} crews={crews} editing={editing}
+        <HookEditor open={editorOpen} onOpenChange={setEditorOpen} workspaceId={workspaceId} role={role} crews={crews}
+          editing={editing} presetEvent={presetEvent}
           onSaved={(saved) => {
             toast.success(editing ? "Hook saved" : "Hook created")
-            if (saved?.id) select(saved.id)
+            if (saved?.id) setOpenId(saved.id)
             setReload((n) => n + 1)
           }} />
       )}
     </>
+  )
+}
+
+function Stat({ n, one, many, className }: { n: number; one: string; many: string; className?: string }) {
+  return <span className={className}><span className="font-mono tabular-nums text-foreground">{n}</span> {n === 1 ? one : many}</span>
+}
+
+function Toolbar({ filters, setFilters, view, setView, hasHooks }: {
+  filters: HookFilters
+  setFilters: (f: Partial<HookFilters>) => void
+  view: View
+  setView: (v: View) => void
+  hasHooks: boolean
+}) {
+  if (!hasHooks) return null
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-slot="hooks-toolbar">
+      <label className="relative min-w-[200px] flex-1 sm:max-w-[280px]">
+        <span className="sr-only">Search hooks</span>
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+        <input value={filters.q} onChange={(e) => setFilters({ q: e.target.value })} placeholder="Search URL, command or event"
+          className="h-8 w-full rounded-md border border-control-border bg-background pl-8 pr-7 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/40" />
+        {filters.q && (
+          <button type="button" aria-label="Clear search" onClick={() => setFilters({ q: "" })} className="absolute right-1.5 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded text-muted-foreground hover:text-foreground">
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </label>
+      <div role="group" aria-label="Show" className="flex flex-wrap gap-1">
+        {STATES.map((s) => (
+          <button key={s.key || "all"} type="button" aria-pressed={filters.state === s.key} onClick={() => setFilters({ state: s.key })}
+            className={cn("h-7 rounded-full border px-2.5 text-xs transition-colors",
+              filters.state === s.key ? "border-primary/40 bg-primary/10 text-primary-hover" : "border-border text-muted-foreground hover:text-foreground")}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+      <div role="group" aria-label="View" className="ml-auto inline-flex gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5">
+        {([["map", "Map", MapIcon], ["list", "List", List]] as const).map(([k, label, Icon]) => (
+          <button key={k} type="button" aria-pressed={view === k} onClick={() => setView(k)}
+            className={cn("inline-flex h-6 items-center gap-1 rounded-md px-2.5 text-xs font-medium transition-colors", view === k ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
+            <Icon className="h-3 w-3" aria-hidden />{label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** One agent run in a line, so the rows below read as its steps. */
+function FlowStrip({ reduce }: { reduce: boolean }) {
+  const go = (id: string) => document.getElementById(`hook-step-${id}`)?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" })
+  return (
+    <div className="rounded-card border border-border bg-card px-4 py-3" data-slot="hooks-flow">
+      <p className="eyebrow mb-2 text-primary-hover">One agent run</p>
+      <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-2">
+        {LIFECYCLE_STEPS.map((s, i) => (
+          <li key={s.id} className="flex items-center gap-1.5">
+            <button type="button" onClick={() => go(s.id)}
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-surface-subtle px-2.5 text-xs hover:border-primary/40 hover:text-foreground">
+              <span className="font-mono text-micro text-primary-hover">{i + 1}</span>{s.label}
+            </button>
+            {i < LIFECYCLE_STEPS.length - 1 && <ArrowRight className="h-3 w-3 text-muted-foreground-soft" aria-hidden />}
+          </li>
+        ))}
+        <li className="ml-auto">
+          <button type="button" onClick={() => go("policy")}
+            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-destructive/25 bg-destructive/5 px-2.5 text-xs text-destructive hover:border-destructive/50">
+            <ShieldAlert className="h-3 w-3" aria-hidden />Policy alerts — any time
+          </button>
+        </li>
+      </ol>
+    </div>
+  )
+}
+
+interface SlotProps {
+  inSlot: (event: string) => HookRow[]
+  runs: Record<string, HookRun[]>
+  canWrite: boolean
+  filtering: boolean
+  onOpen: (h: HookRow) => void
+  onAdd: (event: string) => void
+}
+
+/** The map on a wide screen: steps down, before / after across. */
+function MapGrid(p: SlotProps) {
+  const head = cn(EYEBROW, "px-4 py-2")
+  return (
+    <SettingsCard icon={Webhook} title="Lifecycle map" description="Before a step your hook can stop it · after a step it gets told" bodyClassName="overflow-x-auto">
+      <div className="min-w-[760px]" data-slot="hooks-map" role="table" aria-label="Where hooks can run">
+        <div role="row" className="grid grid-cols-[minmax(0,15rem)_minmax(0,1fr)_minmax(0,1fr)] border-b border-border/60 bg-surface-subtle">
+          <span role="columnheader" className={cn(head, "text-muted-foreground")}>Step</span>
+          <span role="columnheader" className={cn(head, "border-l border-border/40 text-warn")}>Before · can stop it</span>
+          <span role="columnheader" className={cn(head, "border-l border-border/40 text-primary-hover")}>After · gets told</span>
+        </div>
+        {LIFECYCLE_STEPS.map((s, i) => (
+          <div key={s.id} id={`hook-step-${s.id}`} role="row" aria-label={s.label} className="grid scroll-mt-4 grid-cols-[minmax(0,15rem)_minmax(0,1fr)_minmax(0,1fr)] border-b border-border/40">
+            <StepCell n={i + 1} label={s.label} sub={s.sub} />
+            <Slot {...p} event={s.before ?? (s.id === "tools" ? "pre_tool_call" : undefined)} note={s.beforeNote} side="before" className="border-l border-border/40" />
+            <Slot {...p} event={s.after} note={s.afterNote} side="after" className="border-l border-border/40" />
+          </div>
+        ))}
+        <div id="hook-step-policy" className="scroll-mt-4">
+          <p className={cn(EYEBROW, "border-b border-border/40 bg-destructive/[0.04] px-4 py-2 text-destructive")}>Policy alerts · whenever they happen · gets told</p>
+          <div role="row" aria-label="Policy alerts" className="grid grid-cols-3">
+            {POLICY_EVENTS.map((e, i) => (
+              <Slot key={e} {...p} event={e} side="on" title={eventInfo(e).label} className={cn(i > 0 && "border-l border-border/40")} />
+            ))}
+          </div>
+        </div>
+      </div>
+    </SettingsCard>
+  )
+}
+
+/** The map on a phone: each step a card with its two sides stacked. Steps
+ *  with nothing hooked in fold behind "Show all" once there is anything to
+ *  show, so the hooks that exist are what the screen leads with. */
+function MapStack(p: SlotProps) {
+  const [all, setAll] = React.useState(false)
+  const steps = LIFECYCLE_STEPS.map((s, i) => ({ ...s, n: i + 1 }))
+  const has = (s: (typeof steps)[number]) => [s.before, s.after, s.id === "tools" ? "pre_tool_call" : undefined].some((e) => e && p.inSlot(e).length > 0)
+  const anyHook = steps.some(has) || POLICY_EVENTS.some((e) => p.inSlot(e).length > 0)
+  const visible = all || !anyHook ? steps : steps.filter(has)
+  const hidden = steps.length - visible.length
+  return (
+    <div className="space-y-3" data-slot="hooks-map">
+      {visible.map((s) => (
+        <section key={s.id} id={`hook-step-${s.id}`} aria-label={s.label} className="overflow-hidden rounded-card border border-border bg-card">
+          <StepCell n={s.n} label={s.label} sub={s.sub} className="border-b border-border/60" />
+          <Slot {...p} event={s.before ?? (s.id === "tools" ? "pre_tool_call" : undefined)} note={s.beforeNote} side="before" heading />
+          <Slot {...p} event={s.after} note={s.afterNote} side="after" heading className="border-t border-border/40" />
+        </section>
+      ))}
+      {hidden > 0 && (
+        <button type="button" onClick={() => setAll(true)} className="w-full rounded-lg border border-dashed border-border py-2.5 text-xs text-muted-foreground">
+          Show the {hidden} steps with no hooks
+        </button>
+      )}
+      <section id="hook-step-policy" aria-label="Policy alerts" className="overflow-hidden rounded-card border border-destructive/25 bg-card">
+        <p className="flex items-center gap-2 border-b border-border/60 px-4 py-2.5 text-sm font-medium text-destructive"><ShieldAlert className="h-4 w-4" aria-hidden />Policy alerts</p>
+        {POLICY_EVENTS.map((e, i) => <Slot key={e} {...p} event={e} side="on" title={eventInfo(e).label} className={cn(i > 0 && "border-t border-border/40")} />)}
+      </section>
+    </div>
+  )
+}
+
+function StepCell({ n, label, sub, className }: { n: number; label: string; sub: string; className?: string }) {
+  return (
+    <div role="rowheader" className={cn("flex items-start gap-3 px-4 py-3", className)}>
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-primary/25 bg-primary/10 font-mono text-micro text-primary-hover">{n}</span>
+      <span className="min-w-0">
+        <span className="block text-control font-medium">{label}</span>
+        <span className="block text-label text-muted-foreground">{sub}</span>
+      </span>
+    </div>
+  )
+}
+
+function Slot({ event, note, side, title, heading, className, inSlot, runs, canWrite, filtering, onOpen, onAdd }: SlotProps & {
+  event?: string
+  note?: string
+  side: "before" | "after" | "on"
+  title?: string
+  heading?: boolean
+  className?: string
+}) {
+  const list = event ? inSlot(event) : []
+  const retiredSlot = event === "pre_tool_call"
+  const sideLabel = side === "before" ? "Before · can stop it" : side === "after" ? "After · gets told" : null
+  return (
+    <div role="cell" className={cn("flex min-h-[64px] flex-col justify-center gap-1.5 px-4 py-2.5", className)} data-event={event}>
+      {heading && sideLabel && <span className={cn(EYEBROW, side === "before" ? "text-warn" : "text-primary-hover")}>{sideLabel}</span>}
+      {title && <span className="text-control">{title}</span>}
+      {!event || (retiredSlot && list.length === 0) ? (
+        <span className="text-label italic text-muted-foreground-soft">{note ?? "—"}</span>
+      ) : (
+        <>
+          {!retiredSlot && <span className="font-mono text-[10.5px] text-muted-foreground">{event}{eventInfo(event).hasSeverity ? " · by severity" : eventInfo(event).hasTool ? " · by tool" : ""}</span>}
+          {list.map((h) => <HookCard key={h.id} hook={h} last={runs[h.id]?.[0]} onOpen={() => onOpen(h)} />)}
+          {canWrite && !retiredSlot && !(filtering && list.length === 0) && (
+            <button type="button" onClick={() => onAdd(event)} aria-label={`Add a hook: ${eventInfo(event).label}`}
+              className="inline-flex h-7 w-fit items-center gap-1.5 rounded-md border border-dashed border-border px-2.5 text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground">
+              <Plus className="h-3 w-3" aria-hidden />Add
+            </button>
+          )}
+          {!canWrite && list.length === 0 && <span className="text-label text-muted-foreground-soft">Nothing hooked in</span>}
+        </>
+      )}
+    </div>
+  )
+}
+
+function HookCard({ hook, last, onOpen }: { hook: HookRow; last?: HookRun; onOpen: () => void }) {
+  const kind = KIND[hook.handler_kind] ?? KIND.http
+  const info = eventInfo(hook.event)
+  const tone = outcomeTone(last?.outcome)
+  const stops = info.canBlock && hook.blocking
+  const retired = RETIRED_EVENTS.has(hook.event)
+  return (
+    <button type="button" onClick={onOpen} title={`${info.label} · ${targetOf(hook)}`} data-hook={hook.id}
+      className={cn("flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border bg-surface-subtle px-2.5 text-left text-xs transition-colors hover:border-primary/50",
+        retired ? "border-warn/40" : "border-border", !hook.enabled && "opacity-55")}>
+      <span className={cn("rounded px-1.5 py-px font-mono text-[9.5px] font-semibold tracking-wide", kind.tone)}>{kind.tag}</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-[11.5px]">{shortTarget(hook)}</span>
+      {retired && <span className="font-mono text-[9.5px] text-warn">RETIRED</span>}
+      {stops && hook.enabled && <span className="rounded bg-warn/15 px-1.5 py-px font-mono text-[9.5px] font-semibold text-warn">STOPS</span>}
+      {!hook.enabled ? (
+        <span className="text-micro text-muted-foreground">off</span>
+      ) : (
+        <span className={cn("inline-flex shrink-0 items-center gap-1 text-micro", TONE_TEXT[tone])}>
+          <span className={cn("h-1.5 w-1.5 rounded-full", TONE_DOT[tone])} aria-hidden />{last ? ago(last.ts) : "never"}
+        </span>
+      )}
+    </button>
+  )
+}
+
+/** The same hooks as rows, in run order, for searching. */
+function HookList({ hooks, runs, crewName, onOpen }: {
+  hooks: HookRow[]
+  runs: Record<string, HookRun[]>
+  crewName: (id?: string) => string
+  onOpen: (h: HookRow) => void
+}) {
+  const order = (h: HookRow) => {
+    const s = slotOf(h.event)
+    const i = s.step === "policy" ? 99 : LIFECYCLE_STEPS.findIndex((x) => x.id === s.step)
+    return i * 2 + (s.side === "after" ? 1 : 0)
+  }
+  const sorted = [...hooks].sort((a, b) => order(a) - order(b) || a.created_at.localeCompare(b.created_at))
+  return (
+    <SettingsCard icon={List} title="Hooks" description={`${hooks.length} in run order`}>
+      {sorted.length === 0 ? (
+        <p className="px-4 py-8 text-center text-xs text-muted-foreground">No hook matches.</p>
+      ) : (
+        <ul data-slot="hooks-list">
+          {sorted.map((h) => {
+            const last = runs[h.id]?.[0]
+            const tone = outcomeTone(last?.outcome)
+            const s = slotOf(h.event)
+            return (
+              <li key={h.id}>
+                <button type="button" onClick={() => onOpen(h)} title={`${eventInfo(h.event).label} · ${targetOf(h)}`}
+                  className={cn("grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-0.5 border-b border-border/40 px-4 py-2.5 text-left hover:bg-[var(--row-hover-bg)] sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_8rem_7rem]", !h.enabled && "opacity-60")}>
+                  <span className="min-w-0">
+                    <span className="block truncate text-control">{eventInfo(h.event).label}</span>
+                    <span className={cn("block font-mono text-[10.5px]", s.side === "before" ? "text-warn" : "text-muted-foreground")}>{s.side === "on" ? "policy alert" : s.side}</span>
+                  </span>
+                  <span className="hidden min-w-0 truncate font-mono text-[11.5px] sm:block">{targetOf(h)}</span>
+                  <span className="hidden truncate text-xs text-muted-foreground sm:block">{crewName(h.crew_id)}</span>
+                  <span className={cn("inline-flex items-center gap-1.5 justify-self-end text-xs", h.enabled ? TONE_TEXT[tone] : "text-muted-foreground")}>
+                    <span className={cn("h-1.5 w-1.5 rounded-full", h.enabled ? TONE_DOT[tone] : "bg-border")} aria-hidden />
+                    {!h.enabled ? "off" : last ? `${last.outcome} · ${ago(last.ts)}` : "never fired"}
+                  </span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </SettingsCard>
   )
 }
 
@@ -355,34 +544,28 @@ function HookDetail({ hook, runs, runsCapped, crewName, canWrite, isOwner, pendi
   const blockingLive = info.canBlock && hook.blocking
   // An ADMIN can toggle any hook but edit or delete a shell one only as OWNER.
   const canChange = canWrite && (hook.handler_kind !== "shell" || isOwner)
-  const last = runs[0]
   const matcher = hook.matcher ?? {}
+  const s = slotOf(hook.event)
+  const step = LIFECYCLE_STEPS.findIndex((x) => x.id === s.step)
+  const where = s.step === "policy" ? "Policy alert" : `Step ${step + 1} · ${LIFECYCLE_STEPS[step].label} · ${s.side}`
   return (
-    <div className="space-y-4" data-slot="hook-detail">
-      <section className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 rounded-card border border-border bg-card p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]" aria-label={`${info.label} hook`}>
-        <KindTile kind={hook.handler_kind} size="lg" />
-        <div className="min-w-0">
-          <h2 className="text-lg font-semibold tracking-[-0.02em]">{info.label}</h2>
-          <p className="font-mono text-micro text-muted-foreground">{hook.event}</p>
-          <p className="mt-1 max-w-[72ch] text-control text-muted-foreground">{info.when}</p>
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
-            <Fact><kind.icon className="h-3.5 w-3.5" aria-hidden />{kind.label}</Fact>
-            <Fact>{crewName}</Fact>
-            <Fact className={cn(blockingLive && "border-warn/30 bg-warn/5 text-warn")}>
-              {blockingLive ? <><ShieldAlert className="h-3.5 w-3.5" aria-hidden />Can block</> : <><Zap className="h-3.5 w-3.5" aria-hidden />Observes</>}
-            </Fact>
-            <Fact className={cn(last && TONE_TEXT[outcomeTone(last.outcome)])}>
-              <span className={cn("h-2 w-2 rounded-full", TONE_DOT[outcomeTone(last?.outcome)])} aria-hidden />
-              {last ? `${last.outcome} · ${ago(last.ts)}` : "Never fired"}
-            </Fact>
+    <div className="space-y-5" data-slot="hook-detail">
+      <section aria-label={`${info.label} hook`} className="space-y-3">
+        <div className="flex items-start gap-3 pr-6">
+          <span aria-hidden className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", kind.tone)}><kind.icon className="h-5 w-5" /></span>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-semibold tracking-[-0.01em]">{info.label}</h2>
+            <p className="font-mono text-micro text-muted-foreground">{hook.event} · {where}</p>
           </div>
         </div>
-        <div className="col-span-2 flex items-center gap-3 sm:col-span-1 sm:flex-col sm:items-end">
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-            {hook.enabled ? "Enabled" : "Disabled"}
+        <p className="text-xs text-muted-foreground">{info.when}</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-xs">
             <Switch checked={hook.enabled} onCheckedChange={onToggle} disabled={!canWrite || pending} aria-label={`${hook.enabled ? "Disable" : "Enable"} the ${hook.event} hook`} />
+            {hook.enabled ? "On" : "Off"}
           </label>
-          {canChange && <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" onClick={onEdit}><Pencil className="h-3 w-3" />Edit</Button>}
+          {blockingLive && <span className="rounded bg-warn/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-warn">STOPS THE ACTION</span>}
+          {canChange && <Button variant="outline" size="sm" className="ml-auto h-7 gap-1.5 px-2.5 text-xs" onClick={onEdit}><Pencil className="h-3 w-3" />Edit</Button>}
         </div>
       </section>
 
@@ -392,103 +575,69 @@ function HookDetail({ hook, runs, runsCapped, crewName, canWrite, isOwner, pendi
         </p>
       )}
 
-      <div className="grid items-start gap-4 xl:grid-cols-2">
-        <Block title="What it runs" hint={hook.handler_kind === "shell" ? "on the Crewship host" : undefined}>
-          <dl className="grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-2 px-4 py-3 text-xs">
-            <dt className="text-muted-foreground">{hook.handler_kind === "http" ? "URL" : hook.handler_kind === "shell" ? "Command" : "Agent"}</dt>
-            <dd className="break-all font-mono">{targetOf(hook)}</dd>
-            {hook.handler_kind === "http" && <><dt className="text-muted-foreground">Signed</dt><dd>{hook.handler_config?.secret ? "Yes — X-Crewship-Signature" : "No"}</dd></>}
-            <dt className="text-muted-foreground">Scope</dt><dd>{crewName}</dd>
-            {(matcher.severities?.length ?? 0) > 0 && <><dt className="text-muted-foreground">Severities</dt><dd>{matcher.severities!.join(", ")}</dd></>}
-            {(matcher.tools?.length ?? 0) > 0 && <><dt className="text-muted-foreground">Tools</dt><dd className="font-mono">{matcher.tools!.join(", ")}</dd></>}
-            <dt className="text-muted-foreground">Mode</dt>
-            <dd>{blockingLive ? "Waits for the hook; a refusal cancels the action" : info.canBlock ? "Observes — could block, blocking is off" : "Observes — runs after, cannot cancel"}</dd>
-          </dl>
-          {hook.handler_kind === "shell" && (
-            <p className="flex items-start gap-2 border-t border-destructive/20 bg-destructive/5 px-4 py-2 text-label text-destructive">
-              <ShieldAlert className="mt-px h-3.5 w-3.5 shrink-0" />Runs as the Crewship service on the host, outside any container. Only the owner can change it.
-            </p>
-          )}
-        </Block>
+      <section aria-label="What it runs" className="space-y-2">
+        <h3 className="eyebrow text-primary-hover">What it runs</h3>
+        <dl className="grid grid-cols-[6rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+          <dt className="text-muted-foreground">Does</dt><dd>{kind.label}{hook.handler_kind === "http" ? " — POSTs the event as JSON" : ""}</dd>
+          <dt className="text-muted-foreground">{hook.handler_kind === "http" ? "URL" : hook.handler_kind === "shell" ? "Command" : "Agent"}</dt>
+          <dd className="break-all font-mono">{targetOf(hook)}</dd>
+          {hook.handler_kind === "http" && <><dt className="text-muted-foreground">Signed</dt><dd>{hook.handler_config?.secret ? "Yes — X-Crewship-Signature" : "No"}</dd></>}
+          <dt className="text-muted-foreground">Scope</dt><dd>{crewName}</dd>
+          {(matcher.severities?.length ?? 0) > 0 && <><dt className="text-muted-foreground">Severities</dt><dd>{matcher.severities!.join(", ")}</dd></>}
+          {(matcher.tools?.length ?? 0) > 0 && <><dt className="text-muted-foreground">Tools</dt><dd className="font-mono">{matcher.tools!.join(", ")}</dd></>}
+          <dt className="text-muted-foreground">Mode</dt>
+          <dd>{blockingLive ? "Waits for the hook; a refusal stops the action" : info.canBlock ? "Gets told — could stop it, blocking is off" : "Gets told — cannot stop anything"}</dd>
+        </dl>
+        {hook.handler_kind === "shell" && (
+          <p className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-label text-destructive">
+            <ShieldAlert className="mt-px h-3.5 w-3.5 shrink-0" />Runs as the Crewship service on the host, outside any container. Only the owner can change it.
+          </p>
+        )}
+      </section>
 
-        <Block title="Recent runs" count={runs.length} hint="from the journal">
-          {runs.length === 0 ? (
-            <p className="px-4 py-3 text-xs text-muted-foreground">{runsCapped ? "No run in the recent journal window." : "Has not fired yet — it will, the next time this event happens."}</p>
-          ) : (
-            <ul>
-              {runs.slice(0, 6).map((r, i) => {
-                const tone = outcomeTone(r.outcome)
-                return (
-                  <li key={`${r.ts}-${i}`} className="flex items-center gap-2.5 border-b border-border/40 px-4 py-2 text-xs last:border-b-0">
-                    <span className={cn("h-2 w-2 shrink-0 rounded-full", TONE_DOT[tone])} aria-hidden />
-                    <span className={cn("font-medium", TONE_TEXT[tone])}>{r.outcome}</span>
-                    {r.latencyMs != null && <span className="font-mono text-muted-foreground">{r.latencyMs} ms</span>}
-                    {r.message && <span className="min-w-0 truncate text-muted-foreground" title={r.message}>{r.message}</span>}
-                    <span className="ml-auto shrink-0 text-muted-foreground">{ago(r.ts)}</span>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-          <Link href="/journal?q=hook.fired" className="block border-t border-border/40 px-4 py-2 text-xs text-primary-hover hover:bg-[var(--row-hover-bg)]">Open in Journal →</Link>
-        </Block>
-      </div>
+      <section aria-label="Recent runs" className="space-y-2">
+        <h3 className="eyebrow flex items-center text-primary-hover">Recent runs<span className="ml-2 font-mono normal-case tracking-normal text-muted-foreground">{runs.length}</span></h3>
+        {runs.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{runsCapped ? "No run in the recent journal window." : "Has not fired yet — it will, the next time this event happens."}</p>
+        ) : (
+          <ul className="overflow-hidden rounded-lg border border-border">
+            {runs.slice(0, 8).map((r, i) => {
+              const tone = outcomeTone(r.outcome)
+              return (
+                <li key={`${r.ts}-${i}`} className="flex items-center gap-2.5 border-b border-border/40 px-3 py-2 text-xs last:border-b-0">
+                  <span className={cn("h-2 w-2 shrink-0 rounded-full", TONE_DOT[tone])} aria-hidden />
+                  <span className={cn("font-medium", TONE_TEXT[tone])}>{r.outcome}</span>
+                  {r.latencyMs != null && <span className="font-mono text-muted-foreground">{r.latencyMs} ms</span>}
+                  {r.message && <span className="min-w-0 truncate text-muted-foreground" title={r.message}>{r.message}</span>}
+                  <span className="ml-auto shrink-0 text-muted-foreground">{ago(r.ts)}</span>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+        <Link href="/journal?q=hook.fired" className="inline-block text-xs text-primary-hover hover:underline">Open in Journal →</Link>
+      </section>
 
       {canChange && (
-        <Block title="Delete hook" tone="danger">
-          <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-            <p className="min-w-0 flex-1 basis-56 text-xs text-muted-foreground">The hook stops running at once. Its past runs stay in the journal.</p>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 gap-1.5 px-3 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3.5 w-3.5" />Delete hook</Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle className="text-sm">Delete hook</AlertDialogTitle>
-                  <AlertDialogDescription className="text-xs">Delete the <span className="font-mono">{hook.event}</span> hook? This cannot be undone.</AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
-                  <AlertDialogAction className="h-7 bg-destructive text-xs text-destructive-foreground hover:bg-destructive/90" onClick={() => void onDelete()}>Delete</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
-        </Block>
+        <section aria-label="Delete hook" className="flex flex-wrap items-center gap-3 border-t border-border/60 pt-4">
+          <p className="min-w-0 flex-1 basis-48 text-label text-muted-foreground">The hook stops running at once. Its past runs stay in the journal.</p>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 px-3 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3.5 w-3.5" />Delete hook</Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="text-sm">Delete hook</AlertDialogTitle>
+                <AlertDialogDescription className="text-xs">Delete the <span className="font-mono">{hook.event}</span> hook? This cannot be undone.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
+                <AlertDialogAction className="h-7 bg-destructive text-xs text-destructive-foreground hover:bg-destructive/90" onClick={() => void onDelete()}>Delete</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </section>
       )}
     </div>
-  )
-}
-
-/** Nothing registered yet: what hooks are for, with the three most common
- *  first hooks, rather than an empty frame. */
-function EmptyState({ canWrite, onNew }: { canWrite: boolean; onNew: () => void }) {
-  const ideas = [
-    { icon: Globe, title: "Tell Slack when an agent waits for approval", event: "on_approval_requested" },
-    { icon: ShieldAlert, title: "Page someone when a guardrail trips", event: "on_guardrail_triggered" },
-    { icon: Zap, title: "Log every finished agent run to your system", event: "post_agent_stop" },
-  ]
-  return (
-    <section className="rounded-card border border-border bg-card p-6 text-center" aria-label="No hooks yet">
-      <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-xl bg-primary/10 text-primary-hover"><Webhook className="h-6 w-6" /></span>
-      <h2 className="text-base font-semibold">No hooks yet</h2>
-      <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
-        A hook runs your code when something happens — an agent starts, a model is called, a budget is exceeded. Hooks that run before an action can also stop it.
-      </p>
-      <ul className="mx-auto mt-4 grid max-w-2xl gap-2 text-left sm:grid-cols-3">
-        {ideas.map((i) => (
-          <li key={i.event} className="rounded-lg border border-border bg-surface-subtle p-3">
-            <i.icon className="mb-1.5 h-4 w-4 text-muted-foreground" aria-hidden />
-            <div className="text-xs font-medium">{i.title}</div>
-            <div className="mt-0.5 font-mono text-micro text-muted-foreground">{i.event}</div>
-          </li>
-        ))}
-      </ul>
-      {canWrite ? (
-        <Button size="sm" className="mt-5 gap-1.5" onClick={onNew}><Plus className="h-3.5 w-3.5" />New hook</Button>
-      ) : (
-        <p className="mt-4 text-label text-muted-foreground">An admin can add hooks here.</p>
-      )}
-    </section>
   )
 }

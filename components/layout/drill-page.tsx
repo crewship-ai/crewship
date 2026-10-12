@@ -59,8 +59,10 @@ export function DrillPage({
   /** The panel's toolbar — SidebarSearch, a SidebarFilterPopover. The
    *  collapse button is added here. */
   toolbar?: React.ReactNode
-  /** The side panel's sections — DrillNavSection / DrillNavItem. */
-  nav: React.ReactNode
+  /** The side panel's sections — DrillNavSection / DrillNavItem. Leave it
+   *  out for a page whose content is its own map (Lifecycle hooks): no panel,
+   *  no phone "Filters" button. */
+  nav?: React.ReactNode
   /** What stays on the page on a phone, above the content. */
   mobileNav?: React.ReactNode
   /** Active filters, for the phone's "Filters" button. */
@@ -76,7 +78,7 @@ export function DrillPage({
   const [sheetOpen, setSheetOpen] = React.useState(false)
   const BackIcon = parent.icon
 
-  const filtersButton = isMobile && (
+  const filtersButton = isMobile && nav != null && (
     <button
       type="button"
       onClick={() => setSheetOpen(true)}
@@ -128,7 +130,7 @@ export function DrillPage({
         }
       />
       <div className="flex min-h-0 flex-1">
-        {!isMobile && (
+        {!isMobile && nav != null && (
           <motion.aside
             initial={reduce ? false : { opacity: 0, x: 16 }}
             animate={{ opacity: 1, x: 0 }}
@@ -165,7 +167,7 @@ export function DrillPage({
           <PageSaveBar />
         </div>
       </div>
-      {isMobile && (
+      {isMobile && nav != null && (
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
           <SheetContent side="bottom" className="max-h-[85dvh] gap-0 rounded-t-2xl bg-card p-0" data-slot="drill-sheet">
             <div className="mx-auto mt-2 h-1 w-9 rounded-full bg-border" aria-hidden />

@@ -46,6 +46,7 @@ export function HookEditor({
   role,
   crews,
   editing,
+  presetEvent,
   onSaved,
 }: {
   open: boolean
@@ -54,15 +55,25 @@ export function HookEditor({
   role: string | null | undefined
   crews: { id: string; name: string }[]
   editing?: HookRow | null
+  /** A new hook started from a slot on the lifecycle map: its event is
+   *  already chosen. */
+  presetEvent?: string
   onSaved: (hook: HookRow | null) => void
 }) {
-  const [d, setD] = React.useState<HookDraft>(() => draftFrom(editing ?? undefined))
+  const fresh = React.useCallback(() => {
+    const draft = draftFrom(editing ?? undefined)
+    return !editing && presetEvent ? { ...draft, event: presetEvent } : draft
+  }, [editing, presetEvent])
+  const [d, setD] = React.useState<HookDraft>(fresh)
   const [saving, setSaving] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [touched, setTouched] = React.useState(false)
+  // Started from a slot on the map: the event is chosen, so step 1 starts
+  // folded to that choice instead of fourteen options to scroll past.
+  const [pickEvent, setPickEvent] = React.useState(true)
   React.useEffect(() => {
-    if (open) { setD(draftFrom(editing ?? undefined)); setError(null); setTouched(false) }
-  }, [open, editing])
+    if (open) { setD(fresh()); setError(null); setTouched(false); setPickEvent(!(presetEvent && !editing)) }
+  }, [open, fresh, presetEvent, editing])
 
   const isOwner = role === "OWNER"
   const set = (patch: Partial<HookDraft>) => setD((prev) => ({ ...prev, ...patch }))
@@ -110,6 +121,18 @@ export function HookEditor({
           {/* 1 · When */}
           <section aria-label="When">
             <h3 className={stepHead}><span className={stepNo}>1</span>When</h3>
+            {!pickEvent && info ? (
+              <div className="mt-3 flex items-center gap-3 rounded-lg border border-primary bg-primary/5 px-3 py-2 ring-1 ring-primary" data-slot="hook-editor-event">
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5 text-control">
+                    {info.label}
+                    {info.canBlock && <span className="rounded bg-warn/10 px-1 text-[9.5px] font-semibold uppercase tracking-wide text-warn">can block</span>}
+                  </span>
+                  <span className="font-mono text-micro text-muted-foreground">{info.id}</span>
+                </span>
+                <Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setPickEvent(true)}>Change</Button>
+              </div>
+            ) : (
             <div className="mt-3 space-y-3">
               {HOOK_GROUPS.map((g) => (
                 <div key={g.id}>
@@ -133,6 +156,7 @@ export function HookEditor({
                 </div>
               ))}
             </div>
+            )}
           </section>
 
           {/* 2 · Do what */}

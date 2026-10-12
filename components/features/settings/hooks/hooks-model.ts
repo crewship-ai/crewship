@@ -54,6 +54,48 @@ export const HOOK_EVENTS: HookEventInfo[] = [
   { id: "on_guardrail_triggered", group: "policy", label: "A guardrail trips", when: "On every guardrail finding (e.g. a jailbreak attempt), with its severity.", canBlock: false, hasSeverity: true },
 ]
 
+/**
+ * The lifecycle map: one agent run, step by step, each step with the event
+ * that fires BEFORE it (and can stop it) and the one that fires AFTER (and
+ * only hears about it). A side with no event says why instead, so the map
+ * never shows an empty slot that just looks unbuilt.
+ */
+export interface LifecycleStep {
+  id: string
+  label: string
+  sub: string
+  before?: string
+  after?: string
+  /** Why there is no BEFORE / AFTER event. */
+  beforeNote?: string
+  afterNote?: string
+}
+
+export const LIFECYCLE_STEPS: LifecycleStep[] = [
+  { id: "delegation", label: "Task handed off", sub: "A crew delegates to another", before: "pre_task_delegation", after: "post_task_delegation" },
+  { id: "start", label: "Agent starts", sub: "A run begins", before: "pre_agent_start", afterNote: "The run's end is step 7." },
+  { id: "llm", label: "Model call", sub: "A server-side model call", before: "pre_llm_call", after: "post_llm_call" },
+  { id: "tools", label: "Tool call", sub: "The agent's CLI ran a tool", beforeNote: "Not possible — the tool already ran inside the agent.", after: "post_tool_call" },
+  { id: "memory", label: "Memory write", sub: "Learned rules are saved", before: "pre_memory_write", after: "post_memory_write" },
+  { id: "peers", label: "Agents talk", sub: "One agent asks another", before: "pre_peer_conversation", after: "post_peer_conversation" },
+  { id: "stop", label: "Agent stops", sub: "However the run ended", beforeNote: "A run cannot be kept from ending.", after: "post_agent_stop" },
+]
+
+/** Alerts that can come at any point of a run; a hook only hears about them. */
+export const POLICY_EVENTS = ["on_approval_requested", "on_budget_exceeded", "on_guardrail_triggered"] as const
+
+/** Where a hook sits on the map: its step and side, or the policy row. A
+ *  retired pre_tool_call hook sits where it would have fired. */
+export function slotOf(event: string): { step: string; side: "before" | "after" } | { step: "policy"; side: "on" } {
+  if ((POLICY_EVENTS as readonly string[]).includes(event)) return { step: "policy", side: "on" }
+  if (event === "pre_tool_call") return { step: "tools", side: "before" }
+  for (const s of LIFECYCLE_STEPS) {
+    if (s.before === event) return { step: s.id, side: "before" }
+    if (s.after === event) return { step: s.id, side: "after" }
+  }
+  return { step: "policy", side: "on" }
+}
+
 const EVENT_BY_ID = new Map(HOOK_EVENTS.map((e) => [e.id, e]))
 
 /** Rows predating a decision to stop offering an event: they list and toggle,

@@ -276,12 +276,22 @@ crewship hooks disable hk_abc
 ## Web UI
 
 **Settings → Lifecycle hooks** (`/settings/hooks`; old `/settings?tab=hooks` links
-redirect there) is the registry, laid out like Crew links. The side panel groups
-hooks by what they react to (task delegation, agent lifecycle, tool calls, model
-calls, memory writes, agent conversations, policy alerts) and filters by handler
-and state (enabled, disabled, can block, failed last time). The open hook shows
-its event, handler, scope and mode, the full target, its recent runs and an
-enable switch. On a phone a list at the top picks the hook.
+redirect there) is a map of one agent run. Rows are its steps in order — task
+handed off, agent starts, model call, tool call, memory write, agents talk,
+agent stops — and the columns are **Before · can stop it** and **After · gets
+told**. Policy alerts (approval requested, budget exceeded, guardrail tripped)
+have their own row, since they can come at any point. Each slot shows the hooks
+on that event as cards (type, target, `STOPS` where it blocks, last run); an
+empty slot offers **+ Add** with the event already chosen. A side with no event
+says why (nothing can stop a tool call — the tool already ran inside the agent).
+With no hooks registered the map still shows every point a hook could run.
+
+Clicking a hook opens it in a side panel (full screen on a phone): what it runs,
+signing, scope, mode, recent runs from the journal, the on/off switch, Edit and
+Delete. Search and the All / On / Off / Can stop / Failed last time filters
+narrow the map; **List** shows the same hooks as rows in run order. On a phone
+the steps stack as cards, steps with hooks first. `/settings/hooks?hook=<id>`
+opens one hook directly.
 
 - **Every workspace member sees the list.** `GET /api/v1/hooks` is open to any
   authenticated member, and a member asking "why was my agent's memory write
