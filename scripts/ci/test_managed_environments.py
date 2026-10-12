@@ -73,3 +73,17 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         events = [event for event in self.passing()
                   if (event['Package'], event['Test']) in legacy]
         self.assertTrue(managed.failures(events, 0))
+
+    def test_selected_go_toolchain_survives_sudo_and_nested_fixture_builds(self):
+        binary = '/trusted/toolchain/bin/go'
+        legacy, elevated = managed.commands(binary)
+        self.assertEqual(legacy[0], binary)
+        self.assertEqual(elevated[elevated.index('test') - 1], binary)
+        path = next(arg for arg in elevated if arg.startswith('PATH='))
+        self.assertTrue(path.startswith('PATH=/trusted/toolchain/bin:'))
+        self.assertIn('GOTOOLCHAIN=local', elevated)
+        for command in managed.host_commands('/tmp/artifacts', '/tmp/private-home', 998, binary):
+            self.assertEqual(command[0], binary)
+            # The restricted workload environment does not gain a toolchain
+            # cache path; test2json runs outside the UID transition.
+            self.assertIn('PATH=' + managed.os.environ['PATH'], command)

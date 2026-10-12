@@ -94,31 +94,44 @@ def failures(events, returncode):
     return errors
 
 
-def commands():
+def active_go_binary():
+    # sudo changes HOME/toolchain caches. Resolve the already selected toolchain
+    # as the runner before crossing that boundary rather than reselecting Go.
+    root = subprocess.check_output(['go', 'env', 'GOROOT'], text=True).strip()
+    binary = os.path.join(root, 'bin', 'go')
+    if not os.path.isabs(root) or not os.path.isfile(binary) or not os.access(binary, os.X_OK):
+        raise RuntimeError('active Go toolchain is not an executable absolute path')
+    return binary
+
+
+def commands(go_binary='go'):
     # Preserve the original non-root profile for all existing Docker fixtures.
     # Only the new launcher fixture needs a host UID distinct from agent 1001.
     legacy = {package: names for package, names in TESTS.items()
               if package != 'internal/orchestrator'}
     result = []
+    privileged_path = os.environ['PATH']
+    if os.path.isabs(go_binary):
+        privileged_path = os.path.dirname(go_binary) + os.pathsep + privileged_path
     for packages, prefix in (
             (legacy, []),
             ({'internal/orchestrator': TESTS['internal/orchestrator']},
-             ['sudo', 'env', 'PATH=' + os.environ['PATH'], 'GOTOOLCHAIN=local'])):
+             ['sudo', 'env', 'PATH=' + privileged_path, 'GOTOOLCHAIN=local'])):
         pattern = '^(' + '|'.join(re.escape(name) for names in packages.values()
                                  for name in sorted(names)) + ')$'
-        command = prefix + ['go', 'test', '-tags', 'integration', '-p', '1', '-count=1',
+        command = prefix + [go_binary, 'test', '-tags', 'integration', '-p', '1', '-count=1',
                             '-timeout=3m', '-json', '-run', pattern]
         command.extend('./' + package for package in packages)
         result.append(command)
     return result
 
 
-def host_commands(artifacts, home, docker_gid):
+def host_commands(artifacts, home, docker_gid, go_binary='go'):
     result = []
     for package, names in HOST_TESTS.items():
         pattern = '^(' + '|'.join(re.escape(name) for name in sorted(names)) + ')$'
         result.append([
-            'go', 'tool', 'test2json', '-t', '-p', PREFIX + package,
+            go_binary, 'tool', 'test2json', '-t', '-p', PREFIX + package,
             'sudo', '-n', 'setpriv', '--reuid=' + str(HOST_UID),
             '--regid=' + str(docker_gid), '--clear-groups',
             'env', '-i', 'PATH=' + os.environ['PATH'], 'TMPDIR=/tmp', 'HOME=' + home,
@@ -132,7 +145,7 @@ def host_commands(artifacts, home, docker_gid):
 
 
 @contextmanager
-def prepared_host_commands():
+def prepared_host_commands(go_binary='go'):
     endpoint = os.environ.get('DOCKER_HOST', 'unix:///var/run/docker.sock')
     if not endpoint.startswith('unix://'):
         raise RuntimeError('protected capture qualification requires a local Unix Docker socket')
@@ -149,10 +162,10 @@ def prepared_host_commands():
         for package, name in (('cmd/crewship', 'crewship'),
                               ('cmd/crewship-sidecar', 'crewship-sidecar')):
             build_env = dict(os.environ, CGO_ENABLED='0')
-            subprocess.run(['go', 'build', '-o', os.path.join(artifacts, name), './' + package], check=True,
+            subprocess.run([go_binary, 'build', '-o', os.path.join(artifacts, name), './' + package], check=True,
                            env=build_env)
         for package in HOST_TESTS:
-            subprocess.run(['go', 'test', '-tags', 'integration', '-c', '-o',
+            subprocess.run([go_binary, 'test', '-tags', 'integration', '-c', '-o',
                             os.path.join(artifacts, package.replace('/', '-') + '.test'),
                             './' + package], check=True)
         for name in os.listdir(artifacts):
@@ -165,7 +178,7 @@ def prepared_host_commands():
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != HOST_UID or info.st_mode & 0o077:
             raise RuntimeError('qualification HOME is not private to the test UID')
         try:
-            commands = host_commands(artifacts, home, socket_info.st_gid)
+            commands = host_commands(artifacts, home, socket_info.st_gid, go_binary)
             for command in commands:
                 # Preserve an explicitly selected local rootless socket without
                 # inheriting the runner's unrelated credentials or configuration.
@@ -202,8 +215,9 @@ def main():
                         malformed = True
                 code = process.wait() or code
     try:
-        run_suite(commands())
-        with prepared_host_commands() as suite:
+        go_binary = active_go_binary()
+        run_suite(commands(go_binary))
+        with prepared_host_commands(go_binary) as suite:
             run_suite(suite)
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         print('ERROR: protected host qualification setup failed: ' + str(error), file=sys.stderr)

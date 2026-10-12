@@ -201,6 +201,9 @@ func TestHostCaptureSubprocess(t *testing.T) {
 			}
 			if os.Args[i+1] == "helper" {
 				_, err = CaptureHost(context.Background(), input, &hostLocalExecutor{})
+				// Terminal source fsync precedes final capacity accounting. Let
+				// the fixture await all helper writes before deleting its spool.
+				_ = os.WriteFile(filepath.Join(filepath.Dir(input.Directory), "helper-complete"), nil, 0600)
 				if err != nil {
 					os.Exit(125)
 				}
@@ -224,9 +227,8 @@ func TestHostCaptureSurvivesActualControllerKill(t *testing.T) {
 	input.Deadline = time.Now().Add(15 * time.Second)
 	root := filepath.Dir(input.Directory)
 	release, starts := filepath.Join(root, "release"), filepath.Join(root, "starts")
-	input.Command.Args = []string{"/bin/sh", "-c", `printf x >> "$2"; printf 'before\n'; while [ ! -f "$1" ]; do /bin/sleep 0.02; done; printf 'after\n'; exit 7`, "fixture", release, starts}
 	// Large initial output flushes the scrubber overlap while the workload waits.
-	input.Command.Args[2] = strings.Replace(input.Command.Args[2], "printf 'before\\n'", "printf 'before\\n'; printf '%0200d\\n' 0", 1)
+	input.Command.Args = []string{"/bin/sh", "-c", `printf x >> "$2"; printf 'before\n'; printf '%0200d\n' 0; while [ ! -f "$1" ]; do /bin/sleep 0.02; done; printf 'after\n'; exit 7`, "fixture", release, starts}
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -242,6 +244,16 @@ func TestHostCaptureSurvivesActualControllerKill(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = controller.Process.Kill(); _ = controller.Wait(); _ = os.WriteFile(release, nil, 0600) }()
+	t.Cleanup(func() {
+		until := time.Now().Add(20 * time.Second)
+		for time.Now().Before(until) {
+			if _, err := os.Stat(filepath.Join(root, "helper-complete")); err == nil {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Error("detached fixture helper did not finish before spool cleanup")
+	})
 	waitUntil := func(check func() bool) {
 		t.Helper()
 		until := time.Now().Add(10 * time.Second)

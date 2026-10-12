@@ -276,7 +276,19 @@ func runHostCaptureDockerQualification(t *testing.T, scenario string, stopTarget
 	}
 	cfg := stageRuntimeArtifacts(Config{OutputBasePath: filepath.Join(root, "data"), SidecarBinaryPath: sidecar, EntrypointPath: entrypoint}, quietLogger())
 	if scenario == "old" {
-		if err = os.WriteFile(cfg.SidecarBinaryPath, []byte("#!/bin/sh\nexit 2\n"), 0755); err != nil {
+		// Keep a genuine static Linux ELF (the production mount validator
+		// rejects scripts). Remove only recognition of the new probe flag;
+		// its normal Go flag parser now rejects the unknown flag with exit2.
+		binary, err := os.ReadFile(cfg.SidecarBinaryPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		currentFlag, oldFlag := []byte("--host-capture-probe-v1"), []byte("--host-capture-probe-v0")
+		if !bytes.Contains(binary, currentFlag) {
+			t.Fatal("probe flag absent from built sidecar")
+		}
+		binary = bytes.ReplaceAll(binary, currentFlag, oldFlag)
+		if err = os.WriteFile(cfg.SidecarBinaryPath, binary, 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
