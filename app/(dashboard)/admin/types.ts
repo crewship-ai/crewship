@@ -16,6 +16,9 @@ export interface AdminOrg {
   created_at: string
   /** The workspace's uploaded logo (#3005), or null. */
   logo_url?: string | null
+  /** team (shared) or personal (created at sign-up for one person); absent
+   *  from an older server. */
+  kind?: "team" | "personal"
   _count_members: number
   _count_agents: number
   _count_crews: number
