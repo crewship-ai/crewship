@@ -194,7 +194,7 @@ describe("classification reference", () => {
   // No control that saves nowhere: the card points to where a class is set.
   it("points to where a credential's class is set", async () => {
     renderSection("OWNER")
-    expect(await screen.findByText(/class on its detail sheet in credentials/i)).toBeInTheDocument()
+    expect(await screen.findByText(/open a credential to change its class/i)).toBeInTheDocument()
   })
 })
 
@@ -212,5 +212,67 @@ describe("who may reveal, when the grants cannot be read", () => {
     renderSection("MANAGER")
     expect(await screen.findByText(/your role cannot see who holds/i)).toBeInTheDocument()
     expect(screen.queryByText(/nobody holds/i)).toBeNull()
+  })
+})
+
+// The card used to be read-only: the list said "can reveal" and that was all.
+// Grants and revocations now happen here, through the same PATCH the Members
+// page uses, and the class and placement summaries link to the credentials.
+describe("acting on who may reveal", () => {
+  function routeWith(extra: (url: string, init?: RequestInit) => Response | undefined) {
+    const base = h.apiFetch.getMockImplementation()!
+    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => extra(String(url), init) ?? base(url, init))
+  }
+
+  it("revokes reveal from a holder with the capabilities PATCH", async () => {
+    route({ caps: { u2: ["credentials:reveal"] } })
+    routeWith((url, init) => (init?.method === "PATCH" ? ok({ capabilities: [] }) : undefined))
+    renderSection("ADMIN")
+    fireEvent.click(await screen.findByRole("button", { name: "Revoke reveal from tom@firma.cz" }))
+    await waitFor(() => expect(h.apiFetch).toHaveBeenCalledWith(
+      "/api/v1/workspaces/ws1/members/u2/capabilities?workspace_id=ws1",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ revoke: ["credentials:reveal"] }) }),
+    ))
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Revoke reveal from tom@firma.cz" })).toBeNull())
+  })
+
+  it("grants reveal to a chosen person", async () => {
+    route({ caps: { u2: ["credentials:reveal"] } })
+    routeWith((url, init) => (init?.method === "PATCH" ? ok({ capabilities: ["credentials:reveal"] }) : undefined))
+    renderSection("OWNER")
+    fireEvent.change(await screen.findByLabelText("Person to grant reveal to"), { target: { value: "u3" } })
+    fireEvent.click(screen.getByRole("button", { name: "Grant" }))
+    await waitFor(() => expect(h.apiFetch).toHaveBeenCalledWith(
+      "/api/v1/workspaces/ws1/members/u3/capabilities?workspace_id=ws1",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ grant: ["credentials:reveal"] }) }),
+    ))
+    expect(await screen.findByRole("button", { name: "Revoke reveal from eva@firma.cz" })).toBeInTheDocument()
+  })
+
+  it("offers no grant or revoke controls to a MANAGER", async () => {
+    route({ caps: { u2: ["credentials:reveal"] } })
+    renderSection("MANAGER")
+    await screen.findByText(/who may reveal/i)
+    expect(screen.queryByRole("button", { name: /^Revoke reveal/ })).toBeNull()
+    expect(screen.queryByLabelText("Person to grant reveal to")).toBeNull()
+  })
+
+  it("counts credentials per class and per crew, linking to each", async () => {
+    route()
+    routeWith((url) => {
+      if (url.startsWith("/api/v1/credentials?")) return ok([
+        { id: "c1", name: "GITHUB_TOKEN", scope: "WORKSPACE", sensitivity: "STANDARD" },
+        { id: "c2", name: "PROD_DB", scope: "CREW", crew_ids: ["cr1"], sensitivity: "SEALED" },
+        { id: "c3", name: "STRIPE_KEY", scope: "CREW", crew_ids: ["cr1"], sensitivity: "RESTRICTED" },
+      ])
+      if (url.startsWith("/api/v1/crews?")) return ok([{ id: "cr1", name: "Finance", slug: "finance" }])
+      return undefined
+    })
+    renderSection("OWNER")
+    const prod = await screen.findAllByRole("link", { name: "PROD_DB" })
+    expect(prod[0]).toHaveAttribute("href", "/credentials?id=c2")
+    expect(screen.getByText("Finance")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /members of this crew/i })).toHaveAttribute("href", "/crews?crew=finance")
+    expect(screen.getAllByRole("link", { name: "GITHUB_TOKEN" }).length).toBeGreaterThan(0)
   })
 })
