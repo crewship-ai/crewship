@@ -99,3 +99,58 @@ export function facetCounts(events: ActivityEvent[], filters: AuditFilters, boun
   }
   return out
 }
+
+// ── The chart's buckets ──────────────────────────────────────────────
+
+export interface ChartBucket {
+  /** Start of the bucket, ISO. */
+  from: string
+  /** End, exclusive, ISO. */
+  to: string
+  /** The UTC day for a day bucket, "" for an hour bucket. */
+  day: string
+  label: string
+  total: number
+  completed: number
+  failed: number
+}
+
+const HOUR_MS = 3_600_000
+
+/**
+ * The chart for the range the table lists: hours up to two days (1h is
+ * twelve five-minute bars), days beyond. A range reaching further back than
+ * the activity window starts at the window — `clipped` says so, the chart
+ * never invents empty bars for days it did not read.
+ */
+export function chartBuckets(events: ActivityEvent[], bounds: { from?: string; to?: string }, windowFrom: string, now: Date): { buckets: ChartBucket[]; unit: "minute" | "hour" | "day"; clipped: boolean } {
+  const endMs = bounds.to ? Math.min(Date.parse(bounds.to), now.getTime()) : now.getTime()
+  const floor = Date.parse(`${windowFrom}T00:00:00Z`)
+  const wanted = bounds.from ? Date.parse(bounds.from) : floor
+  const clipped = wanted < floor
+  const startMs = Math.max(wanted, floor)
+  const span = endMs - startMs
+  const unit = span <= 2 * HOUR_MS ? "minute" : span <= 2 * DAY_MS + 1 ? "hour" : "day"
+  const buckets: ChartBucket[] = []
+  if (unit === "day") {
+    for (let d = utcDay(new Date(startMs)); Date.parse(`${d}T00:00:00Z`) < endMs; d = addDays(d, 1)) {
+      const from = `${d}T00:00:00.000Z`
+      buckets.push({ from, to: new Date(Date.parse(from) + DAY_MS).toISOString(), day: d, label: String(Number(d.slice(8))), total: 0, completed: 0, failed: 0 })
+    }
+  } else {
+    const step = unit === "minute" ? 5 * 60_000 : HOUR_MS
+    for (let t = Math.floor(startMs / step) * step; t < endMs; t += step) {
+      const at = new Date(t)
+      buckets.push({ from: at.toISOString(), to: new Date(t + step).toISOString(), day: "", label: `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`, total: 0, completed: 0, failed: 0 })
+    }
+  }
+  for (const e of events) {
+    const t = Date.parse(e.at)
+    const b = buckets.find((x) => t >= Date.parse(x.from) && t < Date.parse(x.to))
+    if (!b) continue
+    b.total++
+    if (e.action.endsWith(".failed")) b.failed++
+    else if (e.action.endsWith(".completed")) b.completed++
+  }
+  return { buckets, unit, clipped }
+}

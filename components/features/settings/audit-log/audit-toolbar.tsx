@@ -23,6 +23,8 @@ import { controlHeight } from "@/components/features/settings/shared"
 export interface AuditPerson {
   id: string
   label: string
+  /** Their profile photo, when they have one. */
+  avatarUrl?: string | null
 }
 
 const SEARCH_DEBOUNCE_MS = 300

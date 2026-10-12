@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { ChevronRight } from "lucide-react"
 import { Activity, Building2, Cpu, KeyRound, Link2, Settings as SettingsIcon, Shield, SlidersHorizontal, X, type LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -23,7 +24,7 @@ import {
   type AuditSource,
 } from "./audit-filters"
 import { addDays, facetCounts, tallyByDay, utcDay } from "./audit-activity"
-import { AuditCalendar, AuditHistogram, AuditRangePresets } from "./audit-time"
+import { AuditHistogram, AuditTimePicker } from "./audit-time"
 import { useAuditActivity } from "./use-audit-activity"
 import { useAuditFilters } from "./use-audit-filters"
 import { useWorkspacePeople } from "./use-workspace-people"
@@ -34,12 +35,13 @@ const RESULT_DOT: Record<string, string> = { completed: "bg-success", failed: "b
 const RECENT_DAYS = 35
 
 /**
- * Settings › Audit log as a nested page. The side panel holds every filter —
- * the trail, the time (presets and a month calendar showing how busy each day
- * was), category, person and run result, each value with the number of events
- * picking it would show — and the table takes the full width under the
- * active-filter chips and a two-week histogram. Filters live in the URL
- * (useAuditFilters).
+ * Settings › Audit log as a nested page. The time range sits on the sub-bar,
+ * the Crew Journal's picker with a month calendar behind "Custom…". The side
+ * panel holds the other filters — the trail, category, person (busiest first,
+ * with their photo) and run result, each value with the number of events
+ * picking it would show. The table takes the full width under the
+ * active-filter chips and a chart of exactly the range it lists. Filters live
+ * in the URL (useAuditFilters).
  */
 export function AuditLogPage() {
   const { workspaceId, role, loading } = useWorkspace()
@@ -70,10 +72,22 @@ export function AuditLogPage() {
   const pickSource = (source: AuditSource) =>
     // A new trail keeps the time range; the other filters belong to the old one.
     setFilters({ ...DEFAULT_AUDIT_FILTERS, source, range: filters.range, from: filters.from, to: filters.to })
-  const pickDay = (day: string) => setFilters({ range: "custom", from: day, to: day })
+  const pickRange = (from: string, to: string) => setFilters({ range: "custom", from, to })
+  const [showIdle, setShowIdle] = useState(false)
+  // People busiest first, with their share of the events as a small bar.
+  // While the counts can be trusted (`countable`), people with nothing in the
+  // range fold into one line; otherwise everyone shows, by name.
+  const ranked = useMemo(() => {
+    if (!countable) return { active: people, idle: [] as typeof people, top: 1 }
+    const withN = people.map((p) => ({ p, n: counts.person[p.id] ?? 0 }))
+    const active = withN.filter((x) => x.n > 0 || x.p.id === filters.userId).sort((a, b) => b.n - a.n).map((x) => x.p)
+    const idle = withN.filter((x) => x.n === 0 && x.p.id !== filters.userId).map((x) => x.p)
+    return { active, idle, top: Math.max(1, ...withN.map((x) => x.n)) }
+  }, [people, counts, countable, filters.userId])
   const clearFilters = () => setFilters({ q: "", userId: "", category: "all", result: "" })
 
   const personName = Object.fromEntries(people.map((p) => [p.id, p.label]))
+  const avatarById = useMemo(() => Object.fromEntries(people.map((p) => [p.id, p.avatarUrl])), [people])
   const chips = activeFilterChips(filters, personName)
   const filterCount = chips.filter((c) => c.key !== "range").length
   const viewChanges = Number(!groupRepeats) + Number(!highlightAccess)
@@ -107,10 +121,6 @@ export function AuditLogPage() {
         })}
       </DrillNavSection>
 
-      <DrillNavSection label="Time" count={rangeLabel(filters)}>
-        <AuditRangePresets filters={filters} onChange={setFilters} />
-        <AuditCalendar filters={filters} bounds={bounds} tally={tally} onChange={setFilters} now={now} />
-      </DrillNavSection>
 
       {supports.category && (
         <DrillNavSection label="Category">
@@ -126,16 +136,24 @@ export function AuditLogPage() {
       )}
 
       {supports.person && people.length > 0 && (
-        <DrillNavSection label="People" count={people.length}>
-          {people.map((p, i) => {
+        <DrillNavSection label="People" count={countable ? `${ranked.active.length} active` : people.length}>
+          {[...ranked.active, ...(showIdle ? ranked.idle : [])].map((p, i) => {
             const count = n(counts.person[p.id])
             return (
               <DrillNavItem key={p.id} index={i} pressed={filters.userId === p.id} selected={filters.userId === p.id}
                 onSelect={() => setFilters({ userId: filters.userId === p.id ? "" : p.id })}
                 label={p.label} meta={count} muted={count === 0}
-                icon={<UserAvatar name={p.label} email="" className="h-5 w-5 shrink-0" textClassName="text-micro" />} />
+                sub={countable && count ? <span className="mt-1 block h-[3px] rounded-full bg-primary/55" style={{ width: `${Math.max(6, (count / ranked.top) * 100)}%` }} aria-hidden /> : undefined}
+                icon={<UserAvatar name={p.label} email="" src={p.avatarUrl ?? null} className="h-5 w-5 shrink-0" textClassName="text-micro" />} />
             )
           })}
+          {ranked.idle.length > 0 && (
+            <button type="button" onClick={() => setShowIdle(!showIdle)} aria-expanded={showIdle}
+              className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-label text-muted-foreground hover:bg-[var(--row-hover-bg)] hover:text-foreground">
+              <ChevronRight className={cn("h-3 w-3 transition-transform", showIdle && "rotate-90")} aria-hidden />
+              {showIdle ? "Hide" : `${ranked.idle.length} more`} with no events in this range
+            </button>
+          )}
           <p className="flex items-center gap-1.5 px-2 pt-1 text-micro text-muted-foreground-soft">
             <Cpu className="h-3 w-3" aria-hidden />System events have no person to pick.
           </p>
@@ -176,6 +194,7 @@ export function AuditLogPage() {
       icon={Activity}
       description="Every state-changing action, immutably recorded"
       toolbar={allowed ? toolbar : undefined}
+      actions={allowed ? <AuditTimePicker filters={filters} onChange={setFilters} bounds={bounds} tally={tally} now={now} /> : undefined}
       nav={allowed ? nav : null}
       mobileNav={mobileNav}
       filterCount={filterCount}
@@ -202,7 +221,7 @@ export function AuditLogPage() {
                 <button type="button" onClick={clearFilters} className="px-1.5 text-label text-muted-foreground hover:text-foreground">Clear filters</button>
               )}
             </div>}
-            <AuditHistogram tally={tally} bounds={bounds} onPickDay={pickDay} now={now} truncated={activity.truncated} />
+            <AuditHistogram events={activity.events} bounds={bounds} windowFrom={recentFrom} onPickRange={pickRange} now={now} truncated={activity.truncated} />
             <CrewAuditSection
               workspaceId={workspaceId}
               filters={filters}
@@ -211,6 +230,7 @@ export function AuditLogPage() {
               showToolbar={false}
               groupRepeats={groupRepeats}
               highlightAccess={highlightAccess}
+              avatars={avatarById}
               title="Events"
               description={`${AUDIT_SOURCES.find((s) => s.value === filters.source)?.label ?? ""} trail · ${rangeLabel(filters)}`}
             />

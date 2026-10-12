@@ -6,36 +6,63 @@ import { ChevronLeft, ChevronRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
-import { AUDIT_RANGES, formatDay, type AuditFilters } from "./audit-filters"
-import { dayInBounds, lastDays, monthGrid, utcDay, type DayTally } from "./audit-activity"
+import { Button } from "@/components/ui/button"
+import { TimeRangePicker, type TimeRange } from "@/components/features/logs/time-range-picker"
 
-const SHORT: Record<string, string> = { "1h": "1h", "24h": "24h", "7d": "7 days", "30d": "30 days", "90d": "90 days", all: "All" }
+import { AUDIT_RANGES, DEFAULT_AUDIT_FILTERS, formatDay, rangeLabel, type AuditFilters } from "./audit-filters"
+import { chartBuckets, dayInBounds, monthGrid, utcDay, type ActivityEvent, type DayTally } from "./audit-activity"
+
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+const PICKER_PRESETS: TimeRange[] = [...AUDIT_RANGES.map((r) => r.value), "custom"]
 
-/** The preset ranges as a compact grid, for the side panel's Time section. */
-export function AuditRangePresets({ filters, onChange }: { filters: AuditFilters; onChange: (next: Partial<AuditFilters>) => void }) {
+/** "5 Oct – 11 Oct", the year only when it is not this one. */
+function shortDay(day: string): string {
+  const full = formatDay(day)
+  return day.slice(0, 4) === String(new Date().getUTCFullYear()) ? full.replace(/ \d{4}$/, "") : full
+}
+
+/**
+ * The range picker on the sub-bar: the Crew Journal's control (clock, "7d ▾",
+ * the presets as a menu) with the Audit log's own set — up to 90 days — and
+ * "Custom…" opening the month calendar, where each day shows how much
+ * happened.
+ */
+export function AuditTimePicker({ filters, onChange, bounds, tally, now }: {
+  filters: AuditFilters
+  onChange: (next: Partial<AuditFilters>) => void
+  bounds: { from?: string; to?: string }
+  tally: Map<string, DayTally>
+  now: Date
+}) {
+  const custom = filters.range === "custom"
+  const customLabel = custom
+    ? filters.from && filters.to
+      ? filters.from === filters.to ? shortDay(filters.from) : `${shortDay(filters.from)} – ${shortDay(filters.to)}`
+      : filters.from ? `Since ${shortDay(filters.from)}` : "Custom"
+    : undefined
   return (
-    <div className="grid grid-cols-3 gap-1 px-2 pb-2 pt-1" role="group" aria-label="Time range">
-      {AUDIT_RANGES.map((r) => {
-        const on = filters.range === r.value
-        return (
-          <button
-            key={r.value}
-            type="button"
-            data-drill-close
-            aria-pressed={on}
-            title={r.label}
-            onClick={() => onChange({ range: r.value, from: "", to: "" })}
-            className={cn(
-              "h-7 rounded-md border text-label transition-colors",
-              on ? "border-primary/40 bg-primary/10 font-medium text-primary-hover" : "border-border bg-card text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {SHORT[r.value]}
-          </button>
-        )
-      })}
-    </div>
+    <TimeRangePicker
+      value={filters.range as TimeRange}
+      presets={PICKER_PRESETS}
+      customLabel={customLabel}
+      triggerClassName="h-8 gap-1.5 px-2.5 font-mono text-xs [&>svg]:opacity-60 coarse:h-[2.75rem]"
+      onChange={(v) => { if (v !== "custom") onChange({ range: v as AuditFilters["range"], from: "", to: "" }) }}
+      renderCustom={(close) => (
+        <div className="space-y-2" data-slot="audit-custom-range">
+          <div className="font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground">Custom range</div>
+          <AuditCalendar filters={filters} bounds={bounds} tally={tally} onChange={onChange} now={now} />
+          <div className="flex items-center justify-between gap-2 border-t border-border pt-2">
+            <span className="truncate font-mono text-micro text-foreground/85">{custom ? rangeLabel(filters) : "Pick a day"}</span>
+            <span className="flex gap-1.5">
+              {custom && (
+                <Button variant="ghost" size="sm" className="h-7 px-2.5 text-xs" onClick={() => { onChange({ range: DEFAULT_AUDIT_FILTERS.range, from: "", to: "" }); close() }}>Clear</Button>
+              )}
+              <Button size="sm" className="h-7 px-3 text-xs" onClick={close}>Done</Button>
+            </span>
+          </div>
+        </div>
+      )}
+    />
   )
 }
 
@@ -138,62 +165,87 @@ export function AuditCalendar({
 }
 
 /**
- * Events per day for the last two weeks, runs split into finished and failed.
- * A bar is a shortcut to that day; bars outside the current range dim.
+ * Events across the range the table lists — five-minute, hourly or daily bars
+ * (chartBuckets), runs split into finished and failed. Like the Journal's
+ * chart: click a day to pick it, drag across days to pick a range. Hour bars
+ * only show; the range a filter can hold is whole days.
  */
 export function AuditHistogram({
-  tally,
+  events,
   bounds,
-  onPickDay,
+  windowFrom,
+  onPickRange,
   now,
   truncated,
-  days: n = 14,
 }: {
-  tally: Map<string, DayTally>
+  events: ActivityEvent[]
   bounds: { from?: string; to?: string }
-  onPickDay: (day: string) => void
+  /** The first day the activity sample covers. */
+  windowFrom: string
+  onPickRange: (from: string, to: string) => void
   now: Date
   truncated?: boolean
-  days?: number
 }) {
   const reduce = useReducedMotion()
-  const days = lastDays(n, now)
-  const max = Math.max(1, ...days.map((d) => tally.get(d)?.total ?? 0))
+  const { buckets, unit, clipped } = useMemo(() => chartBuckets(events, bounds, windowFrom, now), [events, bounds, windowFrom, now])
+  const [drag, setDrag] = useState<{ a: number; b: number } | null>(null)
+  const max = Math.max(1, ...buckets.map((b) => b.total))
+  const total = buckets.reduce((n, b) => n + b.total, 0)
+  const picks = unit === "day"
+  const lo = drag ? Math.min(drag.a, drag.b) : -1
+  const hi = drag ? Math.max(drag.a, drag.b) : -1
+  const finish = () => {
+    if (drag && picks) onPickRange(buckets[lo].day, buckets[hi].day)
+    setDrag(null)
+  }
+  const cols = { gridTemplateColumns: `repeat(${Math.max(1, buckets.length)}, minmax(0, 1fr))` }
+  const every = Math.max(1, Math.ceil(buckets.length / 14))
+  const title = unit === "day" ? "Events per day" : unit === "hour" ? "Events per hour" : "Events per 5 minutes"
   return (
-    <div className="rounded-card border border-border bg-card px-4 pb-3 pt-3" data-slot="audit-histogram">
+    <div className="rounded-card border border-border bg-card px-4 pb-3 pt-3" data-slot="audit-histogram" data-unit={unit}>
       <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
-        <span className="eyebrow text-muted-foreground">Events per day · last {n} days{truncated ? " · latest 500" : ""}</span>
+        <span className="flex flex-wrap items-baseline gap-x-2">
+          <span className="font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground">{title}</span>
+          <span className="font-mono text-micro text-muted-foreground-soft">
+            {total} in window{truncated ? " · latest 500" : ""}{clipped ? " · older days not charted" : ""}{picks ? " · click a bar · drag for range" : ""}
+          </span>
+        </span>
         <span className="flex gap-3 text-label text-muted-foreground">
           <Legend className="bg-success" label="completed" />
           <Legend className="bg-destructive" label="failed" />
           <Legend className="bg-primary" label="changes" />
         </span>
       </div>
-      <div className="grid h-20 items-end gap-1 sm:gap-1.5" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }}>
-        {days.map((day, i) => {
-          const t = tally.get(day) ?? { total: 0, completed: 0, failed: 0 }
-          const other = t.total - t.completed - t.failed
-          const h = t.total ? Math.max(6, (t.total / max) * 80) : 2
+      <div className="grid h-20 select-none items-end gap-[3px] sm:gap-1" style={cols} onPointerLeave={() => setDrag(null)} onPointerUp={finish}>
+        {buckets.map((b, i) => {
+          const other = b.total - b.completed - b.failed
+          const h = b.total ? Math.max(6, (b.total / max) * 80) : 2
+          const label = unit === "day" ? formatDay(b.day) : b.label
           return (
             <motion.button
-              key={day}
+              key={b.from}
               type="button"
-              onClick={() => onPickDay(day)}
-              aria-label={`${formatDay(day)}: ${t.total} events, ${t.failed} failed`}
-              title={`${formatDay(day)} · ${t.total} events · ${t.failed} failed`}
+              disabled={!picks}
+              data-bucket={b.day || b.from}
+              onPointerDown={(e) => { if (picks) { e.preventDefault(); setDrag({ a: i, b: i }) } }}
+              onPointerEnter={() => setDrag((d) => (d ? { ...d, b: i } : d))}
+              onKeyDown={(e) => { if (picks && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onPickRange(b.day, b.day) } }}
+              aria-label={`${label}: ${b.total} events, ${b.failed} failed`}
+              title={`${label} · ${b.total} events · ${b.failed} failed`}
               initial={reduce ? false : { scaleY: 0 }}
               animate={{ scaleY: 1 }}
-              transition={{ duration: 0.45, delay: i * 0.02, ease: [0.2, 0.7, 0.2, 1] }}
+              transition={{ duration: 0.45, delay: Math.min(i, 30) * 0.015, ease: [0.2, 0.7, 0.2, 1] }}
               style={{ height: h, transformOrigin: "bottom" }}
               className={cn(
-                "flex flex-col-reverse overflow-hidden rounded-[4px] bg-border/60 transition-opacity hover:opacity-100",
-                !dayInBounds(day, bounds) && "opacity-30",
+                "flex flex-col-reverse overflow-hidden rounded-[3px] bg-border/60 disabled:cursor-default",
+                picks && "cursor-pointer hover:opacity-80",
+                drag && i >= lo && i <= hi && "ring-2 ring-primary/60 ring-offset-1 ring-offset-card",
               )}
             >
-              {t.total > 0 && (
+              {b.total > 0 && (
                 <>
-                  <span className="bg-success/70" style={{ flex: t.completed }} />
-                  <span className="bg-destructive/75" style={{ flex: t.failed }} />
+                  <span className="bg-success/70" style={{ flex: b.completed }} />
+                  <span className="bg-destructive/75" style={{ flex: b.failed }} />
                   <span className="bg-primary/65" style={{ flex: other }} />
                 </>
               )}
@@ -201,9 +253,9 @@ export function AuditHistogram({
           )
         })}
       </div>
-      <div className="mt-1 grid gap-1 font-mono text-micro text-muted-foreground-soft sm:gap-1.5" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }} aria-hidden>
-        {days.map((d, i) => (
-          <span key={d} className={cn("text-center", i % 2 === 1 && "invisible sm:visible")}>{Number(d.slice(8))}</span>
+      <div className="mt-1 grid gap-[3px] font-mono text-micro text-muted-foreground-soft sm:gap-1" style={cols} aria-hidden>
+        {buckets.map((b, i) => (
+          <span key={b.from} className="truncate text-center">{i % every === 0 || i === buckets.length - 1 ? b.label : ""}</span>
         ))}
       </div>
     </div>
