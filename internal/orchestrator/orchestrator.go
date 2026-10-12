@@ -210,6 +210,10 @@ type AgentRunRequest struct {
 	// this run wait on it.
 	OnExecStarted func(execID string)
 
+	// OnExecTerminal reports an inspected natural process exit, never an inferred
+	// status from an error or an observation timeout.
+	OnExecTerminal func(exitCode int)
+
 	// MemoryBinding is the seam the memory Ledger Store.Write plugs into
 	// (dev3 spec). Declared here so the one request-builder carries it and
 	// the two specs don't diverge on the field-set; the Ledger schema +

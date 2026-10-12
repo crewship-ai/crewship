@@ -12,15 +12,27 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/work"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 func (e *MissionEngine) checkApprovalGate(ctx context.Context, taskID, missionID string) string {
+	status, err := e.checkApprovalGateQuery(ctx, e.db, taskID, missionID)
+	if err != nil {
+		e.logger.Error("check approval gate", "error", err)
+		return "COMPLETED"
+	}
+	return status
+}
+
+func (e *MissionEngine) checkApprovalGateQuery(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, taskID, missionID string) (string, error) {
 	var approvalRequired int
 	var confRaw sql.NullFloat64
 	var configJSON sql.NullString
 
-	err := e.db.QueryRowContext(ctx,
+	err := db.QueryRowContext(ctx,
 		`SELECT COALESCE(mt.approval_required, 0), mt.confidence, c.escalation_config
 		 FROM mission_tasks mt
 		 JOIN missions m ON m.id = mt.mission_id
@@ -28,7 +40,7 @@ func (e *MissionEngine) checkApprovalGate(ctx context.Context, taskID, missionID
 		 WHERE mt.id = ?`, taskID).Scan(&approvalRequired, &confRaw, &configJSON)
 	if err != nil {
 		e.logger.Error("check approval gate", "error", err, "task_id", taskID)
-		return "COMPLETED"
+		return "", err
 	}
 
 	var cfg EscalationConfig
@@ -48,21 +60,21 @@ func (e *MissionEngine) checkApprovalGate(ctx context.Context, taskID, missionID
 	}
 
 	if hasConfig && hasConf && cfg.AutoApproveThreshold > 0 && conf >= cfg.AutoApproveThreshold {
-		return "COMPLETED"
+		return "COMPLETED", nil
 	}
 
 	if approvalRequired == 1 {
 		e.logger.Info("task held for approval (explicit flag)", "task_id", taskID, "mission_id", missionID)
-		return "AWAITING_APPROVAL"
+		return "AWAITING_APPROVAL", nil
 	}
 
 	if !hasConfig || !hasConf {
-		return "COMPLETED"
+		return "COMPLETED", nil
 	}
 
 	if cfg.RequireApprovalBelow > 0 && conf < cfg.RequireApprovalBelow {
 		e.logger.Info("task held for approval (confidence below threshold)", "task_id", taskID, "confidence", conf)
-		return "AWAITING_APPROVAL"
+		return "AWAITING_APPROVAL", nil
 	}
 
 	if cfg.NotifyThreshold > 0 && conf < cfg.NotifyThreshold {
@@ -78,7 +90,7 @@ func (e *MissionEngine) checkApprovalGate(ctx context.Context, taskID, missionID
 		}
 	}
 
-	return "COMPLETED"
+	return "COMPLETED", nil
 }
 
 // ApproveTask approves or rejects a task in AWAITING_APPROVAL status.
@@ -263,15 +275,59 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 		}
 		return s
 	}
-	_, err = e.db.ExecContext(ctx, `
+	tx, err := e.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Reserve the mission's durable planning identity before inserting either
+	// domain or work rows. This write serializes concurrent engine instances;
+	// process-local planningDispatched is only a scheduling optimization.
+	reserved, err := tx.ExecContext(ctx, `UPDATE missions SET planning_assignment_id = ?
+		WHERE id = ? AND workspace_id = ? AND status = 'IN_PROGRESS' AND planning_assignment_id IS NULL`,
+		assignmentID, ms.ID, ms.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("reserve planning assignment: %w", err)
+	}
+	created, err := reserved.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read planning reservation: %w", err)
+	}
+	if created == 0 {
+		var missionStatus string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM missions WHERE id=? AND workspace_id=?`, ms.ID, ms.WorkspaceID).Scan(&missionStatus); err != nil {
+			return fmt.Errorf("read planning mission authority: %w", err)
+		}
+		if missionStatus != "IN_PROGRESS" {
+			return fmt.Errorf("mission %s is %s: planning admission refused", ms.ID, missionStatus)
+		}
+		var existingID string
+		if err := tx.QueryRowContext(ctx, `SELECT a.id FROM missions m
+			JOIN assignments a ON a.id = m.planning_assignment_id
+			WHERE m.id = ? AND m.workspace_id = ? AND a.workspace_id = m.workspace_id
+			AND a.mission_id = m.id AND a.lead_planning = 1`, ms.ID, ms.WorkspaceID).Scan(&existingID); err != nil {
+			return fmt.Errorf("resolve persisted planning assignment: %w", err)
+		}
+		// The shared dispatcher polls durable queued work independently of
+		// this wake-up hint. Existing running or terminal planning must never
+		// become a fresh assignment after a restart or a failed wake-up.
+		return tx.Commit()
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, created_at, mission_id, author_agent_id, created_by_user_id, lead_planning)
 		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?, ?, ?, ?, 1)`,
 		assignmentID, ms.WorkspaceID, ms.ID, ms.LeadAgentID, ms.LeadAgentID,
-		"[PLANNING] "+title.String,
+		b.String(),
 		ms.ID,
 		now,
 		ms.ID, nullIfEmpty(ms.AuthorAgentID), nullIfEmpty(ms.CreatedByUserID),
 	)
+	if err == nil {
+		_, err = work.AcceptAssignmentTx(ctx, tx, assignmentID)
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
 	if err != nil {
 		e.logger.Error("create planning assignment", "error", err, "mission_id", ms.ID)
 		return fmt.Errorf("create planning assignment: %w", err)
@@ -317,12 +373,10 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 			if dispatchErr != nil {
 				deferred := isDeferredDispatch(dispatchErr)
 				if deferred {
-					// The lead was staged between the admission read above
-					// and this call. Cancel the row we already wrote so the
-					// retry below does not accumulate one per tick.
+					// Admission is already durable. The shared authorizer
+					// defers held agents without cancelling their work.
 					e.logger.Info("lead planning deferred — the lead is held for an operator's approval",
 						"assignment_id", assignmentID, "mission_id", ms.ID, "reason", dispatchErr.Error())
-					e.cancelDeferredAssignment(dispatchCtx, assignmentID, dispatchErr.Error())
 				} else {
 					e.logger.Error("lead planning dispatch failed",
 						"assignment_id", assignmentID,

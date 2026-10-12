@@ -24,3 +24,5 @@ reports are ignored build output, not an operational procedure.
   [RELEASING.md](../../RELEASING.md).
 
 - [Trusted CI control inventory](ci-inventory-guard.md): main-owned metadata guard, explicit administrator exceptions and shared-App enforcement limits.
+
+- [Assignment work ownership upgrade](assignment-work-upgrade.md) — queue cutover, ambiguous legacy exec refusal, cancellation and terminal projection.

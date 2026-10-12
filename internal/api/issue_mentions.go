@@ -1057,6 +1057,7 @@ type mentionDispatchRequest struct {
 	AuthorID      string
 	AuthorName    string
 	TargetAgentID string
+	DeliveryIDs   []string // internal exact pending digest identities; atomically attached at acceptance
 }
 
 // DispatchMention runs the mentioned agent, through the same machinery
@@ -1289,6 +1290,7 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 			CreatedByUserID:       createdByUserID,
 			ContextPackCompaction: pack.Compaction,
 			ContextPackTokens:     pack.TokensEstimate,
+			DeliveryIDs:           req.DeliveryIDs,
 		})
 	if err != nil {
 		return "", err

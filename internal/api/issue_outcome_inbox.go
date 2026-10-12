@@ -44,19 +44,11 @@ import (
 // shared process-wide.
 var outcomeInboxScrubber = scrubber.New()
 
-// createOutcomeInboxItem writes the §12 action contract for a NEEDS_HUMAN
-// run. Exactly one item per run (§18 scenario 15's "exactly one inbox
-// item"): inbox.Insert's underlying (workspace_id, kind, source_id) unique
-// index is keyed on assignmentID here, so a
-// second call for the SAME run — a duplicate terminal write that lost
-// finishAssignment's own terminal CAS and could never reach this far, or
-// any future retried caller — is silently absorbed rather than doubled.
-//
-// Best-effort: called from finishAssignment's post-completion side
-// effects, which must never fail (or block) the completion this is a side
-// effect of — same contract as recordSessionCheckpoint and
-// consumeDeliveriesForRun right next to its call site.
-func (h *AssignmentHandler) createOutcomeInboxItem(ctx context.Context, assignmentID, workspaceID, targetSlug, result string) {
+// createOutcomeInboxItem writes the NEEDS_HUMAN action contract. Owned work
+// commits the threaded inbox occurrence and its assignment receipt together;
+// projection retry preserves later operator reads and resolutions. External
+// notification is a best-effort postcommit nudge, not the durable inbox item.
+func (h *AssignmentHandler) createOutcomeInboxItem(ctx context.Context, assignmentID, workspaceID, targetSlug, result string) error {
 	var (
 		missionID   sql.NullString
 		identifier  sql.NullString
@@ -64,14 +56,14 @@ func (h *AssignmentHandler) createOutcomeInboxItem(ctx context.Context, assignme
 		agentName   sql.NullString
 	)
 	err := h.db.QueryRowContext(ctx, `
-		SELECT COALESCE(a.group_id, a.chat_id), m.identifier, m.owner_user_id, ag.name
+		SELECT COALESCE(NULLIF(a.mission_id,''),NULLIF(a.group_id,''),a.chat_id), m.identifier, m.owner_user_id, ag.name
 		  FROM assignments a
-		  LEFT JOIN missions m ON m.id = COALESCE(a.group_id, a.chat_id)
+		  LEFT JOIN missions m ON m.id = COALESCE(NULLIF(a.mission_id,''),NULLIF(a.group_id,''),a.chat_id)
 		  LEFT JOIN agents ag ON ag.id = a.assigned_to_id
 		 WHERE a.id = ?`, assignmentID).Scan(&missionID, &identifier, &ownerUserID, &agentName)
 	if err != nil {
 		h.logger.Warn("create outcome inbox item: load assignment", "error", err, "assignment_id", assignmentID)
-		return
+		return err
 	}
 
 	issueLabel := targetSlug
@@ -155,7 +147,7 @@ func (h *AssignmentHandler) createOutcomeInboxItem(ctx context.Context, assignme
 		"context":     contractContext,
 	}
 
-	if err := inbox.WriteThreaded(ctx, h.db, h.logger, inbox.Item{
+	item := inbox.Item{
 		WorkspaceID:    workspaceID,
 		Kind:           inbox.KindRunNeedsHuman,
 		SourceID:       assignmentID,
@@ -174,7 +166,35 @@ func (h *AssignmentHandler) createOutcomeInboxItem(ctx context.Context, assignme
 		// The kind's closed vocabulary; Act (inbox_act.go, B15) performs
 		// them.
 		Actions: runNeedsHumanActions,
-	}); err != nil {
-		h.logger.Warn("create outcome inbox item", "error", err, "assignment_id", assignmentID)
 	}
+	workID, err := assignmentWorkID(ctx, h.db, assignmentID)
+	if err != nil {
+		return err
+	}
+	if workID == "" {
+		return inbox.WriteThreaded(ctx, h.db, h.logger, item)
+	}
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var projected sql.NullString
+	if err = tx.QueryRowContext(ctx, `SELECT work_inbox_projected_at FROM assignments WHERE id=? AND workspace_id=?`, assignmentID, workspaceID).Scan(&projected); err != nil {
+		return err
+	}
+	if projected.Valid {
+		return tx.Commit()
+	}
+	if err = inbox.WriteThreadedTx(ctx, tx, item); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE assignments SET work_inbox_projected_at=? WHERE id=? AND workspace_id=?`, isoMillisNow(), assignmentID, workspaceID); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	inbox.NotifyExternalChannels(ctx, item)
+	return nil
 }

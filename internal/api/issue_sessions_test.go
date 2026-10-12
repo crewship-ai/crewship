@@ -24,13 +24,10 @@ func TestMentions_SecondMentionReusesTheSameSession(t *testing.T) {
 	f := setupMentionFixture(t)
 
 	f.comment(t, "first "+mentionToken("lead", f.target))
+	drainMentionWork(t, f)
 	f.comment(t, "second "+mentionToken("lead", f.target))
-	// B4 (§10.1, #2343): the session's state now genuinely moves as its
-	// runs claim and finish, so — unlike before B4, when 'pending' was a
-	// static value nothing ever touched — the assertions below must wait
-	// for both dispatched runs to actually settle rather than racing their
-	// background goroutines.
-	f.assign.WaitDispatches()
+	// Each wake settles through the shared ledger dispatcher and projection.
+	drainMentionWork(t, f)
 
 	if n := f.assignments(t); n != 2 {
 		t.Fatalf("assignments = %d, want 2 — two separate mentions, two runs", n)

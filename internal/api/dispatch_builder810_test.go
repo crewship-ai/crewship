@@ -73,7 +73,7 @@ func TestBuildAssignmentRunRequest_ThroughBuilder(t *testing.T) {
 	}
 	target := targetAgentInfo{ID: "agent-1", Slug: "eva", CrewSlug: "ops"}
 
-	req, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", "run-assign-1", true)
+	req, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", "run-assign-1")
 	if err != nil {
 		t.Fatalf("builder returned error: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestBuildAssignmentRunRequest_ThroughBuilder(t *testing.T) {
 		t.Errorf("MissionID = %q, want mission-1", req.MissionID)
 	}
 	// Dispatch-specific overrides.
-	if req.AgentRole != "AGENT" || !req.SkipSidecar || !req.SkipConvHistory {
+	if req.AgentRole != "AGENT" || req.SkipSidecar || !req.SkipConvHistory {
 		t.Errorf("dispatch flags wrong: role=%q skipSidecar=%v skipConv=%v", req.AgentRole, req.SkipSidecar, req.SkipConvHistory)
 	}
 	if req.ContainerID != "cid-1" || !strings.HasPrefix(req.UserMessage, "ship it") || !strings.Contains(req.UserMessage, "---HANDOFF---") {
@@ -172,7 +172,7 @@ func TestBuildAssignmentRunRequest_NoResolverFailsClosed(t *testing.T) {
 	body := createAssignmentBody{Task: "t", CrewID: "c", ChatID: "chat-1", AuthorAgentID: "a"}
 	target := targetAgentInfo{ID: "agent-1", Slug: "eva", SystemPrompt: "legacy", CLIAdapter: "CLAUDE_CODE"}
 
-	if _, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", "run-assign-1", true); err == nil {
+	if _, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", "run-assign-1"); err == nil {
 		t.Fatal("expected an error with no resolver wired (fail closed), got nil")
 	}
 }
@@ -187,7 +187,7 @@ func TestBuildAssignmentRunRequest_ResolverErrorFailsClosed(t *testing.T) {
 	body := createAssignmentBody{Task: "t", CrewID: "c", WorkspaceID: "ws-1", ChatID: "chat-1"}
 	target := targetAgentInfo{ID: "agent-1", Slug: "eva"}
 
-	if _, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", "run-assign-1", true); err == nil {
+	if _, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", "run-assign-1"); err == nil {
 		t.Fatal("resolver error must fail closed (no legacy degrade), got nil error")
 	}
 }

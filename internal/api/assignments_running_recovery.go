@@ -277,7 +277,7 @@ func (h *AssignmentHandler) SweepStuckRunning(ctx context.Context, staleAfter ti
 func (h *AssignmentHandler) scanRunningOlderThan(ctx context.Context, cutoff, nowRFC3339 string) ([]string, error) {
 	rows, err := h.db.QueryContext(ctx, `
 		SELECT id FROM assignments
-		 WHERE status = 'RUNNING'
+		 WHERE status = 'RUNNING' AND NOT EXISTS (SELECT 1 FROM work_items w WHERE w.source='assignment' AND w.domain_kind='assignment' AND w.domain_id=assignments.id)
 		   AND (
 		     (lease_expires_at IS NOT NULL AND lease_expires_at < ?)
 		     OR
@@ -309,7 +309,7 @@ func (h *AssignmentHandler) scanRunningStuck(ctx context.Context, now time.Time,
 	rows, err := h.db.QueryContext(ctx, `
 		SELECT asn.id FROM assignments asn
 		  LEFT JOIN agents ag ON ag.id = asn.assigned_to_id
-		 WHERE asn.status = 'RUNNING'
+		 WHERE asn.status = 'RUNNING' AND NOT EXISTS (SELECT 1 FROM work_items w WHERE w.source='assignment' AND w.domain_kind='assignment' AND w.domain_id=asn.id)
 		   AND (julianday(?) - julianday(COALESCE(asn.running_at, asn.started_at, asn.created_at))) * 86400.0
 		       > MAX(COALESCE(ag.timeout_seconds, 0) + ?, ?)
 		 ORDER BY asn.created_at ASC`,

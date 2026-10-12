@@ -10,6 +10,9 @@ package orchestrator
 import (
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -38,12 +41,12 @@ func covMissionDB(t *testing.T) *sql.DB {
 		CREATE TABLE agents (id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, name TEXT, slug TEXT,
 			agent_role TEXT DEFAULT 'AGENT', lead_mode TEXT DEFAULT 'active', status TEXT DEFAULT 'IDLE',
 			deleted_at TEXT);
-		CREATE TABLE missions (id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, lead_agent_id TEXT,
+		CREATE TABLE missions (planning_assignment_id TEXT, id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, lead_agent_id TEXT,
 			trace_id TEXT UNIQUE, title TEXT, description TEXT, status TEXT DEFAULT 'PLANNING',
 			identifier TEXT, mission_type TEXT,
 			plan TEXT, workflow_template TEXT, total_token_count INTEGER, total_estimated_cost REAL,
 			created_at TEXT, updated_at TEXT, completed_at TEXT);
-		CREATE TABLE mission_tasks (id TEXT PRIMARY KEY, mission_id TEXT, assigned_agent_id TEXT,
+		CREATE TABLE mission_tasks (completion_assignment_id TEXT, id TEXT PRIMARY KEY, mission_id TEXT, assigned_agent_id TEXT,
 			title TEXT, description TEXT, status TEXT DEFAULT 'PENDING', task_order INTEGER DEFAULT 0,
 			depends_on TEXT DEFAULT '[]', iteration INTEGER DEFAULT 1, max_iterations INTEGER,
 			result_summary TEXT, output_path TEXT, error_message TEXT, assignment_id TEXT,
@@ -58,7 +61,7 @@ func covMissionDB(t *testing.T) *sql.DB {
 			group_id TEXT, created_at TEXT,
 			depth INTEGER NOT NULL DEFAULT 0, parent_assignment_id TEXT, mission_id TEXT,
 			author_agent_id TEXT, created_by_user_id TEXT, lead_planning INTEGER NOT NULL DEFAULT 0,
-			cancel_requested_at TEXT, cancel_reason TEXT);
+			cancel_requested_at TEXT, cancel_reason TEXT,session_id TEXT);
 		CREATE TABLE chats (id TEXT PRIMARY KEY, agent_id TEXT, workspace_id TEXT,
 			title TEXT, mode TEXT, status TEXT, started_at TEXT, created_at TEXT, updated_at TEXT);
 		CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, email TEXT);
@@ -82,6 +85,17 @@ func covMissionDB(t *testing.T) *sql.DB {
 	`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("create cov schema: %v", err)
+	}
+	_, fixtureSource, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("mission fixture source unavailable")
+	}
+	workDDL, err := os.ReadFile(filepath.Join(filepath.Dir(fixtureSource), "../database/migrations/20260910200255_durable_work_ledger.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(string(workDDL)); err != nil {
+		t.Fatal(err)
 	}
 	return db
 }
@@ -322,11 +336,14 @@ func TestRunMissionLoop_DispatchesLeadPlanningWhenNoTasks(t *testing.T) {
 		t.Fatal("lead planning was never dispatched")
 	}
 
-	// A [PLANNING] assignment row must exist for the lead.
+	// The durable planning identity owns the exact prompt accepted for work,
+	// rather than the short display title used by the legacy launcher.
 	var count int
-	db.QueryRow(`SELECT COUNT(*) FROM assignments WHERE group_id = 'm-plan' AND assigned_to_id = 'agent-lead' AND task LIKE '[PLANNING]%'`).Scan(&count)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM missions m JOIN assignments a ON a.id=m.planning_assignment_id JOIN work_items w ON w.domain_id=a.id AND w.workspace_id=a.workspace_id WHERE m.id='m-plan' AND a.group_id=m.id AND a.assigned_to_id='agent-lead' AND a.lead_planning=1 AND w.source='assignment' AND w.domain_kind='assignment' AND a.task LIKE '[MISSION PLANNING REQUEST]%' AND json_extract(w.input_json,'$.task')=a.task`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
 	if count != 1 {
-		t.Errorf("expected 1 planning assignment, got %d", count)
+		t.Errorf("expected 1 planning assignment with matching work input, got %d", count)
 	}
 
 	cancel()

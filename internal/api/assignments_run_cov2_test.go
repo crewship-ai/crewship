@@ -284,7 +284,11 @@ func TestAsgCov2_MissionLinkedCreate(t *testing.T) {
 		t.Errorf("action = %q", action)
 	}
 
-	covAsg2WaitTerminal(t, h, asgID) // let the async goroutine finish before teardown
+	h.WaitDispatches() // accepted work is owned by the shared dispatcher
+	var owned int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM work_items WHERE domain_kind='assignment' AND domain_id=?`, asgID).Scan(&owned); err != nil || owned != 1 {
+		t.Fatalf("work owners=%d err=%v", owned, err)
+	}
 }
 
 // ---- runAssignment: execution past container creation ----

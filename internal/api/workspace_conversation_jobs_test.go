@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/dispatch"
+	"github.com/crewship-ai/crewship/internal/work"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/groupchat"
 )
@@ -84,7 +87,15 @@ func TestConversationAssignmentGateRevocationAndHold(t *testing.T) {
 			if err := h.db.QueryRow(`SELECT a.id,a.chat_id FROM assignments a JOIN workspace_conversation_agent_jobs j ON j.assignment_id=a.id WHERE j.id=?`, job).Scan(&assignment, &chat); err != nil {
 				t.Fatal(err)
 			}
-			execOrFatal(t, h.db, `UPDATE assignments SET status='RUNNING' WHERE id=?`, assignment)
+			store := work.NewStore(h.db)
+			workID, err := assignmentWorkID(t.Context(), h.db, assignment)
+			if err != nil {
+				t.Fatal(err)
+			}
+			claim, err := store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "channel-test", WorkID: workID})
+			if err != nil {
+				t.Fatal(err)
+			}
 			switch scenario {
 			case "requester_removed":
 				execOrFatal(t, h.db, `DELETE FROM workspace_members WHERE user_id=?`, u)
@@ -93,19 +104,15 @@ func TestConversationAssignmentGateRevocationAndHold(t *testing.T) {
 			case "held":
 				execOrFatal(t, h.db, `UPDATE agents SET status='PENDING_REVIEW' WHERE id=?`, agent)
 			}
-			// Exercise the actual run entrance. With no orchestrator, a missed gate
-			// would proceed and mark FAILED rather than safely cancel/defer.
-			h.runAssignment(context.Background(), assignment, createAssignmentBody{ChatID: chat, WorkspaceID: c.WorkspaceID, TargetSlug: "asg-worker"}, targetAgentInfo{ID: agent, Slug: "asg-worker"})
+			decision, err := (assignmentWorkAuthorizer{h: h}).Authorize(t.Context(), dispatch.Assignment{Item: claim.Item, RunID: claim.RunID, Generation: claim.Generation})
+			if err != nil || decision == dispatch.Allow() {
+				t.Fatalf("unsafe dispatch decision=%v err=%v", decision, err)
+			}
+			// A domain remains nonterminal until the shared owner settles it. Held
+			// work remains queued; a refusal cannot directly cancel a live attempt.
 			var state string
-			if err := h.db.QueryRow(`SELECT status FROM assignments WHERE id=?`, assignment).Scan(&state); err != nil {
-				t.Fatal(err)
-			}
-			want := "CANCELLED"
-			if scenario == "held" {
-				want = "QUEUED"
-			}
-			if state != want {
-				t.Fatalf("state=%s want=%s", state, want)
+			if err = h.db.QueryRow(`SELECT status FROM assignments WHERE id=?`, assignment).Scan(&state); err != nil || state != "QUEUED" {
+				t.Fatalf("state=%s err=%v", state, err)
 			}
 			if scenario == "held" {
 				execOrFatal(t, h.db, `UPDATE agents SET status='IDLE' WHERE id=?`, agent)
@@ -166,18 +173,27 @@ func TestConversationQueuedHoldLetsAnotherAgentRun(t *testing.T) {
 	execOrFatal(t, h.db, `UPDATE agents SET status='PENDING_REVIEW' WHERE id=?`, held)
 	execOrFatal(t, h.db, `UPDATE assignments SET queued_at='2020-01-01 00:00:00' WHERE id=?`, heldAssignment)
 	execOrFatal(t, h.db, `UPDATE assignments SET queued_at='2021-01-01 00:00:00' WHERE id=?`, readyAssignment)
-	firstClaim, err := pumpCrewQueue(context.Background(), h.db, crew, 1)
-	if err != nil || len(firstClaim) != 1 || firstClaim[0] != heldAssignment {
-		t.Fatalf("first claim %v %v", firstClaim, err)
+	store := work.NewStore(h.db)
+	heldID, err := assignmentWorkID(t.Context(), h.db, heldAssignment)
+	if err != nil {
+		t.Fatal(err)
 	}
-	allowed, err := h.authorizeConversationAssignment(context.Background(), heldAssignment)
-	if allowed || err != nil {
-		t.Fatalf("hold guard %v %v", allowed, err)
+	firstClaim, err := store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "channel-test", WorkID: heldID})
+	if err != nil {
+		t.Fatal(err)
 	}
-	secondClaim, err := pumpCrewQueue(context.Background(), h.db, crew, 1)
-	if err != nil || len(secondClaim) != 1 || secondClaim[0] != readyAssignment {
-		t.Fatalf("held agent starved ready agent: %v %v", secondClaim, err)
+	decision, err := (assignmentWorkAuthorizer{h: h}).Authorize(t.Context(), dispatch.Assignment{Item: firstClaim.Item, RunID: firstClaim.RunID, Generation: firstClaim.Generation})
+	if err != nil || decision == dispatch.Allow() {
+		t.Fatalf("held gate=%v err=%v", decision, err)
 	}
+	if err = store.Defer(t.Context(), heldID, firstClaim.RunID, firstClaim.Generation, time.Now().Add(time.Minute), "agent held"); err != nil {
+		t.Fatal(err)
+	}
+	secondClaim, err := store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "channel-test", Limits: work.SerialAgentLimits()})
+	if err != nil || secondClaim.Item.DomainID != readyAssignment {
+		t.Fatalf("held agent starved ready: %+v err=%v", secondClaim, err)
+	}
+
 }
 
 func TestConversationJobsReportsRunningAssignment(t *testing.T) {

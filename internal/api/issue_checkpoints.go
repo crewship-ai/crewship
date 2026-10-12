@@ -38,7 +38,7 @@ var checkpointScrubber = scrubber.New()
 // side effects, which must never fail (or retry-loop) the completion this
 // is a side effect of — same contract as consumeDeliveriesForRun and
 // dispatchQueuedFollowUpsForSession right next to it.
-func writeSessionCheckpoint(ctx context.Context, db *sql.DB, workspaceID, sessionID, runID string, cp orchestrator.CheckpointData) error {
+func writeSessionCheckpoint(ctx context.Context, db dbConn, workspaceID, sessionID, runID string, cp orchestrator.CheckpointData) error {
 	if sessionID == "" {
 		return nil
 	}
@@ -87,11 +87,15 @@ func writeSessionCheckpoint(ctx context.Context, db *sql.DB, workspaceID, sessio
 		}
 	}
 
+	checkpointID := generateCUID()
+	if runID != "" {
+		checkpointID = "checkpoint:" + runID
+	}
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO agent_session_checkpoints
 		    (id, workspace_id, session_id, run_id, seq_at_write, checkpoint_json, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		generateCUID(), workspaceVal, sessionID, runVal, seqAtWrite, string(payload),
+		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+		checkpointID, workspaceVal, sessionID, runVal, seqAtWrite, string(payload),
 		time.Now().UTC().Format(time.RFC3339))
 	return err
 }

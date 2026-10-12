@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Assignments use durable work admission (#3057).** Ordinary assignments, mentions, channel requests and mission planning share fenced claims and run identities with scheduled and webhook work. Cancellation is durable before execution creation, results and mission completion retry safely after restart, and current assignment attempts can use run-bound memory. Legacy running assignments continue to hold capacity; an upgrade refuses ambiguous queued rows that still name an exec.
+
 - **Local Linux Docker runs retain output across controller loss (#2845).** A private host helper keeps the actual CLI execution and redacted output independent of its reader. Recovery projects output and terminal results with durable acknowledgements, preserves work-generation ownership, and refuses duplicate launches. Capture has per-run and aggregate bounds and acknowledgement-based retention. Unsupported providers keep the existing transport; uncertain forced stops retain reconciliation rather than report completion.
 
 - **⌘K finds every place in the app (#3045).** As you type, the search box finds:

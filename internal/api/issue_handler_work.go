@@ -275,7 +275,7 @@ func holdIssueWorkTx(ctx context.Context, tx *sql.Tx, id, userID, note, now stri
 	}
 	targets, err := stampCancelRequested(ctx, tx, now, id)
 	if err == nil {
-		_, err = tx.ExecContext(ctx, `UPDATE assignments SET status='CANCELLED',finished_at=?,outcome='CANCELLED' WHERE `+assignmentMatch+` AND status!='RUNNING'`, now, id, id, id)
+		_, err = tx.ExecContext(ctx, `UPDATE assignments SET status='CANCELLED',finished_at=?,outcome='CANCELLED' WHERE `+assignmentMatch+` AND status!='RUNNING' AND NOT EXISTS(SELECT 1 FROM work_items w WHERE w.source='assignment' AND w.domain_kind='assignment' AND w.domain_id=assignments.id AND w.workspace_id=assignments.workspace_id)`, now, id, id, id)
 	}
 	if err == nil {
 		_, err = tx.ExecContext(ctx, `UPDATE mission_tasks SET status='CANCELLED',updated_at=? WHERE mission_id=? AND status NOT IN ('COMPLETED','FAILED','CANCELLED','SKIPPED')`, now, id)

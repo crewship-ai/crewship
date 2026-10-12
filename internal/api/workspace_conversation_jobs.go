@@ -75,15 +75,11 @@ func (h *AssignmentHandler) prepareConversationJob(ctx context.Context, id strin
 		return "", err
 	}
 	defer release()
-	c, err := h.db.Conn(ctx)
+	c, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
 	}
-	defer c.Close()
-	if _, err = c.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return "", err
-	}
-	defer c.ExecContext(context.Background(), "ROLLBACK")
+	defer c.Rollback()
 	var state, convID, agentID, userID, workspaceID, kind, title, messageID, assignmentID string
 	var sequence int64
 	err = c.QueryRowContext(ctx, `SELECT j.state,j.conversation_id,COALESCE(j.agent_id,''),COALESCE(j.requested_by_user_id,''),c.workspace_id,c.kind,c.title,j.message_id,COALESCE(j.assignment_id,''),m.sequence
@@ -121,7 +117,7 @@ func (h *AssignmentHandler) prepareConversationJob(ctx context.Context, id strin
 		if err != nil {
 			return "", err
 		}
-		_, err = c.ExecContext(ctx, "COMMIT")
+		err = c.Commit()
 		return "", err
 	}
 	if assignmentID != "" {
@@ -131,7 +127,7 @@ func (h *AssignmentHandler) prepareConversationJob(ctx context.Context, id strin
 			if _, err = c.ExecContext(ctx, `UPDATE workspace_conversation_agent_jobs SET state='failed',error='The linked agent assignment is no longer available',updated_at=? WHERE id=?`, isoMillisNow(), id); err != nil {
 				return "", err
 			}
-			_, err = c.ExecContext(ctx, "COMMIT")
+			err = c.Commit()
 			return "", err
 		}
 		if err != nil {
@@ -139,10 +135,9 @@ func (h *AssignmentHandler) prepareConversationJob(ctx context.Context, id strin
 		}
 		if status == "COMPLETED" || status == "FAILED" || status == "CANCELLED" {
 			// Release the write lock before the store starts its own atomic reply.
-			if _, err = c.ExecContext(ctx, "COMMIT"); err != nil {
+			if err = c.Commit(); err != nil {
 				return "", err
 			}
-			c.Close()
 			release()
 			if status == "COMPLETED" {
 				if result == "" {
@@ -161,13 +156,13 @@ func (h *AssignmentHandler) prepareConversationJob(ctx context.Context, id strin
 			_, err = h.db.ExecContext(ctx, `UPDATE workspace_conversation_agent_jobs SET state='failed',error=?,updated_at=? WHERE id=? AND state='queued'`, "Agent work "+status+": "+reason, isoMillisNow(), id)
 			return "", err
 		}
-		if _, err = c.ExecContext(ctx, "COMMIT"); err != nil {
+		if err = c.Commit(); err != nil {
 			return "", err
 		}
 		return crewID, nil
 	}
 	if refuseHeldAgent(slug, agentStatus) != nil {
-		_, err = c.ExecContext(ctx, "COMMIT")
+		err = c.Commit()
 		return "", err
 	} // held hire stays pending
 	// Bound context to the newest 100 messages at the triggering message, never
@@ -228,9 +223,12 @@ func (h *AssignmentHandler) prepareConversationJob(ctx context.Context, id strin
 	if _, err = c.ExecContext(ctx, `INSERT INTO assignments(id,workspace_id,chat_id,assigned_by_id,assigned_to_id,task,status,created_by_user_id,created_at,queued_at) VALUES(?,?,?,?,?,?,'QUEUED',?,?,datetime('now','subsec'))`, assignmentID, workspaceID, chatID, agentID, agentID, task, userID, stamp); err != nil {
 		return "", err
 	}
+	if _, err = acceptAssignmentTx(ctx, c, assignmentID); err != nil {
+		return "", err
+	}
 	if _, err = c.ExecContext(ctx, `UPDATE workspace_conversation_agent_jobs SET assignment_id=?,state='queued',updated_at=? WHERE id=? AND state='pending'`, assignmentID, stamp, id); err != nil {
 		return "", err
 	}
-	_, err = c.ExecContext(ctx, "COMMIT")
+	err = c.Commit()
 	return crewID, err
 }
