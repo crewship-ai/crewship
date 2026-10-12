@@ -21,6 +21,12 @@ func retainedAnalysisFixture(t *testing.T, adapter, stdout, stderr string, code 
 	if err := os.Chmod(root, 0700); err != nil {
 		t.Fatal(err)
 	}
+	// Temp roots may use system aliases such as Darwin's /var and /tmp.
+	// Positive fixtures admit the real directory; rejection tests add their own alias.
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	dir := filepath.Join(root, "retained-analysis")
 	if err := os.Mkdir(dir, 0700); err != nil {
 		t.Fatal(err)

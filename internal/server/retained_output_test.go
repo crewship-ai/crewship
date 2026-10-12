@@ -30,7 +30,13 @@ func seedHostOutput(t *testing.T, s *Server, runID string, output ...string) orc
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	createdRoot := root
+	t.Cleanup(func() { _ = os.RemoveAll(createdRoot) })
+	// Darwin's /tmp is a system alias. Admit the real protected directory.
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	s.orchestrator.SetHostOutputRoot(root)
 	directory := filepath.Join(root, runID)
 	if err := os.Mkdir(directory, 0700); err != nil {

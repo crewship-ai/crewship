@@ -49,6 +49,12 @@ func runAgentHostOutputRoot(t *testing.T) string {
 	if err := os.Chmod(root, 0700); err != nil {
 		t.Fatal(err)
 	}
+	// Temp roots may use system aliases such as Darwin's /var and /tmp.
+	// Positive fixtures admit the real directory; rejection tests add their own alias.
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return root
 }
 

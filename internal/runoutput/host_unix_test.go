@@ -67,6 +67,12 @@ func hostFixtureInputUnchecked(t *testing.T) HostInput {
 	if err := os.Chmod(root, 0700); err != nil {
 		t.Fatal(err)
 	}
+	// Temp roots may use system aliases such as Darwin's /var and /tmp.
+	// Positive fixtures admit the real directory; rejection tests add their own alias.
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return HostInput{Directory: filepath.Join(root, "run"), Deadline: time.Now().Add(5 * time.Second), MaxBytes: DefaultLimit, Command: HostCommand{ContainerID: "container", User: "1001:1001", Args: []string{"/fixture", "literal; $(never)"}}}
 }
 func createHostFixtureDir(t *testing.T, input HostInput) {
