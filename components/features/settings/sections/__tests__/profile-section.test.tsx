@@ -211,3 +211,37 @@ describe("ProfileSection — sessions moved out", () => {
   })
 })
 
+
+describe("ProfileSection — change password", () => {
+  beforeEach(() => {
+    cleanup()
+    apiFetch.mockReset()
+  })
+
+  async function submit(revokeTokens: boolean) {
+    apiFetch.mockImplementation(async (url: string) =>
+      url.includes("/users/me/password")
+        ? jsonResponse({ success: true, sessions_revoked: 1, cli_tokens_revoked: revokeTokens ? 2 : 0 })
+        : jsonResponse({ data: [] }))
+    render(<ProfileSection userName="Ada Lovelace" userEmail="ada@example.com" />)
+    fireEvent.click(screen.getByRole("button", { name: "Change" }))
+    fireEvent.change(await screen.findByLabelText("Current password"), { target: { value: "oldpassword1" } })
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "brandnew123" } })
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "brandnew123" } })
+    if (revokeTokens) fireEvent.click(screen.getByRole("checkbox", { name: "Also revoke all CLI tokens" }))
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }))
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith("/api/v1/users/me/password", expect.anything()))
+    const init = apiFetch.mock.calls.find(([u]) => String(u).includes("/users/me/password"))![1] as RequestInit
+    return JSON.parse(String(init.body))
+  }
+
+  it("keeps CLI tokens by default", async () => {
+    expect(await submit(false)).toMatchObject({ revoke_cli_tokens: false })
+    expect(await screen.findByText(/CLI tokens keep working/)).toBeInTheDocument()
+  })
+
+  it("revokes CLI tokens when asked, and says how many", async () => {
+    expect(await submit(true)).toMatchObject({ revoke_cli_tokens: true })
+    expect(await screen.findByText(/2 CLI tokens revoked/)).toBeInTheDocument()
+  })
+})

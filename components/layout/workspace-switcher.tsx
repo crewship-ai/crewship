@@ -81,7 +81,7 @@ export function WorkspaceSwitcher() {
             <DropdownMenuTrigger asChild>
               <SidebarMenuButton
                 size="lg"
-                tooltip={triggerLabel}
+                tooltip={triggerSub ? `${triggerLabel} · ${triggerSub}` : triggerLabel}
                 aria-label={`Current workspace: ${triggerLabel}`}
                 className={RAIL_ROW}
               >
@@ -91,11 +91,13 @@ export function WorkspaceSwitcher() {
                 ) : (
                   <span className="rail-tile rail-tile-static bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" aria-hidden>·</span>
                 )}
-                <span className="rail-label grid min-w-0 flex-1 text-left leading-tight">
-                  <span className="truncate font-semibold text-[13px]">{triggerLabel}</span>
-                  {triggerSub && (
-                    <span className="truncate text-[10px] text-muted-foreground">{triggerSub}</span>
-                  )}
+                {/* The name gets the whole row, up to two lines. The rail row is
+                    36px and the name had ~120px beside the tile and chevron,
+                    so with the role stacked under it any real name truncated
+                    ("Demo User's …"). The role is in the tooltip, in the menu
+                    rows below, and in the user menu. */}
+                <span className="rail-label min-w-0 flex-1 text-left">
+                  <span className="line-clamp-2 break-words text-[12.5px] font-semibold leading-[1.15]">{triggerLabel}</span>
                 </span>
                 <ChevronDown className="rail-label mr-2 h-3 w-3 shrink-0 text-muted-foreground" />
               </SidebarMenuButton>

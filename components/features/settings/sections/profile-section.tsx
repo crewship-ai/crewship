@@ -17,6 +17,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
+import { Checkbox } from "@/components/ui/checkbox"
 import { SettingsCard, SettingsRow, settingsControl, controlHeight } from "../shared"
 import { useDirtyForm } from "@/hooks/use-dirty-form"
 import { SaveFooter } from "@/components/ui/save-footer"
@@ -162,6 +163,10 @@ export function ProfileSection({
   const [pwCurrent, setPwCurrent] = useState("")
   const [pwNew, setPwNew] = useState("")
   const [pwConfirm, setPwConfirm] = useState("")
+  // Opt-in: also revoke every CLI token. Off by default so a rotation does not
+  // silently break a script or a teammate's paired terminal.
+  const [pwRevokeTokens, setPwRevokeTokens] = useState(false)
+  const [pwTokensRevoked, setPwTokensRevoked] = useState(0)
   const [pwSaving, setPwSaving] = useState(false)
   const [pwError, setPwError] = useState<string | null>(null)
   const [pwDone, setPwDone] = useState(false)
@@ -185,6 +190,7 @@ export function ProfileSection({
 
   const resetPwForm = useCallback(() => {
     setPwCurrent(""); setPwNew(""); setPwConfirm(""); setPwError(null); setPwDone(false)
+    setPwRevokeTokens(false); setPwTokensRevoked(0)
   }, [])
 
   const changePassword = useCallback(async () => {
@@ -196,20 +202,22 @@ export function ProfileSection({
       const res = await apiFetch("/api/v1/users/me/password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ current_password: pwCurrent, new_password: pwNew }),
+        body: JSON.stringify({ current_password: pwCurrent, new_password: pwNew, revoke_cli_tokens: pwRevokeTokens }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => null)
         setPwError(typeof body?.error === "string" ? body.error : "Failed to change password")
         return
       }
+      const done = await res.json().catch(() => null)
+      setPwTokensRevoked(typeof done?.cli_tokens_revoked === "number" ? done.cli_tokens_revoked : 0)
       setPwDone(true)
     } catch {
       setPwError("Failed to change password")
     } finally {
       setPwSaving(false)
     }
-  }, [pwCurrent, pwNew, pwConfirm])
+  }, [pwCurrent, pwNew, pwConfirm, pwRevokeTokens])
 
   return (
     <div className="space-y-5">
@@ -323,8 +331,10 @@ export function ProfileSection({
             <AlertDialogTitle className="text-sm">Change password</AlertDialogTitle>
             <AlertDialogDescription className="text-xs">
               {pwDone
-                ? "Password changed. Your other sessions have been signed out."
-                : "Enter your current password and choose a new one (at least 8 characters). This signs out your other sessions."}
+                ? pwRevokeTokens
+                  ? `Password changed. Your other browser sessions have been signed out and ${pwTokensRevoked} CLI token${pwTokensRevoked === 1 ? "" : "s"} revoked.`
+                  : "Password changed. Your other browser sessions have been signed out. CLI tokens keep working."
+                : "Enter your current password and choose a new one (at least 8 characters). This signs out your other browser sessions."}
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -345,6 +355,19 @@ export function ProfileSection({
                 <Input id="pw-confirm" type="password" value={pwConfirm} autoComplete="new-password"
                   onChange={(e) => setPwConfirm(e.target.value)} className={controlHeight} disabled={pwSaving} />
               </div>
+              <label className="flex items-start gap-2 pt-1 text-xs">
+                <Checkbox
+                  checked={pwRevokeTokens}
+                  onCheckedChange={(v) => setPwRevokeTokens(v === true)}
+                  disabled={pwSaving}
+                  aria-label="Also revoke all CLI tokens"
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium">Also revoke all CLI tokens</span>
+                  <span className="block text-muted-foreground">Every terminal and script signed in as you stops working until it signs in again.</span>
+                </span>
+              </label>
               {pwError && <p className="text-label text-destructive">{pwError}</p>}
             </div>
           )}
