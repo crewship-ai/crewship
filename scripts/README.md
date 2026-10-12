@@ -79,6 +79,7 @@ name as proof that it never contacts a server.
 
 | Location | Requirements and effects |
 | --- | --- |
+| [ci/native-runtime.py](ci/native-runtime.md) | Explicitly approved released native GHCR digest and reviewed AppArmor host required; runs the named restricted Codex race acceptance, verifies image/binary identity and removes run-labeled containers/volumes on timeout/cancellation; no paid provider |
 | [ci/managed-environments.py](ci/managed-environments.py) | Requires local Docker `alpine:3`; runs five named synthetic environment fixtures with isolated resources; fails on skipped/missing tests; no provider credentials or global cleanup |
 | [api-contract/](api-contract/README.md) | API contract/fuzz checks; use its isolation, authentication and pacing instructions |
 | [test-harness/](test-harness/) | CLI-driven acceptance scenarios; may create and delete resources on the selected server |
