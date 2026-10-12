@@ -378,7 +378,7 @@ POST /api/v1/workspaces/{workspaceId}/projects/{projectId}/files roleCreate
 POST /api/v1/workspaces/{workspaceId}/signals roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/bulk-import roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/generate roleInline
-POST /api/v1/workspaces/{workspaceId}/skills/import roleCreate
+POST /api/v1/workspaces/{workspaceId}/skills/import roleInline
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve roleCreate

@@ -105,3 +105,41 @@ endpoint and `/remember` command are not implemented. The test asserts the
 endpoint is absent instead of treating the grant as proof of working memory
 writes. Model execution, browser rendering and restricted resource policies are
 separate acceptance boundaries.
+
+## Data visibility is a separate policy
+
+The 44 accounts above exercise **action permissions in trusted mode**. A VIEWER
+role or a single capability does not mean an account has a resource allowlist.
+Trusted workspace members can read ordinary workspace catalogs, including
+issues, routines and credential metadata, subject to each resource's own read
+policy. Credential metadata access does not authorize revealing secret values.
+Chat audience and Page visibility have additional checks.
+
+For a least-privilege visibility test, configure a separate VIEWER membership
+with the member resource policy API/CLI. Read its current policy, retain
+`membership_id` and `revision`, and replace `mode` with `restricted` and `rights`
+with an explicit array. An empty array grants no resources. To test one agent's
+private chat directory, grant only `agent.discover` and `agent.chat` using the
+wire format below (the operation is the unprefixed name):
+
+```json
+[
+  {"kind": "agent", "id": "AGENT_ID", "operation": "discover"},
+  {"kind": "agent", "id": "AGENT_ID", "operation": "chat"}
+]
+```
+
+See [member resource policy](../specs/member-resource-policy.md) for the versioned
+read/edit/replace commands. Do not overwrite an existing user's manually edited
+policy as part of a seed rerun. Restricted membership affects the whole session,
+including other workspaces in which the user is trusted.
+
+Verify both the sidebar and direct API URLs: broad issues, credential, Page and
+routine endpoints must return 404 in restricted mode. The dedicated restricted
+routine/Page catalogs expose only authorized projections. Agent discovery must
+exclude ungranted agents; a chat grant must not expose another person's private
+conversations. Revoking a grant must deny subsequent requests in the same
+session. `TestRestrictedAuthorityAcrossAuthenticatedRoutes` covers these route
+boundaries with real authenticated VIEWER sessions, private chat canaries and
+live grant revocation. It does not claim granular issue or credential grants:
+those broad routes are unavailable to restricted members.
