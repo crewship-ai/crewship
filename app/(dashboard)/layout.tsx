@@ -122,7 +122,7 @@ export default function DashboardLayout({
               {restrictedBlocked
                 ? restrictedLanding
                   ? <div className="flex justify-center py-16"><Spinner className="h-6 w-6 text-muted-foreground-soft" /></div>
-                  : <RestrictedUnavailable home={surfaces ? restrictedHome(surfaces) : null} />
+                  : <RestrictedUnavailable home={surfaces ? restrictedHome(surfaces) : null} pathname={pathname} />
                 : children}
             </div>
             {/* A flex sibling, not a fixed bar: it takes real space, so the

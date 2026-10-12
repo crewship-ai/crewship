@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Restricted members get a proper "no access" screen.** Private routines, Page actions and screens outside a restricted account's access now use the Routines page layout: a status card explains whether nothing is shared yet, private execution is not installed, or the catalog failed to load, and lists the screens the server allows. "Check again" re-reads the catalog. Access is still decided only by the API.
+
 - **Enabling privileged runtime access requires an instance administrator.** Workspace OWNER/ADMIN rights alone no longer enable `allow_privileged_credentials`. Scoped CLI tokens also need `instance:admin`. Workspace administrators may still disable the opt-in; existing privileged containers require separate review and recreation.
 
 - ⚠️ **Behaviour change: demo RBAC accounts now use English role/profile names (#3058).** `seed --with-users` adds 40 VIEWER/MEMBER/MANAGER/ADMIN profiles alongside four English role-labeled baseline accounts in the selected workspace. `seed rbac-matrix` adds those English accounts to an existing demo without resetting data. The former personal-name fixtures are no longer created. Existing passwords, roles and grants are preserved and fixture drift is reported. Skill import now honors `skill.create`, matching generation. Authenticated API acceptance tests cover allowed and denied actions, workspace isolation and live grant/revoke. `memory.write` remains reserved without a public write endpoint.
