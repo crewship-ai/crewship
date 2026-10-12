@@ -81,10 +81,6 @@ const PALETTE_ALLOWLIST = [
   "components/features/routines/routine-readable-summary.tsx",
   "components/features/routines/routine-touches.tsx",
   "components/features/settings/sections/general-section.tsx",
-  "components/features/skills/skill-card.tsx",
-  "components/features/skills/skills-browser.tsx",
-  "components/features/skills/skills-detail-panel.tsx",
-  "components/skills/skill-detail.tsx",
 ];
 
 export default [
