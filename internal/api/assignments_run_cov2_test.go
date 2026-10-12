@@ -98,24 +98,6 @@ func covAsg2Post(t *testing.T, h *AssignmentHandler, body, boundWS string) *http
 	return rr
 }
 
-// covAsg2WaitTerminal polls until the assignment reaches a terminal state so
-// the async runAssignment goroutine can't outlive the test DB.
-func covAsg2WaitTerminal(t *testing.T, h *AssignmentHandler, assignmentID string) string {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		var status string
-		if err := h.db.QueryRow(`SELECT status FROM assignments WHERE id = ?`, assignmentID).Scan(&status); err == nil {
-			if status == "COMPLETED" || status == "FAILED" {
-				return status
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("assignment %s never reached a terminal state", assignmentID)
-	return ""
-}
-
 // ---- Create: PR-F24 bound-token gates ----
 
 func TestAsgCov2_BoundTokenWorkspaceMismatch403(t *testing.T) {
