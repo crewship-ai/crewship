@@ -126,7 +126,7 @@ const sections: NavSection[] = [
       // ADMIN+, matching the read-only-beats-hidden rule at the top of this
       // file: a shell hook running on the host is information a member is
       // entitled to, and the switch is the part they are not.
-      { key: "hooks", label: "Lifecycle hooks", icon: Webhook },
+      { key: "hooks", label: "Lifecycle hooks", icon: Webhook, href: "/settings/hooks" },
       // GET /api/v1/audit is ADMIN+ (router_admin.go authedAdmin, audit.go
       // canRole("manage")); below that the pane could only show a 403 — the
       // one section where hiding beats read-only.

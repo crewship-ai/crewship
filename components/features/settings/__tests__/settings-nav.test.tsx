@@ -212,8 +212,8 @@ vi.mock("@/lib/api-fetch", () => ({
 vi.mock("../sections/profile-section", () => ({
   ProfileSection: () => <div data-testid="profile-section" />,
 }))
-vi.mock("../sections/hooks-section", () => ({
-  HooksSection: () => <div data-testid="hooks-section" />,
+vi.mock("../sections/access-secrets-section", () => ({
+  AccessSecretsSection: () => <div data-testid="access-secrets-section" />,
 }))
 vi.mock("../sections/crew-audit-section", () => ({
   CrewAuditSection: () => <div data-testid="audit-section" />,
@@ -330,30 +330,30 @@ describe("SettingsLayout — a changed link on a mounted page", () => {
 
   it("follows a later ?tab= without a remount", async () => {
     h.role = "OWNER"
-    window.history.replaceState(null, "", "/settings?tab=hooks")
+    window.history.replaceState(null, "", "/settings?tab=access-secrets")
     const { SettingsLayout } = await import("../settings-layout")
     const { rerender } = render(<SettingsLayout />)
-    await waitFor(() => expect(screen.getByTestId("hooks-section")).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId("access-secrets-section")).toBeTruthy())
 
     // A client-side navigation: the URL changes under a mounted layout.
     window.history.replaceState(null, "", "/settings?tab=profile")
     rerender(<SettingsLayout />)
     await waitFor(() => expect(screen.getByTestId("profile-section")).toBeTruthy())
-    expect(screen.queryByTestId("hooks-section")).toBeNull()
+    expect(screen.queryByTestId("access-secrets-section")).toBeNull()
   })
 
   it("does not re-apply the same link when something else rerenders", async () => {
     // setActiveTab writes the URL with history.replaceState precisely so it
     // does NOT navigate. Re-reading an unchanged URL must not undo a click.
     h.role = "OWNER"
-    window.history.replaceState(null, "", "/settings?tab=hooks")
+    window.history.replaceState(null, "", "/settings?tab=access-secrets")
     const { SettingsLayout } = await import("../settings-layout")
     const { rerender } = render(<SettingsLayout />)
-    await waitFor(() => expect(screen.getByTestId("hooks-section")).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId("access-secrets-section")).toBeTruthy())
 
     rerender(<SettingsLayout />)
     rerender(<SettingsLayout />)
-    expect(screen.getByTestId("hooks-section")).toBeTruthy()
+    expect(screen.getByTestId("access-secrets-section")).toBeTruthy()
   })
 })
 

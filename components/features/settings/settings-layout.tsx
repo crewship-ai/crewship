@@ -22,7 +22,6 @@ import { SessionsSection } from "./sections/sessions-section"
 import { PrivacySection } from "./sections/privacy-section"
 import { GeneralSection } from "./sections/general-section"
 import { AccessSecretsSection } from "./sections/access-secrets-section"
-import { HooksSection } from "./sections/hooks-section"
 import { SectionMoved } from "./sections/section-moved"
 import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
 
@@ -54,10 +53,6 @@ const sectionTitles: Record<string, { title: string; description?: string }> = {
   "access-secrets": {
     title: "Access & Secrets",
     description: "Who may read a stored secret in plaintext, and what each classification means",
-  },
-  hooks: {
-    title: "Lifecycle hooks",
-    description: "Code this workspace runs on platform events — shell handlers run on the host",
   },
   audit: { title: "Audit Log", description: "Track workspace activity" },
 }
@@ -94,6 +89,7 @@ export const MOVED_SECTIONS: Record<string, { href: string; label: string }> = {
   // A ?member= on the old link survives the move (movedSectionHref): the ⌘K
   // palette and other pages linked to one person, not to the roster.
   members: { href: "/settings/members", label: "Members" },
+  hooks: { href: "/settings/hooks", label: "Lifecycle hooks" },
 }
 
 // Resolve the initial tab from the URL `?tab=` param, falling back to
@@ -329,9 +325,6 @@ function SettingsPage() {
     }
     if (activeTab === "privacy" && workspaceId) {
       return <PrivacySection workspaceId={workspaceId} />
-    }
-    if (activeTab === "hooks" && workspaceId) {
-      return <HooksSection workspaceId={workspaceId} role={role} />
     }
     if (activeTab === "access-secrets" && workspaceId) {
       return <AccessSecretsSection workspaceId={workspaceId} role={role} members={members} />
