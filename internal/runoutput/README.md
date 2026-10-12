@@ -1,105 +1,95 @@
-# Run output transport
+# Retained execution output
 
-This package captures a command's output and terminal result independently of
-any reader. It is a foundation for controller reattachment, not a released
-replacement for the orchestrator's tmux/FIFO execution path.
+Supported local Linux Docker providers can capture admitted CLI execution through
+an independent host helper. `storage.run_output_path` defaults to
+`<installation-data-root>/run-output` during startup; `CREWSHIP_RUN_OUTPUT_PATH`
+overrides it. Explicit YAML `run_output_path: ''` disables it. Remote Docker,
+Docker Desktop, controller UIDs 1001/1002, and other providers retain their existing execution transport.
+Before a protected launch, Docker qualifies the read-only staged stop helper
+against its current trusted source hash and versioned process-capability probe.
+Known missing or older helpers keep the legacy transport before any protected
+claim or CLI execution; operational qualification errors refuse launch.
 
-The existing distributed `crewship-sidecar` binary provides separate process
-modes for this transport. These modes do not start the credential proxy:
+The controller persists version-2 capture authority before launching its own
+executable in private `--internal-run-capture` mode. The helper receives admitted
+argv, environment, cwd, bounded stdin, deadline and redaction values through a
+private pipe, and starts the actual Docker exec once. These inputs are not written
+to workload storage. The helper has its own session and owns the Docker output
+attachment independently of the controller. Losing a controller reader does not
+stop the helper, start a replacement CLI, or establish a terminal outcome.
 
-```sh
-crewship-sidecar run-capture --dir /persistent/run-identity --timeout 30m -- command arg
-crewship-sidecar run-read --dir /persistent/run-identity --after 12
-crewship-sidecar run-result --dir /persistent/run-identity
-```
+The host spool must belong to the server identity, which must differ from agent
+UID 1001 and sidecar UID 1002. Private directories, protected ancestors and
+absence of workload mounts are checked before launch. Admission rejects symlink
+aliases and bind-backed local volumes exposing a spool ancestor. Docker container
+ID, image and start identity remain bound to the admitted authority; a restart
+cannot silently rebind the execution or reinstall a fence using partial state.
 
-`run-capture` also accepts `--args-file` with bounded NUL-separated argv instead
-of command arguments. It does not delete that input file. No argv or environment
-is copied into the output journal. The command inherits its caller's environment
-and has no stdin. Interactive input and controller authentication are not
-provided by this transport.
+Streams remain separate. Secrets are redacted before the host log is committed;
+stdout alone feeds structured CLI parsing. The bounded append-only log records
+sequenced byte chunks and the actual provider exit result. A synced, atomically
+replaced checkpoint identifies the committed prefix; incomplete tails are ignored.
+An exclusive durable claim refuses every duplicate launch, even after an
+interrupted handoff. Unknown start/inspection/storage results stay unresolved.
 
-The directory's parent must already exist on persistent storage. Creation claims
-the leaf directory exclusively and syncs its parent before command creation.
-An existing or interrupted claim refuses a duplicate launch. Records in
-`events.jsonl` have monotonic sequences; a synced, atomically replaced
-`checkpoint.json` identifies the committed prefix. Readers ignore an incomplete
-or uncommitted tail. A terminal record includes the actual process exit code
-and an explicit reason for start failure, cancellation or output limits.
+Defaults reserve 64 MiB per run plus 64 KiB of metadata within a 1 GiB, 4096-run aggregate bound.
+`storage.run_output_max_bytes` and `storage.run_output_max_runs` override the
+aggregate limits; zero selects the defaults. Admission
+reserves capacity under a process-shared root lock, so concurrent launches cannot
+overcommit. After a verified terminal checkpoint is synced, its reservation
+shrinks to the committed source size plus metadata; incomplete captures retain
+the full reservation. Capacity exhaustion refuses launch. Output limits, the original
+absolute deadline and read failures request a stop and retain their specific
+reason. Observer cancellation does not change the original deadline.
 
-Readers own their acknowledgement cursor. Delivery can repeat after a reader
-crash; downstream journal/chat/ledger projection must be idempotent. A reader's
-cancellation never signals the capture process. Following advances a local byte
-cursor instead of rescanning the whole log on every poll. A fresh reconnect
-scans the bounded prefix once to locate its sequence. Output records are byte
-chunks, not already-decoded CLI tool events: integration must retain decoder
-state or acknowledge only a safely persisted framing boundary. Advancing a
-cursor past half a JSON line would lose information on restart.
+The exact-process stop helper uses a pidfd and process start time, with Docker
+exec identity and PID namespace checks. It requires host permission to inspect
+that identity. The trusted helper verifies the target PID namespace from within the
+container, so the controller does not need host ptrace privileges. Killing the exec leader does not prove that descendants stopped:
+forced capture results preserve occupancy and reconciliation until whole-runtime
+absence is established. No container-wide kill or privileged UID fallback is used.
 
-`run-read` normally emits JSON records and returns transport success regardless
-of the captured command's exit code. `--raw` emits command output bytes and
-returns the captured exit code; it is intended for the initial CLI stream.
-The default serialized-log limit is 64 MiB, with a maximum of 1 GiB. Space is
-reserved for a terminal record. Reaching the output limit cancels the command's
-process group and records `output_limit`; storage/commit failures are errors and
-do not fabricate completion. There is no acknowledgement-driven truncation yet.
+Recovery validates the original workspace, agent, configured spool root and
+provider identity. It reconstructs framing from sequence one, then projects stable
+line identities into the journal. Each source acknowledgement follows synchronous
+projection. Journal projection receipts survive normal history pruning, so a lost
+ACK cannot append the same event again or re-run commit observers. They do not make
+external side effects transactional. Structured CLI analysis independently
+reconstructs terminal envelopes, in-band failures, session and usage metadata;
+exit zero without a required terminal envelope remains unresolved.
 
-`run-result` validates the committed log and returns only its sequence and
-terminal result, without exposing command output. Its own exit code indicates
-probe success; the returned result contains the captured command's exit code.
-A terminal record is not delivered until checkpoint validation completes.
+A live invocation keeps its settlement authority. After a controller loss,
+protected recovery can settle only the current work generation parked by lease
+recovery or the explicit retained-capture handoff, at the matching run locator.
+Operator resolutions and newer attempts cannot be overwritten. Successful
+execution can finish that work; failed execution retains reconciliation for
+uncertain external effects. Contradictory previously staged terminal facts are
+refused. Normal API completion and recovered completion use the same stable
+journal terminal representation and durable receipt.
 
-Capture requires a Unix runtime. Linux containers on macOS/Windows hosts are the
-intended execution location; this is not evidence of tested Docker Desktop
-support. Unit/race tests and the isolated subprocess experiment do not establish
-whole-controller crash, Docker restart, host power-loss or graceful-upgrade
-acceptance.
+The periodic server pass includes terminal capture records, because execution can
+finish before history projection. Fully acknowledged natural terminal sources
+older than seven days are collected, releasing their aggregate reservation.
+Collection is crash-resumable and retains the immutable launch tombstone and
+projection/collection receipts. Aggregate limits apply to retained capture data
+and reservations; immutable identifier and projection receipts remain for the
+installation lifetime and admission currently scans those tombstones.
+Incomplete, forced or unacknowledged output is not
+silently removed. A missing spool never licenses re-execution.
 
-The deployment must protect the journal from workload writes if trusted outcome
-provenance is required. Running capture and the workload under the same UID does
-not establish that boundary. Retained raw output can contain whatever the CLI
-prints; it must not become a new unauthenticated read API or bypass the existing
-scrubbing and workspace authorization when integrated.
+The older version-1 `crewship-sidecar run-capture`, `run-read`, `run-result` and
+experimental `AgentRunRequest.DurableOutputDir` transport remain compatibility
+fixtures. They run under the workload identity and cannot authenticate a result;
+no production dispatcher selects that path. The private host path is version 2.
 
-An experimental orchestrator path (`AgentRunRequest.DurableOutputDir`) now
-prepares `run-launch`, which exclusively claims the run directory before writing
-inputs and starts `run-execute` in a detached tmux session. The admitted client
-environment, cwd, stdin and original deadline travel with this launch. The
-secret-bearing input file is consumed before the workload starts. No production
-dispatcher enables this field and it is not exposed in YAML or the public API.
-The tmux conformance test requires `-tags integration` and an installed tmux;
-the managed-environment CI lane requires it to actually execute and pass.
+The required `scripts/ci/managed-environments.py` lane builds the real command
+and sidecar plus tagged test binaries, and runs named capture qualifications as
+a distinct unprivileged host UID. Missing or skipped qualifications fail the lane.
 
-RunState retains output location, protocol version, adapter and deadline.
-Persistence failure refuses launch; duplicate local ownership and an existing
-durable run identity refuse admission. Startup and periodic recovery probe the
-retained result and preserve it in RunState. They do not infer cancellation
-solely from process absence, or publish completion before output replay. Probe
-failure leaves the outcome unresolved, including when a stopped container's
-volume cannot yet be read through the exec provider. Retained result evidence
-is not acknowledgement of history projection or successful recovery.
-
-Remaining integration: capability qualification for the bound helper binary;
-controller detach versus explicit stop; replay into normal event handling with
-durable acknowledgement; work-ledger authority; protected writer identity; and
-retention. The default tmux/FIFO path remains unchanged until those gates pass.
-
-## Known default-transport failure
-
-The existing tmux/FIFO transport still loses its workload when its output
-reader disappears (#2845). Preserve the expected-red reproducer explicitly:
-
-```sh
-go test ./internal/orchestrator -tags runoutputrepro -run '^TestTmuxRunContinuesAfterOutputReaderLoss$' -count=1 -v -timeout 1m
-```
-
-Run on Linux with tmux installed. The test uses a private tmux socket and
-synthetic output; it creates no live agent run. Missing tmux is an error.
-The observed failure is an unfinished workload and retained exit 141 (SIGPIPE).
-The build tag keeps this known-failing reproducer out of the default passing
-suite without reporting it as skipped coverage or raising the skip budget.
-Do not count it as durable-transport acceptance or remove its failure evidence.
-The separate `TestDetachedLaunchSurvivesReaderAndRejectsDuplicate` integration
-test remains required and must execute successfully in managed-environment CI.
-Production still selects the existing default transport; this foundation does
-not fix #2845 or enable durable output for production dispatch.
+Verification distinguishes component tests, the real Docker helper transport,
+controller-process loss plus reopened durable state/server replay, and full
+RunAgent dispatch. A passing component test is not evidence of the latter.
+Host power loss, Docker daemon loss and Docker Desktop support require their own
+acceptance evidence. The tagged `TestTmuxRunContinuesAfterOutputReaderLoss`
+reproducer preserves the original FIFO/SIGPIPE failure for unsupported legacy
+transport; it is not a durable-path acceptance test.

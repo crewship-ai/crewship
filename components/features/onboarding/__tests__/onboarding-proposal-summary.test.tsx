@@ -71,3 +71,9 @@ describe("OnboardingProposalSummary", () => {
     expect(screen.getAllByTestId("onboarding-proposal-summary-agent")).toHaveLength(2)
   })
 })
+
+it("shows the approved network domains and custom identity even without a slug", () => {
+  render(<OnboardingProposalSummary proposal={{ ...proposal, crewSlug: "", crewIcon: "globe", crewColor: "blue", egressDomains: ["example.com", "api.example.com"] }} created={false} />)
+  expect(screen.getByText("Network: example.com, api.example.com")).toBeVisible()
+  expect(screen.getByAltText("Research Lead")).toBeVisible()
+})

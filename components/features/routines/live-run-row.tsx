@@ -10,7 +10,6 @@ import { isAwaitingApproval } from "@/hooks/use-active-routine-runs"
 import { SourcePill } from "@/components/features/activity/source-pill"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import { apiFetch } from "@/lib/api-fetch"
-import { routineHref } from "@/lib/routine-href"
 import { cn } from "@/lib/utils"
 import { formatElapsedSince, formatStepCost } from "./routine-cost-format"
 
@@ -78,11 +77,13 @@ export function LiveRunRow({
   cancelling,
   onCancel,
   onNavigate,
+  canCancel = true,
 }: {
   run: PipelineRun
   cancelling: boolean
   onCancel: () => void
   onNavigate: () => void
+  canCancel?: boolean
 }) {
   const awaiting = isAwaitingApproval(run.status)
   const elapsed = formatElapsedSince(run.started_at)
@@ -110,7 +111,8 @@ export function LiveRunRow({
           {awaiting ? (
             <>
               <Pause className="h-3 w-3 shrink-0 text-warn" />
-              <span className="text-warn">awaiting approval</span>
+              {/* The rail's words (#2988): one state, one name across the app. */}
+              <span className="text-warn">waiting for you</span>
             </>
           ) : (
             <>
@@ -132,22 +134,27 @@ export function LiveRunRow({
       }
       actions={
         <>
+          {/* The decision is on the run's page, the same item as in Inbox
+              (#2988) — not on the routine's definition. */}
           {awaiting && (
             <BarMenuRowAction asChild>
-              <Link href={routineHref(run.pipeline_slug)} onClick={onNavigate}>
-                Review →
+              <Link href={`/activity?run=${encodeURIComponent(run.id)}`} onClick={onNavigate}>
+                Decide →
               </Link>
             </BarMenuRowAction>
           )}
           <BarMenuRowAction asChild>
             <Link href={`/activity?run=${encodeURIComponent(run.id)}`} onClick={onNavigate}>
-              Open trace ↗
+              Open run
             </Link>
           </BarMenuRowAction>
-          <BarMenuRowAction danger onClick={onCancel} disabled={cancelling} ariaLabel="Cancel run" title="Cancel this run">
-            {cancelling ? <Spinner className="h-3 w-3" /> : <Square className="h-3 w-3" />}
-            Cancel
-          </BarMenuRowAction>
+          {/* Offered only where the cancel API would accept it (OWNER/ADMIN). */}
+          {canCancel && (
+            <BarMenuRowAction danger onClick={onCancel} disabled={cancelling} ariaLabel="Cancel run" title="Cancel this run">
+              {cancelling ? <Spinner className="h-3 w-3" /> : <Square className="h-3 w-3" />}
+              Cancel
+            </BarMenuRowAction>
+          )}
         </>
       }
     />

@@ -31,11 +31,11 @@ export function useRunWaitpoints(
   const reqIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
+    const myReq = ++reqIdRef.current
     if (!workspaceId || !runId) {
       setWaitpoints([])
       return
     }
-    const myReq = ++reqIdRef.current
     const all = await listPendingWaitpoints(workspaceId)
     if (myReq !== reqIdRef.current) return
     setWaitpoints(all.filter((w) => w.pipeline_run_id === runId))
@@ -89,11 +89,11 @@ export function useWorkspaceWaitpoints(workspaceId: string | null | undefined) {
   const reqIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
+    const myReq = ++reqIdRef.current
     if (!workspaceId) {
       setWaitpoints([])
       return
     }
-    const myReq = ++reqIdRef.current
     const all = await listPendingWaitpoints(workspaceId)
     if (myReq !== reqIdRef.current) return
     setWaitpoints(all)

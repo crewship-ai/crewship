@@ -14,6 +14,8 @@ func TestSpecValidate(t *testing.T) {
 		{"sidecar uid", Spec{AllowUIDs: []uint32{1002}}, false},
 		{"empty allows nothing and fences nothing meaningful", Spec{}, true},
 		{"root is never allowed", Spec{AllowUIDs: []uint32{1002, 0}}, true},
+		{"explicit service endpoint", Spec{AllowUIDs: []uint32{1002}, AllowDests: []Dest{{Addr: netip.MustParseAddr("10.231.0.3"), Port: 6379, Proto: "tcp"}}}, false},
+		{"invalid endpoint cannot bypass spec validation", Spec{AllowUIDs: []uint32{1002}, AllowDests: []Dest{{Addr: netip.MustParseAddr("127.0.0.1"), Port: 6379, Proto: "tcp"}}}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := tc.spec.Validate(); (err != nil) != tc.wantErr {

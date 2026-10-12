@@ -291,6 +291,18 @@ func TestHandleFileDownload_PermissionDeniedIs500(t *testing.T) {
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500 (EACCES is not a 404)", w.Code)
 	}
+	if w.Body.String() != "internal server error\n" {
+		t.Fatalf("download exposed storage details: %s", w.Body.String())
+	}
+	if err := os.Chmod(crew, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(crew, 0750)
+	list := httptest.NewRecorder()
+	s.HandleFileList(list, listRequest("crew-1", ""))
+	if list.Code != http.StatusInternalServerError || list.Body.String() != "internal server error\n" {
+		t.Fatalf("inaccessible listing: %d %s", list.Code, list.Body.String())
+	}
 }
 
 // TestCrewIDTraversalForbidden pins the crew-id guard. The id arrives from
@@ -329,5 +341,23 @@ func TestCrewIDTraversalForbidden(t *testing.T) {
 				t.Errorf("crew id %q leaked a file outside the storage tree", crewID)
 			}
 		})
+	}
+}
+
+func TestFileListRejectsARegularFileAsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "crew"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "crew", "private.txt"), []byte("file-content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	NewServer(dir).HandleFileList(w, listRequest("crew", "private.txt"))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("file listing status=%d body=%s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "internal server error\n" {
+		t.Fatalf("file content or storage path leaked: %s", w.Body.String())
 	}
 }

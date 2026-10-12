@@ -23,7 +23,7 @@ func TestResilienceNetworkRecreate(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	networkName := "crewship-test-resilience"
+	networkName := filepath.Base(tmpDir)
 
 	// EnsureCrewRuntime requires sidecar+entrypoint bind-mount sources.
 	// Create placeholder files so the provider passes its fail-fast validation;
@@ -44,6 +44,8 @@ func TestResilienceNetworkRecreate(t *testing.T) {
 		RuntimeImage:      "alpine:latest",
 		DefaultRuntime:    "runc",
 		Network:           networkName,
+		ContainerPrefix:   networkName,
+		InstanceID:        networkName,
 		OutputBasePath:    tmpDir,
 		SidecarBinaryPath: sidecarPath,
 		EntrypointPath:    entrypointPath,
@@ -52,6 +54,15 @@ func TestResilienceNetworkRecreate(t *testing.T) {
 		t.Skipf("Docker not available: %v", err)
 	}
 	defer p.Close()
+	defer func() {
+		bg := context.Background()
+		for _, crew := range []struct{ id, slug string }{{"res-001", "resilience-test"}, {"res-002", "resilience-test-2"}} {
+			if cid, _, _ := p.FindCrewContainer(bg, crew.id, crew.slug); cid != "" {
+				_ = p.RemoveCrewRuntime(bg, cid)
+			}
+		}
+		_, _ = p.client.NetworkRemove(bg, networkName, client.NetworkRemoveOptions{})
+	}()
 
 	// Step 1: Create container (network exists from New())
 	containerID, err := p.EnsureCrewRuntime(ctx, provider.CrewConfig{

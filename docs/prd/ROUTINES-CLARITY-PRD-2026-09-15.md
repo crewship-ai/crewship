@@ -1,11 +1,9 @@
 # Routines: vstupy, pravidla práce a řešení problémů
 
-Datum: 2026-09-15. Stav: implementováno a browserem ověřeno na dev1; CI/review a lidská přejímka zůstávají otevřené.
-[Validační report](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/routines-clarity-validation-2026-09-15.md).
-Issue: #2555. Jedna větev `feat/routines-clarity-release-1`, jeden PR, testování na dev1.
-Navazuje na [hlavní PRD](ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08.md).
-Historické opravy #2553 jsou uzavřené podle [protokolu po mergi](https://github.com/crewship-ai/crewship/pull/2553#issuecomment-5672592832).
-Tato práce neuzavírá původní lidskou přejímku §11.
+Stav: veřejný rozsah a akceptační kritéria z 2026-09-15; nejedná se o nové
+ověření nasazení. Interní validační protokoly jsou v soukromém kontextu.
+Navazuje na [hlavní návrh](ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08.md);
+lidská přejímka jeho §11 není nahrazena technickými testy.
 
 ## Problém a výsledek
 
@@ -45,8 +43,8 @@ barvy, navigaci a společný seznam kroků; nepřidávat další editor nebo das
 
 Cílené frontend/Go regrese, skutečné API odmítnutí před spuštěním, browser na
 1440px a 390px, plný Go test/vet, frontend lint/build/test types a CI.
-Jeden PR s konkrétním review, identitou nasazení dev1 a stavem každé podmínky.
-Původní WIP se zachová. Nevytvářet reálné externí účinky při browser přejímce.
+U každé podmínky uvést výsledek a ověřenou revizi. Používat izolované
+fixture; nevytvářet reálné externí účinky při browser přejímce.
 
 ## Mimo tento inkrement
 

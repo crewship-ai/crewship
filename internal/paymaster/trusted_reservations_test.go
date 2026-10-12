@@ -66,7 +66,7 @@ func TestTrustedAndRestrictedShareAtomicHardCap(t *testing.T) {
 	}
 }
 func TestTrustedReservationUnknownErrorsAndKnownUsage(t *testing.T) {
-	for _, kind := range []string{"missing", "error", "cancel", "negative", "overbound", "known"} {
+	for _, kind := range []string{"missing", "error", "cancel", "negative", "negative-cache", "negative-cache-write", "cache-sum-overflow", "cache-write-sum-overflow", "overbound", "known"} {
 		t.Run(kind, func(t *testing.T) {
 			db, _ := reservationDB(t)
 			reservationCap(t, db, 1)
@@ -85,6 +85,16 @@ func TestTrustedReservationUnknownErrorsAndKnownUsage(t *testing.T) {
 					return response, context.Canceled
 				case "negative":
 					response.InputTokens = -1
+				case "negative-cache":
+					response.CachedInputTokens = -1
+				case "negative-cache-write":
+					response.CacheCreationTokens = -1
+				case "cache-sum-overflow":
+					response.InputTokens = math.MaxInt64
+				case "cache-write-sum-overflow":
+					response.InputTokens = 0
+					response.CachedInputTokens = math.MaxInt64
+					response.CacheCreationTokens = 1
 				case "overbound":
 					response.OutputTokens = 1001
 				}
@@ -144,5 +154,31 @@ func TestTrustedCeilingsCoverEveryChannelAcrossTiers(t *testing.T) {
 	model.Cost.Tiers[0].Output = math.Inf(1)
 	if _, ok = trustedCeilingRates(model, 2000); ok {
 		t.Fatal("unbounded rate accepted")
+	}
+}
+
+func TestTrustedCeilingsRejectUnprovablePricing(t *testing.T) {
+	negative := -1.0
+	for _, tc := range []struct {
+		name     string
+		cost     *modelcatalog.Cost
+		maxInput int64
+	}{
+		{"missing rates", nil, 1000},
+		{"zero context bound", &modelcatalog.Cost{Input: 1, Output: 2}, 0},
+		{"excessive context bound", &modelcatalog.Cost{Input: 1, Output: 2}, (2 << 20) + 1},
+		{"unknown tier axis", &modelcatalog.Cost{Input: 1, Output: 2, Tiers: []modelcatalog.CostTier{{Input: 3, Output: 4, Tier: modelcatalog.TierBound{Type: "other", Size: 500}}}}, 1000},
+		{"negative tier threshold", &modelcatalog.Cost{Input: 1, Output: 2, Tiers: []modelcatalog.CostTier{{Input: 3, Output: 4, Tier: modelcatalog.TierBound{Type: "context", Size: -1}}}}, 1000},
+		{"zero input rate", &modelcatalog.Cost{Input: 0, Output: 2}, 1000},
+		{"negative output rate", &modelcatalog.Cost{Input: 1, Output: -1}, 1000},
+		{"NaN rate", &modelcatalog.Cost{Input: math.NaN(), Output: 2}, 1000},
+		{"negative cache read", &modelcatalog.Cost{Input: 1, Output: 2, CacheRead: &negative}, 1000},
+		{"negative cache creation", &modelcatalog.Cost{Input: 1, Output: 2, CacheWrite: &negative}, 1000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if ceiling, ok := trustedCeilingRates(modelcatalog.Model{Cost: tc.cost}, tc.maxInput); ok {
+				t.Fatalf("hard budget accepted an unprovable ceiling: %+v", ceiling)
+			}
+		})
 	}
 }

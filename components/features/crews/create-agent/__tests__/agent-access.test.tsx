@@ -192,7 +192,8 @@ describe("<CreateAgentDialog> — Tools & notifications", () => {
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
 
     await waitFor(() => expect(toast.success).toHaveBeenCalled())
-    expect(calls.filter((c) => c.url.includes("/agents/a1/"))).toHaveLength(0)
+    // The avatar render stored after create (#2876) is not a grant.
+    expect(calls.filter((c) => c.url.includes("/agents/a1/") && !c.url.includes("/agents/a1/avatar"))).toHaveLength(0)
   })
 
   it("says which grants did not apply rather than reporting a clean create", async () => {

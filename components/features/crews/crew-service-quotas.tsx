@@ -9,9 +9,10 @@ import { Input } from "@/components/ui/input"
 type Volume = { name: string; mount: string; quota_bytes?: number; generation?: number }
 type Service = { name: string; image: string; ports?: string[]; env_refs?: string[]; volumes?: Volume[]; quota_enforced?: boolean }
 const MIB = 1024 * 1024
-// Quota volume contents cannot be captured yet, so the backup guard refuses
-// rather than produce a bundle that silently omits service data.
-const BACKUP_WARNING = "While a service keeps quota storage, backups of this crew and its workspace are refused until snapshot transport for quota volumes is available."
+// Backups capture quota disks through the host quota helper. Without it the
+// backup guard refuses rather than produce a bundle that omits service data,
+// and a failed capture keeps service maintenance until a --recover-services retry.
+const BACKUP_WARNING = "Backups of this crew and its workspace include these disks when the server's quota helper is configured; without it, they are refused. An interrupted backup keeps the service stopped until an admin retries the backup with --recover-services."
 
 // Accept only the server's complete public representation. Private or unknown
 // settings cannot be reconstructed by this quota editor.

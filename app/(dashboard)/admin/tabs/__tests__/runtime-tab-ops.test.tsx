@@ -5,14 +5,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
 
+import { toast } from "sonner"
 import { RuntimeTab } from "../runtime-tab"
+import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
 
 const h = vi.hoisted(() => ({ apiFetch: vi.fn() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => h.apiFetch(...args) }))
 
 const ok = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => "" })
 let legacyPresent = false
+let logPutFails = false
 const LOG = { level: "info", baseline: "info" }
 
 function routes(url: string, init?: RequestInit) {
@@ -21,6 +25,7 @@ function routes(url: string, init?: RequestInit) {
   if (u.startsWith("/api/v1/agents/crews-status")) return ok({ total: 17, running: 3, idle: 13, queued: 1, error: 0 })
   if (u.startsWith("/api/v1/admin/log-level")) {
     if (init?.method === "PUT") {
+      if (logPutFails) return { ok: false, status: 500, json: async () => ({ error: "log level store is down" }), text: async () => JSON.stringify({ error: "log level store is down" }) }
       const b = JSON.parse(String(init.body))
       return ok({ level: b.level, baseline: "info", expires_at: b.ttl_seconds ? "2026-09-29T12:15:00Z" : undefined })
     }
@@ -42,15 +47,21 @@ function routes(url: string, init?: RequestInit) {
 beforeEach(() => {
   cleanup()
   legacyPresent = false
+  logPutFails = false
+  vi.mocked(toast.error).mockReset()
   h.apiFetch.mockReset()
   h.apiFetch.mockImplementation(async (u: string, init?: RequestInit) => routes(u, init))
 })
 
 function renderTab() {
+  // Inside a page, as Admin renders it: the level edit joins the page's Save bar.
   return render(
-    <RuntimeTab runtimeChecking={false} runtimeAvailable
-      allRuntimes={[{ runtime: "docker", version: "29.3.0", socket: "/var/run/docker.sock", in_use: true }]}
-      runtimeInstallLinks={{}} onCheckRuntime={vi.fn()} workspaceId="ws-1" />,
+    <PageSaveProvider>
+      <RuntimeTab runtimeChecking={false} runtimeAvailable
+        allRuntimes={[{ runtime: "docker", version: "29.3.0", socket: "/var/run/docker.sock", in_use: true }]}
+        runtimeInstallLinks={{}} onCheckRuntime={vi.fn()} workspaceId="ws-1" />
+      <PageSaveBar />
+    </PageSaveProvider>,
   )
 }
 const calls = (pred: (u: string, init?: RequestInit) => boolean) =>
@@ -75,7 +86,10 @@ describe("Runtime — logging", () => {
     await waitFor(() => expect(document.querySelector("[data-slot=log-current]")).not.toBeNull())
     fireEvent.click(screen.getByRole("button", { name: "debug" }))
     fireEvent.click(screen.getByRole("button", { name: "1 hour" }))
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+    // No Apply in the card: the page's bar carries the edit.
+    expect(screen.queryByRole("button", { name: "Apply" })).toBeNull()
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("2 unsaved changes")
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(calls((u, i) => u.startsWith("/api/v1/admin/log-level") && i?.method === "PUT")).toHaveLength(1))
     const [, init] = calls((u, i) => u.startsWith("/api/v1/admin/log-level") && i?.method === "PUT")[0]
     expect(JSON.parse(String(init!.body))).toEqual({ level: "debug", ttl_seconds: 3600 })
@@ -84,6 +98,29 @@ describe("Runtime — logging", () => {
     await waitFor(() => expect(calls((u, i) => u.startsWith("/api/v1/admin/log-level") && i?.method === "PUT")).toHaveLength(2))
     const [, back] = calls((u, i) => u.startsWith("/api/v1/admin/log-level") && i?.method === "PUT")[1]
     expect(JSON.parse(String(back!.body))).toEqual({ level: "info", ttl_seconds: 0 })
+  })
+
+  it("shows nothing to save until a level is picked, and Discard drops the pick", async () => {
+    renderTab()
+    await waitFor(() => expect(document.querySelector("[data-slot=log-current]")).not.toBeNull())
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "warn" }))
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("1 unsaved change")
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
+    expect(screen.getByRole("button", { name: "info" })).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("a refused level change is a corner toast and the pick stays", async () => {
+    logPutFails = true
+    renderTab()
+    await waitFor(() => expect(document.querySelector("[data-slot=log-current]")).not.toBeNull())
+    fireEvent.click(screen.getByRole("button", { name: "debug" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(vi.mocked(toast.error).mock.calls[0][0]).toBe("Couldn’t save Logging")
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("1 unsaved change")
+    expect(screen.getByRole("button", { name: "debug" })).toHaveAttribute("aria-pressed", "true")
   })
 })
 

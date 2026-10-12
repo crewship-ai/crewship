@@ -249,7 +249,7 @@ func TestServeHTTP_FullShellSession(t *testing.T) {
 	if cfg.User != "1001:1001" {
 		t.Errorf("User = %q, want 1001:1001", cfg.User)
 	}
-	if cfg.ContainerID != "crewship-team-crew-a" {
+	if cfg.ContainerID != "container-crew-a" {
 		t.Errorf("ContainerID = %q (slug must come from DB, not client)", cfg.ContainerID)
 	}
 
@@ -681,7 +681,7 @@ func TestServeHTTP_AttachMode(t *testing.T) {
 
 // TestServeHTTP_SlugSpoofRejected pins the DB-resolved-slug defence: the
 // client-supplied crew_slug is ignored in favor of the DB row, so the
-// container name targets the real crew even when the init lies.
+// reserved container ID targets the real crew even when the init lies.
 func TestServeHTTP_SlugSpoofRejected(t *testing.T) {
 	v := newTestValidator(t)
 	db := seedTerminalDB(t)
@@ -701,7 +701,7 @@ func TestServeHTTP_SlugSpoofRejected(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if got := im.config().ContainerID; got != "crewship-team-crew-a" {
+	if got := im.config().ContainerID; got != "container-crew-a" {
 		t.Errorf("container = %q — spoofed slug must not be honored", got)
 	}
 

@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -346,7 +347,9 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if h.provisioner != nil {
 		crewCfg.ProvisionSink = h.provisioner.RuntimeProvisionSink(r.Context(), body.CrewID, body.WorkspaceID)
 	}
-	containerID, err = h.orch.GetOrCreateContainerCfg(r.Context(), crewCfg, body.WorkspaceID)
+	runtimeUse, err := h.orch.AcquireContainerCfg(provider.WithRuntimeUseNoWait(r.Context()), crewCfg, body.WorkspaceID)
+	defer runtimeUse.Release()
+	containerID = runtimeUse.ContainerID()
 	if err != nil {
 		h.logger.Error("get container for query", "error", err, "query_id", convID)
 		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",
@@ -378,6 +381,7 @@ Answer concisely. This is a quick question, not a task.
 Question: %s`, body.FromSlug, body.Question)
 
 	req, buildErr := h.buildPeerQueryRequest(r.Context(), body, target, containerID, peerQueryBlock, runID)
+	req.RuntimeUse = runtimeUse
 	if buildErr != nil {
 		// Fail closed: the single builder could not assemble the request (no
 		// resolver / resolve failure). Fail the query loudly rather than answer

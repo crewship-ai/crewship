@@ -94,8 +94,9 @@ func backupOverviewSchema() map[string]any {
 		"workspaces": array(object(map[string]any{
 			"workspace_id": bpStr(), "name": bpStr(), "last_backup_at": bpNullable(bpStr()), "status": bpStr(), "plan": bpNullable(bpStr()), "proof": bpInteger(),
 		}, "workspace_id", "name", "last_backup_at", "status", "plan", "proof")),
-		"instance_summary": bpNullable(bpStr()),
-	}, "status", "needs_attention", "nights", "space", "instance_summary")
+		"instance_summary":    bpNullable(bpStr()),
+		"crewless_workspaces": bpInteger(),
+	}, "status", "needs_attention", "nights", "space", "instance_summary", "crewless_workspaces")
 }
 
 func backupPlanSchemaCatalog() map[string]DomainSchema {

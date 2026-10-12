@@ -162,7 +162,7 @@ func seedCrewConnections(ctx context.Context, client *cli.Client, crewIDs map[st
 // Phase 3: Agents
 // ════════════════════════════════════════════════════════════════════════════
 
-func seedAgents(ctx context.Context, client *cli.Client, crewIDs map[string]string) (map[string]string, map[string]bool, error) {
+func seedAgents(ctx context.Context, client *cli.Client, crewIDs map[string]string, offline ...bool) (map[string]string, map[string]bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
@@ -199,6 +199,9 @@ func seedAgents(ctx context.Context, client *cli.Client, crewIDs map[string]stri
 			"memory_enabled":  a.MemoryEnabled,
 			"system_prompt":   prompt,
 		}
+		if len(offline) > 0 && offline[0] && a.AgentRole == "LEAD" {
+			body["lead_mode"] = "passive"
+		}
 		for k, v := range agentUpdateOnlyFields(a) {
 			body[k] = v
 		}
@@ -208,6 +211,20 @@ func seedAgents(ctx context.Context, client *cli.Client, crewIDs map[string]stri
 		}
 		if err := applyAgentUpdateOnlyFields(client, id, a); err != nil {
 			return nil, nil, fmt.Errorf("agent %s: %w", a.Slug, err)
+		}
+		if len(offline) > 0 && offline[0] {
+			patch := map[string]any{"schedule_enabled": false}
+			if a.AgentRole == "LEAD" {
+				patch["lead_mode"] = "passive"
+			}
+			resp, err := client.Patch("/api/v1/agents/"+id, patch)
+			if err != nil {
+				return nil, nil, fmt.Errorf("disable automatic execution for offline agent %s: %w", a.Slug, err)
+			}
+			if err := cli.CheckError(resp); err != nil {
+				return nil, nil, err
+			}
+			resp.Body.Close()
 		}
 		// POST conflicts resolve an existing agent without changing its model.
 		// An opt-in Codex re-seed must convert the seeded agents as well.

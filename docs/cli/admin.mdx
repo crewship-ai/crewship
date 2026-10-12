@@ -485,17 +485,17 @@ crewship admin stats --format json | jq '.crews'
 
 ```
 COUNT        VALUE
-Crews        3 of 15
+Crews        3
 Agents       8
-Members      2 of 5
+Members      2
 Running now  0
 Edition      community
 ```
 
-Counts are read against the ceiling the licence imposes on each: a bare "8
-agents" is not something anyone acts on, "3 of 15 crews" is. Where the edition
-imposes no ceiling, the bare count is shown. If the licence cannot be read the
-counts still print — losing the ceilings must not cost you the numbers.
+Current open-source releases permit unlimited crews, members and agents, so
+these counts have no license ceiling. Future releases may introduce resource
+licensing; the CLI retains support for displaying finite ceilings. If the
+license cannot be read, counts still print.
 
 ---
 
@@ -1166,7 +1166,9 @@ image) or `skip` (no Docker), and the layers count toward the space check.
 
 | Flag | Required | Description |
 |---|---|---|
-| `--target` | no | `empty_server` (default), `isolated`, `replace`, `new_workspace` or `crew`. |
+| `--target` | no | `empty_server` (default), `isolated`, `replace`, `new_workspace`, `crew` or `in_place` (the backup under its own names, e.g. a crew archive as the crew it was). |
+| `--as-workspace` | no | The new workspace name a `new_workspace` target lands under; judged like the restore judges it (a free slug, deleted workspaces included). |
+| `--as-crew` | no | The new crew name a `crew` target lands under, judged the same way. |
 | `--identity` | no | age identity file; also reads the crews' configuration for unsafe settings. |
 | `--passphrase-file` | no | The bundle's passphrase, for the same. |
 | `--timeout` | no | How long to wait for the server, 30m by default. |

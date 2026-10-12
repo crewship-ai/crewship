@@ -143,6 +143,11 @@ var reportingVerbs = map[string]bool{
 // reportingCommands names the reporting commands whose leaf verb does not say
 // so — the top-level ones mostly, where the noun IS the command.
 var reportingCommands = map[string]bool{
+	"crewship paths": true,
+	// Decision results are advisory reports, never server mutations.
+	"crewship decisions evaluate":      true,
+	"crewship decisions triage":        true,
+	"crewship decisions rerank":        true,
 	"crewship lint":                    true,
 	"crewship logs":                    true,
 	"crewship activity":                true,
@@ -162,6 +167,10 @@ var reportingCommands = map[string]bool{
 // TestFormatContractExemptionsAreAllReal below, so this table cannot rot into
 // a graveyard.
 var formatContractExempt = map[string]string{
+	"crewship ai config": "exports a client configuration document in the chosen client syntax (TOML or JSON), not the global display format",
+	"crewship ai skill":  "exports the embedded SKILL.md verbatim; installation receipts go to stderr",
+	"crewship mcp serve": "stdout is the MCP JSON-RPC transport, never a CLI rendering",
+
 	// Manifest export. Verified in cmd_export.go: both build a
 	// `cli.ManifestDoc` and hand it to yaml.Marshal unconditionally, with no
 	// reference to the format flag anywhere on the path. That is by design —

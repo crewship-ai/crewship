@@ -68,7 +68,6 @@ export function AgentStrip({
         <AgentAvatar
           seed={agent.avatar_seed || agent.slug}
           style={agent.avatar_style}
-          agentId={agent.id}
           avatarUrl={agent.avatar_url}
           alt=""
           className={cn("rounded-lg", large ? "h-14 w-14 rounded-xl" : "h-8 w-8")}

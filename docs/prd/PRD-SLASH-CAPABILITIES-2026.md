@@ -5,7 +5,7 @@
 | Owner | Pavel |
 | Status | draft — pending approval |
 | Scope | enterprise multi-tenant agent gate: end-user slash commands in chat UI + CLI, gated by per-user capabilities assigned by workspace admins |
-| Related | [MEMORY-ROADMAP-2026.md](MEMORY-ROADMAP-2026.md), [PRD-AGENT-EVOLUTION-2026.md](PRD-AGENT-EVOLUTION-2026.md) |
+| Related | [MEMORY-ROADMAP-2026.md](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/MEMORY-ROADMAP-2026.md), [PRD-AGENT-EVOLUTION-2026.md](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/PRD-AGENT-EVOLUTION-2026.md) |
 
 ## 1. Context
 

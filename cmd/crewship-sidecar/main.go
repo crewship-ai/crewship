@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/runoutput"
 	"github.com/crewship-ai/crewship/internal/sidecar"
 )
@@ -38,6 +39,14 @@ type sidecarInput struct {
 }
 
 func main() {
+	// A flag is intentional: old binaries reject it rather than starting the
+	// proxy after flag parsing stops at an unrecognized positional command.
+	if len(os.Args) == 2 && os.Args[1] == "--host-capture-probe-v1" {
+		os.Exit(runStopProcessCommand([]string{"--probe"}, os.Stdout))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "run-stop-process" {
+		os.Exit(runStopProcessCommand(os.Args[2:], os.Stderr))
+	}
 	if len(os.Args) > 1 && (os.Args[1] == "run-launch" || os.Args[1] == "run-execute") {
 		ctx, stop := signal.NotifyContext(context.Background(), runoutput.ExecutionSignals()...)
 		code := runLaunchCommand(ctx, os.Args[1], os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
@@ -50,7 +59,21 @@ func main() {
 		stop()
 		os.Exit(code)
 	}
+	// Parse this mode before the sidecar flags: CLI arguments belong to the
+	// admitted native executable, never to a shell or the flag parser.
+	if len(os.Args) > 1 && os.Args[1] == "--managed-launch" {
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "managed launch: descriptor and CLI arguments required")
+			os.Exit(126)
+		}
+		if err := managedlaunch.Launch(os.Args[2], os.Args[3:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(126)
+		}
+		return
+	}
 	addr := flag.String("addr", sidecar.DefaultAddr, "listen address")
+	_ = flag.String("managed-launch", "", "internal static-native launch descriptor; followed by CLI arguments")
 	showVersion := flag.Bool("version", false, "print version info and exit")
 	healthCheck := flag.Bool("health-check", false,
 		"probe a already-running sidecar's /health endpoint and exit 0 (healthy) or 1")

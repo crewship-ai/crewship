@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { apiFetch } from "@/lib/api-fetch"
 
@@ -56,15 +56,10 @@ const EMPTY: CreatedInventory = { crews: [], routines: [], pages: [] }
 /** The Guide's own crew. Never shown — see the component doc comment. */
 const SETUP_CREW_SLUG = "_crewship-setup"
 
-function asArray(v: unknown): Record<string, unknown>[] {
-  if (Array.isArray(v)) return v as Record<string, unknown>[]
-  // Some list endpoints wrap in {items: [...]}; tolerate both rather than
-  // rendering nothing because one of three shapes differed.
-  if (v && typeof v === "object") {
-    const items = (v as Record<string, unknown>).items
-    if (Array.isArray(items)) return items as Record<string, unknown>[]
-  }
-  return []
+function asArray(v: unknown): Record<string, unknown>[] | null {
+  const rows = Array.isArray(v) ? v : v && typeof v === "object" ? (v as Record<string, unknown>).items : null
+  if (!Array.isArray(rows)) return null
+  return rows.filter((row): row is Record<string, unknown> => row !== null && typeof row === "object" && !Array.isArray(row))
 }
 
 function str(o: Record<string, unknown>, ...keys: string[]): string {
@@ -96,70 +91,59 @@ export function OnboardingCreatedPanel({
    *  used to land on a disabled Launch with no way to finish setup. */
   onCrewsFound?: (count: number) => void
 }) {
-  const [inv, setInv] = useState<CreatedInventory>(EMPTY)
-  // Poll while the Crew step is open. The agent creates these from inside its
-  // container with no path back to this tab, so there is no event to listen
-  // for — polling is the honest mechanism, not a shortcut around one.
-  const stopped = useRef(false)
+  const [snapshot, setSnapshot] = useState<{ workspaceId: string | null; inventory: CreatedInventory }>({ workspaceId: null, inventory: EMPTY })
+  const inv = snapshot.workspaceId === workspaceId ? snapshot.inventory : EMPTY
 
-  const load = useCallback(async (ws: string) => {
-    const q = `?workspace_id=${encodeURIComponent(ws)}`
-    const [crewsRes, routinesRes, pagesRes] = await Promise.allSettled([
-      apiFetch(`/api/v1/crews${q}`),
-      apiFetch(`/api/v1/workspaces/${encodeURIComponent(ws)}/pipelines${q}`),
-      apiFetch(`/api/v1/pages${q}`),
-    ])
+  useEffect(() => {
+    let stopped = false
+    let loading = false
+    setSnapshot({ workspaceId, inventory: EMPTY })
+    onCrewsFound?.(0)
+    if (!workspaceId) return
 
-    const read = async (r: PromiseSettledResult<Response>) => {
-      if (r.status !== "fulfilled" || !r.value.ok) return []
-      return asArray(await r.value.json().catch(() => null))
-    }
-    // The crew count is a fact the wizard gates Launch on: a failed request
-    // must leave the last known count alone rather than report zero.
-    const crewsAnswered = crewsRes.status === "fulfilled" && crewsRes.value.ok
-
-    const [crewRows, routineRows, pageRows] = await Promise.all([
-      read(crewsRes),
-      read(routinesRes),
-      read(pagesRes),
-    ])
-
-    const crews = crewRows
-        .filter((c) => str(c, "slug") !== SETUP_CREW_SLUG)
-        .map((c) => ({
-          id: str(c, "id"),
-          slug: str(c, "slug"),
+    const load = async () => {
+      // A slow poll must finish before another starts. Otherwise an older
+      // inventory can overwrite a newer one, including the count gating Launch.
+      if (loading) return
+      loading = true
+      try {
+        const q = `?workspace_id=${encodeURIComponent(workspaceId)}`
+        const responses = await Promise.allSettled([
+          apiFetch(`/api/v1/crews${q}`),
+          apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines${q}`),
+          apiFetch(`/api/v1/pages${q}`),
+        ])
+        const read = async (r: PromiseSettledResult<Response>) => {
+          if (r.status !== "fulfilled" || !r.value.ok) return null
+          return asArray(await r.value.json().catch(() => null))
+        }
+        const [crewRows, routineRows, pageRows] = await Promise.all(responses.map(read))
+        if (stopped) return
+        const crews = crewRows?.filter((c) => str(c, "slug") !== SETUP_CREW_SLUG).map((c) => ({
+          id: str(c, "id"), slug: str(c, "slug"),
           name: str(c, "name") || str(c, "slug"),
           agentCount: num(c, "agent_count", "agentCount", "agents"),
         }))
-    if (crewsAnswered) onCrewsFound?.(crews.length)
-    setInv({
-      crews,
-      routines: routineRows.map((p) => ({
-        slug: str(p, "slug"),
-        name: str(p, "name") || str(p, "slug"),
-        status: str(p, "status"),
-      })),
-      pages: pageRows.map((p) => ({
-        slug: str(p, "slug"),
-        name: str(p, "name") || str(p, "slug"),
-        panelCount: num(p, "panel_count", "panelCount"),
-      })),
-    })
-  }, [onCrewsFound])
-
-  useEffect(() => {
-    if (!workspaceId) return
-    stopped.current = false
-    void load(workspaceId)
-    const t = setInterval(() => {
-      if (!stopped.current) void load(workspaceId)
-    }, 4000)
-    return () => {
-      stopped.current = true
-      clearInterval(t)
+        // Failed or malformed responses preserve the last known inventory.
+        // An answered, empty list is the only signal that it is really empty.
+        if (crews) onCrewsFound?.(crews.length)
+        setSnapshot((previous) => ({ workspaceId, inventory: {
+          crews: crews ?? previous.inventory.crews,
+          routines: routineRows?.map((p) => ({
+            slug: str(p, "slug"), name: str(p, "name") || str(p, "slug"), status: str(p, "status"),
+          })) ?? previous.inventory.routines,
+          pages: pageRows?.map((p) => ({
+            slug: str(p, "slug"), name: str(p, "name") || str(p, "slug"), panelCount: num(p, "panel_count", "panelCount"),
+          })) ?? previous.inventory.pages,
+        } }))
+      } finally {
+        loading = false
+      }
     }
-  }, [workspaceId, load])
+    void load()
+    const timer = setInterval(() => { void load() }, 4000)
+    return () => { stopped = true; clearInterval(timer) }
+  }, [workspaceId, onCrewsFound])
 
   const total = inv.crews.length + inv.routines.length + inv.pages.length
   if (total === 0) return null

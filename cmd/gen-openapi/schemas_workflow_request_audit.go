@@ -48,7 +48,7 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"pinned_version": integer(), "expected_definition_hash": str(), "fire_at": str(),
 		"tags": arr(str()), "metadata": anyObject(), "delay_seconds": integer(), "ttl_seconds": integer(),
 		"debounce_key": str(), "debounce_window_seconds": integer(), "debounce_max_seconds": integer(),
-		"priority": integer(), "idempotency_key_ttl_seconds": integer(),
+		"priority": integer(), "idempotency_key_ttl_seconds": integer(), "queue_if_busy": boolean(),
 	})
 	batchItem := obj(map[string]any{"inputs": anyObject(), "tags": arr(str()), "metadata": anyObject()})
 	batch := obj(map[string]any{"items": arr(batchItem), "tags": arr(str()), "tier_override": str()})

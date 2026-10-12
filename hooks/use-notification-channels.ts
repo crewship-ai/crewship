@@ -140,17 +140,19 @@ export function useNotificationChannels(
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const activeRefresh = useRef<(() => Promise<void>) | null>(null)
 
   const refresh = useCallback(async () => {
+    abortRef.current?.abort()
+    setError(null)
     if (!workspaceId) {
       setChannels([])
+      setLoading(false)
       return
     }
-    abortRef.current?.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setLoading(true)
-    setError(null)
     try {
       const q = new URLSearchParams({ workspace_id: workspaceId })
       if (includeEveryone) q.set("scope", "all")
@@ -174,8 +176,12 @@ export function useNotificationChannels(
   }, [workspaceId, includeEveryone])
 
   useEffect(() => {
+    activeRefresh.current = refresh
     refresh()
-    return () => abortRef.current?.abort()
+    return () => {
+      activeRefresh.current = null
+      abortRef.current?.abort()
+    }
   }, [refresh])
 
   const create = useCallback(
@@ -194,7 +200,7 @@ export function useNotificationChannels(
         throw new Error(errBody?.error ?? errBody?.detail ?? `create channel: ${res.status}`)
       }
       const out: CreatedChannel = await res.json()
-      await refresh()
+      if (activeRefresh.current === refresh) await refresh()
       return out
     },
     [workspaceId, refresh],
@@ -211,7 +217,7 @@ export function useNotificationChannels(
         const errBody = await res.json().catch(() => null)
         throw new Error(errBody?.error ?? errBody?.detail ?? `delete channel: ${res.status}`)
       }
-      await refresh()
+      if (activeRefresh.current === refresh) await refresh()
     },
     [workspaceId, refresh],
   )
@@ -270,7 +276,7 @@ export function useNotificationChannels(
         const errBody = await res.json().catch(() => null)
         throw new Error(errBody?.error ?? errBody?.detail ?? `update channel: ${res.status}`)
       }
-      await refresh()
+      if (activeRefresh.current === refresh) await refresh()
     },
     [workspaceId, refresh],
   )

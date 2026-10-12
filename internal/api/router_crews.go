@@ -30,6 +30,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 		ws.SetHub(r.hub)
 	}
 	ws.SetJournal(r.Journal())
+	ws.SetStorageRoot(r.storagePath)
 	crews := NewCrewHandler(r.db, r.logger)
 	crewSocket := r.socketPath
 	if crewSocket == "" {
@@ -99,6 +100,12 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// enforced inside the handler; the route gate is roleManage (ADMIN+)
 	// so a MANAGER never even reaches the finer OWNER check (#866.2).
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}", roleManage, ws.Delete)
+	// Workspace logo (#3005): set/clear like a rename (ADMIN+); the serve
+	// route is authed only — a workspace is drawn to instance admins and in
+	// the switcher, not just to its members.
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/logo", roleManage, ws.UploadLogo)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/logo", roleManage, ws.DeleteLogo)
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/logo", authed(http.HandlerFunc(ws.ServeLogo)))
 
 	// Workspace members
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members", authed(wsCtx(http.HandlerFunc(ws.ListMembers))))
@@ -615,8 +622,8 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/provision", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionStatus))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/provision/revisions", authed(wsCtx(http.HandlerFunc(provisioning.EnvironmentRevisions))))
 	r.authedMut("POST", "/api/v1/crews/{crewId}/provision", roleCreate, provisioning.ProvisionTrigger)
-	// The rebuild handler delegates its enqueue failure response.
-	// openapi: responses 500
+	// ProvisionRebuild delegates admission and responses to ProvisionTrigger.
+	// openapi: responses 202,400,401,403,404,409,429,500,503
 	r.authedMut("POST", "/api/v1/crews/{crewId}/rebuild", roleCreate, provisioning.ProvisionRebuild)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/restart-agents", roleCreate, provisioning.RestartCrewAgents)
 

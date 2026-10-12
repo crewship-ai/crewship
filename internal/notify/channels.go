@@ -101,11 +101,17 @@ type Channel struct {
 	// URL (decrypted) for Type == ChannelShoutrrr. Populated only on
 	// dispatch-path reads and never serialized to API clients.
 	Secret string `json:"-"`
+
+	// A corrupt row remains visible for repair/deletion but cannot deliver.
+	configErr error
 }
 
 // Wants reports whether this channel is subscribed to the given event
 // type. An empty subscription (legacy/none) is treated as failures-only.
 func (c Channel) Wants(eventType string) bool {
+	if c.configErr != nil {
+		return false
+	}
 	if len(c.Events) == 0 {
 		return eventType == EventRunFailed
 	}
@@ -448,6 +454,9 @@ func (s *ChannelStore) GetForDispatch(ctx context.Context, workspaceID, id strin
 	if len(rows) == 0 {
 		return Channel{}, ErrNotFound
 	}
+	if rows[0].configErr != nil {
+		return Channel{}, rows[0].configErr
+	}
 	return rows[0], nil
 }
 
@@ -564,6 +573,9 @@ func (s *ChannelStore) ListForUser(ctx context.Context, workspaceID, userID stri
 // AllowsCategory reports whether the channel's admin allowlist admits
 // category. An empty allowlist (the pre-#1412 default) admits everything.
 func (c Channel) AllowsCategory(category string) bool {
+	if c.configErr != nil {
+		return false
+	}
 	if len(c.Categories) == 0 {
 		return true
 	}
@@ -626,16 +638,25 @@ WHERE workspace_id = ? AND deleted_at IS NULL`
 		c.OwnerUserID = ownerUserID.String
 		c.MinPriority = minPriority
 		var parsed channelConfig
-		_ = json.Unmarshal([]byte(cfg), &parsed)
+		if err := json.Unmarshal([]byte(cfg), &parsed); err != nil {
+			c.configErr = fmt.Errorf("notify: decode config for %s: %w", c.ID, err)
+			c.Enabled = false
+		}
 		c.URL = parsed.URL
 		c.To = parsed.To
 		if eventsJSON.Valid && eventsJSON.String != "" {
-			_ = json.Unmarshal([]byte(eventsJSON.String), &c.Events)
+			if err := json.Unmarshal([]byte(eventsJSON.String), &c.Events); err != nil {
+				c.configErr = fmt.Errorf("notify: decode events for %s: %w", c.ID, err)
+				c.Enabled = false
+			}
 		}
 		if categoriesJSON.Valid && categoriesJSON.String != "" {
-			_ = json.Unmarshal([]byte(categoriesJSON.String), &c.Categories)
+			if err := json.Unmarshal([]byte(categoriesJSON.String), &c.Categories); err != nil {
+				c.configErr = fmt.Errorf("notify: decode categories for %s: %w", c.ID, err)
+				c.Enabled = false
+			}
 		}
-		if withSecret && secretEnc.Valid && secretEnc.String != "" {
+		if withSecret && c.configErr == nil && secretEnc.Valid && secretEnc.String != "" {
 			dec, err := encryption.Decrypt(secretEnc.String)
 			if err != nil {
 				return nil, fmt.Errorf("notify: decrypt secret for %s: %w", c.ID, err)

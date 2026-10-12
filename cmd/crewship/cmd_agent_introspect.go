@@ -4,7 +4,10 @@ package main
 // debug, skills, credentials. Extracted from cmd_agent.go.
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -85,13 +88,38 @@ var agentStopCmd = &cobra.Command{
 			return err
 		}
 		if err := cli.CheckError(resp); err != nil {
-			return err
+			return agentStopRefusal(err, args[0])
 		}
-		resp.Body.Close()
+		defer resp.Body.Close()
+		var stopped struct {
+			Outcome string `json:"outcome" yaml:"outcome"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&stopped)
 
+		if stopped.Outcome == "already_stopped" {
+			cli.PrintSuccess(fmt.Sprintf("Agent %s was not running; nothing to stop.", args[0]))
+			return nil
+		}
 		cli.PrintSuccess(fmt.Sprintf("Agent %s stopped.", args[0]))
 		return nil
 	},
+}
+
+// agentStopRefusal adds what to do next to the stop route's two coded
+// refusals (#2879). Both mean the agent may still be running; the exit code
+// stays the APIError's.
+func agentStopRefusal(err error, slug string) error {
+	var apiErr *cli.APIError
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+	switch apiErr.Extensions["code"] {
+	case "stop_not_confirmed":
+		return fmt.Errorf("%w\n  The agent may still be running and its stop was not confirmed. Retry with `crewship agent stop %s`; check `crewship agent runs %s`.", err, slug, slug)
+	case "runtime_unavailable":
+		return fmt.Errorf("%w\n  The runtime could not be reached, so the agent may still be running. Check `crewship doctor`, then retry.", err)
+	}
+	return err
 }
 
 // agentLogsCmd is an alias for the top-level `crewship logs`, not a second
@@ -170,12 +198,20 @@ var agentSkillsCmd = &cobra.Command{
 			return err
 		}
 
+		// The API nests the skill under "skill" (#3032: the flat
+		// skill_name/category fields this used to read never existed, so
+		// NAME and CATEGORY printed blank).
 		var skills []struct {
-			ID        string `json:"id" yaml:"id"`
-			SkillID   string `json:"skill_id" yaml:"skill_id"`
-			SkillName string `json:"skill_name" yaml:"skill_name"`
-			Category  string `json:"category" yaml:"category"`
-			Enabled   bool   `json:"enabled" yaml:"enabled"`
+			ID      string `json:"id" yaml:"id"`
+			SkillID string `json:"skill_id" yaml:"skill_id"`
+			Enabled bool   `json:"enabled" yaml:"enabled"`
+			Skill   struct {
+				Slug             string   `json:"slug" yaml:"slug"`
+				DisplayName      *string  `json:"display_name" yaml:"display_name"`
+				Category         *string  `json:"category" yaml:"category"`
+				NeedsCredentials []string `json:"needs_credentials" yaml:"needs_credentials"`
+			} `json:"skill" yaml:"skill"`
+			MissingCredentials []string `json:"missing_credentials" yaml:"missing_credentials"`
 		}
 		if err := cli.ReadJSON(resp, &skills); err != nil {
 			return err
@@ -186,14 +222,25 @@ var agentSkillsCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		headers := []string{"SKILL ID", "NAME", "CATEGORY", "ENABLED"}
+		headers := []string{"SKILL ID", "SLUG", "NAME", "CATEGORY", "ENABLED", "MISSING CREDENTIALS"}
 		var rows [][]string
 		for _, s := range skills {
 			enabled := "yes"
 			if !s.Enabled {
 				enabled = "no"
 			}
-			rows = append(rows, []string{f.ShortID(s.SkillID, s.SkillID[:min(12, len(s.SkillID))]), s.SkillName, s.Category, enabled})
+			name, category := s.Skill.Slug, ""
+			if s.Skill.DisplayName != nil && *s.Skill.DisplayName != "" {
+				name = *s.Skill.DisplayName
+			}
+			if s.Skill.Category != nil {
+				category = *s.Skill.Category
+			}
+			missing := "—"
+			if len(s.MissingCredentials) > 0 {
+				missing = strings.Join(s.MissingCredentials, ", ")
+			}
+			rows = append(rows, []string{f.ShortID(s.SkillID, s.SkillID[:min(12, len(s.SkillID))]), s.Skill.Slug, name, category, enabled, missing})
 		}
 		return f.Auto(skills, headers, rows)
 	},

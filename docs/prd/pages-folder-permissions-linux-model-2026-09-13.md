@@ -12,7 +12,7 @@ pro read a write; **(c) ne**, nová složka je výchozí jen pro vlastnickou
 crew a adminy.
 
 Aktuální API a CLI popisují [Pages API](../api-reference/pages.mdx) a
-[page CLI](../cli/page.mdx). [Stav dodávky a ověření](pages-folder-delivery-status-2026-09-14.md)
+[page CLI](../cli/page.mdx). [Stav dodávky a ověření](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-folder-delivery-status-2026-09-14.md)
 odděluje provedené testy od neprovedené živé akceptace dvěma účty a měření s lidmi.
 
 ## 0. Co oponentura upřesnila (všech šest zapracováno)
@@ -49,7 +49,7 @@ které adresář nepřebije (§7.1/2 v `pages.md`).
 Složky bez oprávnění (PR #2531, #2529), `reach` (#2526), efektivní přístup
 jen ke čtení (#2530), stránkové granty s ověřením vydavatele při použití
 (`loadPageGrantRecordsIn`), pravidlo o panelech (`canSeePanel`), kontrola
-úplného dokumentu pro `write` (#2502). Původně šlo o kombinaci větví na dev3; tyto části i §3–§6 jsou nyní
+úplného dokumentu pro `write` (#2502). Tyto části i §3–§6 jsou podle uvedeného historického stavu
 sloučené do main. Návrhová SQL níže popisuje model; autoritativní migrační
 soubory jsou v `internal/database/migrations/`.
 

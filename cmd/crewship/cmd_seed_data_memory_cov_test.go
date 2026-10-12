@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
@@ -45,38 +46,6 @@ func TestSafePathSegment(t *testing.T) {
 	}
 }
 
-func TestResolveStorageBasePath(t *testing.T) {
-	t.Run("env wins", func(t *testing.T) {
-		t.Setenv("CREWSHIP_STORAGE_BASE_PATH", "/tmp/cov-storage")
-		if got := resolveStorageBasePath(); got != "/tmp/cov-storage" {
-			t.Errorf("got %q, want env value", got)
-		}
-	})
-	t.Run("falls back to home", func(t *testing.T) {
-		t.Setenv("CREWSHIP_STORAGE_BASE_PATH", "")
-		home := t.TempDir()
-		t.Setenv("HOME", home)
-		if got := resolveStorageBasePath(); got != filepath.Join(home, ".crewship") {
-			t.Errorf("got %q, want %q", got, filepath.Join(home, ".crewship"))
-		}
-	})
-}
-
-func TestWriteFileIfAbsent(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "f.md")
-	if err := writeFileIfAbsent(path, "original"); err != nil {
-		t.Fatalf("first write: %v", err)
-	}
-	if err := writeFileIfAbsent(path, "clobber attempt"); err != nil {
-		t.Fatalf("second write: %v", err)
-	}
-	data, _ := os.ReadFile(path)
-	if string(data) != "original" {
-		t.Errorf("existing file was clobbered: %q", data)
-	}
-}
-
 func TestDemoMarkdownContents(t *testing.T) {
 	t.Parallel()
 	if got := demoAgentMD("viktor", "backend"); !strings.Contains(got, "AGENT.md — viktor") || !strings.Contains(got, "My crew: backend") {
@@ -99,209 +68,104 @@ func TestDemoMarkdownContents(t *testing.T) {
 	}
 }
 
-func covSeedClient(t *testing.T, agents any) (*cli.Client, *clitest.StubServer) {
-	t.Helper()
-	s := clitest.NewStubServer()
-	t.Cleanup(s.Close)
-	s.OnGet("/api/v1/agents", clitest.JSONResponse(200, agents))
-	return cli.NewClient(s.URL(), "tok", covWSCli9), s
-}
-
-func TestSeedAgentMemory_WritesAllTiers(t *testing.T) {
-	base := t.TempDir()
-	t.Setenv("CREWSHIP_STORAGE_BASE_PATH", base)
-	client, _ := covSeedClient(t, []map[string]string{
-		{"slug": "viktor", "crew_id": "crew1"},
-		{"slug": "orphan", "crew_id": ""},        // skipped: no crew
-		{"slug": "stranger", "crew_id": "crewX"}, // skipped: crew not in seed map
+func TestSeedAgentMemoryRemoteLeavesClientFilesUntouched(t *testing.T) {
+	home, storage, root := t.TempDir(), t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CREWSHIP_STORAGE_BASE_PATH", storage)
+	t.Setenv("CREWSHIP_HOME", root)
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]string{{"slug": "viktor", "crew_id": "crew1"}, {"slug": "stranger", "crew_id": "other"}}))
+	scopes := map[string]map[string]string{}
+	stub.OnPost("/api/v1/memory/initialize", func(r *http.Request, b []byte) (int, []byte, string) {
+		var payload struct {
+			CrewID    string               `json:"crew_id"`
+			AgentSlug string               `json:"agent_slug"`
+			Documents []seedMemoryDocument `json:"documents"`
+		}
+		if err := json.Unmarshal(b, &payload); err != nil {
+			t.Error(err)
+			return 400, nil, "application/json"
+		}
+		if payload.CrewID != "crew1" {
+			t.Errorf("foreign crew payload: %#v", payload)
+		}
+		docs := map[string]string{}
+		for _, d := range payload.Documents {
+			docs[d.Path] = d.Body
+		}
+		scopes[payload.AgentSlug] = docs
+		result, _ := json.Marshal(map[string]int{"written": len(docs), "existing": 0})
+		return 200, result, "application/json"
 	})
-
+	client := cli.NewClient(stub.URL(), "tok", "ws")
 	if err := seedAgentMemory(context.Background(), client, map[string]string{"backend": "crew1"}); err != nil {
-		t.Fatalf("seedAgentMemory: %v", err)
+		t.Fatal(err)
 	}
-
-	month := time.Now().AddDate(0, -1, 0).Format("2006-01-02")
-	wantFiles := []string{
-		filepath.Join(base, "crews", "crew1", "shared", ".memory", "CREW.md"),
-		filepath.Join(base, "crews", "crew1", "shared", ".memory", "learned.md"),
-		filepath.Join(base, "crews", "crew1", "agents", "viktor", ".memory", "AGENT.md"),
-		filepath.Join(base, "crews", "crew1", "agents", "viktor", ".memory", "PERSONA.md"),
-		filepath.Join(base, "crews", "crew1", "agents", "viktor", ".memory", "pins.md"),
-		filepath.Join(base, "crews", "crew1", "agents", "viktor", ".memory", "daily", month+".md"),
+	if len(scopes[""]) != 2 || len(scopes["viktor"]) != 4 || !strings.Contains(scopes["viktor"]["AGENT.md"], "My crew: backend") {
+		t.Fatalf("missing full server memory tiers: %#v", scopes)
 	}
-	for _, f := range wantFiles {
-		if _, err := os.Stat(f); err != nil {
-			t.Errorf("expected seeded file %s: %v", f, err)
+	if _, ok := scopes[""]["learned.md"]; !ok {
+		t.Fatal("missing learned initialization")
+	}
+	for _, dir := range []string{home, storage, root} {
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("client wrote server files in %s: %v %v", dir, entries, err)
 		}
-	}
-	// Agents with no/unknown crew must not get a directory.
-	for _, slug := range []string{"orphan", "stranger"} {
-		matches, _ := filepath.Glob(filepath.Join(base, "crews", "*", "agents", slug))
-		if len(matches) != 0 {
-			t.Errorf("agent %s should be skipped, found %v", slug, matches)
-		}
-	}
-	// Content is personalised.
-	data, _ := os.ReadFile(wantFiles[2])
-	if !strings.Contains(string(data), "viktor") || !strings.Contains(string(data), "backend") {
-		t.Errorf("AGENT.md not personalised:\n%s", data)
 	}
 }
 
-func TestSeedAgentMemory_IdempotentRerunKeepsEdits(t *testing.T) {
-	base := t.TempDir()
-	t.Setenv("CREWSHIP_STORAGE_BASE_PATH", base)
-	client, _ := covSeedClient(t, []map[string]string{{"slug": "viktor", "crew_id": "crew1"}})
-	crews := map[string]string{"backend": "crew1"}
-
-	if err := seedAgentMemory(context.Background(), client, crews); err != nil {
-		t.Fatalf("first seed: %v", err)
-	}
-	agentMD := filepath.Join(base, "crews", "crew1", "agents", "viktor", ".memory", "AGENT.md")
-	if err := os.WriteFile(agentMD, []byte("operator edit"), 0o644); err != nil {
-		t.Fatalf("simulate operator edit: %v", err)
-	}
-	if err := seedAgentMemory(context.Background(), client, crews); err != nil {
-		t.Fatalf("re-seed: %v", err)
-	}
-	data, _ := os.ReadFile(agentMD)
-	if string(data) != "operator edit" {
-		t.Errorf("re-seed must not clobber operator edits: %q", data)
+func TestSeedAgentMemoryRemoteErrors(t *testing.T) {
+	for _, scenario := range []string{"cancelled", "invalid-crew", "invalid-agent", "server-refused", "incomplete-ack", "list-failed"} {
+		t.Run(scenario, func(t *testing.T) {
+			stub := clitest.NewStubServer()
+			defer stub.Close()
+			slug := "alex"
+			if scenario == "invalid-agent" {
+				slug = "../../outside"
+			}
+			stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]string{{"slug": slug, "crew_id": "crew1"}}))
+			stub.OnPost("/api/v1/memory/initialize", clitest.ErrorResponse(409, "memory refused"))
+			if scenario == "incomplete-ack" {
+				stub.OnPost("/api/v1/memory/initialize", clitest.JSONResponse(200, map[string]int{"written": 0, "existing": 0}))
+			}
+			if scenario == "list-failed" {
+				stub.OnGet("/api/v1/agents", clitest.ErrorResponse(500, "list failed"))
+			}
+			crews := map[string]string{"backend": "crew1"}
+			if scenario == "invalid-crew" {
+				crews["backend"] = "../outside"
+			}
+			ctx := context.Background()
+			if scenario == "cancelled" {
+				c, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = c
+			}
+			err := seedAgentMemory(ctx, cli.NewClient(stub.URL(), "tok", "ws"), crews)
+			if err == nil {
+				t.Fatalf("%s should fail", scenario)
+			}
+			if scenario == "invalid-crew" || scenario == "invalid-agent" || scenario == "cancelled" {
+				if n := len(stub.CallsFor("POST", "/api/v1/memory/initialize")); n != 0 {
+					t.Fatalf("invalid preflight made %d writes", n)
+				}
+			}
+		})
 	}
 }
 
-func TestSeedAgentMemory_Errors(t *testing.T) {
-	t.Run("cancelled context", func(t *testing.T) {
-		t.Setenv("CREWSHIP_STORAGE_BASE_PATH", t.TempDir())
-		client, _ := covSeedClient(t, []map[string]string{})
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		if err := seedAgentMemory(ctx, client, nil); err == nil {
-			t.Error("cancelled ctx should error")
-		}
-	})
-	t.Run("no base path", func(t *testing.T) {
-		t.Setenv("CREWSHIP_STORAGE_BASE_PATH", "")
-		t.Setenv("HOME", "")
-		client, _ := covSeedClient(t, []map[string]string{})
-		err := seedAgentMemory(context.Background(), client, nil)
-		if err == nil || !strings.Contains(err.Error(), "CREWSHIP_STORAGE_BASE_PATH") {
-			t.Errorf("expected base-path error; got %v", err)
-		}
-	})
-	t.Run("agents API error", func(t *testing.T) {
-		t.Setenv("CREWSHIP_STORAGE_BASE_PATH", t.TempDir())
-		s := clitest.NewStubServer()
-		t.Cleanup(s.Close)
-		s.OnGet("/api/v1/agents", clitest.ErrorResponse(500, "agents down"))
-		client := cli.NewClient(s.URL(), "tok", covWSCli9)
-		err := seedAgentMemory(context.Background(), client, map[string]string{})
-		if err == nil || !strings.Contains(err.Error(), "list agents") {
-			t.Errorf("expected list-agents error; got %v", err)
-		}
-	})
-	t.Run("traversal crew id in seed map", func(t *testing.T) {
-		base := t.TempDir()
-		t.Setenv("CREWSHIP_STORAGE_BASE_PATH", base)
-		client, _ := covSeedClient(t, []map[string]string{})
-		err := seedAgentMemory(context.Background(), client, map[string]string{"bad": "../../etc"})
-		if err == nil || !strings.Contains(err.Error(), "invalid crew_id") {
-			t.Errorf("expected invalid crew_id error; got %v", err)
-		}
-		if _, statErr := os.Stat(filepath.Join(base, "..", "..", "etc", "shared")); statErr == nil {
-			t.Error("traversal crew id must not create directories outside base")
-		}
-	})
-	t.Run("transport error listing agents", func(t *testing.T) {
-		t.Setenv("CREWSHIP_STORAGE_BASE_PATH", t.TempDir())
-		s := clitest.NewStubServer()
-		deadURL := s.URL()
-		s.Close()
-		client := cli.NewClient(deadURL, "tok", covWSCli9)
-		err := seedAgentMemory(context.Background(), client, map[string]string{})
-		if err == nil || !strings.Contains(err.Error(), "list agents") {
-			t.Errorf("expected transport error; got %v", err)
-		}
-	})
-	t.Run("agents decode error", func(t *testing.T) {
-		t.Setenv("CREWSHIP_STORAGE_BASE_PATH", t.TempDir())
-		s := clitest.NewStubServer()
-		t.Cleanup(s.Close)
-		s.OnGet("/api/v1/agents", clitest.TextResponse(200, "{nope"))
-		client := cli.NewClient(s.URL(), "tok", covWSCli9)
-		err := seedAgentMemory(context.Background(), client, map[string]string{})
-		if err == nil || !strings.Contains(err.Error(), "parse agents") {
-			t.Errorf("expected parse error; got %v", err)
-		}
-	})
-	t.Run("shared mkdir blocked", func(t *testing.T) {
-		base := filepath.Join(t.TempDir(), "blocker")
-		// basePath itself is a regular file → MkdirAll under it fails.
-		if err := os.WriteFile(base, []byte("x"), 0o644); err != nil {
-			t.Fatalf("write blocker: %v", err)
-		}
-		t.Setenv("CREWSHIP_STORAGE_BASE_PATH", base)
-		client, _ := covSeedClient(t, []map[string]string{})
-		err := seedAgentMemory(context.Background(), client, map[string]string{"backend": "crew1"})
-		if err == nil || !strings.Contains(err.Error(), "mkdir shared mem") {
-			t.Errorf("expected shared mkdir error; got %v", err)
-		}
-	})
-	t.Run("agent mkdir blocked", func(t *testing.T) {
-		base := t.TempDir()
-		t.Setenv("CREWSHIP_STORAGE_BASE_PATH", base)
-		// Pre-create {base}/crews/crew1/agents as a FILE so the per-agent
-		// MkdirAll fails after the shared tier succeeded.
-		if err := os.MkdirAll(filepath.Join(base, "crews", "crew1"), 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(base, "crews", "crew1", "agents"), []byte("x"), 0o644); err != nil {
-			t.Fatalf("write blocker: %v", err)
-		}
-		client, _ := covSeedClient(t, []map[string]string{{"slug": "viktor", "crew_id": "crew1"}})
-		err := seedAgentMemory(context.Background(), client, map[string]string{"backend": "crew1"})
-		if err == nil || !strings.Contains(err.Error(), "mkdir agent mem") {
-			t.Errorf("expected agent mkdir error; got %v", err)
-		}
-	})
-	t.Run("crew shared file write blocked", func(t *testing.T) {
-		base := t.TempDir()
-		t.Setenv("CREWSHIP_STORAGE_BASE_PATH", base)
-		sharedMem := filepath.Join(base, "crews", "crew1", "shared", ".memory")
-		if err := os.MkdirAll(sharedMem, 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-		if err := os.Chmod(sharedMem, 0o555); err != nil {
-			t.Fatalf("chmod: %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(sharedMem, 0o755) })
-		client, _ := covSeedClient(t, []map[string]string{})
-		if err := seedAgentMemory(context.Background(), client, map[string]string{"backend": "crew1"}); err == nil {
-			t.Error("expected CREW.md write failure on read-only dir")
-		}
-	})
-	t.Run("agent file write blocked", func(t *testing.T) {
-		base := t.TempDir()
-		t.Setenv("CREWSHIP_STORAGE_BASE_PATH", base)
-		agentMem := filepath.Join(base, "crews", "crew1", "agents", "viktor", ".memory")
-		if err := os.MkdirAll(filepath.Join(agentMem, "daily"), 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-		if err := os.Chmod(agentMem, 0o555); err != nil {
-			t.Fatalf("chmod: %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(agentMem, 0o755) })
-		client, _ := covSeedClient(t, []map[string]string{{"slug": "viktor", "crew_id": "crew1"}})
-		if err := seedAgentMemory(context.Background(), client, map[string]string{"backend": "crew1"}); err == nil {
-			t.Error("expected AGENT.md write failure on read-only dir")
-		}
-	})
-	t.Run("traversal agent slug from API", func(t *testing.T) {
-		t.Setenv("CREWSHIP_STORAGE_BASE_PATH", t.TempDir())
-		client, _ := covSeedClient(t, []map[string]string{{"slug": "../evil", "crew_id": "crew1"}})
-		err := seedAgentMemory(context.Background(), client, map[string]string{"backend": "crew1"})
-		if err == nil || !strings.Contains(err.Error(), "invalid agent slug") {
-			t.Errorf("expected invalid agent slug error; got %v", err)
-		}
-	})
+func TestSeedMemoryDoesNotDependOnClientHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("CREWSHIP_STORAGE_BASE_PATH", filepath.Join(t.TempDir(), "not-created"))
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []any{}))
+	if err := seedAgentMemory(context.Background(), cli.NewClient(stub.URL(), "tok", "ws"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(os.Getenv("CREWSHIP_STORAGE_BASE_PATH")); !os.IsNotExist(err) {
+		t.Fatalf("created local storage: %v", err)
+	}
 }

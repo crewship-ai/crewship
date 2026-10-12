@@ -180,6 +180,19 @@ func verifyOpts(packs ...string) verifyOptions {
 	return verifyOptions{packs: packs, timeout: 30 * time.Second, now: func() time.Time { return verifyNow }}
 }
 
+// historyOnlyOpts is verifyOpts with --skip-report, for tests about the
+// history row alone. The history row is decided before any run is started
+// (packVerifier.run), so skipping the report changes nothing it sees. What it
+// does skip is a wait: those tests replace the routine's run records with a
+// single historical row, so the report run verify starts never shows up there
+// and awaitParkedRun polled for the whole 30 s timeout — 30 s per test spent
+// producing a report row the tests deliberately do not assert on.
+func historyOnlyOpts(packs ...string) verifyOptions {
+	o := verifyOpts(packs...)
+	o.skipReport = true
+	return o
+}
+
 func TestSeedVerify_CIWatchAllGreen(t *testing.T) {
 	vs := newVerifyStub(t)
 	checks, err := seedVerify(context.Background(), covStubClient(vs.s), verifyOpts("ci-watch"))
@@ -651,7 +664,7 @@ func TestSeedVerify_HistoryIgnoresRunsFromAPreviousSeed(t *testing.T) {
 		})
 		return 200, b, "application/json"
 	})
-	checks, err := seedVerify(context.Background(), covStubClient(vs.s), verifyOpts("docs-drift"))
+	checks, err := seedVerify(context.Background(), covStubClient(vs.s), historyOnlyOpts("docs-drift"))
 	if err != nil {
 		t.Fatalf("seedVerify: %v", err)
 	}
@@ -659,9 +672,8 @@ func TestSeedVerify_HistoryIgnoresRunsFromAPreviousSeed(t *testing.T) {
 	if !strings.Contains(c.Detail, "previous seed") {
 		t.Errorf("the filter must say it dropped something — a silent clock comparison is how a real failure disappears: %q", c.Detail)
 	}
-	// Deliberately not asserting the command's exit status here: the stub's
-	// report step fails for reasons of its own, and this test is about the
-	// history row alone.
+	// Deliberately not asserting the command's exit status here: this test is
+	// about the history row alone (the report is skipped, see historyOnlyOpts).
 	for _, c := range checks {
 		if c.Step == "history" && c.Result == verifyFail {
 			t.Errorf("history must not fail on a pre-nuke run: %q", c.Detail)
@@ -688,7 +700,7 @@ func TestSeedVerify_HistoryStillFailsOnARunFromThisSeed(t *testing.T) {
 		})
 		return 200, b, "application/json"
 	})
-	checks, err := seedVerify(context.Background(), covStubClient(vs.s), verifyOpts("docs-drift"))
+	checks, err := seedVerify(context.Background(), covStubClient(vs.s), historyOnlyOpts("docs-drift"))
 	if err != nil {
 		t.Fatalf("seedVerify: %v", err)
 	}

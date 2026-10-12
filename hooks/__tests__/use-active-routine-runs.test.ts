@@ -102,14 +102,20 @@ describe("deriveRecentTerminalRuns", () => {
     expect(recent.map((r) => r.id)).toEqual(["f1", "c1", "c2"])
   })
 
-  it("excludes cancelled/interrupted and falls back to started_at when ended_at is empty", () => {
-    const recent = deriveRecentTerminalRuns([
-      run({ id: "x", status: "cancelled", ended_at: "2026-07-02T12:00:00Z" }),
-      run({ id: "y", status: "interrupted", ended_at: "2026-07-02T12:00:00Z" }),
-      run({ id: "no-end", status: "completed", ended_at: "", started_at: "2026-07-02T11:30:00Z" }),
-      run({ id: "older", status: "completed", ended_at: "2026-07-02T10:00:00Z" }),
-    ])
-    expect(recent.map((r) => r.id)).toEqual(["no-end", "older"])
+  it("keeps stopped runs as outcomes and falls back to started_at when ended_at is empty", () => {
+    // #2988 reverses the old exclusion: Activity reads cancelled and
+    // interrupted as their own outcome (Stopped), so the bar's Recent shows
+    // them rather than hiding that a run was stopped.
+    const recent = deriveRecentTerminalRuns(
+      [
+        run({ id: "x", status: "cancelled", ended_at: "2026-07-02T12:00:00Z" }),
+        run({ id: "y", status: "interrupted", ended_at: "2026-07-02T11:59:00Z" }),
+        run({ id: "no-end", status: "completed", ended_at: "", started_at: "2026-07-02T11:30:00Z" }),
+        run({ id: "older", status: "completed", ended_at: "2026-07-02T10:00:00Z" }),
+      ],
+      4,
+    )
+    expect(recent.map((r) => r.id)).toEqual(["x", "y", "no-end", "older"])
   })
 
   it("returns an empty list when nothing is terminal", () => {

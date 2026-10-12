@@ -48,7 +48,8 @@ UID-1002 broker directory permissions, invalid model/resource/path/token request
 and revocation of one client while the other continues. Upstream is synthetic;
 no production credential or paid model request is used.
 
-Execution results are recorded in the continuation log after each gate finishes.
+Record execution results with their source revision in private context; the
+scenario description alone does not establish application acceptance.
 
 ## Still required before application enablement
 

@@ -42,14 +42,27 @@ func TestWriteCache_ReadCache_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestCacheFile_FallsBackToTempDirWithoutHome(t *testing.T) {
+func TestCacheFile_RejectsUnavailableRoot(t *testing.T) {
+	withTempHome(t)
 	t.Setenv("HOME", "")
-	path, err := cacheFile()
-	if err != nil {
-		t.Fatalf("cacheFile: %v", err)
+	t.Setenv("USERPROFILE", "")
+	if path, err := cacheFile(); err == nil || path != "" {
+		t.Fatalf("cacheFile = %q, %v; want unavailable root and no shared fallback", path, err)
 	}
-	if !strings.HasPrefix(path, os.TempDir()) {
-		t.Errorf("path = %q, want fallback under %q", path, os.TempDir())
+}
+
+func TestCacheFile_IsolatedInstallation(t *testing.T) {
+	home := withTempHome(t)
+	first, second := filepath.Join(t.TempDir(), "one"), filepath.Join(t.TempDir(), "two")
+	for _, root := range []string{first, second} {
+		t.Setenv("CREWSHIP_HOME", root)
+		writeCache(&Result{Latest: "v2.0.0", CheckedAt: time.Now()})
+		if _, err := os.Stat(filepath.Join(root, "cache", "latest_release.json")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".crewship")); !os.IsNotExist(err) {
+		t.Fatalf("update cache escaped installation: %v", err)
 	}
 }
 

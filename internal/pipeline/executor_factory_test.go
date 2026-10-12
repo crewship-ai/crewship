@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS pipeline_signal_waits (
     created_at   TEXT NOT NULL,
     delivered_at TEXT,
     consumed_at  TEXT,
+    timeout_at   TEXT,
     UNIQUE (run_id, step_id)
 );`); err != nil {
 		t.Fatalf("signal waits schema: %v", err)
@@ -210,7 +211,8 @@ func TestNewWiredExecutor_WiresEveryDependency(t *testing.T) {
 		// when the window opens (#1597). Not a dependency — nothing in
 		// production reads or needs it, and wiring it in the factory
 		// would mean shipping a hook that fires on every busy resume.
-		"onResumeSlotBusy": "test-only resume-retry rendezvous; production never sets it",
+		"onResumeSlotBusy":           "test-only resume-retry rendezvous; production never sets it",
+		"afterResumeRegistryAcquire": "test-only cancel/resume rendezvous (#2910); production never sets it",
 	}
 	v := reflect.ValueOf(exec).Elem()
 	typ := v.Type()

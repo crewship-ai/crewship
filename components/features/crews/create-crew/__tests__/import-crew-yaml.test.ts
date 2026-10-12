@@ -105,6 +105,39 @@ ${spec}
     expect(JSON.parse(patch.miseConfig!)).toEqual({ tools: { node: "22" }, env: { MODE: "test" }, lock: { schema_version: 1, files: { "mise.lock": "native lock", ".mise/locks/gemini/1/package.json": "{}" } } })
   })
 
+  it.each([
+    ["with tools", '    tools:\n      node: "22"\n'],
+    ["without explicit tools", ""],
+  ])("preserves required CLI checks %s and overrides raw policy", (_name, tools) => {
+    const { patch } = parseCrewManifest(base(`  mise:
+${tools}    ai_cli_check: required
+    raw:
+      ai_cli_check: record
+      env:
+        MODE: test`))
+    expect(JSON.parse(patch.miseConfig!)).toMatchObject({
+      ai_cli_check: "required", env: { MODE: "test" },
+    })
+  })
+
+  it.each(["optional", "false", "null"])("refuses unsupported typed CLI policy %s", (policy) => {
+    expect(() => parseCrewManifest(base(`  mise:
+    ai_cli_check: ${policy}
+    tools:
+      node: "22"`))).toThrow(/ai_cli_check/)
+  })
+
+  it("preserves raw-only mise configuration without explicit tools", () => {
+    const { patch } = parseCrewManifest(base(`  mise:
+    raw:
+      ai_cli_check: required
+      tools:
+        node: "22"`))
+    expect(JSON.parse(patch.miseConfig!)).toEqual({
+      ai_cli_check: "required", tools: { node: "22" },
+    })
+  })
+
   it("lets typed devcontainer fields win over raw, as the Go side does", () => {
     const { patch } = parseCrewManifest(
       base('  devcontainer:\n    image: real:1\n    raw:\n      image: shadow:1\n      remoteUser: agent'),

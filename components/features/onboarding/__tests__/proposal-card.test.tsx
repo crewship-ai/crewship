@@ -225,3 +225,15 @@ describe("ProposalCard — the crew's look and a readable roster", () => {
     expect(screen.getByText(longRole)).toBeTruthy()
   })
 })
+
+it("renders custom identity and resolved tools for a crew without a slug", () => {
+  render(<ProposalCard proposal={{ ...PROPOSAL, crewSlug: "", crewIcon: "code", crewColor: "blue", tools: ["git", "python"] }} onCreate={noop} />)
+  expect(screen.getAllByTestId("onboarding-proposal-tool").map((el) => el.textContent)).toEqual(["git", "python"])
+  expect(screen.getByText(PROPOSAL.crewName)).toBeVisible()
+  expect(screen.getByRole("button", { name: "Create" })).toBeEnabled()
+})
+it("shows an empty roster without inventing a lead agent", () => {
+  render(<ProposalCard proposal={{ ...PROPOSAL, agents: [] }} onCreate={noop} />)
+  expect(screen.getByText("No agents in this proposal yet.")).toBeVisible()
+  expect(screen.queryByTitle("Lead agent")).toBeNull()
+})

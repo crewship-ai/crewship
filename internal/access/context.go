@@ -142,14 +142,16 @@ func (s Store) ContextEntries(ctx context.Context, admitted Attempt) ([]ContextE
 		return nil, err
 	}
 	defer tx.Rollback()
-	a, err := resolve(ctx, tx, admitted.ID, false, map[string]bool{})
+	q := newTxStmtCache(tx)
+	defer q.Close()
+	a, err := resolve(ctx, q, admitted.ID, false, map[string]bool{})
 	if err != nil {
 		return nil, err
 	}
 	if a.Scope != admitted.Scope || a.Agent != admitted.Agent || a.Principal != admitted.Principal || a.Workspace != admitted.Workspace || a.Chat != admitted.Chat || !subset(a.Rights, admitted.Rights) || !subset(admitted.Rights, a.Rights) {
 		return nil, ErrDenied
 	}
-	out, err := contextEntries(ctx, tx, a)
+	out, err := contextEntries(ctx, q, a)
 	if err != nil {
 		return nil, err
 	}
@@ -169,12 +171,14 @@ func (s Store) resolveContextAttempt(ctx context.Context, a Attempt, entries ...
 		return Attempt{}, err
 	}
 	defer tx.Rollback()
-	fresh, err := resolve(ctx, tx, a.ID, false, map[string]bool{})
+	q := newTxStmtCache(tx)
+	defer q.Close()
+	fresh, err := resolve(ctx, q, a.ID, false, map[string]bool{})
 	if err != nil {
 		return Attempt{}, err
 	}
 	for _, e := range entries {
-		if _, err = readContext(ctx, tx, fresh, e.ID, map[string]bool{}); err != nil {
+		if _, err = readContext(ctx, q, fresh, e.ID, map[string]bool{}); err != nil {
 			return Attempt{}, err
 		}
 	}
@@ -345,7 +349,9 @@ func (s Store) bindContextSnapshot(ctx context.Context, a Attempt, entries []Con
 		return err
 	}
 	defer tx.Rollback()
-	fresh, err := resolve(ctx, tx, a.ID, false, map[string]bool{})
+	q := newTxStmtCache(tx)
+	defer q.Close()
+	fresh, err := resolve(ctx, q, a.ID, false, map[string]bool{})
 	if err != nil {
 		return err
 	}
@@ -353,13 +359,19 @@ func (s Store) bindContextSnapshot(ctx context.Context, a Attempt, entries []Con
 		return ErrDenied
 	}
 	for _, e := range entries {
-		if err = bindContextSource(ctx, tx, fresh, e.ID); err != nil {
+		if err = bindContextSource(ctx, q, fresh, e.ID); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
-func bindContextSource(ctx context.Context, tx *sql.Tx, a Attempt, id string) error {
+
+type contextBinder interface {
+	queryer
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func bindContextSource(ctx context.Context, tx contextBinder, a Attempt, id string) error {
 	if _, err := readContext(ctx, tx, a, id, map[string]bool{}); err != nil {
 		return err
 	}

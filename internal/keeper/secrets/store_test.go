@@ -173,3 +173,38 @@ func TestStore_EncryptionKeyNotLeaked(t *testing.T) {
 		}
 	}
 }
+
+// A corrupt credential must disappear from the decrypted cache while healthy
+// credentials remain usable; a failed database read must not publish half a map.
+func TestStoreReloadFailureBoundaries(t *testing.T) {
+	setTestEncKey(t)
+	db := openTestDB(t)
+	user := seedUsers(t, db)
+	ws := seedWorkspace(t, db, user)
+	healthy := insertCredential(t, db, ws, user, "healthy", "SECRET", 1, "healthy-value")
+	damaged := insertCredential(t, db, ws, user, "damaged", "SECRET", 1, "old-value")
+	store := secrets.New()
+	if err := store.Reload(t.Context(), db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE credentials SET encrypted_value='malformed' WHERE id=?`, damaged); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Reload(t.Context(), db); err == nil {
+		t.Fatal("corruption was not reported")
+	}
+	if _, ok := store.Get(damaged); ok {
+		t.Fatal("corrupt secret retained its stale plaintext")
+	}
+	if c, ok := store.Get(healthy); !ok || c.PlainValue != "healthy-value" {
+		t.Fatal("healthy secret was discarded")
+	}
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := store.Reload(cancelled, db); err == nil {
+		t.Fatal("cancelled read succeeded")
+	}
+	if store.Count() != 1 {
+		t.Fatal("failed read published an incomplete cache")
+	}
+}

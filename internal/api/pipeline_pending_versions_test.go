@@ -24,7 +24,7 @@ func TestOneTimeStartPinsAcceptedPublishedRecipe(t *testing.T) {
 	}
 	r := withWorkspaceUser(httptest.NewRequest("POST", "/run", nil), user, ws, "OWNER")
 	rr := httptest.NewRecorder()
-	h.enqueueDeferredRun(rr, r, ws, user, p, runRequestBody{FireAt: now.Add(time.Hour).Format(time.RFC3339)})
+	h.enqueueDeferredRun(rr, r, ws, user, p, runRequestBody{FireAt: now.Add(time.Hour).Format(time.RFC3339)}, deferredOptions{})
 	if rr.Code != 202 {
 		t.Fatalf("enqueue: %d %s", rr.Code, rr.Body)
 	}
@@ -111,7 +111,7 @@ func TestOneTimeStartReportsArchiveReadFailureAsServerError(t *testing.T) {
 	cancel()
 	r := withWorkspaceUser(httptest.NewRequest("POST", "/run", nil).WithContext(ctx), user, ws, "OWNER")
 	rr := httptest.NewRecorder()
-	h.enqueueDeferredRun(rr, r, ws, user, p, runRequestBody{FireAt: now.Add(time.Hour).Format(time.RFC3339)})
+	h.enqueueDeferredRun(rr, r, ws, user, p, runRequestBody{FireAt: now.Add(time.Hour).Format(time.RFC3339)}, deferredOptions{})
 	if rr.Code != 500 {
 		t.Fatalf("database failure became publication conflict: %d %s", rr.Code, rr.Body)
 	}

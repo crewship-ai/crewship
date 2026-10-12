@@ -31,8 +31,10 @@ func TestImageChangePreservesRunningCrew(t *testing.T) {
 	}
 }
 
+// Confirmed restart backoff is covered separately by
+// TestRuntimeUsePreservesRestartBackoffRecovery: it must remain recoverable.
 func TestImageChangeRejectsUncertainOrBusyState(t *testing.T) {
-	for _, state := range []map[string]any{nil, {}, {"Status": "paused", "Paused": true}, {"Status": "restarting", "Restarting": true}, {"Status": "exited", "Running": true}, {"Status": "dead"}} {
+	for _, state := range []map[string]any{nil, {}, {"Status": "paused", "Paused": true}, {"Status": "exited", "Running": true}, {"Status": "dead"}} {
 		t.Run(fmt.Sprint(state), func(t *testing.T) {
 			p, calls := newDriftFixtureState(t, "crewship-team-safe-safe", "old", state)
 			_, err := p.EnsureCrewRuntime(context.Background(), provider.CrewConfig{ID: "safe", Slug: "safe", Image: "new"})

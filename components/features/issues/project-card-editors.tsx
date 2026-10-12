@@ -34,6 +34,8 @@ import type { IssuePriority, Project, ProjectStatus } from "@/lib/types/mission"
 export interface ProjectCardEdit {
   /** Agents that can lead the project. */
   agents: PickableAgent[]
+  /** Records a change. On the project detail it lands in a draft that the
+   *  page's floating Save bar commits; nothing is written until then. */
   patch: (body: Record<string, unknown>) => Promise<boolean>
   busy?: boolean
 }
@@ -311,7 +313,13 @@ export function ProjectNameEditor({
         aria-label="Project name"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => setEditing(false)}
+        onBlur={() => {
+          // Clicking away keeps the edit (it waits on the page's Save bar);
+          // only Escape throws it away.
+          const next = draft.trim()
+          if (next && next !== name) onSave(next)
+          setEditing(false)
+        }}
         onKeyDown={(e) => {
           // Enter confirms an IME candidate before it means "save"; Escape
           // cancels the candidate, not the edit. Same guard as TitleEditor.

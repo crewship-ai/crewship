@@ -199,6 +199,12 @@ const DELIVERY_WINDOW_MS = 24 * 60 * 60 * 1000
 const DELIVERY_LIMIT = 200
 
 export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
+  // Dialogs, selection and drafts belong to one workspace. Replacing that
+  // identity also replaces child forms and their local pending state.
+  return <WorkspaceIntegrationsLayout key={workspaceId} workspaceId={workspaceId} />
+}
+
+function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   const { abilities } = useAbilities()
   const canManageWorkspace = abilities.can("manage", "Workspace")
   const currentUserId = useSession().data?.user.id ?? null
@@ -434,20 +440,21 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     if (workspaceId) invalidate(`composio:${workspaceId}:`)
   }, [refreshChannels, refreshProviders, refreshDeliveries, workspaceId, refreshIncoming])
 
+  const active = React.useRef(true)
   const handleToggle = async (row: ConnectionRow, next: boolean) => {
     try {
       await patch(row.id, { enabled: next })
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update the connection")
+      if (active.current) toast.error(e instanceof Error ? e.message : "Failed to update the connection")
     }
   }
 
   const handleTest = async (row: ConnectionRow) => {
     try {
       await sendTest(row.id)
-      toast.success("Test sent", { description: `to ${row.name}` })
+      if (active.current) toast.success("Test sent", { description: `to ${row.name}` })
     } catch (e) {
-      toast.error("Test send failed", {
+      if (active.current) toast.error("Test send failed", {
         description: e instanceof Error ? e.message : undefined,
       })
     }
@@ -457,14 +464,26 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   // is gone, so a caller that closes a detail view afterwards does not do it
   // under the open dialog, nor after a Cancel.
   const [pendingDelete, setPendingDelete] = React.useState<{ row: ConnectionRow; resolve: (deleted: boolean) => void } | null>(null)
+  const pendingDeleteRef = React.useRef<typeof pendingDelete>(null)
+  React.useEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
+      pendingDeleteRef.current?.resolve(false)
+    }
+  }, [])
   const handleDelete = (row: ConnectionRow) =>
-    new Promise<boolean>((resolve) => setPendingDelete({ row, resolve }))
+    new Promise<boolean>((resolve) => {
+      const pending = { row, resolve }
+      pendingDeleteRef.current = pending
+      setPendingDelete(pending)
+    })
   const deleteConnection = async (row: ConnectionRow) => {
     try {
       await remove(row.id)
-      toast.success("Connection deleted")
+      if (active.current) toast.success("Connection deleted")
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to delete the connection")
+      if (active.current) toast.error(e instanceof Error ? e.message : "Failed to delete the connection")
       throw e
     }
   }
@@ -942,6 +961,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         onOpenChange={(open) => {
           if (!open) {
             pendingDelete?.resolve(false)
+            pendingDeleteRef.current = null
             setPendingDelete(null)
           }
         }}

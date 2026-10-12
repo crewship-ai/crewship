@@ -341,26 +341,36 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// container NAMES, and overwriting the reaper's recorded id with a name
 	// would break the port-exposure occupancy check, which compares against
 	// the id in port_exposures.
-	if h.containerHolder != nil && init.CrewID != "" {
+	_, managedRuntime := h.container.(provider.CrewRuntimeUseProvider)
+	if !managedRuntime && h.containerHolder != nil && init.CrewID != "" {
 		defer h.containerHolder(init.CrewID)()
 	}
 
 	// Ensure container is running (start if needed).
 	containerName := h.container.CrewContainerName(init.CrewID, actualSlug)
 	status, err := h.container.ContainerStatus(r.Context(), containerName)
-	if err != nil || status.State != "running" {
-		h.logger.Info("terminal: starting container", "crew_slug", actualSlug)
-		h.writeInfo(ws, "Starting container...")
+	{
+		if err != nil || status == nil || status.State != "running" {
+			h.logger.Info("terminal: starting container", "crew_slug", actualSlug)
+			h.writeInfo(ws, "Starting container...")
+		}
 		// {id, slug} was the whole config this passed, which is why the
 		// terminal — the surface an operator opens specifically to look at a
 		// crew's environment — came up in the bare default image with none of
 		// the crew's provisioned toolchain, and without the crew's declared
 		// sidecars (#1717/#1708). The starter resolves both from the crews row.
-		_, err := crewstart.New(h.container, api.NewCrewConfigCompleter(h.db), h.logger).
-			Start(r.Context(), provider.CrewConfig{
-				ID:   init.CrewID,
-				Slug: actualSlug,
-			})
+		var use *provider.RuntimeUse
+		if reserving, ok := h.container.(provider.CrewRuntimeUseProvider); ok && err == nil && status != nil && status.State == "running" {
+			// A terminal inspects the current runtime, even when a newer
+			// image is desired. It must not wait for the work it will inspect.
+			use, err = reserving.RetainCrewRuntimeUse(provider.WithRuntimeUseNoWait(r.Context()), init.CrewID, status.ID)
+		} else {
+			use, _, err = crewstart.New(h.container, api.NewCrewConfigCompleter(h.db), h.logger).StartUse(r.Context(), provider.CrewConfig{ID: init.CrewID, Slug: actualSlug}, nil)
+		}
+		defer use.Release()
+		if use != nil {
+			containerName = use.ContainerID()
+		}
 		switch {
 		case errors.Is(err, crewstart.ErrSidecarStart):
 			// The one caller that proceeds anyway. Everywhere else a crew
@@ -376,6 +386,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.logger.Error("terminal: failed to start container", "error", err)
 			h.writeError(ws, "failed to start container: "+err.Error())
 			return
+		}
+		// Managed admission covers preparation; add the legacy activity hold
+		// only after acquisition so it cannot veto its own idle activation.
+		if managedRuntime && h.containerHolder != nil && init.CrewID != "" {
+			defer h.containerHolder(init.CrewID)()
 		}
 		// Poll for container readiness with timeout.
 		readyCtx, readyCancel := context.WithTimeout(r.Context(), 5*time.Second)

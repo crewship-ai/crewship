@@ -525,7 +525,6 @@ export function CreateProjectModal({
                   <AgentAvatar
                     seed={selectedLead.avatar_seed || selectedLead.name}
                     style={selectedLead.avatar_style || selectedLead.crew_avatar_style}
-                    agentId={selectedLead.id}
                     avatarUrl={selectedLead.avatar_url}
                     alt=""
                     className="h-3.5 w-3.5 shrink-0"
@@ -585,7 +584,6 @@ export function CreateProjectModal({
                         <AgentAvatar
                           seed={agent.avatar_seed || agent.name}
                           style={agent.avatar_style || agent.crew_avatar_style}
-                          agentId={agent.id}
                           avatarUrl={agent.avatar_url}
                           alt=""
                           className="mr-2 h-4 w-4 shrink-0"

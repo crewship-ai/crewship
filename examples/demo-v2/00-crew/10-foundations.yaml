@@ -1,0 +1,8 @@
+apiVersion: crewship/v1
+kind: Label
+metadata:
+  name: demo-v2
+  slug: demo-v2
+spec:
+  color: "#8B5CF6"
+  description: Created by the demo v2 steps (examples/demo-v2)

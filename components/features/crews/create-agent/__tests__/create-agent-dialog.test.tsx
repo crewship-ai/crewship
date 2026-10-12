@@ -175,6 +175,41 @@ describe("CreateAgentDialog", () => {
     expect(band).toHaveTextContent(/slug taken/i)
   })
 
+  // #2862: a refusal that names a field is shown under that field, in the
+  // server's words — not as a toast of the raw JSON body.
+  it("shows a slug conflict under the Slug field instead of toasting JSON", async () => {
+    const { toast } = await import("sonner")
+    stubFetch(() => new Response(JSON.stringify({
+      error: "Agent slug already taken in this workspace", code: "agent_slug_taken", field: "slug",
+    }), { status: 409 }))
+    const { props } = renderDialog()
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+
+    const slug = screen.getByLabelText("Slug")
+    await waitFor(() => expect(slug).toHaveAttribute("aria-invalid", "true"))
+    const message = document.getElementById("agent-slug-error")
+    expect(message).toHaveTextContent("Agent slug already taken in this workspace")
+    expect(slug).toHaveAttribute("aria-describedby", "agent-slug-error")
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalled()
+    expect(document.body.textContent).not.toContain('{"error"')
+    expect(props.onOpenChange).not.toHaveBeenCalled()
+
+    // A new slug is a new question: the message goes with the old one.
+    fireEvent.change(slug, { target: { value: "filip-2" } })
+    await waitFor(() => expect(document.getElementById("agent-slug-error")).toBeNull())
+  })
+
+  it("shows a second-lead refusal under the Role field", async () => {
+    stubFetch(() => new Response(JSON.stringify({
+      error: "Crew already has a lead agent", code: "crew_lead_exists", field: "agent_role",
+    }), { status: 409 }))
+    renderDialog()
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+    expect(await screen.findByText("Crew already has a lead agent")).toBeInTheDocument()
+  })
+
   it("asks before throwing away typed input on Esc", async () => {
     const onOpenChange = vi.fn()
     renderDialog({ onOpenChange })
@@ -567,4 +602,62 @@ it('edits only changed fields and preserves an unlisted saved model', async () =
   expect(JSON.parse(String(patch[1]?.body))).toEqual({ name: 'Alice revised' })
   expect(spy.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
   vi.restoreAllMocks()
+})
+
+// #2876 — an agent's face is stored by the person who creates or edits it,
+// not left for whoever views the agent first.
+describe("stored avatar render", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  function avatarPuts(spy: { mock: { calls: unknown[][] } }) {
+    return (spy.mock.calls as Array<[RequestInfo | URL, RequestInit | undefined]>).filter(
+      ([url, init]) => init?.method === "PUT" && String(url).includes("/avatar"),
+    )
+  }
+
+  it("is stored right after the agent is created", async () => {
+    const onCreated = vi.fn()
+    const spy = vi.spyOn(global, "fetch").mockImplementation(async (url, init) => {
+      if (init?.method === "POST") {
+        return new Response(JSON.stringify({ id: "new-1", name: "Filip", slug: "filip", avatar_seed: null, avatar_style: "bottts-neutral" }), { status: 201 })
+      }
+      if (init?.method === "PUT") return new Response('{"avatar_url":"/x"}')
+      return catalogueResponse(String(url)) ?? new Response("{}")
+    })
+    render(<CreateAgentDialog workspaceId="ws-1" open onOpenChange={vi.fn()} defaultCrewSlug="engineering" crews={CREWS} onCreated={onCreated} />)
+    fireEvent.click(screen.getByRole("button", { name: "Model and execution" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Anthropic" }))
+    fireEvent.click(screen.getByRole("button", { name: "Identity" }))
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith("filip"))
+    const puts = avatarPuts(spy)
+    expect(puts).toHaveLength(1)
+    expect(String(puts[0][0])).toContain("/api/v1/agents/new-1/avatar?workspace_id=ws-1")
+    expect(JSON.parse(String(puts[0][1]?.body)).svg).toMatch(/^<svg/)
+  })
+
+  it("is not re-sent when an edit leaves the stored render in place", async () => {
+    const agent = {
+      id: "existing", workspace_id: "ws-1", crew_id: "c1", name: "Alice", slug: "alice",
+      description: null, role_title: null, agent_role: "AGENT", lead_mode: null,
+      status: "IDLE", cli_adapter: "CLAUDE_CODE", llm_provider: "ANTHROPIC", llm_model: "private-model-v9",
+      system_prompt: null, timeout_seconds: 1800, tool_profile: "CODING", memory_enabled: true,
+      avatar_seed: null, avatar_style: null, updated_at: "2026-09-08T00:00:00Z", crew: null,
+    }
+    const onCreated = vi.fn()
+    const spy = vi.spyOn(global, "fetch").mockImplementation(async (url, init) => {
+      if (init?.method === "PATCH") {
+        return new Response(JSON.stringify({ ...agent, name: "Alice revised", avatar_url: "/api/v1/agents/existing/avatar?v=1&workspace_id=ws-1" }))
+      }
+      return catalogueResponse(String(url)) ?? new Response("{}")
+    })
+    render(<CreateAgentDialog workspaceId="ws-1" agent={agent} open onOpenChange={vi.fn()} defaultCrewSlug="engineering" crews={CREWS} onCreated={onCreated} />)
+    const name = screen.getByLabelText(/name/i, { selector: "input" })
+    fireEvent.change(name, { target: { value: "Alice revised" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+    expect(avatarPuts(spy)).toEqual([])
+  })
 })

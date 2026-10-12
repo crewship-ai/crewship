@@ -7,7 +7,7 @@ and regression tests live in
 Validation counts below record the original implementation runs, not a new
 full-suite result for the current checkout.
 
-Issue #2435, continues dashboard PR #2434 on dev1.
+Issue #2435, continues dashboard PR #2434.
 
 - `/inbox` is the product route. Sidebar, command palette, notifications,
   credentials, crew, routine and activity links use it. `/inbox-v2` is a

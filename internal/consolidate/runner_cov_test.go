@@ -271,7 +271,9 @@ func TestCompactAllWorkspaces_HappyPath(t *testing.T) {
 		t.Fatalf("insert ws_idle: %v", err)
 	}
 
-	old := time.Now().UTC().Add(-45 * 24 * time.Hour)
+	// Keep all twelve entries in one daily bucket even when CI runs shortly
+	// before midnight; smaller buckets are deliberately retained.
+	old := time.Now().UTC().Truncate(24 * time.Hour).Add(-45 * 24 * time.Hour)
 	for i := 0; i < 12; i++ {
 		emitDirect(t, db, makeID("rcav", 0, i), "ws_test", "crew_test",
 			old.Add(time.Duration(i)*time.Minute),

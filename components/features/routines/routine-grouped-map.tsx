@@ -24,12 +24,10 @@ import {
 export function RoutineGroupedMap({
   layout,
   agents,
-  workspaceId,
   onOpenPhase,
 }: {
   layout: RoutineStepsLayout
   agents: WorkspaceAgentIdentity[] | null
-  workspaceId?: string
   onOpenPhase: (level: number, groupKey?: string) => void
 }) {
   const node = (step: Step, label: string, count: number, level: number, groupKey?: string) => {
@@ -46,9 +44,7 @@ export function RoutineGroupedMap({
           <AgentAvatar
             seed={agent.avatar_seed || agent.name}
             style={agent.avatar_style || agent.crew?.avatar_style || undefined}
-            agentId={agent.id}
             avatarUrl={agent.avatar_url}
-            workspaceId={workspaceId}
             className="h-5 w-5"
             alt=""
           />

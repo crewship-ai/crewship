@@ -287,8 +287,11 @@ func (h *IssueHandler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	issue, err := scanIssueRow(h.db.QueryRowContext(r.Context(),
-		issueSelectQuery()+` WHERE m.identifier = ? AND m.workspace_id = ?`,
-		ident, wsID))
+		// The identifier, or the mission id (#2983) — Activity knows issues
+		// by id. An identifier match wins if both somehow match.
+		issueSelectQuery()+` WHERE (m.identifier = ? OR m.id = ?) AND m.workspace_id = ?
+		 ORDER BY (m.identifier = ?) DESC LIMIT 1`,
+		ident, ident, wsID, ident))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")

@@ -13,6 +13,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { apiFetch } from "@/lib/api-fetch"
+import { controlHeight } from "@/components/features/settings/shared"
 
 /**
  * What can be done to one person's data: hand it over, or erase it.
@@ -108,7 +109,7 @@ export function UserDataActions({ userId, email, workspaceId, onErased }: UserDa
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="max-w-md text-[11px] leading-snug text-muted-foreground">
+      <p className="max-w-md text-label leading-snug text-muted-foreground">
         If this person asks for a copy of what you hold about them, export it.
         If they ask to be forgotten, erase it. Both are written to an
         append-only trail — who did it, why, what it touched.
@@ -173,7 +174,7 @@ export function UserDataActions({ userId, email, workspaceId, onErased }: UserDa
                   placeholder="e.g. erasure request #1234 from the data subject"
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
-                  className="h-8 text-xs"
+                  className={controlHeight}
                   autoFocus
                 />
               </div>

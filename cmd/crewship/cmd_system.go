@@ -147,9 +147,9 @@ var systemInfoCmd = &cobra.Command{
 			if license != nil {
 				fmt.Printf("\n%sLicense%s\n", cli.Bold, cli.Reset)
 				fmt.Printf("  Edition:          %s\n", license.Edition)
-				fmt.Printf("  Max crews:        %d\n", license.MaxCrews)
-				fmt.Printf("  Max agents/crew:  %d\n", license.MaxAgents)
-				fmt.Printf("  Max members:      %d\n", license.MaxMembers)
+				fmt.Printf("  Max crews:        %s\n", licenseCapacity(license.MaxCrews))
+				fmt.Printf("  Max agents/crew:  %s\n", licenseCapacity(license.MaxAgents))
+				fmt.Printf("  Max members:      %s\n", licenseCapacity(license.MaxMembers))
 				if license.LicenseeOrg != "" {
 					fmt.Printf("  Licensee:         %s\n", license.LicenseeOrg)
 				}
@@ -322,6 +322,14 @@ func printInstallLinks(links map[string]string) {
 	for _, name := range names {
 		fmt.Printf("    %-10s %s\n", name, links[name])
 	}
+}
+
+// Zero represents unlimited capacity in the license API.
+func licenseCapacity(limit int) string {
+	if limit <= 0 {
+		return "Unlimited"
+	}
+	return fmt.Sprintf("%d", limit)
 }
 
 type systemLicenseInfo struct {

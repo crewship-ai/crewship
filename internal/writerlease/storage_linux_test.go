@@ -16,3 +16,9 @@ func TestSupportedLinuxFilesystemRejectsSharedAndUnknown(t *testing.T) {
 		}
 	}
 }
+
+func TestKernelFilesystemCannotHoldDatabaseLease(t *testing.T) {
+	if err := supportedStorage("/proc"); err != ErrUnsupportedStorage {
+		t.Fatalf("procfs accepted for database storage: %v", err)
+	}
+}

@@ -4,6 +4,7 @@ import * as React from "react"
 import { Plug, Plus, Search, X } from "lucide-react"
 
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useAgentFetch } from "@/hooks/use-agent-fetch"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -70,6 +71,10 @@ const SCOPE_OPTIONS: { value: Scope; label: string }[] = [
   { value: "off", label: "Off" },
 ]
 
+function agentBindingURL(workspaceId: string, agentId: string) {
+  return `/api/v1/integrations/composio/agents/${encodeURIComponent(agentId)}/bind?${new URLSearchParams({ workspace_id: workspaceId })}`
+}
+
 export function AccessEditor({
   workspaceId,
   agentId,
@@ -93,25 +98,26 @@ export function AccessEditor({
   const [addOpen, setAddOpen] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
   const [err, setErr] = React.useState<string | null>(null)
+  const scopeGeneration = React.useRef(0)
 
   // Load current bindings + inventory once on open.
   React.useEffect(() => {
     let alive = true
+    scopeGeneration.current += 1
     setLoading(true)
     setLoadErr(null)
+    setBusy(false)
+    setErr(null)
     ;(async () => {
       try {
         const [invR, bindR] = await Promise.all([
-          apiFetch(`/api/v1/integrations/composio/inventory?workspace_id=${workspaceId}`),
-          apiFetch(
-            `/api/v1/integrations/composio/agents/${agentId}/bind?workspace_id=${workspaceId}`,
-          ),
+          apiFetch(`/api/v1/integrations/composio/inventory?${new URLSearchParams({ workspace_id: workspaceId })}`),
+          apiFetch(agentBindingURL(workspaceId, agentId)),
         ])
         if (!invR.ok) throw new Error(`Inventory failed (${invR.status})`)
+        if (!bindR.ok) throw new Error(`Access failed (${bindR.status})`)
         const inv = (await invR.json()) as Inventory
-        const bindings: AgentBinding[] = bindR.ok
-          ? ((await bindR.json()) as { bindings?: AgentBinding[] }).bindings ?? []
-          : []
+        const bindings = ((await bindR.json()) as { bindings?: AgentBinding[] }).bindings ?? []
         if (!alive) return
 
         // slug → logo, harvested from connected accounts so chips/icons render
@@ -141,6 +147,7 @@ export function AccessEditor({
     })()
     return () => {
       alive = false
+      scopeGeneration.current += 1
     }
   }, [workspaceId, agentId])
 
@@ -190,6 +197,7 @@ export function AccessEditor({
     )
 
   const save = async () => {
+    const generation = scopeGeneration.current
     const uid = userId.trim()
     if (!uid) {
       setErr("Pick the user this agent acts as.")
@@ -209,7 +217,7 @@ export function AccessEditor({
           })),
       }
       const r = await apiFetch(
-        `/api/v1/integrations/composio/agents/${agentId}/bind?workspace_id=${workspaceId}`,
+        agentBindingURL(workspaceId, agentId),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -220,11 +228,13 @@ export function AccessEditor({
         const body = await r.json().catch(() => null)
         throw new Error(body?.detail || `Failed (${r.status})`)
       }
-      onSaved()
+      if (generation === scopeGeneration.current) onSaved()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to save access")
+      if (generation === scopeGeneration.current) {
+        setErr(e instanceof Error ? e.message : "Failed to save access")
+      }
     } finally {
-      setBusy(false)
+      if (generation === scopeGeneration.current) setBusy(false)
     }
   }
 
@@ -464,15 +474,17 @@ function ToolPicker({
         })
         if (!r.ok) throw new Error(`Failed (${r.status})`)
         const j = (await r.json()) as ToolsResp
+        if (ctrl.signal.aborted) return
         setTools(j.tools ?? [])
         setTotal(j.total ?? 0)
       } catch (e) {
-        if ((e as Error).name !== "AbortError") {
+        if (ctrl.signal.aborted) return
+        if (!(e instanceof Error && e.name === "AbortError")) {
           setErr(e instanceof Error ? e.message : "Failed to load tools")
           setTools([])
         }
       } finally {
-        setLoading(false)
+        if (!ctrl.signal.aborted) setLoading(false)
       }
     }, 300)
     return () => {
@@ -615,33 +627,22 @@ export function AgentConnectorsCard({
 }) {
   const ws = useWorkspace()
   const workspaceId = workspaceIdProp ?? ws.workspaceId
-  const [bindings, setBindings] = React.useState<AgentBinding[]>([])
-  const [loading, setLoading] = React.useState(true)
   const [editing, setEditing] = React.useState(false)
-
-  const load = React.useCallback(async () => {
-    if (!workspaceId) return
-    setLoading(true)
-    try {
+  const [revision, setRevision] = React.useState(0)
+  const { data, loading } = useAgentFetch<AgentBinding[]>(
+    async (signal) => {
       const r = await apiFetch(
-        `/api/v1/integrations/composio/agents/${agentId}/bind?workspace_id=${workspaceId}`,
+        agentBindingURL(workspaceId ?? "", agentId),
+        { signal },
       )
-      if (!r.ok) {
-        setBindings([])
-        return
-      }
+      if (!r.ok) throw new Error(`Access failed (${r.status})`)
       const j = (await r.json()) as { bindings?: AgentBinding[] }
-      setBindings(j.bindings ?? [])
-    } catch {
-      setBindings([])
-    } finally {
-      setLoading(false)
-    }
-  }, [workspaceId, agentId])
-
-  React.useEffect(() => {
-    void load()
-  }, [load])
+      return j.bindings ?? []
+    },
+    [workspaceId, agentId, revision],
+    { enabled: !!workspaceId },
+  )
+  const bindings = data ?? []
 
   const actsAs = bindings[0]?.user_id
 
@@ -696,7 +697,7 @@ export function AgentConnectorsCard({
           onClose={() => setEditing(false)}
           onSaved={() => {
             setEditing(false)
-            void load()
+            setRevision((value) => value + 1)
           }}
         />
       )}

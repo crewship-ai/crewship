@@ -115,4 +115,24 @@ describe("SaveFooter", () => {
     render(<SaveFooter dirty status="idle" onSave={vi.fn()} onCancel={vi.fn()} />)
     expect(screen.getByRole("status")).toBeInTheDocument()
   })
+
+  it("gives each audit note its own accessible label and forwards edits", () => {
+    const firstChange = vi.fn()
+    const secondChange = vi.fn()
+    render(<>
+      <SaveFooter dirty status="idle" reason="" reasonLabel="Policy reason" onReasonChange={firstChange} onSave={vi.fn()} onCancel={vi.fn()} />
+      <SaveFooter dirty status="idle" reason="" reasonLabel="Autonomy reason" onReasonChange={secondChange} onSave={vi.fn()} onCancel={vi.fn()} />
+    </>)
+    fireEvent.change(screen.getByRole("textbox", { name: "Policy reason" }), { target: { value: "Limited pilot" } })
+    expect(firstChange).toHaveBeenCalledWith("Limited pilot")
+    expect(secondChange).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByRole("textbox", { name: "Autonomy reason" }), { target: { value: "Manual review required" } })
+    expect(secondChange).toHaveBeenCalledWith("Manual review required")
+  })
+
+  it("keeps an unlabelled server failure retryable after the draft became clean", () => {
+    render(<SaveFooter dirty={false} status="error" onSave={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.getByRole("status")).toHaveTextContent("Save failed")
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+  })
 })

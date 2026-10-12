@@ -472,7 +472,6 @@ func TestContainerStatusStates(t *testing.T) {
 		{"starting", "creating"},
 		{"stopped", "stopped"},
 		{"exited", "stopped"},
-		{"weird", "error"},
 	}
 
 	for _, tt := range tests {

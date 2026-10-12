@@ -32,6 +32,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/jitter"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -257,6 +258,9 @@ func (s *Server) Start(ctx context.Context) error {
 					s.logger.Info("deleted agent runs", "stopped", res.Stopped, "pending", res.Pending, "error", errors.Join(res.Errors...))
 				}
 				s.reconcileRecoveredRuntimes(ctx)
+				if err := s.flushRetainedOutput(ctx); err != nil {
+					s.logger.Warn("retained output pending projection", "error", err)
+				}
 				if err := s.flushRecoveredStops(ctx); err != nil {
 					s.logger.Warn("confirmed stop history pending retry", "error", err)
 				}
@@ -366,6 +370,10 @@ func (s *Server) Start(ctx context.Context) error {
 		// to offline. The transition itself emits agent.status_change so
 		// the journal records the timeout rather than silent disappearance.
 		go func() {
+			// Spread this loop's phase from the other sweepers started at boot (#1891).
+			if !jitter.Startup(ctx, 60*time.Second) {
+				return
+			}
 			t := time.NewTicker(60 * time.Second)
 			defer t.Stop()
 			for {
@@ -709,6 +717,23 @@ func (s *Server) Shutdown() error {
 	return firstErr
 }
 
+// RegisterBackgroundStop attaches an idempotent stop-and-join function to
+// server shutdown, before verdict/journal teardown. Register before Start;
+// late registrations after cancellation stop immediately.
+func (s *Server) RegisterBackgroundStop(stop func()) {
+	if stop == nil {
+		return
+	}
+	s.bgStopsMu.Lock()
+	if s.bgCtx != nil && s.bgCtx.Err() != nil {
+		s.bgStopsMu.Unlock()
+		stop()
+		return
+	}
+	s.bgStops = append(s.bgStops, stop)
+	s.bgStopsMu.Unlock()
+}
+
 // StopBackground cancels server-owned background goroutines that were
 // launched by New() (rather than Start()) — currently the devcontainer
 // catalog refresh and mise runtime refresh tickers — and waits for them
@@ -723,6 +748,12 @@ func (s *Server) Shutdown() error {
 func (s *Server) StopBackground() {
 	if s.bgCancel != nil {
 		s.bgCancel()
+	}
+	s.bgStopsMu.Lock()
+	stops := append([]func(){}, s.bgStops...)
+	s.bgStopsMu.Unlock()
+	for _, stop := range stops {
+		stop()
 	}
 	s.bgWg.Wait()
 }
@@ -1056,6 +1087,11 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 			var run orchestrator.RunState
 			if err := json.Unmarshal(raw, &run); err != nil {
 				s.logger.Error("decode recovered runtime identity", "error", err)
+				if owner := orchestrator.RuntimeRecordAgent(raw); owner != "" {
+					protectedAgents[owner] = true
+					legacyAgents[owner] = true
+					continue
+				}
 				return
 			}
 			run = s.reconcileRecoveredRuntimeAtBoot(probeCtx, key, run)
@@ -1067,15 +1103,48 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 				s.recoveredRuntimes[key] = run
 				s.recoveredRuntimesMu.Unlock()
 			}
-			if (run.Status == "running" || (run.Status == "cancelled" && run.StopJournalPending)) && run.AgentID != "" {
+			if run.Status == "running" && run.AgentID != "" {
 				protectedAgents[run.AgentID] = true
 				if run.ID == "" || run.ID == run.AgentID {
-					// Before per-run identities, runtime records used the agent key and
-					// cannot be mapped to one journal trace. Preserve that agent's traces.
 					legacyAgents[run.AgentID] = true
 				} else {
 					protectedRuns[run.ID] = true
 				}
+			}
+			// A confirmed stop protects only its trace from generic recovery,
+			// never unrelated runs or the entire agent's status.
+			if run.Status == "cancelled" && run.StopJournalPending && run.ID != "" {
+				protectedRuns[run.ID] = true
+			}
+		}
+	}
+	// Boot probes can create new outbox entries. Project them before the
+	// journal-based idle decision; failures retain their durable retry marker.
+	if err := s.flushRecoveredStops(ctx); err != nil {
+		s.logger.Warn("project boot runtime absence", "error", err)
+	}
+	// A rejected or deferred stop projection must not change its agent's
+	// status through the generic reset below. Read back the outbox: successful
+	// projections acknowledged their markers and already own status updates.
+	// This guard leaves unrelated orphan traces eligible for cleanup.
+	if s.state != nil {
+		states, err := s.state.List(ctx, "agent_runs")
+		if err != nil {
+			s.logger.Error("inspect pending boot stop projections", "error", err)
+			return
+		}
+		for _, raw := range states {
+			var run orchestrator.RunState
+			if err := json.Unmarshal(raw, &run); err != nil {
+				s.logger.Error("decode pending boot stop ownership", "error", err)
+				if owner := orchestrator.RuntimeRecordAgent(raw); owner != "" {
+					protectedAgents[owner] = true
+					continue
+				}
+				return
+			}
+			if run.Status == "cancelled" && run.StopJournalPending && run.AgentID != "" {
+				protectedAgents[run.AgentID] = true
 			}
 		}
 	}
@@ -1111,7 +1180,7 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 		    SELECT 1 FROM journal_entries je2
 		    WHERE je2.workspace_id = je1.workspace_id
 		      AND je2.trace_id = je1.trace_id
-		      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
+		      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') AND (je2.entry_type<>'run.recovered_stop' OR je2.agent_id=je1.agent_id)
 		  )
 		GROUP BY je1.workspace_id, je1.trace_id`)
 	if err != nil {
@@ -1125,9 +1194,6 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 		}
 	}
 	_ = rows.Close()
-	if len(orphans) == 0 {
-		return
-	}
 
 	s.logger.Info("recovered orphaned runs", "count", len(orphans))
 
@@ -1227,7 +1293,7 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 			    SELECT 1 FROM journal_entries je2
 			    WHERE je2.workspace_id = je1.workspace_id
 			      AND je2.trace_id = je1.trace_id
-			      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
+			      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') AND (je2.entry_type<>'run.recovered_stop' OR je2.agent_id=je1.agent_id)
 			  )
 		)`+guard, args...); err != nil {
 		s.logger.Error("reset agent statuses after recovery", "error", err)

@@ -1,0 +1,62 @@
+apiVersion: crewship/v1
+kind: Crew
+
+metadata:
+  name: Lab
+  slug: lab
+  description: Demo v2 — one small crew for testing every feature, one step at a time.
+  icon: flask-conical
+  color: violet
+
+spec:
+  devcontainer:
+    image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
+    memory_mb: 2048
+    cpus: 1.0
+    features:
+      "ghcr.io/devcontainers/features/common-utils:2":
+        username: agent
+        userUid: "1001"
+        userGid: "1001"
+        installZsh: false
+        upgradePackages: false
+      "ghcr.io/devcontainers-extra/features/claude-code:2": {}
+    env:
+      PATH: /home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+  agents:
+    - slug: mia
+      name: Mia
+      role_title: Lab Lead
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm:
+        provider: ANTHROPIC
+        model: claude-sonnet-5
+      tool_profile: FULL
+      timeout_seconds: 1800
+      memory_enabled: true
+      system_prompt: |
+        You are Mia, the lead of the Lab crew. The Lab exists to try one
+        Crewship feature at a time, so keep every answer short and literal.
+        When asked to delegate, delegate to Leo and report his answer
+        verbatim; never do a delegated task yourself. When you finish an
+        issue, leave one comment on it saying exactly what changed.
+
+    - slug: leo
+      name: Leo
+      role_title: Lab Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm:
+        provider: ANTHROPIC
+        model: claude-haiku-4-5
+      tool_profile: CODING
+      timeout_seconds: 1800
+      memory_enabled: true
+      system_prompt: |
+        You are Leo, an engineer in the Lab crew. Do exactly what an issue
+        or a message asks, nothing more, and say what you did in one or two
+        lines. Files you are asked to write go under /crew/shared. When you
+        finish an issue, leave one comment on it with the path of what you
+        wrote and its content.

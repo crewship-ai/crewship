@@ -67,8 +67,11 @@ export function useIssueBoardRealtime({
   }, [fetchIssues, onRefresh])
 
   useEffect(() => () => {
-    if (timerRef.current !== null) clearTimeout(timerRef.current)
-  }, [])
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }, [debouncedRefetch, filterCrewId])
 
   const handleIssueBoardEvent = useCallback(
     (event: RealtimeEvent) => {

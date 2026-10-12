@@ -71,7 +71,7 @@ export const ADAPTER_BRAND: Record<string, AdapterBrand> = {
  * to the registry doesn't crash the UI before its brand chip lands.
  */
 export function getAdapterBrand(key: string): AdapterBrand {
-  return ADAPTER_BRAND[key] ?? {
+  return Object.hasOwn(ADAPTER_BRAND, key) ? ADAPTER_BRAND[key] : {
     fg: "#A1A1AA",
     bg: "rgba(161, 161, 170, 0.12)",
     border: "rgba(161, 161, 170, 0.40)",

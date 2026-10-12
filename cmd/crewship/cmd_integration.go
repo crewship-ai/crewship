@@ -76,24 +76,23 @@ var integrationCrewCmd = &cobra.Command{
 // integrationToolsCmd groups the per-tool enable/disable picker
 // (mcp_tool_bindings). Tool toggles only apply to crew-scoped servers.
 //
-// Advisory, not access control: on the self-hosted/legacy MCP path this
-// only changes whether a tool's name is listed in the agent's
-// [CONNECTED INTEGRATIONS] prompt block. The sidecar gateway that
-// dispatches tool calls does no per-tool check, so a disabled tool can
-// still be invoked directly. Composio-routed integrations enforce their
-// own allowed_tools scope separately (see #2168).
+// On the self-hosted/legacy MCP path a disabled tool leaves the agent's
+// [CONNECTED INTEGRATIONS] prompt block and is refused by the crew sidecar's
+// MCP gateway from its next start; agent CLIs that dial an HTTP MCP server
+// directly are not gated per tool yet (#2178). Composio-routed integrations
+// enforce their own allowed_tools scope separately.
 var integrationToolsCmd = &cobra.Command{
 	Use:   "tools",
 	Short: "Manage per-tool enable/disable on crew-scoped integrations",
 	Long: `Manage per-tool enable/disable on crew-scoped integrations.
 
-This is advisory, not access control. On the self-hosted/legacy MCP
-path, enable/disable only changes whether a tool's name is listed in
-the agent's connected-integrations prompt block (a hint of what to
-call) — the sidecar gateway that dispatches tool calls does no
-per-tool check, so a disabled tool can still be called directly.
-Composio-routed integrations are enforced separately, through
-Composio's own allowed_tools scope, not through these bindings.`,
+On the self-hosted/legacy MCP path a disabled tool is removed from the
+agent's connected-integrations prompt block, and the crew sidecar's MCP
+gateway refuses to advertise or call it from the sidecar's next start.
+Agent CLIs that reach an HTTP MCP server directly through their own MCP
+config are not gated per tool yet. Composio-routed integrations are
+enforced separately, through Composio's own allowed_tools scope, not
+through these bindings.`,
 }
 
 // integrationAgentCmd groups agent-binding mutations not covered by the

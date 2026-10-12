@@ -3,11 +3,14 @@ package devcontainer
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+
+	"github.com/crewship-ai/crewship/internal/managedlaunch"
 )
 
 // writeToolchainInventory is shared by exec/commit and Dockerfile recording.
@@ -52,6 +55,12 @@ func writeToolchainInventory(ctx context.Context, containerID string, bins []str
 		"  (ulimit -f 8; timeout -k 1 8 \"$binary\" --version > " + toolchainDirectory + "/\"$binary\".version 2>/dev/null)\n" +
 		"  code=$?\n" +
 		"  printf '%s\\n' \"$code\" > " + toolchainDirectory + "/\"$binary\".status || exit 1\n" +
+		"  if test -x /usr/local/bin/mise; then\n" +
+		"    native=$(timeout -k 1 8 /usr/local/bin/mise which \"$binary\" 2>/dev/null) && canonical=$(readlink -f \"$native\") && test \"$native\" = \"$canonical\" && {\n" +
+		"      printf '%s\\n' \"$native\" > " + toolchainDirectory + "/\"$binary\".native-path\n" +
+		"      (ulimit -f 8; timeout -k 1 8 \"$native\" --version > " + toolchainDirectory + "/\"$binary\".native-version 2>/dev/null)\n" +
+		"      printf '%s\\n' \"$?\" > " + toolchainDirectory + "/\"$binary\".native-status\n" +
+		"    }; fi\n" +
 		"done\nprintf '1\\n' > " + toolchainDirectory + "/schema\n"
 	probeEnv := []string{"HOME=/home/agent", "DISABLE_AUTOUPDATER=1"}
 	for _, kv := range MiseRuntimeEnv {
@@ -119,5 +128,24 @@ func (p *Provisioner) inspectToolchain(ctx context.Context, image string, bins [
 		return unknown
 	}
 	inventory.ImageID = inspected.ID
+	for i := range inventory.Tools {
+		tool := &inventory.Tools[i]
+		if tool.Status != "observed" || (tool.Binary != "claude" && tool.Binary != "codex") || !managedToolPath(tool.Binary, tool.ManagedVersion, tool.ManagedPath) {
+			continue
+		}
+		artifactCopy, err := copier.CopyFromContainer(ctx, created.ID, client.CopyFromContainerOptions{SourcePath: tool.ManagedPath})
+		if err != nil {
+			continue
+		}
+		tool.LaunchArtifact = captureLaunchArtifact(tool.ManagedPath, artifactCopy.Content)
+		artifactCopy.Content.Close()
+	}
 	return inventory
+}
+
+// A host read of the stopped, immutable image supplies the hash. Version probe
+// stdout and digest files produced by image programs never authorize launch.
+func captureLaunchArtifact(executable string, reader io.Reader) *managedlaunch.Artifact {
+	artifact, _ := managedlaunch.CaptureArchive(executable, reader)
+	return artifact
 }

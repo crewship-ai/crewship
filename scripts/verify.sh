@@ -6,6 +6,8 @@ mode=${1:-quick}
 case "$mode" in quick|go|full) ;; *) echo 'usage: scripts/verify.sh [quick|go|full]' >&2; exit 2 ;; esac
 printf 'Verifying %s (dirty=%s)\n' "$(git rev-parse HEAD)" "$(scripts/build-stamp.sh dirty)"
 python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+go test ./scripts/host-paths -count=1
+go run ./scripts/host-paths
 bash scripts/go-toolchain-pin.sh
 bash scripts/pr-image-build-paths.sh
 if command -v actionlint >/dev/null; then

@@ -15,6 +15,34 @@ import (
 func revisionFixture() *devcontainer.ProvisionResult {
 	return &devcontainer.ProvisionResult{CachedImage: "crewship-cache:new", ConfigHash: "build-hash", Requirements: devcontainer.AggregatedRequirements{Toolchain: &devcontainer.ToolchainInventory{SchemaVersion: 1, Status: "recorded", ImageID: "sha256:" + strings.Repeat("a", 64), Tools: []devcontainer.ToolchainTool{{Binary: "codex", Version: "0.152.0", Status: "observed", Path: "/usr/local/bin/codex"}}}}}
 }
+
+func TestEnvironmentRevisionChecksSupersessionBeforeOldQualification(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "current", true: "superseded"}[changed], func(t *testing.T) {
+			config := `{"image":"ubuntu:22.04"}`
+			h, ws, crew := covProvRig(t, &covCommitClient{}, config)
+			oldMise := `{"ai_cli_check":"required"}`
+			currentMise := oldMise
+			if changed {
+				currentMise = `{"ai_cli_check":"record"}`
+			}
+			if _, err := h.db.Exec(`UPDATE crews SET mise_config=?,cached_image='previous' WHERE id=?`, currentMise, crew); err != nil {
+				t.Fatal(err)
+			}
+			_, err := h.saveProvisionResult(t.Context(), crew, ws, provisionDefinition{Config: config, Mise: oldMise}, revisionFixture())
+			if changed && !errors.Is(err, errBuildDefinitionChanged) {
+				t.Fatalf("obsolete qualification terminalized a superseded build: %v", err)
+			}
+			if !changed && (err == nil || errors.Is(err, errBuildDefinitionChanged)) {
+				t.Fatalf("current definition did not enforce required qualification: %v", err)
+			}
+			var selected string
+			if err := h.db.QueryRow(`SELECT cached_image FROM crews WHERE id=?`, crew).Scan(&selected); err != nil || selected != "previous" {
+				t.Fatalf("failed publication changed selection: %q %v", selected, err)
+			}
+		})
+	}
+}
 func TestEnvironmentRevisionPersistsWithoutMutableDefinitionSecrets(t *testing.T) {
 	config := `{"image":"ubuntu:22.04"}`
 	h, wsID, crewID := covProvRig(t, &covCommitClient{}, config)

@@ -53,9 +53,15 @@ func (h *ChainHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var userID string
+	if u := UserFromContext(r.Context()); u != nil {
+		userID = u.ID
+	}
 	opt := chain.Options{
 		MaxDepth: atoiOrZero(r.URL.Query().Get("depth")),
 		MaxNodes: atoiOrZero(r.URL.Query().Get("limit")),
+		// The inbox's own audience, per node (#2986, docs/specs/activity-links.md).
+		CanSeeInbox: inboxAudience(userID, RoleFromContext(r.Context())),
 	}
 
 	g, err := chain.Walk(r.Context(), h.db, workspaceID, anchor, opt)

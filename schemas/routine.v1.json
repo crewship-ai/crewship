@@ -549,7 +549,7 @@
         "until": { "type": "string", "description": "RFC3339 timestamp or template (datetime kind)." },
         "event_type": { "type": "string" },
         "event_filter": { "type": "string", "description": "Simple equality match on payload." },
-        "timeout_sec": { "type": "integer", "minimum": 1, "description": "Hard timeout. 0 = no timeout (wait forever; not recommended)." }
+        "timeout_sec": { "type": "integer", "minimum": 0, "description": "Wait timeout in seconds; a positive step timeout_seconds takes precedence. Zero/omitted uses the kind default: approval 24h, event 1h." }
       }
     },
     "TransformStep": {
@@ -558,7 +558,7 @@
       "additionalProperties": false,
       "properties": {
         "input": { "type": "string", "description": "Template-substitutable; usually {{ steps.X.output }}." },
-        "expression": { "type": "string", "description": "jq-flavored projection: '.path' / '.items[0]' / '.a + .b' etc." }
+        "expression": { "type": "string", "description": "Identity '.', field/array paths such as '.items[0].name', or length, keys, tostring, @json (alias tojson). Arithmetic and pipes are unsupported; use code." }
       }
     },
     "QueryStep": {

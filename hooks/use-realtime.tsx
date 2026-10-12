@@ -9,9 +9,10 @@ import {
   useMemo,
   useRef,
 } from "react"
-import { useWebSocket, type WSMessage, type WSStatus } from "@/hooks/use-websocket"
+import { useWebSocket, WsUnavailableError, type WSMessage, type WSStatus } from "@/hooks/use-websocket"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useAccessMode } from "@/hooks/use-access-mode"
 import { apiFetch } from "@/lib/api-fetch"
 
 /** All supported real-time event types broadcast over the workspace WebSocket channel. */
@@ -370,7 +371,14 @@ function getWsUrl(): string {
  * session-expired event, which the AuthProvider turns into a hard redirect.
  */
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
-  const { workspaceId } = useWorkspace()
+  const { workspaceId, refresh: refreshWorkspaces } = useWorkspace()
+  // Realtime exists only for a trusted session. A restricted account's
+  // allowlist refuses /ws-token (404), so for it the socket is never opened
+  // and the status is the terminal "unavailable" — no ticket request, no retry
+  // loop, no "Reconnecting…" banner. While the mode is still loading nothing is
+  // requested either: the socket opens once the session is known to be trusted.
+  const accessMode = useAccessMode()
+  const realtimeEnabled = accessMode === "trusted"
   const { data: session } = useSessionSafe()
   const userId = session?.user.id
   const listenersRef = useRef<Map<string, Set<EventCallback>>>(new Map())
@@ -386,8 +394,17 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     //     non-auth status (5xx, 429) OR malformed JSON: transient.
     //     Throw; useWebSocket's catch path schedules the next
     //     backoff attempt instead of terminating.
+    //   - 404: the route does not exist for this session — the restricted
+    //     allowlist refuses it. That is not an outage: retrying cannot
+    //     succeed, so it is terminal ("unavailable"), and not an auth
+    //     failure, so the user stays logged in. It also means the session
+    //     may have just become restricted, so the access mode is re-read.
     const res = await apiFetch("/api/v1/ws-token")
     if (res.status === 401 || res.status === 403) return null
+    if (res.status === 404) {
+      void refreshWorkspaces?.()
+      throw new WsUnavailableError("/api/v1/ws-token returned 404")
+    }
     if (!res.ok) {
       throw new Error(`/api/v1/ws-token returned ${res.status}`)
     }
@@ -396,7 +413,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       throw new Error("/api/v1/ws-token response missing token field")
     }
     return data.token
-  }, [])
+  }, [refreshWorkspaces])
 
   const dispatchEvent = useCallback(
     (type: RealtimeEventType, payload: Record<string, unknown>) => {
@@ -453,12 +470,18 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     dispatchEvent("realtime.reconnected", {})
   }, [dispatchEvent])
 
-  const { status, send } = useWebSocket({
+  const { status: socketStatus, send } = useWebSocket({
+    enabled: realtimeEnabled,
     url: getWsUrl(),
     getToken,
     onMessage: handleMessage,
     onConnect: handleConnect,
   })
+
+  // A disabled socket keeps whatever status it last had, so the session's
+  // mode decides what consumers see while it is off.
+  const status: WSStatus =
+    accessMode === "restricted" ? "unavailable" : accessMode === "loading" ? "connecting" : socketStatus
 
   useEffect(() => { statusRef.current = status }, [status])
 

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"io"
@@ -285,9 +286,19 @@ func (o *Orchestrator) RunIsAlive(ctx context.Context, runID string) (bool, erro
 // RunLocation is launch identity, independent of credential HOME lifetime.
 // Callers retain it until the attempt has settled; an absent HOME is not
 // evidence that the launched runtime has stopped.
-type RunLocation struct{ ContainerID, AgentSlug, RunID string }
+type RunLocation struct {
+	ContainerID, AgentSlug, RunID string
+	// Managed is durable launch-mode evidence retained by recovered callers.
+	Managed bool
+}
 
 func (o *Orchestrator) RunIsAliveAt(ctx context.Context, location RunLocation) (bool, error) {
+	if run, host, err := o.hostRunAt(ctx, location); err != nil {
+		return false, err
+	} else if host {
+		return o.probeHostRun(ctx, run, false)
+	}
+
 	containerID, agentSlug, runID := location.ContainerID, location.AgentSlug, location.RunID
 	if containerID == "" || agentSlug == "" || !ValidRunID(runID) {
 		return false, fmt.Errorf("incomplete or invalid runtime location")
@@ -295,7 +306,15 @@ func (o *Orchestrator) RunIsAliveAt(ctx context.Context, location RunLocation) (
 	session := TmuxSessionName(agentSlug, runID)
 	// PRESENT / ABSENT are distinct tokens, and anything else — including an
 	// empty read — is not an answer.
-	probe := directRunProbe(runID, false) + "if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX; " +
+	directProbe, err := o.managedRunProbe(ctx, location, false)
+	if err != nil {
+		absent, inspectErr := o.containerRuntimeAbsent(ctx, containerID)
+		if inspectErr == nil && absent {
+			return false, nil
+		}
+		return false, errors.Join(err, inspectErr)
+	}
+	probe := directProbe + "if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX; " +
 		"elif tmux has-session -t '" + session + "' 2>/dev/null; then echo PRESENT; " +
 		"else echo ABSENT; fi"
 	out, err := o.probeExec(ctx, containerID, probe)
@@ -336,17 +355,37 @@ func (o *Orchestrator) StopRun(ctx context.Context, runID string) (bool, error) 
 }
 
 func (o *Orchestrator) StopRunAt(ctx context.Context, location RunLocation) (bool, error) {
+	if run, host, err := o.hostRunAt(ctx, location); err != nil {
+		return false, err
+	} else if host {
+		return o.probeHostRun(ctx, run, true)
+	}
+
 	containerID, agentSlug, runID := location.ContainerID, location.AgentSlug, location.RunID
 	if containerID == "" || agentSlug == "" || !ValidRunID(runID) {
 		return false, fmt.Errorf("incomplete or invalid runtime location")
 	}
 	session := TmuxSessionName(agentSlug, runID)
-	probe := directRunProbe(runID, true) + "if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX; else " +
+	directProbe, err := o.managedRunProbe(ctx, location, true)
+	if err != nil {
+		absent, inspectErr := o.containerRuntimeAbsent(ctx, containerID)
+		if inspectErr == nil && absent {
+			return true, nil
+		}
+		return false, errors.Join(err, inspectErr)
+	}
+	probe := directProbe + "if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX; else " +
 		"tmux kill-session -t '" + session + "' >/dev/null 2>&1; " +
 		"if tmux has-session -t '" + session + "' 2>/dev/null; then echo PRESENT; else echo ABSENT; fi; fi"
 	out, err := o.probeExec(ctx, containerID, probe)
 	if err != nil {
-		return false, fmt.Errorf("stop run %s: %w", runID, err)
+		// Exec cannot enter a removed/stopped container. Confirm that
+		// condition with an authoritative inspect, not error-message matching.
+		absent, inspectErr := o.containerRuntimeAbsent(ctx, containerID)
+		if inspectErr == nil && absent {
+			return true, nil
+		}
+		return false, fmt.Errorf("stop run %s: %w", runID, errors.Join(err, inspectErr))
 	}
 	switch {
 	case strings.Contains(out, "ABSENT"):
@@ -381,4 +420,17 @@ func (o *Orchestrator) probeExec(ctx context.Context, containerID, script string
 		return "", fmt.Errorf("read probe output: %w", err)
 	}
 	return string(out), nil
+}
+
+func (o *Orchestrator) containerRuntimeAbsent(ctx context.Context, id string) (bool, error) {
+	status, err := o.container.ContainerStatus(ctx, id)
+	if errors.Is(err, provider.ErrContainerNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("%w: inspect container: %w", ErrRuntimeUnavailable, err)
+	}
+	// Docker reports non-running OOM/dead containers as error. Unknown
+	// provider vocabulary (including an empty state) is not absence evidence.
+	return status != nil && (status.State == "stopped" || status.State == "error"), nil
 }

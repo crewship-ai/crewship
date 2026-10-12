@@ -31,7 +31,7 @@ export function EntryAvatar({ entry, lookup, compact = false }: { entry: InboxV2
     // One colour per row: severity lives in the kind pill, not here.
     return <span className={`${box} icon-tile flex items-center justify-center`}><CalendarClock className={compact ? "h-3 w-3" : "h-4 w-4"} aria-hidden /></span>
   }
-  if (agent) return <AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style} agentId={agent.id} avatarUrl={agent.avatar_url} alt="" className={`${box} bg-muted`} />
+  if (agent) return <AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style} avatarUrl={agent.avatar_url} alt="" className={`${box} bg-muted`} />
   if (routine) return <CrewIcon icon={resolveRoutineIcon(routine)} color={resolveRoutineColor(routine)} size="sm" className={box} />
   if (crew && entry.inboxItem?.payload?.mission_id) return <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className={box} />
   if (actor && actor.kind !== "crew") return <ActorAvatar actor={actor} size={compact ? 20 : 32} />

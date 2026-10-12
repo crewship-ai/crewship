@@ -151,7 +151,6 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
               <AgentAvatar
                 seed={agent.avatar_seed || agent.name}
                 style={agent.avatar_style || agent.crew?.avatar_style}
-                agentId={agent.id}
                 avatarUrl={agent.avatar_url}
                 className="h-10 w-10 rounded-lg shrink-0"
               />

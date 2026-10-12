@@ -1,0 +1,50 @@
+---
+title: "crewship reset"
+description: "Reset application data of a stopped local installation while retaining identity and management files."
+icon: "rotate-ccw"
+stability: experimental
+tag: Experimental
+---
+
+# crewship reset
+
+Reset requires a stopped installation and an explicit local root. It never
+selects a target from cwd, a CLI profile or the fallback user home.
+
+```bash
+crewship reset --data --data-dir /absolute/installation --plan
+crewship reset --data --data-dir /absolute/installation
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--data` | `false` | Required acknowledgement to clear application data. |
+| `--plan` | `false` | Review validated paths without modifying files or Docker. |
+| `--data-dir` | environment | Absolute root; otherwise explicit `CREWSHIP_HOME` or `CREWSHIP_DATA_DIR` is required. |
+| `--config` | none | Absolute path to the server YAML configuration used by this installation. |
+| `--db` | environment or root | Absolute local SQLite URL; relative database targets are refused. |
+
+Stop using the installation's supervisor, run reset, start through that same
+supervisor, wait for `/readyz`, then run `crewship seed --server <explicit-url>`.
+Provider-backed seeding requires credentials. `--offline-demo` seeds UI fixtures
+without model execution. Reset itself does not stop or restart services.
+
+Configuration, secrets, logs, backups and installation identity are retained.
+Application rows return to the migration defaults of this binary; the database
+schema, migration metadata and identity nonce survive. Configured managed stores
+and installed chats/skills are cleared; Bolt contents are reset.
+
+Only exact installation-labelled containers, volumes and networks are removed.
+Foreign or unlabelled Docker resources, images and build cache are retained.
+Docker inventory is required; failures prevent clearing application data.
+External stores, unproven custom layouts, checkout roots, hard-linked database
+files, symlink escapes and overlaps with preserved management data are refused.
+
+Reset holds lifetime installation, SQLite and identity locks. If it fails after
+beginning cleanup, startup refuses the installation until reset completes.
+Keep it stopped and rerun the same command. No lock files or reset markers should
+be manually deleted to bypass this protection. SQL row replacement is
+transactional; Docker and filesystem cleanup can have completed before a later
+failure. Apple container cleanup is currently unsupported.
+
+This command is available in the full server binary, not `crewship-cli`.

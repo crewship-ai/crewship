@@ -107,7 +107,8 @@ or a listed endpoint nobody calls.
 | `ContainerUnpause` | `POST /containers/{id}/unpause` | Resumes it afterwards |
 | `ContainerUpdate` | `POST /containers/{id}/update` | Applies managed service resource bounds before startup and recovery |
 | `CopyToContainer` | `HEAD` + `PUT /containers/{id}/archive` | Writes devcontainer features, restored backups, the sidecar binary |
-| `CopyFromContainer` | `GET /containers/{id}/archive` | Streams crew backups and bounded built-toolchain inventory from stopped inspection containers |
+| `CopyFromContainer` | `GET /containers/{id}/archive` | Streams crew backups, bounded built-toolchain inventory, and secondary launcher archive consistency for managed admission (does not prove the running bind inode) |
+| `ContainerStatPath` | `HEAD /containers/{id}/archive` | Rejects symlink ancestors that could alias managed CLI image paths into writable home; requires `POST: 1` for HEAD |
 | `ExecCreate` | `POST /containers/{id}/exec` | Creates the exec session an agent turn runs in |
 
 `ExecCreate` is in this table rather than the next one on purpose: the Engine
@@ -141,6 +142,7 @@ API puts exec *creation* under `/containers`, so `EXEC: 0` does not stop it.
 | `NetworkConnect` | `POST /networks/{id}/connect` | Moves an existing crew service onto the crew's network without recreating it |
 | `NetworkDisconnect` | `POST /networks/{id}/disconnect` | Detaches a moved crew service from its previous network |
 | `NetworkCreate` | `POST /networks/create` | Creates the instance network and, for crews listed in `crew_network_crews`, each crew's own network |
+| `NetworkInspect` | `GET /networks/{id}` | Revalidates network identity and installation ownership before offline reset removal |
 | `NetworkList` | `GET /networks` | Checks whether it already exists |
 | `NetworkRemove` | `DELETE /networks/{id}` | Removes the network of a deleted crew once its containers are gone |
 | `VolumeCreate` | `POST /volumes/create` | Creates per-agent home and memory volumes |

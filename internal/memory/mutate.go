@@ -126,9 +126,10 @@ var (
 	// statement, never a permission.
 	ErrProtectedRemoval = errors.New("protected_removal")
 
-	// ErrContentTooLarge is a replace whose base or target exceeds the
-	// diffable budget. memdiff's Myers is quadratic in the edit distance and
-	// its Diff has no error to return, so the bound has to live here, under
+	// ErrContentTooLarge is content that cannot fit in an append allocation
+	// or whose base or target exceeds the diffable budget. memdiff's Myers is
+	// quadratic in the edit distance and its Diff has no error to return, so
+	// the bound has to live here, under
 	// the lock, before the call. §8 sets a 1 MiB webhook body limit and says
 	// nothing about memory content size; this is our number, not §8's.
 	ErrContentTooLarge = errors.New("memory_content_too_large")
@@ -802,7 +803,11 @@ func (r MutateRequest) buildTarget(rawBase, normContent []byte) (final []byte, n
 		if r.Op == OpReplace {
 			return normContent, false, false, nil
 		}
-		out := make([]byte, 0, len(rawBase)+len(normContent))
+		capacity, err := mutationAppendCapacity(len(rawBase), len(normContent))
+		if err != nil {
+			return nil, false, false, err
+		}
+		out := make([]byte, 0, capacity)
 		out = append(out, rawBase...)
 		out = append(out, normContent...)
 		return out, false, false, nil
@@ -826,7 +831,11 @@ func (r MutateRequest) buildTarget(rawBase, normContent []byte) (final []byte, n
 	}
 
 	if r.Op == OpAppend {
-		final = make([]byte, 0, len(base)+len(normContent))
+		capacity, err := mutationAppendCapacity(len(base), len(normContent))
+		if err != nil {
+			return nil, normalizedBase, false, err
+		}
+		final = make([]byte, 0, capacity)
 		final = append(final, base...)
 		final = append(final, normContent...)
 	} else {
@@ -863,6 +872,16 @@ func (r MutateRequest) buildTarget(rawBase, normContent []byte) (final []byte, n
 		}
 	}
 	return final, normalizedBase, verified, nil
+}
+
+// mutationAppendCapacity accepts slice lengths and checks their sum before
+// allocation. Checking after addition would miss a wrapped int.
+func mutationAppendCapacity(baseLen, contentLen int) (int, error) {
+	const maxInt = int(^uint(0) >> 1)
+	if contentLen > maxInt-baseLen {
+		return 0, ErrContentTooLarge
+	}
+	return baseLen + contentLen, nil
 }
 
 // checkDiffBudget bounds both sides before memdiff.Diff is called. memdiff's

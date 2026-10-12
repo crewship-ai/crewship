@@ -1062,6 +1062,8 @@ func startSidecar(
 		Args        []string          `json:"args,omitempty"`
 		Env         map[string]string `json:"env,omitempty"`
 		Credential  *MCPCredential    `json:"credential,omitempty"`
+		// DisabledTools carries mcp_tool_bindings enabled=0 to the gateway (#2178).
+		DisabledTools []string `json:"disabled_tools,omitempty"`
 	}
 	type sidecarInput struct {
 		Credentials       []sidecarCred         `json:"credentials"`

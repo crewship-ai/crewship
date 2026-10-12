@@ -104,9 +104,9 @@ var intgToolsEnableCmd = &cobra.Command{
 	Short: "Enable a single tool on a crew-scoped integration",
 	Long: `Enable a single tool on a crew-scoped integration.
 
-Advisory, not access control: on the self-hosted/legacy MCP path this
-only adds the tool's name back to the agent's connected-integrations
-prompt block. It does not gate the tool call itself.`,
+On the self-hosted/legacy MCP path this adds the tool's name back to the
+agent's connected-integrations prompt block and lets the crew sidecar's
+MCP gateway call it again from the sidecar's next start.`,
 	Args: cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return toggleCrewIntegrationTool(args[0], args[1], args[2], true)
@@ -118,12 +118,13 @@ var intgToolsDisableCmd = &cobra.Command{
 	Short: "Disable a single tool on a crew-scoped integration",
 	Long: `Disable a single tool on a crew-scoped integration.
 
-Advisory, not access control: on the self-hosted/legacy MCP path this
-only removes the tool's name from the agent's connected-integrations
-prompt block. The sidecar gateway that dispatches tool calls does no
-per-tool check, so the tool can still be called directly. Composio-
-routed integrations are enforced separately, through Composio's own
-allowed_tools scope, not through this binding.`,
+On the self-hosted/legacy MCP path this removes the tool's name from the
+agent's connected-integrations prompt block, and the crew sidecar's MCP
+gateway refuses to advertise or call it from the sidecar's next start.
+Agent CLIs that reach an HTTP MCP server directly through their own MCP
+config are not gated per tool yet (#2178). Composio-routed integrations
+are enforced separately, through Composio's own allowed_tools scope, not
+through this binding.`,
 	Args: cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return toggleCrewIntegrationTool(args[0], args[1], args[2], false)

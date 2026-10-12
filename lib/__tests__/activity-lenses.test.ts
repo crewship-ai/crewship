@@ -8,11 +8,11 @@ import {
   chainScopeCounts,
   chainStatus,
   chainsInScope,
-  isComposed,
   issueLens,
   matchesQuery,
   narrowChains,
   routineLens,
+  startedByWord,
   workflowHandle,
   workflowName,
   workflowSentence,
@@ -279,10 +279,11 @@ describe("chainScopeCounts / chainsInScope", () => {
     chain({ origin: "r", running_runs: 1 }),
     chain({ origin: "f", failed: true, failed_runs: 1 }),
     chain({ origin: "d" }),
+    chain({ origin: "s", cancelled_runs: 1 }),
   ]
 
   it("counts each chain exactly once, under its one status", () => {
-    expect(chainScopeCounts(set())).toEqual({ active: 1, waiting: 1, failed: 1, done: 1 })
+    expect(chainScopeCounts(set())).toEqual({ active: 1, waiting: 1, failed: 1, done: 1, stopped: 1 })
   })
 
   it("maps running onto the page's 'active' scope word", () => {
@@ -294,10 +295,11 @@ describe("chainScopeCounts / chainsInScope", () => {
     expect(chainsInScope(set(), "active").map((c) => c.origin)).toEqual(["r"])
     expect(chainsInScope(set(), "failed").map((c) => c.origin)).toEqual(["f"])
     expect(chainsInScope(set(), "done").map((c) => c.origin)).toEqual(["d"])
+    expect(chainsInScope(set(), "stopped").map((c) => c.origin)).toEqual(["s"])
   })
 
   it("keeps everything under 'all', including what finished cleanly", () => {
-    expect(chainsInScope(set(), "all")).toHaveLength(4)
+    expect(chainsInScope(set(), "all")).toHaveLength(5)
   })
 
   it("agrees with the segment counts it sits beside", () => {
@@ -306,51 +308,9 @@ describe("chainScopeCounts / chainsInScope", () => {
     // produce exactly that many rows.
     const chains = set()
     const counts = chainScopeCounts(chains)
-    for (const scope of ["active", "waiting", "failed", "done"] as const) {
+    for (const scope of ["active", "waiting", "failed", "done", "stopped"] as const) {
       expect(chainsInScope(chains, scope)).toHaveLength(counts[scope])
     }
-  })
-})
-
-describe("isComposed — what earns the word workflow", () => {
-  it("is false for one manual run that touched nothing", () => {
-    // 12 of 21 rows on the live instance were this: `crewship routine run X`,
-    // one run, depth 0, no issue, no agent. Nothing was composed, so calling it
-    // a workflow makes the word mean "a run" — and then the Workflows lens is
-    // the Routines lens with worse naming.
-    //
-    // The slug is spelled out rather than left to the fixture's default,
-    // because it is load-bearing here and was not: `crewship routine run X`
-    // names a routine, so a chain standing in for that command has one. Without
-    // it this asserted the ORPHAN case — a chain routineLens cannot list — and
-    // passed for a reason the sentence above does not give. See the "nothing
-    // falls out of every list" block.
-    expect(isComposed(chain({ routine_slug: "triage", runs: 1, max_chain_depth: 0 }))).toBe(false)
-  })
-
-  it("is true when something caused something else", () => {
-    expect(isComposed(chain({ max_chain_depth: 1 }))).toBe(true)
-    expect(isComposed(chain({ runs: 2 }))).toBe(true)
-  })
-
-  it("is true when it put an agent to work", () => {
-    expect(isComposed(chain({ agent_count: 1 }))).toBe(true)
-  })
-
-  it("is true when it reached an issue", () => {
-    expect(isComposed(chain({ issue_count: 1 }))).toBe(true)
-  })
-
-  it("is true for a failed single run — a failure crosses into what a person does", () => {
-    // The one exception to "one run is not a workflow". A run that broke is the
-    // reason somebody opened this page, and filing it away under its routine
-    // would hide the thing the rail exists to surface.
-    expect(isComposed(chain({ runs: 1, failed: true, failed_runs: 1 }))).toBe(true)
-  })
-
-  it("is true for a run still going or still asking", () => {
-    expect(isComposed(chain({ runs: 1, running_runs: 1 }))).toBe(true)
-    expect(isComposed(chain({ runs: 1, waiting_runs: 1 }))).toBe(true)
   })
 })
 
@@ -449,26 +409,6 @@ describe("narrowChains", () => {
   })
 })
 
-describe("isComposed — nothing falls out of every list", () => {
-  it("keeps a finished chain that no routine can list", () => {
-    // routineLens skips a chain with no slug, and that is right: a catalogue of
-    // routines cannot hold a row with no routine. But the Workflows lens was
-    // the only other list, and it dropped this row for composing nothing — so
-    // a chain whose root run was swept by retention was in NEITHER, which is
-    // the one outcome an index must never produce.
-    const orphan = chain({ routine_slug: undefined, runs: 1, max_chain_depth: 0 })
-    expect(routineLens([orphan])).toEqual([])
-    expect(isComposed(orphan)).toBe(true)
-  })
-
-  it("still files a bare run of a known routine under Routines", () => {
-    // The rule is "compose, or need me, or belong to no catalogue" — not
-    // "keep everything". A plain run of a named routine is still a run, and
-    // the Routines lens is where runs live.
-    expect(isComposed(chain({ routine_slug: "triage", runs: 1, max_chain_depth: 0 }))).toBe(false)
-  })
-})
-
 describe("assignmentsOf", () => {
   it("reads a missing count as one piece of work, not none", () => {
     // Three files disagreed about this: the lens said 1, the agent drill-down's
@@ -476,5 +416,74 @@ describe("assignmentsOf", () => {
     // "0 assignments" on the page the rail led to.
     expect(assignmentsOf({ id: "a", assignments: 0 })).toBe(1)
     expect(assignmentsOf({ id: "a", assignments: 3 })).toBe(3)
+  })
+})
+
+describe("startedByWord", () => {
+  it("says what set the run off in the rail's short words (#2979)", () => {
+    expect(startedByWord(chain({ started_by_kind: "schedule", started_by: "every 15 min" }))).toBe("schedule")
+    expect(startedByWord(chain({ started_by_kind: "webhook", started_by: "contact-form" }))).toBe("webhook · contact-form")
+    expect(startedByWord(chain({ started_by_kind: "user", started_by: "Demo" }))).toBe("by hand")
+    expect(startedByWord(chain({ started_by_kind: "issue", started_by: "Fix", started_by_key: "OPS-1" }))).toBe("from OPS-1")
+    expect(startedByWord(chain({ started_by_kind: "automation", started_by: "on issue closed" }))).toBe("rule · on issue closed")
+    expect(startedByWord(chain({ started_by_kind: "routine", started_by: "nightly" }))).toBe("called by nightly")
+    expect(startedByWord(chain({ started_by_kind: "unknown", started_by: "" }))).toBe("")
+  })
+})
+
+describe("chainStatus — stopped work (#2981)", () => {
+  it("reads a chain whose runs were cancelled or interrupted as stopped, not done", () => {
+    expect(chainStatus(chain({ cancelled_runs: 1 }))).toBe("stopped")
+    expect(chainStatus(chain({ interrupted_runs: 1, completed_runs: 2 }))).toBe("stopped")
+  })
+
+  it("never lets a stopped branch hide live work", () => {
+    expect(chainStatus(chain({ cancelled_runs: 1, running_runs: 1 }))).toBe("running")
+    expect(chainStatus(chain({ interrupted_runs: 1, waiting_runs: 1 }))).toBe("waiting")
+  })
+
+  it("keeps a failure above a stop", () => {
+    expect(chainStatus(chain({ cancelled_runs: 1, failed_runs: 1, failed: true }))).toBe("failed")
+  })
+
+  it("still reads an older server's row, which carries no outcome counts, as done", () => {
+    expect(chainStatus(chain())).toBe("done")
+  })
+})
+
+describe("agent work outside routines (#2989)", () => {
+  it("names the work by its task and says what started it", () => {
+    const work = chain({ kind: "assignment", task: "Draft the reply to Ava", routine_slug: undefined, started_by_kind: "agent", started_by: "Lead" })
+    expect(workflowName(work)).toBe("Draft the reply to Ava")
+    expect(startedByWord(work)).toBe("from chat · Lead")
+    expect(startedByWord(chain({ kind: "assignment", started_by_kind: "lead_planning", started_by: "Fix", started_by_key: "OPS-3" }))).toBe(
+      "lead planning · OPS-3",
+    )
+    expect(startedByWord(chain({ kind: "assignment", started_by_kind: "issue", started_by: "Fix", started_by_key: "OPS-3" }))).toBe("from OPS-3")
+  })
+})
+
+describe("narrowChains — the rail follows every filter (#3000)", () => {
+  const fin = chain({ origin: "fin", routine_slug: "match-payments", agents: [{ id: "casey", name: "Casey", assignments: 1 }], agent_count: 1 })
+  const ops = chain({ origin: "ops", routine_slug: "telemetry", issues: [{ id: "m1", identifier: "OPS-1" }], issue_count: 1 })
+  const work = chain({ origin: "w", kind: "assignment", routine_slug: undefined, agents: [{ id: "morgan", name: "Morgan", assignments: 1 }], agent_count: 1 })
+  const all = [fin, ops, work]
+  const crewOfAgent = (id: string) => ({ casey: "crew_fin", morgan: "crew_ops" })[id]
+  const crewOfRoutine = (slug: string) => ({ "match-payments": "crew_fin", telemetry: "crew_ops" })[slug]
+  const origins = (f: Parameters<typeof narrowChains>[4]) =>
+    narrowChains(all, "", "all", undefined, f).visible.map((c) => c.origin)
+
+  it("narrows by crew through the chain's agents and its routine's crew", () => {
+    expect(origins({ crewIDs: ["crew_ops"], agentIDs: [], focus: null, crewOfAgent, crewOfRoutine })).toEqual(["ops", "w"])
+  })
+  it("narrows by agent", () => {
+    expect(origins({ crewIDs: [], agentIDs: ["casey"], focus: null, crewOfAgent, crewOfRoutine })).toEqual(["fin"])
+  })
+  it("narrows by a focused issue or routine", () => {
+    expect(origins({ crewIDs: [], agentIDs: [], focus: { kind: "issue", id: "m1" }, crewOfAgent, crewOfRoutine })).toEqual(["ops"])
+    expect(origins({ crewIDs: [], agentIDs: [], focus: { kind: "routine", id: "match-payments" }, crewOfAgent, crewOfRoutine })).toEqual(["fin"])
+  })
+  it("leaves the list alone with no filter", () => {
+    expect(origins(undefined)).toEqual(["fin", "ops", "w"])
   })
 })

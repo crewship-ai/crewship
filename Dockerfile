@@ -27,18 +27,41 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
-COPY . .
+# Generate types and legal inventory before app sources: a UI edit must not
+# redo work determined solely by Prisma inputs or the locked dependency tree.
+# .npmrc stays after install, matching the existing install configuration.
+COPY .npmrc prisma.config.ts ./
+COPY prisma/ ./prisma/
 RUN pnpm prisma generate
+COPY scripts/gen-frontend-licenses.mjs ./scripts/
 # License texts of the embedded frontend's npm dependencies, from the
 # lockfile-installed tree (no network). Collected in-stage so every docker
 # build path — PR image build, release, nightly, local — is self-contained.
 RUN node scripts/gen-frontend-licenses.mjs /licenses-frontend
+
+# Backend-only sources leave these COPY layers cached. VERSION still forces
+# a fresh static export when the build identity changes.
+# Root TS configs and e2e sources remain inputs because tsconfig.json includes
+# them in Next's type check. The source contract tests guard new TS inputs.
+COPY *.ts *.json *.mjs ./
+COPY app/ ./app/
+COPY components/ ./components/
+COPY hooks/ ./hooks/
+COPY lib/ ./lib/
+COPY stores/ ./stores/
+COPY public/ ./public/
+# Shared JSON contracts are imported by the UI; exclude their Go sources.
+COPY config/*.json ./config/
+COPY schemas/*.json ./schemas/
+COPY e2e/ ./e2e/
+COPY scripts/prepare-pdf-assets.mjs scripts/check-control-accessibility.tsx ./scripts/
+COPY tools/pages-build/sdk.ts ./tools/pages-build/
 ARG VERSION=dev
 ARG NEXT_PUBLIC_SENTRY_DSN=""
 ENV NEXT_PUBLIC_CREWSHIP_VERSION=$VERSION
 RUN pnpm build
 
-FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine AS backend
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS backend
 ARG TARGETOS
 ARG TARGETARCH
 # This tag is the compiler for the shipped binary, and it is the one Go version
@@ -58,9 +81,9 @@ ARG TARGETARCH
 #
 # What `local` does NOT do — verified against this image, not assumed — is
 # object when go.mod's `toolchain` names something else. That directive is
-# ignored outright under `local`, so a `toolchain go1.27.2` against this 1.27.1
-# tag builds happily and silently with 1.27.1. Only the `go` DIRECTIVE can fail
-# the build ("go.mod requires go >= 1.28; running go 1.27.1"), and that line
+# ignored outright under `local`, so a `toolchain go1.27.3` against this 1.27.2
+# tag builds happily and silently with 1.27.2. Only the `go` DIRECTIVE can fail
+# the build ("go.mod requires go >= 1.28; running go 1.27.2"), and that line
 # tracks the language floor, which moves only when a dependency forces it and
 # so cannot be relied on here. So nothing at build time will ever tell us these
 # two files disagree — which is exactly why the disagreement is checked
@@ -140,6 +163,28 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     -o /crewship ./cmd/crewship
 
 # -- Runner --
+# The docker CLI (page builds, devcontainer images) comes from Docker's static
+# release, not Alpine's docker-cli package: Alpine rebuilds that package on its
+# own schedule, and alpine:3.24 shipped it built with go1.26.8, which the image
+# scan fails critical on (#3047). Bump the version and both checksums together;
+# check the archive's Go with `strings docker/docker | grep -m1 '^go1\.'`.
+FROM alpine:3.24 AS dockercli
+ARG TARGETARCH
+ARG DOCKER_CLI_VERSION=29.9.0
+ARG DOCKER_CLI_SHA256_amd64=33e1ab8b63d14bca449f7a3d30d7f6aa669daa544e60a86b17fec87f61afe2b4
+ARG DOCKER_CLI_SHA256_arm64=811f6eee271678fc98dbe5c4d896c00fc5fe2daa4f7a37069c17abc036eab85b
+RUN set -eu; \
+    case "$TARGETARCH" in \
+      amd64) arch=x86_64; sum="$DOCKER_CLI_SHA256_amd64" ;; \
+      arm64) arch=aarch64; sum="$DOCKER_CLI_SHA256_arm64" ;; \
+      *) echo "no pinned docker CLI for $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    wget -q -O /tmp/docker.tgz "https://download.docker.com/linux/static/stable/${arch}/docker-${DOCKER_CLI_VERSION}.tgz"; \
+    echo "${sum}  /tmp/docker.tgz" | sha256sum -c -; \
+    tar -xzf /tmp/docker.tgz -C /tmp docker/docker; \
+    install -m 0755 /tmp/docker/docker /docker; \
+    /docker --version
+
 FROM alpine:3.24 AS runtime
 ARG VERSION=dev
 ARG COMMIT=none
@@ -151,12 +196,13 @@ LABEL org.opencontainers.image.source="https://github.com/crewship-ai/crewship" 
 
 # Refresh inherited libraries too: apk add alone retains vulnerable base packages.
 RUN apk --no-cache upgrade && \
-    apk --no-cache add ca-certificates git docker-cli && \
+    apk --no-cache add ca-certificates git && \
     addgroup -g 1001 -S crewship && adduser -u 1001 -S crewship -G crewship
 
 RUN mkdir -p /var/lib/crewship /var/log/crewship /data && \
     chown -R crewship:crewship /var/lib/crewship /var/log/crewship /data
 
+COPY --from=dockercli /docker /usr/local/bin/docker
 COPY --from=backend /crewship /usr/local/bin/crewship
 COPY --from=backend /crewship-sidecar /usr/local/bin/crewship-sidecar
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh

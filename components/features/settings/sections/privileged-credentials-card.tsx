@@ -145,7 +145,7 @@ export const PrivilegedCredentialsCard = React.memo(function PrivilegedCredentia
     return (
       <SettingsCard icon={ShieldAlert} title="Privileged credentials" description="Workspace isolation-boundary override">
         <div className="px-4 py-3 flex items-center justify-between gap-3">
-          <span className="text-[11px] text-destructive/90">{err}</span>
+          <span className="text-label text-destructive/90">{err}</span>
           <Button
             variant="outline"
             size="sm"
@@ -184,7 +184,7 @@ export const PrivilegedCredentialsCard = React.memo(function PrivilegedCredentia
                     <Info className="h-3.5 w-3.5" />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-xs text-[11px]">
+                <TooltipContent side="top" className="max-w-xs text-label">
                   {FULL_EXPLANATION}
                 </TooltipContent>
               </Tooltip>

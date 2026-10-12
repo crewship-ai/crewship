@@ -47,7 +47,6 @@ export function AgentRingAvatar({
   seed,
   style,
   avatarUrl,
-  agentId,
   crewColor,
   engine,
   size = "md",
@@ -56,7 +55,6 @@ export function AgentRingAvatar({
   seed: string
   style?: string | null
   avatarUrl?: string | null
-  agentId?: string
   crewColor?: string | null
   /** llm_provider; no badge when the agent has none yet. */
   engine?: string | null
@@ -82,7 +80,6 @@ export function AgentRingAvatar({
             seed={seed}
             style={style}
             avatarUrl={avatarUrl}
-            agentId={agentId}
             className={size === "lg" ? "h-16 w-16" : "h-11 w-11"}
           />
         </span>

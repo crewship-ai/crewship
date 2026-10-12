@@ -91,7 +91,7 @@ func TestInitProviders_SkipContainerProviders(t *testing.T) {
 func TestInitProviders_StorageAndState(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Container.Provider = "k8s" // unknown-but-tolerated: no warning branch
+	cfg.Container.Provider = "" // no container configured; test storage/state wiring
 	cfg.Storage.Provider = "localfs"
 	cfg.Storage.BasePath = filepath.Join(dir, "storage")
 	cfg.State.Provider = "bbolt"

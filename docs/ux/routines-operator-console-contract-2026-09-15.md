@@ -2,20 +2,12 @@
 
 **Status update, 2026-09-28:** PR #2562 merged on 2026-09-16 as
 `e705a498a6db9188037e31c54db6e5032be46fc6`, included in this checkout's base.
-The work-package and integration instructions below record the original
-implementation process; they do not override today's CONTRIBUTING/AGENTS
-workflow. The implementation contract remains public.
+Public implementation contract; internal work allocation, prototypes and
+deployment records are retained in private context. Follow current
+CONTRIBUTING/AGENTS instructions for implementation and review.
 
-Companion to [the proposal](routines-operator-console-2026-09-15.md) and the
-prototype `public/design/routines-operator-console-20260915.html`. Three work
-packages build in parallel against this contract; the integrator merges them
-into `feat/routines-operator-console`, deploys dev1 and opens one PR.
-
-Rules for every package: UI text English only; no new API routes, no DB
-migration, no new query parameters (docs-inventory gate); additive JSON fields
-only; every new field tolerated as absent by the frontend; tests first
-(table-driven Go, Vitest); no `git stash`; commit on your own `wp/*` branch;
-run tests in the foreground with explicit timeouts.
+Keep additive fields optional for older clients, preserve existing API routes
+and schema compatibility, and cover contract changes with regressions.
 
 ## API additions (WP-A, Go)
 

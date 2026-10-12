@@ -152,6 +152,9 @@ type mcpServerResponse struct {
 	CredType    string            `json:"cred_type,omitempty"`
 	CredHeader  string            `json:"cred_header,omitempty"`
 	EnvVarName  string            `json:"env_var_name,omitempty"`
+	// DisabledTools: switched-off mcp_tool_bindings, enforced by the sidecar
+	// MCP gateway (#2178).
+	DisabledTools []string `json:"disabled_tools,omitempty"`
 }
 
 type crewInfoResponse struct {
@@ -605,6 +608,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 			ID: s.ID, Name: s.Name, DisplayName: s.DisplayName,
 			Transport: s.Transport, Endpoint: s.Endpoint,
 			Command: s.Command, Args: s.Args, Env: s.Env,
+			DisabledTools: s.DisabledTools,
 		}
 		if s.CredToken != "" {
 			header := s.CredHeader

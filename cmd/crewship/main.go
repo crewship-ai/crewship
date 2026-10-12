@@ -167,6 +167,9 @@ func init() {
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--internal-run-capture" {
+		os.Exit(runHostCapture(os.Stdin, os.Stderr))
+	}
 	// Mount user-defined slash commands AFTER built-ins so the
 	// collision-detection in registerSlashCommands sees the full
 	// built-in set and can warn-and-skip on name clashes.

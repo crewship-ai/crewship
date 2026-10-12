@@ -173,3 +173,15 @@ describe("useCrewsSelection", () => {
     })
   })
 })
+
+it("clears only the requested crew field and leaves unrelated URL state intact", () => {
+  setURL("/crews", "agent=mia&crew=research&sort=name")
+  const { result } = renderHook(() => useCrewsSelection())
+  act(() => result.current.update({ crew: null }))
+  expect(new URLSearchParams(window.location.search).get("agent")).toBe("mia")
+  expect(new URLSearchParams(window.location.search).get("sort")).toBe("name")
+  expect(new URLSearchParams(window.location.search).has("crew")).toBe(false)
+  const before = window.location.href
+  act(() => result.current.update({}))
+  expect(window.location.href).toBe(before)
+})

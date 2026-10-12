@@ -53,3 +53,51 @@ func TestReadSharedBoundsAndFailures(t *testing.T) {
 		t.Fatalf("cancelled read = %v", err)
 	}
 }
+
+func TestSharedReadRejectsInvalidBoundsAndSourceKinds(t *testing.T) {
+	store := NewStore(t.TempDir(), nil)
+	for _, tc := range []struct {
+		name, id string
+		bytes    int64
+		rows     int
+	}{
+		{"traversal", "../secret", 100, 2}, {"zero-bytes", "share", 0, 2},
+		{"too-many-bytes", "share", 16<<20 + 1, 2}, {"zero-rows", "share", 100, 0}, {"too-many-rows", "share", 100, 1001},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := store.ReadShared(context.Background(), tc.id, tc.bytes, tc.rows)
+			if err == nil || got != nil {
+				t.Fatalf("invalid read exposed data: %+v %v", got, err)
+			}
+		})
+	}
+	path := filepath.Join(store.basePath, "conversations", "share.jsonl")
+	if err := os.MkdirAll(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := store.ReadShared(context.Background(), "share", 100, 2); err == nil || got != nil {
+		t.Fatalf("directory returned transcript: %+v %v", got, err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := store.ReadShared(context.Background(), "share", 100, 2); err == nil || got != nil {
+		t.Fatalf("blank row returned transcript: %+v %v", got, err)
+	}
+}
+
+func TestCountingReaderHonorsCancellationBeforeTouchingSource(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	source := strings.NewReader("secret")
+	reader := sharedCountingReader{ctx: ctx, r: source}
+	if n, err := reader.Read(make([]byte, 16)); n != 0 || !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled read=%d,%v", n, err)
+	}
+	if source.Len() != len("secret") || reader.n != 0 {
+		t.Fatal("canceled reader consumed source bytes")
+	}
+}

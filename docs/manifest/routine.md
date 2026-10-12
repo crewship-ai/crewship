@@ -730,6 +730,8 @@ crewship routine run my-routine --delay 60 --ttl 300 --priority 9
 crewship routine run my-routine --debounce-key vendor-42 --debounce-window 30 --debounce-max 300
 
 crewship routine pending list            # not-yet-fired deferred triggers
+crewship routine pending list --status failed # failed dispatch receipts
+crewship routine pending get <id>         # inspect accepted ID after dispatch
 crewship routine pending cancel <id>     # cancel before it fires
 ```
 
@@ -743,7 +745,19 @@ crewship routine pending cancel <id>     # cancel before it fires
 API: `POST /api/v1/workspaces/{ws}/pipelines/{slug}/run` accepts `delay_seconds`, `ttl_seconds`,
 `debounce_key`, `debounce_window_seconds`, `debounce_max_seconds`,
 `priority`, `idempotency_key_ttl_seconds`. `GET /api/v1/workspaces/{ws}/pipelines/pending`,
-`POST /api/v1/workspaces/{ws}/pipelines/pending/{pendingId}/cancel`.
+`GET /api/v1/workspaces/{ws}/pipeline-pending/{pendingId}`,
+`POST /api/v1/workspaces/{ws}/pipelines/pending/{pendingId}/cancel`. The list accepts
+`status=pending|fired|failed|expired|cancelled|all` (default `pending`).
+
+Capacity rejection retries with backoff up to 60 seconds until the accepted TTL;
+expiry remains visible with a reason. With no TTL, ten rejected attempts end as
+`failed`. Other dispatch errors also become visible failures. `fire_at` remains
+the scheduled occurrence identity; `next_attempt_at` controls retry eligibility.
+Priority still orders eligible rows best effort, without guaranteeing completion
+order. An attempted debounce start keeps its own payload; new triggers open a
+separate window. The receipt includes attempts, reason, deadline, retry time and
+run link. `fired` without a run ID may still be executing and is not automatically
+classified as lost. See [CLI receipt inspection](/cli/routine#crewship-routine-pending).
 
 > Note: `priority` orders the **deferred** dispatch queue. Immediate runs
 > execute on arrival, so priority there is recorded but not consumed

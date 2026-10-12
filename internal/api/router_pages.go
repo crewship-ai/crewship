@@ -88,6 +88,8 @@ func (r *Router) registerPageRoutes() {
 	// aliases keep the registration lines readable (router_orchestration.go).
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
+	// 503 carries code restricted_runtime_unavailable when no private runtime is installed (#2877).
+	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-pages", authed(wsCtx(http.HandlerFunc(p.RestrictedCatalog))))
 
 	r.mux.Handle("GET /api/v1/pages", authed(wsCtx(http.HandlerFunc(p.List))))

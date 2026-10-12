@@ -122,10 +122,19 @@ type chainSummary struct {
 	// Timestamps cannot answer this: last_activity falls back to started_at
 	// while a run is in flight, so a chain parked on an approval since Tuesday
 	// and one that finished on Tuesday carry the same instant.
-	RunningRuns   int    `json:"running_runs" yaml:"running_runs"`
-	WaitingRuns   int    `json:"waiting_runs" yaml:"waiting_runs"`
-	FirstActivity string `json:"first_activity" yaml:"first_activity"`
-	LastActivity  string `json:"last_activity" yaml:"last_activity"`
+	RunningRuns int `json:"running_runs" yaml:"running_runs"`
+	WaitingRuns int `json:"waiting_runs" yaml:"waiting_runs"`
+	// Terminal outcomes besides failed. Cancelled (someone stopped it) and
+	// interrupted (the process died) are not "done", and not failures either.
+	// Kind is "run" (a routine run and what it caused) or "assignment" (agent
+	// work started outside any routine); Task is an assignment root's task.
+	Kind            string `json:"kind" yaml:"kind"`
+	Task            string `json:"task,omitempty" yaml:"task,omitempty"`
+	CompletedRuns   int    `json:"completed_runs" yaml:"completed_runs"`
+	CancelledRuns   int    `json:"cancelled_runs" yaml:"cancelled_runs"`
+	InterruptedRuns int    `json:"interrupted_runs" yaml:"interrupted_runs"`
+	FirstActivity   string `json:"first_activity" yaml:"first_activity"`
+	LastActivity    string `json:"last_activity" yaml:"last_activity"`
 	// DurationMS is wall clock first-to-last, and a POINTER for the reason the
 	// server made it one: null is a chain with nothing to measure between (a
 	// single run still going), and 0 would assert the work was instant.
@@ -349,6 +358,44 @@ Examples:
 	},
 }
 
+// chainSubject is the ROUTINE cell: the routine's slug, or for agent work
+// started outside any routine (#2989) its task, marked so it does not read as
+// a routine name.
+func chainSubject(c chainSummary) string {
+	if c.Kind == "assignment" {
+		task := c.Task
+		if len([]rune(task)) > 40 {
+			task = string([]rune(task)[:39]) + "…"
+		}
+		return "work: " + task
+	}
+	return c.RoutineSlug
+}
+
+// chainStatusWord is the STATUS cell, in the web rail's precedence (#2981):
+// waiting (only a person can move it), FAILED, running, then a stop, then ok.
+// A stopped branch never hides a live one, and cancelled (somebody stopped it)
+// stays apart from interrupted (the process died) when only one of them
+// happened.
+func chainStatusWord(c chainSummary) string {
+	switch {
+	case c.WaitingRuns > 0:
+		return "waiting"
+	case c.Failed || c.FailedRuns > 0:
+		return "FAILED"
+	case c.RunningRuns > 0:
+		return "running"
+	case c.CancelledRuns > 0 && c.InterruptedRuns > 0:
+		return "stopped"
+	case c.CancelledRuns > 0:
+		return "cancelled"
+	case c.InterruptedRuns > 0:
+		return "interrupted"
+	default:
+		return "ok"
+	}
+}
+
 // renderChainList lays the index out as a table. Pure function of the decoded
 // payload, same as renderChainTree, so the layout is testable without HTTP.
 func renderChainList(l chainList) []string {
@@ -360,14 +407,11 @@ func renderChainList(l chainList) []string {
 	header := []string{"WHEN", "STARTED BY", "ROUTINE", "RUNS", "DEPTH", "STATUS", "ORIGIN"}
 	rows := [][]string{header}
 	for _, c := range l.Chains {
-		status := "ok"
-		if c.Failed {
-			status = "FAILED"
-		}
+		status := chainStatusWord(c)
 		rows = append(rows, []string{
 			issueRelativeTime(c.LastActivity),
 			chainCauseCell(c),
-			orDash(sanitizeTerminal(c.RoutineSlug)),
+			orDash(sanitizeTerminal(chainSubject(c))),
 			strconv.Itoa(c.Runs),
 			strconv.Itoa(c.MaxChainDepth),
 			status,

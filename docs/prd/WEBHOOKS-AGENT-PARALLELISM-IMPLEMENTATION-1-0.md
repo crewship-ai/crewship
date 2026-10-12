@@ -1,6 +1,6 @@
 # Crewship 1.0: implementační a akceptační kontrakt
 
-Stav: návrh určený k implementaci, nikoli výsledky měření. Datum: 2026-09-10. Tento dokument je normativní rozpracování [rozhodovacího PRD](WEBHOOKS-AGENT-PARALLELISM-MEMORY-1-0-2026-09-10.md); čte se společně s ním. [Příloha](WEBHOOKS-AGENT-PARALLELISM-ANNEX.md) obsahuje audit a výzkum. Číselné hodnoty níže jsou výchozí návrhové limity a release cíle. Naměřené baseline zatím nemáme.
+Stav: návrh určený k implementaci, nikoli výsledky měření. Datum: 2026-09-10. Tento dokument je normativní rozpracování [rozhodovacího PRD](WEBHOOKS-AGENT-PARALLELISM-MEMORY-1-0-2026-09-10.md); čte se společně s ním. [Příloha](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/WEBHOOKS-AGENT-PARALLELISM-ANNEX.md) obsahuje audit a výzkum. Číselné hodnoty níže jsou výchozí návrhové limity a release cíle. Naměřené baseline zatím nemáme.
 
 ## 1. Výsledek pro uživatele
 

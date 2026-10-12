@@ -5,7 +5,8 @@ runtime and managed service containers with a positively deleted crew owner and
 an exact `crewship.instance-id` matching this installation. It scans stopped as
 well as running containers. Missing owners, legacy containers without instance
 labels, and foreign installation labels are never automatic cleanup candidates.
-Container names and slugs do not establish ownership.
+Container names and slugs do not establish ownership. A separate pass reaps
+unused, installation-labelled noexec bind-volume metadata as described below.
 
 The installation identity is bound to the database, its location and the data
 directory. The database holds only a random nonce; the identity itself lives in
@@ -41,7 +42,7 @@ invalid installation identity fails server startup.
 
 ## Scope and retry
 
-Automatic cleanup stops a container by immutable ID, records its limited mount
+The container pass stops a container by immutable ID, records its limited mount
 references, and removes it with `RemoveVolumes=false` and `Force=false`. It never
 calls volume removal, image pruning, or host directory deletion. Processes and
 the container writable layer are lost; named/anonymous volumes and bind source
@@ -67,6 +68,32 @@ exists. Revive/restore racing the last check can lose that container's process
 and writable layer. Strong incarnation/restore coordination and persistent data
 removal are outside this contract.
 
+## Unused noexec bind-volume records
+
+New runtime mounts for `/workspace`, `/output`, and `/crew` remain anonymous,
+local-driver volumes with `type=none`, an absolute host `device`, and
+`o=bind,noexec,nosuid`. They carry `crewship.kind=crew-noexec-bind`, the crew id,
+and this installation's `crewship.instance-id`. These are metadata wrappers
+around persistent host directories; deleting an unused wrapper leaves its host
+directory intact. Home/tools history volumes do not carry this kind label.
+
+After container/network cleanup, the controller lists dangling volumes with
+this exact installation and kind label. It rechecks labels, driver/options,
+crew ownership and the 64-character hexadecimal anonymous name, then inspects
+and rechecks each candidate before a non-force removal. Docker refuses volumes
+referenced by any container, including stopped containers and references acquired
+after inventory. Conflicts and missing volumes are harmless; other failures
+invalidate the scan with `bind_volume_cleanup_failed` and retry next tick.
+The pass has a 30-second deadline and the configured batch limit, yielding to
+instance backups between candidates. Empty installation identity disables it.
+
+Named home/tools and service volumes, ordinary managed anonymous volumes,
+foreign labels, and unlabelled legacy records are excluded. Previously leaked
+unlabelled records cannot safely be attributed and require a separate operator
+investigation; this pass does not prune that historical backlog or infer
+ownership from a container prefix or host path. Containers already current at
+upgrade are reused without a forced rebuild solely to add volume labels.
+
 ## Coordination with instance backups
 
 A cleanup scan registers as a writer in the instance backup quiet window.
@@ -85,7 +112,13 @@ Opt-in, separate from deletion cleanup, and never acting on deleted owners
 (those are the controller above) or on another installation's containers.
 Enabled by `CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS` and `CREWSHIP_CACHE_EVICTION`
 (`container.idle_runtime_retention_days`, `container.cache_eviction`); runs at
-boot and every 10 minutes while the Docker provider is available.
+boot and every 10 minutes while the Docker provider is available. Cancellation
+is checked before each pass and again after writer admission, before provider
+work. An already-canceled lifecycle starts no cleanup pass; a simultaneously
+ready tick cannot start another pass after cancellation. Cancellation is also
+checked between runtime/cache items and before switching to cache eviction;
+an in-flight provider operation may finish before the next boundary check. Unavailable-daemon
+failures remain retryable on later ticks until cancellation.
 
 **Stopped runtimes.** A runtime container (kind `crew`, this installation's
 `crewship.instance-id`) of a crew that is live in this database is removed once
@@ -98,7 +131,9 @@ crew's start lock, re-inspects the container and re-checks the owner, records
 its mount references in `resource_cleanup_mounts`, and removes it with
 `Force=false` and `RemoveVolumes=false`; a start that won the race leaves a
 running container Docker refuses to remove. Named volumes, anonymous volumes
-and the host data behind them stay. The next start recreates the runtime.
+and the host data behind them stay at removal; the unused noexec bind-record
+pass above may subsequently drop positively attributed bind metadata. The next
+start recreates the runtime.
 
 **Cache images.** A `crewship-cache:*` image is eligible only when no container
 on the daemon uses it (any installation, any state) and no live crew in this

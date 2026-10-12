@@ -111,7 +111,10 @@ func (h *PipelineHandler) SignalRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	liveDelivered := h.signals.Signal(runID, body.EventType, body.Payload)
+	liveDelivered := false
+	if armed || h.db == nil {
+		liveDelivered = h.signals.Signal(runID, body.EventType, body.Payload)
+	}
 	if !armed && !liveDelivered {
 		replyError(w, http.StatusNotFound, "no run waiting on that event (run not at the wait step, or wrong event_type)")
 		return
@@ -122,7 +125,7 @@ func (h *PipelineHandler) SignalRun(w http.ResponseWriter, r *http.Request) {
 		// even when a live goroutine WAS also woken (ResumeAfterSignal
 		// no-ops on a run that isn't in the 'waiting' status by the time
 		// it loads the row).
-		h.newExecutor().ResumeAfterSignal(runID, h.logger)
+		h.resumeAfterSignal(runID)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "delivered": true})
 }
@@ -164,4 +167,18 @@ func (h *PipelineHandler) GetRunTree(w http.ResponseWriter, r *http.Request) {
 		out = append(out, node{n.ID, n.ParentID, n.PipelineSlug, n.Status, n.TriggeredVia, n.CostUSD})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"nodes": out})
+}
+
+// Track signal resumes on the same lifecycle/drain as webhook dispatches.
+// Delivery is durable before this call; request disconnects do not cancel it.
+func (h *PipelineHandler) resumeAfterSignal(runID string) {
+	exec := h.newExecutor()
+	ctx := h.webhookDispatchContext()
+	h.webhookDispatchWG.Add(1)
+	finish := beginBackgroundWork()
+	go func() {
+		defer finish()
+		defer h.webhookDispatchWG.Done()
+		exec.ResumeEventRun(ctx, runID, h.logger)
+	}()
 }

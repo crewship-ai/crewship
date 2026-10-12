@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/spf13/cobra"
 )
@@ -486,18 +487,11 @@ func memoryVersionsFromAPI(client *cli.Client, workspaceID, path string, limit i
 // fails (e.g. no $HOME); the caller can supply --blob-root
 // explicitly.
 func defaultBlobRoot() (string, error) {
-	// Import cycle would form if we pulled internal/database into
-	// this file — so we duplicate the small bit of path math the
-	// data-dir resolution does. Override env var matches
-	// database.DefaultDataDir's contract.
-	if override := strings.TrimSpace(os.Getenv("CREWSHIP_DATA_DIR")); override != "" {
-		return filepath.Join(override, "memory", "versions"), nil
-	}
-	home, err := os.UserHomeDir()
+	root, err := database.ResolveDataDirRoot("")
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".crewship", "memory", "versions"), nil
+	return filepath.Join(root, "memory", "versions"), nil
 }
 
 // canonicalPathIsSafe rejects empty paths + traversal attempts + any

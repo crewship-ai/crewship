@@ -8,7 +8,11 @@ same PR.
 **Rule for a new file.** Imperative, stepwise, and honest about what is
 verified versus assumed. Name the exact gates, artifact identities and
 credential requirements an operator needs. Session narratives ("what I did
-today on dev2") are not runbooks — those belong under `docs/prd/reports/`.
+today on dev2") are not runbooks — those belong in
+[private working context](../development/private-context.md). Generated
+reports are ignored build output, not an operational procedure.
+
+[Documentation map](../README.md) · [Contributor guides](../development/README.md)
 
 ## Contents
 
@@ -18,3 +22,5 @@ today on dev2") are not runbooks — those belong under `docs/prd/reports/`.
   release identities. Referenced from
   [CONTRIBUTING.md](../../CONTRIBUTING.md) and
   [RELEASING.md](../../RELEASING.md).
+
+- [Trusted CI control inventory](ci-inventory-guard.md): main-owned metadata guard, explicit administrator exceptions and shared-App enforcement limits.

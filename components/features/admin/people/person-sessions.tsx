@@ -65,7 +65,7 @@ export function UserSessions({ user, workspaceId, isMe, onChanged }: { user: Adm
     setBusy(null)
   }
 
-  if (error) return <p className="text-[12px] text-destructive">{error}</p>
+  if (error) return <p className="text-label text-destructive">{error}</p>
   if (!data) return <div className="grid gap-2"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
   const mobile = (ua: string | null) => !!ua && /iphone|android|mobile|ipad/i.test(ua)
   // The same browser on the same address signs in again and again (every
@@ -85,7 +85,7 @@ export function UserSessions({ user, workspaceId, isMe, onChanged }: { user: Adm
   return (
     <>
       <DrawerSection label="Signed-in devices">
-        {groups.length === 0 ? <p className="text-[12px] text-muted-foreground">Not signed in anywhere.</p> : (
+        {groups.length === 0 ? <p className="text-label text-muted-foreground">Not signed in anywhere.</p> : (
           <ul className="overflow-hidden rounded-lg border border-border">
             {groups.map((g) => {
               const Icon = mobile(g.ua) ? Smartphone : Monitor
@@ -94,12 +94,12 @@ export function UserSessions({ user, workspaceId, isMe, onChanged }: { user: Adm
                 <li key={g.key} className="flex items-center gap-2.5 border-b border-border/60 px-3 py-2 last:border-b-0" data-slot="admin-session-group">
                   <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px]" title={g.ua ?? ""}>
+                    <span className="block truncate text-label" title={g.ua ?? ""}>
                       {describeAgent(g.ua)}
-                      {g.ids.length > 1 && <span className="ml-1.5 font-mono text-[11px] text-muted-foreground">× {g.ids.length}</span>}
-                      {g.current && <span className="ml-1.5 text-[11px] text-success">this session</span>}
+                      {g.ids.length > 1 && <span className="ml-1.5 font-mono text-micro text-muted-foreground">× {g.ids.length}</span>}
+                      {g.current && <span className="ml-1.5 text-label text-success">this session</span>}
                     </span>
-                    <span className="block truncate text-[11px] text-muted-foreground">last used {ago(g.last)}{g.ip ? ` · ${g.ip}` : ""}</span>
+                    <span className="block truncate text-label text-muted-foreground">last used {ago(g.last)}{g.ip ? ` · ${g.ip}` : ""}</span>
                   </span>
                   {revocable.length > 0 && (
                     <Button variant="outline" size="sm" className="h-7 text-xs" disabled={busy === g.key}
@@ -114,14 +114,14 @@ export function UserSessions({ user, workspaceId, isMe, onChanged }: { user: Adm
         )}
       </DrawerSection>
       <DrawerSection label="CLI tokens">
-        {data.cli_tokens.length === 0 ? <p className="text-[12px] text-muted-foreground">No CLI tokens.</p> : (
+        {data.cli_tokens.length === 0 ? <p className="text-label text-muted-foreground">No CLI tokens.</p> : (
           <ul className="overflow-hidden rounded-lg border border-border">
             {data.cli_tokens.map((t) => (
               <li key={t.id} className="flex items-center gap-2.5 border-b border-border/60 px-3 py-2 last:border-b-0">
                 <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12.5px]">{t.name}</span>
-                  <span className="block truncate text-[11px] text-muted-foreground">
+                  <span className="block truncate text-label">{t.name}</span>
+                  <span className="block truncate text-label text-muted-foreground">
                     {Array.isArray(t.scopes) ? t.scopes.join(", ") : t.scopes || "all scopes"} · used {ago(t.last_used_at)}
                   </span>
                 </span>

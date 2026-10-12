@@ -16,9 +16,11 @@ package backup
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -442,37 +444,14 @@ func TestRestoreBackup_RowsInsertedShortfallIsReported(t *testing.T) {
 	}
 }
 
-// TestVerify_ScopingBugUnderSelection_KnownResidual pins #2009's documented
-// scope limit rather than letting it be rediscovered from scratch later.
-//
-// Contents.TableRowCounts is len(dump.Tables[table]), read from the exact
-// same in-memory dump that DumpWorkspace/DumpCrew then writes into the
-// payload (runner_create.go: `contents.TableRowCounts =
-// tableRowCounts(dump)`, called on the SAME dump WriteDBSection just
-// serialised). If the query that built dump.Tables under-selected — a
-// scoping bug picking a nullable FK column that happened to be NULL
-// everywhere, the exact shape of #1973 — the recorded count and the payload
-// agree with each other perfectly, because they were never independent
-// measurements. Verify's completeness check (this PR, #2009) compares
-// exactly those two numbers, so it reports VALID on a bundle that is
-// already short relative to its SOURCE DATABASE.
-//
-// This is not a bug in this PR; it is the documented boundary of "the
-// bundle is intact" versus the stronger "the bundle is everything" (see
-// TableRowCounts's doc comment in manifest.go). This test proves the
-// boundary is real: seed a database with 3 missions, take a normal
-// DumpWorkspace snapshot of it, then simulate a scoping bug's effect
-// directly on the dump (dropping 2 of the 3 rows) BEFORE deriving the
-// manifest's recorded counts from it — exactly the order runner_create.go
-// uses. Verify still reports VALID, because nothing this PR ships is
-// independent of the query that built the dump.
-//
-// If this test starts failing — Verify begins reporting a mismatch for a
-// dump that under-selected relative to its source — an independent
-// recount (or another mechanism) has landed and closed the residual.
-// Invert the assertions below (expect Valid=false and a "missions"
-// mismatch) and drop the _KnownResidual suffix.
-func TestVerify_ScopingBugUnderSelection_KnownResidual(t *testing.T) {
+// TestVerify_ScopingBugUnderSelection_IsCaught closes the residual #2009
+// documented: TableRowCounts are read from the same dump the payload is
+// written from, so a create-time scope filter that under-selects (#1973's
+// shape) agrees with itself. The scope reconciliation derives the expected
+// rows a second way — the schema's own workspace_id and foreign keys, in the
+// dump's snapshot — so the shortfall is recorded in the manifest and Verify
+// fails the bundle.
+func TestVerify_ScopingBugUnderSelection_IsCaught(t *testing.T) {
 	ctx := context.Background()
 	source := openMigratedDBCov(t)
 	wsID, crewID := seedCovWorkspace(t, source, "residual")
@@ -486,7 +465,7 @@ func TestVerify_ScopingBugUnderSelection_KnownResidual(t *testing.T) {
 		}
 	}
 
-	// A genuine, correctly-scoped snapshot: all 3 missions are present.
+	// A genuine, correctly-scoped snapshot reconciles clean.
 	dump, err := DumpWorkspace(ctx, source, wsID)
 	if err != nil {
 		t.Fatalf("DumpWorkspace: %v", err)
@@ -494,22 +473,55 @@ func TestVerify_ScopingBugUnderSelection_KnownResidual(t *testing.T) {
 	if got := len(dump.Tables["missions"]); got != 3 {
 		t.Fatalf("test setup: expected 3 missions in the real dump, got %d", got)
 	}
+	if sr := dump.ScopeReconciliation(); sr == nil || !sr.Checked || len(sr.Shortfalls) != 0 {
+		t.Fatalf("clean dump reconciliation = %+v, want checked with no shortfalls", sr)
+	}
 
-	// Simulate a create-time scoping bug's effect: the dump this restore
-	// path actually has to work with is already short. Nothing in THIS PR
-	// touches how dump.Tables gets built — only what happens after.
+	// A scope filter that under-selected: the dump only carries one mission.
+	// Reconcile it against the same source the way DumpWorkspace does.
 	dump.Tables["missions"] = dump.Tables["missions"][:1]
+	tx, err := source.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sr, err := reconcileWorkspaceScopeTx(ctx, tx, wsID, dump, map[string]dumpScopeFilter{})
+	_ = tx.Rollback()
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	want := []ScopeShortfall{{Table: "missions", Reachable: 3, Missing: 2}}
+	if !reflect.DeepEqual(sr.Shortfalls, want) {
+		t.Fatalf("shortfalls = %+v, want %+v", sr.Shortfalls, want)
+	}
 
-	// runner_create.go's order: Contents.TableRowCounts is derived from
-	// this SAME (already-short) dump, after the fact.
-	recordedCounts := tableRowCounts(dump)
-	if recordedCounts["missions"] != 1 {
-		t.Fatalf("test setup: expected the simulated under-selection to read back as 1, got %d", recordedCounts["missions"])
+	// The same for a row whose own nullable workspace_id is NULL, so only its
+	// NOT NULL foreign key into an exported parent ties it to the workspace —
+	// #1973's own shape.
+	if _, err := source.ExecContext(ctx, `INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, workspace_id) VALUES ('ma_residual', 'm_residual_2', 'system', 'sys', 'created', NULL)`); err != nil {
+		t.Fatalf("seed mission_activity: %v", err)
+	}
+	full, err := DumpWorkspace(ctx, source, wsID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full.Tables["mission_activity"] = nil // the filter "missed" it
+	tx, err = source.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaFK, err := reconcileWorkspaceScopeTx(ctx, tx, wsID, full, map[string]dumpScopeFilter{"missions": {where: "workspace_id = ?", args: []any{wsID}}})
+	_ = tx.Rollback()
+	if err != nil {
+		t.Fatalf("reconcile via FK: %v", err)
+	}
+	if !reflect.DeepEqual(viaFK.Shortfalls, []ScopeShortfall{{Table: "mission_activity", Reachable: 1, Missing: 1}}) {
+		t.Fatalf("FK-only shortfall = %+v, want mission_activity 1 of 1", viaFK.Shortfalls)
 	}
 
 	m := newValidManifest()
 	m.Encryption = Encryption{}
-	m.Contents.TableRowCounts = recordedCounts
+	m.Contents.TableRowCounts = tableRowCounts(dump) // agrees with the short payload
+	m.Contents.ScopeReconciliation = sr
 	dumpJSON, err := json.Marshal(dump)
 	if err != nil {
 		t.Fatalf("marshal dump: %v", err)
@@ -521,12 +533,8 @@ func TestVerify_ScopingBugUnderSelection_KnownResidual(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if !res.Valid || !res.CompletenessChecked || len(res.TableRowCountMismatches) != 0 {
-		t.Fatalf("#2009 appears to be FIXED beyond its documented scope: Verify caught an "+
-			"under-selected dump whose manifest was recorded from that same short dump. Good — "+
-			"figure out what changed, invert this test to assert the catch, and drop the "+
-			"_KnownResidual suffix. Got valid=%v checked=%v mismatches=%+v",
-			res.Valid, res.CompletenessChecked, res.TableRowCountMismatches)
+	if res.Valid || !errors.Is(res.Err, ErrBundleShortOfSource) || !reflect.DeepEqual(res.ScopeShortfalls, want) {
+		t.Fatalf("Verify on a bundle short of its source: valid=%v err=%v shortfalls=%+v", res.Valid, res.Err, res.ScopeShortfalls)
 	}
 }
 

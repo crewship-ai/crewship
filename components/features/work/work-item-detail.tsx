@@ -44,7 +44,8 @@ import {
 } from "@/hooks/use-work-items"
 import { useWebhookDelivery } from "@/hooks/use-webhook-deliveries"
 import { NeedsReconciliationNotice, WorkStatePill } from "./work-state-pill"
-import { formatCost } from "./work-items-list"
+import { formatCost, humanReason, isDeletedAgent, sentence } from "@/lib/work-ledger"
+import { CrewChip, LedgerAvatar } from "./ledger-parts"
 import { ReplayButton, ReplayUnavailableReason, WorkReplayDialog } from "./work-replay-dialog"
 
 export interface WorkItemDetailProps {
@@ -124,7 +125,8 @@ export function WorkItemDetailBody({
   const streams = workRunStreams(item)
   const itemEvents = ledgerEvents(item)
   const cost = totalCostUSD(item.attempts)
-  const reason = queuedReason(item)
+  // Read as a sentence, without the operator ids the ledger rows already drop.
+  const reason = sentence(humanReason(queuedReason(item)))
   const terminal = isTerminalWorkState(item.state)
   const liveAttempt = item.attempts.find((a) => !a.ended_at) ?? null
 
@@ -159,12 +161,32 @@ export function WorkItemDetailBody({
 
       <DetailCard title="Acceptance" icon={FileDigit}>
         <dl className="grid grid-cols-1 gap-x-4 gap-y-2 text-[11px] sm:grid-cols-2">
-          <Fact label="Agent" value={item.agent_id} mono empty="no agent" />
+          <Fact
+            label="Agent"
+            value={
+              item.agent ? (
+                <span className="inline-flex min-w-0 items-center gap-1.5" title={item.agent_id}>
+                  <LedgerAvatar agent={item.agent} className="h-4 w-4" />
+                  <span className={cn("truncate", isDeletedAgent(item.agent) && "text-muted-foreground line-through")}>{item.agent.name}</span>
+                  {isDeletedAgent(item.agent) && <span className="text-muted-foreground-soft">deleted</span>}
+                </span>
+              ) : (
+                item.agent_id
+              )
+            }
+            mono={!item.agent}
+            empty="no agent"
+          />
           {/* Session and agent are listed separately and are never merged into
               one "who" — they are different identities and §9's rule about run
               streams is the same rule one level down. */}
           <Fact label="Session" value={item.session_id} mono empty={item.class === "chat" ? "no session" : "background work"} />
-          <Fact label="Crew" value={item.crew_id} mono empty="—" />
+          <Fact
+            label="Crew"
+            value={item.crew ? <CrewChip crew={item.crew} className="max-w-full" /> : item.crew_id}
+            mono={!item.crew}
+            empty="—"
+          />
           <Fact label="Authorized by" value={item.authorized_by_user_id} mono empty="—" />
           <Fact label="Target revision" value={item.target_revision} mono empty="none recorded" />
           <Fact

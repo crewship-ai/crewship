@@ -91,7 +91,7 @@ export function fleetAgentStatus(agents: Pick<AgentSummary, "status">[]): string
   return [running && `${running} running`, ready && `${ready} ready`, errors && `${errors} in error`, other && `${other} unavailable`].filter(Boolean).join(" · ")
 }
 
-export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard[]; workspaceId: string | null }) {
+export function FleetBoard({ cards: unordered }: { cards: FleetCard[] }) {
   const cards = React.useMemo(() => prioritiseFleet(unordered), [unordered])
   const listScroll = useListScroll()
   const toolGaps = toolGapCrews(cards)
@@ -150,7 +150,7 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
               <span className="hidden items-center gap-1 sm:flex">
                 {card.agents.slice(0, 5).map((agent) => (
                   <Link key={agent.id} href={entityHref({ kind: "chat", agentSlug: agent.slug })} title={`${agent.name} · ${formatStatus(agent.status).label}`} className="relative">
-                    <AgentAvatar seed={agent.slug} agentId={agent.id} workspaceId={workspaceId} alt={agent.name} className="h-6 w-6 rounded-md bg-muted ring-1 ring-border" />
+                    <AgentAvatar seed={agent.slug} alt={agent.name} className="h-6 w-6 rounded-md bg-muted ring-1 ring-border" />
                     <span className={cn("absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border-2 border-card", AGENT_DOT[agent.status] ?? "bg-muted-foreground")} aria-hidden />
                   </Link>
                 ))}

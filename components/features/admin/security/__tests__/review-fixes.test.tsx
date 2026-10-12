@@ -7,9 +7,11 @@ import { render, screen, fireEvent, cleanup, waitFor, renderHook, act, within } 
 const h = vi.hoisted(() => ({ api: vi.fn(), toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() } }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => h.api(...a) }))
 vi.mock("sonner", () => ({ toast: h.toast }))
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock("@/components/features/admin/keeper-health-card", () => ({ KeeperHealthCard: () => null }))
 
 import { BulkGovernanceForm } from "../bulk-governance"
+import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
 import { useInstanceKeeper, type InstanceGovRow } from "../use-instance-keeper"
 import { SecurityOverview } from "../security-overview"
 
@@ -25,6 +27,9 @@ const preview = (ids: string[], id = "p-1") => ({
 })
 const body = (i: number) => JSON.parse(h.api.mock.calls[i][1].body)
 
+/** The bulk form's edits are committed from the save bar, never from the card. */
+const saveBar = () => fireEvent.click(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" }))
+
 beforeEach(() => { cleanup(); h.api.mockReset(); Object.values(h.toast).forEach((f) => f.mockReset()) })
 
 describe("R3 · a bulk draft belongs to the workspaces it was made for", () => {
@@ -34,7 +39,7 @@ describe("R3 · a bulk draft belongs to the workspaces it was made for", () => {
     const r = render(<BulkGovernanceForm {...props} rows={[row("a"), row("b")]} />)
     fireEvent.click(screen.getByRole("radio", { name: "On" }))
     r.rerender(<BulkGovernanceForm {...props} rows={[row("c"), row("d")]} />)
-    expect(screen.getByRole("button", { name: "Overwrite 2 workspaces…" })).toBeDisabled()
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
     expect(h.toast.info).toHaveBeenCalled()
   })
 
@@ -45,7 +50,7 @@ describe("R3 · a bulk draft belongs to the workspaces it was made for", () => {
     })
     render(<BulkGovernanceForm {...props} rows={[row("a"), row("b")]} />)
     fireEvent.click(screen.getByRole("radio", { name: "On" }))
-    fireEvent.click(screen.getByRole("button", { name: "Overwrite 2 workspaces…" }))
+    saveBar()
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: /^Overwrite 2/ }))
     await waitFor(() => expect(h.api).toHaveBeenCalledTimes(2))
     expect(body(1)).toEqual({ workspaces: ["a", "b"], dry_run: false, expect_preview: "p-1", set: { enabled: true } })
@@ -55,7 +60,7 @@ describe("R3 · a bulk draft belongs to the workspaces it was made for", () => {
     h.api.mockImplementation(async (_u: string, init: RequestInit) => res(preview(JSON.parse(String(init.body)).workspaces)))
     const r = render(<BulkGovernanceForm {...props} rows={[row("a"), row("b")]} />)
     fireEvent.click(screen.getByRole("radio", { name: "On" }))
-    fireEvent.click(screen.getByRole("button", { name: "Overwrite 2 workspaces…" }))
+    saveBar()
     await screen.findByRole("alertdialog")
     r.rerender(<BulkGovernanceForm {...props} rows={[row("c"), row("d")]} />)
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
@@ -67,7 +72,7 @@ describe("R3 · a bulk draft belongs to the workspaces it was made for", () => {
     h.api.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
     const r = render(<BulkGovernanceForm {...props} rows={[row("a"), row("b")]} />)
     fireEvent.click(screen.getByRole("radio", { name: "On" }))
-    fireEvent.click(screen.getByRole("button", { name: "Overwrite 2 workspaces…" }))
+    saveBar()
     r.rerender(<BulkGovernanceForm {...props} rows={[row("c"), row("d")]} />)
     await act(async () => finish(res(preview(["a", "b"]))))
     expect(screen.queryByRole("alertdialog")).toBeNull()
@@ -80,9 +85,13 @@ describe("R3 · a bulk draft belongs to the workspaces it was made for", () => {
     })
     render(<BulkGovernanceForm {...props} rows={[row("a"), row("b")]} />)
     fireEvent.click(screen.getByRole("radio", { name: "On" }))
-    fireEvent.click(screen.getByRole("button", { name: "Overwrite 2 workspaces…" }))
+    saveBar()
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: /^Overwrite 2/ }))
-    expect(await screen.findByRole("status")).toHaveTextContent("changed since the preview")
+    // A corner toast naming the section; the draft stays for another try.
+    await waitFor(() => expect(h.toast.error).toHaveBeenCalled())
+    expect(h.toast.error.mock.calls[0][0]).toBe("Couldn’t save Watchdog")
+    expect(h.toast.error.mock.calls[0][1]).toMatchObject({ description: expect.stringContaining("changed since the preview") })
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("1 unsaved change")
     expect(props.onSaved).not.toHaveBeenCalled()
   })
 
@@ -90,9 +99,38 @@ describe("R3 · a bulk draft belongs to the workspaces it was made for", () => {
     h.api.mockImplementation(async (_u: string, init: RequestInit) => res(preview(JSON.parse(String(init.body)).workspaces)))
     render(<BulkGovernanceForm {...props} rows={[row("a"), row("b")]} />)
     fireEvent.click(screen.getByRole("radio", { name: "On" }))
-    fireEvent.click(screen.getByRole("button", { name: "Overwrite 2 workspaces…" }))
+    saveBar()
     const table = within(await screen.findByRole("alertdialog")).getByRole("table")
     expect(within(table).getAllByText("Watchdog: Off → On")).toHaveLength(2)
+  })
+})
+
+describe("the bulk form inside a page uses the page's Save bar", () => {
+  const props = { section: "watchdog" as const, all: false, onSaved: vi.fn() }
+  const inPage = () => render(
+    <PageSaveProvider><BulkGovernanceForm {...props} rows={[row("a"), row("b")]} /><PageSaveBar /></PageSaveProvider>,
+  )
+
+  it("counts the edited fields, and Discard drops them without a request", () => {
+    inPage()
+    fireEvent.click(screen.getByRole("radio", { name: "On" }))
+    fireEvent.click(screen.getByRole("radio", { name: "1 in 10" }))
+    expect(screen.getAllByRole("region", { name: "Unsaved changes" })).toHaveLength(1)
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("2 unsaved changes")
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
+    expect(h.api).not.toHaveBeenCalled()
+  })
+
+  it("a preview the server refuses is a corner toast, and no dialog opens", async () => {
+    h.api.mockResolvedValue(res({ error: "keeper store unavailable" }, 500))
+    inPage()
+    fireEvent.click(screen.getByRole("radio", { name: "On" }))
+    saveBar()
+    await waitFor(() => expect(h.toast.error).toHaveBeenCalled())
+    expect(h.toast.error.mock.calls[0][0]).toBe("Couldn’t save Watchdog")
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("1 unsaved change")
   })
 })
 
@@ -161,7 +199,7 @@ describe("follow-up · the same page loads once, and a preview belongs to one mo
     const props = { section: "watchdog" as const, all: false, onSaved: vi.fn() }
     const r = render(<BulkGovernanceForm {...props} rows={[row("a"), row("b")]} />)
     fireEvent.click(screen.getByRole("radio", { name: "On" }))
-    fireEvent.click(screen.getByRole("button", { name: "Overwrite 2 workspaces…" }))
+    saveBar()
     r.rerender(<BulkGovernanceForm {...props} rows={[row("c"), row("d")]} />)
     r.rerender(<BulkGovernanceForm {...props} rows={[row("a"), row("b")]} />)
     await act(async () => finish(res(preview(["a", "b"], "stale"))))

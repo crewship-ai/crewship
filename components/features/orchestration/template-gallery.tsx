@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -168,23 +168,42 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [editorOpen, setEditorOpen] = useState(false)
+  const [error, setError] = useState(false)
+  const scope = useRef<{ workspaceId: string; controller: AbortController } | null>(null)
+  const listing = useRef<AbortController | null>(null)
 
   const fetchTemplates = useCallback(async () => {
+    const current = scope.current
+    if (!current || current.workspaceId !== workspaceId) return
+    listing.current?.abort()
+    const controller = new AbortController()
+    listing.current = controller
+    setLoading(true)
+    setError(false)
     try {
-      const res = await apiFetch(`/api/v1/templates?workspace_id=${workspaceId}`)
-      if (res.ok) {
-        setTemplates(await res.json())
-      }
+      const res = await apiFetch(`/api/v1/templates?workspace_id=${encodeURIComponent(workspaceId)}`, { signal: controller.signal })
+      if (!res.ok) throw new Error("Could not load templates")
+      const rows: WorkflowTemplate[] = await res.json()
+      if (!controller.signal.aborted && scope.current === current) setTemplates(rows)
     } catch {
-      // ignore
+      if (!controller.signal.aborted && scope.current === current) setError(true)
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted && scope.current === current) setLoading(false)
     }
   }, [workspaceId])
 
   useEffect(() => {
-    fetchTemplates()
-  }, [fetchTemplates])
+    const current = { workspaceId, controller: new AbortController() }
+    scope.current = current
+    setTemplates([])
+    setEditorOpen(false)
+    void fetchTemplates()
+    return () => {
+      scope.current = null
+      current.controller.abort()
+      listing.current?.abort()
+    }
+  }, [fetchTemplates, workspaceId])
 
   if (loading) {
     return (
@@ -198,6 +217,13 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
       </div>
     )
   }
+
+  if (error) return (
+    <div role="alert" className="space-y-2 text-sm">
+      <p>Could not load templates. Try again.</p>
+      <Button variant="outline" onClick={() => void fetchTemplates()}>Retry</Button>
+    </div>
+  )
 
   return (
     <div className="space-y-5">
@@ -255,9 +281,16 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
                     className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
                     onClick={async () => {
                       if (!window.confirm(`Delete template "${tmpl.name}"?`)) return
-                      const res = await apiFetch(`/api/v1/templates/${tmpl.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
-                      if (res.ok) { toast.success("Template deleted"); fetchTemplates() }
-                      else toast.error("Failed to delete template")
+                      const current = scope.current
+                      if (!current || current.workspaceId !== workspaceId) return
+                      try {
+                        const res = await apiFetch(`/api/v1/templates/${encodeURIComponent(tmpl.id)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "DELETE", signal: current.controller.signal })
+                        if (scope.current !== current) return
+                        if (res.ok) { toast.success("Template deleted"); void fetchTemplates() }
+                        else toast.error("Failed to delete template")
+                      } catch {
+                        if (scope.current === current) toast.error("Failed to delete template")
+                      }
                     }}
                   >
                     <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -342,6 +375,8 @@ function TemplateEditor({ workspaceId, onClose, onCreated }: TemplateEditorProps
     { id: "step-1", title: "", agent_role: "", depends_on: [] },
   ])
   const [saving, setSaving] = useState(false)
+  const pending = useRef<AbortController | null>(null)
+  useEffect(() => () => { pending.current?.abort() }, [])
 
   const addStep = () => {
     const nextNumber =
@@ -368,6 +403,8 @@ function TemplateEditor({ workspaceId, onClose, onCreated }: TemplateEditorProps
     if (steps.some((s) => !s.title.trim())) { toast.error("All steps need a title"); return }
 
     setSaving(true)
+    const controller = new AbortController()
+    pending.current = controller
     try {
       const body = {
         name: name.trim(),
@@ -383,20 +420,24 @@ function TemplateEditor({ workspaceId, onClose, onCreated }: TemplateEditorProps
           })),
         },
       }
-      const res = await apiFetch(`/api/v1/templates?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/templates?workspace_id=${encodeURIComponent(workspaceId)}`, {
         method: "POST",
+        signal: controller.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       })
+      if (controller.signal.aborted) return
       if (res.ok) {
         toast.success("Template created")
         onCreated()
       } else {
         const err = await res.json().catch(() => ({}))
-        toast.error(err.error || "Failed to create template")
+        if (!controller.signal.aborted) toast.error(err.error || "Failed to create template")
       }
+    } catch {
+      if (!controller.signal.aborted) toast.error("Failed to create template")
     } finally {
-      setSaving(false)
+      if (!controller.signal.aborted) setSaving(false)
     }
   }
 

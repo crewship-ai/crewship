@@ -4,77 +4,45 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
+	"sort"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
-	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/safepath"
 )
 
-// safePathSegment rejects values that could escape a filepath.Join base
-// (separators, traversal tokens, empty, or just ".") so server-provided
-// IDs and slugs can't write outside the per-crew memory root. The seed
-// fetches crew_id and agent slug from the API and writes to
-// {base}/crews/{crew_id}/agents/{slug}/.memory — if either segment
-// carried "..", a separator, or NUL the on-disk write would escape and
-// could clobber e.g. another crew's memory or files under the basePath.
 func safePathSegment(s string) (string, error) {
-	if s == "" || s == "." || s == ".." {
-		return "", fmt.Errorf("path segment %q is empty or traversal token", s)
-	}
-	if strings.ContainsAny(s, `/\`+"\x00") {
-		return "", fmt.Errorf("path segment %q contains separator or NUL", s)
+	if _, err := safepath.ValidateComponent(s); err != nil {
+		return "", err
 	}
 	return s, nil
 }
 
-// seedAgentMemory pre-populates the on-disk memory tiers for each seeded
-// agent so a fresh workspace has a realistic "month of context" backing
-// every agent — useful for demoing memory recall and for RBAC/GDPR live
-// tests where memory_versions and peer_cards need to exist.
-//
-// Writes are filesystem-level under {storagePath}/crews/{crew_id}/...
-// because memory tools normally run inside the agent container; at seed
-// time no container exists yet. The orchestrator mounts these paths
-// into /crew/{agents,shared}/ on first agent run.
-//
-// Files written per agent:
-//
-//	{agent_slug}/.memory/AGENT.md             — identity + preferences (4KB cap)
-//	{agent_slug}/.memory/PERSONA.md           — voice & dissent rules (1.5KB cap)
-//	{agent_slug}/.memory/pins.md              — never-evict facts (8KB cap)
-//	{agent_slug}/.memory/daily/{date}.md      — one daily log from a month ago
-//
-// Plus per crew:
-//
-//	shared/.memory/CREW.md                    — shared knowledge (4KB cap)
-//	shared/.memory/learned.md                 — promoted lessons (writer-managed)
-//
-// Toggled via `--with-memory`; default off so existing seeds stay
-// byte-identical for callers who didn't opt in.
+type seedMemoryDocument struct {
+	Path string `json:"path" yaml:"path"`
+	Body string `json:"body" yaml:"body"`
+}
+
+// seedAgentMemory provisions the target server's memory through its scoped,
+// durable, create-if-absent API. No server directories are inferred on the CLI
+// host, even when the selected server happens to be localhost.
 func seedAgentMemory(ctx context.Context, client *cli.Client, crewIDs map[string]string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	basePath := resolveStorageBasePath()
-	if basePath == "" {
-		return fmt.Errorf("seedAgentMemory: cannot resolve CREWSHIP_STORAGE_BASE_PATH; set the env or pass it explicitly")
-	}
-	fmt.Fprintln(os.Stderr, "Seeding agent memory tiers...")
-
-	// Build reverse lookup crewID → crewSlug for the per-crew files.
+	client = client.WithContext(ctx)
+	fmt.Fprintln(os.Stderr, "Seeding agent memory tiers on the target server...")
 	crewSlugByID := make(map[string]string, len(crewIDs))
+	slugs := make([]string, 0, len(crewIDs))
 	for slug, id := range crewIDs {
+		if _, err := safePathSegment(id); err != nil {
+			return fmt.Errorf("seedAgentMemory: invalid crew_id %q: %w", id, err)
+		}
 		crewSlugByID[id] = slug
+		slugs = append(slugs, slug)
 	}
-
-	// Fetch agents and group by crew so we know which slugs to write
-	// memory files for. Going through the API instead of taking the
-	// flat slug→id map keeps the function self-contained and survives
-	// a future seedAgents return-shape change.
-	wsID := client.GetWorkspaceID()
-	resp, err := client.Get(fmt.Sprintf("/api/v1/agents?workspace_id=%s", wsID))
+	sort.Strings(slugs)
+	resp, err := client.Get("/api/v1/agents")
 	if err != nil {
 		return fmt.Errorf("seedAgentMemory: list agents: %w", err)
 	}
@@ -88,102 +56,58 @@ func seedAgentMemory(ctx context.Context, client *cli.Client, crewIDs map[string
 	if err := cli.ReadJSON(resp, &agents); err != nil {
 		return fmt.Errorf("seedAgentMemory: parse agents: %w", err)
 	}
-
-	month := time.Now().AddDate(0, -1, 0).Format("2006-01-02")
-	wrote := 0
-
-	// Crew-shared memory (one CREW.md + learned.md per crew, regardless
-	// of how many agents the crew has).
-	for crewSlug, crewID := range crewIDs {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		safeCrewID, err := safePathSegment(crewID)
-		if err != nil {
-			return fmt.Errorf("seedAgentMemory: invalid crew_id %q: %w", crewID, err)
-		}
-		sharedDir := filepath.Join(basePath, "crews", safeCrewID, "shared", ".memory")
-		if err := os.MkdirAll(sharedDir, 0o755); err != nil {
-			return fmt.Errorf("mkdir shared mem: %w", err)
-		}
-		if err := writeFileIfAbsent(filepath.Join(sharedDir, "CREW.md"), demoCrewMD(crewSlug)); err != nil {
-			return err
-		}
-		if err := writeFileIfAbsent(filepath.Join(sharedDir, "learned.md"), demoLearnedMD()); err != nil {
-			return err
-		}
-		wrote += 2
-	}
-
-	// Per-agent memory (AGENT, PERSONA, pins, one daily log a month ago).
+	sort.Slice(agents, func(i, j int) bool { return agents[i].Slug < agents[j].Slug })
 	for _, a := range agents {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if a.CrewID == "" || crewSlugByID[a.CrewID] == "" {
+		if crewSlugByID[a.CrewID] == "" {
 			continue
 		}
-		safeCrewID, err := safePathSegment(a.CrewID)
-		if err != nil {
-			return fmt.Errorf("seedAgentMemory: invalid crew_id %q from agents API: %w", a.CrewID, err)
+		if _, err := safePathSegment(a.Slug); err != nil {
+			return fmt.Errorf("seedAgentMemory: invalid agent slug %q: %w", a.Slug, err)
 		}
-		safeSlug, err := safePathSegment(a.Slug)
-		if err != nil {
-			return fmt.Errorf("seedAgentMemory: invalid agent slug %q from agents API: %w", a.Slug, err)
-		}
-		agentMemDir := filepath.Join(basePath, "crews", safeCrewID, "agents", safeSlug, ".memory")
-		dailyDir := filepath.Join(agentMemDir, "daily")
-		if err := os.MkdirAll(dailyDir, 0o755); err != nil {
-			return fmt.Errorf("mkdir agent mem: %w", err)
-		}
-		if err := writeFileIfAbsent(filepath.Join(agentMemDir, "AGENT.md"), demoAgentMD(a.Slug, crewSlugByID[a.CrewID])); err != nil {
-			return err
-		}
-		if err := writeFileIfAbsent(filepath.Join(agentMemDir, "PERSONA.md"), demoPersonaMD(a.Slug)); err != nil {
-			return err
-		}
-		if err := writeFileIfAbsent(filepath.Join(agentMemDir, "pins.md"), demoPinsMD()); err != nil {
-			return err
-		}
-		if err := writeFileIfAbsent(filepath.Join(dailyDir, month+".md"), demoDailyMD(month, a.Slug)); err != nil {
-			return err
-		}
-		wrote += 4
 	}
-	fmt.Fprintf(os.Stderr, "  ✓ Wrote %d memory files across %d crew(s) / %d agent(s)\n", wrote, len(crewIDs), len(agents))
+	initialize := func(crewID, agentSlug string, docs []seedMemoryDocument) (int, error) {
+		resp, err := client.Post("/api/v1/memory/initialize", map[string]any{"crew_id": crewID, "agent_slug": agentSlug, "documents": docs})
+		if err != nil {
+			return 0, err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return 0, err
+		}
+		var result struct {
+			Written  int `json:"written" yaml:"written"`
+			Existing int `json:"existing" yaml:"existing"`
+		}
+		if err := cli.ReadJSON(resp, &result); err != nil {
+			return 0, err
+		}
+		if result.Written < 0 || result.Existing < 0 || result.Written+result.Existing != len(docs) {
+			return 0, fmt.Errorf("server did not acknowledge every memory document")
+		}
+		return result.Written, nil
+	}
+	wrote := 0
+	for _, slug := range slugs {
+		count, err := initialize(crewIDs[slug], "", []seedMemoryDocument{{"CREW.md", demoCrewMD(slug)}, {"learned.md", demoLearnedMD()}})
+		if err != nil {
+			return fmt.Errorf("initialize crew %s memory: %w", slug, err)
+		}
+		wrote += count
+	}
+	month := time.Now().AddDate(0, -1, 0).Format("2006-01-02")
+	for _, a := range agents {
+		crewSlug := crewSlugByID[a.CrewID]
+		if crewSlug == "" {
+			continue
+		}
+		docs := []seedMemoryDocument{{"AGENT.md", demoAgentMD(a.Slug, crewSlug)}, {"PERSONA.md", demoPersonaMD(a.Slug)}, {"pins.md", demoPinsMD()}, {"daily/" + month + ".md", demoDailyMD(month, a.Slug)}}
+		count, err := initialize(a.CrewID, a.Slug, docs)
+		if err != nil {
+			return fmt.Errorf("initialize agent %s memory: %w", a.Slug, err)
+		}
+		wrote += count
+	}
+	fmt.Fprintf(os.Stderr, "  ✓ Initialized %d memory files on the target server; existing files preserved\n", wrote)
 	return nil
-}
-
-// resolveStorageBasePath reads the storage base path the orchestrator
-// uses at runtime. Honours CREWSHIP_STORAGE_BASE_PATH (set by dev.sh
-// per-instance, e.g. /tmp/crewship-1-data) and falls back to the
-// default in $HOME/.crewship.
-func resolveStorageBasePath() string {
-	if v := os.Getenv("CREWSHIP_STORAGE_BASE_PATH"); v != "" {
-		return v
-	}
-	if h, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(h, ".crewship")
-	}
-	return ""
-}
-
-// writeFileIfAbsent skips when the file already exists so re-running
-// seed with --with-memory doesn't clobber any edits an operator made
-// after the first seed. To force-overwrite, delete the file first
-// or pass --nuke before re-seeding.
-//
-// Durable, not os.WriteFile (#2124): these are PERSONA.md, pins.md and
-// learned.md under the storage base path, which the running server reads
-// as memory content, and os.WriteFile's create and first write are two
-// syscalls with an empty file visible between them. The os.Stat guard
-// above makes that worse than a one-shot write: a torn first write is
-// never repaired, because the next seed sees the file and skips it.
-func writeFileIfAbsent(path, content string) error {
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	}
-	return memory.WriteFileDurable(path, []byte(content), 0o644)
 }
 
 func demoAgentMD(agentSlug, crewSlug string) string {

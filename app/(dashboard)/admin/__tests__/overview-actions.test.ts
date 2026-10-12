@@ -25,7 +25,7 @@ describe("admin overview actions", () => {
       if (!href.startsWith("/admin")) continue
       // Nested pages of the console (People & workspaces) are routes, not tabs.
       if (href.startsWith("/admin/")) {
-        expect(["/admin/people", "/admin/security"], href).toContain(new URL(href, "http://x").pathname)
+        expect(["/admin/people", "/admin/security", "/admin/backups"], href).toContain(new URL(href, "http://x").pathname)
         continue
       }
       const tab = new URL(href, "http://x").searchParams.get("tab")

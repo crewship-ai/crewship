@@ -628,7 +628,6 @@ export function CreateIssueModal({
                     <AgentAvatar
                       seed={selectedAgent.avatar_seed || selectedAgent.name}
                       style={selectedAgent.avatar_style || selectedAgent.crew_avatar_style}
-                      agentId={selectedAgent.id}
                       avatarUrl={selectedAgent.avatar_url}
                       className="h-3.5 w-3.5 shrink-0"
                     />
@@ -703,7 +702,6 @@ export function CreateIssueModal({
                           <AgentAvatar
                             seed={agent.avatar_seed || agent.name}
                             style={agent.avatar_style || agent.crew_avatar_style}
-                            agentId={agent.id}
                             avatarUrl={agent.avatar_url}
                             className="mr-2 h-4 w-4 shrink-0"
                           />

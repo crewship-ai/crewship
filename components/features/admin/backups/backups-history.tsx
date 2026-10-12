@@ -1,22 +1,64 @@
 "use client"
 
 import * as React from "react"
-import { Pin } from "lucide-react"
+import { History, Pin } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Chip, Gate, SmallButton, TD, TH, WsName } from "./backups-kit"
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { SettingsSegmented, SettingsSummary, SummaryItem, nativeSelect, settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
+import { Chip, Gate, WsName } from "./backups-kit"
 import { formatPhases, formatSize, formatWhen, proofLabel, runPlanLabel, runResult, type BackupRun } from "./backups-model"
 import { checkBundle, downloadHref, pinBundle, useBackupRuns, workspaceFor } from "./use-backup-runs"
 import { perform } from "./use-backups-data"
-import type { SectionCtx } from "./backups-console"
+import type { RunFilter, RunQuery, SectionCtx } from "./backups-console"
 
-type Filter = { kind: "all" } | { kind: "plan"; name: string } | { kind: "manual" } | { kind: "pinned" }
+const FILTERS: { value: RunFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "failed", label: "Failed" },
+  { value: "incomplete", label: "Incomplete" },
+  { value: "manual", label: "Manual" },
+  { value: "pinned", label: "Pinned" },
+]
+
+/** The Runs facets, the same test the side panel counts with. */
+/** The runs the current scope shows. The side panel counts with it too. */
+export function runsInScope(runs: BackupRun[], ctx: Pick<SectionCtx, "scope" | "selected">, legacy: boolean): BackupRun[] {
+  return runs.filter((r) => legacy || (ctx.scope === "instance" ? r.scope === "instance" : r.scope === "workspaces" && !!r.workspace_id && ctx.selected.has(r.workspace_id)))
+}
+
+/** Whether a run passes the panel's search and Filter. The panel counts with it too. */
+export function matchesQuery(r: BackupRun, q: RunQuery | undefined, now: number = Date.now()): boolean {
+  if (!q) return true
+  const text = q.q.trim().toLowerCase()
+  if (text && ![r.plan_name, r.workspace_name, r.note, r.scope === "instance" ? "whole instance" : null]
+    .some((v) => v?.toLowerCase().includes(text))) return false
+  if (q.kind && r.kind !== q.kind) return false
+  if (q.proof && (r.proof_level ?? 0) < Number(q.proof)) return false
+  if (q.period && now - Date.parse(r.started_at) > Number(q.period) * 86_400_000) return false
+  return true
+}
+
+/** Whether a run belongs to a Runs facet. The side panel counts with it too. */
+export function matches(r: BackupRun, f: RunFilter): boolean {
+  switch (f) {
+    case "failed": return r.status === "failed"
+    case "incomplete": return r.status === "incomplete" || r.incomplete.length > 0
+    case "manual": return r.trigger === "manual"
+    case "pinned": return r.pinned
+    default: return true
+  }
+}
+
+const TH = settingsTh
+const TD = cn(settingsTd, "align-top")
 
 /**
  * Backups › Backup history: every run in the scope, what it went through, and
  * how far each backup is proven — checksum, contents checked, test restore —
- * never folded into one "restorable".
+ * never folded into one "restorable". Built like Security › Activity: a
+ * summary line, one table, and a run opens in a side sheet.
  */
 export function BackupsHistory({ ctx }: { ctx: SectionCtx }) {
   const res = useBackupRuns(ctx.scope, ctx.selected, ctx.workspaces)
@@ -28,62 +70,85 @@ export function BackupsHistory({ ctx }: { ctx: SectionCtx }) {
 }
 
 export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { runs: BackupRun[]; ctx: SectionCtx; legacy?: boolean; reload?: () => void; now?: Date }) {
-  const [filter, setFilter] = React.useState<Filter>({ kind: "all" })
+  // On the nested page the side panel owns the facet; on its own the section
+  // draws the same choice as a segmented control.
+  const [localFilter, setLocalFilter] = React.useState<RunFilter>("all")
+  const filter = ctx.inDrill ? ctx.runFilter ?? "all" : localFilter
+  const [plan, setPlan] = React.useState<string>("")
   const [open, setOpen] = React.useState<string | null>(ctx.focusRun)
   const [checking, setChecking] = React.useState<BackupRun | null>(null)
   const [checked, setChecked] = React.useState<Record<string, { level: 1 | 2; ok: boolean; detail: string }>>({})
 
-  const inScope = runs.filter((r) => legacy || (ctx.scope === "instance" ? r.scope === "instance" : r.scope === "workspaces" && !!r.workspace_id && ctx.selected.has(r.workspace_id)))
+  const inScope = runsInScope(runs, ctx, !!legacy).filter((r) => matchesQuery(r, ctx.runQuery))
   const plans = [...new Set(inScope.filter((r) => r.plan_name).map((r) => r.plan_name!))]
-  const list = inScope.filter((r) =>
-    filter.kind === "all" ? true
-    : filter.kind === "plan" ? r.plan_name === filter.name
-    : filter.kind === "manual" ? r.trigger === "manual"
-    : r.pinned)
+  const list = inScope.filter((r) => matches(r, filter) && (!plan || r.plan_name === plan))
   const current = inScope.find((r) => r.id === open) ?? null
-
-  const chip = (f: Filter, label: string) => {
-    const on = JSON.stringify(f) === JSON.stringify(filter)
-    return (
-      <button key={label} type="button" aria-pressed={on} onClick={() => setFilter(f)}
-        className={cn("h-6 rounded-full border px-2.5 text-[12px] coarse:h-[2.75rem]",
-          on ? "border-accent bg-accent text-foreground" : "border-control-border text-muted-foreground hover:text-foreground")}>
-        {label}
-      </button>
-    )
-  }
+  const count = (f: RunFilter) => inScope.filter((r) => matches(r, f)).length
+  const nFailed = count("failed"), nIncomplete = count("incomplete"), nPinned = count("pinned")
+  const filterLabel = FILTERS.find((f) => f.value === filter)?.label
 
   return (
     <>
       {legacy && (
-        <p className="text-[12.5px] text-muted-foreground">Run history is not available on this server yet. These are the bundles it holds for the workspace you are in; a check proves the checksum only.</p>
+        <p className="text-xs text-muted-foreground">Run history is not available on this server yet. These are the bundles it holds for the workspace you are in; a check proves the checksum only.</p>
       )}
-      <div role="group" aria-label="Filter runs" className="flex flex-wrap items-center gap-1.5">
-        {chip({ kind: "all" }, "All plans")}
-        {plans.map((p) => chip({ kind: "plan", name: p }, p))}
-        {chip({ kind: "manual" }, "Manual")}
-        {chip({ kind: "pinned" }, "Pinned")}
-      </div>
-      <div className="overflow-hidden rounded-card border border-border bg-card">
+      <SettingsSummary>
+        <SummaryItem n={inScope.length}>run{inScope.length === 1 ? "" : "s"}</SummaryItem>
+        <SummaryItem n={nFailed} tone={nFailed ? "danger" : undefined}>failed</SummaryItem>
+        <SummaryItem n={nIncomplete} tone={nIncomplete ? "warn" : undefined}>incomplete</SummaryItem>
+        <SummaryItem n={nPinned}>pinned</SummaryItem>
+        {ctx.inDrill && filter !== "all" && (
+          <span data-slot="run-filter" className="inline-flex h-6 items-center rounded-full bg-primary/10 px-2.5 text-micro text-primary-hover">
+            Showing {filterLabel}
+          </span>
+        )}
+      </SettingsSummary>
+      {(!ctx.inDrill || plans.length > 1) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {!ctx.inDrill && <SettingsSegmented label="Filter runs" options={FILTERS} value={localFilter} onChange={setLocalFilter} />}
+          {plans.length > 1 && (
+            <select aria-label="Plan" value={plan} onChange={(e) => setPlan(e.target.value)}
+              className={nativeSelect}>
+              <option value="">All plans</option>
+              {plans.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          )}
+        </div>
+      )}
+      <section aria-label="Runs" className="overflow-hidden rounded-card border border-border bg-card">
+        <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+          <span className="icon-tile inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ "--ic": "var(--primary)" } as React.CSSProperties} aria-hidden>
+            <History className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-semibold">{filter === "all" ? "Every run" : `${filterLabel} runs`}</h3>
+            <p className="mt-0.5 text-label text-muted-foreground">Newest first · open a run for its phases and proof</p>
+          </div>
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full tabular-nums">
-            <thead><tr>{["Started", "Scope", "Plan", "Size", "Result", "Checked to"].map((h) => <th key={h} className={TH}>{h}</th>)}<th className={TH}><span className="sr-only">Pinned</span></th></tr></thead>
+          <table className={settingsTable}>
+            <thead>
+              <tr>
+                {["Started", "Scope", "Plan", "Size", "Result", "Checked to"].map((h) => <th key={h} className={cn(TH, h === "Size" && "text-right")}>{h}</th>)}
+                <th className={TH}><span className="sr-only">Pinned</span></th>
+              </tr>
+            </thead>
             <tbody>
-              {list.length === 0 && <tr><td colSpan={7} className="px-4 py-4 text-center text-[12.5px] text-muted-foreground">No runs {filter.kind === "all" ? "in this scope yet" : "match this filter"}.</td></tr>}
+              {list.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-label text-muted-foreground">No runs {filter === "all" && !plan ? "in this scope yet" : "match this filter"}.</td></tr>}
               {list.map((r) => {
                 const res = runResult(r)
                 const proof = checked[r.bundle_path ?? ""]?.level ?? r.proof_level
                 return (
                   <tr key={r.id} tabIndex={0} aria-selected={open === r.id} data-run={r.id}
-                    onClick={() => setOpen(open === r.id ? null : r.id)}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(open === r.id ? null : r.id) } }}
-                    className="cursor-pointer hover:[&>td]:bg-muted aria-selected:[&>td]:bg-muted [&:last-child>td]:border-b-0">
-                    <td className={TD}>{formatWhen(r.started_at, now)}</td>
-                    <td className={TD}>{r.scope === "instance" ? <WsName name="Whole instance" instance /> : <WsName name={r.workspace_name ?? "—"} />}</td>
-                    <td className={cn(TD, "min-w-[10rem] whitespace-normal")}>{runPlanLabel(r)}</td>
-                    <td className={TD}>{formatSize(r.size_bytes)}</td>
+                    onClick={() => setOpen(r.id)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(r.id) } }}
+                    className={cn(settingsTableRowLink, "aria-selected:bg-accent")}>
+                    <td className={cn(TD, "whitespace-nowrap")}>{formatWhen(r.started_at, now)}</td>
+                    <td className={cn(TD, "whitespace-nowrap")}>{r.scope === "instance" ? <WsName name="Whole instance" instance /> : <WsName name={r.workspace_name ?? "—"} />}</td>
+                    <td className={cn(TD, "min-w-[10rem]")}>{runPlanLabel(r)}</td>
+                    <td className={cn(TD, "whitespace-nowrap text-right font-mono")}>{formatSize(r.size_bytes)}</td>
                     <td className={TD}><Chip tone={res.tone}>{res.text}</Chip></td>
-                    <td className={TD}>{proofLabel(Math.max(proof, r.proof_level) as BackupRun["proof_level"], r.drill_result)}</td>
+                    <td className={cn(TD, "text-muted-foreground")}>{proofLabel(Math.max(proof, r.proof_level) as BackupRun["proof_level"], r.drill_result)}</td>
                     <td className={TD}>{r.pinned && <Pin className="h-3.5 w-3.5 text-muted-foreground" aria-label="Pinned" />}</td>
                   </tr>
                 )
@@ -91,16 +156,20 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
             </tbody>
           </table>
         </div>
-      </div>
-      {current && (
-        <RunDrawer run={current} now={now} ctx={ctx} check={checked[current.bundle_path ?? ""]}
-          onPin={async () => {
-            if (!current.bundle_path) return
-            const ok = await perform(ctx.demo, () => pinBundle(current.bundle_path!, !current.pinned), current.pinned ? "Unpinned" : "Pinned · rotation never deletes it", current.pinned ? "Could not unpin" : "Could not pin")
-            if (ok) reload?.()
-          }}
-          onCheck={() => setChecking(current)} />
-      )}
+      </section>
+      <Sheet open={!!current} onOpenChange={(o) => { if (!o) setOpen(null) }}>
+        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-2xl">
+          {current && (
+            <RunDrawer run={current} now={now} ctx={ctx} check={checked[current.bundle_path ?? ""]}
+              onPin={async () => {
+                if (!current.bundle_path) return
+                const ok = await perform(ctx.demo, () => pinBundle(current.bundle_path!, !current.pinned), current.pinned ? "Unpinned" : "Pinned · rotation never deletes it", current.pinned ? "Could not unpin" : "Could not pin")
+                if (ok) reload?.()
+              }}
+              onCheck={() => setChecking(current)} />
+          )}
+        </SheetContent>
+      </Sheet>
       <CheckDialog run={checking} legacy={!!legacy} onClose={() => setChecking(null)}
         onCheck={async (key) => {
           if (!checking?.bundle_path) return
@@ -112,6 +181,28 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
   )
 }
 
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <dt className="text-label text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5">{children}</dd>
+    </div>
+  )
+}
+
+/** One rung of the proof ladder: its number, what it proves, and where this run stands. */
+function Rung({ n, label, children }: { n: 1 | 2 | 3; label: string; children: React.ReactNode }) {
+  return (
+    <li className="flex items-start gap-3 border-b border-border py-2.5 last:border-b-0">
+      <span aria-hidden className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted font-mono text-micro text-muted-foreground">{n}</span>
+      <div className="min-w-0 flex-1">
+        <div>{label}</div>
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-label text-muted-foreground">{children}</div>
+      </div>
+    </li>
+  )
+}
+
 function RunDrawer({ run, now, ctx, check, onPin, onCheck }: {
   run: BackupRun; now: Date; ctx: SectionCtx; check?: { level: 1 | 2; ok: boolean; detail: string }
   onPin: () => void; onCheck: () => void
@@ -119,35 +210,57 @@ function RunDrawer({ run, now, ctx, check, onPin, onCheck }: {
   const href = run.bundle_path ? downloadHref(run.bundle_path, workspaceFor(ctx, run.workspace_id), run.legacy ? undefined : run.scope) : null
   const proof = Math.max(run.proof_level, check?.ok ? check.level : 0)
   const missing = run.incomplete.reduce((a, i) => a + i.count, 0)
+  const res = runResult(run)
+  const btn = "h-7 text-xs"
   return (
-    <section data-slot="run-drawer" aria-label="Run details" className="flex flex-col gap-2.5 rounded-card border border-border bg-card px-3.5 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-[13px] font-semibold">{runPlanLabel(run)} · {formatWhen(run.started_at, now)}</h3>
-        <span className="flex-1" />
-        {!run.legacy && <SmallButton onClick={onPin}>{run.pinned ? "Unpin" : "Pin"}</SmallButton>}
-        <SmallButton onClick={onCheck} disabled={!run.bundle_path}>Check contents…</SmallButton>
-        {href ? <SmallButton asChild><a href={href} download>Download</a></SmallButton> : <SmallButton disabled>Download</SmallButton>}
-        <SmallButton primary onClick={() => ctx.go("recovery", { path: run.bundle_path ?? undefined })} disabled={!run.bundle_path}>Restore…</SmallButton>
+    <div data-slot="run-drawer" className="flex min-h-full flex-col">
+      <SheetHeader>
+        <SheetTitle className="text-sm">{runPlanLabel(run)} · {formatWhen(run.started_at, now)}</SheetTitle>
+        <SheetDescription className="sr-only">Phases, encryption and how far this backup is proven</SheetDescription>
+      </SheetHeader>
+      <div className="grid flex-1 gap-5 px-4 pb-4 text-label">
+        <dl className="grid grid-cols-2 gap-3">
+          <Fact label="Result"><Chip tone={res.tone}>{res.text}</Chip></Fact>
+          <Fact label="Scope">{run.scope === "instance" ? "Whole instance" : run.workspace_name ?? "—"}</Fact>
+          <Fact label="Size"><span className="font-mono">{formatSize(run.size_bytes)}</span></Fact>
+          <Fact label="Format">{run.format_version ? `v${run.format_version}` : "—"}{run.restorable === "direct" ? " · restorable here directly" : run.restorable === "converter" ? " · restorable through a converter; the original stays untouched" : run.restorable === "unsupported" ? " · not restorable by this server" : ""}</Fact>
+        </dl>
+        <section aria-label="Proof">
+          <h4 className="eyebrow mb-1">Proof</h4>
+          <ol>
+            <Rung n={1} label="Checksum">
+              {proof >= 1 ? <Chip tone="ok">✓ matches</Chip> : check && !check.ok ? <Chip tone="bad">does not match</Chip> : "not checked"}
+            </Rung>
+            <Rung n={2} label="Contents checked">
+              {proof >= 2 ? <Chip tone="ok">✓ every section read</Chip> : "not yet"}
+              {missing > 0 && <span className="text-warn">{run.incomplete.map((i) => i.detail).join(" · ")} absent</span>}
+              {check && <span>{check.detail}</span>}
+            </Rung>
+            <Rung n={3} label="Test restore">
+              {run.proof_level >= 3
+                ? (run.drill_result === "ok" ? <Chip tone="ok">passed</Chip> : <><Chip tone={run.drill_result === "failed" ? "bad" : "warn"}>{run.drill_result ?? "partial"}</Chip>{run.drill_note && <span>{run.drill_note}</span>}</>)
+                : "never"}
+            </Rung>
+          </ol>
+        </section>
+        <section aria-label="Phases">
+          <h4 className="eyebrow mb-1">Phases</h4>
+          <p>{run.phases.length ? formatPhases(run.phases) : "not recorded"}{run.error && <span className="text-destructive"> · {run.error}</span>}</p>
+        </section>
+        <section aria-label="Encryption">
+          <h4 className="eyebrow mb-1">Encryption</h4>
+          <p>{run.recipients.length ? `AGE · ${run.recipients.length === 1 ? "recipient" : "recipients"} ${run.recipients.map((r) => `“${r}”`).join(", ")} (always encrypted)` : "AGE (always encrypted)"}</p>
+        </section>
       </div>
-      <dl className="grid grid-cols-1 gap-x-3 gap-y-1.5 text-[13px] md:grid-cols-[170px_minmax(0,1fr)]">
-        <dt className="text-muted-foreground">Phases</dt>
-        <dd>{run.phases.length ? formatPhases(run.phases) : "not recorded"}{run.error && <span className="text-destructive"> · {run.error}</span>}</dd>
-        <dt className="text-muted-foreground">Encryption</dt>
-        <dd>{run.recipients.length ? `AGE · ${run.recipients.length === 1 ? "recipient" : "recipients"} ${run.recipients.map((r) => `“${r}”`).join(", ")} (always encrypted)` : "AGE (always encrypted)"}</dd>
-        <dt className="text-muted-foreground">1 · Checksum</dt>
-        <dd>{proof >= 1 ? <Chip tone="ok">✓ matches</Chip> : check && !check.ok ? <Chip tone="bad">does not match</Chip> : "—"}</dd>
-        <dt className="text-muted-foreground">2 · Contents checked</dt>
-        <dd className="flex flex-wrap items-center gap-2">
-          {proof >= 2 ? <Chip tone="ok">✓ every section read</Chip> : "not yet"}
-          {missing > 0 && <span className="text-warn">{run.incomplete.map((i) => i.detail).join(" · ")} absent</span>}
-          {check && <span className="text-muted-foreground">{check.detail}</span>}
-        </dd>
-        <dt className="text-muted-foreground">3 · Test restore</dt>
-        <dd>{run.proof_level >= 3 ? (run.drill_result === "ok" ? <Chip tone="ok">passed</Chip> : <><Chip tone={run.drill_result === "failed" ? "bad" : "warn"}>{run.drill_result ?? "partial"}</Chip> {run.drill_note}</>) : "never"}</dd>
-        <dt className="text-muted-foreground">Format</dt>
-        <dd>{run.format_version ? `v${run.format_version}` : "—"}{run.restorable === "direct" ? " · restorable here directly" : run.restorable === "converter" ? " · restorable through a converter; the original stays untouched" : run.restorable === "unsupported" ? " · not restorable by this server" : ""}</dd>
-      </dl>
-    </section>
+      <SheetFooter className="flex-row flex-wrap gap-1.5 border-t border-border">
+        {!run.legacy && <Button type="button" size="sm" variant="outline" className={btn} onClick={onPin}>{run.pinned ? "Unpin" : "Pin"}</Button>}
+        <Button type="button" size="sm" variant="outline" className={btn} onClick={onCheck} disabled={!run.bundle_path}>Check contents…</Button>
+        {href
+          ? <Button size="sm" variant="outline" className={btn} asChild><a href={href} download>Download</a></Button>
+          : <Button type="button" size="sm" variant="outline" className={btn} disabled>Download</Button>}
+        <Button type="button" size="sm" className={cn(btn, "sm:ml-auto")} onClick={() => ctx.go("recovery", { path: run.bundle_path ?? undefined })} disabled={!run.bundle_path}>Restore…</Button>
+      </SheetFooter>
+    </div>
   )
 }
 
@@ -169,13 +282,13 @@ function CheckDialog({ run, legacy, onClose, onCheck }: {
           </DialogDescription>
         </DialogHeader>
         {legacy ? (
-          <p className="text-[12.5px] text-muted-foreground">This server can only verify the checksum for now, which needs no key.</p>
+          <p className="text-xs text-muted-foreground">This server can only verify the checksum for now, which needs no key.</p>
         ) : (
-          <div className="flex flex-col gap-2 text-[13px]">
+          <div className="flex flex-col gap-2 text-control">
             <label className="flex flex-col gap-1">
               <span className="text-muted-foreground">AGE identity (private key)</span>
               <textarea value={identity} onChange={(e) => setIdentity(e.target.value)} rows={2} spellCheck={false} placeholder="AGE-SECRET-KEY-1…"
-                className="rounded-md border border-control-border bg-surface-subtle px-2 py-1.5 font-mono text-[12px]" />
+                className="rounded-md border border-control-border bg-surface-subtle px-2 py-1.5 font-mono text-label" />
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-muted-foreground">or passphrase (older bundles)</span>
@@ -185,11 +298,11 @@ function CheckDialog({ run, legacy, onClose, onCheck }: {
           </div>
         )}
         <DialogFooter>
-          <SmallButton onClick={onClose} disabled={busy}>Cancel</SmallButton>
-          <SmallButton primary disabled={busy || (!legacy && !identity.trim() && !passphrase)}
+          <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button type="button" size="sm" className="h-7 text-xs" disabled={busy || (!legacy && !identity.trim() && !passphrase)}
             onClick={async () => { setBusy(true); await onCheck(legacy ? {} : { identity: identity.trim() || undefined, passphrase: passphrase || undefined }) }}>
             {busy ? "Checking…" : "Check"}
-          </SmallButton>
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

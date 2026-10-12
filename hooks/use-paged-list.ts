@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 
 /**
- * The client half of the S1 paging convention (docs/ux/PLAN.md §0):
+ * The client half of the S1 paging convention (docs/ux/README.md §2):
  * `?limit=&offset=` on the request, the body unchanged, and the total in the
  * `X-Total-Count` header (plus `X-Limit`, `X-Offset`). Lists used to fetch
  * once, get the server's 100-row ceiling and present it as everything —

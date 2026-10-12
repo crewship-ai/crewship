@@ -187,6 +187,13 @@ func OpenNoFollow(path string) (*os.File, error) {
 	return openNoFollow(path)
 }
 
+// OpenRootNoFollow confines a read to root even when a parent directory is
+// replaced by a symlink. It also refuses a final-component symlink and opens
+// without blocking on a FIFO; callers must verify the opened file is regular.
+func OpenRootNoFollow(root *os.Root, name string) (*os.File, error) {
+	return openRootNoFollow(root, name)
+}
+
 // ReadFileNoFollow reads a regular file without following a symlink at
 // the final component. It is the exported form of the reader the FTS
 // indexer already uses (#1043); every new read door into a memory tree

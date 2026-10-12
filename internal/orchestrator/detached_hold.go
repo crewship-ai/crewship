@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -107,10 +108,31 @@ func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
 			}
 			capTimer.Reset(detachedWatchCap)
 		case <-t.C:
+			if h.req.HostOutputDir != "" {
+				ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
+				raw, readErr := o.state.Get(ctx, "agent_runs", h.runID)
+				var run RunState
+				terminal := false
+				if readErr == nil && json.Unmarshal(raw, &run) == nil {
+					if snapshot, err := o.ReadRetainedRunResult(ctx, run); err == nil && snapshot.Complete && snapshot.Result.Reason == "exited" {
+						terminal = true
+					}
+				}
+				if !terminal {
+					absent, err := o.containerRuntimeAbsent(ctx, h.containerID)
+					terminal = err == nil && absent
+				}
+				cancel()
+				if terminal {
+					o.closeProtectedHostHold(h)
+					return
+				}
+				continue
+			}
 			ticks++
 			ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
 			alive, err := o.RunIsAliveAt(ctx, RunLocation{
-				ContainerID: h.containerID, AgentSlug: h.agentSlug, RunID: h.runID,
+				ContainerID: h.containerID, AgentSlug: h.agentSlug, RunID: h.runID, Managed: h.req.managedLaunch != nil,
 			})
 			cancel()
 			switch {
@@ -141,7 +163,7 @@ func (o *Orchestrator) restopDetachedHold(h *detachedHold) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
 	defer cancel()
 	stopped, err := o.StopRunAt(ctx, RunLocation{
-		ContainerID: h.containerID, AgentSlug: h.agentSlug, RunID: h.runID,
+		ContainerID: h.containerID, AgentSlug: h.agentSlug, RunID: h.runID, Managed: h.req.managedLaunch != nil,
 	})
 	switch {
 	case err != nil:
@@ -200,6 +222,34 @@ func (o *Orchestrator) closeDetachedHold(h *detachedHold, confirmedGone bool) {
 			o.detachedMu.Lock()
 			delete(o.detached, h.runID)
 			o.detachedMu.Unlock()
+		}
+		h.release()
+		if h.done != nil {
+			close(h.done)
+		}
+	})
+}
+
+// Protected captures retain terminal/outcome authority in server replay. This
+// watcher only releases resources after a natural complete stream or an
+// authoritatively absent container, and never restops on observer loss.
+func (o *Orchestrator) closeProtectedHostHold(h *detachedHold) {
+	h.once.Do(func() {
+		if h.finalize != nil {
+			h.finalize()
+		}
+		o.detachedMu.Lock()
+		delete(o.detached, h.runID)
+		other := false
+		for _, hold := range o.detached {
+			if hold.req.AgentID == h.req.AgentID {
+				other = true
+				break
+			}
+		}
+		o.detachedMu.Unlock()
+		if !other {
+			o.markAgentOnline(context.Background(), h.req, map[string]any{"reason": "protected_capture_terminal"})
 		}
 		h.release()
 		if h.done != nil {

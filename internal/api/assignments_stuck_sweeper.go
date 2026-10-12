@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/jitter"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -179,6 +180,10 @@ func (h *AssignmentHandler) StartStuckQueueSweeper(ctx context.Context, interval
 		interval = defaultSweeperInterval
 	}
 	go func() {
+		// Spread this loop's phase from the other sweepers started at boot (#1891).
+		if !jitter.Startup(ctx, interval) {
+			return
+		}
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {

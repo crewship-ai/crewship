@@ -70,6 +70,9 @@ func validateStepEgress(st Step) error {
 		if st.Wait == nil {
 			return fmt.Errorf("pipeline: step %q (wait) missing wait body", st.ID)
 		}
+		if st.Wait.TimeoutSec < 0 {
+			return fmt.Errorf("pipeline: step %q (wait) timeout_sec cannot be negative", st.ID)
+		}
 		if st.Wait.RiskLevel != "" && !ValidRiskLevel(st.Wait.RiskLevel) {
 			return fmt.Errorf("pipeline: step %q (wait) risk_level %q invalid (allowed: %s)",
 				st.ID, st.Wait.RiskLevel, strings.Join(RiskLevels, " "))
@@ -107,6 +110,9 @@ func validateStepEgress(st Step) error {
 		}
 		if st.Transform.Expression == "" {
 			return fmt.Errorf("pipeline: step %q (transform) missing expression", st.ID)
+		}
+		if err := validateTransformExpression(st.Transform.Expression); err != nil {
+			return fmt.Errorf("pipeline: step %q (transform) invalid expression: %w", st.ID, err)
 		}
 	case StepNotify:
 		if st.Notify == nil {

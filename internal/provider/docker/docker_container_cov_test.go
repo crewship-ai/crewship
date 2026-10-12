@@ -162,6 +162,17 @@ func (f *covRT) handler() http.HandlerFunc {
 			id := strings.TrimSuffix(path, "/start")
 			id = id[strings.LastIndex(id, "/")+1:]
 			f.starts = append(f.starts, id)
+			var inspected struct {
+				State struct {
+					Paused bool
+					Status string
+				}
+			}
+			_ = json.Unmarshal([]byte(f.inspectBody), &inspected)
+			if inspected.State.Paused || inspected.State.Status == "paused" {
+				http.Error(w, `{"message":"cannot start a paused container, try unpause"}`, http.StatusConflict)
+				return
+			}
 			st := 204
 			if f.startFn != nil {
 				st = f.startFn(id)
@@ -252,6 +263,27 @@ func (f *covRT) handler() http.HandlerFunc {
 				return
 			}
 			jsonHdr()
+			// Older fixtures specified the lifecycle state only on the list.
+			// Supply the corresponding real inspect fields when omitted;
+			// explicit states (including contradictory snapshots) stay intact.
+			var body map[string]any
+			var listed []struct{ State string }
+			if json.Unmarshal([]byte(f.inspectBody), &body) == nil && json.Unmarshal([]byte(f.listBody), &listed) == nil && len(listed) == 1 {
+				if state, ok := body["State"].(map[string]any); ok {
+					if _, explicit := state["Status"]; !explicit {
+						state["Status"] = listed[0].State
+						state["Running"] = listed[0].State == "running" || listed[0].State == "paused"
+						state["Paused"] = listed[0].State == "paused"
+						if state["Restarting"] == true {
+							state["Status"] = "restarting"
+						} else {
+							state["Restarting"] = listed[0].State == "restarting"
+						}
+						_ = json.NewEncoder(w).Encode(body)
+						return
+					}
+				}
+			}
 			_, _ = w.Write([]byte(f.inspectBody))
 
 		default:

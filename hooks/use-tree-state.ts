@@ -25,7 +25,7 @@ function mergeTopLevel(existing: TreeNode[], fresh: FileEntry[]): TreeNode[] {
   const oldByPath = new Map(existing.map((n) => [n.path, n]))
   const merged = fresh.map((f) => {
     const prev = oldByPath.get(f.path)
-    if (prev && prev.is_dir && prev.childrenLoaded) {
+    if (prev && prev.is_dir && f.is_dir && prev.childrenLoaded) {
       return { ...prev, size: f.size, mod_time: f.mod_time }
     }
     return { ...f, children: [], childrenLoaded: !f.is_dir }
@@ -97,8 +97,6 @@ export function useTreeState({ agentId, workspaceId, wsLoading }: UseTreeStateAr
   const canQueryAgent = Boolean(workspaceId && agentId)
 
   useEffect(() => {
-    if (wsLoading) return
-    if (!workspaceId) { setLoading(false); setError("No workspace selected"); return }
     // Flush the previous agent's tree before deciding whether to fetch.
     // If we leave state in place while agentId is unresolved, the panel
     // flashes the last agent's files until the new fetch resolves —
@@ -118,6 +116,8 @@ export function useTreeState({ agentId, workspaceId, wsLoading }: UseTreeStateAr
     setExpandedPaths(new Set())
     setLoadingDirs(new Set())
     setError(null)
+    if (wsLoading) return
+    if (!workspaceId) { setLoading(false); setError("No workspace selected"); return }
     // Without a resolved agentId the legacy pathname would be
     // `/api/v1/agents//files`, which 404s. Short-circuit while the
     // AgentDetailProvider is still resolving.
@@ -140,6 +140,8 @@ export function useTreeState({ agentId, workspaceId, wsLoading }: UseTreeStateAr
           const first = safeData[0]
           const idx = first.path.lastIndexOf(first.name)
           setBasePrefix(idx > 0 ? first.path.slice(0, idx) : "")
+        } else {
+          setBasePrefix("")
         }
         setError(null)
       } catch (err) {

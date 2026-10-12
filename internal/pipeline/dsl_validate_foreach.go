@@ -50,6 +50,15 @@ func validateForeachStep(st Step, dsl *DSL, agentSlugs map[string]struct{}) erro
 		if err := validateStepCredentials(bs); err != nil {
 			return err
 		}
+		if err := validateStepGates(bs, agentSlugs); err != nil {
+			return err
+		}
+		if err := validateStepOutputGate(bs); err != nil {
+			return err
+		}
+		if err := validateStepHooks(bs); err != nil {
+			return err
+		}
 	}
 	return nil
 }

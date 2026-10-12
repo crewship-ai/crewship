@@ -52,7 +52,7 @@ export function issueBoardCounts(missions: Mission[]): IssueBoardCounts {
   return counts
 }
 
-export function WorkSnapshot({ missions, workspaceId }: { missions: Mission[]; workspaceId: string | null }) {
+export function WorkSnapshot({ missions }: { missions: Mission[] }) {
   const counts = React.useMemo(() => issueBoardCounts(missions), [missions])
   const recent = React.useMemo(
     () => [...missions].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).slice(0, 4),
@@ -97,7 +97,7 @@ export function WorkSnapshot({ missions, workspaceId }: { missions: Mission[]; w
                   <span className="w-14 shrink-0 truncate font-mono text-micro text-muted-foreground">{mission.identifier ?? "—"}</span>
                   <span className="min-w-0 flex-1 truncate text-body text-foreground/90">{mission.title}</span>
                   {owner && (
-                    <AgentAvatar seed={ownerSeed} workspaceId={workspaceId} alt={owner} className="h-5 w-5 shrink-0 rounded-md bg-muted ring-1 ring-border" />
+                    <AgentAvatar seed={ownerSeed} alt={owner} className="h-5 w-5 shrink-0 rounded-md bg-muted ring-1 ring-border" />
                   )}
                   <StatusPill status={mission.status} />
                 </Link>

@@ -140,6 +140,31 @@ describe("routine run detail — handoff presentation", () => {
   })
 })
 
+describe("routine run detail — reading order", () => {
+  // The result is what the reader came for; provenance and the shareable
+  // evidence are audit material and follow it instead of pushing it below
+  // the fold (on a 390px phone, below the first screen).
+  it("puts the result before provenance and evidence, which stay on the page", () => {
+    h.run = baseRun({ output: "7" })
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+
+    const result = screen.getByText("Results")
+    const provenance = screen.getByText("Run provenance")
+    expect(order(screen.getByTestId("run-banner"), result)).toBe(-1)
+    expect(order(result, provenance)).toBe(-1)
+    expect(order(result, screen.getByTestId("run-evidence-panel"))).toBe(-1)
+    expect(order(provenance, screen.getByTestId("run-technical-details"))).toBe(-1)
+  })
+
+  it("keeps what to do next for a failed run above the audit material", () => {
+    h.run = baseRun({ status: "failed", failed_at_step: "write", error_message: "Agent did not answer" })
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+
+    expect(order(screen.getByTestId("run-next-step"), screen.getByText("Run provenance"))).toBe(-1)
+    expect(order(screen.getByTestId("run-artifacts"), screen.getByTestId("run-evidence-panel"))).toBe(-1)
+  })
+})
+
 describe("routine run detail — unavailable history", () => {
   it("uses the run's archived recipe and never claims that a declaration was used", () => {
     h.run = baseRun({ pipeline_version: 2, definition_hash: "a".repeat(64), triggered_via: "schedule", metadata: { automation_name: "Triage" }, invoking_user_id: "possibly-forged" })

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import {
-  Shield, AlertTriangle, ChevronRight, ChevronDown, Menu,
+  Shield, AlertTriangle, ChevronRight, Menu,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -20,8 +20,7 @@ import {
 } from "@/components/layout/sidebar-kit"
 
 import {
-  initialAdminTab, initialBackupsSection, movedAdminTabHref, adminSectionLabel, filterNav, ALL_TABS,
-  type BackupsSection,
+  initialAdminTab, movedAdminTabHref, adminSectionLabel, filterNav, ALL_TABS,
 } from "./navigation"
 import type { TabKey, Stats, KeeperStatus } from "./types"
 import { useAdminOverview } from "./hooks/use-admin-overview"
@@ -31,6 +30,7 @@ import type { RuntimeEntry } from "./tabs/runtime-tab"
 import { BackupsConsole } from "@/components/features/admin/backups/backups-console"
 import { NotificationsTab } from "./tabs/notifications-tab"
 import { RateLimitsTab } from "./tabs/rate-limits-tab"
+import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 /**
  * Admin sidebar sections — ONLY real, wired tabs.
@@ -53,10 +53,20 @@ import { RateLimitsTab } from "./tabs/rate-limits-tab"
  */
 const SETTINGS_TABS: ReadonlySet<TabKey> = new Set<TabKey>(["providers", "notifications", "ratelimits"])
 
-/** Backups and Data retention draw their own scope strip and column. */
-const CONSOLE_TABS: ReadonlySet<TabKey> = new Set<TabKey>(["backups", "retention"])
+/** Data retention draws its own workspace strip and column. */
+const CONSOLE_TABS: ReadonlySet<TabKey> = new Set<TabKey>(["retention"])
 
 export default function AdminPage() {
+  // One Save for the console: every card's edits join the floating bar, and
+  // switching section with edits pending asks first.
+  return (
+    <PageSaveProvider>
+      <AdminConsole />
+    </PageSaveProvider>
+  )
+}
+
+function AdminConsole() {
   const router = useRouter()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   // The console belongs to instance administrators (instance_admin.go on the
@@ -72,32 +82,23 @@ export default function AdminPage() {
   const [tab, _setTab] = useState<TabKey>(() =>
     typeof window === "undefined" ? "overview" : initialAdminTab(window.location.search),
   )
-  // Admin › Backups has six pages of its own (?section=); an old ?tab=backups
-  // link lands on its Overview.
-  const [backupSection, _setBackupSection] = useState<BackupsSection>(() =>
-    typeof window === "undefined" ? "overview" : initialBackupsSection(window.location.search),
-  )
-  const setTab = useCallback((next: TabKey, section?: BackupsSection) => {
+  const guard = usePageSaveGuard()
+  const setTab = useCallback((next: TabKey) => guard(() => {
     _setTab(next)
-    if (section) _setBackupSection(section)
     // replaceState, not a route push: this is the same document, and a history
     // entry per sidebar click would turn Back into "undo my last five clicks".
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href)
       url.searchParams.set("tab", next)
-      if (next === "backups") url.searchParams.set("section", section ?? initialBackupsSection(url.search))
-      else url.searchParams.delete("section")
-      // The scope (whole instance / which workspaces) is shared by Backups
-      // and Data retention, and means nothing anywhere else.
+      url.searchParams.delete("section")
+      // The workspaces Data retention edits mean nothing anywhere else.
       if (!CONSOLE_TABS.has(next)) {
         url.searchParams.delete("scope")
         url.searchParams.delete("ws")
       }
       window.history.replaceState(null, "", url.toString())
     }
-  }, [])
-  // The Backups row folds its six pages away; open while one is on screen.
-  const [backupsOpen, setBackupsOpen] = useState(true)
+  }), [guard])
   // Universal search doubles as a command-finder — filters the nav live.
   const [navQuery, setNavQuery] = useState("")
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -291,7 +292,7 @@ export default function AdminPage() {
     return null
   }
 
-  const sectionLabel = adminSectionLabel(tab, backupSection)
+  const sectionLabel = adminSectionLabel(tab)
 
   /* One nav body, rendered into a permanent column on a desktop and into a
      Sheet on a phone. Choosing a section closes the Sheet — on a desktop
@@ -308,8 +309,8 @@ export default function AdminPage() {
           placeholder="Search admin…"
           onKeyDown={(e) => {
             if (e.key === "Enter" && firstNavMatch) {
-              if (firstNavMatch.href) router.push(firstNavMatch.href)
-              else setTab(firstNavMatch.key as TabKey, firstNavMatch.children?.[0]?.key)
+              if (firstNavMatch.href) { const href = firstNavMatch.href; guard(() => router.push(href)) }
+              else setTab(firstNavMatch.key as TabKey)
               setMobileNavOpen(false)
             }
           }}
@@ -321,52 +322,12 @@ export default function AdminPage() {
             {section.items.map((item) => {
               const Icon = item.icon
               const isActive = item.key === tab
-              if (item.children) {
-                // Backups: a parent row that folds, and its pages indented
-                // under it. A search that matches a page keeps it open.
-                const open = backupsOpen || !!navQ
-                return (
-                  <div key={item.key} data-slot="nav-group">
-                    <SidebarRow
-                      selected={isActive && !open}
-                      onSelect={() => {
-                        if (!isActive) {
-                          setTab(item.key as TabKey, "overview")
-                          setBackupsOpen(true)
-                          setMobileNavOpen(false)
-                        } else setBackupsOpen(!backupsOpen)
-                      }}
-                      aria-label={item.label}
-                      aria-expanded={open}
-                    >
-                      <Icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
-                      <span className="truncate flex-1">{item.label}</span>
-                      <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 opacity-50 transition-transform", !open && "-rotate-90")} aria-hidden />
-                    </SidebarRow>
-                    {open && item.children.map((child) => (
-                      <SidebarRow
-                        key={child.key}
-                        indent
-                        selected={isActive && backupSection === child.key}
-                        onSelect={() => {
-                          setTab(item.key as TabKey, child.key)
-                          setMobileNavOpen(false)
-                        }}
-                        aria-label={`${item.label} › ${child.label}`}
-                        data-nav-child={child.key}
-                      >
-                        <span className="truncate flex-1">{child.label}</span>
-                      </SidebarRow>
-                    ))}
-                  </div>
-                )
-              }
               return (
                 <SidebarRow
                   key={item.key}
                   selected={isActive}
                   onSelect={() => {
-                    if (item.href) router.push(item.href)
+                    if (item.href) { const href = item.href; guard(() => router.push(href)) }
                     else setTab(item.key as TabKey)
                     setMobileNavOpen(false)
                   }}
@@ -410,7 +371,7 @@ export default function AdminPage() {
           ) : undefined
         }
         meta={
-          <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground-soft">Instance admin</span>
+          <span className="text-micro font-mono uppercase tracking-wide text-muted-foreground-soft">Instance admin</span>
         }
       />
 
@@ -437,14 +398,15 @@ export default function AdminPage() {
             without a tab stop a keyboard-only admin cannot scroll it at all
             (axe: scrollable-region-focusable). The label names the section
             rather than saying "content", so the landmark list stays useful. */}
+        <div className="relative flex-1 min-w-0">
         <div
-          className="flex-1 min-w-0 overflow-y-auto"
+          className="h-full overflow-y-auto pb-20"
           tabIndex={0}
           role="region"
           aria-label={sectionLabel ? `Admin ${sectionLabel}` : "Admin content"}
         >
         {CONSOLE_TABS.has(tab) ? (
-          <BackupsConsole page={tab === "retention" ? "retention" : backupSection} onNavigate={(s) => setTab("backups", s)} />
+          <BackupsConsole page="retention" onNavigate={(s) => guard(() => router.push(`/admin/backups?section=${s}`))} />
         ) : (
         <div className={cn("mx-auto space-y-4 p-4 md:p-6", SETTINGS_TABS.has(tab) ? "max-w-3xl" : "max-w-5xl")}>
           {fetchError && (
@@ -459,6 +421,8 @@ export default function AdminPage() {
           {renderContent()}
         </div>
         )}
+      </div>
+        <PageSaveBar />
       </div>
       </div>
     </div>

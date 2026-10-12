@@ -205,3 +205,47 @@ it("shows the keyboard user where focus went when this pane takes it", () => {
   expect(heading.className).toMatch(/focus-visible:ring-2/)
   expect(heading.className).not.toMatch(/(^|\s)focus:ring/)
 })
+
+it.each([
+  ["running", "Preparing the candidate's preview…"],
+  ["failed", "This candidate did not build. Its preview cannot be shown."],
+  ["interrupted", "This build stopped before it finished, so there is nothing to preview. Build the candidate again."],
+] as const)("does not mount a cached artifact for a %s build", (status, explanation) => {
+  state.query.data!.build = { id: "build-7", source_revision: 7, state: status }
+  render(<ReviewPreview {...props} />)
+  expect(screen.queryByTitle(FRAME_TITLE)).toBeNull()
+  expect(screen.getByText(explanation)).toBeVisible()
+  if (status === "running") expect(screen.getByRole("button", { name: "Building…" })).toBeDisabled()
+  else expect(screen.getByRole("button", { name: "Build preview" })).toBeEnabled()
+})
+
+it("explains the missing runtime domain and builds the revision supplied by the server", () => {
+  state.query.data!.runtime_url = ""
+  state.query.data!.build = null
+  state.build.mutate.mockClear()
+  render(<ReviewPreview {...props} candidateRevision={null} />)
+  expect(screen.getByRole("alert")).toHaveTextContent("configure the application preview domain")
+  expect(screen.queryByTitle(FRAME_TITLE)).toBeNull()
+  expect(screen.getByText("Build this candidate to preview it.")).toBeVisible()
+  fireEvent.click(screen.getByRole("button", { name: "Build preview" }))
+  expect(state.build.mutate).toHaveBeenCalledWith(7)
+})
+
+it("accounts for a failed build request and prevents duplicate pending builds", () => {
+  state.query.data!.artifact = undefined
+  state.query.data!.build = null
+  state.build.error = new Error("Build queue unavailable")
+  const view = render(<ReviewPreview {...props} />)
+  expect(screen.getByRole("alert")).toHaveTextContent("Build queue unavailable")
+  state.build.isPending = true
+  view.rerender(<ReviewPreview {...props} />)
+  expect(screen.getByRole("button", { name: "Building…" })).toBeDisabled()
+  expect(screen.getByText("Preparing the candidate's preview…")).toBeVisible()
+})
+
+it("returns to review through the host's consent-reset callback", () => {
+  const onReturn = vi.fn()
+  render(<ReviewPreview {...props} onReturn={onReturn} />)
+  fireEvent.click(screen.getByRole("button", { name: "Back to review" }))
+  expect(onReturn).toHaveBeenCalledTimes(1)
+})

@@ -9,8 +9,173 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Run output can be retained by an independent helper process.** Internal capture/read modes preserve sequenced output and a terminal result, refuse duplicate launches and enforce an explicit output limit. Controller reattachment and replacement of the existing tmux stream are not enabled yet.
+- **Local Linux Docker runs retain output across controller loss (#2845).** A private host helper keeps the actual CLI execution and redacted output independent of its reader. Recovery projects output and terminal results with durable acknowledgements, preserves work-generation ownership, and refuses duplicate launches. Capture has per-run and aggregate bounds and acknowledgement-based retention. Unsupported providers keep the existing transport; uncertain forced stops retain reconciliation rather than report completion.
 
+- **⌘K finds every place in the app (#3045).** As you type, the search box finds:
+  - every Settings card, opening the tab and scrolling to the card; `/settings?tab=…&card=<slug>` links to one
+  - the tabs and sections of Integrations, Inbox, Activity, Journal and Routines
+  - actions that live behind a button: Create issue, Invite member, Create CLI token, Change password, Store missing avatars
+  - the Admin console, for instance administrators
+  - missions, routine schedules and automations, each crew tool on its own row, and your other workspaces to switch to
+
+  Several words now match in any order. Every row is gated the way its page is. See [Search (⌘K)](docs/guides/search.mdx).
+
+- **The Crews sidebar has Status, Filter and View, like Routines and Skills (#3043).** Status counts agents (Needs you, Working, Idle, Expired hires) and lists the ones you pick. Filter narrows by role, model, runtime, hire type, activity and crew health, with removable chips. View groups by crew, by status or not at all and sorts by crew size, name or last active. Leads come first with a crown; rows show each agent's role and when it last worked, and each crew's running missions or last activity. Hover adds Chat on an agent and Add agent on a crew, and the collapsed sidebar keeps the crew icons with an attention dot. Status, filters and view are kept in the URL (`?status=needs&role=lead&group=status`).
+
+- **Security: the server image's docker CLI is Docker's static 29.9.0 build (#3047).** Alpine's `docker-cli` package in alpine:3.24 was built with go1.26.8, so the image carried the critical net/http advisories GO-2026-6612 and GO-2026-6604 that #3039 fixed for Crewship's own binaries, and the image scan failed on every build. The Dockerfile now downloads the static docker CLI for the target architecture, checks it against a pinned SHA-256 and copies only the `docker` binary.
+
+- **Skills has the same explorer as Routines and Issues, and can be filtered by agent (#3033).** The left panel lists View buckets (All, On agents, Not assigned, Needs a look, Proposed by agents), the workspace's crews with their agents and how many skills each holds, and the domains in use; source, trust, maturity and "needs a credential" sit in the Filter popover. Each card shows one trust word (Verified, Unverified, Not scanned, Flagged), the credentials the skill needs, the agents that hold it and its uses in the last 7 days. A strip at the top names what needs a person: a flagged skill on agents, a proposal waiting for review, an agent missing a credential a skill needs. A skill opens beside the explorer with Overview, Agents (one switch per agent, applied at once, or a whole crew), SKILL.md (download) and Activity; built-in skills cannot be deleted and say so. The Overview lays the SKILL.md out (when to use it, steps, what it hands back, guardrails) with agents, uses per day, needs and source in a rail; the SKILL.md tab has an outline, the frontmatter as a table and a Source view. Every skill shows its own icon. New skill either has Claude write it or lets you write it, with an icon and domain picked up front; Edit and Duplicate as new skill save through the importer, which re-runs the scan and refuses to change built-ins. Proposals are approved or rejected on the page. On a phone the explorer is a drawer behind Filters. `/skills/<id>` links open the same view. The Runtime facet (every skill is instructions-only), the always-zero install count and the Browse / Installed / Generated tabs are gone.
+
+- ⚠️ **Behaviour change:** **Skill holders are scoped to your workspace (#3032).** The skills catalog is shared across workspaces, but the agents listed on a skill (`installed_on`), the `?installed=1` / `installed_for_agent_id` filters and a skill's `agent_count` counted agents of every workspace, so a member could see other workspaces' agent names and crews. They now only see the caller's workspace. Skills also report this workspace's usage (`usage`: uses in 7 days, errors, total, last used), `lifecycle_state`, `needs_credentials` and, per agent, the required credentials it is missing; `GET /agents/{id}/skills` carries the same. `crewship skill list` gains AGENTS and USES 7D columns, and `crewship agent skills` prints the skill name and category it showed blank before.
+
+- ⚠️ **Behaviour change:** **Skill holders are scoped to your workspace (#3032).** The skills catalog is shared across workspaces, but the agents listed on a skill (`installed_on`), the `?installed=1` / `installed_for_agent_id` filters and a skill's `agent_count` counted agents of every workspace, so a member could see other workspaces' agent names and crews. They now only see the caller's workspace. Skills also report this workspace's usage (`usage`: uses in 7 days, errors, total, last used), `lifecycle_state`, `needs_credentials` and, per agent, the required credentials it is missing; `GET /agents/{id}/skills` carries the same. `crewship skill list` gains AGENTS and USES 7D columns, and `crewship agent skills` prints the skill name and category it showed blank before.
+
+- **Settings › Members marks restricted members (#2878).** A restricted member's row shows a Restricted chip next to the role chip, and the expanded panel names the access mode; saving a changed mode in Edit resource access updates the roster. `GET /workspaces/{id}/members` returns `access_mode` to a trusted OWNER/ADMIN (the same gate as a member's access policy) and omits it for everyone else; `crewship workspace member list` has an ACCESS column (`-` when withheld).
+
+- **Cancelling a run parked at an approval can no longer race its resume (#2910).** If an approval, signal or event resumed the run at the same moment, the API could report the cancellation while the resumed run went on to execute its next steps. Exactly one side now wins: either the resume is refused and the run stays cancelled, or the resumed run is stopped before its next step and records `cancelled` (instead of `interrupted`). The response carries `"parked": true` only when the cancel recorded the row itself.
+
+- **A model call refused by the sidecar says why (#2899).** Every admission failure used to read as 403 "hard-budget traffic requires the restricted broker", even on a workspace with no budget. Only a host decision is still a 403 (a hard budget, or a refused agent, crew or credential scope); an unreachable host, a rejected sidecar credential, an unavailable budget store or a missing binding is a 503, and an unreadable host answer a 502. Each message names its kind. The troubleshooting guide lists what each one means.
+
+- **A taken or reserved agent slug is shown under the Slug field (#2862).** Creating or renaming an agent onto a slug in use used to toast the raw JSON body, and a rename onto a taken slug failed with a 500. The API now answers `409` with a machine-readable `code` (`agent_slug_taken`, `agent_slug_reserved`, `crew_lead_exists`) and the `field` it concerns, next to the unchanged sentence; the agent dialog shows it under Slug (or Role), and the crew and agent canvases, model configuration and crew dialog show the server's sentence instead of JSON. A race between two new LEAD agents is reported as `crew_lead_exists` instead of a taken slug.
+
+- **Routine runs show reported usage, not spend (#2193).** A run's `cost_usd` is what the agent CLIs reported, priced at list rates; under a subscription nothing is billed per call. Routine run detail, the crew bottom panel and the workspace digest now say "reported usage" with an approximate `~$` figure; `routine records` and `routine runs-all` call the column REPORTED USAGE. The `cost_usd` field is unchanged.
+- **Restricted members see only what they can use (#2861).** For a restricted account, `GET /api/v1/workspaces` now returns `restricted_session` and `restricted_surfaces` (`chat`, `routines`, `pages`, `account_security`). The server derives the list from its route allowlist. The sidebar, phone menu and phone tab bar show only those screens. Any other URL shows "Not available with your access" without loading the screen, and `/` opens Chat. Settings shows only account security (password, sessions, revoking CLI tokens).
+
+- **Background sweepers no longer fire in lockstep after a restart (#1891).** The sub-hour periodic loops each wait a random offset within their own period before their ticker starts. That covers the harbormaster timeout, waitpoint, pending-run, ephemeral-agent, assignment queue/running/lease, OAuth and provider-login refresh, presence, episodic-index and port-exposure sweepers. A deploy used to line up their phases so the 30-second sweepers hit the database on the same second. Loops that run once at boot still do so immediately. The daily jobs scheduled by wall-clock hour are unchanged.
+
+- **The first message of a new conversation can be sent again (#2898).** Opening an agent with no saved conversation left Send disabled: the draft has no row yet, so its execution profile stayed pending, realtime stayed off and the composer waited for a connection that only the first send would start. Send is now offered once the profile check has answered. The send creates the conversation, resolves its profile, waits for the connection a trusted chat needs, and only then goes; a refused profile, a failed create or a connection that does not open leaves the message in the box with a toast. The same applies to a `?prompt=` handoff.
+
+- **`crewship backup verify` catches a workspace bundle that left rows behind (#2009).** A workspace backup now checks, in the same database snapshot, every row the schema ties to the workspace (its own `workspace_id`, or a foreign key into an exported workspace row) against what the backup's scope filters exported. The result is recorded in the manifest as `contents.scope_reconciliation`. `verify` reports `INVALID` with `table: N of M workspace row(s) in the source were not exported` for a bundle that recorded a shortfall, including an encrypted one. The verify API returns the list as `scope_shortfalls`.
+
+- **Private routines and Page actions say why nothing is listed (#2877).** A restricted member on a server without private execution sees "Private execution isn't installed on this server — ask an administrator" instead of "catalog unavailable" and "nothing available" at once. Loading, empty, unavailable and not-installed are now one state each. The routine and Page catalogs, routine runs and restricted Page actions answer `503` with code `restricted_runtime_unavailable` to restricted members only; every access refusal stays an opaque `404`.
+
+- **A tool switched off on an MCP integration is refused by the crew sidecar's gateway (#2178).** `crewship integration tools disable` and the per-tool switch now also stop the sidecar's `/mcp/call` from calling the tool and hide it from `/mcp/tools`, from the sidecar's next start. Agent CLIs that connect to an HTTP MCP server directly are not gated per tool yet.
+
+- **A repeated webhook delivery gets its receipt even while the first one is running (#2964).** If the acceptance write could not commit in time, for example because the original delivery's run held the database, a duplicate was answered `503 acceptance unavailable`. It now gets `202` with the original work and its current state; only new work is refused.
+
+- **Security: Go 1.27.2 and golang.org/x/net v0.60.0 (#3039).** Fixes the net/http and HTTP/2 advisories GO-2026-6599, 6600, 6603–6605 and 6607–6613, and GO-2026-6617, that `govulncheck` reports as reachable on 1.27.1 / x/net v0.59.0. The release image builds with `golang:1.27.2-alpine`.
+
+- **The Work queue and Webhook deliveries look like Activity (#3017).** Opening either one keeps the rail and switches it, with a slide, to the ledger's own rows:
+  - status in Activity's words — the Waiting and Expired filters, which nothing ever filled, are gone;
+  - agents with their avatars, and whether their queue moves;
+  - event families.
+
+  Each row narrows the page. The Work queue gives:
+  - a summary sentence and a flow from Arrived to Done;
+  - **Needs you**, where work with an unknown outcome is settled with **Retry**, **Mark as failed** or **Mark as done**, and the card says how many items wait behind it;
+  - failures grouped by cause;
+  - one lane per agent, with its crew's colour;
+  - the latest work, one sentence each.
+
+  Deliveries show each endpoint's health (an endpoint with nothing in a day reads quiet), arrivals per event family, and what each delivery became, with a detail panel that opens its work. Each narrowing shows as a removable chip, so a filter whose row left the window can still be cleared. On a phone the rail starts closed and work and deliveries open in a sheet. Retry's dialog says when the input cannot run again and does not run it. The pages read their whole window plus all unfinished work, so stuck work stays in Needs you; a routine's endpoint is named as such, not as a deleted agent. The 7 d lane axis on these pages and on Activity's home marks every day; it skipped one before.
+- **The work queue and webhook deliveries name who, what and how it ended (#3012).** `GET …/work-items` items carry `agent` (name, slug, avatar, stored `avatar_url`, `deleted`), `crew` (name, colour, icon, `deleted`), `event_type`, `duration_ms` and `cost_usd`; `GET …/webhook-deliveries` carries `agent` and the resulting `work_state`. `crewship work list` shows the agent's name and the event instead of the agent id and capacity class, and `crewship work deliveries list` shows the agent and the work state. Both lists take `since=` (a time window; pages run oldest first) and the work list `open=true` (unfinished work however old), with `--since` and `--open` in the CLI. A replay names its original's event, a deleted crew says so, and duration and cost are given only when known. `crewship work list` no longer has the CLASS column; it is in `-f json`.
+- **Activity's rail follows source and severity filters too (#3007).** With a source, severity or telemetry filter, the rail lists only the runs the matching events belong to, and is empty when none match. It no longer keeps listing every run beside an empty column. Agent work started outside a routine is hidden in Activity for now; the index and CLI still list it.
+- **A crew, agent, issue or routine filter keeps Activity's home, narrowed (#3002).** The column used to swap the home for the raw journal list ("morgan runs claude --print …"). It now shows the same cards for the chains the rail shows, titled with the filter. Source, severity and telemetry filters keep the event list. `GET …/pipeline-runs` returns each run's `chain_origin`.
+- **Activity's Filter narrows the rail too (#3000).** With a crew, agent, issue or routine picked, the rail kept listing every run beside a column that showed only the filtered ones. The facets now narrow the chain list that every surface reads. The rail's routine focus slides in and out like the column beside it.
+- **Activity's rail can focus one routine, and says what each row is (#2998).** Picking a routine's row narrows the rail to that routine and lists its runs by day with time and outcome. The status rows and time range apply to those runs, and a run opens beside the list. Every row now leads with **Routine**, **Issue** or **Agent** before what started it.
+- **Agent work started outside a routine is in Activity (#2993).** A delegation from a chat, an issue mention or lead planning was missing from the chain index. A root assignment is now a chain of its own (`kind: assignment`, grouped by the stored `chain_origin`), with outcome counts, its agents and the issue it was for. It is listed only for people who may read the chat it came from, or, for issue work, for trusted members. Activity shows it as a row titled by its task and opens a work page with its delegations and asks; `crewship chain list` shows `work: <task>`. The chain index also attaches issues through `assignments.mission_id` for routine chains.
+- **The Activity Bar speaks the rail's words, and ↑/↓ step between runs (#2988).** The toolbar dropdown says *waiting for you*, opens the run (**Decide →**, **Open run**) instead of the routine or a "trace", and lists cancelled and interrupted runs under Recent in grey with their own word. Cancel is offered only to OWNER/ADMIN, and the footer opens the waiting bucket when something waits. On a run's page, ↑/↓ move to the previous or next run in the rail.
+- **The chain walk no longer shows inbox items outside the caller's audience (#2986).** `GET /api/v1/chains/{anchor}` returned every inbox item a run produced, including titles of items targeted at a higher role or another person. Inbox nodes now follow the `/inbox` rule. A hidden anchor is a 404, and the response declares that items were withheld without naming them.
+- **The chain walk follows links it missed (#2986).** These are issue ↔ assignment through `assignments.mission_id`, issue → run through `issue_executions`, run → the issue it created (`missions.author_run_id`), and `run_needs_human` asks for routine runs and issue work. Activity's run page lists created issues from the walk, with no five-ref cap. The link contract is `docs/specs/activity-links.md`.
+- **Activity's issue page shows the issue's whole history (#2983).** Events, comments and runs are read directly by issue, each with its own paging, and merged newest first with Load older — instead of being derived from the loaded page of chains and their five capped issue refs. `GET …/issues/{identifier}/events` gains `before_seq` + `limit` for backward pages (`crewship issue events --before-seq --limit`), and the issue endpoints also accept the issue's id.
+- **Cancelled and interrupted runs no longer read as finished (#2981).** The chain index (`GET /api/v1/chains`, `crewship chain list`) counts `completed_runs`, `cancelled_runs` and `interrupted_runs`. Activity has a **Stopped** status row, and a run's page says Cancelled or Interrupted; a stopped branch never hides running or waiting work. The CLI's STATUS column reads `waiting`, `FAILED`, `running`, `cancelled` / `interrupted` / `stopped` or `ok` instead of `ok` for everything that had not failed.
+- **Activity reads like Issues and Routines and is about runs (#2979).** The tab strip above the page is gone; Work queue and Webhook deliveries are rail rows. The rail lists every run under the Routines status rows, titled by routine name, with Group by in place of the lens tabs. A row opens the run: status, Retry / Stop, the approval or why it failed, its steps with attempts, what it caused, what it is linked to and changed, and its routine's previous runs. The home is built from runs: what needs you (decidable for plain approvals), what is live and next, every run on its routine's lane, recurring failures, outcomes and the latest runs. The Inbox digest links into Activity.
+- ⚠️ **Behaviour change: the Journal page is shown to workspace OWNER and ADMIN only (#2979).** Other roles are sent to Activity. The journal API is unchanged.
+- **Stopping an idle agent succeeds instead of failing with `runtime stop not confirmed` (#2879).** `POST /api/v1/agents/{id}/stop` answers `200` with `outcome: "already_stopped"` when the server establishes nothing is running (no invocation owned by the daemon, a readable run store, and no non-terminal run record for the agent), and `outcome: "stopped"` when it ended a run. A refusal is still `502` and now carries a stable `code`: `stop_not_confirmed` when a process may still be live, `runtime_unavailable` when the runtime could not be read. `crewship agent stop` prints `was not running; nothing to stop` for the first and a next step for each refusal; the web Stop buttons word the refusal by its code and the agent page says "Agent was not running".
+
+- **An agent's restricted client execution can be changed in the web app again (#3028).** Edit agent › Model and execution has the Restricted client execution field; the change is part of the dialog's draft and applies on Save, after the agent. It had no UI since #3008. The unused Admin memory-configuration card is removed: Admin › Data retention › Memory versions edits the same setting.
+
+- **Opening chat, a crew or an agent no longer writes the agents' avatars (#2876).** Viewing an agent without a stored avatar render used to send `PUT /api/v1/agents/{id}/avatar` from the viewer's browser — refused for viewers, members and restricted members, noise in access logs for everyone, and whoever looked first decided the stored face. Rendering is now read-only. The render is stored when an agent is created or edited in the dashboard (the agent editor, the avatar picker, a crew's avatar style, a crew created from a template). ⚠️ **Behaviour change:** existing agents and agents created through the CLI, API or Captain no longer fill in on their own; store them with **Settings › General › Agent avatars › Store missing avatars** (admins) or the same button beside a crew's **Avatar style** (managers and up). Until then they are drawn from their seed, as before.
+
+- **Settings and Admin read as one product (#3022).** A refused switch in Access & Secrets or Hooks flips back and says why in the bottom-right toast instead of a line in the card. Every field, select and picker has the same size as its neighbours; supporting text (row descriptions, hints, empty states) is 12px instead of 11px and nothing is set below 11px; every table uses one header, cell and row style; person status, Keeper decisions, "No owner" and "Off" are status pills.
+
+- **Open-source license capacity showed inactive limits.** The license API, administration and CLI now report unlimited crews, members and agents, including when a signed license contains historical caps. Signed claims and enforcement hooks remain available for future releases; administration explains that resource licensing may change.
+
+- **A workspace can have a logo (#3005).** Settings › General › Identity has a Workspace logo row (Upload, Change, Remove; PNG, JPEG or WebP up to 2MB, the same rules as a profile picture), and `crewship workspace logo set <file>` / `remove` do the same. The workspace switcher and Admin › People draw the logo instead of the initial. API: `POST`/`DELETE`/`GET /api/v1/workspaces/{workspaceId}/logo`; setting or removing it is `ADMIN+` and audited.
+
+- **A project's detail saves through the page's floating Save bar, and a bulk status or priority change asks first (#2984).** Name, status, priority, health, lead, dates, icon and colour are held as a draft until Save sends them in one request; clicking away from the name keeps it, and stepping through dates no longer writes each day. Setting several issues to a status or priority from the list now confirms, naming the change and that automations reacting to a status change may run.
+
+- **The Pages editor saves through the floating Save bar (#2984).** The Content card (name, description, icon and colour) is a draft until the bar's Save; its own Save button is gone, a refused save is a corner toast that keeps what was typed, and leaving the editor with edits still asks once — Discard now drops the draft too. The Panels document, Access grants and publishing keep their own explicit actions.
+
+- **Editing an agent no longer changes who pays for it or how it learns behind your back (#2984).** In the agent Edit dialog the provider account ("Pays with") and the learning posture were written the moment they were picked; they are now part of the draft, count as unsaved changes, and are applied when you choose Save changes, after the agent itself. Closing without saving leaves both as they were. The unused save-per-field editor that duplicated the dialog's sections was removed.
+
+- **Issue edits wait for the Save bar (#2984).** On the issues page and /issues/<id>, changing a title, description, status, priority, assignee, date, estimate, project, milestone, routine or labels no longer saves on the spot: the floating bar counts the changes and one Save sends them together. A status of Done, Cancelled, Duplicate or Review, or a new assignee, asks first and names the automations it starts; the description no longer saves itself while you type, and a title edit is kept when you click away. Opening another issue with edits pending asks first.
+
+- **Admin › Backups no longer lists every empty personal workspace as a problem (#2990).** Workspaces that hold no crew are summed up in one Needs attention item ("4 workspaces without crews have no backup") instead of two rows each, get no coverage row, and the summary counts them apart. The overview response carries `crewless_workspaces`.
+
+- **Integrations: a connector's command, URL and environment wait for Save (#2984).** Editing an MCP server's name, command, arguments, URL, transport or environment variables no longer saves on blur; the edits join the page's floating Save bar and one Save sends them together. Collapsing the connector with edits pending asks first. Tool switches, webhook and notification toggles still apply at once.
+
+- **An invited person no longer gets an empty workspace of their own at signup (#3006).** Signup redeems the address's live invitations first; when it joins at least one workspace, no "<name>'s Workspace" is created, and the person lands in the inviting workspace. A signup with nothing to redeem, or only invitations to deleted workspaces, still gets its own workspace. Existing workspaces are untouched.
+
+- **Admin › Backups: the side panel shows only what applies to the page (#2990).** The scope appears where it changes what is listed (Overview, Backup history, a new restore), the workspace list only once Selected workspaces is picked, and the run filters (result, kind, proof, when, each with the rows it opens) only on Backup history; below them sits the navigation. Workspaces without crews, such as the one every signup gets, fold behind "Show N without crews", and a workspace shows its logo when it has one (`GET /admin/workspaces` now returns `logo_url`).
+
+- **Restore checks and the restore itself judge a target by one rule (#2990).** The checks used to approve targets the restore then refused — a crew target for a workspace backup, replacing a workspace from a custom or crew backup, an empty server or drill for a non-instance backup — and neither looked at the new name. Both now share `ValidateRestoreTarget`: a new workspace or crew name must be a valid slug and free on this server, deleted workspaces included; a taken name is refused before anything is written (`409` from the restore). `restore/checks` and `crewship admin instance backups restore-checks` take the new name (`as_workspace` / `as_crew`, `--as-workspace` / `--as-crew`).
+
+- **A backup plan over several workspaces no longer reports success while one of them failed (#2990).** The plan's `failed` and `stale` incidents clear, and the heartbeat is pinged, only once every run of that due time (or manual start) has finished and none failed, was interrupted or was skipped. Before, the first workspace to finish well resolved the incident and pinged the heartbeat, hiding a failure in another workspace or pinging while it still ran.
+
+- **Admin › Backups no longer shows a partial restore as finished (#2989).** Recovery now shows the server's own verdict and names what did not land: missing attachments, crew files, rows short per table, incomplete items, clamped credentials and dropped columns, and says when crew files still have to be brought back into the containers.
+
+- **Settings and Admin save through one floating bar (#2984).** Edits on any card add up in a bar at the bottom of the page ("3 unsaved changes · Discard · Save", ⌘S / Ctrl+S) instead of a Save button per card. Leaving the page or switching section with edits pending asks first, and a failed save is a toast in the bottom-right corner that keeps the edits and offers Retry. Switches still save at once; changes across several workspaces still go through their preview.
+- **Routine HTTP results now redact injected credentials, including JSON and URL-escaped values.** Redaction applies before response bodies and request errors reach step results, run history or broadcasts.
+- **Generated clients described incorrect crew provisioning responses.** OpenAPI now matches the status fields, managed tool/launch artifact metadata and optional build progress, documents provision/rebuild success as 202, and includes rebuild admission errors and conflict diagnostics. ⚠️ **Specification correction:** generated clients no longer expose `crew_id`, `phase`, `updated_at` or trigger `success`, which these handlers never returned; regenerate clients to adopt the corrected contract. HTTP behavior is unchanged (#2897).
+- ⚠️ **Behaviour change: routine authoring and validation now reject unsupported transform expressions, including skipped branches.** Existing definitions must be corrected before re-saving or draft testing; there is no automatic rewrite. Running an existing definition still skips inactive branches, while unsupported expressions reached at runtime fail. Use code for arithmetic or pipes. Whitespace around array indices remains supported.
+- **Approval waits now honor the documented `wait.timeout_sec` setting.** A positive step-level `timeout_seconds` takes precedence; parked waits keep their recorded deadlines.
+- **Webhook deliveries with invalid form inputs now return `400` before acceptance.** Malformed target definitions return `409`. Corrected retries can use the same delivery key. Signed, rate-limited validation failures count toward webhook delivery failure health and can alert managers. CLI help now describes literal additional inputs and the reserved `event`, `raw` and `headers` payload fields.
+
+- **A stopped installation can reset its application data without losing management state.** `reset --data` validates an explicit local target, removes exact installation-labelled Docker resources, restores clean database defaults and preserves identity, configuration, secrets, logs and backups. Interrupted resets block startup until a successful retry. `paths` shows effective configuration without creating files. (#2977)
+- **Reconnecting an AI client could silently narrow its configuration permissions under a restrictive umask.** Successful reconnects and rollback now retain the inspected file mode; connection receipts remain private. Standalone `ai status` diagnostics are verified for owned, modified and missing-executable registrations without printing configuration secrets (#2853).
+- **Server scratch files and update caches now belong to the selected installation.** Development PID checks refuse unrelated processes after PID reuse; `/api/health` shares `/healthz` liveness and writer-ownership checks while keeping the healthy `status: ok` field. (#2977)
+- ⚠️ **Behaviour change: server paths now follow one installation root regardless of DATABASE_URL.** Explicit storage, log, memory, Bolt and socket configuration is respected, including YAML values equal to old defaults. `CREWSHIP_HOME` and `start --data-dir` select the root; startup refuses to abandon existing data in prior locations instead of silently using a new empty store. Relative SQLite URLs retain compatibility. (#2977)
+- ⚠️ **Behaviour change: development data and builds no longer default to shared temporary directories.** `dev.sh` uses a persistent installation outside the checkout, preserves exported configuration over `.env.local`, and refuses unsafe legacy transitions. Existing explicit path pins remain valid. (#2977)
+- ⚠️ **Behaviour change: demo seed requires an explicit server and usable provider credentials before making changes.** `--offline-demo` explicitly creates fixtures without model execution. Bootstrap tokens are saved in the target profile without replacing unrelated defaults. `--with-memory` provisions all demo tiers through the target server before provisioning, with durable create-if-absent writes that preserve operator edits and never write server memory on the CLI host. `--with-users` uses authenticated account provisioning without enabling public signup; retained accounts require proof and never have their passwords reset. An incomplete role fixture fails. (#2977)
+- **The operations Page collector could linger after failed fleet telemetry.** It now releases rejected HTTP response bodies immediately, keeping the unavailable-fleet snapshot without waiting for request expiry.
+- **Idle retention could start cleanup after its lifecycle was canceled.** Boot and periodic passes now check cancellation before admission, including when a tick and cancellation are ready together; retries for an unavailable daemon are preserved (#2925).
+
+- **CI: a trusted-main guard flags any change to CI control files (#2960).** `CI Inventory Guard` runs main's code against PR files as data. Required-job inventories of the CI, Security and CodeQL workflows, the routing and verdict helpers, and a closed namespace (`.github/`, `scripts/ci/`, every `scripts/` path a workflow references) are compared with main; any change needs a separate administrator dispatch for the exact head SHA.
+
+- ⚠️ **Behaviour change: a routine `agent_run` step now waits for a busy agent instead of failing at once.** When a chat, an assignment or another routine holds the agent, the step waits up to its `timeout_seconds` (15 minutes without one) or until the run is stopped, then fails with a reason naming the busy agent. Waiting steps take the agent in no guaranteed order, hold their run and do not survive a restart. (#3023)
+
+- **CI: the full Go suite and the shuffled suite run in three package partitions each.** `Go` keeps vet and the cross-builds; `Go test` and `Go Shuffle` split `go list ./...` largest-first by measured cost and prove every package runs exactly once (a truncated listing still fails).
+
+- ⚠️ **Behaviour change: an immediate routine start whose concurrency slot is full is now queued instead of refused with `429`.** It returns `202 SCHEDULED` with `pending_id`, `queued: true` and `reason: "concurrency_limit"`, starts when a slot frees, and waits at most `ttl_seconds` (one hour by default) before ending `expired`. A retry with the same `Idempotency-Key` returns the same pending start. Send `queue_if_busy: false` (CLI `--reject-if-busy`) to keep the `429`. Webhooks, schedules, replay and agent-invoked runs are unchanged. (#3025)
+
+- **CI: race tests stop re-migrating test databases and skip checkptr inside the transpiled SQLite library.** One migrated template is now shared per source tree across test binaries (it cost 56 s per binary under race), `internal/api` prefetches its per-test database copies, and `cmd/crewship` fixtures start from the template instead of running the migration chain seven more times. Under `-race`, CI compiles `modernc.org/*` with `checkptr` off (migration chain 55 s → 29 s); race detection and checkptr stay on for all Crewship code.
+
+- **Every accepted deferred routine start now says what became of it in the UI.** The routine's Plan view lists waiting starts with their state, including waiting for a free slot with tries and the earliest next try, and recent starts that left the queue as Started (with the run link once recorded), Did not run or Expired with the reason, or Removed. The overview names accepted starts that did not run in the last seven days and how many wait for a slot. Requires the receipt API from #3015. (#3011)
+
+- **CI: Vitest runs in four partitions with one merged coverage gate (#2933).** `Frontend Test` keeps its name, requires every partition plus the type checks, verifies that every discovered test file ran exactly once and evaluates the unchanged coverage thresholds on the merged report.
+
+- **CI: the CLI race suite runs in three partitions, internal/api in six and the remaining race packages in four (#2931).** `Go Race (CLI)` and `Go Race (internal/api)` keep their names and now verify that their partitions cover the full test inventory exactly once. The CLI race job took 16–26 minutes as one process; each partition runs about a third of it.
+
+- **Restricted conversations built their context 4x slower than necessary as history grew (#2959).** Every prompt re-checks the origin authority of each recalled entry three times, and each check parsed the same SQL again. Those checks now reuse prepared statements within their transaction; queries, arguments, isolation and revocation behaviour are unchanged. A 155-turn conversation drops from 116 ms to 29 ms per turn, and the race-instrumented `internal/access` CI package, previously the pipeline's 25-minute critical path, shrinks accordingly.
+
+- **Repeating `crewship seed --nuke --with-users` could fail to restore RBAC fixtures.** Workspace cleanup preserves global accounts, so the seed now authenticates retained fixture accounts with their documented passwords and restores membership through the normal guarded API. Account IDs, passwords and other sessions are preserved; changed passwords are refused.
+
+- **The contract gate's CI server now has the fixture the 13 bucket-3 operations need (#1815).** The ephemeral server configures Page project storage, a separate Page runtime origin and the restricted runtime; the seed publishes real Page apps (10-minute step cap), and a blocking fixture step proves the bound crew/integration pair, a real project revision and a real restricted member (own token, owner still gets the designed 404) before the gate runs. The gate grades the tools operation on the bound pair and the three restricted routes as that member, the pair and workspace are pinned as single-value enums in the schema copy `run.sh` feeds Schemathesis (`openapi-pinned.json`), with the member's token set by per-path headers; its Pages grading depends on slugs Schemathesis harvests, so the dedicated probes are the positive evidence for Pages storage. This is not 13/13: the two history operations still report the real "revision 0" schema finding, and the restricted run-detail operation has no positive receipt (it needs an admitted restricted run in the real runner image). `throwaway-server.sh` gains an allowlisted `--env` and an owned `--page-projects` directory. No product code changed.
+
+- **`crewship init` could bootstrap the wrong server despite CLI configuration.** It now honors the common server selection order (explicit flag, active profile, environment, config, default), supports `-s`, and prints the selected server in the login hint. ⚠️ **Behaviour change:** a selected profile without a server URL refuses initialization instead of falling back to localhost.
+- **Manual MCP startup could discard the selected login and send an environment token to a fallback server.** Explicit credential files now require a valid selected server before replacing CLI state or loading a catalog; an explicit valid `--server` remains supported without a profile. Unknown profiles fail closed.
+- ⚠️ **Behaviour change:** **Legacy direct-run probes now refuse uncertain process-group evidence.** Group signals calibrate against the image utility; unsupported options and permission failures stay UNKNOWN. Failed durable-state reads also refuse legacy probes instead of silently continuing.
+
+- **Ambiguous managed-launch descriptors could overwrite earlier fields.** The launcher rejects duplicate or noncanonical JSON fields before creating process identity; its native core now includes a standalone conformance entrypoint, parser fuzz targets and documented measurement limits.
+
+- **Webhook and scheduled managed runs could falsely confirm a stop after losing their PID file.** Their creation gates now retain the persisted managed identity after the agent invocation returns, including when pilot selection is disabled; missing managed PID files remain UNKNOWN.
+
+- **Pilot agent runs can refuse stale CLI selection from persistent home.** An explicit server crew-ID opt-in binds static native Codex launches to immutable build hashes and lock versions, clears inherited loader options, and uses a trusted direct launcher. Static PIE Codex packages are supported; unsupported scripts and dynamic binaries fail closed. Selected crews must recreate runtimes to bind the immutable launcher generation; ordinary crews retain their current behavior. Managed runs retain process-group stop and recovery identity; native mise candidates are recorded separately from legacy PATH-first inventory.
+
+- Managed runs rejected during prompt or command preparation now finalize as errors before workload creation, releasing unresolved run occupancy. Managed launches execute the verified open descriptor and reject tmpfs overlays over trusted code; legacy direct-run probes keep their existing behavior; enabling the launch pilot changes launcher staging for all new crew runtimes.
+
+- **Unsupported `k8s` startup wiring could return no container provider.** Container initialization now refuses it with supported provider choices; ordinary configuration validation continues to reject Kubernetes.
+
+- **Routines could wait forever for an event despite a step timeout.** ⚠️ **Behaviour change:** Existing parked waits older than their configured timeout (one hour when omitted) expire on upgrade and run their failure hooks. Persisted event waits now retain their original deadline across retries and restarts, expire through normal timeout/failure handling, and preserve signals delivered before the deadline. Cancelled runs reject late signals, and event recovery workers drain during shutdown. Blocking nested waits keep waiting on their original deadline when an advisory wake belongs to a sibling subscription.
+
+- Concurrent egress-fence installation retries incomplete rule reads without reinstalling or accepting a fence that fails verification. Checks reject results spanning a ruleset generation change.
+
+- **Importing a Crew YAML could silently disable required AI CLI checks.** The creation wizard preserves the typed policy, including configurations without explicit tools, and rejects unsupported policy values.
+
+- Recovery and explicit stop now share atomic runtime updates: an OOM-killed or missing container can leave RUNNING, concurrent completion is preserved, and a stop also closes the controls of runs discovered during ownership inspection.
+
+- ⚠️ **Behaviour change:** Runtime readiness refuses paused Docker containers with an actionable error, including warm-cache hits, preserving their live processes until an operator explicitly unpauses them. (#2860)
 
 - **Confirmed stops from direct agent starts no longer wait forever for a missing start event.** Recovery retains the run's workspace, publishes the confirmed terminal event without inventing a start, and preserves dispatcher-owned outcomes and conflicting or unknown tenant identities.
 
@@ -21,6 +186,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **An interrupted container run could remain RUNNING after a server restart.** Startup now checks eligible persisted runtime identities and reconciles confirmed absence, while preserving live or unverified work and dispatcher-owned outcomes.
 
 - **Repeated environment rebuilds left untagged images outside cache cleanup.** The orphan sweeper now recognizes published artifacts from revision history while preserving images selected by live crews and unknown untagged images. The existing opt-in deletion policy and age floor still apply.
+- **Editing an environment during a build could fail waiting messages.** Superseded builds retry the current definition within the original job budget; obsolete CLI qualification cannot prevent that retry, and unchanged definitions still enforce their required checks.
+- **`crewship crew rebuild` and its documentation claimed the cached image is discarded up front.** The CLI help text, its `--no-watch` message and four documentation pages described a cache-marker wipe the code never performs: the bypass belongs to the admitted build job, the previous image stays selected until the new build succeeds, and a failed rebuild leaves it in place.
 
 - Runtime editing preserves existing TOML and unsupported mise shapes instead of erasing tool pins; rejected raw edits no longer partially apply other settings.
 
@@ -45,7 +212,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - `crew provision lock-resolve` creates or updates complete native mise lock bundles in a disposable Docker builder, preserving exact pins and reporting the resolver image/platform/version.
 
 - Managed mise builds accept complete native lock bundles, enforce locked reinstall, and preserve lock inputs through manifest and visual tool edits; `crew provision lock-pack` packages local lock files.
-- Image changes no longer implicitly remove a running Docker crew container. New-image starts report a pending update until an explicit stop/restart; stopped replacement uses non-force removal and warm cache checks image selection.
+- **New environment images wait for current work and activate when the runtime is confirmed idle.** Managed Docker admission reserves the container through preparation and execution; image activation and idle expiry share that reservation. Recovered runs, external occupants and background processes prevent automatic replacement. Unknown occupancy requires an explicit stop; crash-loop recovery remains available.
 
 - Environment provisioning records immutable build history and refuses to publish a build after its definition changes. Inspect the latest records with `crewship crew provision revisions`.
 - Built AI CLI toolchains receive an offline startup/version qualification through a runtime-neutral sandbox port; results distinguish unavailable and failed checks from authenticated provider tests.
@@ -56,20 +223,202 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Explicit crew rebuilds could keep stale agent CLIs.** Rebuild now bypasses the provisioned-image and installation-layer caches while retaining configured version pins. Claude background updates and Codex startup update checks are disabled for Crewship-managed runs; rejected concurrent rebuilds preserve the existing cache.
 
 - Concurrent starts can no longer fork installation identities by observing a partially written nonce owner; owner publication is atomic and malformed records fail without re-keying.
+- **Old stop markers could keep agents RUNNING across later restarts.** Manual and dispatcher-owned stops now release their projection markers; pending history protects only its own trace. Atomic state updates preserve concurrent terminal results.
+
+- **Restarted agents could remain RUNNING after their container disappeared, and a concurrent stop could miss a newly tracked invocation.** Recovery now confirms container absence, and stop closes the live invocation gate before reporting success.
+- **AI operation discovery now ranks multiword searches** — generated API prose and ranked token search replace whole-query substring matching. Public descriptions omit internal handler comments; resource reads, nested creates and named actions receive clearer labels. MCP splits read/write tools, classifies audited POST reads, restricts admin writes and supports tag filters and optional client human approval. Workspace path selectors can no longer override the configured workspace.
+
+- **AI clients can connect directly to the Crewship binary.** Bundled `mcp serve` exposes paginated API discovery, focused schemas, a built-in Agent Skill and guarded JSON requests. `ai connect` registers Codex/Claude Code, `ai config` emits credential-free client snippets, and `ai skill` exports the embedded guide. Mutations require startup opt-in plus per-call acknowledgment; identity, redirect and size guards are shared with the CLI.
+
+- **CLI agents can discover API operations and inspect their inputs without scraping help.** `api operations` searches the embedded OpenAPI catalog, `api schema` returns focused schemas, and `api request` calls HTTP endpoints through the active profile with explicit mutation consent, offline previews, bounded input/output, and atomic downloads. `commands <path>` narrows discovery and includes required flags, inherited options, and runnable status. (#2836)
+- ⚠️ **Behaviour change:** CLI HTTP redirects must remain on the original server origin, including scheme and port. Configure a moved server explicitly; generic `api request` refuses all redirects.
+
+- **A crew started immediately after stopping could receive a stopped Docker container.** Runtime reconciliation now uses the newer inspect state for reuse and configuration drift decisions, rather than the older container-list snapshot. This also prevents a stale stopped listing from triggering configuration-based removal of a running crew. (#2855)
 
 ### Added
+
+- **Experimental typed decision evaluation from the CLI** — recover the opt-in `crewship decisions evaluate`, `triage` and `rerank` pilot with bounded requests, advisory results and credential-free dry runs. This local command uses explicitly supplied provider keys outside server Paymaster accounting; hosted inference remains unverified.
+- ⚠️ **Behaviour change:** CLI AI connections preserve installation symlinks and support `ai status`, `ai doctor`, ownership-checked `ai disconnect`, and optional bundled skill installation. Registrations created outside the new ownership mechanism, or edited afterward, require explicit native-client removal before reconnecting. MCP refreshes stored login credentials per request, can use the server OpenAPI catalog with an explicit offline fallback, and supports exact operation write allowlists. Focused tools list agents/crews/routines, start and wait for routines with durable receipts, and diagnose runs and crew runtimes.
+
 - **A fenced crew can reach its own services.** A restricted crew on the egress-fence pilot that declares `services:` and is on its own network now gets a narrow path to them: each service has a fixed address on the crew network, the fence opens exactly those addresses on their ports, and the names resolve from the runtime's `/etc/hosts` because DNS stays closed. Declaring a service whose name sorts first shifts the others to new addresses: they are re-attached there and the fence follows, also when ensuring the services fails part-way. The same crew on the shared network is still refused. (#1368, #2240)
 
 - Upload encrypted recovery archives through Admin › Backups › Recovery or `crewship admin instance backups upload`, with cancellation, checksum validation, disk-space checks and atomic catalog/audit recording.
 
+- **Waiting for a routine could report uncertain or canceled work as successful.** `wait` now exits 5 for `needs_reconciliation` and 2 for either cancellation spelling; `routine run --wait` reports these outcomes as errors in human and machine formats.
+- **Reconnecting an owned AI client could lose its working registration after a failed add.** Native edits and verification now run against a staged configuration, preserving the prior registration and ownership receipt on failure and refusing concurrent configuration or receipt edits. ⚠️ **Behaviour change:** owned reconnections require a regular client config file; symlinked configs are refused.
+
 ### Changed
+
+- **Required Go race checks run in smaller parallel groups.** The API suite is split into four complete test partitions and the remaining race-tested packages into two balanced groups. Every partition remains required, with coverage evidence, distinct timing artifacts and the existing timeout and aggregate budget checks (#2886).
+
+- Live chat demo scripts now require `--state-dir` or `CREWSHIP_CHAT_DEMO_DIR` for private credentials, outside the checkout. The fleet-watch example requires `CREWSHIP_FLEET_ROOT` instead of assuming a workstation checkout path. Existing demos can reuse their state by selecting its current directory.
+
+- Public documentation now separates product contracts from internal working records and prototypes. Start at `docs/README.md` for guides, specifications and decisions; contributor instructions remain in `AGENTS.md`. Assistant-specific workstation files are ignored and rejected by the tracked-path CI guard. Public builds need no private context checkout. (#2778)
 
 - ⚠️ **Behaviour change:** Restricted routine, Page and assigned-issue runs now use the shared work ledger and dispatcher. Interrupted runs with uncertain effects show “Needs review” and require reconciliation before outputs are released or new work repeats; legacy running jobs are adopted into this state.
 
 ### Fixed
 
+- **Removing a backup key or off-site destination could time out when the database connection pool was full.** Deletion now reuses its transaction for in-use checks, preserving named refusals and allowing unused keys and destinations to be removed. (#2924)
+
+- ⚠️ **Behaviour change:** **Confirmed recovery stops with no recorded start now have clear audit history.** Record one `run.recovered_stop` event with explicit ownership checks and no billing, automation or completed-run statistics. Late lifecycle writes for an audited identity are rejected instead of creating an invented run.
+
+- **A corrupt notification channel could stop healthy workspace deliveries.** Unreadable channels now remain available for administration but are excluded from delivery and test sends.
+- **Memory append buffers used unchecked sums for initial allocation sizes.** Append now checks the combined size before allocating and reports oversized content instead of overflowing.
+
+- Crew group headers expose their collapse state and support activation with Enter and Space.
+
+- Run registry compaction uses exclusive temporary files, preventing pre-existing staging symlinks from overwriting unrelated files.
+
+- Foreach body steps now receive the same retry, failure-policy, output-validation and lifecycle-hook checks as top-level routine steps, rejecting invalid definitions before they run.
+
+- Routine definition tag batches commit atomically; rejected batches leave existing labels intact, and adding an existing label remains idempotent at the tag limit.
+
+- Crew journal summary actions reset on crew/workspace changes and suppress notifications or refreshes from abandoned requests.
+
+- Runtime availability ignores superseded checks; graph agent cards support keyboard activation, routine cards hide unknown step progress, and graph edges refresh changed handles and arrow markers.
+
+- Integration workspace changes close old confirmation dialogs, clear selection and form state, and suppress notifications from abandoned connection actions.
+
+- Crew policy controls discard abandoned reads and drafts, stop a policy save from continuing into quota writes after selection changes, and disable pending saves when edit access is removed. Unreadable optional quota metadata falls back without hiding the loaded policy.
+
+- Task and mission details retain their selected tab when the same entity refreshes; mission logs include completed tasks even when no start timestamp was recorded.
+
+- Toolbar build and agent-restart actions reset on crew or workspace changes, abort abandoned requests and suppress late notifications without unlocking a newer operation.
+
+- Activity run lists count waiting approvals as active, retain their Inbox action without a saved definition, announce detail-read failures and cancel abandoned deep-link scrolling. Issue source chips no longer nest a link inside a run expansion button.
+
+- Journal run feeds cancel superseded reads, clear previous workspace data and ignore delayed table, insight and live-feed responses after selection changes.
+
+- Routine detail panels clear previous selections, stop reads when closed and cancel abandoned rollback/export operations. Read, rollback and export failures are announced in the panel; failed exports no longer cause unhandled rejections.
+
+- Mission timelines retain agent counts when collapsed, announce expansion state and make task timing/usage tooltips reachable from the keyboard.
+
+- Database snapshot restore creates exclusive staging and rollback files, preventing a pre-existing staging symlink from redirecting writes and preserving earlier rollback copies from the same second.
+
+- Empty routine lookups cannot select a demo pack whose optional probe is absent. CLI HTTP test logs return independent header and body snapshots so assertions cannot corrupt later observations.
+
+- Mission controls require complete workspace/crew/mission selection, cancel abandoned requests and ignore stale completions or errors after a selection change.
+
+- The activity feed’s Done filter includes canonical `DONE` missions alongside legacy `COMPLETED` events, with success styling for both.
+
+- Issue-board refresh timers are cancelled when workspace callbacks or crew filters change, preventing queued events from refreshing a former selection.
+
+- Dashboard realtime refresh timers are cancelled when the selected workspace changes, preventing a queued event from refreshing the former workspace.
+
+- Composio trigger lists and enable dialogs clear on workspace changes, ignore superseded reads and abandoned creation responses, and report active-subscription read failures instead of claiming no subscriptions exist.
+
+- Recipe installation clears credentials, account labels and reveal state when closed or switched to another workspace/recipe; abandoned previews and installations cannot update the new selection or redirect it. Credential inputs and reveal controls have accessible labels.
+
+- Workflow template galleries clear previous workspace data and drafts, ignore abandoned requests, distinguish loading failures from empty catalogs and report creation/deletion network errors.
+
+- Integration marketplace search ignores superseded responses, keeps the current request's loading state, resets stale totals on failure and includes uncategorised servers in their facet.
+
+- Audit-note fields in save footers have distinct accessible labels, including when several editable cards appear together.
+
+- Deployed documentation checks require the declared page identities, so duplicate or unrelated index links cannot hide a missing page behind matching totals.
+
+- Notification preference failures roll back only their own edits, preserve concurrent successful changes, and cannot restore data from a former workspace. Workflow and automation lists clear old scope data and loading state; step I/O clears the previous step while its replacement loads.
+
+- Refreshing a Page review respects disabled reads and unavailable source archives instead of requesting an absent baseline revision.
+
+- Backup activity checks report routine-query failures instead of silently treating them as idle; older schemas without the routine-run table remain supported through an explicit schema probe.
+
+- The repository UID invariant checks the actual runtime package paths, so a checkout directory containing `sidecar` or `provider` cannot make unrelated UID literals satisfy the check.
+
+- Page application reads wait for both a workspace and a Page selection instead of requesting an incomplete URL; incomplete crew owner references retain a visible fallback label.
+
+- Page actions reject non-finite numeric inputs and defaults; project recovery refuses checkpoint pins that do not identify an existing Git commit.
+
+- MCP credential creation clears secret input when its workspace or environment variable changes, cancels abandoned requests and ignores late results after closing the picker.
+
+- Guaranteed memory-tool writes require a caller-supplied operation identifier, preserving retry deduplication instead of silently inventing a fresh identifier on each attempt.
+
+- Backend connection status and uptime reset when switching or clearing the selected workspace, so an earlier workspace cannot appear connected during the new workspace's first check.
+
+- Native restricted execution refuses a missing authority database instead of panicking before worker admission.
+
+- Account-group management stays idle and hides cached metadata when no workspace is selected.
+
+- User preferences finish loading after refused or empty server responses while retaining the locally cached value.
+
+- File trees clear stale contents, selection and loading indicators when workspace selection is cleared or resolving. Refresh correctly replaces a directory with a file and clears the path prefix when the listing becomes empty.
+
+- Notification channel reads reject malformed stored configuration and filters instead of silently treating unreadable category restrictions as permission to deliver every category. Valid legacy empty filters retain their existing defaults.
+
+- Account signup recovers from network and unreadable error responses, keeps entered values for retry, and announces refusals accessibly. Password reset treats a null refusal body as a server refusal instead of a network failure.
+
+- First-run secret bootstrap validates the entire key set and persists generated keys before exporting them. Failed persistence or validation cannot leave partial process secrets that a retry mistakes for externally managed keys.
+
+- API mutations reject malformed or imprecise `Retry-After` values instead of treating them as valid retry delays.
+
+- Work-ledger retention reports expired payloads and reclaimed bytes only after their transaction commits, preserving completed-batch counts when a later batch rolls back.
+
+- Secret replacement discards drafts and obsolete completions when its workspace, credential or dialog changes. Revealed values report clipboard success only after the browser confirms it, with recoverable errors and no stale copy status after hiding.
+
+- Chat questionnaires clear when the agent or workspace changes; failed optional requests cannot leave the previous agent’s forms visible.
+
+- Backup conversion releases its rewrite stream when sealing fails, so encryption errors cannot strand the converter or its temporary output. Unknown CLI adapter names use the neutral brand without reading inherited object properties.
+
+- OAuth setup discards obsolete authorization and code-exchange responses, clears owned popups and timers when its scope closes, and prevents overlapping polls or duplicate exchanges. Journal registry scanning skips vendored sources and handles unrelated constants without inheriting an old event type.
+
+- Removed the unused legacy credential dialog and its tests; credential creation continues through the existing wizard.
+
+- Enforce Page build output limits on actual subprocess pipes; prevent an inherited buffer fast path from bypassing cancellation and retaining unbounded worker output.
+
+- Keep integration catalogs and workspace summaries current when searches or workspace selections change; ignore obsolete API-key saves and encode scoped identifiers. Add recovery coverage for dispatch, off-site backups and conversation writes.
+
+- Connector access editing refuses to save when existing grants cannot be read, encodes resource identifiers, and ignores stale tool, summary and save responses after the selected agent or workspace changes. A missing workspace no longer leaves the connector summary loading indefinitely.
+
+- Runtime reconciliation uses the latest inspected container state, so a stale running-list entry cannot return a stopped crew as ready, and a stale stopped-list entry cannot trigger replacement of a now-live crew.
+
+- The shared agent context panel encodes agent, crew and workspace identifiers when loading context.
+
+- Memory import and export reads remain inside their selected tree when a parent directory is replaced with a symlink, including direct file and directory reads.
+
+- Agent detail panels follow their enabled state and ignore errors from obsolete requests after a selection changes.
+
+- Tool argument validation compares object and array enum values structurally instead of panicking, and rejects null when the enum does not allow it.
+
+- A stopped or cancelled scheduler leader no longer authorizes new work while its last lease is still fresh.
+
+- Outbound URL validation rejects blocked IPv6 literals with zone identifiers before dialing, matching the connection-time SSRF guard.
+
+- Onboarding reuses a CLI-delivered model token from the current workspace without asking for the secret again. The Guide starts reliably under Strict Mode, ignores superseded proposal previews, and keeps its created inventory scoped to the workspace across slow or failed polls.
+
+- Notification provider and channel-agent registries, routine schedules, run records and trace details settle loading when their selection is cleared. Obsolete requests and schedule mutations cannot restore data from a previous selection.
+
+- Routine budget views clear data when their workspace changes and ignore obsolete mutation responses. A pending read can no longer overwrite a successfully edited cap.
+
+- Keep the skills browser scoped to the current workspace and Installed lens across imports; rebuild active search results after catalog changes and show crew-assignment network failures in the dialog.
+- Isolate Docker network integration-test installations and subnet leases so concurrent runs cannot adopt or remove each other’s containers.
+- Workflow graphs omit dependency and permission edges whose source or target is absent from the displayed graph.
+- Notification channel settings and delivery logs clear loading and errors when their workspace is removed. Responses still decoding and completed channel mutations from an older workspace cannot replace or refresh the newly selected workspace's data.
+- Pipeline lists, run feeds and webhook settings settle loading when their workspace is cleared; old webhook refreshes and aborted run requests cannot interfere with a newly selected workspace.
+- The quota helper checks its backend and server identity before binding a namespace, avoiding a nil-backend panic and catalog changes on rejected startup.
+- Value previews keep their configured length limit when strings include display quotes or JSON serialization falls back to text.
+- **A terminal could reconnect after being closed or show errors from a previous crew.** Disconnect now invalidates pending authentication and obsolete socket callbacks, releases resize tracking, and reports missing or malformed connection tokens as errors. (#2775)
+- **Routine approval prompts could return after their workspace was cleared.** Clearing the workspace or run selection now invalidates outstanding waitpoint requests before their results can restore stale approvals. (#2775)
+- **Run heatmaps could show an older retry or lose live results while history loaded.** Step metrics keep the newest historical completion, preserve live completions when history arrives or fails, and clear the previous run's metrics when the selection changes. (#2775)
 - Docker environment builds publish immutable local image references, so another rebuild cannot silently replace a selected artifact. Failed explicit rebuilds keep the previous reference; cache inventory and ordinary cleanup recognize image-ID references. The build cache key advances once to avoid retagging legacy references.
 - Confirmed stops recovered after restart now retain a durable journal retry until history and agent state are recorded; retries preserve existing outcomes and leave work-owned settlement to the dispatcher.
+- Confirmed stops recovered after restart now retain a durable journal retry until history and agent state are recorded; retries preserve existing outcomes and leave work-owned settlement to the dispatcher. Another durable running invocation keeps the agent RUNNING even before its journal start is visible.
+- Agent runtime diagnostics now find runs by their durable run IDs, prefer an active invocation, and report unavailable state instead of inventing an idle result.
+- Restart recovery preserves the exact live run while closing older orphan traces, and leaves work-owned outcomes to the durable dispatcher. Legacy agent-keyed runtime records remain conservatively protected.
+- Runtime reconciliation uses the latest container inspection rather than an older list snapshot, avoiding stopped-container reuse or removal of a newly running container.
+- Agent stop recovers durable runtime identities after a server restart and refuses to confirm process absence when the signal tool is unavailable.
+- Crew restore skips empty sections and prepares missing shared memory directories, preserves file modes and timestamps, and verifies the shared permissions before writing payloads. Off-site fetch registers downloaded bundles in the local catalog without overwriting another fetch.
+- CLI Page actions accept `--expected-intent-hash`; restricted routine receipts support structured output and `--wait`, including delayed runs. Backup creation honors machine output formats. Agentless runtime removal and failed legacy pruning report their actual outcome. (#2777)
+- **Resource grants showed raw ids for the kind not selected in the add-grant picker** (#2863). In a member's restricted resource access, the grant list resolved names only from the directory of the currently selected kind, so with "Project" selected every agent grant showed its id (and vice versa). Both the agent and project directories now load, and each grant is named from its own kind's directory.
+- **Agent Stop hid a stop the runtime did not confirm** (#2864). On a phone, the agent header's Stop swallowed every failure, so a `502` from `POST /api/v1/agents/{id}/stop` (`runtime stop not confirmed` / `runtime stop unavailable`) looked like success; the agent canvas showed only `HTTP 502`, and its request also omitted `workspace_id`, so the route refused it before trying. Both buttons now share one stop call: a failure shows an error toast saying the agent may still be running and leaves its status as it was; only a confirmed stop shows `STOPPED`.
+- **Restricted members saw a permanent "Reconnecting…" banner and a shell full of failing requests** (#2861). Restriction applies to the whole account, but the web app asked for a realtime ticket, the inbox count, system version/runtime/license, engine, crews, provisioning, active runs and the journal lookup, all of which the restricted allowlist refuses with 404, and it retried the ticket forever. The app now works out one access mode per session (any restricted membership makes the session restricted, also in workspaces where the membership is trusted), sends nothing outside the allowlist until that mode is known, and leaves those calls and widgets out of a restricted session. Realtime reports a terminal "unavailable" state with no banner, and a 404 from `/ws-token` is terminal for every session instead of a retry loop. `/routines` and `/pages` pick the restricted screens from the session mode. A restricted chat now checks for messages from other participants or tabs every 10 seconds while visible, since it has no WebSocket. Navigation is not yet filtered; that follows separately.
+- **The crew service quota editor said backups of quota disks are refused.** Since format v4 (#2745) crew, workspace and instance backups include quota-service disks whenever the server's quota helper is configured. The editor's warning and the service disk quota guide now say so: backups are refused only without the helper, and an interrupted backup keeps the service stopped until an admin retries with `--recover-services`. (#2866)
+- ⚠️ **Behaviour change: crew updates no longer confirm guesses of hidden service settings.** Updates that submit `services_json` for a crew whose configuration is redacted now return the same conflict even for an exact plaintext match. Omit `services_json` when retrying unrelated crew edits; private values stay on the server and public service/quota edits remain supported. (#2742)
+- **The Work ledger offered Replay on finished restricted workflow work**, and the click failed with 409. The button is now disabled for restricted workflow items and the page states the server's reason: "Private workflow replay requires a new authorized routine or Page admission." Other domains are unchanged. (#2865)
+- **Restore history showed "NaN undefined" for a source bundle no longer in the catalog.** Admin › Backups › Recovery › History now says "source date unknown" when the server sends no source date (it only knows it while the bundle is still catalogued). (#2867)
+- **Old stop markers could keep agents RUNNING across later restarts.** Manual and dispatcher-owned stops now release their projection markers; pending history protects only its own trace. Atomic state updates preserve concurrent terminal results.
+- **Restarted agents could remain RUNNING after their container disappeared, and a concurrent stop could miss a newly tracked invocation.** Recovery now confirms container absence, and stop closes the live invocation gate before reporting success.
+- Confirmed stops recovered after restart now retain a durable journal retry until history and agent state are recorded; retries preserve existing outcomes and leave work-owned settlement to the dispatcher. Another durable running invocation keeps the agent RUNNING even before its journal start is visible.
 - Agent runtime diagnostics now find runs by their durable run IDs, prefer an active invocation, and report unavailable state instead of inventing an idle result.
 - Restart recovery preserves the exact live run while closing older orphan traces, and leaves work-owned outcomes to the durable dispatcher. Legacy agent-keyed runtime records remain conservatively protected.
 - Runtime reconciliation uses the latest container inspection rather than an older list snapshot, avoiding stopped-container reuse or removal of a newly running container.
@@ -6016,6 +6365,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   could otherwise be cached as a permanent false negative — `Dispatch` now
   re-checks the epoch before caching and skips caching (not an error, just
   a forgone optimization for that one call) if a write landed in between.
+
+- **Repeated crew deletion or idle eviction could accumulate anonymous Docker volumes.** New noexec bind-volume records carry installation ownership and are reaped once unused, preserving host data, home/tools history and other installations; unlabelled historical volumes stay for operator investigation. Runtime recreation now reports container removal failures. (#2970)
+
+- **Long routine runs no longer drop out of the overview and the Activity menu.** Running and waiting runs load from their own list instead of the 200 newest runs. When those 200 runs do not reach back seven days, the routine run summary reads "newest N runs · since …" instead of "7d"; partial and needs-a-person results count as finished, not as successes. The run detail shows the result and next step before provenance and evidence. (#3011)
+
+- **Accepted deferred routine starts disappeared when execution capacity was busy or dispatch failed.** Capacity rejection now retries with bounded backoff until TTL, and errors/expiry remain inspectable through `routine pending get` and `pending list --status`. Retry preserves the accepted recipe and occurrence identity. ⚠️ **Behaviour change:** starts without TTL stop after ten capacity rejections; attempted debounce starts keep their payload while newer triggers open a separate window, and attempted one-time starts cannot be rewritten by another save. (#3010)
 
 ## [1.0.0-rc.1] — 2026-07-12
 

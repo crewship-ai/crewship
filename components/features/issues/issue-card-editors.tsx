@@ -94,7 +94,8 @@ export interface IssueCardEdit {
   routines: PickableRoutine[]
   /** Milestones of the issue's current project. Empty until one is set. */
   milestones: Milestone[]
-  /** PATCHes the issue. Resolves true when the write landed. */
+  /** Changes the issue: inside a page Save bar this stages the change in the
+   *  page's draft; on its own it PATCHes at once. Resolves true when done. */
   patch: (body: Record<string, unknown>) => Promise<boolean>
   /** Creates a workspace label and attaches it in one gesture. */
   createLabel?: (name: string) => Promise<void>
@@ -768,10 +769,20 @@ export function TitleEditor({
   onSave,
 }: {
   title: string
+  /** Hands the edited title to the page's draft (its Save bar commits it).
+   *  Called when the field is left — Enter or a click away — never per key. */
   onSave: (next: string) => void
 }) {
   const [editing, setEditing] = React.useState(false)
   const [draft, setDraft] = React.useState(title)
+
+  // Leaving the field keeps what was typed: it becomes part of the page's
+  // draft. Clicking away used to throw the edit away without a word.
+  const leave = () => {
+    const next = draft.trim()
+    if (next && next !== title) onSave(next)
+    setEditing(false)
+  }
 
   if (editing) {
     return (
@@ -780,20 +791,14 @@ export function TitleEditor({
         aria-label="Issue title"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => setEditing(false)}
+        onBlur={leave}
         onKeyDown={(e) => {
-          // The destructive one. This Enter PATCHes the title straight onto
-          // the issue, and mid-composition it saves a fragment of what the
-          // reader was typing — with no `mission_activity` row recording
-          // what the title used to be. Escape is guarded for the same
-          // reason: mid-composition it means "cancel this candidate", not
-          // "throw the draft away".
+          // Mid-composition Enter and Escape belong to the IME candidate,
+          // not to the field.
           if (isImeComposing(e)) return
           if (e.key === "Enter") {
             e.preventDefault()
-            const next = draft.trim()
-            if (next && next !== title) onSave(next)
-            setEditing(false)
+            leave()
           }
           if (e.key === "Escape") {
             e.preventDefault()

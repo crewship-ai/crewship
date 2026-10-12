@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/slug"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -334,12 +335,11 @@ func deleteByID(ctx context.Context, db *sql.DB, table, id, wsID string) (bool, 
 	return affected > 0, nil
 }
 
-// validSlugRe matches safe slug values: lowercase alphanumeric, starting with a letter or digit.
-var validSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
-
-// validSlugFormat validates that a slug contains only safe characters.
-func validSlugFormat(slug string) bool {
-	return validSlugRe.MatchString(slug)
+// validSlugFormat validates that a slug contains only safe characters
+// (internal/slug: lowercase alphanumeric, "-" and "_", starting with a letter
+// or digit). The backup restore applies the same rule to a new name.
+func validSlugFormat(s string) bool {
+	return slug.Valid(s)
 }
 
 // validIssuePrefixRe is the format rule for crews.issue_prefix (#2035). The
@@ -387,6 +387,29 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 // Wraps the previously repeated writeJSON(w, status, map[string]string{"error": ...}) idiom.
 func replyError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// Machine-readable refusal codes (#2862). A client branches on these instead
+// of matching the sentence, which stays the human and CLI contract and may be
+// reworded. Add a code only where a caller actually needs to branch.
+const (
+	errCodeAgentSlugTaken    = "agent_slug_taken"
+	errCodeAgentSlugReserved = "agent_slug_reserved"
+	errCodeCrewLeadExists    = "crew_lead_exists"
+)
+
+// replyErrorCode is replyError plus an optional machine code and the request
+// field the refusal concerns: {"error": msg, "code": code, "field": field}.
+// Additive: a client that reads only "error" sees exactly what it did before.
+func replyErrorCode(w http.ResponseWriter, status int, msg, code, field string) {
+	body := map[string]string{"error": msg}
+	if code != "" {
+		body["code"] = code
+	}
+	if field != "" {
+		body["field"] = field
+	}
+	writeJSON(w, status, body)
 }
 
 // internalError is the canonical "log the error, return a 500" tail that was

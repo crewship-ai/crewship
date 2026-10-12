@@ -72,7 +72,7 @@ func (d *DockerBuilder) Build(ctx context.Context, p *pages.SourceProject) (*Art
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("Page build stopped: %w", ctx.Err())
 		}
-		return nil, fmt.Errorf("Page build failed: %s", logs.String())
+		return nil, fmt.Errorf("Page build failed: %s", logs.buffer.String())
 	}
 	a, err := decodeWorkerArtifact(out, logs)
 	if err != nil {
@@ -91,7 +91,7 @@ func decodeWorkerArtifact(out, logs *boundedOutput) (*Artifact, error) {
 		return nil, errors.New("Page build exceeded its output limit")
 	}
 	var a Artifact
-	dec := json.NewDecoder(bytes.NewReader(out.Bytes()))
+	dec := json.NewDecoder(bytes.NewReader(out.buffer.Bytes()))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&a); err != nil {
 		return nil, fmt.Errorf("invalid worker artifact: %w", err)
@@ -108,7 +108,9 @@ func decodeWorkerArtifact(out, logs *boundedOutput) (*Artifact, error) {
 
 type boundedOutput struct {
 	sync.Mutex
-	bytes.Buffer
+	// Keep the buffer private: embedding promotes ReadFrom and lets io.Copy
+	// bypass Write, defeating both the output bound and cancellation.
+	buffer   bytes.Buffer
 	limit    int
 	cancel   context.CancelFunc
 	overflow bool
@@ -118,12 +120,12 @@ func (b *boundedOutput) Write(p []byte) (int, error) {
 	b.Lock()
 	defer b.Unlock()
 	n := len(p)
-	room := b.limit - b.Len()
+	room := b.limit - b.buffer.Len()
 	if len(p) > room {
 		p = p[:room]
 		b.overflow = true
 		b.cancel()
 	}
-	_, _ = b.Buffer.Write(p)
+	_, _ = b.buffer.Write(p)
 	return n, nil
 }

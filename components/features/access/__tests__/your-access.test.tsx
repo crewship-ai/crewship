@@ -26,4 +26,22 @@ describe("YourAccess", () => {
     expect(screen.getByText(/Conditional — Eligible; checked again when the run starts/)).toBeInTheDocument()
     expect(screen.getByText(/Could not be determined/)).toBeInTheDocument()
   })
+
+  it("uses the supplied decision even when the independent read failed", () => {
+    state.value = { access: null, loading: false, error: true }
+    render(<YourAccess actions={actions} provided={{ access: { actions: { run: { state: "allowed", reason: "role" } } }, loading: false, error: false }} />)
+    expect(screen.getByText(/Allowed — Allowed by your workspace role/)).toBeVisible()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["routine_waiting_for_approval", "Routine is waiting for approval"],
+    ["new_server_policy", "Access is checked again when you act"],
+    ["sealed", "SEALED secrets cannot be revealed"],
+  ])("keeps a denied %s decision unavailable", (reason, explanation) => {
+    state.value = { access: { actions: { run: { state: "denied", reason } } }, loading: false, error: false }
+    render(<YourAccess actions={actions} />)
+    expect(screen.getByText(`Unavailable — ${explanation}`, { exact: false })).toBeVisible()
+    expect(screen.queryByText(/^Allowed —/)).not.toBeInTheDocument()
+  })
 })

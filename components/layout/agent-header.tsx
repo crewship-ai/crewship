@@ -12,7 +12,8 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
-import { apiFetch } from "@/lib/api-fetch"
+import { toast } from "sonner"
+import { stopAgent } from "@/lib/agent-stop"
 
 // Role label tone — neutral semantic tokens, no hardcoded palette shades.
 const AGENT_ROLE_TONE = "text-muted-foreground border-border bg-muted/40"
@@ -43,13 +44,14 @@ export function AgentHeader({ agentId }: AgentHeaderProps) {
     if (!workspaceId || !agent || stopping) return
     setStopping(true)
     try {
-      const res = await apiFetch(`/api/v1/agents/${agentId}/stop?workspace_id=${workspaceId}`, { method: "POST" })
-      if (res.ok) {
-        const data = await res.json()
-        setAgent((prev) => prev ? { ...prev, status: data.status } : prev)
+      // A failed stop keeps the current status: a 502 means the agent may
+      // still be running, so showing STOPPED would be a lie (#2864).
+      const result = await stopAgent(agentId, workspaceId)
+      if (result.ok) {
+        setAgent((prev) => prev ? { ...prev, status: result.status } : prev)
+      } else {
+        toast.error(`Could not stop ${agent.name}`, { description: result.message })
       }
-    } catch {
-      // silently fail
     } finally {
       setStopping(false)
     }
@@ -78,7 +80,6 @@ export function AgentHeader({ agentId }: AgentHeaderProps) {
       <AgentAvatar
         seed={agent.avatar_seed || agent.name}
         style={agent.avatar_style || agent.crew?.avatar_style}
-        agentId={agent.id}
         avatarUrl={agent.avatar_url}
         alt={agent.name}
         className="h-8 w-8 md:h-10 md:w-10 rounded-xl shrink-0"

@@ -199,7 +199,9 @@ terminal transitions matter for institutional knowledge.
   buildCrewMemoryBlock for LEAD includes 10 most recent; for AGENT
   excludes the outcomes section
 
-### 6.3 Live verification (dev3, post-deploy)
+### 6.3 Verification with an isolated fixture
+
+Use an owned disposable server and synthetic agent; never seed a shared instance.
 
 ```bash
 # 1. Bootstrap + seed (after #527 fixes land, or use manual bootstrap)
@@ -213,7 +215,7 @@ docker exec <crew-container> cat /crew/shared/.memory/lessons.md
 # expect a YAML entry with source: mission_outcome
 
 # 4. Spawn a LEAD agent and ask
-crewship ask --agent eva 'What did your crew complete recently?'
+crewship ask --agent <fixture-agent> 'What did your crew complete recently?'
 # expect summary that names the mission identifier
 ```
 

@@ -10,6 +10,10 @@ tag: Stable
 
 The Crew Journal is an append-only event stream backed by the `journal_entries` table (migration 52). Every observable action in Crewship lands here as one row: peer conversations, mission transitions, keeper decisions, LLM calls, approvals, checkpoints, hook fires, exec/network/file events.
 
+<Note>
+The `/journal` page is the technical log, and is shown to workspace **OWNER** and **ADMIN** only: the nav row is hidden below ADMIN, and a member, manager or viewer who follows a link is sent to [Activity](/guides/activity), which tells the same work as runs. The journal API is not role-gated — Activity reads it for every role — so this is a presentation boundary, not an access control.
+</Note>
+
 Downstream features -- [Paymaster](/guides/paymaster), [Watch Roster](/guides/watch-roster), [Episodic Memory](/guides/episodic-memory), [Cartographer](/guides/cartographer) -- are read-models or middleware over this one stream. If it happened in the platform and nobody can see it in the journal, it didn't happen.
 
 ## Schema

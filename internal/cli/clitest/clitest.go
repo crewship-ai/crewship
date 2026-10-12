@@ -184,7 +184,9 @@ func (s *StubServer) Calls() []RecordedCall {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]RecordedCall, len(s.calls))
-	copy(out, s.calls)
+	for i, call := range s.calls {
+		out[i] = cloneRecordedCall(call)
+	}
 	return out
 }
 
@@ -198,10 +200,17 @@ func (s *StubServer) CallsFor(method, path string) []RecordedCall {
 	var out []RecordedCall
 	for _, c := range s.calls {
 		if c.Method == method && c.Path == path {
-			out = append(out, c)
+			out = append(out, cloneRecordedCall(c))
 		}
 	}
 	return out
+}
+
+// cloneRecordedCall also detaches nested mutable data from the server log.
+func cloneRecordedCall(call RecordedCall) RecordedCall {
+	call.Headers = call.Headers.Clone()
+	call.Body = append([]byte(nil), call.Body...)
+	return call
 }
 
 // Reset clears the call log AND every registered route. Use between

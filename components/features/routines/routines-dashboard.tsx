@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { CalendarClock, ChevronRight, FileEdit, Hourglass, Play, Radio, XCircle } from "lucide-react"
+import { CalendarClock, CalendarX, ChevronRight, FileEdit, Hourglass, Play, Radio, XCircle } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { formatDurationMs } from "@/lib/activity-stream"
@@ -15,6 +15,7 @@ import { AttentionStrip, OutcomeKpis, UpNext, type AttentionItem, type OutcomeKp
 import { STATUS_PALETTE } from "@/app/(dashboard)/dashboard-helpers"
 import { routineRunPresentation, formatAgo, formatUntil } from "@/lib/routine-run-presentation"
 import type { OverviewRun } from "@/lib/routines-overview"
+import { didNotRun, isWaitingForCapacity, type PendingStart } from "@/lib/routine-pending-starts"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import { routineRunHref } from "./routines-workspace"
@@ -30,7 +31,10 @@ import { RoutineGlyph } from "./routine-glyph"
 //
 // Every figure derives from the run list the page already loads
 // (`usePipelineRuns`, 200 newest rows) and the schedules; nothing is fetched
-// twice or estimated. Runs of routines that the explorer's filters hide are
+// twice or estimated. When those rows stop inside the window the summary says
+// it covers the newest runs, not the week (`coveredSince`). Running and
+// waiting runs also come from the complete active feed, so a long run that
+// started before the newest 200 stays on the page. Runs of routines that the explorer's filters hide are
 // left out, so the pane follows the filters like the sidebar does.
 
 export const WINDOW_DAYS = 7
@@ -44,6 +48,12 @@ interface Props {
   routines: Pipeline[]
   runs: DashboardRun[]
   runsLoading?: boolean
+  /** Set when `runs` is the newest rows only and stops inside the window:
+   * the started_at of the oldest row (see windowCoverage). */
+  coveredSince?: string | null
+  /** Accepted deferred starts (receipts), for what did not run and what
+   * waits for capacity. */
+  pendingStarts?: PendingStart[]
   schedules: PipelineSchedule[]
   onSelect: (slug: string) => void
 }
@@ -51,6 +61,22 @@ interface Props {
 const LIVE = new Set(["running", "queued", "paused", "waiting"])
 const DONE_OK = new Set(["completed", "succeeded", "success"])
 const STOPPED = new Set(["cancelled", "canceled", "interrupted"])
+const NOT_SUCCESS_OUTCOMES = new Set(["PARTIAL", "NEEDS_HUMAN"])
+
+/** Where the run list stops when it is full and does not reach back the
+ * whole window: the started_at of its oldest row. Null when the list holds
+ * every run of the window (it is not full, or its oldest row is older than
+ * the window). `limit` is the row budget the list was fetched with. */
+export function windowCoverage(runs: DashboardRun[], limit: number, now = new Date()): string | null {
+  if (runs.length < limit) return null
+  let oldest: DashboardRun | null = null
+  for (const run of runs) {
+    const t = Date.parse(run.started_at)
+    if (Number.isFinite(t) && (!oldest || t < Date.parse(oldest.started_at))) oldest = run
+  }
+  if (!oldest) return null
+  return Date.parse(oldest.started_at) > now.getTime() - WINDOW_DAYS * 86_400_000 ? oldest.started_at : null
+}
 
 /** A run judged by its result, not only the engine status: a run that
  * completed with a failed result is a failure for a reader. */
@@ -72,7 +98,9 @@ export function outcomeKpis(runs: DashboardRun[], now = new Date()): OutcomeKpiD
   const since = now.getTime() - WINDOW_DAYS * 86_400_000
   const week = runs.filter((r) => within(r, since))
   const finished = week.filter((r) => !LIVE.has(effectiveStatus(r)) && !STOPPED.has(effectiveStatus(r)))
-  const completed = finished.filter((r) => DONE_OK.has(effectiveStatus(r))).length
+  // A partial result or one that waits on a person finished, but did not
+  // succeed for its reader — the run detail says so, and the rate agrees.
+  const completed = finished.filter((r) => DONE_OK.has(effectiveStatus(r)) && !NOT_SUCCESS_OUTCOMES.has(r.outcome ?? "")).length
   const durations = finished
     .map((r) => r.duration_ms)
     .filter((d): d is number => typeof d === "number" && d > 0)
@@ -159,14 +187,21 @@ export function groupLatestResults(runs: DashboardRun[], limit = 8): LatestResul
     .map(({ latest, count }) => ({ latest, count }))
 }
 
-export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSelect }: Props) {
+export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince, pendingStarts = [], schedules, onSelect }: Props) {
   const now = React.useMemo(() => new Date(), [])
   const visibleRuns = React.useMemo(
     () => runs.filter((r) => routines.some((p) => p.slug === r.pipeline_slug)),
     [runs, routines],
   )
-  const kpis = React.useMemo(() => outcomeKpis(visibleRuns, now), [visibleRuns, now])
-  const volume = React.useMemo(() => runOutcomesByDay(visibleRuns, now), [visibleRuns, now])
+  // The figures describe the history rows. An active run older than where a
+  // truncated list stops still shows as running, but is not counted into
+  // "the newest N runs".
+  const sampleRuns = React.useMemo(() => {
+    const from = coveredSince ? Date.parse(coveredSince) : NaN
+    return Number.isFinite(from) ? visibleRuns.filter((r) => Date.parse(r.started_at) >= from) : visibleRuns
+  }, [visibleRuns, coveredSince])
+  const kpis = React.useMemo(() => outcomeKpis(sampleRuns, now), [sampleRuns, now])
+  const volume = React.useMemo(() => runOutcomesByDay(sampleRuns, now), [sampleRuns, now])
   const volumeShape = outcomeVolumeShape(volume.buckets, volume.series.map((s) => s.key))
   const routineOf = (slug: string) => routines.find((p) => p.slug === slug)
 
@@ -175,11 +210,15 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
   const waiting = newest(visibleRuns.filter((r) => ["waiting", "paused"].includes((r.status ?? "").toLowerCase())))
   const running = newest(visibleRuns.filter((r) => ["running", "queued"].includes((r.status ?? "").toLowerCase())))
   const since = now.getTime() - WINDOW_DAYS * 86_400_000
-  const finished = newest(visibleRuns.filter((r) => !LIVE.has((r.status ?? "").toLowerCase()) && within(r, since)))
+  const finished = newest(sampleRuns.filter((r) => !LIVE.has((r.status ?? "").toLowerCase()) && within(r, since)))
   const resultGroups = groupLatestResults(finished)
   const failing = routines
     .filter((r) => r.last_invocation_status === "failed" || r.last_run_outcome === "FAILED")
     .sort((a, b) => (b.last_invoked_at ?? "").localeCompare(a.last_invoked_at ?? ""))
+  const myStarts = pendingStarts.filter((p) => routines.some((r) => r.slug === p.pipeline_slug))
+  // Accepted in the window but never ran: newest first, as the server lists them.
+  const notRun = myStarts.filter((p) => didNotRun(p) && Date.parse(p.fire_at) >= since)
+  const capacityWaits = myStarts.filter(isWaitingForCapacity)
   const drafts = routines.filter((r) => r.draft)
   const mySchedules = schedules.filter((s) => routines.some((p) => p.slug === s.target_pipeline_slug))
   const nextStart = mySchedules
@@ -209,6 +248,15 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
       tone: "danger",
       icon: XCircle,
     })
+  if (notRun.length)
+    attention.push({
+      id: "starts-not-run",
+      label: `${notRun.length} accepted ${notRun.length === 1 ? "start" : "starts"} did not run`,
+      detail: `Newest · ${routineOf(notRun[0].pipeline_slug)?.name ?? notRun[0].pipeline_slug}`,
+      href: routineViewHref(notRun[0].pipeline_slug, "plan"),
+      tone: "danger",
+      icon: CalendarX,
+    })
   if (nextStart?.target_pipeline_slug)
     attention.push({
       id: "schedules",
@@ -235,8 +283,10 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
       <div className="flex flex-wrap items-center gap-2">
         <Radio className="h-3.5 w-3.5 text-primary-hover" aria-hidden />
         <h2 className="eyebrow">Routine run summary</h2>
-        <span className="font-mono text-[11px] tabular-nums text-muted-foreground-soft">
-          {WINDOW_DAYS}d · {kpis.total} {kpis.total === 1 ? "run" : "runs"}
+        <span data-testid="run-summary-scope" className="font-mono text-[11px] tabular-nums text-muted-foreground-soft">
+          {coveredSince
+            ? `newest ${kpis.total} ${kpis.total === 1 ? "run" : "runs"} · since ${formatAgo(coveredSince, now.getTime())}`
+            : `${WINDOW_DAYS}d · ${kpis.total} ${kpis.total === 1 ? "run" : "runs"}`}
           {runsLoading ? " · loading" : ""}
         </span>
       </div>
@@ -297,6 +347,14 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
                 ))}
               </div>
             )}
+            {capacityWaits.length > 0 && (
+              <Link
+                href={routineViewHref(capacityWaits[0].pipeline_slug, "plan")}
+                className="mt-3 block rounded-lg bg-warn/10 px-3 py-2 text-label text-warn"
+              >
+                {capacityWaits.length} {capacityWaits.length === 1 ? "start waits" : "starts wait"} for a free slot · View →
+              </Link>
+            )}
             {waiting.length > 0 && (
               <Link
                 href={routineRunHref(waiting[0].pipeline_slug, waiting[0].id)}
@@ -349,7 +407,7 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
         }
       >
         {volumeShape === "single-day" ? (
-          <SingleDayOutcomes buckets={volume.buckets} series={volume.series} now={now} />
+          <SingleDayOutcomes buckets={volume.buckets} series={volume.series} now={now} partial={Boolean(coveredSince)} />
         ) : (
           <RunVolumeChart buckets={volume.buckets} series={volume.series} window="7d" />
         )}
@@ -420,8 +478,9 @@ function RunRow({ run, routine }: { run: DashboardRun; routine?: Pipeline }) {
 }
 
 /** A window whose runs all started on one day, said as a sentence with one
- * proportion bar — the seven-day chart would draw a single slab. */
-function SingleDayOutcomes({ buckets, series, now }: { buckets: RunVolumeBucket[]; series: RunVolumeSeries[]; now: Date }) {
+ * proportion bar — the seven-day chart would draw a single slab. `partial`:
+ * the runs are the newest rows only, not every run of the window. */
+function SingleDayOutcomes({ buckets, series, now, partial = false }: { buckets: RunVolumeBucket[]; series: RunVolumeSeries[]; now: Date; partial?: boolean }) {
   const day = buckets.find((b) => series.some((s) => Number(b[s.key]) > 0))
   if (!day) return null
   const counts = series.map((s) => ({ ...s, n: Number(day[s.key]) })).filter((s) => s.n > 0)
@@ -438,7 +497,15 @@ function SingleDayOutcomes({ buckets, series, now }: { buckets: RunVolumeBucket[
   return (
     <div data-testid="run-outcomes-single-day" className="flex flex-col gap-3">
       <p className="text-body text-muted-foreground">
-        All <span className="font-mono tabular-nums text-foreground">{total}</span> {total === 1 ? "run" : "runs"} in the window started {when}.
+        {partial ? (
+          <>
+            The newest <span className="font-mono tabular-nums text-foreground">{total}</span> {total === 1 ? "run" : "runs"} all started {when}.
+          </>
+        ) : (
+          <>
+            All <span className="font-mono tabular-nums text-foreground">{total}</span> {total === 1 ? "run" : "runs"} in the window started {when}.
+          </>
+        )}
       </p>
       <div className="flex h-2 w-full overflow-hidden rounded-full bg-foreground/[0.06]" role="img" aria-label={counts.map((s) => `${s.n} ${s.label}`).join(", ")}>
         {counts.map((s) => (

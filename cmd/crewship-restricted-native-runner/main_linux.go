@@ -135,6 +135,13 @@ func native(ctx context.Context, model string, output io.Writer) error {
 	cmd := exec.CommandContext(ctx, "/opt/codex", nativeArgs(model)...)
 	cmd.Dir = "/home/agent/work"
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=/home/agent", "CODEX_HOME=/home/agent/.codex", "LANG=C.UTF-8", "CREWSHIP_BROKER_TOKEN=" + os.Getenv("CREWSHIP_BROKER_TOKEN")}
+	return runNativeProcess(cmd, cancel, output, "/home/agent/work")
+}
+
+// runNativeProcess owns the child and emits completion only after its bounded
+// protocol, exit status and artifact export have all succeeded. The caller has
+// already verified the executable revisions and constructed the fixed command.
+func runNativeProcess(cmd *exec.Cmd, cancel context.CancelFunc, output io.Writer, workDir string) error {
 	reader, e := cmd.StdoutPipe()
 	if e != nil {
 		return e
@@ -202,7 +209,7 @@ func native(ctx context.Context, model string, output io.Writer) error {
 	if !complete || failed || textBytes == 0 {
 		return errors.New("native incomplete")
 	}
-	if e = emitArtifacts(output, "/home/agent/work"); e != nil {
+	if e = emitArtifacts(output, workDir); e != nil {
 		return e
 	}
 	return encoder.Encode(map[string]string{"type": "done"})

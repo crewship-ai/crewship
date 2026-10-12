@@ -42,6 +42,8 @@ func envBool(name string) (val, ok bool) {
 // Config holds all configuration for the crewship server, including server,
 // IPC, container, storage, state, logging, auth, LLM proxy, Keeper, and license settings.
 type Config struct {
+	pathSources map[string]string // effective explicit path origins, populated while loading
+
 	Server    ServerConfig    `yaml:"server"`
 	IPC       IPCConfig       `yaml:"ipc"`
 	Container ContainerConfig `yaml:"container"`
@@ -153,6 +155,11 @@ type ContainerConfig struct {
 
 // StorageConfig holds file storage settings for agent outputs and logs.
 type StorageConfig struct {
+	// RunOutputPath is host-private retained execution output, never mounted
+	// into workloads. Empty explicitly disables host capture.
+	RunOutputPath                    string `yaml:"run_output_path"`
+	RunOutputMaxBytes                int64  `yaml:"run_output_max_bytes"`
+	RunOutputMaxRuns                 int    `yaml:"run_output_max_runs"`
 	PageStudioOrigin                 string `yaml:"page_studio_origin"`                   // Public browser origin; independent of internal API transport.
 	PageRuntimeDevelopmentSameOrigin bool   `yaml:"page_runtime_development_same_origin"` // Reviewed demos only; no process isolation guarantee.
 	PageBuildImage                   string `yaml:"page_build_image"`                     // Pinned image digest; empty disables builds.
@@ -316,6 +323,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyEnvOverrides(cfg)
+	capturePathEnvSources(cfg)
 
 	// Autodetect sidecar binary + entrypoint.sh paths when not explicitly set.
 	// Since the legacy agent-runtime image (with baked-in sidecar) has been
@@ -401,6 +409,15 @@ var (
 // Validate checks that all configuration values are within acceptable ranges
 // and required fields are set. Returns an error describing the first invalid value.
 func (c *Config) Validate() error {
+	if value := c.Storage.RunOutputPath; value != "" && (!filepath.IsAbs(value) || filepath.Clean(value) != value || strings.ContainsRune(value, 0)) {
+		return fmt.Errorf("storage.run_output_path must be a clean absolute host-private path")
+	}
+	if value := c.Storage.RunOutputMaxBytes; value != 0 && (value < 64*1024*1024+64*1024 || value > 1024*1024*1024*1024) {
+		return fmt.Errorf("storage.run_output_max_bytes must be zero (default) or between 64 MiB plus 64 KiB and 1 TiB")
+	}
+	if value := c.Storage.RunOutputMaxRuns; value < 0 || value > 1000000 {
+		return fmt.Errorf("storage.run_output_max_runs must be zero (default) or between 1 and 1000000")
+	}
 	if err := validatePageRuntime(c.Storage.PageRuntimeOrigin, c.PageStudioOrigin(), c.Storage.PageRuntimeDevelopmentSameOrigin); err != nil {
 		return err
 	}
@@ -476,6 +493,25 @@ func loadFromFile(cfg *Config, path string) error {
 	}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		return fmt.Errorf("parse path origins %s: %w", path, err)
+	}
+	var values map[string]any
+	if err := document.Decode(&values); err != nil {
+		return fmt.Errorf("decode path origins %s: %w", path, err)
+	}
+	cfg.pathSources = make(map[string]string)
+	for key := range pathEnvironment {
+		parts := strings.Split(key, ".")
+		if section, ok := values[parts[0]].(map[string]any); ok {
+			// Null follows yaml's default-preserving behavior; an explicit
+			// empty string remains explicit (e.g. disabling memory).
+			if value, exists := section[parts[1]]; exists && value != nil {
+				cfg.pathSources[key] = "yaml"
+			}
+		}
 	}
 	return nil
 }
@@ -578,6 +614,9 @@ func applyEnvOverrides(cfg *Config) {
 	// tier and memory versioning.
 	if v := os.Getenv("CREWSHIP_STORAGE_MEMORY_ROOT"); v != "" {
 		cfg.Storage.MemoryRoot = v
+	}
+	if v := os.Getenv("CREWSHIP_RUN_OUTPUT_PATH"); v != "" {
+		cfg.Storage.RunOutputPath = v
 	}
 	if v := os.Getenv("CREWSHIP_LOG_PATH"); v != "" {
 		cfg.Storage.LogPath = v

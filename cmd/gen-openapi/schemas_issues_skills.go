@@ -101,7 +101,11 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"avatar_seed": nullable("string"), "avatar_style": nullable("string"), "avatar_url": nullable("string"),
 		"crew_id": nullable("string"), "crew_slug": nullable("string"), "crew_name": nullable("string"),
 		"crew_color": nullable("string"), "crew_icon": nullable("string"), "crew_avatar_style": nullable("string"),
-	}, "agent_id", "agent_slug", "agent_name")
+		"missing_credentials": stringArray(),
+	}, "agent_id", "agent_slug", "agent_name", "missing_credentials")
+	skillUsage := obj(map[string]any{
+		"uses_7d": integer(), "errors_7d": integer(), "uses_total": integer(), "last_used_at": nullable("string"),
+	}, "uses_7d", "errors_7d", "uses_total", "last_used_at")
 	skill := obj(map[string]any{
 		"id": str(), "name": str(), "slug": str(), "display_name": str(), "description": nullable("string"),
 		"version": str(), "author": nullable("string"), "category": str(), "source": str(), "icon": nullable("string"),
@@ -110,8 +114,10 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"vendor": nullable("string"), "homepage": nullable("string"), "spdx_license": nullable("string"),
 		"runtime": str(), "maturity": str(), "scan_status": str(), "description_quality": nullable("string"),
 		"created_at": str(), "updated_at": str(), "installed_on": arrayOf(ref("InstalledSkillAgent")),
+		"lifecycle_state": str(), "needs_credentials": stringArray(), "usage": ref("SkillUsage"),
 	}, "id", "name", "slug", "display_name", "version", "category", "source", "verification", "downloads", "rating_count", "featured", "pricing_tier", "runtime", "maturity", "scan_status", "created_at", "updated_at",
-		"description", "author", "icon", "rating_avg", "tags", "tool_count", "vendor", "homepage", "spdx_license", "description_quality")
+		"description", "author", "icon", "rating_avg", "tags", "tool_count", "vendor", "homepage", "spdx_license", "description_quality",
+		"lifecycle_state", "needs_credentials", "usage")
 	skillDetail := obj(map[string]any{
 		"id": str(), "name": str(), "slug": str(), "display_name": str(), "description": nullable("string"),
 		"version": str(), "author": nullable("string"), "category": str(), "source": str(), "icon": nullable("string"),
@@ -120,12 +126,14 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"vendor": nullable("string"), "homepage": nullable("string"), "spdx_license": nullable("string"),
 		"runtime": str(), "maturity": str(), "scan_status": str(), "description_quality": nullable("string"),
 		"created_at": str(), "updated_at": str(), "installed_on": arrayOf(ref("InstalledSkillAgent")),
+		"lifecycle_state": str(), "needs_credentials": stringArray(), "usage": ref("SkillUsage"),
 		"content": nullable("string"), "credential_requirements": nullable("string"), "mcp_server_command": nullable("string"),
 		"mcp_server_image": nullable("string"), "mcp_transport": nullable("string"), "dependencies": nullable("string"),
 		"license": nullable("string"), "agent_count": integer(), "security_score": nullable("integer"),
 		"allowed_domains": nullable("string"), "changelog": nullable("string"),
 	}, "id", "name", "slug", "display_name", "version", "category", "source", "verification", "downloads", "rating_count", "featured", "pricing_tier", "runtime", "maturity", "scan_status", "created_at", "updated_at",
 		"description", "author", "icon", "rating_avg", "tags", "tool_count", "vendor", "homepage", "spdx_license", "description_quality",
+		"lifecycle_state", "needs_credentials", "usage",
 		"content", "credential_requirements", "mcp_server_command", "mcp_server_image", "mcp_transport", "dependencies", "license", "agent_count", "security_score", "allowed_domains", "changelog")
 
 	credential := obj(map[string]any{
@@ -176,7 +184,7 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"Issue": issue, "IssueList": arrayOf(ref("Issue")), "IssueCreator": creator,
 		"IssueOwner": issueOwner, "IssueDelegate": issueDelegate,
 		"Label": label, "LabelList": arrayOf(ref("Label")),
-		"Skill": skill, "SkillDetail": skillDetail, "SkillList": arrayOf(ref("Skill")), "InstalledSkillAgent": installedAgent,
+		"Skill": skill, "SkillDetail": skillDetail, "SkillList": arrayOf(ref("Skill")), "InstalledSkillAgent": installedAgent, "SkillUsage": skillUsage,
 		"Credential": credential, "CredentialList": arrayOf(ref("Credential")),
 		"ProviderLogin": providerLogin, "ProviderLoginRefreshResponse": providerLoginRefreshResponse,
 		"CredentialPage":  obj(map[string]any{"credentials": arrayOf(ref("Credential")), "next_cursor": nullable("string"), "limit": integer()}, "credentials", "next_cursor", "limit"),

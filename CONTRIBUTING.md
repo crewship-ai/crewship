@@ -67,6 +67,10 @@ The `cmd/crewship` suite scrubs every `CREWSHIP_*` variable from its own
 environment before running, so a shell that exports `CREWSHIP_PROFILE` or
 `CREWSHIP_SERVER` for a dev instance can no longer redirect the tests at
 your live server. Tests that need one of those vars set it themselves.
+After that scrub, the harness sets `CREWSHIP_NO_SLUG_CACHE=1` so CLI child
+processes bypass the shared workspace slug cache: an ephemeral test server
+can reuse another fixture's URL and slug with a different workspace ID.
+Disk-cache behavior is tested explicitly in `internal/cli/slugcache_test.go`.
 
 For UI changes, also exercise the affected feature in a browser before
 declaring it done. Type checking and tests verify code correctness, not
@@ -155,7 +159,30 @@ tick the boxes that apply and remove rows that don't.
 CI classifies the actual Git diff. Code changes run the frontend, embedded
 server, browser and Docker checks; frontend-only changes skip the Go matrix.
 Documentation-only PRs retain the workflow/invariant and security verdicts.
+Documentation skips are limited to prose and image extensions; unknown inputs
+under `docs/` run the full suite. Provider-order, OpenAPI schema figures, Docker
+proxy, WebSocket and telemetry documentation changes retain their Go/frontend
+parity tests, and frontend vocabulary changes
+retain the corresponding Go mirror checks even when the Go matrix is skipped.
+Renames are classified as deletion plus addition so moving source into docs
+cannot hide a runtime change. Prose changes under `docs/` and changes to this
+contributor entrypoint also retain the strict API/CLI documentation inventory
+when the Go lint job is skipped.
 Unknown paths trigger the full suite, as do main pushes.
+
+Frontend tests run in four isolated partitions. Type checking runs once; the
+`Frontend Test` gate requires all partition artifacts, checks that each
+discovered test file appears exactly once in the results, and applies the
+unchanged global coverage thresholds to the merged report. Local
+`pnpm test:coverage` remains
+the equivalent single-invocation entrypoint. Partition summaries report actual
+passed, pending and todo counts; complete file discovery does not imply every
+assertion executed. Native Vitest blobs retain absolute paths, so all
+partitions and their merge must use the same checkout path (as the Ubuntu
+workflow jobs do).
+Each partition must include the configured coverage baseline discovered by
+the locked V8 provider. Imported nested modules can differ between partitions;
+the merged report must preserve their full union as well as the baseline.
 
 The root Dockerfile builds and boots on every code PR through the reusable
 `pr-image-build.yml` job. It tests `linux/amd64` without pushing; publication
@@ -197,6 +224,37 @@ the scenario ran. For behavioral fixes, include a regression test that exercises
 the failure at the affected boundary (CLI/API, restart, Docker or restore).
 Historical bot tooling remains available for old PR investigations only; see
 [the archived process](docs/development/coderabbit-review-process.md).
+
+## Merge through the queue
+
+After recording the review and validation, enqueue with
+`gh pr merge <PR> --auto --squash`. GitHub CLI enables auto-merge while required
+checks are pending and adds an eligible PR to a required merge queue. Do not
+repeatedly merge main into the branch just to chase other queued merges: the
+queue tests its candidate against the current base. Use
+`--match-head-commit <SHA>` when submitting a reviewed head to prevent a concurrent push from
+changing the candidate.
+
+The queue policy uses one PR per merge group and becomes usable only after
+actual PR and merge-group canaries prove that every required context is emitted.
+`CI Result`, `Security Result`, `CodeQL Result` and `CI Inventory Guard` (once
+required) must execute on `merge_group`; a planned skip must still match the
+change plan. Main pushes retain the full exact-SHA verification required by
+publication. Queueing is not permission to remove those checks.
+
+A PR or merge group that changes protected CI controls also needs a visible,
+exact-SHA exception recorded through the trusted-main inventory guard. A new
+head or group SHA needs fresh review; this exception does not bypass required
+checks or authorize an administrative merge.
+
+Do not use `--admin` or a direct REST merge to bypass the queue. An emergency
+exception requires a recorded reason, responsible operator, reviewed head SHA
+and successful required checks for that exact SHA in the PR before merging.
+
+Measure changes with [the read-only PR throughput collector](scripts/ci/pr-throughput.md).
+Compare complete PR open-to-merge time, evidenced final substantive push-to-merge
+time, workflow queue/execution, failure rate and reruns. A new run after a push
+or automatic branch update is not a rerun attempt.
 
 ## Issues
 

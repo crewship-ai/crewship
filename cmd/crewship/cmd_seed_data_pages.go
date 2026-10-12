@@ -51,7 +51,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/pages"
 )
 
-func seedPages(ctx context.Context, client *cli.Client, deferCrewTelemetry bool) error {
+func seedPages(ctx context.Context, client *cli.Client, deferCrewTelemetry bool, offline ...bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -117,6 +117,10 @@ func seedPages(ctx context.Context, client *cli.Client, deferCrewTelemetry bool)
 
 	if failed > 0 {
 		return fmt.Errorf("demo seed incomplete: %d page operations failed", failed)
+	}
+	if len(offline) > 0 && offline[0] {
+		fmt.Fprintln(os.Stderr, "Offline demo: routine-backed panels await provider configuration; no producer runs started.")
+		return nil
 	}
 	return seedPageProducerRoutines(ctx, client, wsID, deferCrewTelemetry)
 }

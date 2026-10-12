@@ -168,7 +168,7 @@ export function SecurityPage() {
           return (
             <DrillNavItem key={s.key} index={i} selected={section === s.key} onSelect={() => update({ section: s.key })}
               icon={<Icon className="h-3.5 w-3.5" />} label={s.label} title={SCOPE_HINT[s.scope]}
-              meta={<span className={cn("rounded px-1 text-[10px]", s.scope === "instance" ? "bg-primary/10 text-primary-hover" : "bg-muted")}>{s.scope === "instance" ? "Instance" : "Per workspace"}</span>} />
+              meta={<span className={cn("rounded px-1 text-micro", s.scope === "instance" ? "bg-primary/10 text-primary-hover" : "bg-muted")}>{s.scope === "instance" ? "Instance" : "Per workspace"}</span>} />
           )
         })}
       </DrillNavSection>
@@ -204,7 +204,7 @@ export function SecurityPage() {
   if (!inst.gov && inst.loading) {
     body = <div className="space-y-3"><Skeleton className="h-8 rounded-lg" /><Skeleton className="h-[280px] rounded-card" /></div>
   } else if (inst.govError && !inst.gov) {
-    body = <p className="rounded-lg border border-border px-4 py-3 text-[13px] text-destructive">{inst.govError}</p>
+    body = <p className="rounded-lg border border-border px-4 py-3 text-control text-destructive">{inst.govError}</p>
   } else if (section === "overview") {
     body = <SecurityOverview status={data.status} posture={data.posture} postureError={data.postureError} entries={entries}
       workspaceId={workspaceId ?? ""} counts={inst.requests ? { total: inst.requests.total, ...inst.requests.counts } : undefined}
@@ -225,7 +225,7 @@ export function SecurityPage() {
     )
   } else if (section === "activity") {
     body = sel.size === 0
-      ? <p className="text-[13px] text-muted-foreground">Tick a workspace in the panel.</p>
+      ? <p className="text-control text-muted-foreground">Tick a workspace in the panel.</p>
       : <SecurityActivity entries={entries} stream={stream} onStream={(s) => update({ stream: s })} live={data.live} error={inst.requestsError}
           server={{
             decision, onDecision: setDecision, total: inst.requests?.total ?? 0, loading: inst.requestsLoading,
@@ -237,7 +237,7 @@ export function SecurityPage() {
       <>
         <SettingsSummary slot="security-scope">
           <SummaryItem>
-            <span className={cn("mr-2 rounded-full px-2 font-mono text-[10.5px]", settings.scope === "instance" ? "bg-primary/10 text-primary-hover" : "bg-muted text-muted-foreground")}>
+            <span className={cn("mr-2 rounded-full px-2 font-mono text-micro", settings.scope === "instance" ? "bg-primary/10 text-primary-hover" : "bg-muted text-muted-foreground")}>
               {SCOPE_LABEL[settings.scope]}
             </span>
             {bulk ? (singleRow ? `Editing ${singleRow.workspace_name}` : bulkRows ? (allTicked ? `All ${rows.length} existing workspace${rows.length === 1 ? "" : "s"}` : `${rows.length} workspaces selected`) : SCOPE_HINT[settings.scope]) : SCOPE_HINT[settings.scope]}
@@ -248,7 +248,7 @@ export function SecurityPage() {
         {section === "rules" && cardWs && <KeeperProfileCard workspaceId={cardWs} />}
         {section === "background" && cardWs && <JudgeModelsCard workspaceId={cardWs} />}
         {section === "defaults" && inst.gov && <DefaultsForm current={inst.gov.defaults} onSaved={() => void inst.reloadGov()} />}
-        {bulk && rows.length === 0 && <p className="text-[13px] text-muted-foreground">Tick one or more workspaces in the panel.</p>}
+        {bulk && rows.length === 0 && <p className="text-control text-muted-foreground">Tick one or more workspaces in the panel.</p>}
         {bulk && instanceProp && (
           <KeeperGovernancePanel key={instanceProp.row.workspace_id} workspaceId={instanceProp.row.workspace_id}
             serverEnabled={data.status?.enabled ?? false} section={PANEL_SECTION[section]} instance={instanceProp} />

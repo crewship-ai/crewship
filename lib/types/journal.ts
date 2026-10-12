@@ -27,6 +27,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "run.completed",
   "run.failed",
   "run.cancelled",
+  "run.recovered_stop",
   "run.timeout",
   // Security
   "keeper.request",
@@ -294,7 +295,7 @@ export const ENTRY_TYPE_GROUPS: { label: string; types: JournalEntryType[] }[] =
   },
   {
     label: "Runs",
-    types: ["run.started", "run.completed", "run.failed", "run.cancelled", "run.timeout"],
+    types: ["run.started", "run.completed", "run.failed", "run.cancelled", "run.recovered_stop", "run.timeout"],
   },
   {
     label: "Checkpointing",

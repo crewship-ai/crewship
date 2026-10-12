@@ -7,22 +7,22 @@ import { formatRoutineTime } from "@/lib/routine-time"
 
 import { routinePresetSummary } from "@/lib/routine-preset-summary"
 
-import { useCallback, useEffect, useState } from "react"
+import { useMemo, useState } from "react"
+import Link from "next/link"
 import { Plus } from "lucide-react"
 import { apiFetch } from "@/lib/api-fetch"
 import { Button } from "@/components/ui/button"
+import { StatusPill } from "@/components/ui/status-pill"
+import { usePendingStarts } from "@/hooks/use-pending-starts"
+import { pendingStartPresentation, pendingStartStatus, type PendingStart } from "@/lib/routine-pending-starts"
 import { Card } from "./_shared"
 import { RoutineDateTimePicker } from "./routine-date-time-picker"
 import { RoutineRunInputsDialog } from "./routine-run-inputs-dialog"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
 
-interface Pending {
-  id: string
-  pipeline_slug: string
-  fire_at: string
-  inputs?: Record<string, unknown>
-  pinned_version?: number | null
-}
+// Accepted starts that already left the queue, shown under the planned ones
+// so a start never vanishes without saying what became of it.
+const SETTLED_LIMIT = 5
 export function RoutineOnceSchedule({
   workspaceId,
   slug,
@@ -38,20 +38,22 @@ export function RoutineOnceSchedule({
   const { role, capabilities } = useAbilities()
   const permissions = routinePermissions(role, capabilities)
   const [at, setAt] = useState("")
-  const [pending, setPending] = useState<Pending[]>([])
+  const { starts, error: loadError, refresh } = usePendingStarts(workspaceId)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [picking, setPicking] = useState(false)
   const [specs, setSpecs] = useState<RoutineInputSpec[] | null>(null)
   const base = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}`
-  const refresh = useCallback(async () => {
-    const res = await apiFetch(`${base}/pipelines/pending`)
-    if (!res.ok) throw new Error("Could not load scheduled starts")
-    setPending((await res.json()).filter((p: Pending) => p.pipeline_slug === slug))
-  }, [base, slug])
-  useEffect(() => {
-    void refresh().catch((e) => setError(e.message))
-  }, [refresh])
+  const mine = useMemo(() => starts.filter((p) => p.pipeline_slug === slug), [starts, slug])
+  const pending = useMemo(
+    () => mine.filter((p) => pendingStartStatus(p) === "pending").sort((a, b) => Date.parse(a.fire_at) - Date.parse(b.fire_at)),
+    [mine],
+  )
+  // The server lists non-pending receipts newest accepted first.
+  const settled = useMemo(() => mine.filter((p) => pendingStartStatus(p) !== "pending").slice(0, SETTLED_LIMIT), [mine])
+  // A server that predates receipts sends no can_cancel; it lists only
+  // pending starts, which a manager may remove.
+  const canRemove = (p: PendingStart) => (p.can_cancel ?? permissions.author)
   const schedule = async (inputs: Record<string, unknown>) => {
     setBusy(true)
     setError(null)
@@ -134,9 +136,9 @@ export function RoutineOnceSchedule({
       }
     >
       <section aria-label="One-time starts" className="divide-y divide-border/40">
-        {error && (
+        {(error || loadError) && (
           <p role="alert" className="px-4 py-3 text-sm text-destructive">
-            {error}
+            {error || loadError}
           </p>
         )}
         {pending.map((p) => (
@@ -148,7 +150,13 @@ export function RoutineOnceSchedule({
             <div className="min-w-0 space-y-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-semibold">{formatRoutineTime(p.fire_at)}</span>
+                <StatusPill tone={pendingStartPresentation(p).tone} label={pendingStartPresentation(p).label} />
               </div>
+              {pendingStartStatus(p) === "pending" && (p.dispatch_attempts ?? 0) > 0 && (
+                <p className="text-xs text-muted-foreground" data-testid={`pending-state-${p.id}`}>
+                  {pendingStartPresentation(p).detail}
+                </p>
+              )}
               <p className="text-xs text-muted-foreground" data-testid={`pending-uses-${p.id}`}>
                 {p.pinned_version ? (
                   <>
@@ -172,8 +180,8 @@ export function RoutineOnceSchedule({
                 size="sm"
                 variant="ghost"
                 className="h-8 text-xs"
-                disabled={busy || !permissions.author}
-                title={!permissions.author ? "Removing a planned start requires a manager role" : undefined}
+                disabled={busy || !canRemove(p)}
+                title={!canRemove(p) ? "Removing a planned start requires a manager role" : undefined}
                 onClick={() => cancel(p.id)}
               >
                 Remove
@@ -181,6 +189,26 @@ export function RoutineOnceSchedule({
             </div>
           </div>
         ))}
+        {settled.length > 0 && (
+          <div aria-label="Recent accepted starts" role="group" className="space-y-1 px-4 py-3">
+            <p className="text-xs font-medium text-muted-foreground">Recent accepted starts</p>
+            {settled.map((p) => {
+              const view = pendingStartPresentation(p)
+              return (
+                <div key={p.id} data-testid={`settled-start-${p.id}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-1 text-xs">
+                  <span className="font-mono tabular-nums text-muted-foreground">{formatRoutineTime(p.fire_at)}</span>
+                  <StatusPill tone={view.tone} label={view.label} />
+                  <span className="min-w-0 flex-1 basis-48 text-muted-foreground">{view.detail}</span>
+                  {p.run_id && (
+                    <Link className="text-primary hover:underline" href={`/routines?${new URLSearchParams({ slug, run: p.run_id })}`}>
+                      Open run
+                    </Link>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
         {!pending.length && !picking && (
           <p className="px-4 py-3 text-sm text-muted-foreground">
             No one-time start planned. Starts added from the Calendar appear here too.

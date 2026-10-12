@@ -16,15 +16,13 @@ import (
 // materialises when the user explicitly toggles or the FE pushes a
 // refreshed list.
 //
-// This is NOT access control on the self-hosted/legacy MCP path: the
-// sidecar gateway's CallTool (internal/sidecar/mcp_gateway.go) has no
-// per-tool lookup and will happily invoke a tool whose binding is
-// disabled — the enabled set only reaches attachEnabledToolNames
-// (internal/api/agent_config.go), which lists it in the model-facing
-// [CONNECTED INTEGRATIONS] prompt block as a hint of what to call, not
-// a gate on what it CAN call. Disabling a tool here is advisory: it
-// asks the model not to reach for it. It does not stop the model, and
-// it does not stop a direct API/CLI call to the tool.
+// On the self-hosted/legacy MCP path, attachToolBindings
+// (internal/api/agent_config.go) splits the rows per resolved server: the
+// enabled names feed the model-facing [CONNECTED INTEGRATIONS] block, and
+// the disabled names travel to the crew sidecar as DisabledTools, where
+// MCPGateway.CallTool refuses them and the catalog omits them (#2178).
+// The sidecar reads them at start. Agent CLIs that dial an HTTP MCP
+// server directly from their own MCP config are not gated per tool yet.
 //
 // Composio-routed integrations are different: Composio enforces its own
 // allowed_tools scope server-side (internal/composio/client.go

@@ -13,7 +13,7 @@ over HTTP, so nothing here can act on a remote instance.
 Stop `crewshipd` before commands that write or replace the database. The
 commands are host-side operations and do not require an API session.
 
-## `--local`: which database, and why the CLI asks
+## `crewship db` — local database selection
 
 If `--server`, `--profile` or `CREWSHIP_SERVER` names a server, every `db`
 command **refuses to run** unless you also pass `--local`. The refusal names
@@ -54,7 +54,7 @@ file a given `crewshipd` actually uses is how you ask about that instance.
 
 ```bash
 crewship db migration-status --local
-DATABASE_URL=file:/srv/crewship/crewship_3/crewship.db \
+DATABASE_URL=file:/var/lib/crewship/crewship.db \
   crewship db migration-status --local
 ```
 

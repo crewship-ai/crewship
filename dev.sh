@@ -4,7 +4,7 @@ set -euo pipefail
 # Ensure Go is on PATH when invoked via SSH non-login shell
 export PATH="$PATH:/usr/local/go/bin:$HOME/go/bin"
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd -P "$(dirname "$0")" && pwd -P)"
 
 # --- Multi-instance detection ---
 # crewship_1 -> instance 1, crewship_2 -> instance 2, etc.
@@ -17,17 +17,160 @@ else
   GO_PORT=$((8080 + INSTANCE_NUM)); NEXT_PORT=$((3010 + INSTANCE_NUM)); S="-${INSTANCE_NUM}"
 fi
 
-NEXT_PID_FILE="/tmp/crewship${S}-next.pid"
-GO_PID_FILE="/tmp/crewship${S}-go.pid"
-NEXT_LOG="/tmp/crewship${S}-next.log"
-GO_LOG="/tmp/crewship${S}-go.log"
+# .env.local remains a trusted shell file. Preserve every incoming exported
+# value, including an explicitly empty value, after evaluating its defaults.
+load_env_local() {
+  local env_file="$1" name i
+  local -a incoming_names=() incoming_values=()
+  while IFS= read -r name; do
+    incoming_names+=("$name")
+    incoming_values+=("${!name}")
+  done < <(compgen -e)
+  if [[ -f "$env_file" ]]; then
+    set -a
+    . "$env_file"
+    set +a
+  fi
+  for ((i=0; i<${#incoming_names[@]}; i++)); do
+    name="${incoming_names[$i]}"
+    if [[ "${!name-}" != "${incoming_values[$i]}" ]]; then
+      printf -v "$name" '%s' "${incoming_values[$i]}"
+    fi
+    export "$name"
+  done
+}
 
-DATA_DIR="/tmp/crewship${S}-data"
-LOG_PATH="/tmp/crewship${S}-logs"
-STATE_DIR="/tmp/crewship${S}-state"
-PAGE_PROJECTS_DIR="/tmp/crewship${S}-page-projects"
-SOCKET_PATH="/tmp/crewship${S}.sock"
-CONTAINER_NETWORK="crewship${S}-agents"
+resolve_dev_paths() {
+  local installation_id identity_home identity_parent identity_tail=""
+  local checkout_id selected_home="${CREWSHIP_HOME:-}" selected_data="${CREWSHIP_DATA_DIR:-}" socket_bytes
+  while [[ "$selected_home" != / && "$selected_home" == */ ]]; do selected_home="${selected_home%/}"; done
+  while [[ "$selected_data" != / && "$selected_data" == */ ]]; do selected_data="${selected_data%/}"; done
+  checkout_id=$(printf '%s' "$PROJECT_DIR" | cksum | awk '{print $1}')
+  if [[ -n "$selected_home" && -n "$selected_data" && "$selected_home" != "$selected_data" ]]; then
+    echo 'CREWSHIP_HOME and CREWSHIP_DATA_DIR must select the same installation' >&2
+    return 1
+  fi
+  DEV_HOME="${selected_home:-${selected_data:-${XDG_DATA_HOME:-$HOME/.local/share}/crewship/dev/$checkout_id}}"
+  if [[ "$DEV_HOME" != /* ]]; then
+    echo 'Development installation home must be absolute' >&2
+    return 1
+  fi
+  while [[ "$DEV_HOME" != / && "$DEV_HOME" == */ ]]; do DEV_HOME="${DEV_HOME%/}"; done
+  export CREWSHIP_HOME="$DEV_HOME" CREWSHIP_DATA_DIR="$DEV_HOME"
+  # Resolve the existing ancestor physically without creating the home.
+  # This makes symlink aliases select the same Docker resource namespace.
+  identity_parent="$DEV_HOME"
+  while [[ ! -d "$identity_parent" && "$identity_parent" != / ]]; do
+    identity_tail="/$(basename "$identity_parent")$identity_tail"
+    identity_parent=$(dirname "$identity_parent")
+  done
+  identity_home="$(cd -P "$identity_parent" && pwd -P)"
+  identity_home="${identity_home%/}$identity_tail"
+  identity_home="${identity_home:-/}"
+  installation_id=$(printf '%s' "$identity_home" | cksum | awk '{print $1}')
+  RUNTIME_DIR="$DEV_HOME/run"
+  if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
+    if [[ "$XDG_RUNTIME_DIR" != /* ]]; then
+      echo 'XDG_RUNTIME_DIR must be absolute' >&2
+      return 1
+    fi
+    RUNTIME_DIR="$XDG_RUNTIME_DIR/crewship-dev-$installation_id"
+  fi
+  NEXT_PID_FILE="$RUNTIME_DIR/next.pid"
+  GO_PID_FILE="$RUNTIME_DIR/go.pid"
+  NEXT_LOG="$DEV_HOME/logs/next.log"
+  GO_LOG="$DEV_HOME/logs/go.log"
+  DEV_BINARY="$DEV_HOME/run/bin/crewship"
+  DATA_DIR="${CREWSHIP_STORAGE_BASE_PATH:-$DEV_HOME/data}"
+  LOG_PATH="${CREWSHIP_LOG_PATH:-$DEV_HOME/logs}"
+  BOLT_PATH="${CREWSHIP_BOLT_PATH:-$DEV_HOME/state/state.db}"
+  PAGE_PROJECTS_DIR="${CREWSHIP_PAGE_PROJECTS_PATH:-$DEV_HOME/page-projects}"
+  SOCKET_PATH="${CREWSHIP_SOCKET_PATH:-$RUNTIME_DIR/crewship.sock}"
+  # The server has historically run from PROJECT_DIR. Resolve every relative
+  # override once so stop/status/nuke use the same files from any caller cwd.
+  local path_name
+  for path_name in DATA_DIR LOG_PATH BOLT_PATH PAGE_PROJECTS_DIR SOCKET_PATH; do
+    if [[ "${!path_name}" != /* ]]; then
+      printf -v "$path_name" '%s' "$PROJECT_DIR/${!path_name}"
+    fi
+  done
+  if [[ -n "${CREWSHIP_STORAGE_MEMORY_ROOT:-}" && "$CREWSHIP_STORAGE_MEMORY_ROOT" != /* ]]; then
+    export CREWSHIP_STORAGE_MEMORY_ROOT="$PROJECT_DIR/$CREWSHIP_STORAGE_MEMORY_ROOT"
+  fi
+  STATE_DIR=$(dirname "$BOLT_PATH")
+  # Darwin sockaddr_un is shorter than Linux; do not create an unusable IPC
+  # path or silently fall back to a global /tmp socket.
+  socket_bytes=$(printf '%s' "$SOCKET_PATH" | wc -c)
+  if (( socket_bytes > 103 )); then
+    echo 'Development socket path is too long; set a shorter XDG_RUNTIME_DIR or CREWSHIP_SOCKET_PATH' >&2
+    return 1
+  fi
+  export CREWSHIP_STORAGE_BASE_PATH="$DATA_DIR" CREWSHIP_LOG_PATH="$LOG_PATH"
+  export CREWSHIP_BOLT_PATH="$BOLT_PATH" CREWSHIP_SOCKET_PATH="$SOCKET_PATH"
+  export CREWSHIP_PAGE_PROJECTS_PATH="$PAGE_PROJECTS_DIR"
+  export DATABASE_URL="${DATABASE_URL:-file:$DEV_HOME/db/crewship.db}"
+  GO_PORT="${CREWSHIP_PORT:-$GO_PORT}"
+  export CREWSHIP_CONTAINER_PREFIX="${CREWSHIP_CONTAINER_PREFIX-crewship-dev-$installation_id}"
+  CONTAINER_NETWORK="${CREWSHIP_CONTAINER_NETWORK-crewship-dev-$installation_id-agents}"
+  export CREWSHIP_CONTAINER_NETWORK="$CONTAINER_NETWORK"
+  if [[ ! "$CREWSHIP_CONTAINER_PREFIX" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ || -z "$CONTAINER_NETWORK" ]]; then
+    echo 'Development container prefix and network must be nonempty valid names' >&2
+    return 1
+  fi
+}
+
+# Do not silently abandon surviving data from the former /tmp layout.
+check_legacy_dev_paths() {
+  local old new i legacy_root="${1:-/tmp}"
+  local -a old_paths=("$legacy_root/crewship${S}-data" "$legacy_root/crewship${S}-state" "$legacy_root/crewship${S}-page-projects")
+  local -a new_paths=("$DATA_DIR" "$STATE_DIR" "$PAGE_PROJECTS_DIR")
+  for ((i=0; i<${#old_paths[@]}; i++)); do
+    old="${old_paths[$i]}"; new="${new_paths[$i]}"
+    if [[ "$old" != "$new" && -d "$old" &&
+          -n "$(find "$old" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+      echo "Refusing to abandon legacy dev data in $old; explicitly select that path or migrate it to $new" >&2
+      return 1
+    fi
+  done
+}
+
+# A new runtime directory must not hide an old server still using its data.
+# A recycled PID is insufficient evidence: verify the executable and cwd.
+legacy_dev_server_running() {
+  local proc_root="${1:-/proc}" pid_file="${2:-/tmp/crewship${S}-go.pid}" pid exe cwd command
+  [[ -f "$pid_file" ]] || return 1
+  pid=$(cat "$pid_file")
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  if [[ -d "$proc_root/$pid" ]]; then
+    exe=$(readlink "$proc_root/$pid/exe" 2>/dev/null) || return 1
+    cwd=$(readlink "$proc_root/$pid/cwd" 2>/dev/null) || return 1
+    [[ "${exe% (deleted)}" == "/tmp/crewship${S}-dev" && "$cwd" == "$PROJECT_DIR" ]]
+  else
+    # macOS does not expose /proc. Match the old absolute binary, never just
+    # the word crewship or the presence of a process with that PID.
+    command=$(ps -p "$pid" -o command= 2>/dev/null) || return 1
+    [[ "$command" == "/tmp/crewship${S}-dev start"* ]]
+  fi
+}
+
+check_legacy_dev_process() {
+  if legacy_dev_server_running; then
+    echo "Old dev server is still running (PID file /tmp/crewship${S}-go.pid). Stop it with its supervisor or original launcher before changing the layout." >&2
+    return 1
+  fi
+}
+
+load_env_local "$PROJECT_DIR/.env.local"
+resolve_dev_paths
+
+# Defaults that used to reach services only by re-sourcing the rewritten file.
+export CREWSHIP_PORT="$GO_PORT"
+export CREWSHIP_CONTAINER_NETWORK="$CONTAINER_NETWORK"
+export NEXT_PUBLIC_GO_PORT="${NEXT_PUBLIC_GO_PORT-$GO_PORT}"
+export NEXTAUTH_URL="${NEXTAUTH_URL-http://localhost:$NEXT_PORT}"
+export CREWSHIP_NEXTJS_URL="${CREWSHIP_NEXTJS_URL-http://localhost:$NEXT_PORT}"
+export CREWSHIP_ALLOWED_ORIGINS="${CREWSHIP_ALLOWED_ORIGINS-http://localhost:$NEXT_PORT,http://127.0.0.1:$NEXT_PORT}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -104,12 +247,45 @@ preserve_crash_log() {
   fi
 }
 
+# Persistent PID files can survive a reboot and refer to a reused PID. Verify
+# service identity before reporting it as running or sending any signal.
+process_is_owned() {
+  local pid="$1" pid_file="$2" proc_root="${3:-/proc}" exe cwd command expected=""
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  if [[ "$pid_file" == "$GO_PID_FILE" ]]; then
+    expected="$DEV_BINARY"
+  elif [[ "$pid_file" == "/tmp/crewship${S}-go.pid" ]]; then
+    expected="/tmp/crewship${S}-dev"
+  elif [[ "$pid_file" != "$NEXT_PID_FILE" ]]; then
+    return 1
+  fi
+  if [[ -d "$proc_root/$pid" ]]; then
+    exe=$(readlink "$proc_root/$pid/exe" 2>/dev/null) || return 1
+    cwd=$(readlink "$proc_root/$pid/cwd" 2>/dev/null) || return 1
+    [[ "$cwd" == "$PROJECT_DIR" ]] || return 1
+    if [[ -n "$expected" ]]; then
+      [[ "${exe% (deleted)}" == "$expected" ]]
+    else
+      [[ "${exe##*/}" == node ]] || return 1
+      tr '\0' '\n' < "$proc_root/$pid/cmdline" | grep -Fxq -e dev-server.mjs -e "$PROJECT_DIR/dev-server.mjs"
+    fi
+  else
+    command=$(ps -p "$pid" -o command= 2>/dev/null) || return 1
+    if [[ -n "$expected" ]]; then
+      [[ "$command" == "$expected start"* ]]
+    else
+      [[ "$command" == "node dev-server.mjs $NEXT_PORT"* || "$command" == *"/node dev-server.mjs $NEXT_PORT"* ]]
+    fi
+  fi
+}
+
 is_running() {
   local pid_file="$1"
   if [[ -f "$pid_file" ]]; then
     local pid
     pid=$(cat "$pid_file")
-    if kill -0 "$pid" 2>/dev/null; then
+    if process_is_owned "$pid" "$pid_file"; then
       echo "$pid"
       return 0
     fi
@@ -131,13 +307,9 @@ port_in_use() {
 }
 
 detect_db_mode() {
-  if [[ -f "$PROJECT_DIR/.env.local" ]]; then
-    local db_url
-    db_url=$(grep -E '^DATABASE_URL=' "$PROJECT_DIR/.env.local" | head -1 | cut -d'=' -f2- | tr -d '"' || true)
-    if [[ "$db_url" == postgresql://* ]] || [[ "$db_url" == postgres://* ]]; then
-      echo "postgresql"
-      return
-    fi
+  if [[ "${DATABASE_URL:-}" == postgresql://* || "${DATABASE_URL:-}" == postgres://* ]]; then
+    echo "postgresql"
+    return
   fi
   echo "sqlite"
 }
@@ -160,6 +332,7 @@ check_prerequisites() {
       log ".env.local missing — bootstrapping from .env.example"
       if cp "$PROJECT_DIR/.env.example" "$PROJECT_DIR/.env.local"; then
         chmod 600 "$PROJECT_DIR/.env.local" 2>/dev/null || true
+        load_env_local "$PROJECT_DIR/.env.local"
         ok ".env.local created from .env.example"
       else
         err "could not copy .env.example -> .env.local (check filesystem permissions)"
@@ -222,7 +395,7 @@ generate_env_local() {
   # Read existing file, stripping managed keys and the banner this function
   # writes (it was accumulating for the same reason as the origins line).
   local tmp_file
-  tmp_file=$(mktemp)
+  tmp_file=$(mktemp "$PROJECT_DIR/.env.local.XXXXXX")
   local key
   while IFS= read -r line || [[ -n "$line" ]]; do
     local skip=false
@@ -254,10 +427,10 @@ generate_env_local() {
     echo "CREWSHIP_PORT=${GO_PORT}"
     echo "CREWSHIP_SOCKET_PATH=${SOCKET_PATH}"
     echo "CREWSHIP_CONTAINER_NETWORK=${CONTAINER_NETWORK}"
-    echo "CREWSHIP_CONTAINER_PREFIX=crewship${S}"
+    echo "CREWSHIP_CONTAINER_PREFIX=${CREWSHIP_CONTAINER_PREFIX:-crewship${S}}"
     echo "CREWSHIP_STORAGE_BASE_PATH=${DATA_DIR}"
     echo "CREWSHIP_LOG_PATH=${LOG_PATH}"
-    echo "CREWSHIP_BOLT_PATH=${STATE_DIR}/state.db"
+    echo "CREWSHIP_BOLT_PATH=${BOLT_PATH:-${STATE_DIR}/state.db}"
     echo "CREWSHIP_NEXTJS_URL=http://localhost:${NEXT_PORT}"
     # Origin allowlist for state-changing requests. The default same-
     # origin gate rejects POST/PUT/DELETE when Origin (Next.js port)
@@ -363,7 +536,7 @@ start_go() {
   fi
 
   log "Starting crewship on :$GO_PORT..."
-  mkdir -p "$DATA_DIR" "$LOG_PATH" "$STATE_DIR"
+  mkdir -p "$DATA_DIR" "$LOG_PATH" "$STATE_DIR" "$DEV_HOME/db" "$DEV_HOME/logs" "$RUNTIME_DIR" "$(dirname "$DEV_BINARY")"
   preserve_crash_log "$GO_LOG"
 
   ensure_web_build_fresh || return 1
@@ -371,7 +544,7 @@ start_go() {
   # Build first (cached builds are <1s, cold ~9s on external SSD).
   # "go run" compiles on every start and the compilation time eats into
   # the health-check budget, causing false "timed out" warnings.
-  local binary="/tmp/crewship${S}-dev"
+  local binary="$DEV_BINARY"
   log "Building crewship..."
   # Stamp the build with the identity of the tree we are ACTUALLY building
   # (#1686). A dev slot carries no release ldflags, so `commit` on
@@ -438,7 +611,7 @@ start_go() {
 
   (
     cd "$PROJECT_DIR"
-    set -a && . ./.env.local && set +a
+    # Environment was loaded once before resolving installation paths.
     # Custom Page source must live outside crew storage. Give each dev slot
     # its own protected store without rewriting the operator's .env.local.
     export CREWSHIP_PAGE_PROJECTS_PATH="${CREWSHIP_PAGE_PROJECTS_PATH:-$PAGE_PROJECTS_DIR}"
@@ -449,7 +622,7 @@ start_go() {
     # path), so the no-.env.local case is unchanged.
     export CREWSHIP_SIDECAR_PATH="$fresh_sidecar"
     export CREWSHIP_ENTRYPOINT_PATH="$fresh_entrypoint"
-    export CREWSHIP_LOG_LEVEL=debug
+    export CREWSHIP_LOG_LEVEL="${CREWSHIP_LOG_LEVEL-debug}"
     # Auto-detect container runtime; fall back to --no-docker if none found
     # Supports Docker, Podman, and Apple Containers (macOS 26+)
     export CREWSHIP_CONTAINER_PROVIDER="${CREWSHIP_CONTAINER_PROVIDER:-auto}"
@@ -502,7 +675,7 @@ start_next() {
 
   (
     cd "$PROJECT_DIR"
-    set -a && . ./.env.local && set +a
+    # Environment was loaded once before resolving installation paths.
     exec node dev-server.mjs "$NEXT_PORT"
   ) > "$NEXT_LOG" 2>&1 &
 
@@ -543,7 +716,7 @@ stop_service() {
       sleep 0.5
       attempts=$((attempts + 1))
     done
-    if kill -0 "$pid" 2>/dev/null; then
+    if process_is_owned "$pid" "$pid_file"; then
       kill -9 "$pid" 2>/dev/null || true
     fi
     rm -f "$pid_file"
@@ -559,7 +732,9 @@ stop_service() {
       orphan_pids=$(lsof -ti:"$port" 2>/dev/null || true)
     fi
     for orphan_pid in $orphan_pids; do
-      kill "$orphan_pid" 2>/dev/null || true
+      if process_is_owned "$orphan_pid" "$pid_file"; then
+        kill "$orphan_pid" 2>/dev/null || true
+      fi
     done
     sleep 1
     if port_in_use "$port"; then
@@ -570,15 +745,23 @@ stop_service() {
         orphan_pids=$(lsof -ti:"$port" 2>/dev/null || true)
       fi
       for orphan_pid in $orphan_pids; do
-        kill -9 "$orphan_pid" 2>/dev/null || true
+        if process_is_owned "$orphan_pid" "$pid_file"; then
+          kill -9 "$orphan_pid" 2>/dev/null || true
+        fi
       done
     fi
   fi
 
+  if port_in_use "$port"; then
+    warn "$name port $port remains occupied; refusing to kill an unverified process. Stop it with its supervisor."
+    return 1
+  fi
   ok "$name stopped"
 }
 
 cmd_start() {
+  check_legacy_dev_process
+  check_legacy_dev_paths
   check_prerequisites
 
   # Install git pre-commit hook (idempotent, auto-skips if already installed)
@@ -614,7 +797,11 @@ cmd_start() {
 cmd_stop() {
   echo -e "${BOLD}Stopping Crewship${S}...${NC}"
   stop_service "Next.js" "$NEXT_PID_FILE" "$NEXT_PORT"
-  stop_service "crewship" "$GO_PID_FILE" "$GO_PORT"
+  if legacy_dev_server_running; then
+    stop_service "crewship (legacy runtime)" "/tmp/crewship${S}-go.pid" "$GO_PORT"
+  else
+    stop_service "crewship" "$GO_PID_FILE" "$GO_PORT"
+  fi
   local db_mode
   db_mode=$(detect_db_mode)
   if [[ "$db_mode" == "postgresql" ]]; then
@@ -713,7 +900,7 @@ cmd_status() {
     # readlink answers "<path> (deleted)", which no `-f` test will find — the
     # exact case a STALE line exists for. stat -L on the link reaches the
     # inode that is actually executing (validation 2026-09-13).
-    local stale running_bin="/tmp/crewship${S}-dev" listening_pid=""
+    local stale running_bin="$DEV_BINARY" listening_pid=""
     listening_pid=$(ss -ltnpH "sport = :$GO_PORT" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
     # -L, not -e: once the binary on disk has been replaced the exe link is
     # dangling to any test that follows it, and -e would fall back to the
@@ -740,7 +927,7 @@ cmd_status() {
       echo -e "  PostgreSQL:  ${RED}stopped${NC}"
     fi
   else
-    echo -e "  SQLite:      ${GREEN}file:./crewship.db${NC}"
+    echo -e "  SQLite:      ${GREEN}${DATABASE_URL}${NC}"
   fi
 
   if pid=$(is_running "$GO_PID_FILE"); then
@@ -782,21 +969,25 @@ cmd_logs_next() {
   tail -f "$NEXT_LOG" 2>/dev/null
 }
 
-cmd_nuke() {
-  # start_go sources .env.local before honouring CREWSHIP_PAGE_PROJECTS_PATH,
-  # so a pin there (env-style or `export`-prefixed) wins over the slot
-  # default. Resolve the same way — by actually sourcing the file, not by
-  # grepping it — so the reset removes what start really used, and show the
-  # resolved path in the confirmation below before deleting it.
-  local page_projects_dir
-  page_projects_dir="$(
-    cd "$PROJECT_DIR" 2>/dev/null &&
-      { set -a; . ./.env.local 2>/dev/null; set +a; } &&
-      printf '%s' "${CREWSHIP_PAGE_PROJECTS_PATH:-}"
-  )"
-  if [[ -z "$page_projects_dir" ]]; then
-    page_projects_dir="${CREWSHIP_PAGE_PROJECTS_PATH:-$PAGE_PROJECTS_DIR}"
+# Refuse destructive directory cleanup anywhere in the source tree or its
+# parents, regardless of confirmation. Follow symlinks for existing paths.
+validate_dev_cleanup_dir() {
+  local dir="$1" resolved checkout
+  [[ -d "$dir" ]] || return 0
+  resolved=$(cd -P "$dir" && pwd -P) || return 1
+  checkout=$(cd -P "$PROJECT_DIR" && pwd -P) || return 1
+  if [[ "$resolved" == / || "$resolved" == "$checkout" ||
+        "$checkout" == "$resolved"/* || "$resolved" == "$checkout"/* ]]; then
+    echo "Refusing to remove source tree or parent: $dir" >&2
+    return 1
   fi
+}
+
+cmd_nuke() {
+  check_legacy_dev_process || return 1
+  # All commands use the paths resolved once from the same effective
+  # environment, including explicit overrides from .env.local.
+  local page_projects_dir="$PAGE_PROJECTS_DIR"
 
   # start_go runs the server with the checkout as its working directory (its
   # subshell cd's to PROJECT_DIR before sourcing .env.local and exec'ing), so
@@ -845,9 +1036,14 @@ cmd_nuke() {
     page_projects_dir="$resolved_projects"
   fi
 
+  local cleanup_dir
+  for cleanup_dir in "$DATA_DIR" "$LOG_PATH" "$page_projects_dir"; do
+    validate_dev_cleanup_dir "$cleanup_dir" || return 1
+  done
+
   echo -e "${BOLD}${RED}Factory Reset — Crewship${S}${NC}"
   echo "This will destroy ALL local data:"
-  echo "  - SQLite database (./crewship.db)"
+  echo "  - SQLite database (${DATABASE_URL})"
   echo "  - Agent output, workspace, crew data ($DATA_DIR)"
   echo "  - Bolt state ($STATE_DIR)"
   if [[ "$page_projects_dir" == "$PAGE_PROJECTS_DIR" ]]; then
@@ -857,8 +1053,8 @@ cmd_nuke() {
   fi
   echo "  - Conversations ($DATA_DIR/conversations)"
   echo "  - Log files ($LOG_PATH)"
-  echo "  - Docker containers (crewship${S}-*  — team + sidecars + init)"
-  echo "  - Docker volumes (crewship${S}-*    — home, tools, sidecar volumes)"
+  echo "  - Docker containers (${CREWSHIP_CONTAINER_PREFIX}-*  — team + sidecars + init)"
+  echo "  - Docker volumes (${CREWSHIP_CONTAINER_PREFIX}-*    — home, tools, sidecar volumes)"
   echo "  - Docker network ($CONTAINER_NETWORK)"
   echo ""
 
@@ -874,10 +1070,14 @@ cmd_nuke() {
   # 1. Stop services
   log "Stopping services..."
   cmd_stop 2>/dev/null || true
+  if port_in_use "$GO_PORT" || legacy_dev_server_running; then
+    err "Refusing to nuke: server is still running; stop it with its supervisor first."
+    return 1
+  fi
 
   # 2. Remove Docker containers + volumes for this instance.
   #
-  # The filter is `crewship${S}-` (no `-team-` suffix) so it catches
+  # The filter is the effective installation prefix (no `-team-` suffix) so it catches
   # sidecar containers too: crewship-N-svc-<crew>-<service> from the
   # SPEC-4 sugar path stayed running across nukes before this fix,
   # which left a "factory reset complete" message lying — the next
@@ -890,9 +1090,13 @@ cmd_nuke() {
   local docker_cmd
   docker_cmd=$(command -v docker 2>/dev/null || echo "$HOME/.docker/bin/docker")
   if [[ -x "$docker_cmd" ]] || command -v docker &>/dev/null; then
-    local prefix="crewship${S}-"
+    local prefix="${CREWSHIP_CONTAINER_PREFIX}-" prefix_regex
+    # Docker names contain a leading slash; anchor rather than match a
+    # substring belonging to another installation. Prefix validation above
+    # restricts regex metacharacters to dots, which must be escaped.
+    prefix_regex="${prefix//./\\.}"
     local containers
-    containers=$("$docker_cmd" ps -a --filter "name=${prefix}" --format '{{.ID}}' 2>/dev/null || true)
+    containers=$("$docker_cmd" ps -a --filter "name=^/?${prefix_regex}" --format '{{.ID}}' 2>/dev/null || true)
     if [[ -n "$containers" ]]; then
       echo "$containers" | xargs "$docker_cmd" rm -f 2>/dev/null || true
       ok "Containers removed"
@@ -903,7 +1107,9 @@ cmd_nuke() {
     # Volumes: same prefix filter. xargs -r so an empty list is a noop
     # instead of a no-args `docker volume rm` (which errors loudly).
     local volumes
-    volumes=$("$docker_cmd" volume ls --filter "name=${prefix}" --format '{{.Name}}' 2>/dev/null || true)
+    volumes=$("$docker_cmd" volume ls --format '{{.Name}}' 2>/dev/null | while IFS= read -r volume; do
+      if [[ "$volume" == "$prefix"* ]]; then printf '%s\n' "$volume"; fi
+    done || true)
     if [[ -n "$volumes" ]]; then
       echo "$volumes" | xargs "$docker_cmd" volume rm 2>/dev/null || true
       ok "Volumes removed"
@@ -952,7 +1158,7 @@ cmd_nuke() {
     fi
   }
   remove_data_dir "$DATA_DIR"
-  remove_data_dir "$STATE_DIR"
+  rm -f "$BOLT_PATH"
   remove_data_dir "$page_projects_dir"
   remove_data_dir "$LOG_PATH"
   rm -f "$SOCKET_PATH"
@@ -967,12 +1173,20 @@ cmd_nuke() {
   #    backup believing it was current. Wipe everything matching the
   #    DB stem so the next `start` builds from scratch every time.
   local db_removed=false
-  for path in "$PROJECT_DIR"/crewship.db "$PROJECT_DIR"/crewship.db-shm "$PROJECT_DIR"/crewship.db-wal "$PROJECT_DIR"/crewship.db-journal "$PROJECT_DIR"/crewship.db.pre-migrate-*; do
-    if [[ -e "$path" ]]; then
-      rm -f "$path"
-      db_removed=true
-    fi
-  done
+  local db_path=""
+  if [[ "$DATABASE_URL" == file:* ]]; then
+    db_path="${DATABASE_URL#file:}"
+    db_path="${db_path%%\?*}"
+    if [[ "$db_path" != /* ]]; then db_path="$PROJECT_DIR/$db_path"; fi
+  fi
+  if [[ -n "$db_path" ]]; then
+    for path in "$db_path" "$db_path"-shm "$db_path"-wal "$db_path"-journal "$db_path".pre-migrate-*; do
+      if [[ -e "$path" ]]; then
+        rm -f "$path"
+        db_removed=true
+      fi
+    done
+  fi
   if [[ "$db_removed" == "true" ]]; then
     ok "SQLite database + sidecars removed"
   fi
@@ -1003,13 +1217,14 @@ cmd_seed() {
 
   # Build CLI binary
   log "Building crewship CLI..."
-  (cd "$PROJECT_DIR" && go build -o ./crewship ./cmd/crewship/)
+  mkdir -p "$(dirname "$DEV_BINARY")"
+  (cd "$PROJECT_DIR" && go build -o "$DEV_BINARY" ./cmd/crewship/)
 
   # Source env vars and run seed via CLI (requires running server)
   (
     cd "$PROJECT_DIR"
-    set -a && . ./.env.local && set +a
-    ./crewship seed --server "http://localhost:${GO_PORT:-8080}" --with-team-chat "$@"
+    # Environment was loaded once before resolving installation paths.
+    "$DEV_BINARY" seed --server "http://localhost:${GO_PORT:-8080}" --with-team-chat "$@"
   )
 
   ok "Seed complete."

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/jitter"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -41,11 +42,15 @@ func NewIndexer(db *sql.DB, embedder Embedder, logger *slog.Logger, poll time.Du
 // paginated via indexed_at exists check so the query stays efficient
 // regardless of journal_entries size.
 func (x *Indexer) Start(ctx context.Context) {
+	// Kick off once immediately so tests and short-lived processes don't
+	// have to wait a full interval. Only the ticker's phase is spread from the
+	// other sweepers started at boot (#1891).
+	x.sweepOnce(ctx, 64)
+	if !jitter.Startup(ctx, x.poll) {
+		return
+	}
 	ticker := time.NewTicker(x.poll)
 	defer ticker.Stop()
-	// Kick off once immediately so tests and short-lived processes don't
-	// have to wait a full interval.
-	x.sweepOnce(ctx, 64)
 	for {
 		select {
 		case <-ctx.Done():

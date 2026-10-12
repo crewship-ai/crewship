@@ -5,18 +5,19 @@ import { AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import { SettingsCard } from "@/components/features/settings/shared"
+import { toastSaveError } from "@/components/ui/page-save-bar"
+import { SettingsCard, SettingsSaveBar, controlHeight, settingsTable, settingsTh, settingsTd } from "@/components/features/settings/shared"
 import { saveDefaults, saveInstanceGovernance, type DefaultsResult, type GovSaveResult, type GovTargets, type InstanceGovRow, type InstanceGovSettings } from "./use-instance-keeper"
 
 /**
  * One form for several workspaces at once. Each field shows the value the
  * selected workspaces share, or "Mixed" with what they hold when they differ;
  * nothing is sent for a field the admin did not touch, so a save changes only
- * what was chosen here. Saving always asks first: the server previews the save
- * (dry_run) and the dialog lists, workspace by workspace, what is overwritten.
+ * what was chosen here. The edits join the page's Save bar, and Save always
+ * asks first: the server previews the save (dry_run) and the dialog lists,
+ * workspace by workspace, what is overwritten. A failure is a corner toast.
  */
 
 export type BulkSection = "workspace-judge" | "watchdog" | "alerts" | "leases"
@@ -117,7 +118,6 @@ export function BulkGovernanceForm({
   // request, never whatever the form holds by then (review R3).
   const [preview, setPreview] = React.useState<{ result: GovSaveResult; targets: GovTargets; set: Partial<InstanceGovSettings> } | null>(null)
   const [busy, setBusy] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
 
   // A draft belongs to the workspaces it was made for: the section, which
   // workspaces, and whether "all" (which also sets the defaults). Another
@@ -134,25 +134,25 @@ export function BulkGovernanceForm({
     scopeRef.current = scopeKey
     epoch.current += 1
     if (Object.keys(draftRef.current).length > 0) toast.info("The selection changed, so the unsaved changes were dropped.")
-    setDraft({}); setError(null); setPreview(null); setBusy(false)
+    setDraft({}); setPreview(null); setBusy(false)
   }, [scopeKey])
 
   const targets: GovTargets = all ? { all: true } : { workspaces: rows.map((r) => r.workspace_id) }
   const set = Object.fromEntries(Object.entries(draft)) as Partial<InstanceGovSettings>
-  const dirty = Object.keys(draft).length > 0
   const n = rows.length
 
+  /** The bar's Save: preview first. A failed preview is thrown for the bar's toast. */
   async function review() {
     const asked = epoch.current
     const req = { targets, set }
-    setBusy(true); setError(null)
+    setBusy(true)
     try {
       const result = await saveInstanceGovernance(req.targets, req.set, true)
       // An answer for a selection that is no longer on screen is dropped.
       if (epoch.current !== asked) return
       setPreview({ result, ...req })
     } catch (e) {
-      if (epoch.current === asked) setError(e instanceof Error ? e.message : "The save could not be checked")
+      if (epoch.current === asked) throw e instanceof Error ? e : new Error("The save could not be checked")
     } finally {
       if (epoch.current === asked) setBusy(false)
     }
@@ -168,7 +168,7 @@ export function BulkGovernanceForm({
       onSaved(r)
     } catch (e) {
       setPreview(null)
-      setError(e instanceof Error ? e.message : "The save failed; nothing was changed")
+      toastSaveError(SECTION_TITLE[section], e instanceof Error ? e.message : "The save failed; nothing was changed.")
     }
   }
 
@@ -176,7 +176,7 @@ export function BulkGovernanceForm({
 
   return (
     <>
-      <div role="alert" data-slot="bulk-warning" className="flex items-start gap-2.5 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2.5 text-[12.5px]">
+      <div role="alert" data-slot="bulk-warning" className="flex items-start gap-2.5 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2.5 text-label">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
         <p>
           <b className="text-warn">{all ? `All ${n} workspace${n === 1 ? "" : "s"} selected.` : `${n} workspaces selected.`}</b>{" "}
@@ -185,7 +185,7 @@ export function BulkGovernanceForm({
         </p>
       </div>
       {onEditOne && (
-        <p className="text-[12px] text-muted-foreground" data-slot="edit-one">
+        <p className="text-label text-muted-foreground" data-slot="edit-one">
           The security contact, a workspace&apos;s own judge key and its watch rules are set one workspace at a time:{" "}
           {rows.map((r, i) => (
             <React.Fragment key={r.workspace_id}>
@@ -207,22 +207,22 @@ export function BulkGovernanceForm({
             return (
               <div key={f.key} className="grid gap-2 sm:grid-cols-[11rem_1fr] sm:items-center" data-field={f.key}>
                 <div>
-                  <div className="text-[13px]">{f.label}</div>
-                  <div className="text-[11px] text-muted-foreground">{f.hint}</div>
+                  <div className="text-control">{f.label}</div>
+                  <div className="text-label text-muted-foreground">{f.hint}</div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {f.text ? (
-                    <Input aria-label={f.label} className="h-8 max-w-xs text-xs" value={String(value ?? "")}
+                    <Input aria-label={f.label} className={cn(controlHeight, "max-w-xs")} value={String(value ?? "")}
                       placeholder={shared === undefined ? "Mixed" : undefined}
                       onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))} />
                   ) : (
                     <Segmented field={f} value={value} name={f.label} onPick={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
                   )}
                   {shared === undefined && !(f.key in draft) && (
-                    <span className="font-mono text-[10.5px] text-warn" data-slot="mixed">MIXED · {distinct.join(" / ")}</span>
+                    <span className="font-mono text-micro text-warn" data-slot="mixed">MIXED · {distinct.join(" / ")}</span>
                   )}
                   {f.key in draft && (
-                    <button type="button" className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+                    <button type="button" className="text-label text-muted-foreground underline-offset-2 hover:underline"
                       onClick={() => setDraft((d) => { const { [f.key]: _, ...rest } = d; return rest })}>
                       keep as is
                     </button>
@@ -232,15 +232,9 @@ export function BulkGovernanceForm({
             )
           })}
         </div>
-        <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2.5">
-          <Button size="sm" variant="destructive" disabled={!dirty || busy} onClick={() => void review()}>
-            {all ? `Overwrite all ${n} workspace${n === 1 ? "" : "s"}…` : `Overwrite ${n} workspaces…`}
-          </Button>
-          <Button size="sm" variant="outline" disabled={!dirty || busy} onClick={() => setDraft({})}>Reset</Button>
-          {!dirty && <span className="text-[12px] text-muted-foreground">Change a value to save</span>}
-          {error && <span role="status" className="text-[12px] text-destructive">{error}</span>}
-        </div>
       </SettingsCard>
+      <SettingsSaveBar label={SECTION_TITLE[section]} count={Object.keys(draft).length} saving={busy}
+        onSave={review} onDiscard={() => setDraft({})} />
 
       <ConfirmDialog
         open={preview !== null}
@@ -268,15 +262,15 @@ function OverwriteTable({ result, fields }: { result: GovSaveResult; fields: Map
   const name = (field: string) => fields.get(field)?.label ?? field
   return (
     <div className="mt-2 max-h-64 overflow-auto rounded-md border border-border">
-      <table className="w-full text-left text-[12px]" data-slot="overwrite-table">
-        <thead className="text-[10.5px] uppercase text-muted-foreground">
-          <tr><th className="px-2.5 py-1.5 font-medium">Workspace</th><th className="px-2.5 py-1.5 font-medium">Change</th></tr>
+      <table className={settingsTable} data-slot="overwrite-table">
+        <thead>
+          <tr><th className={settingsTh}>Workspace</th><th className={settingsTh}>Change</th></tr>
         </thead>
         <tbody>
           {result.workspaces.map((w) => (
-            <tr key={w.workspace_id} className={cn("border-t border-border", w.changes.length === 0 && "text-muted-foreground")}>
-              <td className="px-2.5 py-1.5">{w.workspace_name}</td>
-              <td className="px-2.5 py-1.5">
+            <tr key={w.workspace_id} className={cn(w.changes.length === 0 && "text-muted-foreground")}>
+              <td className={settingsTd}>{w.workspace_name}</td>
+              <td className={settingsTd}>
                 {w.changes.length === 0 ? "no change" : (
                   <ul className="space-y-0.5">
                     {w.changes.map((c) => <li key={c.field}>{`${name(c.field)}: ${show(c.field, c.before)} → ${show(c.field, c.after)}`}</li>)}
@@ -304,18 +298,17 @@ export function DefaultsForm({ current, onSaved }: { current: InstanceGovSetting
   const [draft, setDraft] = React.useState<Draft>({})
   const [preview, setPreview] = React.useState<{ result: DefaultsResult; set: Partial<InstanceGovSettings> } | null>(null)
   const [busy, setBusy] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
   const row = { ...current, workspace_id: "defaults", workspace_name: "New workspaces", workspace_slug: "defaults", configured: true } as InstanceGovRow
   const set = Object.fromEntries(Object.entries(draft)) as Partial<InstanceGovSettings>
-  const dirty = Object.keys(draft).length > 0
   const byField = new Map(DEFAULT_FIELDS.map((f) => [f.key as string, f]))
 
+  /** The bar's Save: preview first. A failed preview is thrown for the bar's toast. */
   async function review() {
-    setBusy(true); setError(null)
+    setBusy(true)
     try {
       setPreview({ result: await saveDefaults(set, true), set })
     } catch (e) {
-      setError(e instanceof Error ? e.message : "The change could not be checked")
+      throw e instanceof Error ? e : new Error("The change could not be checked")
     } finally {
       setBusy(false)
     }
@@ -329,7 +322,7 @@ export function DefaultsForm({ current, onSaved }: { current: InstanceGovSetting
       onSaved()
     } catch (e) {
       setPreview(null)
-      setError(e instanceof Error ? e.message : "The save failed; nothing was changed")
+      toastSaveError("Defaults for new workspaces", e instanceof Error ? e.message : "The save failed; nothing was changed.")
     }
   }
 
@@ -342,12 +335,12 @@ export function DefaultsForm({ current, onSaved }: { current: InstanceGovSetting
             return (
               <div key={f.key} className="grid gap-2 sm:grid-cols-[11rem_1fr] sm:items-center" data-field={f.key}>
                 <div>
-                  <div className="text-[13px]">{f.label}</div>
-                  <div className="text-[11px] text-muted-foreground">{f.hint}</div>
+                  <div className="text-control">{f.label}</div>
+                  <div className="text-label text-muted-foreground">{f.hint}</div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {f.text ? (
-                    <Input aria-label={f.label} className="h-8 max-w-xs text-xs coarse:h-[2.75rem]" value={String(value ?? "")}
+                    <Input aria-label={f.label} className={cn(controlHeight, "max-w-xs")} value={String(value ?? "")}
                       onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))} />
                   ) : (
                     <Segmented field={f} value={value} name={f.label} onPick={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
@@ -357,19 +350,16 @@ export function DefaultsForm({ current, onSaved }: { current: InstanceGovSetting
             )
           })}
         </div>
-        <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2.5">
-          <Button size="sm" disabled={!dirty || busy} onClick={() => void review()}>Save defaults for new workspaces…</Button>
-          <Button size="sm" variant="outline" disabled={!dirty || busy} onClick={() => setDraft({})}>Reset</Button>
-          {error && <span role="status" className="text-[12px] text-destructive">{error}</span>}
-        </div>
       </SettingsCard>
+      <SettingsSaveBar label="Defaults for new workspaces" count={Object.keys(draft).length} saving={busy}
+        onSave={review} onDiscard={() => setDraft({})} />
       <ConfirmDialog
         open={preview !== null}
         onOpenChange={(o) => { if (!o) setPreview(null) }}
         title="Save defaults for new workspaces?"
         confirmLabel="Save defaults"
         description={preview && (
-          <ul className="mt-2 space-y-0.5 rounded-md border border-border px-3 py-2 text-[12px]" data-slot="defaults-changes">
+          <ul className="mt-2 space-y-0.5 rounded-md border border-border px-3 py-2 text-label" data-slot="defaults-changes">
             {preview.result.changes.map((c) => {
               const f = byField.get(c.field)
               const show = (v: unknown) => (f ? labelOf(f, eff(c.field as Key, v)) : String(v))

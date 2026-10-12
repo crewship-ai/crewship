@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { toApiError } from "@/lib/api-error"
 import { fetchAllRoutinePages } from "@/lib/routine-list"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 
@@ -118,19 +119,22 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
+  const activeRefresh = useRef<(() => Promise<void>) | null>(null)
+
   const refresh = useCallback(async () => {
+    abortRef.current?.abort()
+    setError(null)
     if (!workspaceId) {
       setSchedules([])
+      setLoading(false)
       return
     }
-    abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
     setLoading(true)
-    setError(null)
     try {
       const data = await fetchAllRoutinePages<PipelineSchedule>(
-        `/api/v1/workspaces/${workspaceId}/pipeline-schedules`,
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-schedules`,
         controller.signal,
       )
       if (controller.signal.aborted) return
@@ -144,15 +148,20 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
   }, [workspaceId])
 
   useEffect(() => {
-    refresh()
-    return () => abortRef.current?.abort()
+    activeRefresh.current = refresh
+    setSchedules([])
+    void refresh()
+    return () => {
+      activeRefresh.current = null
+      abortRef.current?.abort()
+    }
   }, [refresh])
 
   const create = useCallback(
     async (body: ScheduleSaveBody): Promise<PipelineSchedule | null> => {
       if (!workspaceId) return null
       const res = await apiFetch(
-        `/api/v1/workspaces/${workspaceId}/pipeline-schedules`,
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-schedules`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -160,11 +169,10 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
         },
       )
       if (!res.ok) {
-        const txt = await res.text()
-        throw new Error(`create schedule failed: ${res.status} ${txt}`)
+        throw await toApiError(res, `create schedule failed: HTTP ${res.status}`)
       }
       const out: PipelineSchedule = await res.json()
-      await refresh()
+      if (activeRefresh.current === refresh) await refresh()
       return out
     },
     [workspaceId, refresh],
@@ -174,7 +182,7 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
     async (id: string, body: SchedulePatchBody): Promise<PipelineSchedule | null> => {
       if (!workspaceId) return null
       const res = await apiFetch(
-        `/api/v1/workspaces/${workspaceId}/pipeline-schedules/${id}`,
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-schedules/${encodeURIComponent(id)}`,
         {
           method: "PATCH",
           headers: { "content-type": "application/json" },
@@ -182,11 +190,10 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
         },
       )
       if (!res.ok) {
-        const txt = await res.text()
-        throw new Error(`update schedule failed: ${res.status} ${txt}`)
+        throw await toApiError(res, `update schedule failed: HTTP ${res.status}`)
       }
       const out: PipelineSchedule = await res.json()
-      await refresh()
+      if (activeRefresh.current === refresh) await refresh()
       return out
     },
     [workspaceId, refresh],
@@ -196,13 +203,13 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
     async (id: string): Promise<void> => {
       if (!workspaceId) return
       const res = await apiFetch(
-        `/api/v1/workspaces/${workspaceId}/pipeline-schedules/${id}`,
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-schedules/${encodeURIComponent(id)}`,
         { method: "DELETE" },
       )
       if (!res.ok && res.status !== 404) {
         throw new Error(`delete schedule failed: ${res.status}`)
       }
-      await refresh()
+      if (activeRefresh.current === refresh) await refresh()
     },
     [workspaceId, refresh],
   )
@@ -216,11 +223,10 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
       if (!workspaceId) throw new Error("no workspace")
       const params = new URLSearchParams({ cron_expr: cronExpr, timezone, count: String(count) })
       const res = await apiFetch(
-        `/api/v1/workspaces/${workspaceId}/pipeline-schedules/preview?${params.toString()}`,
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-schedules/preview?${params.toString()}`,
       )
       if (!res.ok) {
-        const txt = await res.text()
-        throw new Error(`preview failed: ${res.status} ${txt}`)
+        throw await toApiError(res, `preview failed: HTTP ${res.status}`)
       }
       return res.json()
     },

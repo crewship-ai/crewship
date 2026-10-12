@@ -17,14 +17,9 @@ Age alone is not a reason; unreferenced alone is not a reason.
 
 ## Contents
 
-- [`pages-apps.md`](pages-apps.md) — the 2026-09-08 research into Pages as
-  internal applications (Refine/Puck evaluation). Superseded by
-  [`docs/prd/pages-apps-architecture.md`](../prd/pages-apps-architecture.md)
-  (implementation architecture) and
-  [`docs/prd/pages-apps-v1.md`](../prd/pages-apps-v1.md) (the shipped v1
-  contract); kept for the market research and the decision record.
-- [`pages-apps-v1-history-2026-09-09.md`](pages-apps-v1-history-2026-09-09.md) —
-  the implementation chronology of Pages Apps v1 before the #2472 hardening.
-  The current contract is
-  [`docs/prd/pages-apps-v1.md`](../prd/pages-apps-v1.md), which links here
-  for the history.
+No archived document is currently retained in this directory. The former
+Pages research and implementation diary belong to private working context.
+The public [Pages Apps contract](../specs/pages-apps.md) and
+[architecture rationale](../prd/pages-apps-architecture.md) remain available.
+Earlier public commits remain public history; this move does not make them
+secret. Do not recreate an internal research archive in this directory.

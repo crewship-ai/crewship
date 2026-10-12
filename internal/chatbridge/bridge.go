@@ -937,9 +937,13 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		cpuVal = b.cfg.DefaultCPUs
 	}
 
-	if containerID == "" && b.container != nil {
-		b.logger.Info("creating container", "crew_slug", info.CrewSlug)
-		streamFn(ws.ChatEvent{Type: "status", Content: "Starting container..."})
+	var runtimeUse *provider.RuntimeUse
+	defer func() { runtimeUse.Release() }()
+	if b.container != nil {
+		if coldStart {
+			b.logger.Info("creating container", "crew_slug", info.CrewSlug)
+			streamFn(ws.ChatEvent{Type: "status", Content: "Starting container..."})
+		}
 		// One assembly, shared with the scheduler, the webhook handler and the
 		// pipeline's agent step (crew_config.go). Sidecar services declared in
 		// the crew's services_json are part of it, with env_refs resolved; the
@@ -992,7 +996,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// The runtime container and the crew's sidecars come up as one step:
 		// the sidecars start after the runtime (the crew bridge network has to
 		// exist first) and before the crew is reported ready.
-		cID, err := b.crewStarter().StartNotify(ctx, cc, func(n crewstart.Notice) {
+		use, _, err := b.crewStarter().StartUse(ctx, cc, func(n crewstart.Notice) {
 			// Only when the provider's own capability report didn't already
 			// name Services — telling the user the same thing twice reads as
 			// two separate faults.
@@ -1001,6 +1005,8 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			}
 			streamFn(ws.ChatEvent{Type: "status", Content: n.Message})
 		})
+		runtimeUse = use
+		cID := use.ContainerID()
 		if err != nil {
 			if errors.Is(err, crewstart.ErrSidecarStart) {
 				streamFn(ws.ChatEvent{Type: "error", Content: "failed to start sidecar services: " + err.Error()})
@@ -1173,6 +1179,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// the whole call so a steering message arriving mid-turn (POST
 	// /chats/{id}/steer) is detected and QUEUED instead of racing a second
 	// Exec into the same container. Released via the defer registered there.
+	req.RuntimeUse = runtimeUse
 	runErr := b.orch.RunAgent(ctx, req, handler)
 
 	// Bill the ledger before branching on runErr, the way the scheduler does.

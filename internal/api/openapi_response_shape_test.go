@@ -45,6 +45,8 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "WorkspacePendingRunResponseV1", pointer: "/components/schemas/WorkspacePendingRunResponseV1", value: pendingRunReceipt{}},
+	{name: "WorkspacePendingRunsResponseV1[]", pointer: "/components/schemas/WorkspacePendingRunsResponseV1/items", value: pendingRunReceipt{}},
 	{name: "RestrictedAgentProfile", pointer: "/components/schemas/RestrictedAgentProfile", value: restrictedAgentProfileResponse{}},
 	{name: "RestrictedOperationMode", pointer: "/components/schemas/RestrictedOperationMode", value: restrictedOperationModeResponse{}},
 	{name: "RestrictedChatMode", pointer: "/components/schemas/RestrictedChatMode", value: restrictedChatModeResponse{}},

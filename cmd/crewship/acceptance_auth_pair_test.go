@@ -128,6 +128,9 @@ func runAuthPairCLI(t *testing.T, cfgPath string, args ...string) (string, error
 		"NO_COLOR=1",
 		"CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=")
 	out, err := cmd.CombinedOutput()
+	if strings.Contains(string(out), "WARNING: DATA RACE") {
+		t.Fatalf("auth pair subprocess reported a race:\n%s", out)
+	}
 	return string(out), err
 }
 
@@ -221,6 +224,12 @@ func TestAcceptance_AuthPairTimeoutIsNotSuccess(t *testing.T) {
 	if err == nil {
 		t.Fatalf("pair reported success for a code nobody redeemed\noutput: %s", out)
 	}
+	if got := exitCodeOf(t, err); got != cli.ExitGeneric {
+		t.Fatalf("pair timeout exited %d, want %d (application failure): %s", got, cli.ExitGeneric, out)
+	}
+	if !strings.Contains(strings.ToLower(out), "timed out") {
+		t.Fatalf("pair did not report timeout: %s", out)
+	}
 	if strings.Contains(strings.ToLower(out), "paired as") {
 		t.Errorf("pair claims a redemption that never happened:\n%s", out)
 	}
@@ -244,6 +253,9 @@ func TestAcceptance_AuthPairFailsFastWhenCodeExpires(t *testing.T) {
 		"--timeout", "30s", "--poll-interval", "100ms")
 	if err == nil {
 		t.Fatalf("pair succeeded against an expired code\noutput: %s", out)
+	}
+	if got := exitCodeOf(t, err); got != cli.ExitGeneric {
+		t.Fatalf("pair expiry exited %d, want %d (application failure): %s", got, cli.ExitGeneric, out)
 	}
 	if !strings.Contains(strings.ToLower(out), "expired") {
 		t.Errorf("expired-code failure does not say so:\n%s", out)

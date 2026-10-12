@@ -7,7 +7,7 @@ import RoutinesPage from "@/app/(dashboard)/routines/page"
 const api = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: api }))
 const workspace = vi.hoisted(() => ({ mode: "restricted" }))
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "workspace", workspace: { currentUserAccessMode: workspace.mode }, loading: false }) }))
+vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "workspace", workspace: { currentUserAccessMode: workspace.mode }, workspaces: [{ id: "workspace", currentUserAccessMode: workspace.mode }], loading: false }) }))
 vi.mock("../routines-layout", () => ({ RoutinesLayout: () => <div>Trusted routine editor</div> }))
 afterEach(() => { cleanup(); api.mockReset(); vi.restoreAllMocks(); workspace.mode = "restricted" })
 const catalog = [{ slug: "allowed", name: "Allowed routine", definition_hash: "frozen-hash", execution_hash: "compiled-graph-hash", inputs: [{ name: "task", type: "string", required: true }] }]

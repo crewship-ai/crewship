@@ -360,43 +360,16 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	if ws := manifest.Contents.Workspace; ws != nil {
 		manifestWorkspaceID = ws.ID
 	}
-	if manifest.Scope == ScopeInstance {
-		return nil, fmt.Errorf("%w: instance scope restore is not supported yet (V1.5)", ErrInvalidScope)
+	// Where the bundle may land — scope against target, a custom bundle
+	// never replacing, a new name that is a free slug — is one rule shared
+	// with the restore checks (restore_target.go), applied before anything
+	// is read or rewritten.
+	spec, err := TargetFromOptions(opts)
+	if err != nil {
+		return nil, err
 	}
-
-	// Enforce that --as-workspace / --as-crew match the bundle scope
-	// BEFORE we start rewriting IDs. Without this the CLI can point
-	// --as-crew at a workspace bundle (silently ignored, admin confused
-	// why nothing happened) or --as-workspace at a crew bundle (rewrites
-	// the workspace row even though the restore is scoped to a single
-	// crew). Both are wrong, neither triggers a useful error later, so
-	// fail loudly here.
-	if opts.AsWorkspace != "" && opts.AsCrew != "" {
-		return nil, fmt.Errorf("%w: supply only one of --as-workspace or --as-crew", ErrInvalidScope)
-	}
-	if opts.AsWorkspace != "" && manifest.Scope != ScopeWorkspace {
-		return nil, fmt.Errorf("%w: --as-workspace is only valid for workspace-scope bundles (this bundle is %s)", ErrInvalidScope, manifest.Scope)
-	}
-	if opts.AsCrew != "" && manifest.Scope != ScopeCrew {
-		return nil, fmt.Errorf("%w: --as-crew is only valid for crew-scope bundles (this bundle is %s)", ErrInvalidScope, manifest.Scope)
-	}
-	// --replace and --as-* are semantic opposites: --replace reasserts
-	// the bundle's identity OVER whatever the target has under the
-	// same slug; --as-* forks the bundle under a NEW slug. Combining
-	// them is incoherent — refuse up front so the admin sees the
-	// conflict before we touch anything.
-	if opts.Replace && (opts.AsWorkspace != "" || opts.AsCrew != "") {
-		return nil, fmt.Errorf("%w: --replace is incompatible with --as-workspace / --as-crew", ErrInvalidScope)
-	}
-	if opts.Replace && manifest.Scope != ScopeWorkspace {
-		return nil, fmt.Errorf("%w: --replace is only supported for workspace-scope bundles", ErrInvalidScope)
-	}
-	// A custom bundle carries only some categories. --replace wipes the whole
-	// workspace first, so replacing from one would delete everything the
-	// bundle does not hold (a memory-only bundle would take the chats, issues
-	// and routines with it).
-	if opts.Replace && manifest.Kind == KindCustom {
-		return nil, fmt.Errorf("%w: --replace is refused for a custom bundle (it carries only %s); restore it without --replace", ErrInvalidScope, strings.Join(manifest.Categories, ", "))
+	if _, err := ValidateRestoreTarget(ctx, manifest, spec, DBSlugLookup(db)); err != nil {
+		return nil, err
 	}
 
 	// Schema skew detection. The bundle records which DB migrations
@@ -1217,6 +1190,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		})
 		var commitTx *sql.Tx
 		hooks := &RestoreDumpHooks{
+			RejectNoOp: true,
 			// Provenance for the DR resume (#1716), written only for a
 			// rewritten restore — that is the only case that creates a
 			// workspace whose identity the tenant guard cannot recognise
@@ -1266,10 +1240,10 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			},
 		}
 		s, err := RestoreDumpTxHooks(ctx, db, extracted.DBDump, hooks)
-		if err != nil {
+		if err != nil && !errors.Is(err, ErrNoOpRestore) {
 			return nil, err
 		}
-		serviceDatabaseCommitted = true
+		serviceDatabaseCommitted = err == nil
 		stats = s
 		warnSecurityLevelClamps(opts.Logger, stats.SecurityLevelClamps, stats.SecurityLevelClamped, false)
 		warnDroppedColumns(opts.Logger, stats.DroppedColumns, stats.ColumnsDropped, false)
@@ -1300,7 +1274,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// must already be visible. A hook failure surfaces as
 	// ErrRestoreBackfillFailed; the admin must investigate because the
 	// main restore is already committed.
-	if extracted.DBDump != nil && !opts.DryRun && len(manifest.SchemaMigrationVersions) > 0 {
+	if extracted.DBDump != nil && !opts.DryRun && len(manifest.SchemaMigrationVersions) > 0 && !(stats.RowsSeen > 0 && stats.RowsInserted == 0) {
 		if err := replayRestoreBackfills(ctx, db, manifest.SchemaMigrationVersions, opts.Logger); err != nil {
 			return nil, err
 		}

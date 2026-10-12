@@ -37,12 +37,6 @@ automation preview --mission
 automation preview --name
 automation preview --routine
 automation preview --severity
-commands --no-color
-commands --profile
-commands --server
-commands --server-allow-mismatch
-commands --verbose
-commands --workspace
 consolidate proposed approve --yes
 consolidate proposed reject --yes
 credential create --oauth-auth-url

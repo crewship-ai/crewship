@@ -27,6 +27,19 @@ The request has no JSON body. The HTTP 200 response is an array of the authorize
 routine metadata described above; `X-Total-Count` is the filtered count. Unavailable or unauthorized projections return 404; the authentication and
 workspace middleware can reject the request before projection.
 
+### Private execution not installed
+
+When the server has no private execution runtime, a restricted member of the
+workspace receives HTTP 503 with
+`{"error": "...", "code": "restricted_runtime_unavailable"}` from this catalog,
+from `GET /api/v1/workspaces/{workspaceId}/restricted-pages`, from routine run
+admission and from restricted Page action dispatch. The code is a server-wide
+fact and is sent only after the caller is established as a restricted member;
+every access refusal stays the opaque 404 with no code. Clients show "Private
+execution isn't installed on this server — ask an administrator" only for this
+code; any other failure, including a 503 without it, reads as "unavailable", and
+a successful empty array reads as "nothing available with your current access".
+
 ## Private receipt list
 
 ```http

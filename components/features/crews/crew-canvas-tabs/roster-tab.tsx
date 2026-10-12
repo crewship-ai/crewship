@@ -41,7 +41,6 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
                   <AgentAvatar
                     seed={a.avatar_seed || a.name}
                     style={a.avatar_style || crew.avatar_style}
-                    agentId={a.id}
                     avatarUrl={a.avatar_url}
                     className="w-10 h-10 rounded-xl"
                   />

@@ -144,6 +144,7 @@ func TestLiveQuotaSnapshotProtocolBindsNamespaceAndRejectsPartialImport(t *testi
 	source := Key{"protocol-source", "database", "data", 1}
 	target := Key{"protocol-target", "database", "data", 1}
 	partial := Key{"protocol-partial", "database", "data", 1}
+	shortClient := Key{"protocol-short-client", "database", "data", 1}
 	if _, err = b.Ensure(context.Background(), source, MinBytes, Owner{UID: 1001, GID: 1002}); err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +165,7 @@ func TestLiveQuotaSnapshotProtocolBindsNamespaceAndRejectsPartialImport(t *testi
 		if err := <-done; err != nil {
 			t.Error(err)
 		}
-		for _, key := range []Key{source, target, partial} {
+		for _, key := range []Key{source, target, partial, shortClient} {
 			if err := b.Remove(context.Background(), key); err != nil {
 				t.Error(err)
 			}
@@ -232,12 +233,30 @@ func TestLiveQuotaSnapshotProtocolBindsNamespaceAndRejectsPartialImport(t *testi
 	if err = wrong.Export(context.Background(), source, MinBytes, io.Discard); err == nil {
 		t.Fatal("foreign namespace exported source image")
 	}
-	if _, err = client.Import(context.Background(), partial, MinBytes, bytes.NewReader(image.Bytes()[:1024])); err == nil {
+	if _, err = client.Import(context.Background(), shortClient, MinBytes, bytes.NewReader(image.Bytes()[:1024])); err == nil {
 		t.Fatal("partial image published")
 	}
-	// The server observes the closed stream before handling this next request.
-	// A complete retry at the same unpublished key proves no resumable metadata
-	// or silently mounted partial image survived the interrupted transfer.
+	// A client-side short-reader error returns before the helper necessarily
+	// finishes cleanup. Half-close a separate partial transfer and read its
+	// refusal so the retry is ordered after the helper's completed rollback.
+	interrupted, response, err := client.snapshotConnection(t.Context(), "import", partial, MinBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interrupted.Close()
+	if _, err := interrupted.Write(image.Bytes()[:1024]); err != nil {
+		t.Fatal(err)
+	}
+	if err := interrupted.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	line, err := response.ReadBytes('\n')
+	var refusal Response
+	if err != nil || json.Unmarshal(line, &refusal) != nil || refusal.Namespace != client.Namespace || refusal.Error == "" || refusal.Descriptor != (Descriptor{}) {
+		t.Fatalf("helper did not acknowledge incomplete-stream rollback: %q %v", line, err)
+	}
+	// A complete retry at the same unpublished key proves no metadata or
+	// silently mounted partial image survived the acknowledged rollback.
 	if _, err = client.Import(context.Background(), partial, MinBytes, bytes.NewReader(image.Bytes())); err != nil {
 		t.Fatal(err)
 	}

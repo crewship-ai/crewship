@@ -41,6 +41,20 @@ function avatarLetter(name: string): string {
   return trimmed ? trimmed[0]!.toUpperCase() : "?"
 }
 
+/**
+ * A workspace drawn the way its people know it: its logo when one was
+ * uploaded (#3005), its initial otherwise. Size and colours come from
+ * `className`; a logo that fails to load falls back to the initial.
+ */
+export function WorkspaceMark({ name, logoUrl, className }: { name: string; logoUrl?: string | null; className?: string }) {
+  const [broken, setBroken] = useState(false)
+  useEffect(() => setBroken(false), [logoUrl])
+  if (logoUrl && !broken) {
+    return <img src={logoUrl} alt="" aria-hidden onError={() => setBroken(true)} className={cn("shrink-0 object-cover", className)} />
+  }
+  return <span className={className} aria-hidden>{avatarLetter(name)}</span>
+}
+
 function slugify(name: string): string {
   return name
     .toLowerCase()
@@ -69,9 +83,12 @@ export function WorkspaceSwitcher() {
                 aria-label={`Current workspace: ${triggerLabel}`}
                 className={RAIL_ROW}
               >
-                <span className="rail-tile rail-tile-static bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" aria-hidden>
-                  {workspace ? avatarLetter(workspace.name) : "·"}
-                </span>
+                {workspace ? (
+                  <WorkspaceMark name={workspace.name} logoUrl={workspace.logo_url}
+                    className="rail-tile rail-tile-static bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" />
+                ) : (
+                  <span className="rail-tile rail-tile-static bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" aria-hidden>·</span>
+                )}
                 <span className="rail-label grid min-w-0 flex-1 text-left leading-tight">
                   <span className="truncate font-semibold text-[13px]">{triggerLabel}</span>
                   {triggerSub && (
@@ -143,9 +160,8 @@ function WorkspaceRow({
       }}
       className={cn("flex items-center gap-3 py-2", active && "bg-primary/5")}
     >
-      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-micro font-bold text-primary-foreground shrink-0">
-        {avatarLetter(ws.name)}
-      </div>
+      <WorkspaceMark name={ws.name} logoUrl={ws.logo_url}
+        className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-micro font-bold text-primary-foreground shrink-0" />
       <div className="min-w-0 flex-1">
         <div className="text-xs font-medium truncate">{ws.name}</div>
         <div className="text-micro text-muted-foreground truncate">

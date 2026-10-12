@@ -312,6 +312,10 @@ func TestCheckDataDirPerms(t *testing.T) {
 		if err := os.WriteFile(dbPath, []byte("x"), 0o644); err != nil {
 			t.Fatalf("write: %v", err)
 		}
+		// A restrictive CI umask must not erase the permission drift fixture.
+		if err := os.Chmod(dbPath, 0o644); err != nil {
+			t.Fatalf("chmod: %v", err)
+		}
 		got := checkDataDirPerms(root, dbPath)
 		if got.status != "WARN" {
 			t.Errorf("status = %q, want WARN", got.status)

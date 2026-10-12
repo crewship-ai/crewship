@@ -370,7 +370,7 @@ func runAggregatesCTE(cols []string, innerWhere string) (string, []any) {
 	cte := "\nWITH run_aggregates AS (\n" +
 		strings.Join(lines, ",\n") + "\n" +
 		"    FROM journal_entries\n" +
-		"    WHERE " + innerWhere + "\n" +
+		"    WHERE (" + innerWhere + ") AND " + withoutRecoveredStop("journal_entries") + "\n" +
 		// GROUP BY must repeat the COALESCE expression, not the bareword
 		// "trace_id" — SQLite resolves a GROUP BY bareword against the
 		// FROM-clause column of that name (journal_entries.trace_id),
@@ -898,6 +898,7 @@ SELECT COUNT(DISTINCT trace_id)
 FROM journal_entries je1
 WHERE je1.workspace_id = ?
   AND je1.entry_type = 'run.started'
+  AND `+withoutRecoveredStop("je1")+`
   AND NOT EXISTS (
       SELECT 1 FROM journal_entries je2
       WHERE je2.workspace_id = je1.workspace_id
@@ -922,7 +923,7 @@ SELECT COUNT(DISTINCT trace_id)
 FROM journal_entries
 WHERE workspace_id = ?
   AND entry_type = 'run.started'
-  AND ts >= ?`, workspaceID, todayBound).Scan(&res.Today); err != nil {
+  AND ts >= ? AND `+withoutRecoveredStop("journal_entries"), workspaceID, todayBound).Scan(&res.Today); err != nil {
 		return res, fmt.Errorf("journal: run stats today: %w", err)
 	}
 	// FailedToday = run.failed/timeout rows with ts >= start-of-today UTC
@@ -931,7 +932,7 @@ SELECT COUNT(DISTINCT trace_id)
 FROM journal_entries
 WHERE workspace_id = ?
   AND entry_type IN ('run.failed','run.timeout')
-  AND ts >= ?`, workspaceID, todayBound).Scan(&res.FailedToday); err != nil {
+  AND ts >= ? AND `+withoutRecoveredStop("journal_entries"), workspaceID, todayBound).Scan(&res.FailedToday); err != nil {
 		return res, fmt.Errorf("journal: run stats failed today: %w", err)
 	}
 	return res, nil

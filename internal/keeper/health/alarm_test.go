@@ -162,3 +162,45 @@ func TestRecordNeverBlocksOrFails(t *testing.T) {
 		t.Errorf("5000 Record calls took %v; this sits in front of a credential decision", elapsed)
 	}
 }
+
+func TestRecordPersistsAlarmAfterRequestCancellation(t *testing.T) {
+	db := healthTestDB(t)
+	previous := Default
+	Default = NewMonitor(DefaultWindowSize)
+	t.Cleanup(func() { Default = previous })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for i := 0; i < MinSamples; i++ {
+		Record(ctx, db, quietLogger(), Verdict{
+			WorkspaceID: "ws1", Decision: string(keeper.DecisionDeny),
+			At: base.Add(time.Duration(i) * time.Second),
+		})
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = 'ws1'`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("request cancellation prevented the detached health alarm")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestAlarmExplainsJudgeFailureAndUnknownVerdicts(t *testing.T) {
+	a := sampleAlarm(t)
+	a.Kind = AlarmJudgeFailures
+	a.Stats.Other = 2
+	a.Stats.JudgeFailures = a.Stats.Samples
+	item := AlarmItem(a)
+	for _, want := range []string{"unrecognised verdict: 2", "failing closed", "crewship keeper judge test"} {
+		if !strings.Contains(item.BodyMD, want) {
+			t.Errorf("alarm lacks %q: %s", want, item.BodyMD)
+		}
+	}
+}

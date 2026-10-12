@@ -44,6 +44,27 @@ func TestMain(m *testing.M) {
 	// The developer's shell may export CREWSHIP_* for their own dev instance;
 	// those beat the config a test just wrote (#1305). See testenv_test.go.
 	scrubAmbientCrewshipEnv()
+	// go test -cover supplies its own GOCOVERDIR. Keep child-process artifacts
+	// in the explicitly requested directory, outside go test's temporary tree.
+	if dir := os.Getenv("TEST_CREWSHIP_CLI_COVERAGE_DIR"); dir != "" {
+		info, err := os.Stat(dir)
+		if err != nil || !filepath.IsAbs(dir) || !info.IsDir() {
+			fmt.Fprintln(os.Stderr, "TEST_CREWSHIP_CLI_COVERAGE_DIR must be an existing absolute directory")
+			os.Exit(2)
+		}
+		if err := os.Setenv("GOCOVERDIR", dir); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
+	// Acceptance servers are ephemeral: a reused URL and slug can refer to
+	// another fixture's workspace. Their CLI children must not consult or
+	// populate the developer's shared disk cache. Cache behavior has its own
+	// explicitly enabled coverage in internal/cli/slugcache_test.go.
+	if err := os.Setenv("CREWSHIP_NO_SLUG_CACHE", "1"); err != nil {
+		fmt.Fprintf(os.Stderr, "disable shared workspace slug cache in tests: %v\n", err)
+		os.Exit(1)
+	}
 	// Record the CLI globals and the whole Cobra flag tree while they are still
 	// untouched, so every test can be handed back the same starting state.
 	// See clistate_test.go.

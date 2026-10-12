@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, cleanup, act } from "@testing-library/react"
+import { render, renderHook, cleanup, act } from "@testing-library/react"
 import { useRef } from "react"
 
 import { useRouteScrollRestoration } from "../use-route-scroll-restoration"
@@ -50,6 +50,25 @@ function scrollTo(el: HTMLElement, top: number) {
 }
 
 describe("scroll restoration for a scrolling container", () => {
+  it("leaves history alone when the scroll container is absent", () => {
+    renderHook(() => useRouteScrollRestoration({ current: null }, "/a"))
+    expect(window.history.state).toBeNull()
+    expect(scrolledTo).toEqual([])
+  })
+
+  it("ignores scroll events on an unkeyed entry during route transition", () => {
+    const { getByTestId, rerender } = render(<Probe pathname="/a" />)
+    const entryA = window.history.state
+    scrollTo(getByTestId("scroller"), 300)
+    pushRoute("/b")
+    scrollTo(getByTestId("scroller"), 50)
+    rerender(<Probe pathname="/b" />)
+    expect(scrolledTo.at(-1)).toBe(0)
+    popTo("/a", entryA)
+    rerender(<Probe pathname="/a" />)
+    expect(scrolledTo.at(-1)).toBe(300)
+  })
+
   it("starts a pushed route at the top", () => {
     const { getByTestId, rerender } = render(<Probe pathname="/a" />)
     scrollTo(getByTestId("scroller"), 480)

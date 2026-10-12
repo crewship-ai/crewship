@@ -51,50 +51,64 @@ export function RecipeInstallSheet({
   const [showSecrets, setShowSecrets] = React.useState<Record<string, boolean>>({})
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const scope = React.useRef<{ workspaceId: string; recipeSlug: string; controller: AbortController } | null>(null)
 
   React.useEffect(() => {
-    if (!open || !recipeSlug) {
-      setStep(1); setPreview(null); setCredValues({}); setCredLabels({}); setSubmitting(false); setError(null)
+    setStep(1); setPreview(null); setCredValues({}); setCredLabels({}); setShowSecrets({}); setSubmitting(false); setError(null)
+    if (!open || !recipeSlug || !workspaceId) {
+      setPreviewLoading(false)
       return
     }
+    const current = { workspaceId, recipeSlug, controller: new AbortController() }
+    scope.current = current
     setPreviewLoading(true)
-    apiFetch(`/api/v1/recipes/${recipeSlug}/preview?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/recipes/${encodeURIComponent(recipeSlug)}/preview?workspace_id=${encodeURIComponent(workspaceId)}`, { signal: current.controller.signal })
       .then((r) => r.ok ? r.json() : null)
-      .then((data: PreviewResp | null) => setPreview(data))
-      .catch(() => setPreview(null))
-      .finally(() => setPreviewLoading(false))
+      .then((data: PreviewResp | null) => { if (scope.current === current) setPreview(data) })
+      .catch(() => { if (scope.current === current) setPreview(null) })
+      .finally(() => { if (scope.current === current) setPreviewLoading(false) })
+    return () => {
+      scope.current = null
+      current.controller.abort()
+    }
   }, [open, recipeSlug, workspaceId])
 
   const handleInstall = async () => {
-    if (!preview) return
+    const current = scope.current
+    if (!preview || submitting || !current || current.workspaceId !== workspaceId || current.recipeSlug !== recipeSlug) return
     setSubmitting(true); setError(null)
     try {
-      const res = await apiFetch(`/api/v1/recipes/${preview.recipe.slug}/install?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/recipes/${encodeURIComponent(preview.recipe.slug)}/install?workspace_id=${encodeURIComponent(workspaceId)}`, {
         method: "POST",
+        signal: current.controller.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           credential_values: credValues,
           account_labels: credLabels,
         }),
       })
+      if (scope.current !== current) return
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
+        if (scope.current !== current) return
         setError(typeof data.error === "string" ? data.error : "Install failed")
         setSubmitting(false)
         return
       }
       const result: { crew_slug: string } = await res.json()
+      if (scope.current !== current) return
       toast.success(`${preview.recipe.name} installed`)
       onInstalled?.()
       onOpenChange(false)
       router.push(`/crews?crew=${encodeURIComponent(result.crew_slug)}`)
     } catch {
+      if (scope.current !== current) return
       setError("Network error")
       setSubmitting(false)
     }
   }
 
-  if (!recipeSlug) return null
+  if (!recipeSlug || !workspaceId) return null
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -146,7 +160,7 @@ export function RecipeInstallSheet({
         </div>
 
         {error && (
-          <div className="px-5 py-2 text-xs text-destructive border-t border-foreground/10">{error}</div>
+          <div role="alert" className="px-5 py-2 text-xs text-destructive border-t border-foreground/10">{error}</div>
         )}
 
         <div className="px-5 py-3 border-t border-foreground/10 flex items-center gap-2">
@@ -174,7 +188,7 @@ export function RecipeInstallSheet({
               if (step === 3) { handleInstall(); return }
               setStep((s) => (s + 1) as typeof s)
             }}
-            disabled={!isStepValid(step, preview, credValues) || submitting}
+            disabled={previewLoading || !isStepValid(step, preview, credValues) || submitting}
             className={cn("text-sm px-3.5 py-1.5 rounded bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5", step === 1 && "ml-auto")}
           >
             {submitting && <Spinner className="h-3 w-3" />}
@@ -275,6 +289,7 @@ function CredentialsStep({
   showSecrets: Record<string, boolean>
   setShowSecrets: React.Dispatch<React.SetStateAction<Record<string, string | boolean>>> | React.Dispatch<React.SetStateAction<Record<string, boolean>>>
 }) {
+  const fieldId = React.useId()
   const needed = preview.recipe.credentials.filter((c) => !preview.existing_credentials[c.env_var_name])
   if (needed.length === 0) {
     return (
@@ -293,9 +308,10 @@ function CredentialsStep({
             <Badge variant="outline" className="text-[10px]">{c.label}</Badge>
           </div>
           <div className="space-y-1.5">
-            <label className="block text-[11px] text-muted-foreground">Value</label>
+            <label htmlFor={`${fieldId}-${c.env_var_name}-value`} className="block text-[11px] text-muted-foreground">Value</label>
             <div className="relative">
               <input
+                id={`${fieldId}-${c.env_var_name}-value`}
                 type={showSecrets[c.env_var_name] ? "text" : "password"}
                 value={credValues[c.env_var_name] ?? ""}
                 onChange={(e) => setCredValues((s) => ({ ...s, [c.env_var_name]: e.target.value }))}
@@ -304,6 +320,7 @@ function CredentialsStep({
               />
               <button
                 type="button"
+                aria-label={`${showSecrets[c.env_var_name] ? "Hide" : "Show"} ${c.env_var_name}`}
                 onClick={() => (setShowSecrets as React.Dispatch<React.SetStateAction<Record<string, boolean>>>)((s) => ({ ...s, [c.env_var_name]: !s[c.env_var_name] }))}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
@@ -312,8 +329,9 @@ function CredentialsStep({
             </div>
           </div>
           <div className="space-y-1.5">
-            <label className="block text-[11px] text-muted-foreground">Account label (optional)</label>
+            <label htmlFor={`${fieldId}-${c.env_var_name}-account`} className="block text-[11px] text-muted-foreground">Account label (optional)</label>
             <input
+              id={`${fieldId}-${c.env_var_name}-account`}
               value={credLabels[c.env_var_name] ?? ""}
               onChange={(e) => setCredLabels((s) => ({ ...s, [c.env_var_name]: e.target.value }))}
               placeholder={`e.g. production`}

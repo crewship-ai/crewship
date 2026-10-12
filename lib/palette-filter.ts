@@ -21,6 +21,9 @@ const SCORE = {
   substring: 0.4,
   /** It matched an alias rather than the row's own text. */
   keyword: 0.3,
+  /** Every word of a several-word query is there, but not as one phrase —
+   *  "store avatars" → "Store missing avatars". */
+  words: 0.2,
   /** Nothing typed yet: everything is equally worth showing. */
   empty: 1,
 } as const
@@ -51,6 +54,15 @@ export function paletteFilter(value: string, search: string, keywords?: string[]
   // must outrank one that only matched a keyword.
   for (const k of keywords ?? []) {
     if (k.toLowerCase().includes(q)) return SCORE.keyword
+  }
+
+  // A deep destination is named by its words, not by one exact phrase: a
+  // person types "avatars store" or "settings token" and means the row that
+  // has both. Every word must land, in the row or in an alias.
+  const words = q.split(/\s+/).filter(Boolean)
+  if (words.length > 1) {
+    const hay = [value, ...(keywords ?? [])].join(" ").toLowerCase()
+    if (words.every((w) => hay.includes(w))) return SCORE.words
   }
   return 0
 }

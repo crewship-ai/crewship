@@ -34,6 +34,8 @@ export interface DirtyForm<T> {
   draft: T
   /** True when `draft` differs from the baseline on at least one key. */
   isDirty: boolean
+  /** How many keys differ from the baseline — the page save bar's count. */
+  dirtyCount: number
   set: <K extends keyof T>(key: K, value: T[K]) => void
   patch: (values: Partial<T>) => void
   /** Throw the draft away and return to the baseline. */
@@ -55,6 +57,13 @@ interface Options {
   savedMs?: number
 }
 
+function diffCount<T extends Record<string, unknown>>(a: T, b: T): number {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  let n = 0
+  for (const k of keys) if (!Object.is(a[k], b[k])) n++
+  return n
+}
+
 function shallowEqual<T extends Record<string, unknown>>(a: T, b: T): boolean {
   const keys = Object.keys(a) as (keyof T)[]
   if (keys.length !== Object.keys(b).length) return false
@@ -71,6 +80,7 @@ export function useDirtyForm<T extends Record<string, unknown>>(
   const [error, setError] = useState<string | null>(null)
 
   const isDirty = useMemo(() => !shallowEqual(draft, committed), [draft, committed])
+  const dirtyCount = useMemo(() => diffCount(draft, committed), [draft, committed])
 
   // Refs the async submit path reads, so it never closes over stale values
   // and never touches state after the card unmounts.
@@ -152,5 +162,5 @@ export function useDirtyForm<T extends Record<string, unknown>>(
     }
   }, [savedMs])
 
-  return { draft, isDirty, set, patch, reset, status, error, submit }
+  return { draft, isDirty, dirtyCount, set, patch, reset, status, error, submit }
 }

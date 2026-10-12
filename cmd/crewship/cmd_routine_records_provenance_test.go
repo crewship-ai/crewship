@@ -90,3 +90,37 @@ func TestRoutineRecords_NoChainColumnWhenNothingComposed(t *testing.T) {
 		t.Errorf("chain column drawn for a workspace with no composed runs:\n%s", out)
 	}
 }
+
+// #2193: a run's cost_usd is usage the agent CLIs reported, not money billed.
+// The table calls the column REPORTED USAGE and marks the figure approximate;
+// machine formats keep the cost_usd field unchanged.
+func TestRoutineRecords_CostIsReportedUsageNotSpend(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnGet(covRecordsPath, clitest.JSONResponse(200, []runRecordRow{
+		{ID: "r-used", Status: "completed", Mode: "live", TriggeredVia: "manual", CostUSD: 0.0123, StartedAt: "2026-08-07T08:00:00Z"},
+		{ID: "r-none", Status: "completed", Mode: "live", TriggeredVia: "manual", StartedAt: "2026-08-07T07:00:00Z"},
+	}))
+	covSetupCli10(t, s.URL())
+
+	out, err := captureStdoutCovCli10(t, func() error {
+		return routineRecordsCmd.RunE(routineRecordsCmd, []string{"daily-report"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "REPORTED USAGE") || strings.Contains(out, "\tCOST\t") || strings.Contains(out, " COST ") {
+		t.Errorf("column must read REPORTED USAGE, not COST:\n%s", out)
+	}
+	if !strings.Contains(out, "~$0.0123") {
+		t.Errorf("reported usage not marked approximate:\n%s", out)
+	}
+}
+
+func TestFormatRunCost_MarksReportedUsageApproximate(t *testing.T) {
+	for usd, want := range map[float64]string{0: "—", -1: "—", 0.0123: "~$0.0123", 1.5: "~$1.5000"} {
+		if got := formatRunCost(usd); got != want {
+			t.Errorf("formatRunCost(%v) = %q, want %q", usd, got, want)
+		}
+	}
+}

@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"context"
 	"strconv"
 	"testing"
 
@@ -89,5 +90,17 @@ func TestReadTailMissingSessionReturnsNil(t *testing.T) {
 	}
 	if msgs != nil {
 		t.Errorf("expected nil for missing session, got %d messages", len(msgs))
+	}
+}
+
+func TestReadTailRejectsInvalidSessionAndCancelledContext(t *testing.T) {
+	store := NewStore(t.TempDir(), nil)
+	if got, err := store.ReadTail(context.Background(), "../outside", 10); err == nil || got != nil {
+		t.Fatalf("invalid session read=%v err=%v", got, err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got, err := store.ReadTail(cancelled, "session", 10); err != context.Canceled || got != nil {
+		t.Fatalf("cancelled read=%v err=%v", got, err)
 	}
 }

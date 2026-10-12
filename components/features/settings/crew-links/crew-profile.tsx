@@ -63,12 +63,12 @@ export function CrewProfile({ crew, agents }: { crew: Crew; agents: CrewAgent[] 
       <div className="min-w-0">
         <h2 className="flex flex-wrap items-baseline gap-x-2 text-lg font-semibold tracking-[-0.02em]">
           <span className="truncate">{crew.name}</span>
-          <span className="font-mono text-[11px] font-normal text-muted-foreground">{crew.slug}</span>
+          <span className="font-mono text-micro font-normal text-muted-foreground">{crew.slug}</span>
         </h2>
         {crew.description ? (
-          <p className="mt-0.5 max-w-[72ch] text-[13px] text-muted-foreground">{crew.description}</p>
+          <p className="mt-0.5 max-w-[72ch] text-control text-muted-foreground">{crew.description}</p>
         ) : (
-          <p className="mt-0.5 text-[13px] italic text-muted-foreground-soft">No description. Add one in Crews &amp; Agents so people know what this crew is for.</p>
+          <p className="mt-0.5 text-control italic text-muted-foreground-soft">No description. Add one in Crews &amp; Agents so people know what this crew is for.</p>
         )}
         <div className="mt-2.5 flex flex-wrap gap-1.5" data-slot="crew-facts">
           {n != null && (
@@ -89,7 +89,7 @@ export function CrewProfile({ crew, agents }: { crew: Crew; agents: CrewAgent[] 
             <Fact>{isOpenNetwork(crew) ? <Globe className="h-3.5 w-3.5" aria-hidden /> : <Lock className="h-3.5 w-3.5" aria-hidden />}{isOpenNetwork(crew) ? "Open network" : "Restricted network"}</Fact>
           )}
           {resources && <Fact><Cpu className="h-3.5 w-3.5" aria-hidden /><span className="text-foreground">{resources}</span></Fact>}
-          {image && <Fact className="font-mono text-[11px]">{image}</Fact>}
+          {image && <Fact className="font-mono text-micro">{image}</Fact>}
           {!crew.icon && (
             <Link href={crewHref(crew)} className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 text-xs text-primary-hover hover:bg-accent">
               <Plus className="h-3.5 w-3.5" aria-hidden />Set icon and colour
@@ -133,12 +133,12 @@ export function LinkMap({ crew, ins, outs, dirs, agentsByCrew, onSelect, compact
       className="flex h-full w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-surface-subtle px-1.5 text-left transition-colors hover:border-foreground/25 hover:bg-accent">
       <CrewTile crew={c} />
       <span className="min-w-0">
-        <span className="block truncate text-[12.5px] font-medium leading-tight">{c.name}</span>
-        <span className="block truncate text-[10.5px] leading-tight text-muted-foreground">{agentsLine(c, agentsByCrew?.get(c.id)) ?? c.slug}</span>
+        <span className="block truncate text-label font-medium leading-tight">{c.name}</span>
+        <span className="block truncate text-micro leading-tight text-muted-foreground">{agentsLine(c, agentsByCrew?.get(c.id)) ?? c.slug}</span>
       </span>
     </button>
   )
-  const empty = (text: string) => <p className="text-[11.5px] text-muted-foreground">{text}</p>
+  const empty = (text: string) => <p className="text-label text-muted-foreground">{text}</p>
 
   if (compact) {
     return (
@@ -187,16 +187,16 @@ export function LinkMap({ crew, ins, outs, dirs, agentsByCrew, onSelect, compact
             </marker>
           ))}
         </defs>
-        <text x={0} y={14} className="fill-muted-foreground font-mono text-[10px] uppercase tracking-[0.08em]">Receives work from</text>
-        <text x={W} y={14} textAnchor="end" className="fill-muted-foreground font-mono text-[10px] uppercase tracking-[0.08em]">Hands work to</text>
+        <text x={0} y={14} className="fill-muted-foreground font-mono text-micro uppercase tracking-[0.08em]">Receives work from</text>
+        <text x={W} y={14} textAnchor="end" className="fill-muted-foreground font-mono text-micro uppercase tracking-[0.08em]">Hands work to</text>
         <g key={crew.id}>
           {ins.map((c, i) => edge(`in-${c.id}`, NODE_W, y(i, ins.length), cx - 4, cy, carriesFiles(c.id, crew.id), i))}
           {outs.map((c, i) => edge(`out-${c.id}`, cx + CENTRE_W, cy, W - NODE_W - 4, y(i, outs.length), carriesFiles(crew.id, c.id), i + ins.length))}
         </g>
         {ins.map((c, i) => <foreignObject key={c.id} x={0} y={y(i, ins.length) - NODE_H / 2} width={NODE_W} height={NODE_H}>{node(c)}</foreignObject>)}
         {outs.map((c, i) => <foreignObject key={c.id} x={W - NODE_W} y={y(i, outs.length) - NODE_H / 2} width={NODE_W} height={NODE_H}>{node(c)}</foreignObject>)}
-        {!ins.length && <text x={0} y={cy + 4} className="fill-muted-foreground text-[11.5px]">Nobody hands work here yet</text>}
-        {!outs.length && <text x={W} y={cy + 4} textAnchor="end" className="fill-muted-foreground text-[11.5px]">Hands work to nobody yet</text>}
+        {!ins.length && <text x={0} y={cy + 4} className="fill-muted-foreground text-label">Nobody hands work here yet</text>}
+        {!outs.length && <text x={W} y={cy + 4} textAnchor="end" className="fill-muted-foreground text-label">Hands work to nobody yet</text>}
         <foreignObject x={cx} y={cy - 24} width={CENTRE_W} height={48}>
           <div className="flex h-full items-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-2 text-sm font-semibold" data-slot="link-map-centre">
             <CrewTile crew={crew} />

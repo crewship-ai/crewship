@@ -30,6 +30,12 @@ func (d provisionDefinition) hash() string {
 	return hex.EncodeToString(sum[:])
 }
 
+// EnvironmentDefinitionHash shares the immutable revision binding with runtime
+// admission; edits to selectors/lock/config cannot reuse old build authority.
+func EnvironmentDefinitionHash(cfg, mise, runtime string, adapters []string) string {
+	return (provisionDefinition{Config: cfg, Mise: mise, Runtime: runtime, Adapters: adapters}).hash()
+}
+
 type EnvironmentRevision struct {
 	ID             string                           `json:"id" yaml:"id"`
 	DefinitionHash string                           `json:"definition_hash" yaml:"definition_hash"`
@@ -43,6 +49,25 @@ type EnvironmentRevision struct {
 // build evidence and publishes the cached result. It never changes a running
 // container. Raw configuration/env values are deliberately absent from history.
 func (h *ProvisioningHandler) saveProvisionResult(ctx context.Context, crewID, workspaceID string, expected provisionDefinition, result *devcontainer.ProvisionResult) (string, error) {
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	var cfg, mise, runtime sql.NullString
+	if err = tx.QueryRowContext(ctx, `SELECT devcontainer_config,mise_config,runtime_image FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, crewID, workspaceID).Scan(&cfg, &mise, &runtime); err != nil {
+		return "", err
+	}
+	adapters, err := crewAgentAdapters(ctx, tx, crewID)
+	if err != nil {
+		return "", err
+	}
+	if database.EffectiveCrewDevcontainerConfig(cfg.String, cfg.Valid) != expected.Config || mise.String != expected.Mise || runtime.String != expected.Runtime || !slices.Equal(adapters, expected.Adapters) {
+		return "", errBuildDefinitionChanged
+	}
+	// Supersession wins over validation of obsolete build evidence. Keep both
+	// checks in the publication transaction so a concurrent edit cannot slip
+	// between the comparison and the selected image update.
 	if expected.Mise != "" {
 		mise, err := devcontainer.ParseMiseConfig(expected.Mise)
 		if err != nil {
@@ -67,22 +92,6 @@ func (h *ProvisioningHandler) saveProvisionResult(ctx context.Context, crewID, w
 				return "", err
 			}
 		}
-	}
-	tx, err := h.db.BeginTx(ctx, nil)
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-	var cfg, mise, runtime sql.NullString
-	if err = tx.QueryRowContext(ctx, `SELECT devcontainer_config,mise_config,runtime_image FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, crewID, workspaceID).Scan(&cfg, &mise, &runtime); err != nil {
-		return "", err
-	}
-	adapters, err := crewAgentAdapters(ctx, tx, crewID)
-	if err != nil {
-		return "", err
-	}
-	if database.EffectiveCrewDevcontainerConfig(cfg.String, cfg.Valid) != expected.Config || mise.String != expected.Mise || runtime.String != expected.Runtime || !slices.Equal(adapters, expected.Adapters) {
-		return "", errBuildDefinitionChanged
 	}
 	var requirements sql.NullString
 	if !isEmptyRequirements(result.Requirements) {

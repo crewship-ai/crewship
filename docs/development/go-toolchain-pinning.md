@@ -8,10 +8,10 @@ Thirteen files name the Go version, and they must all name the same one:
 
 | Where | Line |
 |---|---|
-| `go.mod` | `toolchain go1.27.1` — the anchor everything else is checked against |
-| `Dockerfile` | `FROM golang:1.27.1-alpine` — the compiler for the **shipped** binary |
-| ten workflows | `GO_VERSION: "1.27.1"` |
-| `.github/workflows/codeql.yml` | a literal `go-version: "1.27.1"` |
+| `go.mod` | `toolchain go1.27.2` — the anchor everything else is checked against |
+| `Dockerfile` | `FROM golang:1.27.2-alpine` — the compiler for the **shipped** binary |
+| ten workflows | `GO_VERSION: "1.27.2"` |
+| `.github/workflows/codeql.yml` | a literal `go-version: "1.27.2"` |
 
 `scripts/go-toolchain-pin.sh` parses all of them and fails on disagreement;
 it runs in CI's `Shell` job on every PR. Run it before you push:
@@ -41,8 +41,8 @@ it fails backwards — bump the `FROM` tag, forget the literal, and Go downloads
 the *old* toolchain and undoes the bump with CI still green.
 
 Do not expect the image build to catch drift for you. Under `local` the
-`toolchain` directive is ignored outright, so `toolchain go1.27.2` against a
-`golang:1.27.1-alpine` base builds silently with 1.27.1 and exits 0. Only the
+`toolchain` directive is ignored outright, so `toolchain go1.27.3` against a
+`golang:1.27.2-alpine` base builds silently with 1.27.2 and exits 0. Only the
 `go` directive can fail a build, and it tracks the language floor rather than
 this pin. The static check is the only thing that sees this.
 

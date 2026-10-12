@@ -10,6 +10,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import type { StatusTone } from "@/lib/format-status"
 import type { Tone } from "./backups-model"
 import type { Resource } from "./use-backups-data"
+import { settingsTh, settingsTd } from "@/components/features/settings/shared"
 
 /**
  * The few pieces every Backups section draws the same way, on top of the
@@ -37,13 +38,13 @@ export function FieldRow({ label, hint, children, detail, detailTone, className 
 }) {
   return (
     <div data-slot="field-row" className={cn("grid grid-cols-1 items-center gap-x-3 gap-y-1 border-b border-border px-4 py-2.5 last:border-b-0 md:grid-cols-[170px_minmax(0,1fr)]", className)}>
-      <div className="text-[13px] text-muted-foreground">
+      <div className="text-control text-muted-foreground">
         {label}
-        {hint && <small className="block text-[12px] text-muted-foreground-soft">{hint}</small>}
+        {hint && <small className="block text-label text-muted-foreground-soft">{hint}</small>}
       </div>
-      <div className="min-w-0 text-[13px] text-foreground">
+      <div className="min-w-0 text-control text-foreground">
         <div>{children}</div>
-        {detail && <div className={cn("mt-0.5 text-[12.5px]", detailTone ? TONE_TEXT[detailTone] : "text-muted-foreground")}>{detail}</div>}
+        {detail && <div className={cn("mt-0.5 text-label", detailTone ? TONE_TEXT[detailTone] : "text-muted-foreground")}>{detail}</div>}
       </div>
     </div>
   )
@@ -53,7 +54,7 @@ export function FieldRow({ label, hint, children, detail, detailTone, className 
 export function WarnBar({ title, children, action, tone = "warn" }: { title: React.ReactNode; children?: React.ReactNode; action?: React.ReactNode; tone?: "warn" | "bad" }) {
   return (
     <div role="status" data-slot="warn-bar"
-      className={cn("flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-[12.5px]",
+      className={cn("flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-label",
         tone === "warn" ? "border-warn/45 bg-warn/10" : "border-destructive/40 bg-destructive/[0.07]")}>
       <AlertTriangle className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", tone === "warn" ? "text-warn" : "text-destructive")} aria-hidden />
       <div className="min-w-0 flex-1">
@@ -90,7 +91,7 @@ const AVATAR_TINT = ["var(--primary)", "var(--purple)", "var(--warn)", "var(--su
 export function WsAvatar({ name, instance, size = 20 }: { name: string; instance?: boolean; size?: number }) {
   const i = [...name].reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR_TINT.length
   return (
-    <span aria-hidden className="grid shrink-0 place-items-center rounded-[6px] text-[10px] font-bold text-white"
+    <span aria-hidden className="grid shrink-0 place-items-center rounded-[6px] text-micro font-bold text-white"
       style={{ width: size, height: size, background: instance ? "var(--purple)" : AVATAR_TINT[i] }}>
       {(name.trim()[0] ?? "·").toUpperCase()}
     </span>
@@ -102,7 +103,7 @@ export function WsName({ name, instance, here }: { name: string; instance?: bool
     <span className="inline-flex items-center gap-1.5">
       <WsAvatar name={name} instance={instance} />
       {name}
-      {here && <span className="rounded border border-dashed border-control-border px-1 font-mono text-[9.5px] text-muted-foreground-soft">here</span>}
+      {here && <span className="rounded border border-dashed border-control-border px-1 font-mono text-micro text-muted-foreground-soft">here</span>}
     </span>
   )
 }
@@ -111,7 +112,7 @@ export function WsName({ name, instance, here }: { name: string; instance?: bool
 export function InlineInput({ className, ...props }: React.ComponentProps<"input">) {
   return (
     <input {...props}
-      className={cn("mx-1 h-7 w-[5.5rem] rounded-md border border-control-border bg-surface-subtle px-2 text-[13px] text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 coarse:h-[2.75rem]", className)} />
+      className={cn("mx-1 h-7 w-[5.5rem] rounded-md border border-control-border bg-surface-subtle px-2 text-control text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 coarse:h-[2.75rem]", className)} />
   )
 }
 
@@ -123,7 +124,7 @@ export function Dot({ className, style }: { className?: string; style?: React.CS
 /** Quiet: the endpoint behind this part is not on this server yet. */
 export function Unavailable({ what, className }: { what?: string; className?: string }) {
   return (
-    <div data-slot="backups-unavailable" className={cn("flex items-center gap-2 rounded-lg border border-dashed border-border px-4 py-3 text-[12.5px] text-muted-foreground", className)}>
+    <div data-slot="backups-unavailable" className={cn("flex items-center gap-2 rounded-lg border border-dashed border-border px-4 py-3 text-label text-muted-foreground", className)}>
       <CloudOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
       <span>Not available on this server yet{what ? ` · ${what}` : ""}</span>
     </div>
@@ -141,7 +142,7 @@ export function Gate<T>({ resource, what, children, skeleton = "h-[160px]" }: {
   if (resource.status === "unavailable") return <Unavailable what={what} />
   if (resource.status === "error" || resource.data === null) {
     return (
-      <p role="alert" className="rounded-lg border border-border px-4 py-3 text-[12.5px] text-destructive">
+      <p role="alert" className="rounded-lg border border-border px-4 py-3 text-label text-destructive">
         {what ? `${what} could not be read` : "Could not be read"}: {resource.error ?? "no answer"}{" "}
         <button type="button" className="underline" onClick={resource.reload}>Retry</button>
       </p>
@@ -162,8 +163,8 @@ export function ItemRow({ lead, title, detail, action, className }: {
     <div data-slot="item-row" className={cn("flex items-center gap-2.5 border-b border-border px-4 py-2.5 last:border-b-0", className)}>
       {lead}
       <div className="min-w-0 flex-1">
-        <div className="text-[13.5px]">{title}</div>
-        {detail && <div className="text-[12.5px] text-muted-foreground">{detail}</div>}
+        <div className="text-control">{title}</div>
+        {detail && <div className="text-label text-muted-foreground">{detail}</div>}
       </div>
       {action && <div className="flex shrink-0 items-center gap-1.5">{action}</div>}
     </div>
@@ -172,9 +173,10 @@ export function ItemRow({ lead, title, detail, action, className }: {
 
 /** The mono label the design uses above a block. */
 export function Eyebrow({ children }: { children: React.ReactNode }) {
-  return <span className="font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">{children}</span>
+  return <span className="font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">{children}</span>
 }
 
 /** Table cell classes, so every table in the section reads alike. */
-export const TH = "whitespace-nowrap border-b border-border px-3.5 py-2 text-left font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground-soft"
-export const TD = "whitespace-nowrap border-b border-border px-3.5 py-2 text-[13px]"
+/** Backups tables are Settings tables; cells do not wrap unless a column asks. */
+export const TH = settingsTh
+export const TD = cn(settingsTd, "whitespace-nowrap")

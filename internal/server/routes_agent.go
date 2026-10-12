@@ -37,6 +37,10 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 	for _, raw := range states {
 		var run orchestrator.RunState
 		if err := json.Unmarshal(raw, &run); err != nil {
+			if owner := orchestrator.RuntimeRecordAgent(raw); owner != "" && owner != id {
+				s.logger.Warn("skip corrupt runtime for another agent", "agent_id", owner, "error", err)
+				continue
+			}
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime status unavailable"})
 			return
 		}
@@ -107,18 +111,20 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	// Resource limits come from the request (an agent run may size its own
 	// container); the crew's provisioned image and declared sidecars are filled
 	// in by the starter, which is what this route never looked up (#1717/#1708).
-	containerID, err := s.startCrew(r.Context(), provider.CrewConfig{
+	runtimeUse, _, err := s.crewStarter().StartUse(r.Context(), provider.CrewConfig{
 		ID:       req.CrewID,
 		Slug:     req.CrewSlug,
 		MemoryMB: memoryMB,
 		CPUs:     cpus,
-	})
+	}, nil)
 	if err != nil {
+		runtimeUse.Release()
 		s.logger.Error("failed to ensure team runtime", "crew_id", req.CrewID, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to start container"})
 		return
 	}
 
+	containerID := runtimeUse.ContainerID()
 	// Start file watcher for this crew's output directory (idempotent).
 	s.ensureFileWatcher(req.CrewID)
 
@@ -137,6 +143,7 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	runID := orchestrator.NewRunID()
 
 	runReq := orchestrator.AgentRunRequest{
+		RuntimeUse:     runtimeUse,
 		AgentID:        agentID,
 		AgentSlug:      req.AgentSlug,
 		RunID:          runID,
@@ -159,6 +166,7 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
+		defer runtimeUse.Release()
 		timeout := time.Duration(req.TimeoutSecs) * time.Second
 		if timeout <= 0 {
 			timeout = 30 * time.Minute
@@ -221,23 +229,32 @@ func (s *Server) handleAgentStop(w http.ResponseWriter, r *http.Request) {
 	s.logger.Info("agent stop request", "agent_id", id)
 
 	if s.orchestrator == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime stop unavailable"})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime stop unavailable", "code": orchestrator.AgentStopCodeRuntimeUnavailable})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	if err := s.orchestrator.StopAgent(ctx, id); err != nil {
+	outcome, err := s.orchestrator.StopAgentOutcome(ctx, id)
+	if err != nil {
 		s.logger.Warn("agent stop not confirmed", "agent_id", id, "error", err)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime stop not confirmed"})
+		// A possibly live process outranks an unreadable runtime.
+		if errors.Is(err, orchestrator.ErrStopNotConfirmed) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime stop not confirmed", "code": orchestrator.AgentStopCodeNotConfirmed})
+			return
+		}
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime stop unavailable", "code": orchestrator.AgentStopCodeRuntimeUnavailable})
 		return
 	}
 	if err := s.flushRecoveredStops(ctx); err != nil {
 		s.logger.Warn("confirmed stop history pending retry", "agent_id", id, "error", err)
 	}
 
+	// status stays "stopped" for both outcomes: the agent is confirmed not
+	// running. outcome says whether this request ended anything.
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"agent_id": id,
 		"status":   "stopped",
+		"outcome":  string(outcome),
 	})
 }
 

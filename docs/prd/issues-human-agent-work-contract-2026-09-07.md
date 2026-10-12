@@ -1,17 +1,9 @@
 # Issues: předávání práce mezi agenty a lidmi
 
-Návrh a implementační/testovací plán, 2026-09-07. Navazuje na
-[archived snapshot](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/ux/issues-analysis-proposal-2026-09-07.md) z dev1 a na
-[PRD Issues and Routines](PRD-ISSUES-AND-ROUTINES-2026.md).
-Nová analýza kódu: `origin/main` @ `038117517`; první implementační část
-na větvi `feat/issues-work-clarity`, issue #2447. Routines se zde mění pouze
-v návrhu pravidel pro jejich zápisy/spouštění nad issue.
-
-**Stav:** původní návrh a audit před implementací. Rozšířená implementace #2449
-(převzetí člověkem, předání, výsledky, přílohy, formuláře a stránkování) je
-popsaná v [aktuálním handoffu](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/HANDOFF-2026-09-07-ISSUES-WORK.md).
-Níže uvedená matice zůstává návrhem cílových scénářů, nikoli tvrzením, že
-každý z nich prošel živým testem s agentem.
+Návrhový a testovací kontrakt z 2026-09-07, navazující na
+[Issues and Routines](PRD-ISSUES-AND-ROUTINES-2026.md). Interní audity a
+předání jsou zachované v soukromém kontextu. Matice níže popisuje cílové
+scénáře, nikoli nové tvrzení o přejímce každého z nich.
 
 ## Doporučení
 
@@ -281,22 +273,6 @@ Chybějící výsledek je explicitní; technický prompt není název karty; cel
 uložené shrnutí lze rozbalit vedle případné chyby. Nemění to obsah historických
 komentářů, neobnovuje chybějící artefakty a neimplementuje lidské převzetí.
 
-Ověření první části dne 2026-09-07:
-
-- `pnpm exec vitest run components/features/issues/__tests__`: 212 testů,
-  22 souborů, všechny prošly.
-- `TMPDIR=/dev/shm go test ./... -count=1 -timeout=40m -p=3`: prošlo celé;
-  API 131 s, databázový balík 417 s. Tmpfs je urychlení testů, není to
-  výkonnostní důkaz produkčního SQLite. Docker testy respektují vlastní skipy.
-- `go vet -p=3 ./...`: prošlo.
-- `pnpm lint`: bez chyb, 32 existujících varování mimo tuto změnu.
-- `pnpm build`: prošlo po standardním vygenerování Prisma klienta v novém
-  worktree. Nebyla spuštěna databázová migrace přes Prisma.
-- `node e2e/issues-work-clarity.mjs`: Chromium 390/820/1440 px, skutečné
-  komponenty a CSS aplikace, přístupná práce s klávesnicí, rozbalení celého
-  shrnutí, rozlišení lidského vlastníka a delegáta, žádné horizontální
-  přetečení ani browser exception. Screenshoty `/tmp/issues-work-clarity-*.png`.
-  Jde o izolovanou komponentovou browser fixture, nikoli živé předání úkolu.
-
-První část nepřidává síťová volání ani LLM požadavky. Nový celý návrh nebyl
-nasazen na dev1; běžící Inbox/Dashboard zůstaly na své původní větvi.
+Interní průběh ověřování a nasazení je zachován v soukromém kontextu.
+Veřejné testy rozlišují vlastníka, delegáta, outcomes a přijaté realtime
+události; jejich existence sama nepotvrzuje přejímku celého návrhu.

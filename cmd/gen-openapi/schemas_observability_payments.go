@@ -106,6 +106,12 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 		// The timestamps cannot answer it: last_activity falls back to
 		// started_at while a run is in flight.
 		"running_runs": integer(), "waiting_runs": integer(),
+		// Terminal outcomes besides failed (#2981): cancelled and interrupted
+		// runs are neither failures nor finished work.
+		"completed_runs": integer(), "cancelled_runs": integer(), "interrupted_runs": integer(),
+		// What the chain is rooted in (#2989): "run" or "assignment" (agent
+		// work outside any routine), and an assignment root's task.
+		"kind": map[string]any{"type": "string", "enum": []string{"run", "assignment"}}, "task": str(),
 		"first_activity": dateTime(), "last_activity": dateTime(),
 		"duration_ms": map[string]any{"type": "integer", "nullable": true},
 		"issues":      array(chainIssueRef), "issue_count": integer(),

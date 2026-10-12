@@ -18,21 +18,26 @@ import (
 
 // flagManifest describes one flag in the commands manifest.
 type flagManifest struct {
-	Name      string `json:"name" yaml:"name"`
-	Shorthand string `json:"shorthand,omitempty" yaml:"shorthand,omitempty"`
-	Type      string `json:"type" yaml:"type"`
-	Default   string `json:"default,omitempty" yaml:"default,omitempty"`
-	Usage     string `json:"usage" yaml:"usage"`
+	Name       string `json:"name" yaml:"name"`
+	Shorthand  string `json:"shorthand,omitempty" yaml:"shorthand,omitempty"`
+	Type       string `json:"type" yaml:"type"`
+	Default    string `json:"default,omitempty" yaml:"default,omitempty"`
+	Usage      string `json:"usage" yaml:"usage"`
+	Required   bool   `json:"required,omitempty" yaml:"required,omitempty"`
+	Deprecated string `json:"deprecated,omitempty" yaml:"deprecated,omitempty"`
 }
 
 // commandManifest describes one command (and its subtree).
 type commandManifest struct {
-	Path     string            `json:"path" yaml:"path"`
-	Use      string            `json:"use" yaml:"use"`
-	Short    string            `json:"short,omitempty" yaml:"short,omitempty"`
-	Aliases  []string          `json:"aliases,omitempty" yaml:"aliases,omitempty"`
-	Flags    []flagManifest    `json:"flags,omitempty" yaml:"flags,omitempty"`
-	Commands []commandManifest `json:"commands,omitempty" yaml:"commands,omitempty"`
+	Runnable       bool              `json:"runnable" yaml:"runnable"`
+	Example        string            `json:"example,omitempty" yaml:"example,omitempty"`
+	InheritedFlags []flagManifest    `json:"inherited_flags,omitempty" yaml:"inherited_flags,omitempty"`
+	Path           string            `json:"path" yaml:"path"`
+	Use            string            `json:"use" yaml:"use"`
+	Short          string            `json:"short,omitempty" yaml:"short,omitempty"`
+	Aliases        []string          `json:"aliases,omitempty" yaml:"aliases,omitempty"`
+	Flags          []flagManifest    `json:"flags,omitempty" yaml:"flags,omitempty"`
+	Commands       []commandManifest `json:"commands,omitempty" yaml:"commands,omitempty"`
 }
 
 // commandsManifest is the top-level document.
@@ -43,7 +48,7 @@ type commandsManifest struct {
 }
 
 var commandsCmd = &cobra.Command{
-	Use:   "commands",
+	Use:   "commands [command path...]",
 	Short: "Dump the full CLI command tree as a machine-readable manifest",
 	Long: `Print every command, subcommand, and flag the CLI supports.
 
@@ -53,13 +58,27 @@ capabilities in one call:
 
   crewship commands --format json | jq '.commands[].path'
 
+Pass a canonical command path to focus on one subtree:
+
+  crewship commands routine run --format json
+
+The manifest includes runnable status, examples, inherited flags, and individually
+required flags. Conditional requirements remain documented in command help.
 The default (table) output is an indented human-readable tree.`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, _ []string) error {
+	Args: cobra.ArbitraryArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		manifest := commandsManifest{
 			Version:     version,
 			GlobalFlags: collectFlags(rootCmd.PersistentFlags()),
 			Commands:    collectCommands(rootCmd, ""),
+		}
+		if len(args) > 0 {
+			path := strings.Join(strings.Fields(strings.Join(args, " ")), " ")
+			selected := findCommandManifest(manifest.Commands, path)
+			if selected == nil {
+				return cli.NotFoundf("command not found: %s (run 'crewship commands')", path)
+			}
+			manifest.Commands = []commandManifest{*selected}
 		}
 		f := newFormatter()
 		switch f.Format {
@@ -93,15 +112,31 @@ func collectCommands(parent *cobra.Command, prefix string) []commandManifest {
 			path = prefix + " " + c.Name()
 		}
 		out = append(out, commandManifest{
-			Path:     path,
-			Use:      c.Use,
-			Short:    c.Short,
-			Aliases:  c.Aliases,
-			Flags:    collectFlags(c.Flags()),
-			Commands: collectCommands(c, path),
+			Runnable:       c.Runnable(),
+			Example:        c.Example,
+			InheritedFlags: collectInheritedFlags(c),
+			Path:           path,
+			Use:            c.Use,
+			Short:          c.Short,
+			Aliases:        c.Aliases,
+			Flags:          collectFlags(c.LocalFlags()),
+			Commands:       collectCommands(c, path),
 		})
 	}
 	return out
+}
+
+// Global flags already appear once at the document root. Repeating them for
+// every command needlessly consumes the agent's context window.
+func collectInheritedFlags(cmd *cobra.Command) []flagManifest {
+	local := pflag.NewFlagSet("inherited", pflag.ContinueOnError)
+	global := cmd.Root().PersistentFlags()
+	cmd.InheritedFlags().VisitAll(func(flag *pflag.Flag) {
+		if global.Lookup(flag.Name) != flag {
+			local.AddFlag(flag)
+		}
+	})
+	return collectFlags(local)
 }
 
 // collectFlags converts a pflag set into the manifest shape.
@@ -112,11 +147,13 @@ func collectFlags(fs *pflag.FlagSet) []flagManifest {
 			return
 		}
 		out = append(out, flagManifest{
-			Name:      f.Name,
-			Shorthand: f.Shorthand,
-			Type:      f.Value.Type(),
-			Default:   f.DefValue,
-			Usage:     f.Usage,
+			Name:       f.Name,
+			Shorthand:  f.Shorthand,
+			Type:       f.Value.Type(),
+			Default:    f.DefValue,
+			Usage:      f.Usage,
+			Required:   len(f.Annotations[cobra.BashCompOneRequiredFlag]) > 0,
+			Deprecated: f.Deprecated,
 		})
 	})
 	return out
@@ -145,4 +182,18 @@ func printCommandTree(cmds []commandManifest, depth int) {
 
 func init() {
 	rootCmd.AddCommand(commandsCmd)
+}
+
+// findCommandManifest accepts canonical paths only, so the returned path can be
+// reused verbatim. This lookup never executes a command or contacts a server.
+func findCommandManifest(commands []commandManifest, path string) *commandManifest {
+	for i := range commands {
+		if commands[i].Path == path {
+			return &commands[i]
+		}
+		if found := findCommandManifest(commands[i].Commands, path); found != nil {
+			return found
+		}
+	}
+	return nil
 }

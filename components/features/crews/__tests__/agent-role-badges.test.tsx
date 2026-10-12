@@ -8,13 +8,6 @@ import { CrewAgentPreviewList } from "../crew-agent-preview-list"
 import { EmptyRoster } from "../empty-roster"
 import { RosterTab } from "../crew-canvas-tabs/roster-tab"
 
-// The avatars on two of these surfaces fire a background PUT; vitest.setup.ts
-// fails any unmocked network call. Not what this file is about.
-vi.mock("@/lib/agent-avatar-persist", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/agent-avatar-persist")>()),
-  queueAvatarBackfill: vi.fn(),
-}))
-
 /**
  * A role badge is a promise: it names something the product can create. The
  * create-crew wizard's lineup could render `COORDINATOR` — retired in v0.1,

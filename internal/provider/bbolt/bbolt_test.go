@@ -288,3 +288,47 @@ func TestLockWaitIsBounded(t *testing.T) {
 		t.Errorf("lockProbe = %s must be a small positive slice of lockWait (%s)", lockProbe, lockWait)
 	}
 }
+
+func TestUpdateSerializesWithSetAndRollsBack(t *testing.T) {
+	p, err := New(filepath.Join(t.TempDir(), "atomic.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	ctx := t.Context()
+	if err := p.Set(ctx, "b", "k", []byte("first")); err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	updated := make(chan error, 1)
+	written := make(chan error, 1)
+	go func() {
+		updated <- p.Update(ctx, "b", "k", func(raw []byte) ([]byte, error) {
+			close(entered)
+			<-release
+			return append(raw, []byte("-updated")...), nil
+		})
+	}()
+	<-entered
+	go func() { written <- p.Set(ctx, "b", "k", []byte("newer")) }()
+	close(release)
+	if err := <-updated; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-written; err != nil {
+		t.Fatal(err)
+	}
+	raw, err := p.Get(ctx, "b", "k")
+	if err != nil || string(raw) != "newer" {
+		t.Fatalf("concurrent writer lost: %q %v", raw, err)
+	}
+	failure := errors.New("callback failed")
+	if err := p.Update(ctx, "b", "k", func([]byte) ([]byte, error) { return []byte("wrong"), failure }); !errors.Is(err, failure) {
+		t.Fatal(err)
+	}
+	raw, err = p.Get(ctx, "b", "k")
+	if err != nil || string(raw) != "newer" {
+		t.Fatalf("failed transaction persisted: %q %v", raw, err)
+	}
+}

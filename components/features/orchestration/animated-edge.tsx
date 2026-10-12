@@ -173,6 +173,9 @@ export const AnimatedEdge = memo(AnimatedEdgeInner, (prev, next) => {
     prev.sourceY === next.sourceY &&
     prev.targetX === next.targetX &&
     prev.targetY === next.targetY &&
+    prev.sourcePosition === next.sourcePosition &&
+    prev.targetPosition === next.targetPosition &&
+    prev.markerEnd === next.markerEnd &&
     prevData?.color === nextData?.color &&
     prevData?.active === nextData?.active &&
     prevData?.dimmed === nextData?.dimmed

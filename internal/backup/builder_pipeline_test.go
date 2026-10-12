@@ -414,6 +414,36 @@ func TestBackup_RestoreSameWorkspaceTwice_RejectsAsNoOp(t *testing.T) {
 	}
 }
 
+func TestBackup_NoOpRestoreDoesNotWriteCrewFiles(t *testing.T) {
+	ctx := context.Background()
+	db := openMigratedDB(t)
+	workspaceID := seedWorkspace(t, db)
+	ops := &recordingOps{}
+	actor := backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"}
+	containerFor := func(id, _ string) string { return "owned-" + id }
+	created, err := backup.CreateBackup(ctx, db, backup.CreateOptions{
+		Scope: backup.ScopeWorkspace, WorkspaceID: workspaceID,
+		OutputDir: t.TempDir(), Actor: actor, Passphrase: "no-op-file-guard",
+		CrewContainerName: containerFor, DockerOps: ops,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := backup.RestoreBackup(ctx, db, backup.RestoreOptions{
+		Path: created.Path, Passphrase: "no-op-file-guard", Actor: actor,
+		ContainerFor: containerFor, DockerOps: ops,
+	})
+	if !errors.Is(err, backup.ErrNoOpRestore) {
+		t.Fatalf("expected collision rejection, got %v", err)
+	}
+	if result == nil || result.RowsInserted != 0 || result.RestoredWorkspaceID != workspaceID {
+		t.Fatalf("lost rejection metadata: %+v", result)
+	}
+	if len(ops.written) != 0 {
+		t.Fatalf("rejected restore already changed crew files: %v", ops.written)
+	}
+}
+
 // TestBackup_LockLifecycle_AcquireIsHeldRelease pins the public
 // SQLLockManager API the orchestrator depends on to refuse new agent
 // runs while a backup is in flight. The lifecycle:

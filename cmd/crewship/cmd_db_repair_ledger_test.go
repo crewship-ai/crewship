@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // ledgerFixtureKey is the ENCRYPTION_KEY every fixture in this file is built
@@ -70,14 +71,40 @@ func buildLedgerFixtures() ledgerFixtures {
 
 	// A database at head. It is both the "nothing to repair" fixture and the
 	// only way to learn which migration to leave out of the collided one.
+	//
+	// It is the process-wide migrated template (internal/testutil), not a
+	// migration of its own: the template is database.Migrate's output too,
+	// most shards of this package build it anyway, and a second full run of
+	// the chain was ~45 s under -race. Migrating an EMPTY database does not
+	// read ENCRYPTION_KEY into anything — v140 and v152 only rewrite existing
+	// rows — so the template is the same head image this key would produce.
+	// The template is WAL-mode; journal_mode=DELETE turns the copy back into
+	// the rollback-journal database a plain sql.Open migration left here
+	// before, which is what the in-use guard test's holder relies on.
+	template, err := testutil.MigratedTemplate()
+	if err != nil {
+		return failed("migrated template: %w", err)
+	}
 	headPath := filepath.Join(dir, "head.db")
+	image, err := os.ReadFile(template)
+	if err != nil {
+		return failed("read template: %w", err)
+	}
+	if err := os.WriteFile(headPath, image, 0o600); err != nil {
+		return failed("write head: %w", err)
+	}
 	head, err := sql.Open("sqlite", headPath)
 	if err != nil {
 		return failed("open head: %w", err)
 	}
-	if err := database.Migrate(ctx, head, quiet); err != nil {
+	var mode string
+	if err := head.QueryRowContext(ctx, "PRAGMA journal_mode=DELETE").Scan(&mode); err != nil || mode != "delete" {
 		head.Close()
-		return failed("migrate head: %w", err)
+		return failed("head journal_mode=DELETE: got %q, %v", mode, err)
+	}
+	if _, _, pending, err := database.PendingMigrations(ctx, head); err != nil || pending != 0 {
+		head.Close()
+		return failed("head image is not at head: %d pending, %v", pending, err)
 	}
 	led, err := database.ReadLedger(ctx, head)
 	if err != nil {

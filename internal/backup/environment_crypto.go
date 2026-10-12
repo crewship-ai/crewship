@@ -576,7 +576,7 @@ func (s *EnvironmentStore) newGeneration(recipients []age.Recipient, set []strin
 		g.Recipients = []string{}
 		var seal []age.Recipient
 		if passphrase != "" {
-			r, err := age.NewScryptRecipient(passphrase)
+			r, err := newPassphraseRecipient(passphrase)
 			if err != nil {
 				return nil, err
 			}

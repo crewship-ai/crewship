@@ -181,6 +181,11 @@ const RENDERABLE_PART_TYPES: ReadonlySet<string> = new Set<TurnPartType>([
 ])
 
 interface UseChatOptions {
+  /** False for a session with no realtime at all (a restricted account: the
+   *  allowlist refuses /ws-token). The socket is then never opened and the
+   *  connection reads "unavailable" — except on a restricted chat, whose
+   *  replies stream over the restricted-run response instead. */
+  realtimeEnabled?: boolean
   executionProfile?: "trusted" | "restricted" | "pending"
   getExecutionProfile?: () => "trusted" | "restricted" | "pending"
   workspaceId?: string | null
@@ -319,7 +324,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
  * Handles streaming text/thinking/tool events, turn grouping, history loading,
  * message editing, regeneration, and stop/cancel.
  */
-export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamReset, onReplyCompleted, onOwnMessageSaved, executionProfile, getExecutionProfile, workspaceId }: UseChatOptions) {
+export function useChat({ realtimeEnabled = true, wsUrl, getToken, sessionId, currentUserId, onStreamReset, onReplyCompleted, onOwnMessageSaved, executionProfile, getExecutionProfile, workspaceId }: UseChatOptions) {
   const completedReplyRef = useRef(onReplyCompleted)
   completedReplyRef.current = onReplyCompleted
   const ownMessageSavedRef = useRef(onOwnMessageSaved)
@@ -1321,7 +1326,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
   }, [subscribeAndResume])
 
   const { status, send } = useWebSocket({
-    enabled: executionProfile !== "restricted" && executionProfile !== "pending",
+    enabled: realtimeEnabled && executionProfile !== "restricted" && executionProfile !== "pending",
     url: wsUrl,
     getToken,
     onMessage: handleMessage,
@@ -1677,6 +1682,6 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     markHistoryUnavailable,
     resubscribeSession,
     isStreaming,
-    connectionStatus: (executionProfile === "restricted" ? "connected" : status) as WSStatus,
+    connectionStatus: (executionProfile === "restricted" ? "connected" : realtimeEnabled ? status : "unavailable") as WSStatus,
   }
 }

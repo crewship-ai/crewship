@@ -3,15 +3,12 @@ package providerlogin
 import (
 	"context"
 	"database/sql"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 type proofVerifier func(context.Context, string, string, string) (CodexIdentity, error)
@@ -22,14 +19,11 @@ func (f proofVerifier) Verify(ctx context.Context, id, access, account string) (
 func proofFixture(t *testing.T) (*sql.DB, *CodexProofStore, string) {
 	t.Helper()
 	t.Setenv("ENCRYPTION_KEY", strings.Repeat("31", 32))
-	db, e := database.Open("file:" + filepath.Join(t.TempDir(), "proof.db"))
-	if e != nil {
-		t.Fatal(e)
-	}
-	t.Cleanup(func() { db.Close() })
-	if e = database.Migrate(t.Context(), db.DB, slog.New(slog.NewTextHandler(io.Discard, nil))); e != nil {
-		t.Fatal(e)
-	}
+	// The migrated template, not a per-test database.Migrate: the chain costs
+	// ~1.5 s per fixture plain and over a minute under -race, and the schema is
+	// identical (TestMigratedDB_SchemaMatchesMigrateRunner).
+	db := testutil.MigratedDB(t)
+	var e error
 	for _, statement := range []string{`INSERT INTO users(id,email,full_name) VALUES('h1','h1@synthetic.invalid','H1'),('h2','h2@synthetic.invalid','H2')`, `INSERT INTO workspaces(id,name,slug) VALUES('w1','W1','w1'),('w2','W2','w2')`} {
 		if _, e = db.Exec(statement); e != nil {
 			t.Fatal(e)

@@ -40,6 +40,12 @@ var (
 	// "crew", "workspace", nor "instance".
 	ErrInvalidScope = errors.New("backup: invalid scope")
 
+	// ErrRestoreNameTaken is returned when a restore under a new name
+	// (--as-workspace, --as-crew) names a workspace slug this server
+	// already holds, live or deleted: workspaces.slug stays UNIQUE after a
+	// soft delete.
+	ErrRestoreNameTaken = errors.New("backup: restore name taken")
+
 	// ErrIncompatibleTarget is returned on restore when the bundle's
 	// compatible_targets list disallows the current target (e.g. a
 	// crew bundle being restored into a different Crewship instance).
@@ -102,4 +108,10 @@ var (
 	// built, and it means the bundle cannot be trusted to restore what an
 	// operator expects.
 	ErrIncompleteBundle = errors.New("backup: payload row counts do not match the manifest")
+
+	// ErrBundleShortOfSource is returned by Verify when the manifest's
+	// create-time scope reconciliation (#2009) recorded workspace rows the
+	// source held that the dump did not export — a scope-filter bug of
+	// #1973's shape. The bundle is intact but not everything.
+	ErrBundleShortOfSource = errors.New("backup: bundle is missing workspace rows its source held")
 )

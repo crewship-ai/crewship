@@ -691,11 +691,19 @@ func (h *WebhookHandler) acceptDelivery(ctx context.Context, crewID, agentID str
 				"agent_id", agentID, "workspace_id", info.WorkspaceID)
 			return webhook.Acceptance{}, nil, fmt.Errorf("%w: %w", webhook.ErrDeliveryConflict, acceptErr)
 		default:
-			// Budget exceeded, database unavailable, constraint fault — all of
-			// them 503 and none of them a 202. W4: nothing runs.
+			// Budget exceeded, database unavailable, constraint fault — none of
+			// them a 202 for new work. W4: nothing runs.
+			//
+			// But the write transaction is the wrong question for a delivery
+			// that is ALREADY in the ledger: a re-delivery arriving while the
+			// original's run holds the write lock exhausts the budget waiting
+			// for a row it would never have written (#2964). §5 gives an
+			// accepted delivery its receipt, so ask the ledger read-only first;
+			// only genuinely new work gets the 503.
 			h.logger.Error("webhook acceptance did not commit; no agent started",
 				"agent_id", agentID, "workspace_id", info.WorkspaceID, "error", acceptErr)
-			return webhook.Acceptance{}, nil, fmt.Errorf("%w: %w", webhook.ErrUnavailable, acceptErr)
+			return h.receiptOrRefusal(ctx, store, info.WorkspaceID, agentID, sourceDeliveryID, d.BodySHA256,
+				fmt.Errorf("%w: %w", webhook.ErrUnavailable, acceptErr))
 		}
 	}
 
@@ -732,7 +740,7 @@ func (h *WebhookHandler) acceptDelivery(ctx context.Context, crewID, agentID str
 	return acc, nil, nil
 }
 
-// receiptOrRefusal answers a gate rejection.
+// receiptOrRefusal answers a gate rejection or a failed acceptance write.
 //
 // §5: "Duplicate již přijaté práce není odmítnuta kvůli zaplnění" — a delivery
 // that has already been accepted is not refused because the ingress is full, it
@@ -828,7 +836,9 @@ func (h *WebhookHandler) runWebhookAgent(
 		h.logger.Warn("webhook: crew services unresolved, starting without them",
 			"agent_id", agentID, "crew_id", info.CrewID, "error", whCfgErr)
 	}
-	containerID, err := crewstart.New(h.container, NewCrewConfigCompleter(h.db), h.logger).Start(ctx, whCfg)
+	runtimeUse, _, err := crewstart.New(h.container, NewCrewConfigCompleter(h.db), h.logger).StartUse(ctx, whCfg, nil)
+	defer runtimeUse.Release()
+	containerID := runtimeUse.ContainerID()
 	if err != nil {
 		if releaseSlot != nil {
 			releaseSlot()
@@ -964,6 +974,7 @@ func (h *WebhookHandler) runWebhookAgent(
 		// it the orchestrator would derive this run's tmux session and /tmp
 		// files from the agent slug alone, and the eight concurrent webhook
 		// runs this handler explicitly allows would overwrite each other.
+		req.RuntimeUse = runtimeUse
 		req.RunID = runID
 		// Externally-triggered runs are forced to restricted egress regardless
 		// of the crew's own mode: the payload comes from outside, so it must
@@ -1037,17 +1048,8 @@ func (h *WebhookHandler) runWebhookAgent(
 			// that moment refuses the creation; a creation admitted here is
 			// recorded durably on the attempt before it happens.
 			if err == nil && len(launch) > 0 {
-				gates := launch
 				req.ExecGate = func(ctx context.Context) error {
-					for _, g := range gates {
-						if g == nil {
-							continue
-						}
-						if gerr := g.RequestCreation(ctx); gerr != nil {
-							return gerr
-						}
-					}
-					return nil
+					return requestWebhookCreation(ctx, h.orch, location, launch...)
 				}
 			}
 			if err == nil {
@@ -1060,6 +1062,11 @@ func (h *WebhookHandler) runWebhookAgent(
 		status := "COMPLETED"
 		var errMsg *string
 		detached := errors.Is(err, orchestrator.ErrDetachedStillRunning)
+		if errors.Is(err, orchestrator.ErrHostCaptureUnconfirmed) {
+			// The observer has no terminal result to stage. Protected replay
+			// reconstructs the final metadata and actual exit independently.
+			return err
+		}
 
 		if err != nil {
 			status = "FAILED"

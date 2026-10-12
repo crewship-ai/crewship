@@ -97,6 +97,10 @@ func scanPlan(s scanner) (*Plan, error) {
 
 // ListPlans returns every plan, by name.
 func ListPlans(ctx context.Context, db *sql.DB) ([]*Plan, error) {
+	return listPlans(ctx, db)
+}
+
+func listPlans(ctx context.Context, db queryer) ([]*Plan, error) {
 	rows, err := db.QueryContext(ctx, `SELECT `+planColumns+` FROM backup_plans ORDER BY name COLLATE NOCASE, id`)
 	if err != nil {
 		return nil, err
@@ -116,6 +120,18 @@ func ListPlans(ctx context.Context, db *sql.DB) ([]*Plan, error) {
 // GetPlan returns one plan or ErrNotFound.
 func GetPlan(ctx context.Context, db *sql.DB, id string) (*Plan, error) {
 	return scanPlan(db.QueryRowContext(ctx, `SELECT `+planColumns+` FROM backup_plans WHERE id = ?`, id))
+}
+
+// queryer allows reads through either the pool or an already-owned transaction.
+type queryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// queryExecer keeps deletion checks on the executor that owns the writes.
+type queryExecer interface {
+	queryer
+	execer
 }
 
 type execer interface {

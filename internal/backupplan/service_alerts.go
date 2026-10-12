@@ -202,8 +202,14 @@ func (s *Service) resolve(ctx context.Context, planID string, kinds ...string) {
 // (or repeat) the plan's "failed" incident, and so do skipped runs once
 // SkipAlertAfter of them come in a row — a single skip stays in history and
 // the nights strip without paging anyone; an incomplete run raises
-// "incomplete" and clears "failed" and "stale"; a done run clears all three
-// and pings the heartbeat. Called once per terminal state.
+// "incomplete". Called once per terminal state.
+//
+// Clearing is a statement about the plan, not the run: a plan over several
+// workspaces runs once per workspace for one due time (or one manual click),
+// so "failed" and "stale" clear, and the heartbeat is pinged, only once every
+// run of that group has finished and none of them failed — workspace A coming
+// back well must not hide workspace B failing, nor tell the outside monitor
+// all is well while B is still running.
 func (s *Service) afterRun(ctx context.Context, r *Run, plan *Plan) {
 	set := s.settings(ctx)
 	label := incidentLabel(plan)
@@ -225,15 +231,101 @@ func (s *Service) afterRun(ctx context.Context, r *Run, plan *Plan) {
 		msg := fmt.Sprintf("%s backup %s. Last successful backup: %s.", label, verb, last)
 		s.raise(ctx, set, r.PlanID, IncidentFailed, msg, r.ID, r.Error, true)
 	case StatusIncomplete:
-		s.resolve(ctx, r.PlanID, IncidentFailed, IncidentStale)
+		if g := runGroupOutcome(ctx, s.DB, r); !g.pending && !g.bad {
+			s.resolve(ctx, r.PlanID, IncidentFailed, IncidentStale)
+		}
 		msg := fmt.Sprintf("%s backup is incomplete: %s.", label, describeIncomplete(r.Incomplete))
 		s.raise(ctx, set, r.PlanID, IncidentIncomplete, msg, r.ID, "", true)
 	case StatusDone:
-		s.resolve(ctx, r.PlanID, IncidentFailed, IncidentIncomplete, IncidentStale)
-		if set.HeartbeatURL != nil {
+		g := runGroupOutcome(ctx, s.DB, r)
+		if g.pending || g.bad {
+			s.Logger.Info("backup run done; the plan's outcome waits for the rest of its group", "run", r.ID, "plan", r.PlanID, "pending", g.pending, "failed", g.bad)
+			return
+		}
+		kinds := []string{IncidentFailed, IncidentStale}
+		if !g.incomplete {
+			kinds = append(kinds, IncidentIncomplete)
+		}
+		s.resolve(ctx, r.PlanID, kinds...)
+		if set.HeartbeatURL != nil && !g.incomplete {
 			s.pingHeartbeat(*set.HeartbeatURL)
 		}
 	}
+}
+
+// groupOutcome is where the runs started together with one run stand.
+type groupOutcome struct {
+	// pending: one of them is still running.
+	pending bool
+	// bad: one failed, was interrupted or was skipped.
+	bad bool
+	// incomplete: one finished incomplete.
+	incomplete bool
+}
+
+// runGroupOutcome looks at every run started together with r — the same due
+// time of its plan, or the same manual click — counting each workspace's
+// newest attempt: a retry after an interruption stands in for the run it
+// retried. When the group cannot be read, r stands alone.
+func runGroupOutcome(ctx context.Context, db *sql.DB, r *Run) groupOutcome {
+	var rows *sql.Rows
+	var err error
+	if r.DueAt != nil {
+		rows, err = db.QueryContext(ctx, `SELECT id, status, COALESCE(retry_of,'') FROM backup_runs
+			WHERE COALESCE(plan_id,'') = ? AND due_at = ?`, r.PlanID, ts(*r.DueAt))
+	} else {
+		origin := r.ID
+		if r.RetryOf != "" {
+			origin = r.RetryOf
+		}
+		var started, trigger string
+		if err = db.QueryRowContext(ctx, `SELECT started_at, trigger FROM backup_runs WHERE id = ?`, origin).Scan(&started, &trigger); err == nil {
+			rows, err = db.QueryContext(ctx, `SELECT id, status, COALESCE(retry_of,'') FROM backup_runs
+				WHERE COALESCE(plan_id,'') = ? AND due_at IS NULL AND trigger = ?
+				  AND (started_at = ? OR retry_of IN (SELECT id FROM backup_runs
+				       WHERE COALESCE(plan_id,'') = ? AND due_at IS NULL AND trigger = ? AND started_at = ?))`,
+				r.PlanID, trigger, started, r.PlanID, trigger, started)
+		}
+	}
+	status := map[string]string{r.ID: r.Status}
+	retryOf := map[string]string{}
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id, st, of string
+			if rows.Scan(&id, &st, &of) != nil {
+				continue
+			}
+			if id != r.ID {
+				status[id] = st
+			}
+			if of != "" {
+				retryOf[id] = of
+			}
+		}
+	}
+	if r.RetryOf != "" {
+		retryOf[r.ID] = r.RetryOf
+	}
+	retried := map[string]bool{}
+	for _, of := range retryOf {
+		retried[of] = true
+	}
+	var g groupOutcome
+	for id, st := range status {
+		if retried[id] {
+			continue // its retry speaks for it
+		}
+		switch st {
+		case StatusRunning:
+			g.pending = true
+		case StatusFailed, StatusInterrupted, StatusSkipped:
+			g.bad = true
+		case StatusIncomplete:
+			g.incomplete = true
+		}
+	}
+	return g
 }
 
 // staleEvery is how often the scheduler tick looks for stale plans.
@@ -265,7 +357,7 @@ func (s *Service) checkStale(ctx context.Context) {
 			s.resolve(ctx, p.ID, IncidentStale)
 			continue
 		}
-		last := lastGoodRun(ctx, s.DB, p.ID)
+		last, who := s.stalestTarget(ctx, p)
 		since := last
 		if since == nil {
 			if t, err := parseTS(p.CreatedAt); err == nil {
@@ -276,9 +368,48 @@ func (s *Service) checkStale(ctx context.Context) {
 			s.resolve(ctx, p.ID, IncidentStale)
 			continue
 		}
-		msg := fmt.Sprintf("%s: no backup for over %d hours. Last successful backup: %s.", p.Name, set.StaleAlertHours, Ago(last, now))
+		about := ""
+		if who != "" {
+			about = " (" + who + ")"
+		}
+		msg := fmt.Sprintf("%s: no backup for over %d hours%s. Last successful backup: %s.", p.Name, set.StaleAlertHours, about, Ago(last, now))
 		s.raise(ctx, set, p.ID, IncidentStale, msg, "", "", false)
 	}
+}
+
+// stalestTarget is the newest good run of the plan's least recently backed-up
+// target, and that workspace's name ("" for an instance plan). A plan that runs
+// once per workspace is as fresh as its stalest workspace: judging by the
+// plan's newest run let one workspace's success hide another going without a
+// backup. A target that never had a good run returns nil.
+func (s *Service) stalestTarget(ctx context.Context, p *Plan) (*time.Time, string) {
+	targets, err := s.Targets(ctx, p)
+	if err != nil || len(targets) == 0 || (len(targets) == 1 && targets[0] == "") {
+		return lastGoodRun(ctx, s.DB, p.ID), ""
+	}
+	var stalest *time.Time
+	who, found := "", false
+	for _, ws := range targets {
+		var ended sql.NullString
+		if err := s.DB.QueryRowContext(ctx, `SELECT MAX(ended_at) FROM backup_runs WHERE status IN ('done','incomplete') AND plan_id = ? AND workspace_id = ?`, p.ID, ws).Scan(&ended); err != nil {
+			continue
+		}
+		t := optTime(ended)
+		if !found || t == nil || (stalest != nil && t.Before(*stalest)) {
+			stalest, who, found = t, ws, true
+		}
+		if t == nil {
+			break
+		}
+	}
+	if !found {
+		return lastGoodRun(ctx, s.DB, p.ID), ""
+	}
+	var name string
+	if s.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = ?`, who).Scan(&name) == nil && name != "" {
+		who = name
+	}
+	return stalest, who
 }
 
 // DrillReminderPeriod is how old the newest test restore may get before

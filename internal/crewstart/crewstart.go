@@ -176,7 +176,42 @@ func (s *Starter) StartNotify(ctx context.Context, cfg provider.CrewConfig, noti
 // actually started with — what the caller passed, completed from the crews row.
 // Callers that register the crew with the idle reaper need the EFFECTIVE
 // TTLHours, not the zero they happened to pass in.
+// StartUse reserves the resolved runtime through caller preparation and execution.
+// A non-nil handle must be released even when sidecar startup returns an error.
+// Providers without reservation support keep their existing behavior and do not
+// gain automatic image activation through this fallback.
+func (s *Starter) StartUse(ctx context.Context, cfg provider.CrewConfig, notify func(Notice)) (*provider.RuntimeUse, provider.CrewConfig, error) {
+	var use *provider.RuntimeUse
+	_, resolved, err := s.startResolved(ctx, cfg, notify, func(ctx context.Context, cfg provider.CrewConfig) (string, error) {
+		if reserving, ok := s.container.(provider.CrewRuntimeUseProvider); ok {
+			var err error
+			use, err = reserving.AcquireCrewRuntimeUse(ctx, cfg)
+			if err != nil {
+				return "", err
+			}
+			if use == nil || use.ContainerID() == "" {
+				use.Release()
+				use = nil
+				return "", errors.New("runtime provider returned an empty reservation")
+			}
+			return use.ContainerID(), nil
+		}
+		id, err := s.container.EnsureCrewRuntime(ctx, cfg)
+		if err == nil {
+			use = provider.NewRuntimeUse(cfg.ID, id, nil)
+		}
+		return id, err
+	})
+	return use, resolved, err
+}
+
 func (s *Starter) StartResolved(ctx context.Context, cfg provider.CrewConfig, notify func(Notice)) (string, provider.CrewConfig, error) {
+	use, resolved, err := s.StartUse(ctx, cfg, notify)
+	defer use.Release()
+	return use.ContainerID(), resolved, err
+}
+
+func (s *Starter) startResolved(ctx context.Context, cfg provider.CrewConfig, notify func(Notice), acquire func(context.Context, provider.CrewConfig) (string, error)) (string, provider.CrewConfig, error) {
 	if s == nil || s.container == nil {
 		return "", cfg, ErrNoContainerProvider
 	}
@@ -216,7 +251,7 @@ func (s *Starter) StartResolved(ctx context.Context, cfg provider.CrewConfig, no
 		}
 	}
 
-	containerID, err := s.container.EnsureCrewRuntime(ctx, cfg)
+	containerID, err := acquire(ctx, cfg)
 	if err != nil {
 		return "", cfg, err
 	}

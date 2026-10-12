@@ -27,7 +27,7 @@ Before tagging, verify:
       empty.
 - [ ] `package.json` `version` matches the target tag (without the `v`
       prefix; `0.1.0-beta.1` for tag `v0.1.0-beta.1`).
-- [ ] No unresolved CodeRabbit major comments on the release PR.
+- [ ] No unresolved major review findings on the release PR; follow [Review before merge](CONTRIBUTING.md#review-before-merge).
 - [ ] Goreleaser dry-run passes:
       `goreleaser release --parallelism 2 --snapshot --clean --skip=publish,sign,sbom,homebrew`.
 - [ ] The `release` branch is at most a few commits behind `main`

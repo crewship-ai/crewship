@@ -3,10 +3,11 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { z } from "zod"
-import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { usePageSave } from "@/components/ui/page-save-bar"
 import { apiFetch } from "@/lib/api-fetch"
+import { nativeSelect } from "@/components/features/settings/shared"
 
 const rightSchema = z.object({ kind: z.enum(["agent", "project"]), id: z.string().min(1), operation: z.string() })
 const policySchema = z.object({
@@ -18,8 +19,10 @@ type Right = z.infer<typeof rightSchema>
 const directorySchema = z.array(z.object({ id: z.string(), name: z.string() }))
 const operations = { agent: ["discover", "chat", "run", "delegate"], project: ["list", "read", "write", "delete"] }
 
-export function MemberResourceAccess({ workspaceId, memberId, label, role }: {
+export function MemberResourceAccess({ workspaceId, memberId, label, role, onSaved }: {
   workspaceId: string; memberId: string; label: string; role: string
+  /** A saved mode changes the roster's Restricted marker; reload it. */
+  onSaved?: () => void
 }) {
   const [open, setOpen] = useState(false)
   const url = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(memberId)}/access?workspace_id=${encodeURIComponent(workspaceId)}`
@@ -41,12 +44,13 @@ export function MemberResourceAccess({ workspaceId, memberId, label, role }: {
     {open && policy.isPending && <p className="text-xs">Loading resource access…</p>}
     {open && policy.isError && <p role="alert" className="text-xs">Resource policy unavailable. <button type="button" onClick={() => void policy.refetch()}>Reload policy</button></p>}
     {open && policy.data && <PolicyEditor key={`${workspaceId}:${memberId}:${policy.data.revision}`} policy={policy.data} url={url}
-      queryKey={queryKey} workspaceId={workspaceId} role={role} />}
+      queryKey={queryKey} workspaceId={workspaceId} role={role} label={label} onSaved={onSaved} />}
   </section>
 }
 
-function PolicyEditor({ policy, url, queryKey, workspaceId, role }: {
-  policy: Policy; url: string; queryKey: string[]; workspaceId: string; role: string
+function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved }: {
+  policy: Policy; url: string; queryKey: string[]; workspaceId: string; role: string; label: string
+  onSaved?: () => void
 }) {
   const queryClient = useQueryClient()
   const [mode, setMode] = useState(policy.mode)
@@ -55,14 +59,13 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role }: {
   const [resourceId, setResourceId] = useState("")
   const [operation, setOperation] = useState("chat")
   const [conflict, setConflict] = useState(false)
-  const directory = useQuery({
-    queryKey: ["resource-access-directory", workspaceId, kind], enabled: mode === "restricted", retry: false,
-    queryFn: async ({ signal }) => {
-      const response = await apiFetch(`/api/v1/${kind === "agent" ? "agents" : "projects"}?workspace_id=${encodeURIComponent(workspaceId)}`, { signal })
-      if (!response.ok) throw new Error("Resources unavailable")
-      return directorySchema.parse(await response.json())
-    },
-  })
+  // Both directories load so every grant resolves its name by its own kind,
+  // not by whichever kind the add-grant selector currently shows (#2863).
+  const directories = {
+    agent: useResourceDirectory(workspaceId, "agent", mode === "restricted"),
+    project: useResourceDirectory(workspaceId, "project", mode === "restricted"),
+  }
+  const directory = directories[kind]
   const save = useMutation({
     mutationFn: async () => {
       const response = await apiFetch(url, { method: "PUT", headers: { "Content-Type": "application/json" },
@@ -73,15 +76,28 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role }: {
       if (updated.membership_id !== policy.membership_id) throw new Error("Membership changed; reload the roster")
       return updated
     },
-    onSuccess: updated => { queryClient.setQueryData(queryKey, updated); toast.success("Resource access saved") },
-    onError: error => toast.error(error.message),
+    // The saved revision remounts this editor (its key), so the draft goes
+    // clean. A failure rejects into the page bar, which toasts it.
+    onSuccess: updated => {
+      queryClient.setQueryData(queryKey, updated)
+      if (updated.mode !== policy.mode) onSaved?.()
+    },
+  })
+  // The page's floating Save commits this draft: one change for the mode, one
+  // per grant added or removed. A conflict keeps the draft but blocks Save
+  // until the current policy is reloaded.
+  const pending = changeCount(policy, mode, rights)
+  usePageSave({
+    label: `Resource access for ${label}`, count: pending, canSave: !conflict, saving: save.isPending,
+    save: () => save.mutateAsync(),
+    discard: () => { setMode(policy.mode); setRights(policy.rights) },
   })
   function addRight() {
     if (!directory.data?.some(resource => resource.id === resourceId)) return
     const right = { kind, id: resourceId, operation }
     if (!rights.some(existing => existing.kind === kind && existing.id === resourceId && existing.operation === operation)) setRights([...rights, right])
   }
-  const selectClass = "rounded-md border bg-background px-2 text-xs h-8 coarse:h-12"
+  const selectClass = nativeSelect
   const protectedRole = role === "OWNER" || role === "ADMIN"
   return <div className="space-y-3 text-xs">
     <label className="flex flex-wrap items-center gap-2">Access mode
@@ -96,7 +112,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role }: {
       : "Only listed operations are allowed. Role and conversation privacy checks still apply. Some agent features may be unavailable in restricted mode."}</p>
     {mode === "restricted" && <>
       <ul className="space-y-1" aria-label="Resource grants">{rights.map((right, index) => <li key={`${right.kind}:${right.id}:${right.operation}`} className="flex flex-wrap items-center gap-2">
-        <span>{right.kind}: {directory.data?.find(resource => kind === right.kind && resource.id === right.id)?.name ?? right.id} · {right.operation}</span>
+        <span>{right.kind}: {directories[right.kind].data?.find(resource => resource.id === right.id)?.name ?? right.id} · {right.operation}</span>
         <Button size="sm" variant="ghost" className="coarse:h-12" disabled={save.isPending || conflict} onClick={() => setRights(rights.filter((_, row) => row !== index))}
           aria-label={`Remove ${right.kind} ${right.id} ${right.operation}`}>Remove</Button>
       </li>)}</ul>
@@ -117,8 +133,30 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role }: {
     </>}
     {conflict && <p role="alert">Policy changed. Reload to discard this draft and review the current grants.</p>}
     <div className="flex flex-wrap gap-2">
-      <Button size="sm" className="coarse:h-12" disabled={save.isPending || conflict} onClick={() => save.mutate()}>Save resource access</Button>
       <Button size="sm" variant="outline" className="coarse:h-12" disabled={save.isPending} onClick={() => void queryClient.invalidateQueries({ queryKey })}>Reload current policy</Button>
     </div>
   </div>
+}
+
+const rightKey = (right: Right) => `${right.kind}:${right.id}:${right.operation}`
+
+/** Edits pending against the saved policy: the mode, then each grant added or removed. */
+function changeCount(policy: Policy, mode: Policy["mode"], rights: Right[]): number {
+  const before = new Set(policy.mode === "trusted" ? [] : policy.rights.map(rightKey))
+  const after = new Set(mode === "trusted" ? [] : rights.map(rightKey))
+  let n = mode === policy.mode ? 0 : 1
+  for (const key of after) if (!before.has(key)) n++
+  for (const key of before) if (!after.has(key)) n++
+  return n
+}
+
+function useResourceDirectory(workspaceId: string, kind: Right["kind"], enabled: boolean) {
+  return useQuery({
+    queryKey: ["resource-access-directory", workspaceId, kind], enabled, retry: false,
+    queryFn: async ({ signal }) => {
+      const response = await apiFetch(`/api/v1/${kind === "agent" ? "agents" : "projects"}?workspace_id=${encodeURIComponent(workspaceId)}`, { signal })
+      if (!response.ok) throw new Error("Resources unavailable")
+      return directorySchema.parse(await response.json())
+    },
+  })
 }

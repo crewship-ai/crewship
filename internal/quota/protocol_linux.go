@@ -140,13 +140,13 @@ func ServeWithReady(ctx context.Context, socket string, serverUID uint32, b *Bac
 
 // ServeNamespace binds production peers to the immutable private catalog identity.
 func ServeNamespace(ctx context.Context, socket string, serverUID uint32, b *Backend, namespace string, ready func() error) error {
+	if os.Geteuid() != 0 || serverUID == 1001 || serverUID == 1002 || b == nil {
+		return ErrDenied
+	}
 	if namespace != "" {
 		if err := b.BindNamespace(namespace); err != nil {
 			return err
 		}
-	}
-	if os.Geteuid() != 0 || serverUID == 1001 || serverUID == 1002 || b == nil {
-		return ErrDenied
 	}
 	if err := trustedParent(socket); err != nil {
 		return err

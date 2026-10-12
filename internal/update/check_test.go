@@ -27,7 +27,10 @@ func setLatestNightlyListURL(url string) func() {
 func withTempHome(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
+	t.Setenv("CREWSHIP_HOME", "")
+	t.Setenv("CREWSHIP_DATA_DIR", "")
 	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	// macOS also honors $HOME but some systems read XDG_CACHE_HOME first;
 	// keep both consistent for safety.
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(tmp, ".cache"))

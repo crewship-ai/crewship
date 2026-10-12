@@ -6,7 +6,7 @@
 turning infrastructure noise into client work and without losing a decision
 after it has been made.
 
-![Unified Inbox maximum wireframe](assets/inbox-maximum-wireframe.png)
+![Unified Inbox maximum wireframe](https://raw.githubusercontent.com/crewship-ai/crewship/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/assets/inbox-maximum-wireframe.png)
 
 ## Product promise
 

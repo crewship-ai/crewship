@@ -272,8 +272,8 @@ func TestScheduleStore_List_OrdersByNextRun(t *testing.T) {
 	store := NewScheduleStore(db)
 	ctx := context.Background()
 
-	// Two schedules with different cadences — daily fires far less
-	// often than every-minute, so every-minute should come first.
+	// Listing sorts persisted instants, not cadence frequency. Just before
+	// midnight these two cron expressions have the same next occurrence.
 	_, err := store.Save(ctx, SaveScheduleInput{
 		WorkspaceID: "ws_test", Name: "daily",
 		TargetPipelineID: "pipe_1", CronExpr: "0 0 * * *", Enabled: true,
@@ -286,6 +286,12 @@ func TestScheduleStore_List_OrdersByNextRun(t *testing.T) {
 		TargetPipelineID: "pipe_1", CronExpr: "* * * * *", Enabled: true,
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.Exec(`UPDATE pipeline_schedules SET next_run_at = CASE name
+		WHEN 'daily' THEN '2030-01-02T00:00:00Z' ELSE '2030-01-01T12:01:00Z' END
+		WHERE workspace_id='ws_test'`); err != nil {
 		t.Fatal(err)
 	}
 

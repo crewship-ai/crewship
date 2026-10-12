@@ -139,3 +139,56 @@ func TestWorkspaceMemberList_TableAndJSONAgreeOnTheEmail(t *testing.T) {
 		}
 	}
 }
+
+// #2878: the access mode is a separate fact from the role. An admin's list
+// shows it in its own ACCESS column and keeps it in the machine formats; a
+// caller the server withholds it from sees "-" rather than a guessed "trusted".
+func TestWorkspaceMemberList_ShowsAccessModeApartFromRole(t *testing.T) {
+	const body = `[
+  {"id":"m-owner","user_id":"u-owner","role":"OWNER","access_mode":"trusted","created_at":"2026-07-23T13:15:24Z",
+   "user":{"id":"u-owner","email":"demo@crewship.ai","full_name":"Demo User"}},
+  {"id":"m-rest","user_id":"u-rest","role":"MEMBER","access_mode":"restricted","created_at":"2026-08-07T19:05:04Z",
+   "user":{"id":"u-rest","email":"rest@crewship.local","full_name":"Rita Restricted"}}
+]`
+	rows := memberListJSON(t, body)
+	want := map[string]string{"m-owner": "trusted", "m-rest": "restricted"}
+	for _, r := range rows {
+		id, _ := r["id"].(string)
+		if got, _ := r["access_mode"].(string); got != want[id] {
+			t.Errorf("row %s: access_mode = %q, want %q", id, got, want[id])
+		}
+	}
+
+	origFormat := flagFormat
+	t.Cleanup(func() { flagFormat = origFormat })
+	table := func(body string) string {
+		flagFormat = "table"
+		stub := covStub(t)
+		stub.OnGet("/api/v1/workspaces/"+covWSCli3+"/members", func(*http.Request, []byte) (int, []byte, string) {
+			return 200, []byte(body), "application/json"
+		})
+		covResetFlags(t, workspaceMemberListCmd)
+		return covCaptureStdoutCli5(t, func() {
+			if err := workspaceMemberListCmd.RunE(workspaceMemberListCmd, nil); err != nil {
+				t.Errorf("RunE: %v", err)
+			}
+		})
+	}
+	out := table(body)
+	if !strings.Contains(out, "ACCESS") {
+		t.Fatalf("table has no ACCESS column:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "rest@crewship.local") && !(strings.Contains(line, "MEMBER") && strings.Contains(line, "restricted")) {
+			t.Errorf("restricted member row does not show role and access separately: %q", line)
+		}
+		if strings.Contains(line, "demo@crewship.ai") && strings.Contains(line, "restricted") {
+			t.Errorf("trusted owner row reads restricted: %q", line)
+		}
+	}
+	for _, line := range strings.Split(table(memberJSONBody), "\n") {
+		if strings.Contains(line, "viewer1@crewship.local") && (strings.Contains(line, "trusted") || strings.Contains(line, "restricted")) {
+			t.Errorf("withheld access mode was invented: %q", line)
+		}
+	}
+}

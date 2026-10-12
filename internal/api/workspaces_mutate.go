@@ -5,6 +5,7 @@ package api
 // workspaces.go for readability.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -312,27 +313,11 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var ws workspaceResponse
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
-			w.allow_privileged_credentials, w.run_retention_days,
-			w.credential_audit_retention_days, w.audit_log_retention_days,
-			w.approvals_retention_days, w.pages_theme,
-			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
-			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
-			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
-		FROM workspaces w
-		WHERE w.id = ? AND w.deleted_at IS NULL
-	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
-		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials, &ws.RunRetentionDays,
-		&ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
-		&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON,
-		&ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
+	ws, err := h.workspaceByID(r.Context(), workspaceID)
 	if err != nil {
 		replyInternalError(w, h.logger, "get workspace after update", err)
 		return
 	}
-	ws.fillNestedCount()
 
 	// Which settings moved. allow_privileged_credentials gets called out by
 	// name because it is the one that removes the fail-closed boundary between
@@ -385,4 +370,30 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, ws)
+}
+
+// workspaceByID reads the workspace as the detail and update responses show
+// it. Update and the logo endpoints (#3005) answer with it.
+func (h *WorkspaceHandler) workspaceByID(ctx context.Context, workspaceID string) (workspaceResponse, error) {
+	var ws workspaceResponse
+	err := h.db.QueryRowContext(ctx, `
+		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
+			w.allow_privileged_credentials, w.run_retention_days,
+			w.credential_audit_retention_days, w.audit_log_retention_days,
+			w.approvals_retention_days, w.pages_theme,
+			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
+			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
+			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
+		FROM workspaces w
+		WHERE w.id = ? AND w.deleted_at IS NULL
+	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
+		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials, &ws.RunRetentionDays,
+		&ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
+		&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON,
+		&ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
+	if err != nil {
+		return ws, err
+	}
+	ws.fillNestedCount()
+	return ws, nil
 }

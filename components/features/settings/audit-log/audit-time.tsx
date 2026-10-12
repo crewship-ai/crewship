@@ -27,7 +27,7 @@ export function AuditRangePresets({ filters, onChange }: { filters: AuditFilters
             title={r.label}
             onClick={() => onChange({ range: r.value, from: "", to: "" })}
             className={cn(
-              "h-7 rounded-md border text-[11.5px] transition-colors",
+              "h-7 rounded-md border text-label transition-colors",
               on ? "border-primary/40 bg-primary/10 font-medium text-primary-hover" : "border-border bg-card text-muted-foreground hover:text-foreground",
             )}
           >
@@ -89,7 +89,7 @@ export function AuditCalendar({
       </div>
       <div className="grid grid-cols-7 gap-0.5">
         {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
-          <span key={i} className="pb-0.5 text-center font-mono text-[9.5px] text-muted-foreground-soft" aria-hidden>{d}</span>
+          <span key={i} className="pb-0.5 text-center font-mono text-micro text-muted-foreground-soft" aria-hidden>{d}</span>
         ))}
         {cells.map((day, i) => {
           if (!day) return <span key={`b${i}`} />
@@ -110,7 +110,7 @@ export function AuditCalendar({
               aria-label={`${formatDay(day)}: ${count} event${count === 1 ? "" : "s"}`}
               title={`${formatDay(day)} · ${count} event${count === 1 ? "" : "s"}`}
               className={cn(
-                "relative grid h-7 place-items-center font-mono text-[11px] tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30",
+                "relative grid h-7 place-items-center font-mono text-micro tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30",
                 inRange ? "bg-primary/[0.13] text-foreground" : "rounded-md",
                 inRange && !prevIn && "rounded-l-md",
                 inRange && !nextIn && "rounded-r-md",
@@ -130,7 +130,7 @@ export function AuditCalendar({
           )
         })}
       </div>
-      <p className="px-0.5 pt-1.5 text-[10.5px] leading-snug text-muted-foreground-soft">
+      <p className="px-0.5 pt-1.5 text-micro leading-snug text-muted-foreground-soft">
         Bar under a day = how much happened. Shift-click extends the range.
       </p>
     </div>
@@ -163,7 +163,7 @@ export function AuditHistogram({
     <div className="rounded-card border border-border bg-card px-4 pb-3 pt-3" data-slot="audit-histogram">
       <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
         <span className="eyebrow text-muted-foreground">Events per day · last {n} days{truncated ? " · latest 500" : ""}</span>
-        <span className="flex gap-3 text-[11px] text-muted-foreground">
+        <span className="flex gap-3 text-label text-muted-foreground">
           <Legend className="bg-success" label="completed" />
           <Legend className="bg-destructive" label="failed" />
           <Legend className="bg-primary" label="changes" />
@@ -201,7 +201,7 @@ export function AuditHistogram({
           )
         })}
       </div>
-      <div className="mt-1 grid gap-1 font-mono text-[10px] text-muted-foreground-soft sm:gap-1.5" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }} aria-hidden>
+      <div className="mt-1 grid gap-1 font-mono text-micro text-muted-foreground-soft sm:gap-1.5" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }} aria-hidden>
         {days.map((d, i) => (
           <span key={d} className={cn("text-center", i % 2 === 1 && "invisible sm:visible")}>{Number(d.slice(8))}</span>
         ))}

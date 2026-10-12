@@ -9,6 +9,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { daysUntil, displayName, personStatus, ROLES, STATUS_LABEL, type Person, type PersonStatus, type Role } from "./people-model"
+import { inlineControl, nativeSelect } from "@/components/features/settings/shared"
+import { StatusPill } from "@/components/ui/status-pill"
+import type { StatusTone } from "@/lib/format-status"
 
 export const roleLabel = (r: string) => r.charAt(0) + r.slice(1).toLowerCase()
 
@@ -28,7 +31,7 @@ export function RoleSelect({ value, onChange, disabled, label, allowNone, classN
       value={value ?? ""}
       disabled={disabled}
       onChange={(e) => onChange((e.target.value || null) as Role | null)}
-      className={cn("h-8 w-36 rounded-md border border-control-border bg-surface-subtle px-2 text-control text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50", className)}
+      className={cn(nativeSelect, "w-36", className)}
     >
       {allowNone && <option value="">No access</option>}
       {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
@@ -36,16 +39,16 @@ export function RoleSelect({ value, onChange, disabled, label, allowNone, classN
   )
 }
 
-const STATUS_TONE: Record<PersonStatus, string> = {
-  active: "bg-success/12 text-success",
-  setup: "bg-primary/12 text-primary-hover",
-  locked: "bg-warn/15 text-warn",
-  suspended: "bg-muted text-muted-foreground",
+const STATUS_TONE: Record<PersonStatus, StatusTone> = {
+  active: "success",
+  setup: "blue",
+  locked: "warn",
+  suspended: "muted",
 }
 
 export function StatusChip({ person, now }: { person: Person; now?: number }) {
   const s = personStatus(person, now)
-  return <span className={cn("inline-flex h-5 items-center rounded-full px-2 font-mono text-[10.5px] font-medium", STATUS_TONE[s])}>{STATUS_LABEL[s]}</span>
+  return <StatusPill tone={STATUS_TONE[s]} label={STATUS_LABEL[s]} />
 }
 
 export function PersonAvatar({ person, className }: { person: Person; className?: string }) {
@@ -57,8 +60,8 @@ export function PersonLabel({ person, sub }: { person: Person; sub?: React.React
     <span className="flex min-w-0 items-center gap-2.5">
       <PersonAvatar person={person} />
       <span className="min-w-0">
-        <span className="block truncate text-[13px]">{displayName(person)}</span>
-        <span className="block truncate text-[11px] text-muted-foreground">{sub ?? person.email}</span>
+        <span className="block truncate text-control">{displayName(person)}</span>
+        <span className="block truncate text-label text-muted-foreground">{sub ?? person.email}</span>
       </span>
     </span>
   )
@@ -78,8 +81,8 @@ export function SetupLinkBox({ url, expiresAt, onDone }: { url: string; expiresA
     <div className="mx-4 my-3 flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-primary/45 bg-primary/[0.06] px-3 py-2" data-slot="setup-link">
       <Link2 className="h-3.5 w-3.5 shrink-0 text-primary-hover" />
       <Input readOnly value={url} aria-label="Setup link" onFocus={(e) => e.currentTarget.select()}
-        className="h-7 min-w-0 flex-1 border-none bg-transparent px-0 font-mono text-[11px] text-primary-hover shadow-none focus-visible:ring-0" />
-      <span className="text-[11px] text-muted-foreground">valid {daysUntil(expiresAt)} days · shown once</span>
+        className="h-7 min-w-0 flex-1 border-none bg-transparent px-0 font-mono text-micro text-primary-hover shadow-none focus-visible:ring-0" />
+      <span className="text-label text-muted-foreground">valid {daysUntil(expiresAt)} days · shown once</span>
       <Button size="xs" variant="outline" onClick={copy}><Copy />Copy</Button>
       {onDone && <Button size="xs" variant="ghost" onClick={onDone}>Done</Button>}
     </div>
@@ -100,12 +103,12 @@ export function InlineConfirm({ message, confirmLabel, onConfirm, onCancel, type
   const id = React.useId()
   const ok = !typeToConfirm || typed.trim() === typeToConfirm
   return (
-    <div role="alert" className="flex flex-wrap items-center gap-2 px-4 pb-3 text-[11.5px]">
+    <div role="alert" className="flex flex-wrap items-center gap-2 px-4 pb-3 text-label">
       <span className="min-w-0 flex-1 text-warn">{message}</span>
       {typeToConfirm && (
         <>
           <label htmlFor={id} className="text-muted-foreground">Type <span className="font-mono text-foreground">{typeToConfirm}</span></label>
-          <Input id={id} value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" className="h-7 w-44 font-mono text-xs" />
+          <Input id={id} value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" className={cn(inlineControl, "w-44 font-mono")} />
         </>
       )}
       <Button size="xs" variant="ghost" onClick={onCancel} disabled={busy}>Cancel</Button>

@@ -50,6 +50,7 @@ import (
 	"encoding/json"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -122,6 +123,21 @@ func (p *Provider) crewRuntimeContractDigest() string {
 // including a field added by a moby upgrade, and sorts map keys so Labels and
 // Tmpfs are order-stable.
 func digestCrewSpec(cfg *container.Config, hostCfg *container.HostConfig) string {
+	// Volume ownership is attribution, not runtime behavior. Keep the
+	// pre-label contract stable without mutating the caller's create spec.
+	if hostCfg != nil {
+		normalized := *hostCfg
+		normalized.Mounts = append([]mount.Mount(nil), hostCfg.Mounts...)
+		for i := range normalized.Mounts {
+			m := &normalized.Mounts[i]
+			if agentWritableNoexecTargets[m.Target] && m.VolumeOptions != nil {
+				options := *m.VolumeOptions
+				options.Labels = nil
+				m.VolumeOptions = &options
+			}
+		}
+		hostCfg = &normalized
+	}
 	payload, err := json.Marshal(struct {
 		Config     *container.Config     `json:"config"`
 		HostConfig *container.HostConfig `json:"host_config"`

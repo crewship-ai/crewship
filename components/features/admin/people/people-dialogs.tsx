@@ -47,7 +47,7 @@ export function AddPersonDialog({ open, onOpenChange, workspaces, actions, busy,
         </DialogHeader>
         {result ? (
           <div className="grid gap-3">
-            <p className="text-[13px]"><b className="font-medium">{result.link.email}</b> has an account now. Send them this link to choose a password.</p>
+            <p className="text-control"><b className="font-medium">{result.link.email}</b> has an account now. Send them this link to choose a password.</p>
             <div className="-mx-4"><SetupLinkBox url={result.link.url} expiresAt={result.link.expires_at} /></div>
             <DialogFooter>
               <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
@@ -70,7 +70,7 @@ export function AddPersonDialog({ open, onOpenChange, workspaces, actions, busy,
                 {workspaces.map((w) => (
                   <div key={w.id} className="flex items-center gap-2.5 border-b border-border px-3 py-2 last:border-b-0">
                     <WorkspaceTile id={w.id} name={w.name} />
-                    <span className="min-w-0 flex-1 truncate text-[13px]">{w.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-control">{w.name}</span>
                     <RoleSelect label={`Role in ${w.name}`} allowNone value={roles[w.id] ?? null} onChange={(r) => setRoles((prev) => ({ ...prev, [w.id]: r }))} />
                   </div>
                 ))}

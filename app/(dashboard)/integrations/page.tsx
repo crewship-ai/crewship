@@ -39,6 +39,7 @@ import { serializeArgs, subtitleFor } from "@/components/features/integrations/h
 import { useWorkspaceURLReady } from "@/components/features/integrations/use-workspace-url"
 import { IntegrationsLayout } from "@/components/features/integrations/integrations-layout"
 import { legacyMcpIntegrations } from "@/lib/feature-flags"
+import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
 import type {
   AgentBinding,
   AgentInfo,
@@ -96,6 +97,18 @@ function IntegrationsWorkspaceGate() {
 }
 
 function LegacyIntegrationsPage() {
+  // One Save for the page: an open connector's edits wait on the floating
+  // bar (components/ui/page-save-bar) instead of saving on blur.
+  return (
+    <PageSaveProvider>
+      <LegacyIntegrations />
+      <PageSaveBar className="fixed" />
+    </PageSaveProvider>
+  )
+}
+
+function LegacyIntegrations() {
+  const guard = usePageSaveGuard()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const { abilities } = useAbilities()
   const canManage = abilities.can("create", "Credential")
@@ -307,25 +320,22 @@ function LegacyIntegrationsPage() {
     server: CrewIntegration,
     fields: Record<string, unknown>,
   ) {
-    if (!workspaceId) return
-    try {
-      const res = await apiFetch(
-        `/api/v1/crews/${server.crew_id}/integrations/${server.id}?workspace_id=${workspaceId}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(fields),
-        },
-      )
-      if (!res.ok) {
-        const d = await res.json().catch(() => null)
-        toast.error(d?.error ?? "Failed to update")
-        return
-      }
-      await fetchAll(workspaceId)
-    } catch {
-      toast.error("Network error")
+    // Rejects on failure: the page Save bar turns it into the corner toast
+    // and keeps the draft.
+    if (!workspaceId) throw new Error("No workspace selected.")
+    const res = await apiFetch(
+      `/api/v1/crews/${server.crew_id}/integrations/${server.id}?workspace_id=${workspaceId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      },
+    )
+    if (!res.ok) {
+      const d = await res.json().catch(() => null)
+      throw new Error(d?.error ?? "Failed to update")
     }
+    await fetchAll(workspaceId)
   }
 
   // -------------------------------------------------------------------------
@@ -634,7 +644,7 @@ function LegacyIntegrationsPage() {
                     "w-full px-4 py-2.5 text-left items-center gap-3",
                     isExpanded ? "row-interactive row-selected" : "row-interactive row-hover",
                   )}
-                  onClick={() => setExpandedId(isExpanded ? null : server.id)}
+                  onClick={() => guard(() => setExpandedId(isExpanded ? null : server.id))}
                   aria-expanded={isExpanded}
                   aria-label={`${server.display_name || server.name} integration`}
                 >

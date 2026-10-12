@@ -21,11 +21,16 @@ def main():
     parser.add_argument('--binary', default='/tmp/crewship-2-dev')
     parser.add_argument('--server', default='http://localhost:8082')
     parser.add_argument('--profile', default='dev2')
+    parser.add_argument('--state-dir', default=os.environ.get('CREWSHIP_CHAT_DEMO_DIR'),
+                        required=not os.environ.get('CREWSHIP_CHAT_DEMO_DIR'),
+                        help='Private absolute directory outside the checkout; or set CREWSHIP_CHAT_DEMO_DIR')
     args = parser.parse_args()
+    private = Path(args.state_dir).expanduser()
+    if not private.is_absolute() or private.resolve().is_relative_to(Path(__file__).resolve().parents[1]):
+        parser.error('--state-dir must be an absolute private directory outside this checkout')
     if args.server.rstrip('/') not in ('http://localhost:8082', 'http://127.0.0.1:8082'):
         parser.error('Persistent demo preparation is restricted to local Dev2.')
     os.umask(0o077)
-    private = Path('/srv/crewship/.dev2-chat-demo')
     if private.is_symlink():
         raise RuntimeError('Private directory must not be a symlink')
     private.mkdir(mode=0o700, exist_ok=True)

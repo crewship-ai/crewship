@@ -376,12 +376,10 @@ func TestBridge_ColdStart_AppliesResolverMemory(t *testing.T) {
 	}
 }
 
-// TestBridge_WarmStart_SkipsContainerCreate drives the warm-path branch by
-// pre-seeding b.containerCache. With the cached container reporting "running"
-// (capturingContainer.ContainerStatus), the bridge MUST NOT call
-// EnsureCrewRuntime and MUST NOT emit "Starting container..." — that's the
-// whole point of the cache (kill status-event noise on every reply).
-func TestBridge_WarmStart_SkipsContainerCreate(t *testing.T) {
+// A cached container id is a UI hint, not authority to bypass runtime
+// reconciliation and reservation. Revalidate it without showing cold-start
+// noise on every message.
+func TestBridge_WarmStart_RevalidatesWithoutStartingNotice(t *testing.T) {
 	resolver := &mockResolver{
 		info: &ChatInfo{
 			AgentID:     "agent-1",
@@ -408,8 +406,8 @@ func TestBridge_WarmStart_SkipsContainerCreate(t *testing.T) {
 	}
 	_ = b.HandleChatMessage(context.Background(), "u", "sess-warm", "hello", streamFn)
 
-	if ctr.createCalls.Load() != 0 {
-		t.Errorf("warm start should NOT call EnsureCrewRuntime, got %d calls", ctr.createCalls.Load())
+	if ctr.createCalls.Load() != 1 {
+		t.Errorf("warm start must revalidate the runtime, got %d calls", ctr.createCalls.Load())
 	}
 	for _, s := range statuses {
 		if s == "Starting container..." {

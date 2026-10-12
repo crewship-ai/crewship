@@ -157,7 +157,7 @@ describe("Overview", () => {
     render(<SecurityPage />)
     const card = await screen.findByRole("region", { name: "Needs attention" })
     expect(within(card).getByText("No backup recorded")).toBeInTheDocument()
-    expect(within(card).getByRole("link", { name: /Create a backup/ })).toHaveAttribute("href", "/admin?tab=backups")
+    expect(within(card).getByRole("link", { name: /Create a backup/ })).toHaveAttribute("href", "/admin/backups")
   })
 
   it("shows the server's setup read-only, an unset value named as such", async () => {
@@ -256,6 +256,9 @@ describe("Settings", () => {
   })
 })
 
+/** The page's floating Save bar: every Security form saves from there. */
+const saveBar = () => fireEvent.click(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" }))
+
 describe("several workspaces at once", () => {
   it("warns, marks what differs, and writes nothing until the admin has seen what is overwritten", async () => {
     window.history.replaceState(null, "", "/admin/security?section=watchdog")
@@ -266,7 +269,7 @@ describe("several workspaces at once", () => {
     expect(within(enabled).getByText(/MIXED · On \/ Off/)).toBeInTheDocument()
 
     fireEvent.click(within(enabled).getByRole("radio", { name: "On" }))
-    fireEvent.click(screen.getByRole("button", { name: "Overwrite all 2 workspaces…" }))
+    saveBar()
 
     const dialog = await screen.findByRole("alertdialog")
     expect(puts()).toEqual([{ all: true, dry_run: true, set: { enabled: true } }])
@@ -290,7 +293,7 @@ describe("several workspaces at once", () => {
       render(<SecurityPage />)
       expect(await screen.findByRole("alert")).toHaveTextContent("2 workspaces selected")
       fireEvent.click(screen.getByRole("radio", { name: "15 min" }))
-      fireEvent.click(screen.getByRole("button", { name: "Overwrite 2 workspaces…" }))
+      saveBar()
       const dialog = await screen.findByRole("alertdialog")
       expect(puts()[0]).toEqual({ workspaces: ["ws-a", "ws-b"], dry_run: true, set: { auto_lease_seconds: 900 } })
       fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
@@ -347,7 +350,7 @@ describe("All means the same with one workspace (review R9)", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent("All 1 workspace selected")
       expect(screen.queryByTestId("gov-watchdog")).toBeNull()
       fireEvent.click(within(document.querySelector("[data-field=enabled]") as HTMLElement).getByRole("radio", { name: "Off" }))
-      fireEvent.click(screen.getByRole("button", { name: "Overwrite all 1 workspace…" }))
+      saveBar()
       await screen.findByRole("alertdialog")
       expect(puts()[0]).toMatchObject({ all: true, dry_run: true })
     } finally {
@@ -407,7 +410,7 @@ describe("Defaults for new workspaces, an operation of its own", () => {
     const enabled = document.querySelector("[data-field=enabled]") as HTMLElement
     expect(scope()).toHaveAttribute("aria-disabled", "true")
     fireEvent.click(within(enabled).getByRole("radio", { name: "On" }))
-    fireEvent.click(screen.getByRole("button", { name: "Save defaults for new workspaces…" }))
+    saveBar()
     const dialog = await screen.findByRole("alertdialog")
     expect(defaultsPuts()[0]).toEqual({ dry_run: true, set: { enabled: true } })
     expect(dialog).toHaveTextContent("Watchdog: Off → On")

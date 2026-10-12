@@ -23,6 +23,8 @@ import (
 // stub in tests) so the handler can be wired and tested before the
 // real orchestrator integration lands.
 type PipelineHandler struct {
+	// queuedKeys serialises same-key manual starts around capacity queuing.
+	queuedKeys         queuedKeyLocks
 	restrictedWorkflow func() *restrictedworkflow.Service
 	storagePath        string
 	db                 *sql.DB
@@ -75,7 +77,7 @@ type PipelineHandler struct {
 	// must not cancel an in-flight run server-side.
 	lifecycleCtx context.Context
 
-	// webhookDispatchWG tracks the async FireWebhook run goroutines,
+	// webhookDispatchWG tracks async webhook and signal-resume goroutines,
 	// mirroring AssignmentHandler.dispatchWG — graceful shutdown (and
 	// tests) drain in-flight dispatches via WaitWebhookDispatches
 	// instead of orphaning them mid-write.
@@ -92,6 +94,12 @@ type PipelineHandler struct {
 	// on, so shutdown can drain in-flight verdicts (DrainVerdicts) before
 	// the journal writer closes (#1403).
 	verdictWG sync.WaitGroup
+
+	// parkedCancelStage fires in CancelRun's parked-run path at "before-fence"
+	// (the row read WAITING, the run's registry entry not yet taken) and at
+	// "fenced" (entry held, row not yet re-read or committed). Test
+	// rendezvous for the cancel/resume race (#2910); nil in production.
+	parkedCancelStage func(stage, runID string)
 }
 
 // NewPipelineHandler wires the pipeline subsystem against an
@@ -286,7 +294,7 @@ func (h *PipelineHandler) webhookDispatchContext() context.Context {
 	return context.Background()
 }
 
-// WaitWebhookDispatches blocks until every async webhook run goroutine
+// WaitWebhookDispatches blocks until every async webhook/signal run goroutine
 // spawned so far has finished. Called during graceful shutdown after
 // the listener stops (and before the journal writer closes, so
 // terminal run entries still land); tests use it to drain

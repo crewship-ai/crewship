@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 const signalEventWaitDSL = `{
@@ -143,5 +144,37 @@ func TestSignalRun_NoWaitingRun_Returns404(t *testing.T) {
 
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSignalRun_ExpiredEventWaitRejectsDelivery(t *testing.T) {
+	h, wsID := newTopicSignalHandler(t)
+	seedTopicPipeline(t, h, "pln_expired_signal", wsID)
+	runID := parkRun(t, h, "pln_expired_signal", wsID)
+	if _, err := h.db.Exec(`UPDATE pipeline_signal_waits SET timeout_at=? WHERE run_id=?`, tsformat.Format(time.Now().Add(-time.Minute)), runID); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/signal", strings.NewReader(`{"event_type":"mission.status_change","payload":"too-late"}`))
+	req.SetPathValue("runId", runID)
+	req = withWorkspaceCtx(req, wsID)
+	rr := httptest.NewRecorder()
+	h.SignalRun(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expired delivery HTTP %d: %s", rr.Code, rr.Body.String())
+	}
+	rr = postTopicSignal(t, h, wsID, `{"event_type":"mission.status_change","payload":"too-late"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("topic HTTP %d: %s", rr.Code, rr.Body.String())
+	}
+	var result struct {
+		Delivered int `json:"delivered"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil || result.Delivered != 0 {
+		t.Fatalf("expired topic result=%+v err=%v", result, err)
+	}
+	stop := pipeline.StartEventWaitSweeper(context.Background(), h.db, h.newExecutor(), nil, h.logger, 10*time.Millisecond)
+	defer stop()
+	if rec := awaitRunStatus(t, h.runStore, runID); rec.Status != pipeline.RunStatusFailed || !strings.Contains(rec.ErrorMessage, "timed out") {
+		t.Fatalf("expired run: %+v", rec)
 	}
 }

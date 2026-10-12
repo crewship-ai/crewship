@@ -39,19 +39,20 @@ async function request(ws: string, path: string, init: RequestInit = {}) {
 
 export function useProviderPools(ws: string, enabled: boolean, after = "") {
   const client = useQueryClient()
+  const available = enabled && !!ws
   const pools = useQuery({
-    queryKey: poolKeys.list(ws, after), enabled: enabled && !!ws,
+    queryKey: poolKeys.list(ws, after), enabled: available,
     queryFn: async ({ signal }) => (await request(ws, `provider-logins/pools${after ? `?after=${encodeURIComponent(after)}` : ""}`, { signal })).json() as Promise<{ items: ProviderPool[]; next_cursor: string | null }>,
   })
   const accounts = useQuery({
-    queryKey: poolKeys.accounts(ws), enabled: enabled && !!ws,
+    queryKey: poolKeys.accounts(ws), enabled: available,
     queryFn: async ({ signal }) => (await request(ws, "credentials?kind=provider_login", { signal })).json() as Promise<LoginCredential[]>,
   })
-  const requireEnabled = () => { if (!enabled || !ws) throw new Error("Account group management is not available.") }
+  const requireEnabled = () => { if (!available) throw new Error("Account group management is not available.") }
   return {
-    pools: enabled && !pools.error ? pools.data : undefined, accounts: enabled && !accounts.error ? accounts.data : undefined,
-    loading: enabled && (pools.isPending || accounts.isPending),
-    error: enabled ? pools.error || accounts.error : null,
+    pools: available && !pools.error ? pools.data : undefined, accounts: available && !accounts.error ? accounts.data : undefined,
+    loading: available && (pools.isPending || accounts.isPending),
+    error: available ? pools.error || accounts.error : null,
     reload: () => { requireEnabled(); void pools.refetch(); void accounts.refetch() },
     detail: async (id: string) => {
       requireEnabled()

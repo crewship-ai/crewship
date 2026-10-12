@@ -21,9 +21,10 @@ import (
 // than the wiring. Failing at init names the actual fault.
 //
 // Container and State keep their tolerant defaults on purpose: an unknown
-// container provider is how `--no-docker` and the k8s placeholder legitimately
-// run with deps.Container nil, and callers of both already nil-check. Storage
-// has no such caller contract.
+// container provider or explicit `--no-docker` can leave deps.Container nil,
+// and callers already nil-check. The unsupported k8s value is explicitly
+// rejected; it must not masquerade as a working backend. Storage has no
+// tolerant caller contract.
 func TestInitProviders_UnwiredStorageProviderErrors(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Storage.Provider = "s3"

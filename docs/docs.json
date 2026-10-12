@@ -90,6 +90,7 @@
               "guides/issue-detail",
               "guides/issue-mentions",
               "guides/inbox",
+              "guides/search",
               {
                 "group": "Routines",
                 "icon": "workflow",
@@ -255,11 +256,15 @@
             "pages": [
               "cli/overview",
               "cli/commands",
+                "cli/api",
+              "cli/ai",
               "cli/start",
               "cli/onboarding",
               "cli/login",
               "cli/version",
               "cli/doctor",
+              "cli/paths",
+              "cli/reset",
               "cli/telemetry",
               "cli/ai-workflows",
               "cli/apply",
@@ -463,7 +468,8 @@
               "cli/tui",
               "cli/completion",
               "cli/copy-prompt",
-              "cli/template"
+              "cli/template",
+              "cli/decisions"
             ]
           }
         ]

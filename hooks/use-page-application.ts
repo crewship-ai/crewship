@@ -18,7 +18,7 @@ export function usePageApplication(workspace: string, slug: string, enabled = tr
   useRealtimeEventSafe("realtime.reconnected", invalidate)
   const endpoint = `/api/v1/pages/${encodeURIComponent(slug)}`
   const params = new URLSearchParams({ workspace_id: workspace })
-  const query = useQuery({ queryKey: key, enabled, retry: false, gcTime: 0,
+  const query = useQuery({ queryKey: key, enabled: enabled && Boolean(workspace) && Boolean(slug), retry: false, gcTime: 0,
     queryFn: async ({ signal }): Promise<PageApplication> => {
       const previous = client.getQueryData<PageApplication>(["page-application", workspace, slug])
       const response = await apiFetch(`${endpoint}/application?${params}`, { signal, headers: previous?.etag ? { "If-None-Match": previous.etag } : undefined })

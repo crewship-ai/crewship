@@ -8,7 +8,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
-func fixture(t *testing.T) Store {
+func fixture(t testing.TB) Store {
 	t.Helper()
 	db := testutil.MigratedSQLDB(t)
 	statements := []string{
@@ -28,7 +28,7 @@ func fixture(t *testing.T) Store {
 	return Store{db}
 }
 
-func policy(t *testing.T, s Store, user string, rights ...Right) Membership {
+func policy(t testing.TB, s Store, user string, rights ...Right) Membership {
 	t.Helper()
 	m, err := s.Membership(t.Context(), user, "w")
 	if err != nil {

@@ -2,7 +2,7 @@
 
 **Release cíl: jeden chat a jeden background běh Jamieho současně v ověřeném Claude profilu; další práce čeká v trvalé frontě.** Zprávy v jedné session se zpracovávají postupně. Sériový fallback tento závazek nesplňuje.
 
-Stav: rozhodnutý produktový a architektonický kontrakt, implementace a release ověření dosud nedokončené. Revize zahrnuje závěry diskuse z 10. září 2026. [Výzkumná příloha](WEBHOOKS-AGENT-PARALLELISM-ANNEX.md) uchovává audit, zdroje a omezení důkazů. Rozsah vydání určuje tento dokument spolu s normativním [implementačním a akceptačním kontraktem](WEBHOOKS-AGENT-PARALLELISM-IMPLEMENTATION-1-0.md), který definuje API, stavový automat, limity, metriky, testy a rollout.
+Stav: rozhodnutý produktový a architektonický kontrakt, implementace a release ověření dosud nedokončené. Revize zahrnuje závěry diskuse z 10. září 2026. [Výzkumná příloha](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/WEBHOOKS-AGENT-PARALLELISM-ANNEX.md) uchovává audit, zdroje a omezení důkazů. Rozsah vydání určuje tento dokument spolu s normativním [implementačním a akceptačním kontraktem](WEBHOOKS-AGENT-PARALLELISM-IMPLEMENTATION-1-0.md), který definuje API, stavový automat, limity, metriky, testy a rollout.
 
 ## 1. Uzavřená rozhodnutí
 
@@ -57,7 +57,7 @@ E0 nemění UID 1001/1002, image ani crew container lifecycle. Bez plánované z
 
 **Hranice profilu:** běhy sdílejí doménu důvěry, principal a container. Per-run cesty nejsou kernelové vynucení izolace. Shell může otevřít sousední cestu nebo obejít memory službu. Tento profil neslibuje sandboxovou ochranu před škodlivým či nedbalým zápisem. Omezení musí být uvedeno i u zapnutí profilu.
 
-E1 zvažuje oddělené principals a vynucení přístupu; jeho rozsah přes image, terminal, mounty a sidecar určí [isolation spike](SPIKE-RUN-ISOLATION-E1.md). E2 přidává lifecycle samostatných run sandboxů. Obě fáze jsou mimo release 1.0.
+E1 zvažuje oddělené principals a vynucení přístupu; jeho rozsah přes image, terminal, mounty a sidecar určí [isolation spike](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/SPIKE-RUN-ISOLATION-E1.md). E2 přidává lifecycle samostatných run sandboxů. Obě fáze jsou mimo release 1.0.
 
 ## 5. Paměť a soubory
 

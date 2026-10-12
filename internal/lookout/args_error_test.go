@@ -127,3 +127,58 @@ func TestValidateArgs_TypeMismatch(t *testing.T) {
 func wrapJoin(errs ...error) error {
 	return errors.Join(errs...)
 }
+
+func TestValidateArgsNestedPrimitiveFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind string
+		value      any
+		valid      bool
+	}{
+		{"number", "number", true, false}, {"fractional integer", "integer", 1.5, false},
+		{"float32 integer", "integer", float32(2), true}, {"float32 fractional", "integer", float32(2.5), false},
+		{"string integer", "integer", "2", false}, {"boolean", "boolean", "true", false},
+		{"array", "array", map[string]any{}, false}, {"object", "object", []any{}, false},
+		{"null", "null", false, false}, {"null allowed", "null", nil, true},
+		{"unknown", "future-type", "text", false}, {"number null", "number", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := Schema{Type: "object", Properties: map[string]Schema{"config": {Type: "object", Properties: map[string]Schema{"value": {Type: tc.kind}}}}}
+			err := ValidateArgs(schema, map[string]any{"config": map[string]any{"value": tc.value}})
+			if tc.valid {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			var invalid *ArgsInvalidError
+			if !errors.As(err, &invalid) || invalid.Path != "config.value" {
+				t.Fatalf("wrong correction path: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateArgsUsesStructuralEnumsWithoutPanics(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		allowed, value any
+		valid          bool
+	}{
+		{"same-object", map[string]any{"scope": "read"}, map[string]any{"scope": "read"}, true},
+		{"different-object", map[string]any{"scope": "read"}, map[string]any{"scope": "write"}, false},
+		{"same-array", []any{"read", "list"}, []any{"read", "list"}, true},
+		{"different-array", []any{"read"}, []any{"write"}, false},
+		{"null-not-listed", "read", nil, false}, {"null-listed", nil, nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateArgs(Schema{Type: "object", Properties: map[string]Schema{"permission": {Enum: []any{tc.allowed}}}}, map[string]any{"permission": tc.value})
+			if tc.valid {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if !IsArgsInvalid(err) {
+				t.Fatalf("invalid enum accepted: %v", err)
+			}
+		})
+	}
+}

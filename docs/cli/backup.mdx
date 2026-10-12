@@ -177,9 +177,16 @@ manifest carried `table_row_counts` — and the warning names why. It means
 **not evaluated**, never "complete". [`backup restore --dry-run`](#crewship-backup-restore)
 decrypts and makes the same comparison. `--format json` carries the raw
 fields: `valid`, `size_bytes`, `error`, `completeness_checked`,
-`completeness_skip_reason`, `table_row_count_mismatches`
+`completeness_skip_reason`, `table_row_count_mismatches`, `scope_shortfalls`
 (see the [API reference](/api-reference/backup#inspect-verify-and-self-test)).
 Exit status is non-zero on `INVALID`.
+
+A workspace bundle also records, at create time, whether every row the
+schema ties to the workspace was exported (`manifest.contents.scope_reconciliation`).
+`verify` fails a bundle that recorded a shortfall, **encrypted or not**,
+and lists each as `table: N of M workspace row(s) in the source were not
+exported`. That is a scope bug in the backup code, not damage to the file.
+See [What verify checks](/guides/backup#list-inspect-verify).
 
 ---
 

@@ -1,3 +1,4 @@
+import { roleAtLeast } from "@/lib/routine-governance"
 import type { LucideIcon } from "lucide-react"
 
 import { CONCEPT_ICON } from "@/lib/concept-icons"
@@ -24,6 +25,11 @@ export interface NavItem {
    * ADMIN hides the row below the console's ADMIN+ floor (#868/#893).
    */
   badge?: "FUTURE" | "ADMIN"
+  /**
+   * The lowest workspace role that sees the row. The Journal is the raw
+   * technical log; Activity is the readable record for everyone (#2979).
+   */
+  minRole?: "MANAGER" | "ADMIN"
 }
 
 export interface NavSection {
@@ -57,7 +63,7 @@ export const navSections: NavSection[] = [
     label: "Run",
     items: [
       { title: "Activity", href: "/activity", icon: CONCEPT_ICON.activity },
-      { title: "Journal", href: "/journal", icon: CONCEPT_ICON.journal },
+      { title: "Journal", href: "/journal", icon: CONCEPT_ICON.journal, minRole: "ADMIN" },
     ],
   },
   {
@@ -84,8 +90,11 @@ export const navSections: NavSection[] = [
  * Admin is the instance console: it shows for an instance administrator, and a
  * workspace role (OWNER or ADMIN of the current workspace) does not decide it.
  */
-export function isHiddenForRole(item: NavItem, _role: string | null | undefined, instanceAdmin?: boolean | null): boolean {
-  return item.badge === "ADMIN" && instanceAdmin !== true
+export function isHiddenForRole(item: NavItem, role: string | null | undefined, instanceAdmin?: boolean | null): boolean {
+  if (item.badge === "ADMIN" && instanceAdmin !== true) return true
+  // While the role is loading it is null, and the row stays hidden: showing it
+  // and then taking it away is worse than letting it appear.
+  return item.minRole != null && !roleAtLeast(role, item.minRole)
 }
 
 /**

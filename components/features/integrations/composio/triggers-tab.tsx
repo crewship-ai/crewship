@@ -27,6 +27,9 @@ export function TriggersTab({
 }) {
   const [active, setActive] = React.useState<TriggerInstance[]>([])
   const [activeLoading, setActiveLoading] = React.useState(true)
+  const [activeError, setActiveError] = React.useState(false)
+  const scope = React.useRef<{ workspaceId: string } | null>(null)
+  const activeRequest = React.useRef<AbortController | null>(null)
 
   const [types, setTypes] = React.useState<TriggerType[]>([])
   const [typesLoading, setTypesLoading] = React.useState(true)
@@ -37,27 +40,50 @@ export function TriggersTab({
   const [enable, setEnable] = React.useState<TriggerType | null>(null)
 
   const loadActive = React.useCallback(async () => {
+    const current = scope.current
+    if (!current || current.workspaceId !== workspaceId || !workspaceId) return
+    activeRequest.current?.abort()
+    const controller = new AbortController()
+    activeRequest.current = controller
     setActiveLoading(true)
+    setActiveError(false)
     try {
       const r = await apiFetch(
-        `/api/v1/integrations/composio/triggers/active?workspace_id=${workspaceId}`,
+        `/api/v1/integrations/composio/triggers/active?workspace_id=${encodeURIComponent(workspaceId)}`,
+        { signal: controller.signal },
       )
       if (!r.ok) throw new Error(String(r.status))
       const j = (await r.json()) as ActiveTriggersResp
-      setActive(j.triggers ?? [])
+      if (!controller.signal.aborted && scope.current === current) setActive(j.triggers ?? [])
     } catch {
-      setActive([])
+      if (!controller.signal.aborted && scope.current === current) {
+        setActive([])
+        setActiveError(true)
+      }
     } finally {
-      setActiveLoading(false)
+      if (!controller.signal.aborted && scope.current === current) setActiveLoading(false)
     }
   }, [workspaceId])
 
   React.useEffect(() => {
+    scope.current = { workspaceId }
+    setActive([])
+    setActiveError(false)
+    setActiveLoading(Boolean(workspaceId))
+    setEnable(null)
     void loadActive()
-  }, [loadActive])
+    return () => {
+      scope.current = null
+      activeRequest.current?.abort()
+    }
+  }, [loadActive, workspaceId])
 
   React.useEffect(() => {
     const ctrl = new AbortController()
+    setTypes([])
+    setTypesLoading(Boolean(workspaceId))
+    setErr(null)
+    if (!workspaceId) return
     const t = setTimeout(async () => {
       setTypesLoading(true)
       setErr(null)
@@ -70,14 +96,14 @@ export function TriggersTab({
         })
         if (!r.ok) throw new Error(`Failed (${r.status})`)
         const j = (await r.json()) as TriggerTypesResp
-        setTypes(j.triggers ?? [])
+        if (!ctrl.signal.aborted) setTypes(j.triggers ?? [])
       } catch (e) {
-        if ((e as Error).name !== "AbortError") {
+        if (!ctrl.signal.aborted && !(e instanceof Error && e.name === "AbortError")) {
           setErr(e instanceof Error ? e.message : "Failed to load triggers")
           setTypes([])
         }
       } finally {
-        setTypesLoading(false)
+        if (!ctrl.signal.aborted) setTypesLoading(false)
       }
     }, 300)
     return () => {
@@ -109,6 +135,8 @@ export function TriggersTab({
           <div className="mt-2">
             <TableSkeleton rows={2} />
           </div>
+        ) : activeError ? (
+          <p role="alert" className="mt-2 text-[11px] text-destructive">Could not load active triggers.</p>
         ) : active.length === 0 ? (
           <p className="mt-2 text-[11px] text-muted-foreground">
             No active triggers yet. Enable one below to wake an agent on events like{" "}
@@ -157,7 +185,7 @@ export function TriggersTab({
         </div>
       </div>
 
-      {err && <div className="text-[11px] text-destructive">{err}</div>}
+      {err && <div role="alert" className="text-[11px] text-destructive">{err}</div>}
 
       {typesLoading ? (
         <TableSkeleton rows={5} />
@@ -240,6 +268,9 @@ function TriggerModal({
   const [userId, setUserId] = React.useState(users[0] ?? "")
   const [busy, setBusy] = React.useState(false)
   const [err, setErr] = React.useState<string | null>(null)
+  const pending = React.useRef<AbortController | null>(null)
+  const fieldId = React.useId()
+  React.useEffect(() => () => { pending.current?.abort() }, [])
 
   const create = async () => {
     const uid = userId.trim()
@@ -249,21 +280,25 @@ function TriggerModal({
     }
     setBusy(true)
     setErr(null)
+    const controller = new AbortController()
+    pending.current = controller
     try {
-      const r = await apiFetch(`/api/v1/integrations/composio/triggers?workspace_id=${workspaceId}`, {
+      const r = await apiFetch(`/api/v1/integrations/composio/triggers?workspace_id=${encodeURIComponent(workspaceId)}`, {
         method: "POST",
+        signal: controller.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ slug: trigger.slug, user_id: uid }),
       })
+      if (controller.signal.aborted) return
       if (!r.ok) {
         const body = await r.json().catch(() => null)
         throw new Error(body?.detail || `Failed (${r.status})`)
       }
-      onCreated()
+      if (!controller.signal.aborted) onCreated()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to create trigger")
+      if (!controller.signal.aborted) setErr(e instanceof Error ? e.message : "Failed to create trigger")
     } finally {
-      setBusy(false)
+      if (!controller.signal.aborted) setBusy(false)
     }
   }
 
@@ -282,8 +317,9 @@ function TriggerModal({
         <div className="mt-4 space-y-3">
           {users.length > 0 && (
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">For user</label>
+              <label htmlFor={`${fieldId}-select`} className="mb-1 block text-xs text-muted-foreground">For user</label>
               <select
+                id={`${fieldId}-select`}
                 value={users.includes(userId) ? userId : ""}
                 onChange={(e) => setUserId(e.target.value)}
                 className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
@@ -298,8 +334,9 @@ function TriggerModal({
             </div>
           )}
           <div>
-            <label className="mb-1 block text-xs text-muted-foreground">User id</label>
+            <label htmlFor={`${fieldId}-user`} className="mb-1 block text-xs text-muted-foreground">User id</label>
             <input
+              id={`${fieldId}-user`}
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
               placeholder="e.g. alice@acme.com"
@@ -308,7 +345,7 @@ function TriggerModal({
           </div>
         </div>
 
-        {err && <div className="mt-3 text-xs text-destructive">{err}</div>}
+        {err && <div role="alert" className="mt-3 text-xs text-destructive">{err}</div>}
 
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>

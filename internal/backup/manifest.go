@@ -233,9 +233,16 @@ type Contents struct {
 	// claims — a corrupted or hand-edited bundle, or a future refactor
 	// that lets the two numbers drift apart. "The bundle is intact" is
 	// the guarantee; "the bundle is everything" (independent
-	// re-derivation, e.g. reconciling against the source instance) is a
-	// stronger, separate guarantee and out of scope here — see #2009.
+	// re-derivation against the source) is ScopeReconciliation's job.
 	TableRowCounts map[string]int `json:"table_row_counts,omitempty" yaml:"table_row_counts,omitempty"`
+
+	// ScopeReconciliation is the independent half of #2009: workspace rows
+	// the source schema reaches that the dump's scope filters did not
+	// export, measured in the dump's own snapshot at create time. Verify
+	// fails a bundle that records a shortfall, encrypted or not, since the
+	// manifest is readable without the key. Additive: nil on older bundles
+	// and on scopes that do not run it.
+	ScopeReconciliation *ScopeReconciliation `json:"scope_reconciliation,omitempty" yaml:"scope_reconciliation,omitempty"`
 
 	// Instance is set on instance-scope bundles only: the workspaces in the
 	// snapshot, every file store with its file count and index digest, the

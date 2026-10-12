@@ -141,7 +141,9 @@ address hashed.
   invitation](/api-reference/workspaces#create-invitation) first: signup
   redeems every live invitation for the address inside the same
   transaction that creates the account, so the new user lands in the
-  inviting workspace at the invited role. `POST
+  inviting workspace at the invited role — and gets no workspace of their
+  own. Only a signup with no live invitation (to a workspace that still
+  exists) gets a default workspace, as its OWNER. `POST
   /api/v1/workspaces/{workspaceId}/members` still takes a `user_id` and
   nothing else.
 </Note>

@@ -73,6 +73,10 @@ export function usePipelineRuns(
   // hook asks for the full 200 so a cron-heavy workspace doesn't
   // truncate its active set.
   limit = 100,
+  // poll: false drops the 3s poll for a feed that only needs the run.*
+  // events below — a history feed read beside a separate active feed,
+  // which already polls while anything runs.
+  { poll = true }: { poll?: boolean } = {},
 ) {
   const [runs, setRuns] = useState<PipelineRun[]>([])
   const [loading, setLoading] = useState(false)
@@ -91,6 +95,8 @@ export function usePipelineRuns(
   const refresh = useCallback(async () => {
     if (!workspaceId) {
       setRuns([])
+      setLoading(false)
+      setError(null)
       return
     }
     if (inFlightRef.current) return
@@ -118,8 +124,12 @@ export function usePipelineRuns(
       if (ctrl.signal.aborted) return
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      inFlightRef.current = false
-      if (!ctrl.signal.aborted) setLoading(false)
+      // A cancelled request can settle after a new scope has started its
+      // replacement. Only the current controller owns the in-flight gate.
+      if (abortRef.current === ctrl) {
+        inFlightRef.current = false
+        if (!ctrl.signal.aborted) setLoading(false)
+      }
     }
   }, [workspaceId, filter, limit])
 
@@ -142,10 +152,10 @@ export function usePipelineRuns(
     r.status === "running" || r.status === "queued" || r.status === "paused" || r.status === "waiting",
   )
   useEffect(() => {
-    if (!hasActive) return
+    if (!poll || !hasActive) return
     const t = setInterval(refresh, 3_000)
     return () => clearInterval(t)
-  }, [hasActive, refresh])
+  }, [poll, hasActive, refresh])
 
   // Realtime: any pipeline run state change kicks a refresh so we
   // catch "new run started" events that the active-only polling

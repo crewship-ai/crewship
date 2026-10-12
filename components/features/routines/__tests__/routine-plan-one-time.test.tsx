@@ -39,6 +39,8 @@ vi.mock("@/hooks/use-pipeline-schedules", () => ({
     preview: vi.fn(),
   }),
 }))
+// The one-time starts card refreshes on run events; no socket in tests.
+vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEvent: () => {} }))
 vi.mock("@/lib/api-fetch", () => ({
   apiFetch: vi.fn(async () => ({
     ok: true,

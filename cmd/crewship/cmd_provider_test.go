@@ -386,11 +386,15 @@ func TestCatalogIDFor(t *testing.T) {
 // would let an "offline" test quietly pass by reaching a real server.
 func offlineEnv(t *testing.T) []string {
 	t.Helper()
-	return []string{
+	env := []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + t.TempDir(),
 		"NO_COLOR=1",
 	}
+	if dir := os.Getenv("TEST_CREWSHIP_CLI_COVERAGE_DIR"); dir != "" {
+		env = append(env, "GOCOVERDIR="+dir)
+	}
+	return env
 }
 
 func TestAcceptance_ProviderList_Offline(t *testing.T) {

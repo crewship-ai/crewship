@@ -57,12 +57,14 @@ export function useNotificationDeliveries(
   const { status, channelId, category, limit } = filter
 
   const refresh = useCallback(async () => {
+    abortRef.current?.abort()
+    setError(null)
+    setForbidden(false)
     if (!workspaceId) {
       setDeliveries([])
       setLoading(false)
       return
     }
-    abortRef.current?.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setLoading(true)
@@ -85,6 +87,7 @@ export function useNotificationDeliveries(
       }
       if (!res.ok) throw new Error(`load deliveries: ${res.status}`)
       const body = await res.json()
+      if (ctrl.signal.aborted) return
       setForbidden(false)
       setDeliveries(Array.isArray(body?.deliveries) ? body.deliveries : [])
       setError(null)

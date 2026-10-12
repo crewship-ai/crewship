@@ -69,11 +69,21 @@ function AgentCardNodeInner({ data }: NodeProps) {
       className={cn(
         "rounded-lg border backdrop-blur-sm cursor-pointer transition-all duration-200",
         "hover:brightness-110",
+        "focus:outline-none focus:ring-2 focus:ring-primary",
         cfg.border,
         cfg.bg,
       )}
       style={{ width: 200, minHeight: 100 }}
       onClick={() => d.onAgentClick?.(d.slug)}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open agent ${d.name}`}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          d.onAgentClick?.(d.slug)
+        }
+      }}
     >
       <div className="px-2.5 py-2">
         {/* Top row: status dot + name + badges */}

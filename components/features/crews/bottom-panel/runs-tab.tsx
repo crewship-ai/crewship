@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { REPORTED_USAGE_HINT, formatReportedUsage } from "@/components/features/routines/routine-cost-format"
 
 import type { BottomPanelContext } from "./types"
 import { EmptyState, formatRelative, statusColor } from "./shared"
@@ -113,7 +114,9 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
                   ? <span className="text-destructive">{run.error_message}</span>
                   : isMission
                     ? (run.result_summary || "—")
-                    : (typeof run.cost_usd === "number" ? `$${run.cost_usd.toFixed(4)}` : "—")}
+                    : (typeof run.cost_usd === "number" && run.cost_usd > 0
+                      ? <span title={REPORTED_USAGE_HINT}>{formatReportedUsage(run.cost_usd)} reported usage</span>
+                      : "—")}
               </td>
             </tr>
           ))}

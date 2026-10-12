@@ -1,0 +1,61 @@
+name: Trusted CI Inventory
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to inspect (leave blank for a queue target)
+        required: false
+        type: string
+      queue_ref:
+        description: Exact refs/heads/gh-readonly-queue/main/... branch (leave blank for a PR)
+        required: false
+        type: string
+      expected_base_sha:
+        description: Exact current main SHA for a queue target (leave blank for a PR)
+        required: false
+        type: string
+      expected_head_sha:
+        description: Exact 40-character PR or queue head SHA reviewed by the administrator
+        required: true
+        type: string
+      approve_control_changes:
+        description: Explicitly approve the reported CI control changes for this exact head
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  inventory:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Trusted default-branch source only. Never use PR head/merge refs here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.sha }}
+          persist-credentials: false
+      - name: Inspect bounded PR contents as data and attach exact-head status
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GUARD_TRUSTED_SHA: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.sha }}
+        run: python3 scripts/ci/inventory-guard.py
+      - name: Preserve inventories and exact-head administrator decision
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ci-inventory-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .ci-results/ci-inventory-report.json
+          if-no-files-found: warn
+          retention-days: 30

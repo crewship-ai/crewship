@@ -63,36 +63,10 @@ Real paid inference requires a user-provided Go/Zen account and has not been
 performed. Fixture tests and local CLI transport probes do not verify plan
 entitlement or actual billed amounts.
 
-## Verification evidence
+## Verification requirements
 
-- Credentials/provider/agent Vitest selection: 347 tests passed; follow-up
-  agent-selection/detail tests: 20 passed; model-catalog tests: 13 passed.
-- Production `pnpm build` passed. TypeScript check passed. ESLint passed with
-  30 warnings and no errors.
-- Playwright provider-first workflow passed at 1280 px and 390 px using the
-  production static export and fixture APIs. Screenshots inspected under
-  `/tmp/opencode-{go,zen}-{1280,390}.png`; no real credentials were created.
-- OpenCode 1.18.31 native transport probe, with isolated HOME/XDG directories
-  and dummy auth, reached a local server for Go Kimi K3, MiniMax M3 and
-  GPT-5.6 Luna, and Zen Claude Sonnet 5 and Gemini 3.1 Pro. It preserved native
-  endpoint shapes, sent a stable x-opencode-session per conversation, and
-  identified itself as OpenCode. Auxiliary Zen requests used the same local
-  gateway. Each probe intentionally stopped with a local 401. Evidence:
-  `/tmp/opencode-native-probe.log`. A second probe using the exact options-only
-  production configuration (no disabled-provider override) confirmed Go and
-  Zen auxiliary traffic stays on the selected gateway:
-  `/tmp/opencode-native-exact-probe.log`.
-- Complete targeted suites for orchestrator, sidecar, llmroute, providerlogin,
-  modelcatalog and paymaster passed. API regressions cover encrypted storage,
-  independent slots, plan labels, agent updates and custom model IDs.
-- `go vet ./...`, `scripts/verify.sh quick`, and agent invariants passed.
-- Full Go-suite outcome is recorded in the PR after completion; log:
-  `/tmp/opencode-full-go.log`. No deployment or successful paid inference is
-  implied by this verification.
-
-## Acceptance handoff (2026-09-18)
-
-See [PRD validation and next-agent checklist](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/opencode-go-zen-handoff-2026-09-18.md)
-for requirement coverage, completed CI, actual dev3 deployment evidence and the
-remaining real-account acceptance/review gates. Implementation coverage is not
-proof of successful paid inference.
+Use synthetic upstream endpoints and isolated HOME/XDG directories to verify
+provider selection, native transport, account fencing and usage metadata.
+Cover independent credential slots, custom models and agent updates.
+Internal probe transcripts and deployment checklists are retained privately.
+Synthetic transport success is not evidence of successful paid inference.

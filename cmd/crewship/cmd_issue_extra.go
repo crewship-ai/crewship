@@ -437,6 +437,33 @@ type issueEventsPageDTO struct {
 	Events    []issueEventDTO `json:"events" yaml:"events"`
 	AfterSeq  int             `json:"after_seq" yaml:"after_seq"`
 	LatestSeq int             `json:"latest_seq" yaml:"latest_seq"`
+	// Backward paging (#2983): set only on a --before-seq read.
+	BeforeSeq *int `json:"before_seq,omitempty" yaml:"before_seq,omitempty"`
+	HasOlder  bool `json:"has_older,omitempty" yaml:"has_older,omitempty"`
+}
+
+// fetchIssueEventsOlderPage does one GET .../events?before_seq=&limit= call:
+// the newest `limit` events below the cursor, in seq order (#2983).
+func fetchIssueEventsOlderPage(client *cli.Client, crewID, identifier string, beforeSeq, limit int) (issueEventsPageDTO, error) {
+	params := url.Values{}
+	params.Set("before_seq", strconv.Itoa(beforeSeq))
+	if limit > 0 {
+		params.Set("limit", strconv.Itoa(limit))
+	}
+	path := fmt.Sprintf("/api/v1/crews/%s/issues/%s/events?%s", crewID, url.PathEscape(identifier), params.Encode())
+	resp, err := client.Get(path)
+	if err != nil {
+		return issueEventsPageDTO{}, err
+	}
+	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		return issueEventsPageDTO{}, err
+	}
+	var page issueEventsPageDTO
+	if err := cli.ReadJSON(resp, &page); err != nil {
+		return issueEventsPageDTO{}, err
+	}
+	return page, nil
 }
 
 // maxIssueEventsCLIPages bounds how many 500-row server pages `issue
@@ -526,11 +553,23 @@ var issueEventsCmd = &cobra.Command{
 		identifier := derefStr(issue.Identifier, issue.ID)
 		afterSeq, _ := cmd.Flags().GetInt("after-seq")
 
-		events, latestSeq, err := fetchAllIssueEvents(client, issue.CrewID, identifier, afterSeq)
-		if err != nil {
-			return err
+		var result issueEventsPageDTO
+		if cmd.Flags().Changed("before-seq") {
+			beforeSeq, _ := cmd.Flags().GetInt("before-seq")
+			limit, _ := cmd.Flags().GetInt("limit")
+			page, err := fetchIssueEventsOlderPage(client, issue.CrewID, identifier, beforeSeq, limit)
+			if err != nil {
+				return err
+			}
+			result = page
+		} else {
+			events, latestSeq, err := fetchAllIssueEvents(client, issue.CrewID, identifier, afterSeq)
+			if err != nil {
+				return err
+			}
+			result = issueEventsPageDTO{Events: events, AfterSeq: afterSeq, LatestSeq: latestSeq}
 		}
-		result := issueEventsPageDTO{Events: events, AfterSeq: afterSeq, LatestSeq: latestSeq}
+		events := result.Events
 
 		f := newFormatter()
 		headers := []string{"SEQ", "WHEN", "ACTOR", "ACTION", "DETAILS"}
@@ -1093,6 +1132,9 @@ func init() {
 	issueCmd.AddCommand(issueSubtasksCmd)
 	issueCmd.AddCommand(issueActivityCmd)
 	issueEventsCmd.Flags().Int("after-seq", 0, "Only show events with seq greater than this (0 = full history)")
+	issueEventsCmd.Flags().Int("before-seq", 0, "Read one page of OLDER events: the newest --limit events with seq below this (0 = from the newest)")
+	issueEventsCmd.Flags().Int("limit", 0, "Page size for --before-seq (server cap 500)")
+	issueEventsCmd.MarkFlagsMutuallyExclusive("after-seq", "before-seq")
 	issueCmd.AddCommand(issueEventsCmd)
 
 	issueBulkUpdateCmd.Flags().String("ids", "", "Comma-separated issue IDs (max 100; REQUIRED)")

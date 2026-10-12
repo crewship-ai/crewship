@@ -11,7 +11,10 @@ const cpu = async () => {
 const fleetSample = async () => {
   try {
     const response = await fetch('http://127.0.0.1:9119/crews/telemetry', {signal: AbortSignal.timeout(8000)})
-    if (!response.ok) return null
+    if (!response.ok) {
+      await response.body?.cancel()
+      return null
+    }
     const value = await response.json()
     return Array.isArray(value?.crews) ? value.crews : null
   } catch { return null }

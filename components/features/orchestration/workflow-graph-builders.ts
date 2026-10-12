@@ -390,7 +390,7 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
 
   // Permission edges
   for (const conn of connections) {
-    if (!usedCrewIds.has(conn.from_crew_id) || !usedCrewIds.has(conn.to_crew_id)) continue
+    if (!visibleNodeIds.has(`crew-${conn.from_crew_id}`) || !visibleNodeIds.has(`crew-${conn.to_crew_id}`)) continue
     const markers = getPermissionMarkers(conn.direction)
     edges.push({
       id: `perm-${conn.id}`,
@@ -468,9 +468,10 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
     }
 
     const tasksByOrder = [...tasks].sort((a, b) => a.task_order - b.task_order)
+    const taskIds = new Set(tasksByOrder.map((task) => task.id))
     const deps = new Map<string, string[]>()
     for (const task of tasksByOrder) {
-      deps.set(task.id, parseDependsOn(task.depends_on))
+      deps.set(task.id, parseDependsOn(task.depends_on).filter((id) => taskIds.has(id)))
     }
 
     const levels = new Map<string, number>()

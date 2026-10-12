@@ -52,8 +52,17 @@ that selection. A selected run adds `&run=` and keeps its recorded recipe versio
 Steps use an explicit name when provided, otherwise a description of their action.
 Stable IDs remain secondary technical identifiers. Empty schedules and results
 collapse to a short row. The run page leads with its verdict, error and failed
-step, and opens failed, current or waiting steps automatically. Missing evidence
-is distinguished from an empty result. Stopping a run does not undo prior actions.
+step, and opens failed, current or waiting steps automatically. The result and
+the next step come before run provenance and the shareable evidence, which stay
+further down the same page. Missing evidence is distinguished from an empty
+result. Stopping a run does not undo prior actions.
+
+The overview pane and the header Activity menu load running and waiting runs
+from their own list, so a long run stays visible however many runs started
+after it. The run summary is computed from the 200 newest runs: when those do
+not reach back seven days it reads *newest N runs · since …* instead of *7d*.
+A run whose result is partial or needs a person counts as finished, not as a
+success.
 
 A run detail's recipe comes from the run's **own archived record** — resolved by
 content hash, then numeric version, never from the routine's current head — so
@@ -573,6 +582,8 @@ has no services and no notable tools.
 
 `complexity` resolves through the workspace's `execution_tiers_json` mapping into `(adapter, model)`. With `complexity: "fast"`, the agent's CLI gets `--model claude-haiku-4-5-20251001` (or whatever the workspace mapped `fast` to). `model_override` is the explicit pin that wins over `complexity`.
 
+**A busy agent is waited for.** An agent runs one turn at a time. When the step's agent is busy with a chat, an assignment or another routine, the step waits for it instead of failing, for up to its `timeout_seconds` (15 minutes when the step sets none) and until the run is stopped. Steps waiting for the same agent take it as it frees, in no guaranteed order. If the agent stays busy for the whole wait, the step fails with "agent … stayed busy for …", and its `retry` policy and `on_failure` apply as usual. The wait holds the run and does not survive a server restart; the waiting time comes before, and does not shorten, the step's own run time.
+
 `on_fail` lives at the step level (not inside `validation`) and is one of `escalate_tier | abort | retry_step` — `escalate_tier` walks the fallback chain (e.g., Haiku → Sonnet → Opus) until validation passes or the chain exhausts. `retry_step` is sugar for the [default retry policy](#retry-transient-failures) (retry the step on a transient execution error); for the validation/rubric gate it behaves as `escalate_tier`.
 
 ### Retry transient failures
@@ -731,6 +742,12 @@ gates at run time, checked pre-flight AND on every redirect hop
 A blocked request fails the step with a structured error naming the step,
 the host, and which layer denied it — before any bytes leave the server.
 
+**Response redaction.** Known resolved credential values and their common JSON
+and URL encodings are redacted from HTTP results and request errors. This is
+best-effort protection, not detection of arbitrary derived values such as base64,
+hex or fragments. Upstream services should not echo credentials. Very short
+credentials may also redact unrelated output substrings.
+
 **Credential injection.** `credential_ref.type` is resolved at run time
 against the workspace credential vault by **type** (case-insensitive match
 on the vault type, e.g. `API_KEY`, `GENERIC_SECRET`), never by ID — so a
@@ -787,6 +804,41 @@ direction that matters — reading a destructive action as an ordinary one
 than being read as `normal`.
 
 Three kinds: `approval` (HITL token), `datetime` (sleep until ISO timestamp), `event` (external signal via `POST /api/v1/workspaces/{ws}/pipeline-runs/{runId}/signal`). Both `approval` and `event` survive a process restart: a top-level run parks (`status: WAITING`) with durable state — `pipeline_waitpoints` for approval, `pipeline_signal_waits` for event (migration v154, #1409) — and at boot the parked run is resumed from that state. For `event` specifically, a signal delivered while the process was down (or a hair before the step even reached the wait) is not lost: the signal endpoint records the delivery durably before attempting any in-process wake, and the resumed step reads it straight back out (see [Durability and restart recovery](#durability-and-restart-recovery)).
+
+`wait.timeout_sec` sets the wait's timeout. A positive `timeout_seconds` on
+the step takes precedence when both are supplied. Omitting both (or using
+zero) keeps the kind's default: 24 hours for approval, one hour for event,
+and no timeout for datetime. Existing parked waits retain their recorded
+deadline when resumed.
+
+**Event deadlines.** `timeout_seconds` also applies to parked `event` waits
+(default: one hour). The deadline is fixed when the step first arms; retrying
+or restarting the server does not reset it. A leader-gated worker checks parked
+waits every second and resumes expired waits through the usual step failure,
+retry policy / `on_fail`, and routine `on_failure` handling. A busy execution
+slot can delay processing, but cannot extend the delivery deadline. Recovery
+also checks deadlines that elapsed while the server was offline. A signal
+committed before the deadline takes precedence even if consumed after it;
+late signals cannot satisfy an expired wait. Cancelling a run closes its pending
+subscriptions. Resumed pending event waits park again and release their slot.
+For blocking nested waits, an in-memory wake is advisory: if a sibling receives
+the durable signal, the pending own wait keeps its original timer and remains
+cancellable until its own delivery or deadline. This does not change the shared
+run/event identity used by nested waits.
+When nested waits share a run and event type, another waiter can receive the
+in-memory wake, so the intended waiter may not consume its durable payload until
+its original deadline; the deadline is never extended.
+`retry_step` applies its backoff but does not grant a fresh event window: once
+expired, each retry reports the same timeout. Upgrading also applies the original
+deadline to existing parked waits; waits already older than their configured
+(or default one-hour) timeout can fail immediately and run failure hooks.
+Legacy deadline recovery looks up top-level steps only. Existing nested event-wait
+rows that cannot be matched use the one-hour fallback, even if their nested step
+configured a longer timeout. Newly armed nested waits persist their configured
+timeout.
+Shutdown cancels event-resumed work already executing, matching other
+lifecycle-owned runs; parked waits and expirations awaiting a slot remain
+recoverable at the next boot.
 
 **Async, non-blocking.** Hitting a `kind: approval` gate does **not** hold a goroutine or fail the run. A foreground `crewship routine run` returns promptly with `status: WAITING` (exit 0) and a waitpoint token, and **releases its execution slot** while it waits. Approving **or** rejecting resumes the run from the gate (already-completed steps are restored/skipped); a rejection resolves the run to `FAILED` cleanly rather than stranding it. Parked approvals whose `timeout_sec` elapsed are reconciled at the next boot scan.
 
@@ -960,13 +1012,22 @@ The `files:` block works in **both** crew manifest shapes — a standalone `kind
 
 ### `transform`
 
+**Transform compatibility.** Transform supports field/array paths and standalone
+`length`, `keys`, `tostring`, `@json`/`tojson`; use `code` for arithmetic or pipes.
+Field names are literal, including `-`, `?` and `!`; this is not a full jq parser.
+Whitespace around an array index is accepted. Save and draft validation check
+all branches, including inactive ones. Existing definitions with unsupported
+syntax need a manual correction before re-saving or draft testing; there is no
+automatic migration. Ordinary execution of an existing routine still skips
+inactive branches and reports an error if an unsupported expression is reached.
+
 ```json
 {
-  "id": "extract_emails",
+  "id": "extract_email",
   "type": "transform",
   "transform": {
     "input": "{{ steps.fetch.output }}",
-    "expression": ".items[] | .email"
+    "expression": ".items[0].email"
   }
 }
 ```
@@ -1872,9 +1933,22 @@ crewship routine pending list            # not-yet-fired deferred triggers
 crewship routine pending cancel <id>     # cancel before it fires
 ```
 
-An in-process dispatcher (5s tick) fires due rows highest-priority-first and expires rows past their `ttl`. Immediate runs (no `--delay` / `--debounce-key`) are unaffected. Full reference, including the underlying API fields: [Deferred dispatch](/manifest/routine).
+An in-process dispatcher (5s tick) fires due rows highest-priority-first and expires rows past their `ttl`. An immediate run whose `concurrency_key` slot is full joins the same queue: it returns `SCHEDULED` with `queued: true` and starts when a slot frees, waiting at most its `--ttl` (one hour by default). Pass `--reject-if-busy` to get the old `429` instead. Full reference, including the underlying API fields: [Deferred dispatch](/manifest/routine).
 
 **A deferred run is pinned to the version it was accepted against.** The receipt carries `pinned_version`, and publishing an edit while the trigger waits does not change what fires — the run executes the recipe that passed its preflight, not whatever HEAD has become by the time the dispatcher reaches it. A debounced burst keeps the first trigger's version, because coalescing makes it one trigger — and a later trigger in the window is judged against that version as well as the current one, so inputs written for a recipe published after the window opened are refused with `409` and the pending run is left as it was accepted; let it fire or cancel it first. `pinned_version` can only be named on an immediate or one-time (`fire_at`) start; a delayed or debounced start answers `400` to it. A routine without an archived version is refused with 409. Publish a version before deferring it; every accepted manual deferred start must have a durable recipe.
+
+**Every accepted start stays visible.** A start that finds its
+`concurrency_key` slot taken waits and retries until its `ttl`; without a `ttl`
+it gives up after ten attempts. The routine's **Plan** view lists waiting starts
+under *One-time starts* with the reason (*Waiting for capacity*, how many tries,
+the earliest next try — not a promised start time), and below them the recent
+starts that left the queue: *Started* with a link to the run once it is
+recorded, *Did not run* or *Expired* with the server's reason, or *Removed*. A
+started start without a run link may still be running; it is never shown as a
+failure. The overview's attention strip names accepted starts that did not run
+in the last seven days, and *Routines running now* says how many wait for a
+free slot. `crewship routine pending list --status all` and
+`crewship routine pending get <id>` show the same receipts.
 
 That is the opposite of a schedule, which deliberately runs current HEAD unless its `target_pipeline_version` says otherwise: a plan is a standing instruction, a deferred run is one start that a person already made.
 
@@ -1998,7 +2072,7 @@ At boot, the server scans for runs left in `queued`/`running` from the previous 
 - **Completed steps are restored, not re-executed.** Their outputs feed downstream `{{ steps.X.output }}` templates exactly as if the process had never died.
 - **The in-flight step re-executes from scratch** — at-least-once semantics. For an `agent_run` step this means the agent call is re-issued (and re-billed); `http`/`code`/`script` steps with external side effects may fire twice. Design steps to be idempotent where that matters.
 - **Runs parked on a `wait` approval step re-attach to the original waitpoint token.** No duplicate approval card is created; the pending inbox item stays answerable across the restart, and approving it resumes the run.
-- **Runs parked on a `wait: event` step re-attach the same way** (#1409): the wait durably ARMs a `pipeline_signal_waits` row before parking, so a signal delivered via `POST .../signal` at any point — including while the process was down — lands in that row rather than an in-memory-only channel. Resume checks for an already-delivered payload first; if none has arrived yet it re-registers and waits again.
+- **Runs parked on a `wait: event` step re-attach the same way** (#1409): the wait durably ARMs a `pipeline_signal_waits` row before parking, so a signal delivered via `POST .../signal` at any point — including while the process was down — lands in that row rather than an in-memory-only channel. Resume checks for an already-delivered payload first; pending top-level waits park again with the original deadline, and elapsed deadlines produce the normal timeout failure. A valid consumed payload can be replayed if a crash happened before the step output was saved.
 - **DAG runs (`needs:`) resume at wave granularity** — the parallel scheduler flushes state when each wave completes, so a kill mid-wave re-executes that wave's unfinished steps.
 - **`call_pipeline` boundaries are NOT persisted.** A kill while a nested pipeline is executing re-runs the **entire nested pipeline** on resume — the parent's `call_pipeline` step is the unit of recovery, and the nested run's own per-step progress is not checkpointed. Keep nested pipelines short or idempotent if a mid-flight kill matters to you.
 - The accumulated cost is restored too, so `max_cost_usd` keeps counting across the restart instead of resetting. **Caveat:** cost is flushed at step boundaries, so whatever the killed in-flight step had already spent before the kill is **not** in the restored total — the cap under-counts the true spend by up to one step's worth (and the re-executed step is billed again on top).
@@ -2353,7 +2427,7 @@ pipeline: concurrency_key rendered to empty value (referenced input missing or e
 Why fail-fast: a routine that declares `concurrency_key: "{{ inputs.account_id }}"` is asking the platform to serialise runs per tenant. If `account_id` is missing, treating the empty key as "no gate" would silently allow unlimited parallelism for a routine the author explicitly asked us to serialise — a denial-of-self by misconfiguration. The executor refuses to start the run.
 
 Fixes, in order of preference:
-1. **Supply the input.** The caller (curl / `crewship routine run --inputs '{...}'` / scheduler / webhook) needs to pass the referenced input. For webhooks this means the `inputs_template` in the webhook config must produce it from the incoming payload.
+1. **Supply the input.** The caller (curl / `crewship routine run --inputs '{...}'` / scheduler / webhook) needs to pass the referenced input. Webhooks expose the incoming payload under `inputs.event`; `inputs_template` adds literal values and does not evaluate expressions or merge payload fields into top-level inputs.
 2. **Set a default on the InputSpec.** If the input is genuinely optional but you still want a tenant-style gate, add `"default": "global"` (or any non-empty sentinel) to the `InputSpec`. The platform merges defaults before rendering the key.
 3. **Use a literal prefix.** A template like `"vendor-alert-{{ inputs.vendor_id }}"` always renders non-empty (the literal `vendor-alert-` survives even when `vendor_id` is missing); the key still gates, just less granularly.
 4. **Drop the gate.** If you genuinely don't want concurrency control, omit `concurrency_key` entirely (do NOT set it to `""` — that's the *unset* sentinel).

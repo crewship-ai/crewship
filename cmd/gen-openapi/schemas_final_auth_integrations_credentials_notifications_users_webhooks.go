@@ -75,6 +75,7 @@ func finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog() (
 		"POST /api/v1/credentials/{credentialId}/reveal":                         {Request: ref("FinalAuthRevealRequest")},
 		"POST /api/v1/credentials/{credentialId}/test":                           {Request: ref("FinalAuthCredentialTestRequest")},
 		"POST /api/v1/users/me/avatar":                                           {Request: ref("FinalAuthAvatarUploadRequest")},
+		"POST /api/v1/workspaces/{workspaceId}/logo":                             {Request: ref("FinalAuthAvatarUploadRequest")},
 		"PUT /api/v1/users/me/peer-consent":                                      {Request: ref("FinalAuthPeerConsentRequest")},
 		"PUT /api/v1/me/preferences/{key}":                                       {Request: ref("FinalAuthUserPreferenceValue")},
 		"POST /api/v1/webhooks/{token}":                                          {Request: ref("FinalAuthWebhookPayload")},

@@ -1,11 +1,10 @@
 "use client"
 
-import { useEffect, useState, type ImgHTMLAttributes } from "react"
+import { useState, type ImgHTMLAttributes } from "react"
 
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { queueAvatarBackfill, resolveStoredAvatarSrc } from "@/lib/agent-avatar-persist"
+import { resolveStoredAvatarSrc } from "@/lib/agent-avatar-persist"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
-import { useCurrentWorkspaceId } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
 
 /**
@@ -26,29 +25,10 @@ export interface AgentAvatarProps
   /** Alt text. Defaults to "" so decorative avatars stay out of the a11y tree. */
   alt?: string
   /**
-   * Agent row id, when this avatar belongs to a real persisted agent
-   * (#1297). Supplying it opts the agent into having its render stored, so
-   * its face stops changing when the generator is upgraded. Omit for
-   * avatars that stand for something else — a crew, a skill author, a
-   * comment byline — which have no row to store against.
-   */
-  agentId?: string
-  /**
    * `avatar_url` from the API: the agent's stored render, or null/undefined
    * when it has none and should be generated from the seed.
    */
   avatarUrl?: string | null
-  /**
-   * Workspace to scope the backfill write to. Overrides the workspace store;
-   * the dashboard leaves it unset, matching `panel-actions`' `workspaceId`.
-   *
-   * It exists for surfaces that know their workspace but never mount the
-   * store: `/onboarding` renders a real agent's avatar
-   * (`onboarding-setup-chat.tsx`) and nothing in `app/(onboarding)/**` calls
-   * `useWorkspace()`, so the store stays empty for that whole visit and the
-   * backfill would be skipped for the one agent that route shows.
-   */
-  workspaceId?: string | null
 }
 
 /**
@@ -71,31 +51,22 @@ export interface AgentAvatarProps
  *      fallback for everything else, including a stored render that fails
  *      to load. Generating always works, so it is never right to leave a
  *      broken-image icon on screen instead.
+ *
+ * Rendering never writes (#2876): an agent without a stored render is drawn
+ * from its seed and left alone. Renders are stored where an agent is created
+ * or edited, and by the explicit backfill — see lib/agent-avatar-persist.ts.
  */
 export function AgentAvatar({
   seed,
   style,
   alt = "",
   className,
-  agentId,
   avatarUrl,
-  workspaceId: workspaceIdProp,
   ...rest
 }: AgentAvatarProps) {
   // Re-render when a lazy DiceBear collection finishes loading so the
   // placeholder upgrades to the real avatar.
   useAvatarStylesVersion()
-
-  // The backfill PUT is workspace-scoped and 400s without it (#2196). Read
-  // here rather than inside lib/ so that module stays free of a store import,
-  // matching how lib/conversation-search.ts takes its workspaceId from the
-  // caller — and via the subscribe-only reader, so an avatar never becomes
-  // the thing that fires GET /api/v1/workspaces.
-  //
-  // The prop wins where a caller has the id but the store was never loaded —
-  // see AgentAvatarProps.workspaceId. Same shape as panel-actions.
-  const storeWorkspaceId = useCurrentWorkspaceId()
-  const workspaceId = workspaceIdProp ?? storeWorkspaceId
 
   // Set when the stored render fails to load, pinning this avatar to
   // generation for the rest of its mount. Keyed off avatarUrl so a genuinely
@@ -105,18 +76,6 @@ export function AgentAvatar({
 
   const storedSrc = resolveStoredAvatarSrc(avatarUrl)
   const useStored = storedSrc !== null && failedUrl !== storedSrc
-
-  // Offer the server a render for an agent that has none. Fire-and-forget:
-  // it self-limits per session and per page load, and a failure only means
-  // the agent keeps generating from its seed.
-  // workspaceId is in the deps so the attempt re-fires once the workspace
-  // store resolves — on a cold load the first paint has none yet, and
-  // queueAvatarBackfill deliberately does not spend the agent's one attempt
-  // on a call it cannot make.
-  useEffect(() => {
-    if (!agentId || avatarUrl) return
-    void queueAvatarBackfill(agentId, seed, style, workspaceId)
-  }, [agentId, avatarUrl, seed, style, workspaceId])
 
   return (
     <img

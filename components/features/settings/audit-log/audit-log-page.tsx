@@ -133,10 +133,10 @@ export function AuditLogPage() {
               <DrillNavItem key={p.id} index={i} pressed={filters.userId === p.id} selected={filters.userId === p.id}
                 onSelect={() => setFilters({ userId: filters.userId === p.id ? "" : p.id })}
                 label={p.label} meta={count} muted={count === 0}
-                icon={<UserAvatar name={p.label} email="" className="h-5 w-5 shrink-0" textClassName="text-[8px]" />} />
+                icon={<UserAvatar name={p.label} email="" className="h-5 w-5 shrink-0" textClassName="text-micro" />} />
             )
           })}
-          <p className="flex items-center gap-1.5 px-2 pt-1 text-[10.5px] text-muted-foreground-soft">
+          <p className="flex items-center gap-1.5 px-2 pt-1 text-micro text-muted-foreground-soft">
             <Cpu className="h-3 w-3" aria-hidden />System events have no person to pick.
           </p>
         </DrillNavSection>
@@ -189,7 +189,7 @@ export function AuditLogPage() {
           <>
             {chips.length > 0 && <div className="flex flex-wrap items-center gap-1.5" data-slot="audit-chips">
               {chips.map((c) => (
-                <span key={c.key} className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-[11.5px] font-medium text-primary-hover motion-safe:animate-in motion-safe:zoom-in-95">
+                <span key={c.key} className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-micro font-medium text-primary-hover motion-safe:animate-in motion-safe:zoom-in-95">
                   {c.label}
                   <button type="button" aria-label={`Remove filter ${c.label}`}
                     onClick={() => setFilters(c.key === "range" ? { range: DEFAULT_AUDIT_FILTERS.range, from: "", to: "" } : { [c.key]: DEFAULT_AUDIT_FILTERS[c.key] })}
@@ -199,7 +199,7 @@ export function AuditLogPage() {
                 </span>
               ))}
               {filterCount > 0 && (
-                <button type="button" onClick={clearFilters} className="px-1.5 text-[11.5px] text-muted-foreground hover:text-foreground">Clear filters</button>
+                <button type="button" onClick={clearFilters} className="px-1.5 text-label text-muted-foreground hover:text-foreground">Clear filters</button>
               )}
             </div>}
             <AuditHistogram tally={tally} bounds={bounds} onPickDay={pickDay} now={now} truncated={activity.truncated} />

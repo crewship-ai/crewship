@@ -19,6 +19,18 @@ import (
 func (r *Router) SetRestrictedWorkflow(service *restrictedworkflow.Service) {
 	r.restrictedWorkflow = service
 }
+
+// restrictedRuntimeUnavailableCode is the machine code a restricted member
+// receives when this server has no private execution runtime at all. It is a
+// server-wide fact, not a resource-level one, so it is only ever sent to a
+// caller already established as a restricted member of the workspace; every
+// access refusal stays the opaque 404 (#2877).
+const restrictedRuntimeUnavailableCode = "restricted_runtime_unavailable"
+
+func replyRestrictedRuntimeUnavailable(w http.ResponseWriter) {
+	writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "private execution is not installed on this server", "code": restrictedRuntimeUnavailableCode})
+}
+
 func restrictedActor(req *http.Request, db *sql.DB) (bool, error) {
 	user := UserFromContext(req.Context())
 	if user == nil {
@@ -40,7 +52,7 @@ func (h *PipelineHandler) serveRestrictedWorkflow(w http.ResponseWriter, req *ht
 		return false
 	}
 	if h.restrictedWorkflow == nil || h.restrictedWorkflow() == nil {
-		replyError(w, 503, "restricted workflow unavailable")
+		replyRestrictedRuntimeUnavailable(w)
 		return true
 	}
 	var body struct {
@@ -85,7 +97,7 @@ func (h *PageHandler) serveRestrictedPageWorkflow(w http.ResponseWriter, req *ht
 		return false
 	}
 	if h.restrictedWorkflow == nil || h.restrictedWorkflow() == nil {
-		replyError(w, 503, "restricted workflow unavailable")
+		replyRestrictedRuntimeUnavailable(w)
 		return true
 	}
 	expected, _ := req.Context().Value(restrictedPageIntentKey{}).(string)
@@ -144,13 +156,22 @@ func (r *Router) restrictedWorkflowResults(w http.ResponseWriter, req *http.Requ
 
 func (r *Router) restrictedRoutineCatalog(w http.ResponseWriter, req *http.Request) {
 	user := UserFromContext(req.Context())
-	if user == nil || r.restrictedWorkflow == nil {
+	restricted, err := restrictedActor(req, r.db)
+	if user == nil || !restricted || err != nil {
 		replyError(w, 404, "routine unavailable")
 		return
 	}
+	if r.restrictedWorkflow == nil {
+		replyRestrictedRuntimeUnavailable(w)
+		return
+	}
 	items, err := r.restrictedWorkflow.Catalog(req.Context(), user.ID, WorkspaceIDFromContext(req.Context()))
-	if err != nil {
+	if errors.Is(err, restrictedworkflow.ErrDenied) {
 		replyError(w, 404, "routine unavailable")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, r.logger, "load restricted routine catalog", err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")

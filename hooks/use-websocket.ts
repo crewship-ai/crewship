@@ -5,8 +5,25 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { broadcastSessionExpired } from "@/lib/api-fetch"
 
-/** WebSocket connection lifecycle status. */
-export type WSStatus = "connecting" | "connected" | "disconnected" | "error"
+/** WebSocket connection lifecycle status.
+ *
+ * `"unavailable"` is terminal and is not an outage: realtime does not exist for
+ * this session (a restricted account, whose allowlist refuses `/ws-token` with
+ * 404). Nothing retries and no "reconnecting" banner is shown for it. */
+export type WSStatus = "connecting" | "connected" | "disconnected" | "error" | "unavailable"
+
+/**
+ * Thrown by a `getToken` callback when the ticket endpoint says realtime is not
+ * available to this session at all (404 from `/api/v1/ws-token`). Unlike a
+ * transient error it stops the reconnect loop for good, and unlike a null
+ * ticket it is not an auth failure, so it does not log the user out.
+ */
+export class WsUnavailableError extends Error {
+  constructor(message = "realtime is not available to this session") {
+    super(message)
+    this.name = "WsUnavailableError"
+  }
+}
 
 const wsMessageSchema = z.object({
   type: z.string(),
@@ -109,6 +126,7 @@ export function useWebSocket({
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const disconnectingRef = useRef(false)
   const terminatedRef = useRef(false)
+  const unavailableRef = useRef(false)
 
   // Use refs for callbacks to prevent reconnection loops when consumers
   // pass non-memoized functions.
@@ -156,6 +174,19 @@ export function useWebSocket({
     updateStatus("error")
   }, [updateStatus])
 
+  // Realtime does not exist for this session: stop for good, no banner, no
+  // session-expired. Cleared again if the consumer re-enables the hook (the
+  // session's access changed while the app was open).
+  const terminateUnavailable = useCallback(() => {
+    terminatedRef.current = true
+    unavailableRef.current = true
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = undefined
+    }
+    updateStatus("unavailable")
+  }, [updateStatus])
+
   const connect = useCallback(async () => {
     if (!enabled) return
     // Only `terminatedRef` is permanent — once we've decided we'll
@@ -189,8 +220,12 @@ export function useWebSocket({
     let token: string | null
     try {
       token = await getTokenRef.current()
-    } catch {
+    } catch (err) {
       if (terminatedRef.current || disconnectingRef.current) return
+      if (err instanceof WsUnavailableError) {
+        terminateUnavailable()
+        return
+      }
       const attempts = reconnectAttemptsRef.current
       if (attempts >= MAX_RECONNECT_ATTEMPTS) {
         terminateTransport()
@@ -291,7 +326,7 @@ export function useWebSocket({
       reconnectAttemptsRef.current = attempts + 1
       reconnectTimerRef.current = setTimeout(() => { void connect() }, delay)
     }
-  }, [url, enabled, updateStatus, terminateAuth, terminateTransport])
+  }, [url, enabled, updateStatus, terminateAuth, terminateTransport, terminateUnavailable])
 
   const disconnect = useCallback(() => {
     disconnectingRef.current = true
@@ -329,7 +364,17 @@ export function useWebSocket({
   )
 
   useEffect(() => {
-    if (enabled) void connect()
+    if (enabled) {
+      // An "unavailable" verdict belongs to the session as it was. When the
+      // consumer turns the socket back on (access changed while open), try
+      // again from a clean slate. Auth and transport terminations stay final.
+      if (unavailableRef.current) {
+        unavailableRef.current = false
+        terminatedRef.current = false
+        reconnectAttemptsRef.current = 0
+      }
+      void connect()
+    }
     return () => disconnect()
   }, [connect, disconnect, enabled])
 

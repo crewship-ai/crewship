@@ -16,6 +16,7 @@ import {
   SidebarRow,
   SIDEBAR_WIDTH,
 } from "@/components/layout/sidebar-kit"
+import { usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 interface NavItem {
   key: string
@@ -169,6 +170,8 @@ interface SettingsNavProps {
 
 export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: SettingsNavProps) {
   const router = useRouter()
+  // Switching section unmounts the cards; with edits pending, ask first.
+  const guard = usePageSaveGuard()
   // Universal search doubles as a command-finder here — type "audit" to jump
   // straight to Audit Log. Filters the nav live; Enter opens the first match.
   const [query, setQuery] = useState("")
@@ -200,8 +203,7 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
           onKeyDown={(e) => {
             if (e.key !== "Enter" || !firstMatch) return
             const href = filtered[0]?.items[0]?.href
-            if (href) router.push(href)
-            else onTabChange(firstMatch)
+            guard(() => (href ? router.push(href) : onTabChange(firstMatch)))
           }}
         />
       </SidebarToolbar>
@@ -213,7 +215,7 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
             label={section.label}
             actions={
               section.label === "Workspace" && workspaceName ? (
-                <span className="ml-1 truncate font-mono text-[10px] normal-case tracking-normal text-sidebar-foreground/70">
+                <span className="ml-1 truncate font-mono text-micro normal-case tracking-normal text-sidebar-foreground/70">
                   {workspaceName}
                 </span>
               ) : undefined
@@ -225,17 +227,17 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
                 <SidebarRow
                   key={item.key}
                   selected={isActive}
-                  onSelect={() => (item.href ? router.push(item.href) : onTabChange(item.key))}
+                  onSelect={() => guard(() => (item.href ? router.push(item.href) : onTabChange(item.key)))}
                   aria-label={item.label}
                 >
                   <item.icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
                   <span className="truncate flex-1">{item.label}</span>
                   {item.badge === "P2" && (
-                    <span className="ml-auto shrink-0 font-mono text-[10px] text-sidebar-foreground/40">P2</span>
+                    <span className="ml-auto shrink-0 font-mono text-micro text-sidebar-foreground/40">P2</span>
                   )}
                   {item.href && <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden />}
                   {item.badge === "OWNER" && (
-                    <span className="ml-auto shrink-0 font-mono text-[10px] text-sidebar-foreground/60">Owner</span>
+                    <span className="ml-auto shrink-0 font-mono text-micro text-sidebar-foreground/60">Owner</span>
                   )}
                 </SidebarRow>
               )

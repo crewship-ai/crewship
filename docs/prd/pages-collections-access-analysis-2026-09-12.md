@@ -23,7 +23,7 @@ Aktuální kontrakt: [API Pages](../api-reference/pages.mdx) a
 [CLI page](../cli/page.mdx). Objekt i API se jmenují `folder` / `page-folders`;
 ikona v sidebaru nese vybranou barvu přímo. Souhrn sdílení rozlišuje lidi,
 crews, jejich kombinaci a workspace. Stav akceptace a meze ověření jsou
-v [uzavíracím záznamu](pages-folder-delivery-status-2026-09-14.md).
+v [uzavíracím záznamu](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/pages-folder-delivery-status-2026-09-14.md).
 
 ## 0. Historický výchozí stav návrhu
 

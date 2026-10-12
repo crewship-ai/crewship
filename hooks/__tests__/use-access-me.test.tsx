@@ -42,3 +42,27 @@ describe("useAccessMe", () => {
     expect(view.result.current.access).toBeNull()
   })
 })
+
+it.each([null, false, {}, { actions: null }, { actions: [] }, { actions: "allowed" }, { actions: { run: null } }, { actions: { run: "allowed" } }, { actions: { run: { state: "allowed", reason: 1 } } }])("rejects an unreadable access envelope %j", async (body) => {
+  fetchAccess.mockResolvedValue({ ok: true, json: async () => body })
+  const { result } = renderHook(() => useAccessMe("/access/me"))
+  await waitFor(() => expect(result.current.loading).toBe(false))
+  expect(result.current.access).toBeNull()
+  expect(result.current.error).toBe(true)
+})
+
+it("clears permissions when the identity URL disappears and ignores an old rejection", async () => {
+  let reject!: (error: Error) => void
+  fetchAccess.mockResolvedValueOnce(answer("allowed")).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
+  const { result, rerender } = renderHook(({ url }: { url?: string }) => useAccessMe(url), { initialProps: { url: "/access/me" } as { url?: string } })
+  await waitFor(() => expect(result.current.access?.actions.run.state).toBe("allowed"))
+  act(() => { void result.current.refresh() })
+  expect(result.current.access).toBeNull()
+  const signal = fetchAccess.mock.calls[1][1].signal as AbortSignal
+  rerender({ url: undefined })
+  expect(signal.aborted).toBe(true)
+  expect(result.current).toMatchObject({ access: null, loading: false, error: false })
+  await act(async () => { reject(new Error("old connection lost")) })
+  expect(result.current).toMatchObject({ access: null, loading: false, error: false })
+  expect(fetchAccess).toHaveBeenCalledTimes(2)
+})

@@ -308,3 +308,27 @@ func TestJoinRel_NeverLooserThanDeletedPathsafeJoin(t *testing.T) {
 		t.Fatalf("only %d of %d inputs were accepted; the corpus stopped exercising the happy path", accepted, len(rels))
 	}
 }
+
+func TestCleanAbsRelativeAndEmpty(t *testing.T) {
+	t.Parallel()
+	base := filepath.Join(string(filepath.Separator), "backups")
+	got, err := CleanAbs(base, "daily/../latest.tar")
+	if err != nil || got != filepath.Join(base, "latest.tar") {
+		t.Fatalf("relative output: %q, %v", got, err)
+	}
+	if got, err := CleanAbs(base, ""); got != "" || !errors.Is(err, ErrUnsafe) {
+		t.Fatalf("empty output path accepted: %q, %v", got, err)
+	}
+}
+
+func TestEnsureInsideRejectsMixedAbsoluteAndRelativePaths(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ base, target string }{
+		{filepath.Join(string(filepath.Separator), "root"), "relative"},
+		{"relative", filepath.Join(string(filepath.Separator), "root")},
+	} {
+		if err := EnsureInside(tc.base, tc.target); !errors.Is(err, ErrUnsafe) {
+			t.Fatalf("mixed paths accepted: %#v, %v", tc, err)
+		}
+	}
+}

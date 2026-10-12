@@ -1,6 +1,9 @@
 package chatbridge
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // AgentRunLock implements the same per-key exclusivity CAS as
 // tryMarkRunStart/markRunEnd (see steer.go), generalised into its own type so
@@ -24,11 +27,14 @@ import "sync"
 type AgentRunLock struct {
 	mu     sync.Mutex
 	active map[string]int
+	// released[key] is closed when key's last claim ends, waking Acquire
+	// callers; it exists only while someone waits on a held key.
+	released map[string]chan struct{}
 }
 
 // NewAgentRunLock returns an empty AgentRunLock.
 func NewAgentRunLock() *AgentRunLock {
-	return &AgentRunLock{active: make(map[string]int)}
+	return &AgentRunLock{active: make(map[string]int), released: make(map[string]chan struct{})}
 }
 
 // TryStart atomically claims the run slot for key: it succeeds (and marks a
@@ -47,6 +53,33 @@ func (l *AgentRunLock) TryStart(key string) bool {
 	return true
 }
 
+// Acquire claims the run slot for key like TryStart, but when the key is
+// held it waits for the holder to end instead of failing. It returns false,
+// without claiming, once ctx is done. Every release wakes all waiters and
+// one of them wins the claim; the rest wait for the next release. There is
+// no FIFO between waiters, and nothing survives the process.
+func (l *AgentRunLock) Acquire(ctx context.Context, key string) bool {
+	for {
+		l.mu.Lock()
+		if l.active[key] == 0 {
+			l.active[key]++
+			l.mu.Unlock()
+			return true
+		}
+		ch, ok := l.released[key]
+		if !ok {
+			ch = make(chan struct{})
+			l.released[key] = ch
+		}
+		l.mu.Unlock()
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
+
 // End releases one claim on key, deleting the entry at zero so the map
 // doesn't grow unbounded. Guards against underflow so a stray extra call
 // can never wedge a key permanently "busy".
@@ -55,6 +88,10 @@ func (l *AgentRunLock) End(key string) {
 	defer l.mu.Unlock()
 	if l.active[key] <= 1 {
 		delete(l.active, key)
+		if ch, ok := l.released[key]; ok {
+			close(ch)
+			delete(l.released, key)
+		}
 		return
 	}
 	l.active[key]--

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 
 /**
@@ -35,31 +35,44 @@ export function useChannelAgents(
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const abortRef = useRef<AbortController | null>(null)
+
   const refresh = useCallback(async () => {
+    abortRef.current?.abort()
+    setError(null)
     if (!workspaceId || !channelId) {
       setAgents([])
+      setLoading(false)
       return
     }
+    const controller = new AbortController()
+    abortRef.current = controller
     setLoading(true)
     try {
       const res = await apiFetch(
         `/api/v1/notification-channels/${encodeURIComponent(channelId)}/agents` +
           `?workspace_id=${encodeURIComponent(workspaceId)}`,
+        { signal: controller.signal },
       )
+      if (controller.signal.aborted) return
       if (!res.ok) throw new Error(`load channel agents: ${res.status}`)
       const body = await res.json()
+      if (controller.signal.aborted) return
       setAgents(Array.isArray(body?.agents) ? body.agents : [])
       setError(null)
     } catch (e) {
+      if (controller.signal.aborted) return
       setError(e instanceof Error ? e.message : "failed to load")
       setAgents([])
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }, [workspaceId, channelId])
 
   useEffect(() => {
+    setAgents([])
     void refresh()
+    return () => abortRef.current?.abort()
   }, [refresh])
 
   return { agents, loading, error, refresh }

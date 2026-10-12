@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func TestAcceptanceRoutineTypedDecisionHTTP(t *testing.T) {
 	}
 	base := "/api/v1/workspaces/" + config.Workspace + "/pipelines/"
 	client := &http.Client{Timeout: 5 * time.Second}
-	request := func(method, endpoint, body string, authenticated bool, want int) []byte {
+	request := func(method, endpoint, body string, authenticated bool, want ...int) []byte {
 		t.Helper()
 		req, err := http.NewRequestWithContext(t.Context(), method, config.Server+endpoint, bytes.NewBufferString(body))
 		if err != nil {
@@ -46,8 +47,8 @@ func TestAcceptanceRoutineTypedDecisionHTTP(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if res.StatusCode != want {
-			t.Fatalf("%s %s: got %d want %d: %s", method, endpoint, res.StatusCode, want, data)
+		if !slices.Contains(want, res.StatusCode) {
+			t.Fatalf("%s %s: got %d want one of %v: %s", method, endpoint, res.StatusCode, want, data)
 		}
 		return data
 	}
@@ -67,7 +68,12 @@ func TestAcceptanceRoutineTypedDecisionHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	request("POST", base+"human-decision-http/publish", string(publication), true, 201)
-	accepted := decode(request("POST", base+"human-decision-http/run", `{}`, true, 202))
+	// Prefer is a preference, not a promise of 202: the handler can select
+	// the finished result if this short executor already parked at the gate.
+	accepted := decode(request("POST", base+"human-decision-http/run", `{}`, true, http.StatusAccepted, http.StatusOK))
+	if accepted["status"] != "IN_PROGRESS" && accepted["status"] != "WAITING" {
+		t.Fatalf("run bypassed the required decision gate: %v", accepted)
+	}
 	runID, ok := accepted["run_id"].(string)
 	if !ok || runID == "" {
 		t.Fatalf("missing accepted run: %v", accepted)

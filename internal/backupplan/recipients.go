@@ -92,6 +92,10 @@ func plansUsing(plans []*Plan, id, key string) []string {
 
 // GetRecipient returns one backup key or ErrNotFound.
 func GetRecipient(ctx context.Context, db *sql.DB, id string) (*Recipient, error) {
+	return getRecipient(ctx, db, id)
+}
+
+func getRecipient(ctx context.Context, db queryer, id string) (*Recipient, error) {
 	var r Recipient
 	var by sql.NullString
 	err := db.QueryRowContext(ctx, `SELECT id, name, public_key, holder, created_by, created_at FROM backup_recipients WHERE id = ?`, id).
@@ -148,12 +152,13 @@ func InsertRecipient(ctx context.Context, ex execer, r *Recipient, actor string,
 // DeleteRecipient removes a backup key no plan uses. A key a plan still
 // encrypts to returns ErrRecipientInUse with the plans named: change the
 // plan first, so no plan is left encrypting to nobody.
-func DeleteRecipient(ctx context.Context, db *sql.DB, ex execer, id string) ([]string, error) {
-	r, err := GetRecipient(ctx, db, id)
+// Reads and writes use ex; the DB argument is retained for existing callers.
+func DeleteRecipient(ctx context.Context, _ *sql.DB, ex queryExecer, id string) ([]string, error) {
+	r, err := getRecipient(ctx, ex, id)
 	if err != nil {
 		return nil, err
 	}
-	plans, err := ListPlans(ctx, db)
+	plans, err := listPlans(ctx, ex)
 	if err != nil {
 		return nil, err
 	}

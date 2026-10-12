@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
+	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/providerlogin"
 	"github.com/crewship-ai/crewship/internal/runoutput"
@@ -49,8 +51,13 @@ var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]*$`)
 var ErrExecRefused = errors.New("agent exec refused at the creation gate; no process was created")
 
 type AgentRunRequest struct {
+	// RuntimeUse pins the concrete container acquired by the caller. RunAgent
+	// retains its own handle, so callers may release theirs after RunAgent
+	// returns even when a detached process still needs the container.
+	RuntimeUse *provider.RuntimeUse
 	// Set by RunAgent from provider inspection, never a caller's desired image.
 	runtimeImageID string
+	managedLaunch  *managedlaunch.Descriptor
 	// ExecGate, when set, is asked SYNCHRONOUSLY immediately before the
 	// agent's exec is created, and nothing external happens between its
 	// answer and the creation. It is the authoritative "a process is about
@@ -100,9 +107,12 @@ type AgentRunRequest struct {
 	// parent directory. No production dispatch enables this until replay and
 	// recovery ownership are wired. It is not accepted from user YAML/API.
 	DurableOutputDir string
-	durableDeadline  time.Time
-	CLIAdapter       string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID
-	LLMModel         string // optional model override (e.g. claude-haiku-4-5-20251001)
+	// HostOutputDir selects the protected host capture transport. It is an
+	// internal admission input, never a workload path or public request field.
+	HostOutputDir   string
+	durableDeadline time.Time
+	CLIAdapter      string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID
+	LLMModel        string // optional model override (e.g. claude-haiku-4-5-20251001)
 	// LLMProvider is the agent's configured provider (ANTHROPIC, OPENAI,
 	// GOOGLE, OLLAMA, …). Used by the OPENCODE adapter to qualify a bare
 	// model name into OpenCode's required "provider/model" form (#1007);
@@ -244,6 +254,9 @@ type MCPServerConfig struct {
 	Args        []string          `json:"args,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
 	Credential  *MCPCredential    `json:"credential,omitempty"`
+	// DisabledTools are the server's switched-off mcp_tool_bindings; the
+	// sidecar MCP gateway refuses them (#2178).
+	DisabledTools []string `json:"disabled_tools,omitempty"`
 }
 
 // MCPCredential holds a decrypted credential for MCP server authentication.
@@ -399,9 +412,12 @@ func (c Credential) loginMode() string {
 type RunState struct {
 	// Non-nil marks a replay-capable transport. Process absence alone must not
 	// terminalize it before its retained output/result has been reconciled.
-	Output *RunOutputState `json:"output,omitempty"`
+	Output        *RunOutputState           `json:"output,omitempty"`
+	ManagedLaunch *managedlaunch.Descriptor `json:"managed_launch,omitempty"`
 	// WorkspaceID preserves the original history scope even without run.started.
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	CrewID      string `json:"crew_id,omitempty"`
+	MissionID   string `json:"mission_id,omitempty"`
 	// RuntimeImageID is source-image evidence, not the mutable filesystem or
 	// proof of the binary eventually selected by PATH. Empty means unknown.
 	RuntimeImageID string    `json:"runtime_image_id,omitempty"`
@@ -427,10 +443,14 @@ type RunState struct {
 }
 
 type RunOutputState struct {
-	Version   int       `json:"version"`
-	Directory string    `json:"directory"`
-	Deadline  time.Time `json:"deadline"`
-	Adapter   string    `json:"adapter"`
+	Acknowledged bool            `json:"acknowledged,omitempty"`
+	Collected    bool            `json:"collected,omitempty"`
+	Endpoint     string          `json:"endpoint,omitempty"`
+	Version      int             `json:"version"`
+	Directory    string          `json:"directory"`
+	Deadline     time.Time       `json:"deadline"`
+	Adapter      string          `json:"adapter"`
+	Authority    json.RawMessage `json:"authority,omitempty"`
 	// RetainedResult is observed terminal evidence, not acknowledgement of
 	// output projection. Status cannot become successful until replay commits.
 	RetainedResult *runoutput.Snapshot `json:"retained_result,omitempty"`
@@ -506,10 +526,15 @@ type ContainerBusyProbe func(ctx context.Context, crewID, containerID string) bo
 type StatsRegisterFunc func(containerID, crewID, workspaceID string)
 
 type Orchestrator struct {
-	runRecoveryMu          sync.Mutex // serializes recovered publication with local admission
-	agentRuns              sync.Map   // run id -> *agentRunControl; independent of credential HOME cleanup
-	userModelReader        func(context.Context, string, string) (string, error)
-	personalizationAllowed func(context.Context, string, string) (bool, error)
+	hostOutputRoot          string
+	hostOutputCapacityBytes int64
+	hostOutputCapacityRuns  int
+	managedLaunchCrews      map[string]bool
+	managedLaunchResolver   ManagedLaunchResolver
+	runRecoveryMu           sync.Mutex // serializes recovered publication with local admission
+	agentRuns               sync.Map   // run id -> *agentRunControl; independent of credential HOME cleanup
+	userModelReader         func(context.Context, string, string) (string, error)
+	personalizationAllowed  func(context.Context, string, string) (bool, error)
 	// agentLive refuses process creation for an agent that may no longer run
 	// (soft-deleted). Asked at the creation boundary of every run.
 	agentLive      func(context.Context, string) error
@@ -1415,6 +1440,7 @@ func New(
 			"warn_threshold", runSemCapWarnThreshold)
 	}
 	return &Orchestrator{
+		managedLaunchCrews:   managedLaunchPilots(),
 		container:            container,
 		state:                state,
 		scrubber:             scrubber.New(),

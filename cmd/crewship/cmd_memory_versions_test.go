@@ -46,3 +46,13 @@ func TestDefaultBlobRoot_HonorsOverride(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+func TestDefaultBlobRoot_HonorsInstallationHome(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CREWSHIP_HOME", root)
+	t.Setenv("CREWSHIP_DATA_DIR", "")
+	got, err := defaultBlobRoot()
+	if err != nil || got != root+"/memory/versions" {
+		t.Fatalf("root = %q, %v", got, err)
+	}
+}

@@ -69,14 +69,14 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"last_active_at", "active_sessions", "cli_tokens", "locked_until", "failed_login_count", "email_verified",
 		"instance_admin", "instance_admin_source", "suspended_at", "suspended_reason", "setup_link_expires_at")
 	adminWorkspace := object(map[string]any{
-		"id": str(), "name": str(), "slug": str(), "created_at": str(), "updated_at": str(),
+		"id": str(), "name": str(), "slug": str(), "logo_url": nullable(str()), "created_at": str(), "updated_at": str(),
 		"_count_members": integer(), "_count_agents": integer(), "_count_crews": integer(),
 		"preferred_language": nullable(str()), "run_retention_days": nullable(integer()),
 		"allow_privileged_credentials": boolean(), "pending_invitations": integer(),
 		"last_activity_at": nullable(str()), "runs_7d": integer(), "runs_by_day": array(integer()),
 		"cost_30d_usd": number(), "current": boolean(),
 		"owners": array(object(map[string]any{"id": str(), "email": str(), "full_name": nullable(str())}, "id", "email", "full_name")),
-	}, "id", "name", "slug", "created_at", "updated_at", "_count_members", "_count_agents", "_count_crews",
+	}, "id", "name", "slug", "logo_url", "created_at", "updated_at", "_count_members", "_count_agents", "_count_crews",
 		"preferred_language", "run_retention_days", "allow_privileged_credentials", "pending_invitations",
 		"last_activity_at", "runs_7d", "runs_by_day", "cost_30d_usd", "current", "owners")
 	// The three per-person POSTs carry no body; EmptyRequest is the shared
@@ -179,8 +179,9 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"agent_id": str(), "agent_slug": str(), "agent_name": str(), "avatar_seed": nullable(str()),
 		"avatar_style": nullable(str()), "avatar_url": nullable(str()), "crew_id": nullable(str()),
 		"crew_slug": nullable(str()), "crew_name": nullable(str()), "crew_color": nullable(str()),
-		"crew_icon": nullable(str()), "crew_avatar_style": nullable(str()),
+		"crew_icon": nullable(str()), "crew_avatar_style": nullable(str()), "missing_credentials": stringArray(),
 	})
+	skillUsage := object(map[string]any{"uses_7d": integer(), "errors_7d": integer(), "uses_total": integer(), "last_used_at": nullable(str())})
 	skill := object(map[string]any{
 		"id": str(), "name": str(), "slug": str(), "display_name": str(), "description": nullable(str()),
 		"version": str(), "author": nullable(str()), "category": str(), "source": str(), "icon": nullable(str()),
@@ -188,7 +189,7 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"tags": nullable(str()), "featured": boolean(), "pricing_tier": str(), "tool_count": nullable(integer()),
 		"vendor": nullable(str()), "homepage": nullable(str()), "spdx_license": nullable(str()), "runtime": str(),
 		"maturity": str(), "scan_status": str(), "description_quality": nullable(str()), "created_at": str(),
-		"updated_at": str(), "installed_on": array(skillAgent),
+		"updated_at": str(), "installed_on": array(skillAgent), "lifecycle_state": str(), "needs_credentials": stringArray(), "usage": skillUsage,
 	})
 	skillDetail := object(map[string]any{
 		"id": str(), "name": str(), "slug": str(), "display_name": str(), "description": nullable(str()),
@@ -197,7 +198,7 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"tags": nullable(str()), "featured": boolean(), "pricing_tier": str(), "tool_count": nullable(integer()),
 		"vendor": nullable(str()), "homepage": nullable(str()), "spdx_license": nullable(str()), "runtime": str(),
 		"maturity": str(), "scan_status": str(), "description_quality": nullable(str()), "created_at": str(),
-		"updated_at": str(), "installed_on": array(skillAgent), "content": nullable(str()),
+		"updated_at": str(), "installed_on": array(skillAgent), "lifecycle_state": str(), "needs_credentials": stringArray(), "usage": skillUsage, "content": nullable(str()),
 		"credential_requirements": nullable(str()), "mcp_server_command": nullable(str()), "mcp_server_image": nullable(str()),
 		"mcp_transport": nullable(str()), "dependencies": nullable(str()), "license": nullable(str()), "agent_count": integer(),
 		"security_score": nullable(integer()), "allowed_domains": nullable(str()), "changelog": nullable(str()),
@@ -451,7 +452,7 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 				"entries": integer(), "tables": integer(), "files": integer(),
 			}, "ok", "proof_level", "detail", "problems", "absent")},
 		"POST /api/v1/admin/instance/backups/restore/checks": {
-			Request: object(map[string]any{"path": str(), "target": str(), "identity": str(), "passphrase": str()}, "path", "target"),
+			Request: object(map[string]any{"path": str(), "target": str(), "identity": str(), "passphrase": str(), "as_workspace": str(), "as_crew": str()}, "path", "target"),
 			Response: object(map[string]any{
 				"space":   object(map[string]any{"ok": boolean(), "need_bytes": integer(), "free_bytes": integer()}, "ok", "need_bytes", "free_bytes"),
 				"format":  object(map[string]any{"ok": boolean(), "version": integer(), "converter": boolean()}, "ok", "version", "converter"),

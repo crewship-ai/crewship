@@ -36,13 +36,11 @@ import { askFormsFromColumn, type AskForm } from "./types"
  */
 export function useAskForms(agentId: string, provided?: AskForm[] | null): AskForm[] {
   const { workspaceId } = useWorkspace()
-  const [forms, setForms] = useState<AskForm[]>(() => provided ?? [])
+  const [loaded, setLoaded] = useState<{ agentId: string; workspaceId: string; forms: AskForm[] } | null>(null)
 
   useEffect(() => {
-    if (provided) {
-      setForms(provided)
-      return
-    }
+    setLoaded(null)
+    if (provided) return
     if (!agentId || !workspaceId) return
 
     const ac = new AbortController()
@@ -53,7 +51,7 @@ export function useAskForms(agentId: string, provided?: AskForm[] | null): AskFo
       .then((r) => (r.ok ? r.json() : null))
       .then((agent: { ask_forms?: string | null } | null) => {
         if (ac.signal.aborted) return
-        setForms(askFormsFromColumn(agent?.ask_forms))
+        setLoaded({ agentId, workspaceId, forms: askFormsFromColumn(agent?.ask_forms) })
       })
       .catch(() => {
         /* see the note above: no forms is the correct answer to a failure */
@@ -61,5 +59,8 @@ export function useAskForms(agentId: string, provided?: AskForm[] | null): AskFo
     return () => ac.abort()
   }, [agentId, workspaceId, provided])
 
-  return forms
+  // Scope-check during render, before the new effect starts its request.
+  // A failed optional fetch must never keep another agent's questionnaire.
+  if (provided) return provided
+  return loaded?.agentId === agentId && loaded.workspaceId === workspaceId ? loaded.forms : []
 }

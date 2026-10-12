@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest"
 
 import {
-  computeNextRuns, contentsFromPreview, formatPhases, formatPlannedRun, formatSize, parseScope, proofLabel, requiredWhy,
-  resolveContents, resolveSelection, retentionDiff, runPlanLabel, runResult, scopeQuery, stripCells, verdictHeadline, writeScope,
+  computeNextRuns, contentsFromPreview, formatPhases, formatPlannedRun, formatSize, formatSourceDate, parseScope, proofLabel, requiredWhy,
+  resolveContents, resolveSelection, retentionDiff, runPlanLabel, runResult, scopeQuery, shortDate, stripCells, verdictHeadline, writeScope,
   type CategoryKey, type Schedule,
 } from "../backups-model"
 import { FIXTURE_WORKSPACES } from "../__fixtures__/backups"
@@ -171,5 +171,23 @@ describe("formatting", () => {
     const rows = [{ key: "a", label: "A", days: 30 }, { key: "b", label: "B", days: null, mixed: true }, { key: "h", label: "H", days: 7, housekeeping: true }]
     expect(retentionDiff(rows, { a: 30 })).toEqual([])
     expect(retentionDiff(rows, { a: 90, b: null, h: 30 })).toEqual([{ key: "a", from: 30, to: 90, mixed: false }, { key: "b", from: null, to: null, mixed: true }])
+  })
+})
+
+describe("dates that may be missing (#2867)", () => {
+  it.each([
+    ["empty", "", "source date unknown"],
+    ["null", null, "source date unknown"],
+    ["undefined", undefined, "source date unknown"],
+    ["unparsable", "not-a-date", "source date unknown"],
+    ["catalogued", "2026-09-27T12:00:00Z", "27 Sep"],
+  ])("formatSourceDate: %s", (_, iso, want) => {
+    expect(formatSourceDate(iso)).toBe(want)
+  })
+
+  it("shortDate keeps valid output and never prints NaN for an invalid Date", () => {
+    expect(shortDate(new Date(Date.UTC(2026, 8, 29)), true)).toBe("29 Sep")
+    expect(shortDate(new Date(""))).toBe("—")
+    expect(shortDate(new Date("x"), true)).toBe("—")
   })
 })

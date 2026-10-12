@@ -54,7 +54,7 @@ func enqueueDelayed(t *testing.T, h *PipelineHandler, user, ws string, p *pipeli
 	t.Helper()
 	r := withWorkspaceUser(httptest.NewRequest("POST", "/run", nil), user, ws, "OWNER")
 	rr := httptest.NewRecorder()
-	h.enqueueDeferredRun(rr, r, ws, user, p, body)
+	h.enqueueDeferredRun(rr, r, ws, user, p, body, deferredOptions{})
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("enqueue: %d %s", rr.Code, rr.Body.String())
 	}

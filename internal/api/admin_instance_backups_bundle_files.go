@@ -65,6 +65,7 @@ func (h *InstanceBackupsHandler) VerifyBundle(w http.ResponseWriter, r *http.Req
 		CompletenessChecked:     res.CompletenessChecked,
 		CompletenessSkipReason:  res.CompletenessSkipReason,
 		TableRowCountMismatches: res.TableRowCountMismatches,
+		ScopeShortfalls:         res.ScopeShortfalls,
 	})
 }
 

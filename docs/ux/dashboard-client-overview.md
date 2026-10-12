@@ -6,7 +6,7 @@ below before treating the original layout as current. The implementation is
 in `app/(dashboard)/page.tsx` and
 [`components/features/dashboard/`](../../components/features/dashboard/).
 
-Scope: main dashboard on dev1, issue #2433. Reuses the existing theme,
+Scope: main dashboard, issue #2433. Reuses the existing theme,
 SubBar, DashboardCard, AgentAvatar, CrewIcon, StatusPill and entityHref.
 
 Order: attention → review/results and routine activity → crews → one agent

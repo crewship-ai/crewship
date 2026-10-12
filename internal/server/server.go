@@ -59,6 +59,8 @@ type Server struct {
 	recoveredRuntimesMu     sync.Mutex
 	recoveredRuntimes       map[string]orchestrator.RunState
 	recoveredRuntimesCursor string
+	retainedOutputMu        sync.Mutex
+	retainedOutputCursor    string
 
 	httpServer    *http.Server
 	ipcServer     *http.Server
@@ -114,9 +116,11 @@ type Server struct {
 	// initial catalog HTTP fetch lands on disk under the test's TempDir
 	// AFTER cleanup walked the children but BEFORE the final unlinkat —
 	// surfaces as "directory not empty" under -race -count=3.
-	bgCtx    context.Context
-	bgCancel context.CancelFunc
-	bgWg     sync.WaitGroup
+	bgCtx     context.Context
+	bgCancel  context.CancelFunc
+	bgWg      sync.WaitGroup
+	bgStopsMu sync.Mutex
+	bgStops   []func()
 
 	// fileJournalPtr is the pointer the file-watcher closure dereferences
 	// to emit file.written entries. Stored on the struct (instead of a
@@ -486,11 +490,9 @@ func (s *Server) mountAPIRouter(
 	// slow/full hub (best-effort: it drops under sustained backpressure;
 	// subscribers reconcile via the SSE replay / a /api/v1/journal refetch).
 	journalBridge := newJournalWSBridge(wsHub, logger)
-	// AddCommitObserver, not Set: the journal→notify bridge registers a
-	// second observer during boot (cmd_start.go), and a Set from either side
-	// would silently unregister the other — this feed would go quiet, or
-	// external notifications would stop, with nothing to say why.
-	s.journalWriter.AddCommitObserver(journalBridge.observe)
+	// The live feed is read-only: audit-only recovered stops must remain
+	// visible without reaching automation or external notification observers.
+	s.journalWriter.AddReadObserver(journalBridge.observe)
 
 	// Wire the journal into the orchestrator so Docker exec, network,
 	// and filesystem hook points inside the orchestrator can emit
@@ -546,6 +548,7 @@ func (s *Server) mountAPIRouter(
 	orch.SetAgentLiveness(func(ctx context.Context, agentID string) error {
 		return agentMayRun(ctx, deps.DB, agentID)
 	})
+	orch.SetManagedLaunchResolver(managedLaunchResolver(deps.DB))
 	// Episodic embedder resolution. Injection (tests/fakes) wins;
 	// otherwise build an Ollama embedder when Keeper Ollama is
 	// actually configured. Gating on Keeper.Enabled — not just a
@@ -1207,6 +1210,13 @@ func (s *Server) mountAPIRouter(
 // orchestrator and the IPC base URL containers use to reach this server.
 func buildOrchestrator(cfg *config.Config, logger *slog.Logger, ctr provider.ContainerProvider, sta provider.StateProvider) (*orchestrator.Orchestrator, string) {
 	orch := orchestrator.New(ctr, sta, logger, orchestrator.WithMaxConcurrentRuns(cfg.Orchestrator.MaxConcurrentRuns))
+	orch.SetHostOutputRoot(cfg.Storage.RunOutputPath)
+	orch.SetHostOutputCapacity(cfg.Storage.RunOutputMaxBytes, cfg.Storage.RunOutputMaxRuns)
+	if managed, ok := ctr.(interface {
+		SetRuntimeIdleVerifier(func(context.Context, string, string) error)
+	}); ok {
+		managed.SetRuntimeIdleVerifier(orch.VerifyRuntimeIdle)
+	}
 	if cfg.Container.SidecarEnabled {
 		orch.SetSidecarEnabled(true)
 		logger.Info("sidecar proxy enabled for credential injection")

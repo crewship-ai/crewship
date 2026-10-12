@@ -25,6 +25,7 @@ package api
 import (
 	"database/sql"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 )
@@ -63,6 +64,10 @@ type issueEventsResponse struct {
 	Events    []issueEventDTO `json:"events"`
 	AfterSeq  int             `json:"after_seq"`
 	LatestSeq int             `json:"latest_seq"`
+	// BeforeSeq echoes the backward cursor when one was asked for, and
+	// HasOlder says whether events below the returned page exist (#2983).
+	BeforeSeq *int `json:"before_seq,omitempty"`
+	HasOlder  bool `json:"has_older"`
 }
 
 // ListEvents — GET /api/v1/crews/{crewId}/issues/{identifier}/events?after_seq=N
@@ -84,8 +89,9 @@ func (h *IssueHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	q := r.URL.Query()
 	afterSeq := 0
-	if raw := r.URL.Query().Get("after_seq"); raw != "" {
+	if raw := q.Get("after_seq"); raw != "" {
 		n, convErr := strconv.Atoi(raw)
 		if convErr != nil || n < 0 {
 			writeProblem(w, r, http.StatusBadRequest, "after_seq must be a non-negative integer")
@@ -94,7 +100,36 @@ func (h *IssueHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		afterSeq = n
 	}
 
-	rows, err := h.db.QueryContext(r.Context(), `
+	// before_seq pages BACKWARDS (#2983): the newest `limit` events below the
+	// cursor, returned in seq order like every other page. before_seq=0 means
+	// "from the newest". The two cursors answer different questions — resync
+	// forward, history backward — so asking for both is a client bug.
+	var beforeSeq *int
+	if raw := q.Get("before_seq"); raw != "" {
+		n, convErr := strconv.Atoi(raw)
+		if convErr != nil || n < 0 {
+			writeProblem(w, r, http.StatusBadRequest, "before_seq must be a non-negative integer")
+			return
+		}
+		if q.Get("after_seq") != "" {
+			writeProblem(w, r, http.StatusBadRequest, "after_seq and before_seq cannot be combined")
+			return
+		}
+		beforeSeq = &n
+	}
+	limit := maxIssueEventsPage
+	if raw := q.Get("limit"); raw != "" {
+		n, convErr := strconv.Atoi(raw)
+		if convErr != nil || n < 1 {
+			writeProblem(w, r, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		if n < limit {
+			limit = n
+		}
+	}
+
+	const eventCols = `
 		SELECT a.id, a.mission_id, a.seq, a.actor_type, a.actor_id, a.action, a.details,
 		       a.payload_json, a.source_kind, a.source_id, a.created_at,
 		       CASE
@@ -102,10 +137,25 @@ func (h *IssueHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		           WHEN a.actor_type = 'agent' THEN (SELECT name FROM agents WHERE id = a.actor_id)
 		           ELSE NULL
 		       END AS actor_name
-		FROM mission_activity a
+		FROM mission_activity a`
+	var rows *sql.Rows
+	if beforeSeq != nil {
+		upper := *beforeSeq
+		if upper == 0 {
+			upper = math.MaxInt32
+		}
+		// One extra row answers has_older without a second query; the page
+		// is then flipped back into seq order.
+		rows, err = h.db.QueryContext(r.Context(), eventCols+`
+		WHERE a.mission_id = ? AND a.seq IS NOT NULL AND a.seq < ?
+		ORDER BY a.seq DESC
+		LIMIT ?`, missionID, upper, limit+1)
+	} else {
+		rows, err = h.db.QueryContext(r.Context(), eventCols+`
 		WHERE a.mission_id = ? AND a.seq IS NOT NULL AND a.seq > ?
 		ORDER BY a.seq ASC
-		LIMIT ?`, missionID, afterSeq, maxIssueEventsPage)
+		LIMIT ?`, missionID, afterSeq, limit)
+	}
 	if err != nil {
 		internalError(w, r, h.logger, "list issue events", err)
 		return
@@ -151,9 +201,22 @@ func (h *IssueHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hasOlder := false
+	if beforeSeq != nil {
+		if len(events) > limit {
+			hasOlder = true
+			events = events[:limit]
+		}
+		for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+			events[i], events[j] = events[j], events[i]
+		}
+	}
+
 	writeJSON(w, http.StatusOK, issueEventsResponse{
 		Events:    events,
 		AfterSeq:  afterSeq,
 		LatestSeq: int(latestSeq.Int64),
+		BeforeSeq: beforeSeq,
+		HasOlder:  hasOlder,
 	})
 }

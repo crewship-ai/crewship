@@ -30,3 +30,14 @@ describe("manual routine start identity", () => {
     )
   })
 })
+
+it("ignores a duplicate completion from an older attempt while its retry is active", () => {
+  const starts = new RoutineStartIntent()
+  const original = starts.begin("/routine/run", { input: "same" })!
+  original.finish(false)
+  const retry = starts.begin("/routine/run", { input: "same" })!
+  original.finish(true)
+  expect(starts.begin("/routine/run", { input: "same" })).toBeNull()
+  retry.finish(false)
+  expect(starts.begin("/routine/run", { input: "same" })!.key).toBe(original.key)
+})

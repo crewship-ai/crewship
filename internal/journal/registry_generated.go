@@ -149,6 +149,7 @@ var AllEntryTypes = []EntryType{
 	EntryRunCancelled,
 	EntryRunCompleted,
 	EntryRunFailed,
+	EntryRunRecoveredStop,
 	EntryRunSessionInit,
 	EntryRunStarted,
 	EntryRunTimeout,

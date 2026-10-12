@@ -220,6 +220,10 @@ type VerifyResult struct {
 	// not match what the payload actually carries. Non-empty implies
 	// CompletenessChecked is true and Valid is false.
 	TableRowCountMismatches []TableRowCountMismatch
+	// ScopeShortfalls repeats Manifest.Contents.ScopeReconciliation's
+	// shortfalls: workspace rows the source held at create time that the
+	// bundle does not carry. Non-empty implies Valid is false.
+	ScopeShortfalls []ScopeShortfall
 }
 
 // Verify opens a bundle, reads the manifest, and streams the sealed
@@ -294,6 +298,19 @@ func Verify(ctx context.Context, path string) (*VerifyResult, error) {
 	}
 	if err := VerifyChecksum(manifest.Checksums.PayloadSHA256, hashed.Sum()); err != nil {
 		return &VerifyResult{Manifest: manifest, Valid: false, Size: info.Size(), Err: err}, nil
+	}
+
+	// The create-time scope reconciliation lives in the manifest, so it is
+	// checked for encrypted bundles too: a bundle that was short of its
+	// source when it was written is not restorable as "everything".
+	if sr := manifest.Contents.ScopeReconciliation; sr != nil && len(sr.Shortfalls) > 0 {
+		return &VerifyResult{
+			Manifest:        manifest,
+			Valid:           false,
+			Size:            info.Size(),
+			Err:             fmt.Errorf("%w: %d table(s)", ErrBundleShortOfSource, len(sr.Shortfalls)),
+			ScopeShortfalls: sr.Shortfalls,
+		}, nil
 	}
 
 	hasCounts := len(manifest.Contents.TableRowCounts) > 0

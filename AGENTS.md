@@ -3,7 +3,8 @@
 Concise entrypoint for AI agents and new contributors working in this repo.
 For contributor process see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-**Codex sessions:** read [`CODEX.md`](CODEX.md) for the instance map and basic operating instructions.
+**Assistant sessions:** this file and `CONTRIBUTING.md` are the public entrypoints.
+For optional workstation instructions, discover private context as described below.
 
 **Design context and working records.**
 [`docs/README.md`](docs/README.md) is the map — from there, current contracts
@@ -83,11 +84,19 @@ binary has no UI (every UI route → `503` + an explanatory page); run
 
 ## Before you merge: confirm the review happened
 
-CodeRabbit was retired on 2026-10-02. Do not wait for its status or request
-bot reviews. Review the final diff and document concrete findings, fixes and
+CodeQL findings can live only in a run’s annotations; inspect them as well as the aggregate check.
+
+Review the final diff and document concrete findings, fixes and
 validation in the PR. Keep required CI checks green; skipped checks are not
 execution evidence. A self-review must be labelled as such, not presented as
 an independent review. See [CONTRIBUTING.md](CONTRIBUTING.md#review-before-merge).
+
+**Merge queue:** after review, submit with `gh pr merge <PR> --auto --squash`
+(and `--match-head-commit <SHA>` for the reviewed head). Let the queue check the
+current base; do not repeatedly update branches to chase main. Do not use
+`--admin` or a REST bypass except a recorded emergency with the responsible
+operator, reason, reviewed SHA and successful exact-SHA required checks.
+See [CONTRIBUTING.md → Merge through the queue](CONTRIBUTING.md#merge-through-the-queue).
 
 ## Architecture map (`internal/`)
 
@@ -181,7 +190,7 @@ and [`docs/guides/migrations.mdx`](docs/guides/migrations.mdx).
 
 ## NEVER DO
 
-Four of these are checked, not promised — `go run ./scripts/agents-invariants`,
+Five of these are checked, not promised — `go run ./scripts/agents-invariants`,
 which the `Shell` CI job runs. They are marked. The rest are about what a person
 does and cannot be, so they are prose and say so.
 
@@ -191,6 +200,11 @@ does and cannot be, so they are prose and say so.
 - Never use `"sqlite3"` as the driver name — `modernc.org/sqlite` registers `"sqlite"`.
 - Never use `npm`/`yarn` — `pnpm` only (a stray lockfile is the evidence).
 - Never change sidecar UID (1002) or agent UID (1001) — it's a security boundary.
+- Never track root assistant instructions (`CLAUDE.md`, `CODEX.md`, `GEMINI.md`),
+  workspaces (`.claude/`, `.codex/`, `.cursor/`),
+  `.github/copilot-instructions.md`, private-context aliases, internal mockups
+  or captured run reports. The invariant reads the
+  Git index; ignored local files remain allowed. Public test fixtures stay public.
 
 **Prose — nothing enforces these but you:**
 

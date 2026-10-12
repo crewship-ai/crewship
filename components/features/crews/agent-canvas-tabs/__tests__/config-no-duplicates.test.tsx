@@ -5,7 +5,11 @@ import { ConfigTab } from "@/components/features/crews/agent-canvas-tabs/config-
 import type { AgentRecord } from "@/components/features/crews/agent-canvas-tabs/types"
 
 // =============================================================================
-// One field, one control.
+// One field, one control — and one editor.
+//
+// Identity, model, tools and the system prompt are edited in the agent Edit
+// dialog's own sections. This tab used to carry a second, save-per-field
+// editor for them; it is gone, so the tab must not offer those controls.
 //
 // The old "Advanced (LLM tuning, tools, memory, webhook, hooks)" panel sat
 // below these cards and offered a SECOND control for timeout_seconds,
@@ -55,41 +59,22 @@ const agent = {
 } as unknown as AgentRecord
 
 function renderTab() {
-  return render(
-    <ConfigTab
-      agent={agent}
-      crews={[{ id: "c1", name: "Ops", slug: "ops" }]}
-      patch={vi.fn()}
-      onSelectCrew={vi.fn()}
-    />,
-  )
+  return render(<ConfigTab agent={agent} patch={vi.fn()} />)
 }
 
 describe("agent configuration", () => {
-  it("offers exactly one control per field", () => {
+  it("offers no second editor for what the dialog's sections own", () => {
     const { container } = renderTab()
-
-    // timeout: the preset row, and nothing else
-    expect(screen.getAllByText("Longest run")).toHaveLength(1)
-    expect(container.querySelectorAll('[aria-label="Timeout in seconds"]')).toHaveLength(0)
-
-    // memory: one switch
-    expect(screen.getAllByRole("switch", { name: "Memory between sessions" })).toHaveLength(1)
-    expect(container.querySelectorAll('[aria-label="Enable memory for agent"]')).toHaveLength(0)
-
-    // tool profile: one radio group
-    expect(screen.getAllByRole("radiogroup")).toHaveLength(1)
-    expect(container.querySelectorAll('[aria-label="Tool profile"]')).toHaveLength(0)
+    expect(screen.queryByText("Longest run")).not.toBeInTheDocument()
+    expect(screen.queryByRole("switch", { name: "Memory between sessions" })).not.toBeInTheDocument()
+    expect(screen.queryAllByRole("radiogroup")).toHaveLength(0)
+    expect(screen.queryByText("System prompt")).not.toBeInTheDocument()
+    expect(container.querySelectorAll('[aria-label="Pays with"]')).toHaveLength(0)
   })
 
   it("has no collapsed Advanced panel left to hide a second copy in", () => {
     renderTab()
     expect(screen.queryByText(/^Advanced \(/)).not.toBeInTheDocument()
-  })
-
-  it("still shows the tool list the retired panel uniquely carried", () => {
-    renderTab()
-    expect(screen.getByText(/bash/)).toBeInTheDocument()
   })
 
   // Waking an agent from outside is gated off (lib/feature-gates.ts): issues
@@ -101,25 +86,15 @@ describe("agent configuration", () => {
     expect(screen.queryByText(/rotate-webhook-secret/)).not.toBeInTheDocument()
   })
 
-  it("carries the system prompt as a card, not a trailing panel", () => {
-    renderTab()
-    expect(screen.getByText("System prompt").className).toContain("type-section")
-  })
-
-  // Self-improving mode is gated off (lib/feature-gates.ts). The switch and
-  // the gate are both proven, but nothing demonstrates that a live agent run
-  // reaches the handler they gate, so it is not offered yet.
-  // Memory is four markdown files almost nobody edits. It briefly sat at the
-  // bottom of this screen, where it was taller than every real setting above
-  // it combined. It lives in the ··· menu now — reachable, not resident.
+  // Memory is four markdown files almost nobody edits. It lives in the ···
+  // menu — reachable, not resident.
   it("does not park the memory editor under the settings", () => {
     renderTab()
     expect(screen.queryByText("AGENT.md")).not.toBeInTheDocument()
     expect(screen.queryByText(/^Memory$/)).not.toBeInTheDocument()
-    // The switch that actually configures it stays.
-    expect(screen.getByRole("switch", { name: "Memory between sessions" })).toBeInTheDocument()
   })
 
+  // Self-improving mode is gated off (lib/feature-gates.ts).
   it("does not offer self-improving mode while the gate is off", () => {
     renderTab()
     expect(screen.queryByTestId("learning-card")).not.toBeInTheDocument()

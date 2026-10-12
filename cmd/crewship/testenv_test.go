@@ -42,6 +42,11 @@ func scrubAmbientCrewshipEnv() {
 func TestNoAmbientCrewshipEnv(t *testing.T) {
 	for _, kv := range os.Environ() {
 		name, _, ok := strings.Cut(kv, "=")
+		// Installed by TestMain after the ambient scrub, not inherited from
+		// the shell. Ephemeral acceptance servers must bypass shared cache.
+		if kv == "CREWSHIP_NO_SLUG_CACHE=1" {
+			continue
+		}
 		if ok && (strings.HasPrefix(name, "CREWSHIP_") || name == "DATABASE_URL") {
 			t.Errorf("ambient %s leaked into the test process; TestMain must scrub CREWSHIP_* and DATABASE_URL before m.Run", name)
 		}

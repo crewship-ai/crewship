@@ -2,6 +2,7 @@
 """Conservative CI routing. Unknown inputs always require the full Go suite."""
 import json
 import os
+from pathlib import PurePosixPath
 import subprocess
 
 
@@ -10,10 +11,39 @@ def release_changed(paths):
                or path.startswith(('packaging/', 'scripts/ci/', '.github/workflows/', '.github/actions/')) for path in paths)
 
 
+# Docs may contain executable/build inputs. Only prose and display assets are
+# safe to skip; an unknown extension under docs/ is still an unknown input.
+DOC_EXTENSIONS = {'.md', '.mdx', '.txt', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.ico'}
+DOC_ROOT_FILES = {'README.md', 'CHANGELOG.md', 'LICENSE', 'CONTRIBUTING.md', 'AGENTS.md', 'CODEX.md'}
+GO_DOC_TESTS = {
+    'docs/configuration/providers.mdx': 'cmd/crewship/cmd_start_provider_order_test.go',
+    'docs/api-reference/openapi.mdx': 'scripts/docs-inventory/main_test.go',
+    'docs/guides/docker-socket-proxy.mdx': 'scripts/docker-api-surface/main_test.go',
+}
+FRONTEND_DOC_TESTS = {
+    'docs/api-reference/websocket.mdx': 'hooks/__tests__/realtime-allowlist-docs-parity.test.ts',
+    'docs/guides/chat-telemetry.mdx': 'lib/__tests__/telemetry-call-sites.test.ts',
+}
+GO_PARITY_INPUTS = {
+    *GO_DOC_TESTS,
+    'lib/crew-icons.ts', 'lib/colors.ts', 'lib/notification-categories.ts',
+    'components/features/admin/backups/backups-model.ts',
+}
+FRONTEND_PARITY_INPUTS = set(FRONTEND_DOC_TESTS)
+
+
+def changed_paths(base, head):
+    # Rename detection can hide a deleted runtime input behind its new docs
+    # path. Emit both paths so routing retains the source-side requirements.
+    return [p for p in subprocess.check_output([
+        'git', 'diff', '--no-renames', '--name-only', '-z', f'{base}...{head}',
+    ]).decode().split('\0') if p]
+
+
 def classify(paths):
     code = go = False
     for path in paths:
-        if path.startswith('docs/') or path in {'README.md', 'CHANGELOG.md', 'LICENSE', 'CONTRIBUTING.md', 'AGENTS.md', 'CODEX.md'}:
+        if (path.startswith('docs/') and PurePosixPath(path).suffix.lower() in DOC_EXTENSIONS) or path in DOC_ROOT_FILES:
             continue
         code = True
         if path.startswith(('app/', 'components/', 'hooks/', 'lib/', 'stores/', 'public/', 'e2e/')) or path in {'next.config.ts', 'tsconfig.json', 'vitest.config.ts', 'postcss.config.mjs', 'eslint.config.mjs'}:
@@ -21,7 +51,16 @@ def classify(paths):
         # Markdown outside documentation can be embedded runtime data/skills.
         # Dependency, workflow, Docker, scripts and unrecognised paths run all.
         go = True
-    return {'code': code, 'go': go}
+    return {
+        'code': code, 'go': go,
+        # Full suites already execute these tests. Dedicated lanes restore
+        # cross-language evidence only when the full owning suite is skipped.
+        'go_parity': not go and bool(set(paths) & GO_PARITY_INPUTS),
+        'frontend_parity': not code and bool(set(paths) & FRONTEND_PARITY_INPUTS),
+        'docs_inventory': not go and any(
+            (path.startswith('docs/') and PurePosixPath(path).suffix.lower() in {'.md', '.mdx'})
+            or path == 'CONTRIBUTING.md' for path in paths),
+    }
 
 
 def main():
@@ -35,12 +74,12 @@ def main():
         base = head = None
     # Pushes, including docs-only commits, get complete evidence for publication.
     if base:
-        paths = subprocess.check_output(['git', 'diff', '--name-only', '-z', f'{base}...{head}']).decode().split('\0')
-        paths = [p for p in paths if p]
+        paths = changed_paths(base, head)
         result = classify(paths)
         result['release'] = release_changed(paths)
     else:
-        result = {'code': True, 'go': True, 'release': name == 'workflow_dispatch'}
+        result = classify(['unknown/full-suite'])
+        result['release'] = name == 'workflow_dispatch'
     with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
         for key, value in result.items():
             print(f'{key}={str(value).lower()}', file=out)

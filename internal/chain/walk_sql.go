@@ -145,7 +145,7 @@ func agentNode(id, name, slug, status string) Node {
 // every other kind does not, and says so.
 func inboxPartial(kind string) (bool, string) {
 	switch kind {
-	case "waitpoint", "failed_run":
+	case "waitpoint", "failed_run", "run_needs_human":
 		return false, ""
 	case "escalation":
 		// KnownGaps[1].
@@ -347,18 +347,23 @@ func (w *walker) lookupAutomationByID(ctx context.Context, anchor string) (Node,
 }
 
 func (w *walker) lookupInboxByID(ctx context.Context, anchor string) (Node, bool, error) {
-	var id, kind, title, state, createdAt string
+	var id, kind, title, state, createdAt, targetUser, targetRole string
 	err := w.db.QueryRowContext(ctx, `
 		SELECT `+inboxColumns+`
 		FROM inbox_items
 		WHERE workspace_id = ? AND id = ?`,
 		w.workspaceID, anchor,
-	).Scan(&id, &kind, &title, &state, &createdAt)
+	).Scan(&id, &kind, &title, &state, &createdAt, &targetUser, &targetRole)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, false, nil
 	}
 	if err != nil {
 		return Node{}, false, err
+	}
+	// A hidden item anchors nothing, and says nothing about existing: the
+	// caller gets the same not-found as for an id that was never there.
+	if !w.canSeeInbox(targetUser, targetRole) {
+		return Node{}, false, nil
 	}
 	return inboxNode(id, kind, title, state, createdAt), true, nil
 }
@@ -422,10 +427,10 @@ func (w *walker) expandIssue(ctx context.Context, n Node) ([]neighbour, error) {
 		return nil, err
 	}
 
-	// The issue→assignment link lives on mission_tasks.assignment_id, not on
-	// assignments — assignments has no mission column at all. mission_tasks
-	// has no workspace_id either, so the tenant fence is the join to missions
-	// and to assignments, both carrying it.
+	// The issue→assignment link as a task row: mission_tasks.assignment_id.
+	// assignments.mission_id is the other stored link, walked below.
+	// mission_tasks has no workspace_id, so the tenant fence is the join to
+	// missions and to assignments, both carrying it.
 	if err := w.collect(ctx, &out, `
 		SELECT a.id, COALESCE(a.task,''), COALESCE(a.status,''),
 		       COALESCE(a.started_at,''), COALESCE(a.finished_at,'')
@@ -440,6 +445,55 @@ func (w *walker) expandIssue(ctx context.Context, n Node) ([]neighbour, error) {
 		[]any{n.Ref, w.workspaceID, w.fanOutLimit()},
 		w.scanAssignmentNeighbour(n.ID, EdgeTriggers)); err != nil {
 		return nil, err
+	}
+
+	// assignments.mission_id (#2986). Mention, lead-planning and /assign work
+	// record their issue here and nowhere else, and the human-reply trigger
+	// re-points the task row away from the old assignment — so mission_tasks
+	// alone missed them. An assignment reached both ways is one edge: addEdge
+	// keys on from/to/kind.
+	if err := w.collect(ctx, &out, `
+		SELECT `+assignmentColumns+`
+		FROM assignments
+		WHERE workspace_id = ? AND mission_id = ?
+		ORDER BY created_at ASC, id ASC
+		LIMIT ?`,
+		[]any{w.workspaceID, n.Ref, w.fanOutLimit()},
+		w.scanAssignmentNeighbour(n.ID, EdgeTriggers)); err != nil {
+		return nil, err
+	}
+
+	// issue_executions.routine_run_id (#2986): the routine run an issue's
+	// execution started. Fenced through missions and the run itself.
+	if err := w.collect(ctx, &out, `
+		SELECT r.id, COALESCE(r.pipeline_slug,''), COALESCE(r.status,''), COALESCE(r.chain_depth, 0),
+		       COALESCE(r.chain_origin,''), COALESCE(r.started_at,''), COALESCE(r.ended_at,'')
+		FROM issue_executions ie
+		JOIN missions m ON m.id = ie.mission_id AND m.workspace_id = ?
+		JOIN pipeline_runs r ON r.id = ie.routine_run_id AND r.workspace_id = m.workspace_id
+		WHERE ie.mission_id = ?
+		ORDER BY ie.created_at DESC, ie.id ASC
+		LIMIT ?`,
+		[]any{w.workspaceID, n.Ref, w.fanOutLimit()},
+		w.scanRunNeighbour(n.ID, EdgeTriggers)); err != nil {
+		return nil, err
+	}
+
+	// missions.author_run_id (#2986): the run that created this issue. The
+	// issue is that run's OUTPUT, so the edge points run → issue.
+	var authorRunID string
+	if err := w.db.QueryRowContext(ctx,
+		`SELECT COALESCE(author_run_id,'') FROM missions WHERE id = ? AND workspace_id = ?`,
+		n.Ref, w.workspaceID,
+	).Scan(&authorRunID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if authorRunID != "" {
+		if rn, ok, err := w.lookupRunByID(ctx, authorRunID); err != nil {
+			return nil, err
+		} else if ok {
+			out = append(out, neighbour{node: rn, edge: Edge{From: rn.ID, To: n.ID, Kind: EdgeProduces}})
+		}
 	}
 
 	// mission_relations, both directions. The edge always points source→target
@@ -647,7 +701,8 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 	// Inbox, kind 'waitpoint': inbox_items.source_id is the waitpoint TOKEN,
 	// and pipeline_waitpoints.pipeline_run_id is what names the run.
 	if err := w.collect(ctx, &out, `
-		SELECT i.id, i.kind, i.title, COALESCE(i.state,''), COALESCE(i.created_at,'')
+		SELECT i.id, i.kind, i.title, COALESCE(i.state,''), COALESCE(i.created_at,''),
+		       COALESCE(i.target_user_id,''), COALESCE(i.target_role,'')
 		FROM inbox_items i
 		JOIN pipeline_waitpoints wp
 		  ON wp.token = i.source_id
@@ -675,6 +730,58 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 		return nil, err
 	}
 
+	// Inbox, kind 'run_needs_human' for a routine run (#2986): source_id is
+	// the pipeline run id (pipeline/outcome_inbox.go).
+	if err := w.collect(ctx, &out, `
+		SELECT `+inboxColumns+`
+		FROM inbox_items
+		WHERE workspace_id = ? AND kind = 'run_needs_human' AND source_id = ?
+		ORDER BY id ASC
+		LIMIT ?`,
+		[]any{w.workspaceID, n.Ref, w.fanOutLimit()},
+		w.scanInboxNeighbour(n.ID)); err != nil {
+		return nil, err
+	}
+
+	// Issues this run created (missions.author_run_id) — its outputs.
+	if err := w.collect(ctx, &out, `
+		SELECT id, COALESCE(identifier,''), title, status
+		FROM missions
+		WHERE workspace_id = ? AND author_run_id = ?
+		ORDER BY created_at ASC, id ASC
+		LIMIT ?`,
+		[]any{w.workspaceID, n.Ref, w.fanOutLimit()},
+		func(rows *sql.Rows) (neighbour, error) {
+			var id, identifier, title, status string
+			if err := rows.Scan(&id, &identifier, &title, &status); err != nil {
+				return neighbour{}, err
+			}
+			to := issueNode(id, identifier, title, status)
+			return neighbour{node: to, edge: Edge{From: n.ID, To: to.ID, Kind: EdgeProduces}}, nil
+		}); err != nil {
+		return nil, err
+	}
+
+	// The issue whose execution started this run (issue_executions).
+	if err := w.collect(ctx, &out, `
+		SELECT m.id, COALESCE(m.identifier,''), m.title, m.status
+		FROM issue_executions ie
+		JOIN missions m ON m.id = ie.mission_id AND m.workspace_id = ?
+		WHERE ie.routine_run_id = ?
+		ORDER BY ie.created_at DESC, ie.id ASC
+		LIMIT ?`,
+		[]any{w.workspaceID, n.Ref, w.fanOutLimit()},
+		func(rows *sql.Rows) (neighbour, error) {
+			var id, identifier, title, status string
+			if err := rows.Scan(&id, &identifier, &title, &status); err != nil {
+				return neighbour{}, err
+			}
+			from := issueNode(id, identifier, title, status)
+			return neighbour{node: from, edge: Edge{From: from.ID, To: n.ID, Kind: EdgeTriggers}}, nil
+		}); err != nil {
+		return nil, err
+	}
+
 	return out, nil
 }
 
@@ -697,7 +804,7 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 const (
 	runColumns        = `id, COALESCE(pipeline_slug,''), COALESCE(status,''), COALESCE(chain_depth, 0), COALESCE(chain_origin,''), COALESCE(started_at,''), COALESCE(ended_at,'')`
 	assignmentColumns = `id, COALESCE(task,''), COALESCE(status,''), COALESCE(started_at,''), COALESCE(finished_at,'')`
-	inboxColumns      = `id, kind, title, COALESCE(state,''), COALESCE(created_at,'')`
+	inboxColumns      = `id, kind, title, COALESCE(state,''), COALESCE(created_at,''), COALESCE(target_user_id,''), COALESCE(target_role,'')`
 )
 
 func (w *walker) scanRunNeighbour(fromID string, kind EdgeKind) func(*sql.Rows) (neighbour, error) {
@@ -730,9 +837,14 @@ func (w *walker) scanAssignmentNeighbour(fromID string, kind EdgeKind) func(*sql
 
 func (w *walker) scanInboxNeighbour(fromID string) func(*sql.Rows) (neighbour, error) {
 	return func(rows *sql.Rows) (neighbour, error) {
-		var id, kind, title, state, createdAt string
-		if err := rows.Scan(&id, &kind, &title, &state, &createdAt); err != nil {
+		var id, kind, title, state, createdAt, targetUser, targetRole string
+		if err := rows.Scan(&id, &kind, &title, &state, &createdAt, &targetUser, &targetRole); err != nil {
 			return neighbour{}, err
+		}
+		// The inbox's own audience, applied per row (#2986). Without it the
+		// walk returned a manager-targeted ask's title to any member.
+		if !w.canSeeInbox(targetUser, targetRole) {
+			return neighbour{hidden: true}, nil
 		}
 		to := inboxNode(id, kind, title, state, createdAt)
 		return neighbour{node: to, edge: Edge{From: fromID, To: to.ID, Kind: EdgeProduces}}, nil
@@ -917,6 +1029,37 @@ func (w *walker) expandAssignment(ctx context.Context, n Node) ([]neighbour, err
 		return nil, err
 	}
 
+	// assignments.mission_id, the issue this work was asked for (#2986).
+	if err := w.collect(ctx, &out, `
+		SELECT m.id, COALESCE(m.identifier,''), m.title, m.status
+		FROM assignments a
+		JOIN missions m ON m.id = a.mission_id AND m.workspace_id = a.workspace_id
+		WHERE a.id = ? AND a.workspace_id = ?`,
+		[]any{n.Ref, w.workspaceID},
+		func(rows *sql.Rows) (neighbour, error) {
+			var id, identifier, title, status string
+			if err := rows.Scan(&id, &identifier, &title, &status); err != nil {
+				return neighbour{}, err
+			}
+			from := issueNode(id, identifier, title, status)
+			return neighbour{node: from, edge: Edge{From: from.ID, To: n.ID, Kind: EdgeTriggers}}, nil
+		}); err != nil {
+		return nil, err
+	}
+
+	// Inbox, kind 'run_needs_human' for issue work: source_id is the
+	// assignment id (issue_outcome_inbox.go).
+	if err := w.collect(ctx, &out, `
+		SELECT `+inboxColumns+`
+		FROM inbox_items
+		WHERE workspace_id = ? AND kind = 'run_needs_human' AND source_id = ?
+		ORDER BY id ASC
+		LIMIT ?`,
+		[]any{w.workspaceID, n.Ref, w.fanOutLimit()},
+		w.scanInboxNeighbour(n.ID)); err != nil {
+		return nil, err
+	}
+
 	return out, nil
 }
 
@@ -963,6 +1106,23 @@ func (w *walker) expandInbox(ctx context.Context, n Node) ([]neighbour, error) {
 			return nil, err
 		}
 		runID = extracted.String
+	case "run_needs_human":
+		// source_id names a routine run or, for issue work, an assignment
+		// (#2986). Each is looked up by exact id in its own table, fenced to
+		// the workspace — never matched by time or agent.
+		if sourceID == "" {
+			return nil, nil
+		}
+		if rn, ok, err := w.lookupRunByID(ctx, sourceID); err != nil {
+			return nil, err
+		} else if ok {
+			return []neighbour{{node: rn, edge: Edge{From: rn.ID, To: n.ID, Kind: EdgeProduces}}}, nil
+		}
+		an, ok, err := w.lookupAssignmentByID(ctx, sourceID)
+		if err != nil || !ok {
+			return nil, err
+		}
+		return []neighbour{{node: an, edge: Edge{From: an.ID, To: n.ID, Kind: EdgeProduces}}}, nil
 	default:
 		return nil, nil
 	}
@@ -991,6 +1151,10 @@ func (w *walker) collect(ctx context.Context, out *[]neighbour, query string, ar
 		nb, err := scan(rows)
 		if err != nil {
 			return err
+		}
+		if nb.hidden {
+			w.hiddenInbox++
+			continue
 		}
 		*out = append(*out, nb)
 	}

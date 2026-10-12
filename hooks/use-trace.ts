@@ -56,9 +56,12 @@ export function useTrace(workspaceId: string | null | undefined, runId: string |
   const abortRef = useRef<AbortController | null>(null)
 
   const refresh = useCallback(async () => {
+    abortRef.current?.abort()
+    setError(null)
     if (!workspaceId || !runId) {
       setRun(null)
       setDsl(null)
+      setLoading(false)
       return
     }
     // Cancel any in-flight fetch and start a fresh one. We
@@ -67,11 +70,9 @@ export function useTrace(workspaceId: string | null | undefined, runId: string |
     // step.completed events between polls never showed up. Aborting
     // is correct: if a step finishes while a previous fetch is
     // still flying, the abort guarantees the next fetch wins.
-    abortRef.current?.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setLoading(true)
-    setError(null)
     try {
       // 1) Fetch the run. The endpoint is workspace-scoped: GET
       //    /api/v1/workspaces/{ws}/pipeline-runs/{id}. Response is the

@@ -355,7 +355,7 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
                 <div key={path.join(".")} className="rounded-lg border border-hairline p-3">
                   <div className="mb-2 flex items-center gap-2">
                     {agent ? (
-                      <AgentAvatar seed={agent.avatar_seed || agent.name} style={agent.avatar_style || agent.crew?.avatar_style || undefined} agentId={agent.id} avatarUrl={agent.avatar_url} workspaceId={workspaceId} className="h-7 w-7" alt="" />
+                      <AgentAvatar seed={agent.avatar_seed || agent.name} style={agent.avatar_style || agent.crew?.avatar_style || undefined} avatarUrl={agent.avatar_url} className="h-7 w-7" alt="" />
                     ) : (
                       <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-purple/10 text-purple">
                         <Pencil className="h-3.5 w-3.5" />

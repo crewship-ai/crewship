@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, ArrowUpRight, CircleDot, Clock, Eye, EyeOff, Link2, MessageSquare, ScrollText, Users, MoreHorizontal } from "lucide-react"
+import { Activity, AlertTriangle, ArrowUpRight, CircleDot, Clock, Eye, EyeOff, Link2, MessageSquare, ScrollText, Users, MoreHorizontal } from "lucide-react"
 
 import { DetailCard, Pill, type DetailTone } from "@/components/ui/detail"
 import { InboxMessageSurface, messageSection, messageDivider } from "./inbox-message-surface"
@@ -504,6 +504,12 @@ export function originLinks(
   if (issue) out.push({ label: `Open ${issue}`, href: entityHref({ kind: "issue", identifier: issue }), icon: CircleDot })
   const routine = payloadString(item, "pipeline_slug")
   if (routine) out.push({ label: "Open routine", href: entityHref({ kind: "routine", slug: routine }), icon: ScrollText })
+  // The quiet-runs digest counts runs that completed in the window; they are
+  // the Completed bucket of Activity over the same 24h. Without this the card
+  // named where they were and offered only Dismiss (#2979).
+  if (item.kind === "message" && payloadString(item, "subkind") === "digest") {
+    out.push({ label: "View in Activity", href: "/activity?status=done", icon: Activity })
+  }
   const crewID = crewIdOf(item)
   const crew = crewID && lookup ? lookup.crewById.get(crewID) : null
   if (crew) out.push({ label: `Open ${crew.name}`, href: entityHref({ kind: "crew", slug: crew.slug }), icon: Users })

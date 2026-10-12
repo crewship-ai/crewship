@@ -195,7 +195,7 @@ func TestAcceptance_AdminInstanceBackupAlertChannels(t *testing.T) {
 			t.Fatalf("alert body lacks %q:\n%s", want, body)
 		}
 	}
-	if alert["url"] != "https://crewship.example.com/admin?tab=backups&section=overview" {
+	if alert["url"] != "https://crewship.example.com/admin/backups" {
 		t.Fatalf("alert url = %v", alert["url"])
 	}
 	if out := must(cli("settings", "get")...); !strings.Contains(out, "last alert sent") {

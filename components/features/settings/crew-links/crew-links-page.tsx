@@ -39,6 +39,7 @@ import {
 } from "./crew-links-model"
 import { CrewProfile, CrewTile, LinkMap, agentsLine } from "./crew-profile"
 import { useCrewLinks } from "./use-crew-links"
+import { settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
 
 type View = "crew" | "all" | "matrix"
 const VIEWS: { key: View; label: string; icon: typeof List }[] = [
@@ -126,7 +127,7 @@ export function CrewLinksPage() {
   const crewItem = (c: Crew, i: number) => (
     <DrillNavItem key={c.id} index={i} selected={view === "crew" && selected?.id === c.id} onSelect={() => selectCrew(c.slug)} title={`${c.name} · ${c.slug}`}
       icon={<CrewTile crew={c} />}
-      label={<>{c.name}{dups.has(c.name) && <span className="ml-1.5 font-mono text-[10.5px] text-muted-foreground">{c.slug}</span>}</>}
+      label={<>{c.name}{dups.has(c.name) && <span className="ml-1.5 font-mono text-micro text-muted-foreground">{c.slug}</span>}</>}
       sub={agentsLine(c, agentsOf(c)) ?? undefined}
       meta={linkedIds.has(c.id) ? <span title="hands work to · receives work from">↗{outsOf(c.id).length} ↙{insOf(c.id).length}</span> : undefined} />
   )
@@ -137,18 +138,18 @@ export function CrewLinksPage() {
       <SidebarFilterPopover label="Filter crews" activeCount={popoverCount} onClear={() => setFilters({ agents: "", net: "" })} panelClassName="min-w-[220px]">
         <SidebarFacet label="Agents" resetLabel="Any crew" resetActive={!filters.agents} onReset={() => setFilters({ agents: "" })} first>
           <SidebarFacetOption active={filters.agents === "with"} onToggle={() => setFilters({ agents: filters.agents === "with" ? "" : "with" })}>
-            With agents<span className="ml-auto font-mono text-[10px] text-muted-foreground">{countWhere((c) => (agentCount(c, agentsOf(c)) ?? 0) > 0)}</span>
+            With agents<span className="ml-auto font-mono text-micro text-muted-foreground">{countWhere((c) => (agentCount(c, agentsOf(c)) ?? 0) > 0)}</span>
           </SidebarFacetOption>
           <SidebarFacetOption active={filters.agents === "none"} onToggle={() => setFilters({ agents: filters.agents === "none" ? "" : "none" })}>
-            No agents (collectors)<span className="ml-auto font-mono text-[10px] text-muted-foreground">{countWhere((c) => agentCount(c, agentsOf(c)) === 0)}</span>
+            No agents (collectors)<span className="ml-auto font-mono text-micro text-muted-foreground">{countWhere((c) => agentCount(c, agentsOf(c)) === 0)}</span>
           </SidebarFacetOption>
         </SidebarFacet>
         <SidebarFacet label="Network" resetLabel="Any network" resetActive={!filters.net} onReset={() => setFilters({ net: "" })}>
           <SidebarFacetOption active={filters.net === "restricted"} onToggle={() => setFilters({ net: filters.net === "restricted" ? "" : "restricted" })}>
-            Restricted<span className="ml-auto font-mono text-[10px] text-muted-foreground">{countWhere((c) => c.network_mode != null && !isOpenNetwork(c))}</span>
+            Restricted<span className="ml-auto font-mono text-micro text-muted-foreground">{countWhere((c) => c.network_mode != null && !isOpenNetwork(c))}</span>
           </SidebarFacetOption>
           <SidebarFacetOption active={filters.net === "open"} onToggle={() => setFilters({ net: filters.net === "open" ? "" : "open" })}>
-            Open<span className="ml-auto font-mono text-[10px] text-muted-foreground">{countWhere(isOpenNetwork)}</span>
+            Open<span className="ml-auto font-mono text-micro text-muted-foreground">{countWhere(isOpenNetwork)}</span>
           </SidebarFacetOption>
         </SidebarFacet>
       </SidebarFilterPopover>
@@ -160,7 +161,7 @@ export function CrewLinksPage() {
       <div className="mx-2 mt-1 grid grid-cols-3 gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5" role="group" aria-label="View">
         {VIEWS.map((v) => (
           <button key={v.key} type="button" aria-pressed={view === v.key} onClick={() => setView(v.key)} data-drill-close
-            className={cn("flex h-7 items-center justify-center gap-1 rounded-md text-[11.5px] font-medium transition-colors", view === v.key ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
+            className={cn("flex h-7 items-center justify-center gap-1 rounded-md text-label font-medium transition-colors", view === v.key ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
             <v.icon className="h-3.5 w-3.5" />{v.label}
           </button>
         ))}
@@ -229,14 +230,14 @@ export function CrewLinksPage() {
             <div className="flex flex-wrap items-center gap-1.5" data-slot="crew-links-chips">
               {chips.map((c) => (
                 <motion.span key={c.key} initial={reduce ? false : { scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.18 }}
-                  className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-[11.5px] font-medium text-primary-hover">
+                  className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-micro font-medium text-primary-hover">
                   {c.label}
                   <button type="button" onClick={() => setFilters(c.clear)} aria-label={`Remove filter ${c.label}`} className="grid h-4 w-4 place-items-center rounded-full hover:bg-primary/20">
                     <X className="h-3 w-3" />
                   </button>
                 </motion.span>
               ))}
-              <button type="button" onClick={() => setFilters(DEFAULT_CREW_LINK_FILTERS)} className="px-1.5 text-[11.5px] text-muted-foreground hover:text-foreground">Clear all</button>
+              <button type="button" onClick={() => setFilters(DEFAULT_CREW_LINK_FILTERS)} className="px-1.5 text-label text-muted-foreground hover:text-foreground">Clear all</button>
             </div>
           )}
           {/* The summary answers the audit question before any crew is opened. */}
@@ -287,7 +288,7 @@ function CrewLabel({ crew, dup }: { crew: Crew; dup: boolean }) {
   return (
     <span className="flex min-w-0 flex-col leading-tight">
       <span className="truncate">{crew.name}</span>
-      {dup && <span className="truncate font-mono text-[10.5px] text-muted-foreground">{crew.slug}</span>}
+      {dup && <span className="truncate font-mono text-micro text-muted-foreground">{crew.slug}</span>}
     </span>
   )
 }
@@ -295,10 +296,10 @@ function CrewLabel({ crew, dup }: { crew: Crew; dup: boolean }) {
 function CrewChip({ crew, dup, agents }: { crew: Crew; dup: boolean; agents?: CrewAgent[] }) {
   const n = agents ? agents.length : null
   return (
-    <span className="flex min-w-0 items-center gap-2 text-[13px] font-medium">
+    <span className="flex min-w-0 items-center gap-2 text-control font-medium">
       <CrewTile crew={crew} />
       <CrewLabel crew={crew} dup={dup} />
-      {n != null && <span className="shrink-0 text-[11.5px] font-normal text-muted-foreground">· {n} {n === 1 ? "agent" : "agents"}</span>}
+      {n != null && <span className="shrink-0 text-label font-normal text-muted-foreground">· {n} {n === 1 ? "agent" : "agents"}</span>}
     </span>
   )
 }
@@ -317,7 +318,7 @@ const FILE_TONE: Record<FileAccess, string> = {
 function FilesChip({ files }: { files: FileAccess | null }) {
   // Unknown on servers that do not report file access; the page says so once.
   if (files === null) return null
-  return <span className={cn("inline-flex h-[22px] items-center gap-1 rounded-full px-2 font-mono text-[10.5px] font-semibold", FILE_TONE[files])}>{FILE_ICON[files]}{FILE_LABELS[files]}</span>
+  return <span className={cn("inline-flex h-[22px] items-center gap-1 rounded-full px-2 font-mono text-micro font-semibold", FILE_TONE[files])}>{FILE_ICON[files]}{FILE_LABELS[files]}</span>
 }
 
 /** None / View / Deliver for one direction; a chip when it cannot be edited. */
@@ -355,7 +356,7 @@ function CrewDetail({ crew, crews, dirs, dups, links, outs, ins, agentsByCrew, o
     <section className="min-w-0 overflow-hidden rounded-card border border-border bg-card" aria-label={title}>
       <header className="flex items-center gap-2 border-b border-border/60 bg-surface-subtle px-4 py-2.5">
         <h3 className="text-sm font-semibold">{title}</h3>
-        <span className="font-mono text-[11px] text-muted-foreground">{list.length}</span>
+        <span className="font-mono text-micro text-muted-foreground">{list.length}</span>
         <span className="ml-auto text-xs text-muted-foreground">{hint}</span>
       </header>
       {list.length === 0 && (
@@ -370,7 +371,7 @@ function CrewDetail({ crew, crews, dirs, dups, links, outs, ins, agentsByCrew, o
           <div key={other.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/40 px-4 py-2.5 last:border-b-0">
             <div className="min-w-0 flex-1 basis-48">
               <CrewChip crew={other} dup={dups.has(other.name)} agents={agentsOf(other)} />
-              <p className="mt-0.5 pl-9 text-[11.5px] text-muted-foreground">{directionSentence(from.name, to.name, d.files)}</p>
+              <p className="mt-0.5 pl-9 text-label text-muted-foreground">{directionSentence(from.name, to.name, d.files)}</p>
             </div>
             <FilesControl from={from} to={to} files={d.files} links={links} />
             {links.canManage && (
@@ -417,7 +418,7 @@ function AddCrewPicker({ label, candidates, dups, disabled, onPick }: { label: s
         <div className="max-h-64 overflow-y-auto" role="listbox" aria-label={label}>
           {candidates.map((c) => (
             <button key={c.id} type="button" role="option" aria-selected={false} onClick={() => { setOpen(false); onPick(c) }}
-              className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-accent">
+              className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-control hover:bg-accent">
               <CrewChip crew={c} dup={dups.has(c.name)} />
             </button>
           ))}
@@ -477,7 +478,7 @@ function DirectionEditor({ from, to, dirs, links, children }: { from: Crew; to: 
             <Button size="sm" className="h-8 text-xs" disabled={links.pending} onClick={() => void apply()}>Apply</Button>
           </div>
         ) : (
-          <p className="text-[11px] text-muted-foreground">Only Managers and up change links.</p>
+          <p className="text-label text-muted-foreground">Only Managers and up change links.</p>
         )}
       </PopoverContent>
     </Popover>
@@ -498,7 +499,7 @@ function AllLinks({ crews, shown, dirs, dups, links, isMobile }: { crews: Crew[]
     <section className="overflow-hidden rounded-card border border-border bg-card" aria-label="All links">
       <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2">
         <h3 className="text-sm font-semibold">Directions</h3>
-        <span className="ml-auto font-mono text-[11px] text-muted-foreground">{rows.length}</span>
+        <span className="ml-auto font-mono text-micro text-muted-foreground">{rows.length}</span>
       </div>
       {rows.length === 0 && <p className="px-4 py-6 text-center text-xs text-muted-foreground">{filtered ? "No link involves the crews these filters show." : "No crew can hand work to another yet."}</p>}
       {rows.length > 0 && (isMobile ? (
@@ -506,7 +507,7 @@ function AllLinks({ crews, shown, dirs, dups, links, isMobile }: { crews: Crew[]
           {rows.map(({ d, from, to }) => (
             <DirectionEditor key={dirKey(d.from, d.to)} from={from} to={to} dirs={dirs} links={links}>
               <button type="button" className="flex w-full flex-col gap-1.5 border-b border-border/40 px-4 py-3 text-left last:border-b-0">
-                <span className="flex items-center gap-2 text-[13px]"><CrewChip crew={from} dup={dups.has(from.name)} /><ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /><CrewChip crew={to} dup={dups.has(to.name)} /></span>
+                <span className="flex items-center gap-2 text-control"><CrewChip crew={from} dup={dups.has(from.name)} /><ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /><CrewChip crew={to} dup={dups.has(to.name)} /></span>
                 <span className="flex items-center gap-2 pl-9"><FilesChip files={d.files} /></span>
               </button>
             </DirectionEditor>
@@ -514,21 +515,21 @@ function AllLinks({ crews, shown, dirs, dups, links, isMobile }: { crews: Crew[]
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
+          <table className={settingsTable}>
             <thead>
-              <tr className="border-b border-border/60 bg-surface-subtle">
-                {["From", "", "To", "Shared files", "In other words"].map((h) => <th key={h} className="eyebrow px-3 py-2 text-left text-muted-foreground">{h}</th>)}
+              <tr>
+                {["From", "", "To", "Shared files", "In other words"].map((h) => <th key={h} className={cn(settingsTh, h === "" && "px-1")}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
               {rows.map(({ d, from, to }) => (
                 <DirectionEditor key={dirKey(d.from, d.to)} from={from} to={to} dirs={dirs} links={links}>
-                  <tr tabIndex={0} className="cursor-pointer border-b border-border/40 last:border-b-0 hover:bg-[var(--row-hover-bg)] focus-visible:bg-[var(--row-hover-bg)] focus-visible:outline-none">
-                    <td className="px-3 py-2.5"><CrewChip crew={from} dup={dups.has(from.name)} /></td>
-                    <td className="px-1 text-muted-foreground"><ArrowRight className="h-3.5 w-3.5" /></td>
-                    <td className="px-3 py-2.5"><CrewChip crew={to} dup={dups.has(to.name)} /></td>
-                    <td className="px-3 py-2.5"><FilesChip files={d.files} /></td>
-                    <td className="px-3 py-2.5 text-muted-foreground">{directionSentence(from.name, to.name, d.files)}</td>
+                  <tr tabIndex={0} className={settingsTableRowLink}>
+                    <td className={settingsTd}><CrewChip crew={from} dup={dups.has(from.name)} /></td>
+                    <td className={cn(settingsTd, "px-1 text-muted-foreground")}><ArrowRight className="h-3.5 w-3.5" /></td>
+                    <td className={settingsTd}><CrewChip crew={to} dup={dups.has(to.name)} /></td>
+                    <td className={settingsTd}><FilesChip files={d.files} /></td>
+                    <td className={cn(settingsTd, "text-muted-foreground")}>{directionSentence(from.name, to.name, d.files)}</td>
                   </tr>
                 </DirectionEditor>
               ))}
@@ -546,7 +547,7 @@ function Matrix({ crews, dirs, dups, links }: { crews: Crew[]; dirs: Map<string,
   return (
     <section className="overflow-hidden rounded-card border border-border bg-card" aria-label="Matrix">
       <div className="max-h-[70vh] overflow-auto" onMouseLeave={() => setHover(null)}>
-        <table className="border-separate border-spacing-0 text-[13px]" role="grid" aria-label="Rows hand work to columns">
+        <table className="border-separate border-spacing-0 text-control" role="grid" aria-label="Rows hand work to columns">
           <thead>
             <tr>
               <th className="sticky left-0 top-0 z-30 min-w-[200px] border-b border-r border-border bg-surface-subtle px-3 py-2 text-left align-bottom">
@@ -597,7 +598,7 @@ function Matrix({ crews, dirs, dups, links }: { crews: Crew[]; dirs: Map<string,
 function Legend() {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-      <span className="inline-flex items-center gap-1.5"><span className="inline-flex h-[22px] items-center gap-1 rounded-full bg-chip-info-bg px-2 font-mono text-[10.5px] font-semibold text-chip-info-fg"><ArrowRight className="h-3 w-3" />Work</span>may hand work</span>
+      <span className="inline-flex items-center gap-1.5"><span className="inline-flex h-[22px] items-center gap-1 rounded-full bg-chip-info-bg px-2 font-mono text-micro font-semibold text-chip-info-fg"><ArrowRight className="h-3 w-3" />Work</span>may hand work</span>
       <span className="inline-flex items-center gap-1.5"><FilesChip files="read" />reads their shared files</span>
       <span className="inline-flex items-center gap-1.5"><FilesChip files="read_write" />reads and delivers into their incoming folder</span>
       <span className="ml-auto inline-flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5" />Links never grant shell, credentials or private agent homes.</span>

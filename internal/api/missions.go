@@ -124,13 +124,26 @@ func parseDependencyJSON(raw string) []string {
 }
 
 func writeProblem(w http.ResponseWriter, r *http.Request, status int, detail string) {
-	writeJSON(w, status, map[string]interface{}{
+	writeProblemCode(w, r, status, detail, "", "")
+}
+
+// writeProblemCode is writeProblem with the optional machine code and field
+// that replyErrorCode carries (#2862), as RFC 7807 extension members.
+func writeProblemCode(w http.ResponseWriter, r *http.Request, status int, detail, code, field string) {
+	body := map[string]interface{}{
 		"type":     "about:blank",
 		"title":    http.StatusText(status),
 		"status":   status,
 		"detail":   detail,
 		"instance": r.URL.Path,
-	})
+	}
+	if code != "" {
+		body["code"] = code
+	}
+	if field != "" {
+		body["field"] = field
+	}
+	writeJSON(w, status, body)
 }
 
 // loadTasksForMission loads all tasks for a mission with agent info.

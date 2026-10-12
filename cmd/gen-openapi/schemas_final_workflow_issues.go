@@ -34,7 +34,10 @@ func finalWorkflowIssueSchemaCatalog() map[string]DomainSchema {
 	// it has no cursor and caps at 50 rows DESC. payload_json/source_kind/
 	// source_id mirror mission_activity's own widened columns (§9.1, B1).
 	issueEvent := obj(map[string]any{"id": str(), "mission_id": str(), "seq": integer(), "actor_type": str(), "actor_id": str(), "actor_name": nullable(str()), "action": str(), "details": nullable(str()), "payload_json": nullable(str()), "source_kind": nullable(str()), "source_id": nullable(str()), "created_at": str()})
-	issueEventsPage := obj(map[string]any{"events": arr(issueEvent), "after_seq": integer(), "latest_seq": integer()})
+	issueEventsPage := obj(map[string]any{"events": arr(issueEvent), "after_seq": integer(), "latest_seq": integer(),
+		// Backward paging (#2983): before_seq echoes the cursor, has_older
+		// says whether events exist below the returned page.
+		"before_seq": integer(), "has_older": boolean()})
 	// mission_id and source (#2313, item 3) tell a client WHY a run is
 	// attributed to the issue, not just that it is: "task" (the issue's own
 	// mission_tasks plan), "mention" (an @mention dispatch, via

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,6 +22,13 @@ import (
 func (o *Orchestrator) ReadRetainedRunResult(ctx context.Context, run RunState) (runoutput.Snapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return runoutput.Snapshot{}, err
+	}
+	if run.Output != nil && run.Output.Version == 2 {
+		directory, err := o.validatedHostRunDirectory(run)
+		if err != nil {
+			return runoutput.Snapshot{}, err
+		}
+		return runoutput.Inspect(ctx, filepath.Join(directory, "output"))
 	}
 	if run.Output == nil || run.Output.Version != 1 || !ValidRunID(run.ID) || run.ContainerID == "" || o.container == nil {
 		return runoutput.Snapshot{}, errors.New("retained run location unavailable")
@@ -94,34 +102,44 @@ func (o *Orchestrator) RecordRetainedRunResult(ctx context.Context, key string, 
 	if _, owned := o.agentRuns.Load(expected.ID); owned {
 		return expected, nil
 	}
-	raw, err := o.state.Get(ctx, "agent_runs", key)
+	atomic, ok := o.state.(provider.AtomicStateProvider)
+	if !ok {
+		return expected, errors.New("state provider cannot atomically preserve retained result")
+	}
+	updated := expected
+	err := atomic.Update(ctx, "agent_runs", key, func(raw []byte) ([]byte, error) {
+		// A deleted or terminal identity must never be recreated by a late
+		// capture. Check the current row inside the storage transaction.
+		if raw == nil {
+			return nil, nil
+		}
+		var current RunState
+		if err := json.Unmarshal(raw, &current); err != nil {
+			return nil, err
+		}
+		if current.Status != "running" || current.Output == nil || !SameRecoveredIdentity(current, expected) {
+			return raw, nil
+		}
+		if prior := current.Output.RetainedResult; prior != nil {
+			if err := prior.Validate(); err != nil {
+				return nil, err
+			}
+			if prior.Sequence != snapshot.Sequence || prior.Result == nil || *prior.Result != *snapshot.Result {
+				return nil, errors.New("retained terminal result changed")
+			}
+			updated = current
+			return raw, nil
+		}
+		current.Output.RetainedResult = &snapshot
+		current.LastActivity = time.Now()
+		data, err := json.Marshal(current)
+		if err == nil {
+			updated = current
+		}
+		return data, err
+	})
 	if err != nil {
 		return expected, err
 	}
-	var current RunState
-	if err = json.Unmarshal(raw, &current); err != nil {
-		return expected, err
-	}
-	if current.Status != "running" || current.Output == nil || !SameRecoveredIdentity(current, expected) {
-		return expected, nil
-	}
-	if prior := current.Output.RetainedResult; prior != nil {
-		if err := prior.Validate(); err != nil {
-			return expected, err
-		}
-		if prior.Sequence != snapshot.Sequence || prior.Result == nil || *prior.Result != *snapshot.Result {
-			return expected, errors.New("retained terminal result changed")
-		}
-		return current, nil
-	}
-	current.Output.RetainedResult = &snapshot
-	current.LastActivity = time.Now()
-	raw, err = json.Marshal(current)
-	if err != nil {
-		return expected, err
-	}
-	if err = o.state.Set(ctx, "agent_runs", key, raw); err != nil {
-		return expected, err
-	}
-	return current, nil
+	return updated, nil
 }

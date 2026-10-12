@@ -234,7 +234,6 @@ function AgentNodeBase({ data: d }: NodeProps<Node<OverviewAgentNodeData>>) {
         <AgentAvatar
           seed={d.avatarSeed || d.slug || d.name}
           style={d.avatarStyle}
-          agentId={d.agentId}
           avatarUrl={d.avatarUrl}
           className="h-4 w-4 shrink-0"
         />

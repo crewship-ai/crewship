@@ -129,7 +129,12 @@ func renderDigestSummaryMD(s *DigestStats) string {
 	}
 	fmt.Fprintf(&b, "- **%d** routine run(s) — %d completed, %d failed, %d waiting, %d cancelled\n",
 		s.TotalRuns, s.Completed, s.Failed, s.Waiting, s.Cancelled)
-	fmt.Fprintf(&b, "- **$%.4f** total cost\n", s.TotalCostUSD)
+	// TotalCostUSD sums pipeline_runs.cost_usd: what the agent CLIs
+	// reported, priced at list rates — not spend. Subscription-plan calls
+	// are not billed per call (#2193), so this must not read as a bill.
+	if s.TotalCostUSD > 0 {
+		fmt.Fprintf(&b, "- **~$%.4f** usage reported by agent CLIs (list-price estimate, not billed spend)\n", s.TotalCostUSD)
+	}
 	if len(s.TopFailures) > 0 {
 		b.WriteString("\n**Top failures:**\n")
 		for _, f := range s.TopFailures {

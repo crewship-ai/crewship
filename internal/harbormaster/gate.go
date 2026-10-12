@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/jitter"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -262,6 +263,10 @@ func StartTimeoutSweeper(ctx context.Context, db *sql.DB, j journal.Emitter, int
 		interval = 30 * time.Second
 	}
 	go func() {
+		// Spread this loop's phase from the other sweepers started at boot (#1891).
+		if !jitter.Startup(ctx, interval) {
+			return
+		}
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {

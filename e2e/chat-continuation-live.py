@@ -12,8 +12,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', default='/tmp/crewship-2-dev')
     parser.add_argument('--report', required=True)
+    parser.add_argument('--state-dir', default=os.environ.get('CREWSHIP_CHAT_DEMO_DIR'),
+                        required=not os.environ.get('CREWSHIP_CHAT_DEMO_DIR'),
+                        help='Private absolute directory outside the checkout; or set CREWSHIP_CHAT_DEMO_DIR')
     args = parser.parse_args()
-    state = json.loads(Path('/srv/crewship/.dev2-chat-demo/accounts.json').read_text())
+    private = Path(args.state_dir).expanduser()
+    if not private.is_absolute() or private.resolve().is_relative_to(Path(__file__).resolve().parents[1]):
+        parser.error('--state-dir must be an absolute private directory outside this checkout')
+    state = json.loads((private / 'accounts.json').read_text())
     ws, owner = state['workspace_id'], state['owner_id']
     klara, tomas = state['accounts']['klara'], state['accounts']['tomas']
     source = klara['direct_conversation_id']
@@ -26,7 +32,7 @@ def main():
             base += ['--profile', 'dev2']
         else:
             env = {k: v for k, v in env.items() if not k.startswith('CREWSHIP_')}
-            env['CREWSHIP_CONFIG'] = f'/srv/crewship/.dev2-chat-demo/{actor}.yaml'
+            env['CREWSHIP_CONFIG'] = str(private / f'{actor}.yaml')
         result = subprocess.run(base+list(words), capture_output=True, text=True, env=env, timeout=150)
         if expected:
             assert result.returncode != 0

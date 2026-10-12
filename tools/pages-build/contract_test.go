@@ -39,3 +39,27 @@ func TestProfileDependencyDiagnosticsAndContract(t *testing.T) {
 		t.Fatal(contract)
 	}
 }
+
+func TestProfileDependencyFailuresAreReportedBeforeCompilation(t *testing.T) {
+	if err := ValidateDependencies(nil); err == nil {
+		t.Fatal("nil project accepted")
+	}
+	for _, tc := range []struct{ name, encoding, content, diagnostic string }{
+		{"malformed manifest", "utf8", "{", "package.json"},
+		{"invalid encoded manifest", "base64", "%%%", "base64"},
+		{"unsupported encoding", "unknown", "{}", "encoding"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := Source()
+			for i := range p.Files {
+				if p.Files[i].Path == "package.json" {
+					p.Files[i].Encoding = tc.encoding
+					p.Files[i].Content = tc.content
+				}
+			}
+			if err := ValidateDependencies(p); err == nil || !strings.Contains(err.Error(), tc.diagnostic) {
+				t.Fatalf("invalid source accepted or diagnostic missing: %v", err)
+			}
+		})
+	}
+}

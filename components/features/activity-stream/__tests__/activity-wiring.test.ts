@@ -57,7 +57,9 @@ describe("the shell's chain wiring", () => {
     // The segments must survive their own selection: counting over the scoped
     // list would render "Failed 3 · Waiting 0 · Running 0" — what is left after
     // the pick rather than what there is to pick.
-    expect(source).toMatch(/chainsBeforeStatus=\{narrowedChains\.searched\}/)
+    // railChains is narrowedChains, further narrowed by journal-only filters
+    // (#3007) — still the set before the status pick.
+    expect(source).toMatch(/chainsBeforeStatus=\{railChains\.searched\}/)
   })
 
   it("measures the raw window only where the raw window is the question", () => {

@@ -22,7 +22,11 @@ export interface RotationDialogProps {
 // The rotate endpoint preserves the separate credential.rotate capability.
 // The customer surface only replaces a supplied value, with no grace overlap.
 // Provider-side issuance/revocation and advanced overlap remain backend concerns.
-export function RotationDialog({
+export function RotationDialog(props: RotationDialogProps) {
+  return props.open ? <RotationDialogSession key={JSON.stringify([props.workspaceId, props.credentialId])} {...props} /> : null
+}
+
+function RotationDialogSession({
   workspaceId, credentialId, credentialName, credentialType = "SECRET", open, onOpenChange, onRotated,
 }: RotationDialogProps) {
   const presentation = credentialEditPresentation(credentialType)
@@ -30,15 +34,17 @@ export function RotationDialog({
   const [showValue, setShowValue] = React.useState(false)
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const active = React.useRef(true)
+  const pending = React.useRef(false)
 
   React.useEffect(() => {
-    setValue("")
-    setShowValue(false)
-    setError(null)
-  }, [open, credentialId])
+    active.current = true
+    return () => { active.current = false }
+  }, [])
 
   const replace = async () => {
-    if (!value.trim() || submitting) return
+    if (!active.current || !value.trim() || pending.current) return
+    pending.current = true
     setSubmitting(true)
     setError(null)
     try {
@@ -47,18 +53,21 @@ export function RotationDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ value, grace_seconds: 0 }),
       })
+      if (!active.current) return
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        setError(typeof data.error === "string" ? data.error : "Could not replace the value")
+        if (!active.current) return
+        setError(typeof data?.error === "string" ? data.error : "Could not replace the value")
         return
       }
       setValue("")
       onRotated()
       onOpenChange(false)
     } catch {
-      setError("Network error")
+      if (active.current) setError("Network error")
     } finally {
-      setSubmitting(false)
+      pending.current = false
+      if (active.current) setSubmitting(false)
     }
   }
 

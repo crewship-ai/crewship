@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -219,6 +220,9 @@ func TestContainerStatus_InspectError(t *testing.T) {
 	_, err := p.ContainerStatus(context.Background(), "missing")
 	if err == nil {
 		t.Fatal("expected error for missing container")
+	}
+	if !errors.Is(err, provider.ErrContainerNotFound) {
+		t.Fatalf("missing container lost typed absence: %v", err)
 	}
 	if !strings.Contains(err.Error(), "container inspect") {
 		t.Errorf("error should mention 'container inspect': %v", err)

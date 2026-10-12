@@ -469,8 +469,8 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 		result, err := tx.ExecContext(ctx, `INSERT INTO pending_runs
           (id,workspace_id,pipeline_id,pipeline_slug,inputs_json,tags_json,metadata_json,priority,fire_at,invoking_user_id,triggered_via,triggered_by_id,pinned_version,status,created_at,updated_at)
           VALUES (?,?,?,?,?,'[]','{}',0,?,?,'schedule',?,?,'pending',datetime('now','subsec'),datetime('now','subsec'))
-          ON CONFLICT(id) DO UPDATE SET fire_at=excluded.fire_at,inputs_json=excluded.inputs_json,pinned_version=excluded.pinned_version,status='pending',updated_at=excluded.updated_at
-          WHERE pending_runs.status='pending' OR (pending_runs.status='fired' AND pending_runs.fire_at <> excluded.fire_at)`, id, in.WorkspaceID, pipelineID, in.Slug, string(inputs), tsformat.Format(trigger.FireAt), nullableStr(in.Author.UserID), id, pinnedVersion)
+          ON CONFLICT(id) DO UPDATE SET fire_at=excluded.fire_at,inputs_json=excluded.inputs_json,pinned_version=excluded.pinned_version,status='pending',dispatch_attempts=0,last_error='',next_attempt_at=NULL,fired_run_id=NULL,updated_at=excluded.updated_at
+          WHERE (pending_runs.status='pending' AND pending_runs.dispatch_attempts=0) OR (pending_runs.status='fired' AND pending_runs.fire_at <> excluded.fire_at)`, id, in.WorkspaceID, pipelineID, in.Slug, string(inputs), tsformat.Format(trigger.FireAt), nullableStr(in.Author.UserID), id, pinnedVersion)
 		if err != nil {
 			return nil, err
 		}

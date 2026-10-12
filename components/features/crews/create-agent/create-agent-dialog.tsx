@@ -40,6 +40,8 @@ import {
 import { cn } from "@/lib/utils"
 import { CrewPicker } from "@/components/features/crews/crew-picker"
 import { apiFetch } from "@/lib/api-fetch"
+import { ApiError, toApiError } from "@/lib/api-error"
+import { storeAgentAvatar } from "@/lib/agent-avatar-persist"
 import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE, getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { BUILTIN_PERSONAS, type AgentPersona } from "@/lib/entities"
@@ -62,7 +64,10 @@ import {
 import { AskFormsBuilder } from "../ask-forms-builder"
 import { EditorLayout, EditorPanel } from "../editor-layout"
 import { AgentModelSettings } from "./agent-model-settings"
-import { PaysWithRow } from "../agent-canvas-tabs/pays-with-row"
+import { RestrictedExecutionField, saveRestrictedProfile, type RestrictedProfile } from "../agent-canvas-tabs/restricted-execution-profile"
+import { PaysWithRow, applyPaysWith } from "../agent-canvas-tabs/pays-with-row"
+import { saveLearning, type LearningDraft } from "@/components/features/agents/agent-learning-toggle"
+import type { LoginCredential } from "@/lib/credentials/provider-logins"
 import { PersonaDraft } from "../persona-draft"
 import { ConfigTab, SuggestedPromptsField } from "../agent-canvas-tabs/config-tab"
 import type { AgentRecord } from "../agent-canvas-tabs/types"
@@ -107,11 +112,23 @@ export function CreateAgentDialog({
   useAvatarStylesVersion()
   const router = useRouter()
   const [section, setSection] = useState("identity")
+  // A server refusal that names a field (#2862) is shown under that field
+  // rather than toasted: slug conflicts under Slug, a second lead under Role.
+  const [fieldErrors, setFieldErrors] = useState<{ slug?: string; agent_role?: string }>({})
   const [providerConfirmed, setProviderConfirmed] = useState(!!agent)
   const [draft, setDraft] = useState(() => initialAgentDraft(defaultCrewSlug))
   const [persona, setPersona] = useState<string | null | undefined>(undefined)
   const [baseline, setBaseline] = useState<AgentDraft | null>(null)
   const [extra, setExtra] = useState<Record<string, unknown>>({})
+  // Two writes that are not fields of the agent body: the seat the agent pays
+  // with (an AGENT credential binding) and the learning posture (its own
+  // audited PATCH). Held as a draft like everything else and applied on Save,
+  // after the agent itself.
+  const [seatDraft, setSeatDraft] = useState<LoginCredential | null>(null)
+  const [learningDraft, setLearningDraft] = useState<LearningDraft | null>(null)
+  // The restricted client execution profile (#3028) has its own endpoint, so
+  // it is a third follow-up write: held here, applied on Save after the agent.
+  const [restrictedDraft, setRestrictedDraft] = useState<RestrictedProfile | null>(null)
   const [submitting, setSubmitting] = useState(false)
   // Ref for the in-flight check inside submit() — using `submitting` state
   // there would close over a stale value and let a fast double-fire through
@@ -142,10 +159,13 @@ export function CreateAgentDialog({
     if (open && !wasOpenRef.current) {
       const next = agent ? draftFromAgent(agent, crews) : initialAgentDraft(defaultCrewSlugRef.current)
       setSection("identity")
+      setFieldErrors({})
       setProviderConfirmed(!!agent)
       setDraft(next)
       setBaseline(next)
       setExtra({})
+      setSeatDraft(null)
+      setLearningDraft(null)
       setPersona(undefined)
       setBaselineCrewSlug(defaultCrewSlugRef.current)
       setSubmitting(false)
@@ -165,6 +185,11 @@ export function CreateAgentDialog({
       .replace(/^-|-$/g, "")
     if (derived !== draft.slug) setDraft((d) => ({ ...d, slug: derived }))
   }, [draft.name, draft.slug, draft.slugTouched])
+  // A slug refusal describes the slug that was sent; any new slug (typed or
+  // derived from the name) is a new question.
+  useEffect(() => {
+    setFieldErrors((f) => (f.slug ? { ...f, slug: undefined } : f))
+  }, [draft.slug])
 
   const seed = draft.avatarSeed || draft.slug || draft.name || "agent"
   const avatarUrl = getAgentAvatarUrl(seed, draft.avatarStyle)
@@ -174,12 +199,14 @@ export function CreateAgentDialog({
     draft.selectedPersona !== null &&
     draft.editedPersonaPrompt === null &&
     !draft.customPrompt.trim()
-  const valid = isIdentityValid(draft) && (!!agent || !providerConfirmed || !!draft.llmModel.trim())
+  const learningReasonMissing = learningDraft !== null && learningDraft.reason.trim() === ""
+  const valid = isIdentityValid(draft) && (!!agent || !providerConfirmed || !!draft.llmModel.trim()) && !learningReasonMissing
   // What's blocking submit? Shown to the user as an inline hint so they
   // don't have to guess why Create is disabled. Mirrors isIdentityValid
   // — keep the order matching so the hint reflects the first failing rule.
   const validationHint: string | null = (() => {
     if (valid) return null
+    if (learningReasonMissing) return "Give a reason for the learning change"
     if (!agent && providerConfirmed && !draft.llmModel.trim()) return "Choose a model in Model and execution"
     const trimmedName = draft.name.trim()
     if (trimmedName.length < 2) return "Name must be at least 2 characters"
@@ -230,6 +257,7 @@ export function CreateAgentDialog({
     submittingRef.current = true
     setSubmitting(true)
     setRefusal(null)
+    setFieldErrors({})
     try {
       const targetCrew = draft.crewSlug
         ? crews.find((c) => c.slug === draft.crewSlug) ?? null
@@ -275,19 +303,52 @@ export function CreateAgentDialog({
         },
       )
       if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || `HTTP ${res.status}`)
+        throw await toApiError(res, `HTTP ${res.status}`)
       }
       const created = await res.json()
       if (agent && persona !== undefined) {
         const response = await apiFetch(`/api/v1/agents/${agent.id}/persona?workspace_id=${encodeURIComponent(workspaceId)}`, { method: persona === null ? "DELETE" : "PUT", headers: { "Content-Type": "application/json" }, body: persona === null ? undefined : JSON.stringify({ content: persona }) })
         if (!response.ok) throw new Error(`Agent settings saved, but persona could not be saved (${response.status}). Your persona draft is retained; retry Save changes.`)
       }
+      // After the agent, so a refused agent change leaves the seat and the
+      // posture untouched. Each is cleared once applied, so a retry after a
+      // later failure does not apply it twice.
+      if (agent && seatDraft) {
+        try {
+          await applyPaysWith(workspaceId, agent.id, seatDraft)
+        } catch (err) {
+          throw new Error(`Agent settings saved, but the provider account could not be changed: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        setSeatDraft(null)
+      }
+      if (agent && learningDraft) {
+        try {
+          await saveLearning(agent.id, workspaceId, learningDraft.enabled, learningDraft.reason)
+        } catch (err) {
+          throw new Error(`Agent settings saved, but the learning posture could not be changed: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        setLearningDraft(null)
+      }
+      if (agent && restrictedDraft) {
+        try {
+          await saveRestrictedProfile(agent.id, workspaceId, restrictedDraft)
+        } catch (err) {
+          throw new Error(`Agent settings saved, but restricted execution could not be changed: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        setRestrictedDraft(null)
+      }
 
       // Bindings are keyed on an agent that exists, so they are spent here
       // rather than in the body above. Failures are reported, not thrown: the
       // agent is created either way, and an agent quietly missing the tool it
       // was created for is worse than being told where to add it.
+      // The agent's face is stored here, by the person who just created or
+      // edited it — not by whoever happens to view it first (#2876). A PATCH
+      // that left the avatar alone comes back with its avatar_url and costs
+      // no request; one that changed it comes back without, and is stored.
+      // Never throws: a missing render only means the face is generated.
+      await storeAgentAvatar(created, workspaceId)
+
       const failed =
         !agent && (access.integrationIds.length || access.channelIds.length)
           ? await applyAgentAccess(workspaceId, created.id, access, accessCatalog)
@@ -304,6 +365,12 @@ export function CreateAgentDialog({
       onCreated(created.slug)
       router.replace(`/crews?agent=${encodeURIComponent(created.slug)}`)
     } catch (err) {
+      if (err instanceof ApiError && (err.field === "slug" || err.field === "agent_role")) {
+        const field = err.field
+        setFieldErrors({ [field]: err.message })
+        setSection("identity")
+        return
+      }
       const message = `Could not ${agent ? "save" : "create"} agent: ${err instanceof Error ? err.message : String(err)}`
       toast.error(message)
       setRefusal(message)
@@ -311,7 +378,7 @@ export function CreateAgentDialog({
       submittingRef.current = false
       setSubmitting(false)
     }
-  }, [agent, providerConfirmed, persona, baseline, extra, draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, onOpenChange, onCreated, router])
+  }, [agent, providerConfirmed, persona, baseline, extra, seatDraft, learningDraft, restrictedDraft, draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, onOpenChange, onCreated, router])
 
   // ⌘↵ / Ctrl↵ is wired by the shell — this is only the "is it submittable"
   // guard the shell asks callers to keep inside their own handler.
@@ -326,7 +393,7 @@ export function CreateAgentDialog({
         onOpenChange={onOpenChange}
         size="xl"
         className="h-[92dvh] sm:h-[min(85dvh,720px)]"
-        dirty={agent ? persona !== undefined || JSON.stringify(draft) !== JSON.stringify(baseline) || Object.keys(extra).length > 0 : isDraftDirty(draft, baselineCrewSlug) || Object.keys(extra).length > 0 || access.integrationIds.length > 0 || access.channelIds.length > 0}
+        dirty={agent ? persona !== undefined || JSON.stringify(draft) !== JSON.stringify(baseline) || Object.keys(extra).length > 0 || seatDraft !== null || learningDraft !== null || restrictedDraft !== null : isDraftDirty(draft, baselineCrewSlug) || Object.keys(extra).length > 0 || access.integrationIds.length > 0 || access.channelIds.length > 0}
         discardLabel="this agent"
         onSubmit={() => {
           // ⌘↵ inside the picker closes the picker; it must not also create
@@ -567,11 +634,13 @@ export function CreateAgentDialog({
                 />
               </CreateSurfaceField>
 
-              <CreateSurfaceField label="Slug" htmlFor="agent-slug" hint="auto from name">
+              <CreateSurfaceField label="Slug" htmlFor="agent-slug" hint="auto from name" error={fieldErrors.slug}>
                 <input
                   id="agent-slug"
                   type="text"
                   value={draft.slug}
+                  aria-invalid={fieldErrors.slug ? true : undefined}
+                  aria-describedby={fieldErrors.slug ? "agent-slug-error" : undefined}
                   onChange={(e) =>
                     setDraft({ ...draft, slug: e.target.value, slugTouched: true })
                   }
@@ -585,11 +654,14 @@ export function CreateAgentDialog({
                   <select> loses: both are visible without opening anything,
                   each hint explains the role rather than stating a limit, and
                   the tap target is the chip instead of a 16px caret. */}
-              <CreateSurfaceField label="Role">
+              <CreateSurfaceField label="Role" error={fieldErrors.agent_role}>
                 <CreateSurfaceChoice
                   ariaLabel="Agent role"
                   value={draft.agentRole}
-                  onChange={(agentRole) => setDraft({ ...draft, agentRole })}
+                  onChange={(agentRole) => {
+                    setFieldErrors((f) => ({ ...f, agent_role: undefined }))
+                    setDraft({ ...draft, agentRole })
+                  }}
                   options={[
                     { value: "AGENT", label: "Agent", hint: "Works on what it is given" },
                     { value: "LEAD", label: "Lead", hint: "Can plan and delegate to the crew" },
@@ -719,6 +791,12 @@ WORK STYLE: …`}
           </EditorPanel>
           <EditorPanel active={section === "model"}>
             <AgentModelSettings providerConfirmed={!!agent || providerConfirmed} onProviderConfirmed={() => setProviderConfirmed(true)} workspaceId={workspaceId} draft={draft} setDraft={setDraft} />
+            {agent && (
+              <RestrictedExecutionField
+                value={restrictedDraft ?? (agent.restricted_execution_profile as RestrictedProfile | undefined) ?? "disabled"}
+                onChange={(next) => setRestrictedDraft(next === (agent.restricted_execution_profile ?? "disabled") ? null : next)}
+              />
+            )}
               {draft.agentRole === "LEAD" && (
                 <CreateSurfaceField label="Lead mode" htmlFor="agent-lead-mode">
                   <select
@@ -742,12 +820,12 @@ WORK STYLE: …`}
               <p className="text-xs text-muted-foreground">Enforcement depends on the selected runner. This setting does not change the crew's network access.</p>
             </CreateSurfaceSection>
             {!agent && <AgentAccessSection catalog={accessCatalog} selection={access} onChange={setAccess} />}
-            {agent && <CreateSurfaceSection title="Provider account" icon={CreditCard}><p className="text-xs text-muted-foreground">Billing access is managed separately and applies immediately.</p>{draft.cliAdapter !== agent.cli_adapter || draft.llmProvider !== agent.llm_provider ? <p className="text-sm text-muted-foreground">Save the new provider and runner first, then choose its account here.</p> : <PaysWithRow workspaceId={workspaceId} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} paysWith={agent.pays_with ?? null} />}</CreateSurfaceSection>}
+            {agent && <CreateSurfaceSection title="Provider account" icon={CreditCard}><p className="text-xs text-muted-foreground">The account changes with the rest when you choose Save changes.</p>{draft.cliAdapter !== agent.cli_adapter || draft.llmProvider !== agent.llm_provider ? <p className="text-sm text-muted-foreground">Save the new provider and runner first, then choose its account here.</p> : <PaysWithRow workspaceId={workspaceId} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} paysWith={agent.pays_with ?? null} pending={seatDraft} onPick={setSeatDraft} />}</CreateSurfaceSection>}
             {agent && <p className="text-sm text-muted-foreground">Manage this agent&apos;s assigned skills, credentials and integrations under Work → Skills and access.</p>}
           </EditorPanel>
           <EditorPanel active={section === "chat"}>
             {!agent && <CreateSurfaceSection title="Chat suggestions and forms" icon={MessageSquare}><SuggestedPromptsField draftMode value={String(extra.suggested_prompts ?? "")} onSave={async value => { setExtra(current => ({ ...current, suggested_prompts: value })) }} /><AskFormsBuilder value={String(extra.ask_forms ?? "")} onChange={value => { setExtra(current => ({ ...current, ask_forms: value })) }} /></CreateSurfaceSection>}
-            {agent && <ConfigTab supplementalOnly omitBilling agent={{ ...agent, ...extra }} crews={crews} patch={async body => { setExtra(current => ({ ...current, ...body })) }} onSelectCrew={() => {}} />}
+            {agent && <ConfigTab agent={{ ...agent, ...extra }} patch={async body => { setExtra(current => ({ ...current, ...body })) }} learning={{ draft: learningDraft, onChange: setLearningDraft }} />}
           </EditorPanel>
             </>
           )}

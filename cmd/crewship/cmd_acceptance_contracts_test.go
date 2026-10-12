@@ -10,6 +10,7 @@ import (
 )
 
 func TestRestrictedRoutineReceiptAndWaitJSON(t *testing.T) {
+	guardCLIState(t)
 	for _, status := range []string{"receipt", "completed", "failed", "needs_reconciliation", "forbidden"} {
 		t.Run(status, func(t *testing.T) {
 			s := clitest.NewStubServer()

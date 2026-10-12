@@ -75,7 +75,59 @@ function bulkSetDone() {
   expect(screen.getByText("2 selected")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Status" }))
   fireEvent.click(screen.getByRole("button", { name: "Done" }))
+  confirmBulk()
 }
+
+/** Accept the confirmation a bulk change now asks for. */
+function confirmBulk() {
+  fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: /^Set to/ }))
+}
+
+// A bulk status change can set off automations on every selected issue, so it
+// asks first; priority asks the same way, so the two menus behave alike.
+describe("IssuesListView bulk changes ask first", () => {
+  beforeEach(() => {
+    cleanup()
+    apiFetch.mockReset()
+    apiFetch.mockResolvedValue(json(200, { updated: 2 }))
+  })
+
+  it("names the change and the issues, and sends nothing until confirmed", async () => {
+    render(<IssuesListView issues={issues} onIssueClick={vi.fn()} workspaceId="ws-1" />)
+    fireEvent.click(screen.getAllByRole("checkbox")[0])
+    fireEvent.click(screen.getByRole("button", { name: "Status" }))
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    const dialog = screen.getByRole("alertdialog")
+    expect(dialog).toHaveTextContent("Set 2 issues to Done?")
+    expect(dialog).toHaveTextContent(/automations/i)
+    expect(apiFetch.mock.calls.filter((c) => String(c[0]).includes("/issues/bulk"))).toHaveLength(0)
+  })
+
+  it("Cancel leaves the issues and the selection alone", async () => {
+    render(<IssuesListView issues={issues} onIssueClick={vi.fn()} workspaceId="ws-1" />)
+    fireEvent.click(screen.getAllByRole("checkbox")[0])
+    fireEvent.click(screen.getByRole("button", { name: "Status" }))
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }))
+    expect(apiFetch.mock.calls.filter((c) => String(c[0]).includes("/issues/bulk"))).toHaveLength(0)
+    expect(screen.getByText("2 selected")).toBeTruthy()
+  })
+
+  it("asks before a bulk priority change too", async () => {
+    render(<IssuesListView issues={issues} onIssueClick={vi.fn()} workspaceId="ws-1" />)
+    fireEvent.click(screen.getAllByRole("checkbox")[0])
+    fireEvent.click(screen.getByRole("button", { name: "Priority" }))
+    fireEvent.click(screen.getByRole("button", { name: "Urgent" }))
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Set 2 issues to Urgent?")
+    confirmBulk()
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        "/api/v1/issues/bulk?workspace_id=ws-1",
+        expect.objectContaining({ body: JSON.stringify({ ids: ["i1", "i2"], updates: { priority: "urgent" } }) }),
+      ),
+    )
+  })
+})
 
 describe("IssuesListView bulk update", () => {
   beforeEach(() => {
@@ -200,6 +252,7 @@ describe("IssuesListView bulk update", () => {
     apiFetch.mockResolvedValueOnce(json(200, { updated: 2 }))
     fireEvent.click(screen.getByRole("button", { name: "Status" }))
     fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    confirmBulk()
 
     await waitFor(() => expect(screen.queryByText("2 selected")).toBeNull())
     expect(screen.queryByRole("alert")).toBeNull()

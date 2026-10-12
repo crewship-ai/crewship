@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/jitter"
 	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
@@ -899,6 +900,10 @@ func (s *SQLWaitpointStore) checkDecided(ctx context.Context, token string) (dec
 // partial index on (status='pending', timeout_at).
 func (s *SQLWaitpointStore) sweeper() {
 	defer s.sweeperWg.Done()
+	// Spread this loop's phase from the other sweepers started at boot (#1891).
+	if !jitter.StartupStop(s.stopCh, 30*time.Second) {
+		return
+	}
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
 	for {

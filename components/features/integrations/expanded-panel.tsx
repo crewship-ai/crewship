@@ -32,6 +32,7 @@ import { CredentialPicker } from "@/components/features/mcp/components/credentia
 import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
+import { usePageSave } from "@/components/ui/page-save-bar"
 
 import { OAuthAutoConnect } from "./oauth-auto-connect"
 import { TestConnectionButton } from "./test-connection-button"
@@ -100,122 +101,83 @@ export function ExpandedPanel({
     canManage ? (workspaceId ?? undefined) : undefined,
   )
 
-  // Track in-flight patches so the server→local sync effect below
-  // does not clobber newer local edits with a stale refetched
-  // snapshot. The parent's onPatch triggers a full list refetch on
-  // success; two edits landing out of order (slow network, blur +
-  // immediate second blur) can otherwise replay an older server
-  // version of the field that's still being edited.
-  const pendingPatchesRef = React.useRef(0)
-  const [patchSettledTick, setPatchSettledTick] = React.useState(0)
-  const patchTracked = React.useCallback(
-    async (fields: Record<string, unknown>) => {
-      pendingPatchesRef.current++
+  // The server's configuration as saved: what the draft is measured against.
+  // The env is compared serialized, so a blank row being typed is not a change
+  // until it has a key.
+  const saved = React.useMemo(() => ({
+    name: server.name,
+    display_name: server.display_name || "",
+    command: server.command ?? "",
+    args: parseArgs(server.args_json),
+    endpoint: server.endpoint ?? "",
+    transport: normalizeTransport(server.transport),
+    env_json: serializeEnv(parseEnv(server.env_json)),
+  }), [server.name, server.display_name, server.command, server.args_json, server.endpoint, server.transport, server.env_json])
+
+  // A draft, not a save per field: command, URL and env decide what runs in
+  // the crew's containers, so nothing is written until the page's Save bar
+  // commits it (components/ui/page-save-bar). Blur used to PATCH on the spot.
+  const [name, setName] = React.useState(saved.name)
+  const [displayName, setDisplayName] = React.useState(saved.display_name)
+  const [command, setCommand] = React.useState(saved.command)
+  const [args, setArgs] = React.useState(saved.args)
+  const [url, setUrl] = React.useState(saved.endpoint)
+  const [transport, setTransport] = React.useState(saved.transport)
+  const [envVars, setEnvVars] = React.useState(parseEnv(server.env_json))
+  const [saving, setSaving] = React.useState(false)
+
+  const changes: Record<string, unknown> = {}
+  if (name !== saved.name) changes.name = name
+  if (displayName !== saved.display_name) changes.display_name = displayName
+  if (command !== saved.command) changes.command = command
+  if (args !== saved.args) changes.args_json = serializeArgs(args)
+  if (url !== saved.endpoint) changes.endpoint = url
+  if (transport !== saved.transport) changes.transport = transport
+  const envJson = serializeEnv(envVars)
+  if (envJson !== saved.env_json) changes.env_json = envJson
+  const count = Object.keys(changes).length
+
+  const discard = React.useCallback(() => {
+    setName(saved.name)
+    setDisplayName(saved.display_name)
+    setCommand(saved.command)
+    setArgs(saved.args)
+    setUrl(saved.endpoint)
+    setTransport(saved.transport)
+    setEnvVars(parseEnv(server.env_json))
+  }, [saved, server.env_json])
+
+  // A refetch adopts the server's values only while nothing is being edited:
+  // a background refresh must never eat what someone typed.
+  const dirtyRef = React.useRef(count > 0)
+  dirtyRef.current = count > 0
+  React.useEffect(() => {
+    if (!dirtyRef.current) discard()
+  }, [discard])
+
+  usePageSave({
+    label: server.name,
+    count,
+    saving,
+    save: async () => {
+      setSaving(true)
       try {
-        await onPatch(fields)
+        await onPatch(changes)
       } finally {
-        pendingPatchesRef.current--
-        if (pendingPatchesRef.current === 0) {
-          // Bump tick so the sync effect re-runs once no patches are
-          // pending — otherwise a skipped sync would leave local
-          // state permanently out of date if deps don't change again.
-          setPatchSettledTick((n) => n + 1)
-        }
+        setSaving(false)
       }
     },
-    [onPatch],
-  )
-
-  // Local state for inputs (save on blur)
-  const [name, setName] = React.useState(server.name)
-  const [displayName, setDisplayName] = React.useState(server.display_name || "")
-  const [command, setCommand] = React.useState(server.command ?? "")
-  const [args, setArgs] = React.useState(parseArgs(server.args_json))
-  const [url, setUrl] = React.useState(server.endpoint ?? "")
-  const [transport, setTransport] = React.useState(normalizeTransport(server.transport))
-  const [envVars, setEnvVars] = React.useState(parseEnv(server.env_json))
-
-  // Sync local state if server data changes (after refetch). The deps
-  // list names only the fields this editor actually displays — keying
-  // on the whole `server` object would re-run every time an unrelated
-  // field (auth_status, updated_at, audit metadata) changes, wiping
-  // any in-flight user edits.
-  //
-  // While any patch is in flight we skip the sync: the parent refetch
-  // that triggered this effect might have raced with an earlier PATCH
-  // that hasn't hit the DB yet, so `server.*` could be stale relative
-  // to what the user just typed. `patchSettledTick` forces a re-sync
-  // once the last patch settles.
-  React.useEffect(() => {
-    if (pendingPatchesRef.current > 0) return
-    setName(server.name)
-    setDisplayName(server.display_name || "")
-    setCommand(server.command ?? "")
-    setArgs(parseArgs(server.args_json))
-    setUrl(server.endpoint ?? "")
-    setTransport(normalizeTransport(server.transport))
-    setEnvVars(parseEnv(server.env_json))
-  }, [
-    server.name,
-    server.display_name,
-    server.command,
-    server.args_json,
-    server.endpoint,
-    server.transport,
-    server.env_json,
-    patchSettledTick,
-  ])
+    discard,
+  })
 
   const hasAnyBindings = (agentBindings[server.id]?.size ?? 0) > 0
-
-  function handleBlur(field: string, value: string) {
-    switch (field) {
-      case "name":
-        if (value !== server.name) void patchTracked({ name: value })
-        break
-      case "display_name":
-        if (value !== (server.display_name || "")) void patchTracked({ display_name: value })
-        break
-      case "command":
-        if (value !== (server.command ?? "")) void patchTracked({ command: value })
-        break
-      case "args":
-        if (value !== parseArgs(server.args_json)) void patchTracked({ args_json: serializeArgs(value) })
-        break
-      case "url":
-        if (value !== (server.endpoint ?? "")) void patchTracked({ endpoint: value })
-        break
-    }
-  }
-
-  function handleTransportChange(newTransport: string) {
-    setTransport(newTransport)
-    if (newTransport !== server.transport) {
-      void patchTracked({ transport: newTransport })
-    }
-  }
-
-  function handleEnvBlur() {
-    const newJson = serializeEnv(envVars)
-    const oldJson = server.env_json ?? "{}"
-    if (newJson !== oldJson) {
-      void patchTracked({ env_json: newJson })
-    }
-  }
 
   function addEnvVar() {
     setEnvVars((prev) => [...prev, { key: "", value: "" }])
   }
 
   function removeEnvVar(idx: number) {
-    const updated = envVars.filter((_, i) => i !== idx)
-    setEnvVars(updated)
-    // Save immediately on remove
-    const newJson = serializeEnv(updated)
-    const oldJson = server.env_json ?? "{}"
-    if (newJson !== oldJson) {
-      void patchTracked({ env_json: newJson })
-    }
+    setEnvVars((prev) => prev.filter((_, i) => i !== idx))
   }
 
   function updateEnvVar(idx: number, field: "key" | "value", val: string) {
@@ -369,7 +331,6 @@ export function ExpandedPanel({
               className="h-8 text-label"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              onBlur={() => handleBlur("name", name)}
               readOnly={!canManage}
             />
           </div>
@@ -382,7 +343,6 @@ export function ExpandedPanel({
               className="h-8 text-label"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              onBlur={() => handleBlur("display_name", displayName)}
               readOnly={!canManage}
             />
           </div>
@@ -394,7 +354,7 @@ export function ExpandedPanel({
           </Label>
           <Select
             value={transport}
-            onValueChange={handleTransportChange}
+            onValueChange={setTransport}
             disabled={!canManage}
           >
             <SelectTrigger id={`transport-${server.id}`} className="h-8 text-label w-40">
@@ -427,7 +387,6 @@ export function ExpandedPanel({
                 placeholder="npx"
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
-                onBlur={() => handleBlur("command", command)}
                 readOnly={!canManage}
               />
             </div>
@@ -441,7 +400,6 @@ export function ExpandedPanel({
                 placeholder="-y @modelcontextprotocol/server-github"
                 value={args}
                 onChange={(e) => setArgs(e.target.value)}
-                onBlur={() => handleBlur("args", args)}
                 readOnly={!canManage}
               />
             </div>
@@ -474,7 +432,7 @@ export function ExpandedPanel({
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onBlur={() => {
-                handleBlur("url", url)
+                // Blur only looks the new endpoint up; Save writes it.
                 if (url && url !== (server.endpoint ?? "")) {
                   discoverOAuth(url)
                 }
@@ -581,7 +539,6 @@ export function ExpandedPanel({
                   placeholder="KEY"
                   value={env.key}
                   onChange={(e) => updateEnvVar(idx, "key", e.target.value)}
-                  onBlur={handleEnvBlur}
                   readOnly={!canManage}
                   aria-label={`Environment variable key ${idx + 1}`}
                 />
@@ -596,12 +553,7 @@ export function ExpandedPanel({
                       workspaceId={workspaceId}
                       onFetchCredentials={fetchCredentials}
                       onAddCredential={addCredential}
-                      onChangeValue={(val) => {
-                        updateEnvVar(idx, "value", val)
-                        // Save immediately after credential selection
-                        const updated = envVars.map((e, i) => (i === idx ? { ...e, value: val } : e))
-                        void patchTracked({ env_json: serializeEnv(updated) })
-                      }}
+                      onChangeValue={(val) => updateEnvVar(idx, "value", val)}
                     />
                   </div>
                 ) : (

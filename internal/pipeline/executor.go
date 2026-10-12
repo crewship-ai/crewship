@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -261,6 +262,12 @@ type Executor struct {
 	// window instead of guessing at it. Nil in production.
 	onResumeSlotBusy func(runID string)
 
+	// afterResumeRegistryAcquire fires on a resumed Run right after it took
+	// the run's registry entry and before it re-reads the persisted status:
+	// the window in which a cancel can reach the resumed lifetime (#2910).
+	// Test rendezvous; nil in production.
+	afterResumeRegistryAcquire func(runID string)
+
 	// sleepFn / jitterFn make the per-step retry backoff (runStepWithRetry)
 	// injectable so tests drive the retry schedule deterministically without
 	// real wall-clock delays. Nil = production behaviour (real timer sleep,
@@ -285,6 +292,24 @@ type Executor struct {
 	// — can be drained together at shutdown before the journal closes.
 	verdictWG       sync.WaitGroup
 	sharedVerdictWG *sync.WaitGroup
+}
+
+// resumeAdmissionFailed classifies a resume that failed after taking the
+// run's registry entry but before runDSL's terminal persistence took over.
+// A user cancel that reached the lifetime there (#2910: the cancel API found
+// the resumed run live and cancelled it) is a CANCELLED run, not an
+// interrupted one; the caller's generic fallback would record the latter.
+func (e *Executor) resumeAdmissionFailed(runID, pipelineID string, err error) (*RunResult, error) {
+	if e.runs == nil || !e.runs.IsCancelRequested(runID) {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	const msg = "run cancelled while resuming"
+	if markErr := e.runStore.MarkTerminal(ctx, MarkTerminalInput{RunID: runID, Status: RunStatusCancelled, ErrorMessage: msg}); markErr != nil {
+		return nil, fmt.Errorf("executor: record cancelled resume: %w", markErr)
+	}
+	return &RunResult{RunID: runID, PipelineID: pipelineID, Status: "CANCELLED", ErrorMessage: msg}, nil
 }
 
 // verdictWaitGroup returns the group verdict goroutines register on: the
@@ -927,16 +952,49 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 			MaxConcurrent:  dsl.MaxConcurrent,
 		})
 		if regErr != nil {
-			// Free the idempotency reservation so the caller can
-			// retry the same key without waiting 24h. Best-effort —
-			// failure here just means the key stays reserved.
+			// Retry is safe only after releasing this pre-run reservation.
+			// Otherwise a retry returns DEDUPED for a run that never existed.
+			// Surface cleanup failure as a dispatch error, not capacity retry.
 			if in.IdempotencyKey != "" && e.idempotency != nil {
-				_ = e.idempotency.Forget(ctx, in.WorkspaceID, p.ID, in.IdempotencyKey)
+				if err := e.idempotency.Forget(ctx, in.WorkspaceID, p.ID, in.IdempotencyKey); err != nil {
+					return nil, fmt.Errorf("executor: release rejected run reservation: %w", err)
+				}
 			}
 			return nil, regErr
 		}
 		defer release()
 		ctx = regCtx
+	}
+
+	if in.resume && e.runStore != nil {
+		if e.afterResumeRegistryAcquire != nil {
+			e.afterResumeRegistryAcquire(preallocRunID)
+		}
+		rec, err := e.runStore.Get(ctx, preallocRunID)
+		if err != nil {
+			return e.resumeAdmissionFailed(preallocRunID, in.PipelineID, err)
+		}
+		if rec.Status != RunStatusQueued && rec.Status != RunStatusRunning && rec.Status != RunStatusWaiting {
+			return &RunResult{RunID: rec.ID, PipelineID: rec.PipelineID, Status: strings.ToUpper(string(rec.Status))}, nil
+		}
+		if rec.CurrentStepID != in.resumeCurrentStepID {
+			return e.resumeAdmissionFailed(preallocRunID, in.PipelineID, errResumePlanStale)
+		}
+		// Admission may have waited while another lifetime committed outputs.
+		// Restore again under the registry slot, never execute from a stale map.
+		outputs, err := e.runStore.GetStepOutputs(ctx, preallocRunID)
+		if err != nil {
+			return e.resumeAdmissionFailed(preallocRunID, in.PipelineID, err)
+		}
+		in.restoredOutputs = outputs
+		in.restoredCostUSD = rec.CostUSD
+	}
+
+	// Sweeper admission is bounded separately from full execution. Release its
+	// permit only after acquiring the run lifetime and fencing stale plans,
+	// before hooks, downstream steps or retry backoff can run indefinitely.
+	if in.resumeAdmitted != nil {
+		in.resumeAdmitted()
 	}
 
 	hookSlug := ""
@@ -1155,6 +1213,9 @@ type RunInput struct {
 	// resumeReasonRestart (boot scan) or resumeReasonApproval
 	// (waitpoint approved in-process). Set only by runResumedRun.
 	resumeReason string
+	// resumeAdmitted releases the sweeper's admission permit. The full Run
+	// lifetime remains tracked by its caller until Run returns.
+	resumeAdmitted func()
 }
 
 // costCapExceededMessage is the single wording for max_cost_usd

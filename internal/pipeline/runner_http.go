@@ -180,6 +180,7 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 		if credErr != nil || credValue == "" {
 			return "", 0, 0, fmt.Errorf("http step %q: required credential %q is unavailable; no request was sent", step.ID, ref.Type)
 		}
+		secrets.add(credValue)
 		injectCredential(req, ref, credValue)
 	}
 

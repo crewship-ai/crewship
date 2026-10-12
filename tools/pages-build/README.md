@@ -4,7 +4,7 @@ An opt-in runtime for custom React dashboards. The Go server stores the
 source draft, starts one short-lived Docker compiler, and returns immutable
 JavaScript/CSS. There is no per-Page web server or Vite development server.
 Draft Git checkpoints, reviewed publication/rollback and declared routine actions
-are implemented. Integrated file backup and retention are implemented; browser and operational release gates remain. The delivery PRD (`docs/prd/pages-apps-v1.md`) ships in the later documentation layer of #2472.
+are implemented. Integrated file backup and retention are implemented; browser and operational release gates remain. The delivery PRD (`docs/specs/pages-apps.md`) ships in the later documentation layer of #2472.
 
 Users continue to open `/pages/{slug}` on Studio. The runtime hostname is one
 installation setting shared by Pages, not a customer-facing Page URL or a domain

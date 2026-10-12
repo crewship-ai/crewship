@@ -92,6 +92,28 @@ describe("groupExplorerCrews", () => {
     expect(r.matchedAgents).toBe(1)
   })
 
+  it("lists only crews with an agent that passes the filters, and orders their agents", () => {
+    const r = groupExplorerCrews({
+      crews, agents, search: "ops",
+      match: (a) => a.status === "IDLE",
+      sortAgents: (list) => [...list].sort((a, b) => b.id.localeCompare(a.id)),
+    })
+    // "ops" matches the crew name, but a filter is on and none of its idle
+    // agents is called ops: the name alone does not list it.
+    expect(r.groups).toEqual([])
+    const all = groupExplorerCrews({ crews, agents, match: (a) => a.status === "IDLE", sortAgents: (list) => [...list].reverse() })
+    const rows = all.groups.flatMap((g) => g.rows)
+    expect(rows.map((x) => x.crew.id).sort()).toEqual(["eng", "ops", "qa"])
+    expect(rows.find((x) => x.crew.id === "eng")?.agents.map((a) => a.id)).toEqual(["sam"])
+    expect(all.unassigned.map((a) => a.id)).toEqual(["drifter"])
+    expect(all.matchedAgents).toBe(4)
+  })
+
+  it("orders crews by the given rule inside each group", () => {
+    const { groups } = groupExplorerCrews({ crews, agents, crewOrder: (a, b) => a.crew.name.localeCompare(b.crew.name) })
+    expect(groups[0].rows.map((r) => r.crew.id)).toEqual(["eng", "ops"])
+  })
+
   it("uses the crew's own count when the agent list is a page that missed its agents", () => {
     const { groups } = groupExplorerCrews({ crews: [crew("far", "Far", 3)], agents: [] })
     expect(groups[0].rows[0].agentCount).toBe(3)
@@ -113,6 +135,9 @@ describe("explorerCountLine", () => {
   })
   it("reports matches while searching, singular when one", () => {
     expect(explorerCountLine({ search: "ops", crewsTotal: 103, agentsTotal: 308, matchedCrews: 1, matchedAgents: 0 })).toBe("1 crew · 0 agents match")
+  })
+  it("counts matches when a filter is on without a search", () => {
+    expect(explorerCountLine({ search: "", narrowed: true, crewsTotal: 103, agentsTotal: 308, matchedCrews: 2, matchedAgents: 5 })).toBe("2 crews · 5 agents match")
   })
   it("falls back to what is loaded on a server that sends no total", () => {
     expect(explorerCountLine({ search: "", crewsTotal: null, agentsTotal: null, matchedCrews: 3, matchedAgents: 7 })).toBe("3 crews · 7 agents")

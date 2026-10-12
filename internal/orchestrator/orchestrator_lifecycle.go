@@ -70,6 +70,23 @@ func (o *Orchestrator) GetOrCreateContainerCfg(ctx context.Context, cfg provider
 	return containerID, nil
 }
 
+// AcquireContainerCfg keeps the resolved runtime reserved from preparation
+// through execution. The caller must release every non-nil handle, including
+// on partial sidecar startup, and pass it to AgentRunRequest.RuntimeUse.
+func (o *Orchestrator) AcquireContainerCfg(ctx context.Context, cfg provider.CrewConfig, workspaceID string) (*provider.RuntimeUse, error) {
+	use, _, err := o.crewStarter().StartUse(ctx, cfg, nil)
+	if err != nil {
+		return use, fmt.Errorf("reserve crew runtime for crew %s (workspace %s): %w", cfg.ID, workspaceID, err)
+	}
+	o.mu.RLock()
+	reg := o.statsRegister
+	o.mu.RUnlock()
+	if reg != nil && workspaceID != "" {
+		reg(use.ContainerID(), cfg.ID, workspaceID)
+	}
+	return use, nil
+}
+
 // RunAgentForAssignment runs a sub-agent as part of a mission assignment.
 // It skips conversation history injection (each task gets a clean context via the mission brief).
 // SkipSidecar is respected from the caller — regular AGENT tasks skip sidecar,
@@ -417,6 +434,16 @@ func (o *Orchestrator) checkTTLs(ctx context.Context) {
 			// Tracked but never associated with a container — nothing to
 			// stop, and keeping the entry would re-evaluate it every tick.
 			o.forgetCrew(c.crewID)
+			continue
+		}
+		if managed, ok := o.container.(provider.CrewIdleStopper); ok {
+			stopped, err := managed.StopUnusedCrewRuntime(ctx, c.crewID, c.containerID)
+			if err != nil {
+				o.logger.Debug("idle runtime stop deferred", "crew_id", c.crewID, "error", err)
+			}
+			if stopped {
+				o.forgetCrew(c.crewID)
+			}
 			continue
 		}
 		if o.containerOccupied(ctx, c.crewID, c.containerID) {

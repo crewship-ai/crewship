@@ -917,13 +917,16 @@ seen via [Refresh](#refresh-crew-integration-tools) have a row; a tool
 with no row is treated as **enabled** by default. This endpoint does
 **not** contact the MCP server.
 
-**This is advisory, not access control.** On the self-hosted/legacy MCP
-path, `enabled` only decides whether a tool's name is listed in the
-agent's `[CONNECTED INTEGRATIONS]` prompt block (a hint of what to
-call) — the sidecar gateway that actually dispatches tool calls does
-no per-tool check, so a disabled tool can still be invoked directly.
-Composio-routed integrations are the exception: those enforce their
-own `allowed_tools` scope server-side, independent of this table.
+**Where `enabled = false` is enforced, and where it is not.** On the
+self-hosted/legacy MCP path a disabled tool is left out of the agent's
+`[CONNECTED INTEGRATIONS]` prompt block, and the crew sidecar's MCP
+gateway (`/mcp/tools`, `/mcp/call`) neither advertises nor calls it.
+The gateway reads the bindings when the crew sidecar starts, so a change
+reaches it on the sidecar's next start. Agent CLIs that connect to an HTTP
+MCP server directly through their own MCP config are **not** gated per
+tool yet ([#2178](https://github.com/crewship-ai/crewship/issues/2178)).
+Composio-routed integrations enforce their own `allowed_tools` scope
+server-side, independent of this table.
 
 **Response:** `200 OK` — a JSON **array** of tool-binding objects (no wrapper).
 
@@ -939,7 +942,7 @@ own `allowed_tools` scope server-side, independent of this table.
 | `id` | string | Tool-binding row ID |
 | `tool_name` | string | MCP tool name |
 | `description` | string? | Tool description (nullable) |
-| `enabled` | boolean | Per-crew enabled state — advisory only, see caveat above |
+| `enabled` | boolean | Per-crew enabled state — see above for where it is enforced |
 | `created_at` | string | ISO 8601 timestamp |
 | `updated_at` | string | ISO 8601 timestamp |
 

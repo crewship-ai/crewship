@@ -75,7 +75,9 @@ const (
 	EntryRunCompleted EntryType = "run.completed"
 	EntryRunFailed    EntryType = "run.failed"
 	EntryRunCancelled EntryType = "run.cancelled"
-	EntryRunTimeout   EntryType = "run.timeout"
+	// Audit-only stop with no recorded start; never an automation or billing event.
+	EntryRunRecoveredStop EntryType = "run.recovered_stop"
+	EntryRunTimeout       EntryType = "run.timeout"
 
 	// Security
 	EntryKeeperRequest     EntryType = "keeper.request"
@@ -861,6 +863,10 @@ type Entry struct {
 	SpanID      string
 	ExpiresAt   *time.Time
 
+	// replay marks an idempotent projection. Its receipt commits atomically
+	// with the journal row and survives retention of that visible row.
+	replay bool
+
 	// flushBarrierAck is an internal sentinel used by Writer.Flush.
 	// When non-nil, the worker treats this Entry as a barrier rather
 	// than a row to persist — the barrier rides the same queue as
@@ -893,6 +899,12 @@ func (e *Entry) Validate() error {
 	}
 	if e.Summary == "" {
 		return errors.New("journal: summary required")
+	}
+	if e.Type == EntryRunRecoveredStop {
+		recorded, ok := e.Payload["start_recorded"].(bool)
+		if e.AgentID == "" || e.TraceID == "" || !ok || recorded {
+			return errors.New("journal: recovered stop requires agent, trace and start_recorded=false")
+		}
 	}
 	if e.Severity == "" {
 		e.Severity = SeverityInfo

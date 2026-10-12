@@ -54,8 +54,8 @@ export default defineConfig({
         '**/index.ts', // Barrel files
       ],
       // Thresholds are set from a measured run and enforced in CI: the
-      // "Test" step of the frontend-test job runs `pnpm test:coverage`,
-      // which is `vitest run --coverage`, and vitest exits non-zero when
+      // frontend-test job merges every shard with the base configuration,
+      // including these global thresholds, and Vitest exits non-zero when
       // any of these is not met. They sit just under the current numbers
       // so the gate starts green and ratchets upward as coverage lands.
       //

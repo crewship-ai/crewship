@@ -36,13 +36,13 @@ type PipelineRunDetail struct {
 	StepOutputs map[string]any `json:"step_outputs"`
 }
 
-// IsTerminal reports whether the pipeline run reached a status that will
-// not change further. "waiting" is deliberately NON-terminal — a run
+// IsTerminal reports whether the routine has finished or requires explicit
+// reconciliation before it can make further progress. "waiting" is deliberately NON-terminal — a run
 // parked on a human approval resumes when the waitpoint is approved, and
 // pollers must keep watching it.
 func (r *PipelineRunDetail) IsTerminal() bool {
 	switch strings.ToLower(r.Status) {
-	case "completed", "failed", "cancelled", "interrupted", "dry_run":
+	case "completed", "failed", "cancelled", "canceled", "interrupted", "dry_run", "needs_reconciliation":
 		return true
 	}
 	return false
@@ -121,6 +121,12 @@ func (c *Client) GetRunFiles(ctx context.Context, id string) (*RunFilesResult, e
 // either kind of run with identical semantics. A nil onTick is allowed;
 // when set it fires after every non-terminal read.
 func (c *Client) PollPipelineRun(ctx context.Context, id string, interval time.Duration, onTick func(*PipelineRunDetail)) (*PipelineRunDetail, error) {
+	return PollPipelineRunWith(ctx, id, interval, c.GetPipelineRun, onTick)
+}
+
+// PollPipelineRunWith shares the routine lifecycle between CLI and transports
+// that need their own bounded, policy-checked reader (such as MCP).
+func PollPipelineRunWith(ctx context.Context, id string, interval time.Duration, read func(context.Context, string) (*PipelineRunDetail, error), onTick func(*PipelineRunDetail)) (*PipelineRunDetail, error) {
 	if interval <= 0 {
 		interval = 2 * time.Second
 	}
@@ -130,7 +136,7 @@ func (c *Client) PollPipelineRun(ctx context.Context, id string, interval time.D
 	// First read happens immediately so already-terminal runs return
 	// without waiting a full interval.
 	for {
-		detail, err := c.GetPipelineRun(ctx, id)
+		detail, err := read(ctx, id)
 		if err != nil {
 			return nil, fmt.Errorf("poll routine run %q: %w", id, err)
 		}

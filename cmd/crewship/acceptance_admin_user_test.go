@@ -56,9 +56,26 @@ func TestAcceptance_AdminUserVerbs(t *testing.T) {
 		t.Fatal(err)
 	}
 	binary := buildCrewshipBinary(t)
+	// A previous ephemeral server can have used this URL for another
+	// workspace named people. Seed that collision deterministically instead
+	// of depending on the OS reusing a test server's port during a race run.
+	cliHome := t.TempDir()
+	cacheDir := filepath.Join(cliHome, ".crewship", "cache")
+	if err := os.MkdirAll(cacheDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	staleCache, err := json.Marshal(map[string]any{
+		srv.URL + "|" + ws: map[string]any{"id": "ba-people", "cached_at": time.Now().UTC()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "workspace_slugs.json"), staleCache, 0600); err != nil {
+		t.Fatal(err)
+	}
 	run := func(args ...string) (string, error) {
 		cmd := exec.Command(binary, args...)
-		cmd.Env = append(os.Environ(), "CREWSHIP_CONFIG="+cfg, "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=", "NO_COLOR=1", "DATABASE_URL=")
+		cmd.Env = append(os.Environ(), "HOME="+cliHome, "CREWSHIP_CONFIG="+cfg, "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=", "NO_COLOR=1", "DATABASE_URL=")
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}

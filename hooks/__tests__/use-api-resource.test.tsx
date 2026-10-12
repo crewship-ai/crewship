@@ -236,3 +236,49 @@ describe("useApiResource", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
+
+it.each(["notConfigured", "error"] as const)("keeps prior data on a 404 with %s policy", async (on404) => {
+  const body = { rows: [{ id: "saved" }] }
+  const fetchMock = vi.mocked(global.fetch)
+  fetchMock.mockResolvedValueOnce(okJSON(body)).mockResolvedValueOnce(notFound())
+  const { result } = renderHook(() => useApiResource<Rows>("/api/v1/thing", { keepDataOnError: true, on404 }))
+  await waitFor(() => expect(result.current.loading).toBe(false))
+  await act(async () => { await result.current.reload({ silent: true }) })
+  expect(result.current.data).toEqual(body)
+  expect(result.current.notConfigured).toBe(on404 === "notConfigured")
+  expect(result.current.error).toBe(on404 === "error" ? "HTTP 404" : null)
+})
+
+it("keeps prior data on a background transport failure", async () => {
+  const body = { rows: [{ id: "saved" }] }
+  vi.mocked(global.fetch).mockResolvedValueOnce(okJSON(body)).mockRejectedValueOnce(new Error("disconnected"))
+  const { result } = renderHook(() => useApiResource<Rows>("/api/v1/thing", { keepDataOnError: true }))
+  await waitFor(() => expect(result.current.loading).toBe(false))
+  await act(async () => { await result.current.reload({ silent: true }) })
+  expect(result.current).toMatchObject({ data: body, loading: false, error: "Network error" })
+})
+
+it("polls silently, then cancels polling when disabled and on unmount", async () => {
+  vi.useFakeTimers()
+  try {
+    const body = { rows: [{ id: "saved" }] }
+    const next = deferred<Response>()
+    const fetchMock = vi.mocked(global.fetch).mockResolvedValueOnce(okJSON(body)).mockReturnValueOnce(next.promise).mockResolvedValue(okJSON(body))
+    const { result, rerender, unmount } = renderHook(({ enabled }) => useApiResource<Rows>("/api/v1/thing", { enabled, pollMs: 1000 }), { initialProps: { enabled: true } })
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.data).toEqual(body)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.current.loading).toBe(false)
+    rerender({ enabled: false })
+    await act(async () => { next.resolve(okJSON({ rows: [{ id: "obsolete" }] })); await vi.advanceTimersByTimeAsync(3000) })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.current.data).toEqual(body)
+    rerender({ enabled: true })
+    await act(async () => { await Promise.resolve() })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    unmount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  } finally { vi.useRealTimers() }
+})

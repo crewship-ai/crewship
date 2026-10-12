@@ -13,20 +13,25 @@ import (
 // due rows (FireAt <= now), highest Priority first, and expires rows
 // past ExpiresAt.
 type PendingRun struct {
-	PinnedVersion *int // nil is the legacy live-at-dispatch policy
-	ID            string
-	WorkspaceID   string
-	PipelineID    string
-	PipelineSlug  string
-	InputsJSON    string
-	TagsJSON      string
-	MetadataJSON  string
-	TierOverride  string
-	Priority      int
-	DebounceKey   string
-	FireAt        time.Time
-	ExpiresAt     *time.Time
-	DebounceMaxAt *time.Time
+	PinnedVersion    *int // nil is the legacy live-at-dispatch policy
+	Status           string
+	FiredRunID       string
+	DispatchAttempts int
+	LastError        string     // Safe public reason, never raw executor errors or inputs.
+	NextAttemptAt    *time.Time // Backoff eligibility; FireAt remains the occurrence identity.
+	ID               string
+	WorkspaceID      string
+	PipelineID       string
+	PipelineSlug     string
+	InputsJSON       string
+	TagsJSON         string
+	MetadataJSON     string
+	TierOverride     string
+	Priority         int
+	DebounceKey      string
+	FireAt           time.Time
+	ExpiresAt        *time.Time
+	DebounceMaxAt    *time.Time
 	// InvokingUserID is the workspace user who enqueued this deferred run,
 	// threaded through to the fired run so a notify step can resolve
 	// `to: trigger` to a real recipient (issue #842 Phase 1). Empty for
@@ -192,7 +197,7 @@ func (s *PendingRunStore) coalesceDebounce(ctx context.Context, pr PendingRun, a
 	var existingPin *int
 	err := s.db.QueryRowContext(ctx, `
 SELECT id, COALESCE(debounce_max_at,''), pinned_version FROM pending_runs
-WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending'`,
+WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending' AND dispatch_attempts = 0`,
 		pr.PipelineID, pr.DebounceKey).Scan(&existingID, &maxAt, &existingPin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return EnqueueResult{}, errNoPendingRow
@@ -265,7 +270,7 @@ SET inputs_json = ?, tags_json = ?, metadata_json = ?, tier_override = ?,
     chain_origin = CASE WHEN ? > COALESCE(chain_depth,0) THEN ? ELSE chain_origin END,
     chain_depth  = MAX(COALESCE(chain_depth,0), ?),
     updated_at = datetime('now','subsec')
-WHERE id = ? AND status = 'pending' AND pinned_version IS ?`,
+WHERE id = ? AND status = 'pending' AND dispatch_attempts = 0 AND pinned_version IS ?`,
 		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 		nullableStr(pr.TierOverride), pr.Priority, formatRFC3339(fireAt),
 		nullableTime(pr.ExpiresAt), nullableStr(pr.InvokingUserID), pr.InvocationAuthority,
@@ -288,20 +293,22 @@ WHERE id = ? AND status = 'pending' AND pinned_version IS ?`,
 func (s *PendingRunStore) ClaimDue(ctx context.Context, id string, now time.Time) (*PendingRun, error) {
 	var pr PendingRun
 	var fireAt string
+	var expiresAt sql.NullString
 	at := formatRFC3339(now)
 	err := s.db.QueryRowContext(ctx, `
 UPDATE pending_runs
-SET status='fired', fired_run_id='', updated_at=datetime('now','subsec')
+SET status='fired', fired_run_id='', last_error='', next_attempt_at=NULL, dispatch_attempts=dispatch_attempts+1, updated_at=datetime('now','subsec')
 WHERE id=? AND status='pending' AND fire_at<=?
+  AND (next_attempt_at IS NULL OR next_attempt_at<=?)
   AND (expires_at IS NULL OR expires_at>?)
 RETURNING id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
     COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,''), invocation_authority,
     COALESCE(triggered_via,''), COALESCE(triggered_by_id,''), COALESCE(chain_depth,0),
-    COALESCE(chain_origin,''), pinned_version, fire_at`, id, at, at).Scan(
+    COALESCE(chain_origin,''), pinned_version, fire_at, expires_at, dispatch_attempts`, id, at, at, at).Scan(
 		&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
 		&pr.InputsJSON, &pr.TagsJSON, &pr.MetadataJSON, &pr.TierOverride, &pr.Priority,
 		&pr.InvokingUserID, &pr.InvocationAuthority, &pr.TriggeredVia, &pr.TriggeredByID, &pr.ChainDepth,
-		&pr.ChainOrigin, &pr.PinnedVersion, &fireAt)
+		&pr.ChainOrigin, &pr.PinnedVersion, &fireAt, &expiresAt, &pr.DispatchAttempts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -312,6 +319,13 @@ RETURNING id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, 
 	if err != nil {
 		return nil, fmt.Errorf("pending_runs: parse claimed fire_at: %w", err)
 	}
+	if expiresAt.Valid {
+		at, perr := time.Parse(time.RFC3339Nano, expiresAt.String) // tsformat:allow: parsing a persisted timestamp
+		if perr != nil {
+			return nil, fmt.Errorf("pending_runs: parse expires_at: %w", perr)
+		}
+		pr.ExpiresAt = &at
+	}
 	return &pr, nil
 }
 
@@ -319,7 +333,8 @@ RETURNING id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, 
 // count. Run before DueRuns so an expired-but-due row never fires.
 func (s *PendingRunStore) ExpireDue(ctx context.Context, now time.Time) (int, error) {
 	res, err := s.db.ExecContext(ctx, `
-UPDATE pending_runs SET status = 'expired', updated_at = datetime('now','subsec')
+UPDATE pending_runs SET status = 'expired', next_attempt_at = NULL,
+    last_error = 'Deferred start expired before dispatch.', updated_at = datetime('now','subsec')
 WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?`,
 		formatRFC3339(now))
 	if err != nil {
@@ -342,9 +357,9 @@ SELECT id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, met
        COALESCE(triggered_via,''), COALESCE(triggered_by_id,''), COALESCE(chain_depth,0),
        COALESCE(chain_origin,''), pinned_version, fire_at
 FROM pending_runs
-WHERE status = 'pending' AND fire_at <= ?
+WHERE status = 'pending' AND fire_at <= ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
 ORDER BY priority DESC, created_at ASC
-LIMIT ?`, formatRFC3339(now), limit)
+LIMIT ?`, formatRFC3339(now), formatRFC3339(now), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -382,19 +397,19 @@ WHERE id = ? AND status = 'pending'`, runID, id)
 }
 
 // SetFiredRunID backfills the dispatched run id after a claim (which
-// stamps status='fired' with an empty run id). No status guard — the
-// row is already ours post-claim.
-func (s *PendingRunStore) SetFiredRunID(ctx context.Context, id, runID string) error {
+// stamps status='fired' with an empty run id). The occurrence and attempt
+// guard prevent a late worker from overwriting a newly rearmed start.
+func (s *PendingRunStore) SetFiredRunID(ctx context.Context, pr PendingRun, runID string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE pending_runs SET fired_run_id = ?, updated_at = datetime('now','subsec') WHERE id = ?`,
-		runID, id)
+		`UPDATE pending_runs SET fired_run_id = ?, next_attempt_at = NULL, last_error = '', updated_at = datetime('now','subsec') WHERE id = ? AND status = 'fired' AND dispatch_attempts=? AND fire_at=?`,
+		runID, pr.ID, pr.DispatchAttempts, formatRFC3339(pr.FireAt))
 	return err
 }
 
 // Cancel removes a pending row before it fires.
 func (s *PendingRunStore) Cancel(ctx context.Context, workspaceID, id string) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `
-UPDATE pending_runs SET status = 'cancelled', updated_at = datetime('now','subsec')
+UPDATE pending_runs SET status = 'cancelled', next_attempt_at = NULL, last_error = '', updated_at = datetime('now','subsec')
 WHERE id = ? AND workspace_id = ? AND status = 'pending'`, id, workspaceID)
 	if err != nil {
 		return false, err
@@ -403,31 +418,105 @@ WHERE id = ? AND workspace_id = ? AND status = 'pending'`, id, workspaceID)
 	return n > 0, nil
 }
 
-// ListPending returns a workspace's not-yet-fired deferred runs.
+// FinishDispatchError changes only this still-unlinked claim. Retrying does not
+// change FireAt (the idempotency occurrence), payload, pin, priority or deadline.
+// Retried debounce rows no longer accept coalesces; a newer trigger is separate.
+func (s *PendingRunStore) FinishDispatchError(ctx context.Context, pr PendingRun, status, reason string, next *time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+UPDATE pending_runs SET status=?, last_error=?, next_attempt_at=?, updated_at=datetime('now','subsec')
+WHERE id=? AND status='fired' AND COALESCE(fired_run_id,'')='' AND dispatch_attempts=? AND fire_at=?`,
+		status, reason, nullableTime(next), pr.ID, pr.DispatchAttempts, formatRFC3339(pr.FireAt))
+	return err
+}
+
+// ListPending preserves the original pending-only list contract.
 func (s *PendingRunStore) ListPending(ctx context.Context, workspaceID string, limit int) ([]PendingRun, error) {
+	return s.ListByStatus(ctx, workspaceID, "pending", limit)
+}
+
+const pendingReceiptColumns = `id, workspace_id, pipeline_id, pipeline_slug,
+    COALESCE(debounce_key,''), priority, fire_at, expires_at, pinned_version, inputs_json,
+    status, COALESCE(fired_run_id,''), dispatch_attempts, last_error, next_attempt_at`
+
+type pendingScanner interface{ Scan(...any) error }
+
+func scanPendingReceipt(row pendingScanner) (PendingRun, error) {
+	var pr PendingRun
+	var fireAt string
+	var expiresAt, nextAt sql.NullString
+	if err := row.Scan(&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
+		&pr.DebounceKey, &pr.Priority, &fireAt, &expiresAt, &pr.PinnedVersion, &pr.InputsJSON,
+		&pr.Status, &pr.FiredRunID, &pr.DispatchAttempts, &pr.LastError, &nextAt); err != nil {
+		return pr, err
+	}
+	var err error
+	pr.FireAt, err = time.Parse(time.RFC3339Nano, fireAt)
+	if err != nil {
+		return pr, err
+	}
+	for _, field := range []struct {
+		raw  sql.NullString
+		dest **time.Time
+	}{{expiresAt, &pr.ExpiresAt}, {nextAt, &pr.NextAttemptAt}} {
+		if field.raw.Valid {
+			at, perr := time.Parse(time.RFC3339Nano, field.raw.String)
+			if perr != nil {
+				return pr, perr
+			}
+			*field.dest = &at
+		}
+	}
+	return pr, nil
+}
+
+// ListByStatus includes terminal receipts on request. Pending order stays
+// priority DESC, created_at ASC among eligible rows in DueRuns; this read uses
+// scheduled time. History uses newest first. The exact ID remains queryable
+// through Get even after falling out of this bounded list.
+func (s *PendingRunStore) ListByStatus(ctx context.Context, workspaceID, status string, limit int) ([]PendingRun, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, pipeline_id, pipeline_slug, COALESCE(debounce_key,''), priority, fire_at, pinned_version, inputs_json
-FROM pending_runs WHERE workspace_id = ? AND status = 'pending'
-ORDER BY fire_at ASC LIMIT ?`, workspaceID, limit)
+	query := "SELECT " + pendingReceiptColumns + " FROM pending_runs WHERE workspace_id = ?"
+	args := []any{workspaceID}
+	if status != "all" {
+		query += " AND status = ?"
+		args = append(args, status)
+	}
+	if status == "pending" {
+		query += " ORDER BY fire_at ASC"
+	} else {
+		query += " ORDER BY created_at DESC, id DESC"
+	}
+	query += " LIMIT ?"
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []PendingRun
+	out := []PendingRun{}
 	for rows.Next() {
-		var pr PendingRun
-		var fireAt string
-		if err := rows.Scan(&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
-			&pr.DebounceKey, &pr.Priority, &fireAt, &pr.PinnedVersion, &pr.InputsJSON); err != nil {
+		pr, err := scanPendingReceipt(rows)
+		if err != nil {
 			return nil, err
 		}
-		pr.FireAt, _ = time.Parse(time.RFC3339Nano, fireAt)
 		out = append(out, pr)
 	}
 	return out, rows.Err()
+}
+
+// Get scopes the receipt to its workspace, including fired and terminal rows.
+// An empty fired_run_id is not failure evidence: Run may still be executing.
+func (s *PendingRunStore) Get(ctx context.Context, workspaceID, id string) (*PendingRun, error) {
+	pr, err := scanPendingReceipt(s.db.QueryRowContext(ctx, "SELECT "+pendingReceiptColumns+" FROM pending_runs WHERE workspace_id=? AND id=?", workspaceID, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &pr, nil
 }
 
 // orJSON returns v, or fallback when v is empty — keeps the JSON columns

@@ -53,7 +53,7 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: "1.27.1"
+  GO_VERSION: "1.27.2"
   NODE_VERSION: "22"
   PNPM_VERSION: "10"
 
@@ -131,7 +131,7 @@ jobs:
       - name: Bootstrap admin + CLI token
         env:
           CREWSHIP_SERVER: http://localhost:8080
-        run: ./crewship seed --skip-issues --server "$CREWSHIP_SERVER"
+        run: ./crewship seed --offline-demo --skip-issues --server "$CREWSHIP_SERVER"
 
       - name: Run E2E devcontainer test
         run: bash scripts/e2e-devcontainer-test.sh

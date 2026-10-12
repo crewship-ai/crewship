@@ -90,11 +90,17 @@ disabled, so a stopped service stays stopped across Docker and host restarts.
 
 ## Backups
 
-While any service of a crew has quota volumes, **crew and workspace backups
-of that crew's workspace are refused** with an explicit error. The contents of
-quota volumes cannot be captured until snapshot transport for them exists,
-and a bundle that silently omitted them would not restore the service. See
-[Backup](/guides/backup).
+Crew, workspace and whole-instance backups include quota volumes when the
+server's quota helper is configured. The backup stops the service and copies
+each volume offline; the service controller resumes it after the complete
+bundle is written. Without the helper, a backup that covers a
+crew with quota volumes is **refused** with an explicit error rather than
+producing a bundle that silently omits them.
+
+If a backup fails while copying these volumes, the service stays stopped under
+maintenance. Once the failed backup's writers have stopped, an admin retries
+with `crewship backup create --recover-services`. See
+[Backup](/guides/backup#persistent-quota-service-disks).
 
 ## Host requirements
 
@@ -170,4 +176,5 @@ one.
 - Image users given by name are not resolved; such volumes stay root-owned.
 - The physical tests (overflow, helper restart, host reboot) run only in
   dedicated guests with explicit opt-in. No CI workflow runs them yet.
-- Quota volume contents are not part of backups yet.
+- Backups of quota volumes require the server's quota helper; without it they
+  are refused.

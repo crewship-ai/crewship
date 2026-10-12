@@ -143,7 +143,6 @@ export function EmptyRoster({ agents, crews, onAgentSelect, showCrews = false }:
                         <AgentAvatar
                           seed={a.avatar_seed || a.name}
                           style={a.avatar_style || a.crew?.avatar_style}
-                          agentId={a.id}
                           avatarUrl={a.avatar_url}
                           className="h-8 w-8 md:h-6 md:w-6 rounded-lg md:rounded-full shrink-0"
                         />

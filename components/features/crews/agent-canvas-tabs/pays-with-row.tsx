@@ -52,6 +52,66 @@ interface BindingRow {
   slot: string
 }
 
+/**
+ * Swap the agent's seat: release the AGENT binding that points at a seat,
+ * then bind `seat`. No PATCH on a binding — the row IS the slot claim, so the
+ * delete goes first or the create would 409 on the slot the old seat holds.
+ * A failed create puts the released binding back; if that fails too the
+ * error says so. Returns without a write when `seat` is already bound.
+ */
+export async function swapSeat(workspaceId: string, agentId: string, seat: LoginCredential, boundSeat: BindingRow | null): Promise<void> {
+  const ws = encodeURIComponent(workspaceId)
+  if (boundSeat?.credential_id === seat.id) return
+  let released: BindingRow | null = null
+  try {
+    const slot = loginBindingSlot(seat.login, boundSeat?.slot ?? null) ?? "PROVIDER_LOGIN"
+    if (boundSeat) {
+      const del = await apiFetch(`/api/v1/credentials/bindings/${encodeURIComponent(boundSeat.id)}?workspace_id=${ws}`, { method: "DELETE" })
+      if (!del.ok && del.status !== 404) throw new Error(`Couldn't release the current seat (HTTP ${del.status}).`)
+      if (del.ok) released = boundSeat
+    }
+    const res = await apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential_id: seat.id, scope: "AGENT", crew_id: "", agent_id: agentId, slot }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(typeof data.error === "string" ? data.error : `Couldn't assign the seat (HTTP ${res.status}).`)
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Could not save"
+    if (released) {
+      const back = await apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credential_id: released.credential_id, scope: "AGENT", crew_id: "", agent_id: agentId, slot: released.slot }),
+      }).catch(() => null)
+      if (!back?.ok) throw new Error(`${message} The previous seat was released and could not be restored. Check the agent's assignment before running it.`)
+    }
+    throw new Error(message)
+  }
+}
+
+/**
+ * Apply a seat picked in a draft (the agent Edit dialog's Save): reads the
+ * agent's bindings and the workspace's seats fresh, so the swap releases what
+ * is bound now rather than what was bound when the dialog opened.
+ */
+export async function applyPaysWith(workspaceId: string, agentId: string, seat: LoginCredential): Promise<void> {
+  const ws = encodeURIComponent(workspaceId)
+  const [listRes, bindRes] = await Promise.all([
+    apiFetch(`/api/v1/credentials?workspace_id=${ws}&kind=provider_login`),
+    apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}&scope=AGENT&agent_id=${encodeURIComponent(agentId)}`),
+  ])
+  if (!listRes.ok || !bindRes.ok) throw new Error(`Couldn't read the agent's current seat (HTTP ${listRes.ok ? bindRes.status : listRes.status}).`)
+  const list = await listRes.json()
+  const body = (await bindRes.json()) as { bindings?: BindingRow[] }
+  const seatIds = new Set((Array.isArray(list) ? (list as LoginCredential[]) : []).filter((c) => c?.login).map((c) => c.id))
+  const bound = (Array.isArray(body?.bindings) ? body.bindings : []).find((b) => seatIds.has(b.credential_id)) ?? null
+  await swapSeat(workspaceId, agentId, seat, bound)
+}
+
 export interface PaysWithRowProps {
   workspaceId: string
   agentId: string
@@ -61,9 +121,16 @@ export interface PaysWithRowProps {
   paysWith?: AgentPaysWith | null
   /** After a binding is written — the canvas may want to re-read `pays_with`. */
   onChanged?: () => void
+  /**
+   * Draft mode (the agent Edit dialog): picking a seat calls this instead of
+   * writing a binding; the caller applies it on Save (applyPaysWith).
+   */
+  onPick?: (seat: LoginCredential) => void
+  /** The seat picked in draft mode and not saved yet. */
+  pending?: LoginCredential | null
 }
 
-export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysWith, onChanged }: PaysWithRowProps) {
+export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysWith, onChanged, onPick, pending }: PaysWithRowProps) {
   const { abilities } = useAbilities()
   const canBind = abilities.can("manage", "Credential")
   const [seats, setSeats] = React.useState<LoginCredential[]>([])
@@ -115,7 +182,8 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
   const seatById = React.useMemo(() => new Map(seats.map((s) => [s.id, s])), [seats])
   const boundSeat = snapshotStale && loadError ? null : bindings.find((b) => seatById.has(b.credential_id)) ?? null
   const currentId = loaded ? boundSeat?.credential_id ?? snapshot?.credential_id ?? null : snapshot?.credential_id ?? null
-  const current = currentId ? seatById.get(currentId) ?? null : null
+  const saved = currentId ? seatById.get(currentId) ?? null : null
+  const current = pending ?? saved
   const currentLogin: ProviderLogin | null = current?.login ?? snapshot?.login ?? null
   const currentName = current?.name ?? snapshot?.name ?? null
 
@@ -141,49 +209,25 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
       : null
 
   async function choose(seat: LoginCredential) {
+    if (onPick) {
+      onPick(seat)
+      setOpen(false)
+      return
+    }
     if (seat.id === currentId) {
       setOpen(false)
       return
     }
     setSaving(true)
-    let released: BindingRow | null = null
     try {
-      // No PATCH on a binding — the row IS the slot claim. Swapping seats is
-      // delete-then-create; the delete goes first so the create cannot 409 on
-      // the slot the old seat still holds.
-      const slot = loginBindingSlot(seat.login, boundSeat?.slot ?? null) ?? "PROVIDER_LOGIN"
-      if (boundSeat) {
-        setSnapshotStale(true)
-        const del = await apiFetch(`/api/v1/credentials/bindings/${encodeURIComponent(boundSeat.id)}?workspace_id=${ws}`, { method: "DELETE" })
-        if (!del.ok && del.status !== 404) throw new Error(`Couldn't release the current seat (HTTP ${del.status}).`)
-        if (del.ok) released = boundSeat
-      }
       setSnapshotStale(true)
-      const res = await apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credential_id: seat.id, scope: "AGENT", crew_id: "", agent_id: agentId, slot }),
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(typeof data.error === "string" ? data.error : `Couldn't assign the seat (HTTP ${res.status}).`)
-      }
+      await swapSeat(workspaceId, agentId, seat, boundSeat)
       toast.success(`Pays with saved`)
       setOpen(false)
       void load()
       onChanged?.()
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Could not save"
-      let restored = true
-      if (released) {
-        const back = await apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ credential_id: released.credential_id, scope: "AGENT", crew_id: "", agent_id: agentId, slot: released.slot }),
-        }).catch(() => null)
-        restored = Boolean(back?.ok)
-      }
-      toast.error(restored ? message : `${message} The previous seat was released and could not be restored. Check the agent's assignment before running it.`)
+      toast.error(err instanceof Error ? err.message : "Could not save")
       await load()
       onChanged?.()
     } finally {
@@ -228,6 +272,7 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
                 <>
                   <LoginBrandMark provider={currentLogin.provider} size="sm" />
                   <span className="min-w-0 flex-1 truncate">{currentName}</span>
+                  {pending && pending.id !== saved?.id && <span className="shrink-0 type-meta text-primary-hover">unsaved</span>}
                 </>
               ) : (
                 <>
@@ -259,7 +304,7 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
               {seats.map((seat) => {
                 const login = seat.login!
                 const wrong = provider !== null && login.provider.toUpperCase() !== provider
-                const selected = seat.id === currentId
+                const selected = seat.id === (pending?.id ?? currentId)
                 return (
                   <li key={seat.id}>
                     <button

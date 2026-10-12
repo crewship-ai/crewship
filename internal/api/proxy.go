@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
 // ProxyHandler proxies requests from the UI to the crewshipd sidecar over the Unix socket.
@@ -221,7 +222,9 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, []interface{}{})
 }
 
-// AgentStop reports STOPPED only after the daemon confirms runtime termination.
+// AgentStop reports STOPPED only after the daemon confirms the agent is not
+// running: outcome "stopped" (it ended something) or "already_stopped" (it
+// established nothing was running, #2879). A refusal is 502 with a stable code.
 func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -244,18 +247,35 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.ipcPost(r.Context(), fmt.Sprintf("/agents/%s/stop", url.PathEscape(agentID)), nil)
 	if err != nil {
-		replyError(w, http.StatusBadGateway, "runtime stop unavailable")
+		replyAgentStopRefusal(w, orchestrator.AgentStopCodeRuntimeUnavailable)
 		return
 	}
 	defer resp.Body.Close()
 	var confirmed struct {
 		AgentID string `json:"agent_id"`
 		Status  string `json:"status"`
+		Outcome string `json:"outcome"`
+		Code    string `json:"code"`
 	}
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4097))
 	decodeErr := json.Unmarshal(body, &confirmed)
-	if resp.StatusCode != http.StatusOK || readErr != nil || len(body) > 4096 || decodeErr != nil || confirmed.AgentID != agentID || confirmed.Status != "stopped" {
-		replyError(w, http.StatusBadGateway, "runtime stop not confirmed")
+	if resp.StatusCode != http.StatusOK {
+		// Only the daemon's own runtime_unavailable is forwarded as such;
+		// anything else may mean a live process.
+		code := orchestrator.AgentStopCodeNotConfirmed
+		if decodeErr == nil && confirmed.Code == orchestrator.AgentStopCodeRuntimeUnavailable {
+			code = confirmed.Code
+		}
+		replyAgentStopRefusal(w, code)
+		return
+	}
+	// A daemon predating #2879 omits outcome; its 200 always meant stopped.
+	if confirmed.Outcome == "" {
+		confirmed.Outcome = string(orchestrator.AgentStopStopped)
+	}
+	knownOutcome := confirmed.Outcome == string(orchestrator.AgentStopStopped) || confirmed.Outcome == string(orchestrator.AgentStopAlreadyStopped)
+	if readErr != nil || len(body) > 4096 || decodeErr != nil || confirmed.AgentID != agentID || confirmed.Status != "stopped" || !knownOutcome {
+		replyAgentStopRefusal(w, orchestrator.AgentStopCodeNotConfirmed)
 		return
 	}
 
@@ -272,7 +292,17 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"id": agentID, "status": "STOPPED"})
+	writeJSON(w, http.StatusOK, map[string]string{"id": agentID, "status": "STOPPED", "outcome": confirmed.Outcome})
+}
+
+// replyAgentStopRefusal is AgentStop's 502: the agent may still be running.
+// code is one of the orchestrator.AgentStopCode* values.
+func replyAgentStopRefusal(w http.ResponseWriter, code string) {
+	msg := "runtime stop not confirmed"
+	if code == orchestrator.AgentStopCodeRuntimeUnavailable {
+		msg = "runtime stop unavailable"
+	}
+	writeJSON(w, http.StatusBadGateway, map[string]string{"error": msg, "code": code})
 }
 
 // ChatMessages returns the conversation message history for a chat session.

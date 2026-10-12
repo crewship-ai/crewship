@@ -298,6 +298,13 @@ func execCommandPayload(req AgentRunRequest, journalCmd journalCmdView, phase st
 	payload["model"] = bound(req.LLMModel)
 	payload["tool_profile"] = bound(req.ToolProfile)
 	payload["container_id"] = shortID(req.ContainerID)
+	// Immutable admission evidence, never a CLI session's self-reported version.
+	delete(payload, "managed_launch")
+	if req.managedLaunch != nil {
+		payload["managed_launch"] = map[string]any{"image_id": req.managedLaunch.ImageID, "revision_id": req.managedLaunch.RevisionID,
+			"lock_sha256": req.managedLaunch.LockSHA256, "binary": req.managedLaunch.Binary, "version": req.managedLaunch.Version,
+			"path": req.managedLaunch.Path, "sha256": req.managedLaunch.SHA256, "format": req.managedLaunch.Format}
+	}
 	if req.runtimeImageID != "" {
 		payload["runtime_image_id"] = req.runtimeImageID
 	} else {

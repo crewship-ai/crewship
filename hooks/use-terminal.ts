@@ -36,8 +36,13 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   const wsRef = useRef<WebSocket | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
+  const connectionGenerationRef = useRef(0)
 
   const disconnect = useCallback(() => {
+    // Invalidate pending token requests and queued callbacks before teardown.
+    connectionGenerationRef.current += 1
+    observerRef.current?.disconnect()
+    observerRef.current = null
     if (wsRef.current) {
       wsRef.current.close()
       wsRef.current = null
@@ -54,6 +59,8 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     if (!enabled || !containerRef.current) return
 
     let cancelled = false
+    const generation = connectionGenerationRef.current
+    const isCancelled = () => cancelled || connectionGenerationRef.current !== generation
     const el = containerRef.current
 
     async function connect() {
@@ -62,12 +69,17 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
 
         // Fetch WS token.
         const tokenRes = await apiFetch("/api/v1/ws-token")
+        if (isCancelled()) return
         if (!tokenRes.ok) {
           setStatus("error")
           return
         }
         const { token } = await tokenRes.json()
-        if (!token || cancelled) return
+        if (isCancelled()) return
+        if (typeof token !== "string" || token.length === 0) {
+          setStatus("error")
+          return
+        }
 
         // Build WebSocket URL via the server-base seam; the dev-port
         // remap below only applies to the same-origin default (the shell
@@ -113,7 +125,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
         wsRef.current = ws
 
         ws.onopen = () => {
-          if (cancelled) { ws.close(); return }
+          if (isCancelled()) { ws.close(); return }
           // Authenticate first, then send init message.
           ws.send(JSON.stringify({ type: "auth", token }))
           const initMsg = JSON.stringify({
@@ -129,6 +141,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
         }
 
         ws.onmessage = (event) => {
+          if (isCancelled()) return
           if (event.data instanceof ArrayBuffer) {
             // Binary: raw terminal output.
             terminal.write(new Uint8Array(event.data))
@@ -150,19 +163,19 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
         }
 
         ws.onclose = () => {
-          if (!cancelled) {
+          if (!isCancelled()) {
             terminal.writeln("\r\n\x1b[90m[Connection closed]\x1b[0m")
             setStatus("disconnected")
           }
         }
 
         ws.onerror = () => {
-          setStatus("error")
+          if (!isCancelled()) setStatus("error")
         }
 
         // Terminal input → WebSocket.
         terminal.onData((data) => {
-          if (ws.readyState === WebSocket.OPEN) {
+          if (!isCancelled() && ws.readyState === WebSocket.OPEN) {
             const encoder = new TextEncoder()
             ws.send(encoder.encode(data))
           }
@@ -170,21 +183,21 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
 
         // Terminal resize → WebSocket.
         terminal.onResize(({ rows, cols }) => {
-          if (ws.readyState === WebSocket.OPEN) {
+          if (!isCancelled() && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "resize", rows, cols }))
           }
         })
 
         // Auto-fit on container resize.
         const observer = new ResizeObserver(() => {
-          if (fitAddonRef.current) {
+          if (!isCancelled() && fitAddonRef.current) {
             fitAddonRef.current.fit()
           }
         })
         observer.observe(el)
         observerRef.current = observer
       } catch {
-        if (!cancelled) setStatus("error")
+        if (!isCancelled()) setStatus("error")
       }
     }
 
@@ -192,8 +205,6 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
 
     return () => {
       cancelled = true
-      observerRef.current?.disconnect()
-      observerRef.current = null
       disconnect()
     }
   }, [enabled, crewId, crewSlug, mode, agentSlug, key, containerRef, disconnect])

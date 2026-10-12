@@ -105,6 +105,10 @@ var pathWorkspaceAllowlist = map[string]string{
 	// in the path IS the target, chosen by an instance admin who may act on
 	// any workspace; there is no membership check it could slip past.
 	"admin_instance.go": "authedInstance routes: the path workspace is the instance admin's target, and no workspace membership is resolved",
+	// The logo serve route (#3005) is authed only, like a user's avatar: a
+	// workspace is drawn to instance admins and in the switcher. The path id
+	// picks which logo file to stream; it scopes no query and reads no rows.
+	"workspaces_logo.go": "ServeLogo streams the logo file named by the path; no query, no tenant rows",
 }
 
 // TestNoHandlerReadsWorkspaceFromPath is the class-level guard. It parses the

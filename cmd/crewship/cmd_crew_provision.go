@@ -274,7 +274,7 @@ Examples:
 
 var crewRebuildCmd = &cobra.Command{
 	Use:   "rebuild <slug-or-id>",
-	Short: "Invalidate cache and re-provision a crew container",
+	Short: "Rebuild a crew's image without reusing the build cache",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -301,7 +301,7 @@ var crewRebuildCmd = &cobra.Command{
 
 		noWatch, _ := cmd.Flags().GetBool("no-watch")
 		if noWatch {
-			cli.PrintSuccess(fmt.Sprintf("Cache invalidated and provisioning started for crew %q.", args[0]))
+			cli.PrintSuccess(fmt.Sprintf("Rebuild started for crew %q; the previous image stays selected until the new build succeeds.", args[0]))
 			return nil
 		}
 

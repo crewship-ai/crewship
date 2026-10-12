@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
   runs: [] as unknown[],
   agentItems: [] as unknown[],
   refresh: vi.fn(),
+  role: "OWNER" as string | null,
 }))
 
 vi.mock("sonner", () => ({
@@ -35,7 +36,7 @@ vi.mock("@/hooks/use-realtime", () => ({
 }))
 
 vi.mock("@/hooks/use-workspace", () => ({
-  useWorkspace: () => ({ workspaceId: "ws-1" }),
+  useWorkspace: () => ({ workspaceId: "ws-1", role: h.role }),
 }))
 
 // The dropdown consumes the shared hook — feed it the same derivation
@@ -124,6 +125,7 @@ describe("<ActivityBell> badge", () => {
   beforeEach(() => {
     h.runs = []
     h.agentItems = []
+    h.role = "OWNER"
   })
 
   it("hides the badge when nothing is live", () => {
@@ -199,21 +201,18 @@ describe("<ActivityBell> dropdown", () => {
     expect(screen.getByText(/ask-casey/)).toBeInTheDocument()
     // Cost is on the row meta (mono, right).
     expect(screen.getAllByText(/\$0\.0110/).length).toBeGreaterThan(0)
-    // Waiting row gets the amber hint + Review link into the routine.
-    // Exact string — the dropdown header contains "awaiting approval"
-    // as part of its longer count text.
-    expect(screen.getByText("awaiting approval")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /review/i })).toHaveAttribute(
-      "href",
-      "/routines?slug=approval-gate",
-    )
+    // The waiting row speaks the rail's words (#2988), and Decide opens the
+    // run, where the approval is decidable — not the routine's definition.
+    // Exact string — the header pill carries a longer count text.
+    expect(screen.getByText("waiting for you")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /decide/i })).toHaveAttribute("href", "/activity?run=r2")
     // Trace deep-link per row. Asserted as a set, not by index: the
     // claim under test is "every live row deep-links to its own run",
     // which says nothing about row order — indexing in coupled this to
     // the sort and made the test fail on an ordering it never meant to
     // pin (#1223).
     const traceHrefs = screen
-      .getAllByRole("link", { name: /open trace/i })
+      .getAllByRole("link", { name: /open run/i })
       .map((el) => el.getAttribute("href"))
     expect(new Set(traceHrefs)).toEqual(
       new Set(["/activity?run=r1", "/activity?run=r2"]),
@@ -233,7 +232,7 @@ describe("<ActivityBell> dropdown", () => {
     openDropdown()
 
     await waitFor(() => {
-      expect(screen.getAllByRole("link", { name: /open trace/i })).toHaveLength(6)
+      expect(screen.getAllByRole("link", { name: /open run/i })).toHaveLength(6)
     })
     const viewAll = screen.getByRole("link", { name: /view all activity/i })
     expect(viewAll).toHaveAttribute("href", "/activity?status=active")
@@ -266,8 +265,8 @@ describe("<ActivityBell> dropdown", () => {
       expect(screen.getByText("Cost spike probe")).toBeInTheDocument()
     })
     expect(screen.getByText("Flaky sync")).toBeInTheDocument()
-    expect(screen.getByText(/completed · 12m ago · \$0\.0001/)).toBeInTheDocument()
-    expect(screen.getByText(/failed · 30m ago/)).toBeInTheDocument()
+    expect(screen.getByText(/Completed · 12m ago · \$0\.0001/)).toBeInTheDocument()
+    expect(screen.getByText(/Could not finish · 30m ago/)).toBeInTheDocument()
   })
 
   it("links the footer to plain /activity when nothing is live", async () => {
@@ -346,6 +345,7 @@ describe("<ActivityBell> recent rows — markup", () => {
   beforeEach(() => {
     h.runs = []
     h.agentItems = []
+    h.role = "OWNER"
   })
 
   it("never nests a link inside the clickable row", async () => {
@@ -389,5 +389,46 @@ describe("<ActivityBell> recent rows — markup", () => {
     const row = screen.getByRole("button", { name: /Triage/ })
     expect(row).toBeInTheDocument()
     expect(row).toHaveTextContent("ENG-1")
+  })
+
+  it("lists a stopped run under Recent in its own words and colour (#2988)", async () => {
+    h.runs = [
+      run({
+        id: "stop-1",
+        pipeline_slug: "nightly",
+        pipeline_name: "Nightly",
+        status: "cancelled",
+        ended_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+      }),
+      run({
+        id: "stop-2",
+        pipeline_slug: "sync",
+        pipeline_name: "Sync",
+        status: "interrupted",
+        ended_at: new Date(Date.now() - 6 * 60_000).toISOString(),
+      }),
+    ]
+    render(<ActivityBell />)
+    openDropdown()
+    expect(await screen.findByText(/Cancelled · 5m ago/)).toBeInTheDocument()
+    expect(screen.getByText(/Interrupted · 6m ago/)).toBeInTheDocument()
+    expect(document.querySelector(".bg-success")).toBeNull()
+  })
+
+  it("points the footer at the waiting bucket when something waits on a person", async () => {
+    h.runs = [run({ id: "w1", status: "waiting" })]
+    render(<ActivityBell />)
+    openDropdown()
+    const viewAll = await screen.findByRole("link", { name: /view all activity/i })
+    expect(viewAll).toHaveAttribute("href", "/activity?status=waiting")
+  })
+
+  it("offers Cancel only to the roles the cancel API accepts", async () => {
+    h.role = "MANAGER"
+    h.runs = [run({ id: "r-live" })]
+    render(<ActivityBell />)
+    openDropdown()
+    await screen.findByRole("link", { name: /open run/i })
+    expect(screen.queryByRole("button", { name: /cancel run/i })).toBeNull()
   })
 })

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useRouteScrollRestoration } from "@/hooks/use-route-scroll-restoration"
 import { MobileTabBar } from "@/components/layout/mobile-tab-bar"
@@ -17,6 +17,10 @@ import { RealtimeProvider } from "@/hooks/use-realtime"
 import { JournalLookupProvider } from "@/hooks/use-journal-lookup"
 import { ActiveRoutineRunsProvider } from "@/hooks/use-active-routine-runs"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useAccessMode, useAccessModeWatcher, useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
+import { restrictedHome, restrictedPathAllowed } from "@/lib/restricted-surfaces"
+import { RestrictedUnavailable } from "@/components/layout/restricted-unavailable"
+import { Button } from "@/components/ui/button"
 import { RealtimeToasts } from "@/components/layout/realtime-toasts"
 import { RealtimeStatusBanner } from "@/components/layout/realtime-status-banner"
 import { NotificationSoundEvents } from "@/components/layout/notification-sound-events"
@@ -27,7 +31,15 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   const { status } = useSession()
-  const { workspaceId } = useWorkspace()
+  const { error: workspacesError, refresh: refreshWorkspaces } = useWorkspace()
+  // Session-level, not per workspace: one restricted membership puts the
+  // whole account behind the restricted allowlist (see use-access-mode.ts).
+  const accessMode = useAccessMode()
+  const trusted = accessMode === "trusted"
+  // Null until the session is known to be trusted, so the workspace-scoped
+  // shell providers below send nothing a restricted session would be refused.
+  const trustedWorkspaceId = useTrustedWorkspaceId()
+  useAccessModeWatcher()
   const isMobile = useIsMobile()
   const pathname = usePathname()
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -40,6 +52,17 @@ export default function DashboardLayout({
    * desktop, where a route change usually fits the viewport anyway.
    */
   useRouteScrollRestoration(scrollRef, pathname)
+
+  // A restricted session opens only the screens the server lists (#2861).
+  // Anything else renders the unavailable page instead of the screen, so the
+  // screen's requests are never sent; the root goes to chat.
+  const router = useRouter()
+  const surfaces = useRestrictedSurfaces()
+  const restrictedBlocked = surfaces !== null && !restrictedPathAllowed(pathname, surfaces)
+  const restrictedLanding = restrictedBlocked && pathname === "/" ? restrictedHome(surfaces) : null
+  useEffect(() => {
+    if (restrictedLanding) router.replace(restrictedLanding)
+  }, [restrictedLanding, router])
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -56,6 +79,24 @@ export default function DashboardLayout({
     )
   }
 
+  // Until the access mode is known, nothing below may mount: the shell and
+  // every page start requests that a restricted session is refused. The
+  // workspace list (allowlisted for everyone) is the only request in flight.
+  if (accessMode === "loading") {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background">
+        {workspacesError ? (
+          <>
+            <p role="alert" className="text-sm text-muted-foreground">Could not load your workspaces.</p>
+            <Button variant="outline" size="sm" onClick={() => { void refreshWorkspaces() }}>Retry</Button>
+          </>
+        ) : (
+          <Spinner className="h-6 w-6 text-muted-foreground-soft" />
+        )}
+      </div>
+    )
+  }
+
   return (
     <RealtimeProvider>
       {/* Workspace-scoped journal lookup (crew/agent/mission id → name,
@@ -63,7 +104,7 @@ export default function DashboardLayout({
           journal page, crew-journal, and the crew/agent activity feeds —
           which resolve ids to display names client-side. Must sit inside
           RealtimeProvider (it invalidates on crew/agent realtime events). */}
-      <JournalLookupProvider workspaceId={workspaceId}>
+      <JournalLookupProvider workspaceId={trustedWorkspaceId}>
       {/* One workspace-scoped "active routine runs" subscription shared
           by the toolbar live chip and the /routines live surfaces —
           must sit inside RealtimeProvider (it consumes WS events). */}
@@ -73,10 +114,16 @@ export default function DashboardLayout({
           <SidebarInset>
             <AppToolbar />
             <RealtimeStatusBanner />
-            <RuntimeBanner />
-            <UpdateBanner />
+            {/* /system/runtime and /system/version are not on the
+                restricted allowlist. */}
+            {trusted && <RuntimeBanner />}
+            {trusted && <UpdateBanner />}
             <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
-              {children}
+              {restrictedBlocked
+                ? restrictedLanding
+                  ? <div className="flex justify-center py-16"><Spinner className="h-6 w-6 text-muted-foreground-soft" /></div>
+                  : <RestrictedUnavailable home={surfaces ? restrictedHome(surfaces) : null} />
+                : children}
             </div>
             {/* A flex sibling, not a fixed bar: it takes real space, so the
                 scroll container above it needs no compensating padding and
@@ -85,7 +132,7 @@ export default function DashboardLayout({
           </SidebarInset>
         </SidebarProvider>
         <RealtimeToasts />
-        <NotificationSoundEvents />
+        {trusted && <NotificationSoundEvents />}
       </ActiveRoutineRunsProvider>
       </JournalLookupProvider>
     </RealtimeProvider>

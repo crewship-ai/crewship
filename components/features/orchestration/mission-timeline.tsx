@@ -95,7 +95,10 @@ function TaskBar({ task, timeRange }: { task: MissionTask; timeRange: { start: n
       <Tooltip>
         <TooltipTrigger asChild>
           <div
-            className="absolute top-[10px] h-[32px] rounded flex items-center px-2 cursor-pointer transition-all hover:brightness-115 hover:-translate-y-px overflow-hidden z-10 hover:z-25"
+            role="group"
+            aria-label={`Task: ${task.title}`}
+            tabIndex={0}
+            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary absolute top-[10px] h-[32px] rounded flex items-center px-2 cursor-pointer transition-all hover:brightness-115 hover:-translate-y-px overflow-hidden z-10 hover:z-25"
             style={{
               left: `${left}%`,
               width: `${width}%`,
@@ -198,6 +201,7 @@ export function MissionTimeline({ missions, highlightSlugs }: MissionTimelinePro
       <div className="flex flex-col gap-3">
         {activeMissions.map((mission) => {
           const isOpen = !collapsed.has(mission.id)
+          const agentCount = new Set(mission.tasks.map((task) => task.agent_slug || "unassigned")).size
           // Only compute agent grouping when section is expanded
           let agents: string[] = []
           let agentTasks = new Map<string, MissionTask[]>()
@@ -216,6 +220,7 @@ export function MissionTimeline({ missions, highlightSlugs }: MissionTimelinePro
               <button
                 type="button"
                 onClick={() => toggle(mission.id)}
+                aria-expanded={isOpen}
                 className="w-full flex items-center gap-2 px-3 py-2 bg-muted/50 hover:bg-muted/80 transition-colors border-b border-border"
               >
                 <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", !isOpen && "-rotate-90")} />
@@ -225,7 +230,7 @@ export function MissionTimeline({ missions, highlightSlugs }: MissionTimelinePro
                 <span className="text-xs font-semibold truncate">{mission.title}</span>
                 <span className="text-[11px] text-muted-foreground font-mono">@{mission.lead_agent_slug}</span>
                 <span className="ml-auto text-[10px] text-muted-foreground">
-                  {agents.length} agent{agents.length !== 1 ? "s" : ""} / {(mission.tasks || []).length} tasks
+                  {agentCount} agent{agentCount !== 1 ? "s" : ""} / {(mission.tasks || []).length} tasks
                 </span>
               </button>
 

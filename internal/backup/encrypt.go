@@ -12,6 +12,19 @@ import (
 // schemes; decryptors must refuse anything they do not recognise.
 const EncryptionAlgorithm = "age-v1"
 
+// Keep the AGE default in production. TestMain selects a cheaper factor once,
+// before any tests or goroutines run; this is never configurable by operators.
+var passphraseWorkFactor = 18
+
+func newPassphraseRecipient(passphrase string) (*age.ScryptRecipient, error) {
+	r, err := age.NewScryptRecipient(passphrase)
+	if err != nil {
+		return nil, err
+	}
+	r.SetWorkFactor(passphraseWorkFactor)
+	return r, nil
+}
+
 // EncryptStream wraps out with an AGE encryptor. The returned WriteCloser
 // MUST be closed by the caller to flush the final AGE chunk; failing to
 // do so produces a truncated bundle that the decryptor will reject.
@@ -49,7 +62,7 @@ func EncryptStreamPassphrase(out io.Writer, passphrase string) (io.WriteCloser, 
 	if passphrase == "" {
 		return nil, fmt.Errorf("backup: passphrase must not be empty")
 	}
-	r, err := age.NewScryptRecipient(passphrase)
+	r, err := newPassphraseRecipient(passphrase)
 	if err != nil {
 		return nil, fmt.Errorf("backup: init scrypt recipient: %w", err)
 	}

@@ -252,3 +252,38 @@ describe("unmount flush", () => {
     expect(fetchMock.mock.calls.length).toBe(callsAfterMount)
   })
 })
+
+describe("preference sync failure boundaries", () => {
+  it.each(["refused", "empty"])("finishes initialization after a %s response while keeping the cached value", async (kind) => {
+    storage.set(`${LS_PREFIX}theme`, JSON.stringify("dark"))
+    fetchMock.mockResolvedValueOnce(kind === "refused" ? { ok: false, status: 503 } : okJSON(null))
+    const { result } = renderHook(() => useUserPreference("theme", "system"))
+    await waitFor(() => expect(result.current[2].ready).toBe(true))
+    expect(result.current[0]).toBe("dark")
+    expect(storage.get(`${LS_PREFIX}theme`)).toBe('"dark"')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("flushes a pending nullable preference once even if the write fails", async () => {
+    vi.useFakeTimers()
+    fetchMock.mockResolvedValueOnce(okJSON({})).mockRejectedValue(new Error("offline"))
+    const { result, unmount } = renderHook(() => useUserPreference<string | null>("choice", "default"))
+    await act(async () => { await Promise.resolve() })
+    act(() => { result.current[1](null) })
+    expect(result.current[0]).toBeNull()
+    await act(async () => { unmount() })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: "PUT", body: "null", keepalive: true })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("ignores a preferences response after unmount", async () => {
+    let resolve!: (response: Response) => void
+    fetchMock.mockReturnValueOnce(new Promise<Response>((r) => { resolve = r }))
+    const { unmount } = renderHook(() => useUserPreference("theme", "system"))
+    unmount()
+    await act(async () => { resolve(okJSON({ theme: "obsolete" })) })
+    expect(storage.has(`${LS_PREFIX}theme`)).toBe(false)
+  })
+})

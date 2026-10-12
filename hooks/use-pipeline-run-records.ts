@@ -82,18 +82,19 @@ export function usePipelineRunRecords(
   const abortRef = useRef<AbortController | null>(null)
 
   const refresh = useCallback(async () => {
+    abortRef.current?.abort()
+    setError(null)
     if (!workspaceId || !slug) {
       setRecords([])
       setLegacy(false)
+      setLoading(false)
       return
     }
-    abortRef.current?.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setLoading(true)
-    setError(null)
     try {
-      let url = `/api/v1/workspaces/${workspaceId}/pipelines/${slug}/run-records?limit=50`
+      let url = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}/run-records?limit=50`
       if (before) url += `&before=${encodeURIComponent(before)}`
       if (status) url += `&status=${encodeURIComponent(status)}`
       const res = await apiFetch(url, { signal: ctrl.signal })

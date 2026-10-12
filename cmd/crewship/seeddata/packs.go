@@ -121,6 +121,9 @@ func PackFileContent(src string) ([]byte, error) {
 
 // PackForRoutine returns the pack that owns a routine slug, if any.
 func PackForRoutine(slug string) (PackDef, bool) {
+	if slug == "" {
+		return PackDef{}, false
+	}
 	for _, p := range Packs {
 		if p.ProbeSlug == slug || p.ReportSlug == slug {
 			return p, true

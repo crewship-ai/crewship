@@ -349,7 +349,7 @@ func (s *RunStore) MarkRunning(ctx context.Context, runID, stepID string) error 
 	_, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_runs
 SET status = 'running', current_step_id = ?, updated_at = datetime('now','subsec')
-WHERE id = ?`, stepID, runID)
+WHERE id = ? AND status IN ('queued','running','waiting')`, stepID, runID)
 	return err
 }
 

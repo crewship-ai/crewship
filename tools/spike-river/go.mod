@@ -4,7 +4,7 @@ module github.com/crewship-ai/crewship/tools/spike-river
 
 go 1.27
 
-toolchain go1.27.1
+toolchain go1.27.2
 
 require (
 	github.com/riverqueue/river v0.47.0

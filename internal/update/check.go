@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"golang.org/x/mod/semver"
 )
 
@@ -198,14 +199,14 @@ type Result struct {
 	CheckedAt time.Time `json:"checked_at"`
 }
 
-// cacheFile lives under the user's data dir so it survives binary upgrades
-// but not full uninstalls. Falls back to a per-OS temp dir if the home dir
-// is unavailable (CI, sandboxed environments).
+// cacheFile belongs to the selected installation. Resolving it is read-only;
+// an unavailable root disables caching rather than writing shared temp state.
 func cacheFile() (string, error) {
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".crewship", "cache", "latest_release.json"), nil
+	root, err := database.ResolveDataDirRoot("")
+	if err != nil {
+		return "", err
 	}
-	return filepath.Join(os.TempDir(), "crewship-update-check.json"), nil
+	return filepath.Join(root, "cache", "latest_release.json"), nil
 }
 
 // Check returns the latest-release information for the given current version,

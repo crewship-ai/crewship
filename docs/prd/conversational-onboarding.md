@@ -415,7 +415,7 @@ the child `crewship-sidecar` line and the stdin pipe. Both hold; neither covers
 the parent `sh -c` argv. The test asserts a narrower property than its name.
 
 Belongs in its own security issue. It overlaps the "get secrets OFF the agent"
-item in `docs/prd/agent-identity-signing.md`'s locked-decisions preamble — item 7
+item in [historical source](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/agent-identity-signing.md)'s locked-decisions preamble — item 7
 of that list, which is not the same as that document's markdown §7.
 
 ---

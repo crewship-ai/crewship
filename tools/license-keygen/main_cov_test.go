@@ -1,10 +1,8 @@
 package main
 
-// Coverage tests for the license-keygen CLI. The os.Exit error paths
-// (unknown command, missing flags, bad key) cannot be unit-tested without
-// a subprocess, so the tests focus on the success paths: keypair
-// generation, license signing + signature verification, and the string
-// helpers.
+// In-process tests cover keypair generation, signing with signature
+// verification, and string helpers. cli_boundaries_test.go exercises the
+// os.Exit failure paths through the built CLI.
 
 import (
 	"crypto/ed25519"

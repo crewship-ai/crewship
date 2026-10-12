@@ -9,7 +9,8 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { AccessSecretsSection } from "../access-secrets-section"
 import { isSettingsSectionVisible } from "../../settings-nav"
 
-const h = vi.hoisted(() => ({ apiFetch: vi.fn() }))
+const h = vi.hoisted(() => ({ apiFetch: vi.fn(), toastError: vi.fn() }))
+vi.mock("sonner", () => ({ toast: { error: h.toastError, success: vi.fn() } }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => h.apiFetch(...args) }))
 
 const members = [
@@ -51,6 +52,7 @@ function renderSection(role: string) {
 }
 
 beforeEach(() => {
+  h.toastError.mockReset()
   h.apiFetch.mockReset()
   route()
 })
@@ -122,7 +124,15 @@ describe("the reveal switch", () => {
     })
     renderSection("OWNER")
     fireEvent.click(await screen.findByLabelText(/enable credential reveal/i))
-    expect(await screen.findByRole("alert")).toHaveTextContent(/only a workspace owner can change/i)
+    // A switch error is a toast (docs/ux/README.md › Saving); the switch stays where it was.
+    await waitFor(() =>
+      expect(h.toastError).toHaveBeenCalledWith(
+        "Couldn’t change Value reveal",
+        expect.objectContaining({ description: "Only a workspace OWNER can change the credential reveal policy." }),
+      ),
+    )
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/enable credential reveal/i)).not.toBeChecked()
   })
 })
 

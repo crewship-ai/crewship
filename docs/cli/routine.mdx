@@ -335,7 +335,8 @@ crewship routine run nightly-report --async --wait
 | `--tag` | Attach tag(s) to the run for filtering/grouping (repeatable; max 10) |
 | `--batch` | Path to a JSONL / JSON-array file of input sets — fan out N runs (tagged `batch:<id>`) |
 | `--delay` | Defer the run N seconds (parked in `pending_runs`; returns `SCHEDULED`) |
-| `--ttl` | Expire a deferred run if not dispatched within N seconds |
+| `--ttl` | Expire a deferred run if not dispatched within N seconds. A start queued for a full concurrency slot defaults to 3600 |
+| `--reject-if-busy` | When the routine's concurrency slot is full, fail with `429` instead of queuing the start. By default the start is queued and the CLI prints `Queued:` with its pending ID (`SCHEDULED`, `queued: true`). Sent as `queue_if_busy: false` |
 | `--priority` | Dispatch priority for deferred runs (higher fires first) |
 | `--idempotency-key` | Dedupe key; a duplicate within the TTL returns the original run as `DEDUPED` instead of executing again |
 | `--idempotency-ttl` | Dedupe window in seconds for `--idempotency-key` (`0` = server default, 24h) |
@@ -347,6 +348,11 @@ crewship routine run nightly-report --async --wait
 | `--version` | Alias of `--pinned-version`; the two flags cannot be combined. |
 | `--expected-hash` | SHA-256 of the definition shown in the preview. For an immediate HEAD start, the server returns `409` if HEAD changed and pins the verified version before execution. Combine with `--version` to check an archived version. Mutable step overrides are skipped so they cannot alter the reviewed recipe. Unsupported for delayed/debounced/one-time starts and batch runs. |
 | `--async` | Send `Prefer: respond-async`: the server answers `202 {run_id, status: "IN_PROGRESS"}` as soon as the run row is durable instead of holding the connection for the whole run. Prints the run id and the `crewship wait --routine` / `routine result` follow-ups; combine with `--wait` to poll it to a terminal status |
+
+When `--wait` polls an existing run, `failed`, `interrupted`, `cancelled`, `canceled`, and
+`needs_reconciliation` terminate polling with a nonzero exit in both human and
+machine formats. Reconciliation requires inspecting the execution outcome before
+retrying; it is never reported as successful completion.
 
 Output: `run_id`, `status`, `output`, `duration_ms`, `cost_usd`. Immediate runs
 use `COMPLETED`, `FAILED`, or `CANCELLED`; `WAITING` means the run is parked at
@@ -743,11 +749,16 @@ field cannot tell the two apart. When a run carries an `automation_name`, the
 column reads `automation` and `SOURCE` names the rule that started it:
 
 ```text
-RUN ID            STATUS     OUTCOME    MODE  TRIGGER     SOURCE            DURATION  COST     STARTED
-crun_9f2c…        completed  SUCCEEDED  live  automation  Triage new bugs   4.1s      $0.0031  2026-08-07 08:00
-crun_71ab…        completed  NEEDS_HUMAN live schedule    sch_nightly       12.4s     $0.0180  2026-08-07 07:00
-crun_2d40…        completed  FAILED     live  manual      —                 1.2s      $0.0004  2026-08-07 06:41
+RUN ID            STATUS     OUTCOME    MODE  TRIGGER     SOURCE            DURATION  REPORTED USAGE  STARTED
+crun_9f2c…        completed  SUCCEEDED  live  automation  Triage new bugs   4.1s      ~$0.0031        2026-08-07 08:00
+crun_71ab…        completed  NEEDS_HUMAN live schedule    sch_nightly       12.4s     ~$0.0180        2026-08-07 07:00
+crun_2d40…        completed  FAILED     live  manual      —                 1.2s      ~$0.0004        2026-08-07 06:41
 ```
+
+`REPORTED USAGE` is the run's `cost_usd`: the usage the agent CLIs reported, priced
+at list rates. It is not a billed amount. Calls under a subscription plan are not
+charged per call, and only metered calls reach the cost ledger (`crewship cost`).
+Machine formats keep the field name `cost_usd`.
 
 `OUTCOME` is the §9.6 routing decision (work package B6, #2349) — `-` when the run
 predates the `outcome` column. It is not the same question `STATUS` answers: a run whose
@@ -840,7 +851,7 @@ crewship routine runs-all --status active   # running+queued+paused+waiting
 
 Backed by `GET /api/v1/workspaces/{ws}/pipeline-runs`, sorted `started_at` DESC (newest first).
 
-**Output columns:** RUN_ID (truncated), SLUG, STATUS, MODE, STARTED, DURATION, COST, TRIGGER. Empty list prints `No runs.`
+**Output columns:** RUN_ID (truncated), SLUG, STATUS, MODE, STARTED, DURATION, REPORTED USAGE (`~$` reported by the agent CLIs, not billed spend; `—` when none), TRIGGER. Empty list prints `No runs.`
 
 <Note>
 Distinct from `routine runs <slug>` / `routine records <slug>` (one routine's history) and `routine active` (in-flight only, no filters): `runs-all` is the cross-pipeline, any-status feed, filterable server-side.
@@ -1350,6 +1361,8 @@ crewship routine cancel run_cmovn40h30001c57bb667
 
 Signals the run goroutine. Run terminates at the next safe point; the row is `cancelled` and the `pipeline.run.failed` journal payload has status `CANCELLED`. Completed effects are not undone. Exceeding the run’s own deadline remains `failed` / `FAILED` in both records. Already-terminal runs return 409.
 
+A run parked at a waitpoint (`waiting`) is cancelled in place: the row becomes `cancelled` and its pending approvals stop being actionable. If an approval, signal or event resumes the same run at that moment, exactly one side wins. Either the resume is refused and later resumes find the run cancelled, or the resumed run is cancelled before its next step and records `cancelled` itself. The response carries `"parked": true` when the cancel itself recorded the row; otherwise the run records `cancelled` when it stops.
+
 ---
 
 ## `crewship routine tree <run_id>`
@@ -1578,7 +1591,7 @@ Backed by `POST /api/v1/workspaces/{ws}/pipelines/runs/bulk_replay`. Output: `Bu
 
 ## `crewship routine pending`
 
-List or cancel deferred routine triggers — the parked dispatches created by `run --delay`, `--ttl`, `--debounce-key`, or `--priority`. A parent command with two children.
+List or cancel deferred routine triggers — the parked dispatches created by `run --delay`, `--ttl`, `--debounce-key`, or `--priority`. The commands inspect waiting, dispatched and terminal receipts, or cancel a waiting start.
 
 ### `pending list`
 
@@ -1586,7 +1599,29 @@ List or cancel deferred routine triggers — the parked dispatches created by `r
 crewship routine pending list
 ```
 
-Requires login and workspace context. Backed by `GET /api/v1/workspaces/{ws}/pipelines/pending` (`200 OK`, member-scoped), which returns at most 100 not-yet-fired rows with `id`, `pipeline_slug`, optional `debounce_key`, `priority`, RFC3339Nano `fire_at`, `pinned_version` (the archived recipe the start will run; `null` for a legacy row that resolves HEAD at dispatch) and a read-only `inputs` preview. **Output columns:** PENDING ID, ROUTINE, PRIORITY, DEBOUNCE KEY, FIRES AT, RECIPE VERSION (`v3`, or `live at dispatch (legacy/deferred)` when unpinned). Nothing pending prints `No deferred triggers pending.` A `run --fire-at` start shows up here pinned to the version that passed preflight.
+Requires login and workspace context. Backed by `GET /api/v1/workspaces/{ws}/pipelines/pending` (`200 OK`, member-scoped). It defaults to at most 100 not-yet-fired rows. Use `--status pending|fired|failed|expired|cancelled|all` to inspect other receipts; terminal/history lists return newest first.
+
+The response retains `id`, `pipeline_slug`, optional `debounce_key`, `priority`, RFC3339Nano `fire_at`, `pinned_version` and the read-only `inputs` preview. It also includes `status`, `run_id` (empty until linked), `dispatch_attempts`, safe `last_error`, nullable `expires_at` and `next_attempt_at`, and `can_cancel` (the start is still pending and the caller has the update capability). The table adds STATUS, ATTEMPTS, RUN ID and REASON alongside the scheduled time and recipe version. Machine formats retain the full receipt. An empty default list prints `No deferred triggers pending.`
+
+```bash
+crewship routine pending list --status failed
+crewship routine pending list --status all -f json
+```
+
+### `pending get <pending_id>`
+
+```bash
+crewship routine pending get pnd_abc123
+crewship routine pending get pnd_abc123 -f json
+```
+
+Backed by `GET /api/v1/workspaces/{ws}/pipeline-pending/{pendingId}`. Returns the same receipt shape for a stable accepted ID, including failed, expired, cancelled and fired starts after they leave the default pending list. An unknown or another workspace's ID returns `404`.
+
+`fired` means the dispatcher claimed the start; it does **not** mean the routine completed. `run_id` may stay empty while the synchronous executor runs. Legacy fired rows without a run link are also returned unchanged; emptiness alone cannot establish whether work was lost. Once a link exists, use `routine result` to inspect the run's own status.
+
+Temporary routine concurrency rejection returns the start to pending with exponential backoff (2, 4, 8, 16, 32, then at most 60 seconds). Retry keeps the accepted ID, recipe pin, payload, priority and original `fire_at`; `next_attempt_at` controls eligibility. An explicit TTL remains the deadline and ends waiting as `expired` with a reason. Starts without TTL fail visibly after ten capacity attempts. The 5-second sweep and available worker slots also affect dispatch time; this is not a FIFO or ETA guarantee.
+
+Other executor errors are not retried automatically: the receipt becomes `failed` with a safe public reason. After a debounce start has been attempted, newer triggers open a separate debounce window so they cannot rewrite its accepted retry payload. Canceling is still possible while a retry is pending. A claimed/running dispatch is canceled through its run once the run link is available.
 
 ### `pending cancel <pending_id>`
 

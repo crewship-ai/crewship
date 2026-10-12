@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func toolchainArchive(t *testing.T, files map[string]string) []byte {
+func toolchainArchive(t testing.TB, files map[string]string) []byte {
 	t.Helper()
 	var out bytes.Buffer
 	w := tar.NewWriter(&out)

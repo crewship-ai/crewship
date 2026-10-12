@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -21,7 +22,7 @@ func (failedStopAcknowledgement) Set(context.Context, string, string, []byte) er
 
 func seedStoppedOutbox(t *testing.T, s *Server, id string) {
 	t.Helper()
-	raw, err := json.Marshal(orchestrator.RunState{ID: id, AgentID: "a", Status: "cancelled", StopJournalPending: true})
+	raw, err := json.Marshal(orchestrator.RunState{ID: id, AgentID: "a", WorkspaceID: "rw", Status: "cancelled", StopJournalPending: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +159,7 @@ func TestRecoveredStopHistoryPreservesRecordedCompletion(t *testing.T) {
 	}
 }
 
-// Pending legacy runs without a known workspace must not repeatedly consume
+// Pending manual IPC runs without a journal start must not repeatedly consume
 // the batch budget while actionable stops wait behind them.
 func TestRecoveredStopHistoryMakesBoundedProgressPastUnresolvedRuns(t *testing.T) {
 	s := newTestServerWithDeps(t)
@@ -166,11 +167,11 @@ func TestRecoveredStopHistoryMakesBoundedProgressPastUnresolvedRuns(t *testing.T
 	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
 	for i := 0; i < 100; i++ {
 		id := fmt.Sprintf("absent-%03d", i)
-		raw, err := json.Marshal(orchestrator.RunState{ID: id, AgentID: "missing-agent", Status: "cancelled", StopJournalPending: true})
+		raw, err := json.Marshal(orchestrator.RunState{ID: id, AgentID: "a", Status: "cancelled", StopJournalPending: true})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err = s.state.Set(t.Context(), "agent_runs", id, raw); err != nil {
+		if err := s.state.Set(t.Context(), "agent_runs", id, raw); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -179,12 +180,21 @@ func TestRecoveredStopHistoryMakesBoundedProgressPastUnresolvedRuns(t *testing.T
 		seedRecoveryTrace(t, s, id, "a")
 		seedStoppedOutbox(t, s, id)
 	}
+	// Isolate the count/fairness policy from the production five-second
+	// budget: a slow -race runner can legitimately exhaust that time budget
+	// before consuming 100 entries. The production wrapper keeps its limit.
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
 	// Three batches of 100 cover every one of these 201 pending runs,
 	// even when unresolved entries retain their durable pending marker.
+	unresolvedErrors := 0
 	for i := 0; i < 3; i++ {
-		if err := s.flushRecoveredStops(t.Context()); err != nil {
-			t.Fatal(err)
+		if err := s.flushRecoveredStopsBatch(ctx); err != nil {
+			unresolvedErrors++
 		}
+	}
+	if unresolvedErrors == 0 {
+		t.Fatal("fixture did not exercise unresolved ownership")
 	}
 	remaining := 0
 	for i := 0; i < 101; i++ {
@@ -196,8 +206,98 @@ func TestRecoveredStopHistoryMakesBoundedProgressPastUnresolvedRuns(t *testing.T
 		t.Fatalf("%d actionable stops starved behind unresolved entries", remaining)
 	}
 	if !pendingStop(t, s, "absent-000") {
-		t.Fatal("invented history for unresolved manual run")
+		t.Fatal("unknown ownership lost its pending marker")
 	}
+	if n := recoveryTerminalCount(t, s, "absent-000"); n != 0 {
+		t.Fatalf("unknown ownership published %d history entries", n)
+	}
+}
+
+// A manual IPC invocation (or a delayed journal start) can have durable runtime
+// ownership before its run.started entry exists. Projecting an older stop must
+// not advertise STOPPED while that runtime is still owned.
+func TestRecoveredStopHistoryPreservesUnjournaledRunningIdentity(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+	seedRecoveryTrace(t, s, "stopped", "a")
+	seedStoppedOutbox(t, s, "stopped")
+	raw, err := json.Marshal(orchestrator.RunState{ID: "unjournaled", AgentID: "a", AgentSlug: "a", ContainerID: "owned-container", Status: "running"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.state.Set(t.Context(), "agent_runs", "unjournaled", raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.flushRecoveredStops(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := s.db.QueryRow(`SELECT status FROM agents WHERE id='a'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "RUNNING" {
+		t.Fatalf("durable live runtime projected as %s", status)
+	}
+	if pendingStop(t, s, "stopped") {
+		t.Fatal("old stop projection was not acknowledged")
+	}
+	if n := recoveryTerminalCount(t, s, "unjournaled"); n != 0 {
+		t.Fatalf("invented %d terminal entries for live runtime", n)
+	}
+}
+
+func TestRecoveredStopHistoryRetainsOutboxWhenRuntimeOwnershipIsCorrupt(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+	seedRecoveryTrace(t, s, "stopped", "a")
+	seedStoppedOutbox(t, s, "stopped")
+	if err := s.state.Set(t.Context(), "agent_runs", "unknown", []byte("{")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.flushRecoveredStops(t.Context()); err == nil {
+		t.Fatal("corrupt runtime ownership accepted")
+	}
+	if !pendingStop(t, s, "stopped") {
+		t.Fatal("unknown ownership lost the retry marker")
+	}
+	var status string
+	if err := s.db.QueryRow(`SELECT status FROM agents WHERE id='a'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "RUNNING" {
+		t.Fatalf("unknown runtime ownership projected as %s", status)
+	}
+}
+
+func TestRecoveredStopHistoryExpiredBudgetPreservesPendingWork(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+	seedRecoveryTrace(t, s, "stopped", "a")
+	seedStoppedOutbox(t, s, "stopped")
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+	if err := s.flushRecoveredStops(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expired budget: %v", err)
+	}
+	if !pendingStop(t, s, "stopped") {
+		t.Fatal("expired budget lost pending work")
+	}
+	if n := recoveryTerminalCount(t, s, "stopped"); n != 0 {
+		t.Fatalf("expired budget wrote %d terminal entries", n)
+	}
+	if err := s.flushRecoveredStops(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if pendingStop(t, s, "stopped") {
+		t.Fatal("next drain failed to acknowledge the stop")
+	}
+}
+
+func (failedStopAcknowledgement) Update(context.Context, string, string, func([]byte) ([]byte, error)) error {
+	return errors.New("state acknowledgement unavailable")
 }
 
 func TestRecoveredStopHistoryWithoutStartedEvent(t *testing.T) {
@@ -250,7 +350,7 @@ func TestRecoveredStopHistoryMissingStartScope(t *testing.T) {
 		name, agent, workspace string
 		conflict               bool
 	}{
-		{"captured-after-agent-deletion", "gone", "rw", false},
+		{"captured-after-agent-deletion", "gone", "rw", true},
 		{"agent-scope-conflict", "a", "other", true},
 		{"journal-scope-conflict", "a", "rw", true},
 	} {
@@ -285,5 +385,61 @@ func TestRecoveredStopHistoryMissingStartScope(t *testing.T) {
 				t.Fatalf("terminals=%d want=%d", terminals, want)
 			}
 		})
+	}
+}
+
+// A new invocation may publish its durable record after the outbox scan but
+// before the old stop projects the agent status, without a journal start yet.
+type admitAfterStopScan struct {
+	provider.StateProvider
+	admit func()
+}
+
+func (s *admitAfterStopScan) List(ctx context.Context, bucket string) (map[string][]byte, error) {
+	records, err := s.StateProvider.List(ctx, bucket)
+	// The server test provider returns its backing map. Freeze the snapshot
+	// before admission, matching the production bbolt List contract.
+	snapshot := make(map[string][]byte, len(records))
+	for key, raw := range records {
+		snapshot[key] = append([]byte(nil), raw...)
+	}
+	if err == nil && bucket == "agent_runs" && s.admit != nil {
+		admit := s.admit
+		s.admit = nil
+		admit()
+	}
+	return snapshot, err
+}
+func (s *admitAfterStopScan) Update(ctx context.Context, bucket, key string, fn func([]byte) ([]byte, error)) error {
+	return s.StateProvider.(provider.AtomicStateProvider).Update(ctx, bucket, key, fn)
+}
+func TestRecoveredStopHistoryPreservesRunAdmittedAfterScan(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+	seedRecoveryTrace(t, s, "stopped", "a")
+	seedStoppedOutbox(t, s, "stopped")
+	state := s.state
+	s.state = &admitAfterStopScan{StateProvider: state, admit: func() {
+		raw, err := json.Marshal(orchestrator.RunState{ID: "new", AgentID: "a", Status: "running"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := state.Set(t.Context(), "agent_runs", "new", raw); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	if err := s.flushRecoveredStops(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := s.db.QueryRow(`SELECT status FROM agents WHERE id='a'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "RUNNING" {
+		t.Fatalf("new invocation hidden by old stop: agent status=%s", status)
+	}
+	if pendingStop(t, s, "stopped") {
+		t.Fatal("old stop not acknowledged")
 	}
 }

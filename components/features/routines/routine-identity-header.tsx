@@ -95,7 +95,7 @@ export function RoutineIdentityHeader({
           {runUses && (published
             ? <span>Run uses <b className="font-medium text-foreground/85">v{routine.head_version}</b></span>
             : <span>Run uses <b className="font-medium text-foreground/85">nothing yet</b> — publish first</span>)}
-          {agent && <RoutineAgentLink slug={agent} agent={agents?.find(a => a.slug === agent)} workspaceId={workspaceId} />}
+          {agent && <RoutineAgentLink slug={agent} agent={agents?.find(a => a.slug === agent)} />}
         </div></div>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">

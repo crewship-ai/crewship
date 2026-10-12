@@ -1,9 +1,11 @@
 package memport
 
 import (
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/memory"
@@ -66,11 +68,19 @@ func (d secureDir) resolve(name string) (string, error) {
 // reaching a directory get an *os.File, which fs.WalkDir never uses
 // directly because ReadDir below takes precedence.
 func (d secureDir) Open(name string) (fs.File, error) {
-	p, err := d.resolve(name)
+	_, err := d.resolve(name)
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
-	info, err := os.Lstat(p)
+	// A final-component O_NOFOLLOW alone does not confine parent directories.
+	// Open every path through an OS-enforced root so a renamed directory or
+	// symlink inserted after the walk cannot expose another crew's memory.
+	root, err := os.OpenRoot(d.root)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
+	}
+	defer root.Close()
+	info, err := root.Lstat(name)
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
@@ -78,10 +88,7 @@ func (d secureDir) Open(name string) (fs.File, error) {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
 	}
 	if info.IsDir() {
-		// A directory is opened plainly: the root was already resolved
-		// in SecureDirFS, and the walk reaches subdirectories only
-		// through ReadDir, which drops links before descending.
-		f, err := os.Open(p)
+		f, err := root.Open(name)
 		if err != nil {
 			return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 		}
@@ -90,7 +97,7 @@ func (d secureDir) Open(name string) (fs.File, error) {
 	// Files open with O_NOFOLLOW: Lstat-then-Open leaves a window in
 	// which the entry is swapped for a link and Open follows it, so the
 	// refusal has to be part of the open syscall.
-	f, err := memory.OpenNoFollow(p)
+	f, err := memory.OpenRootNoFollow(root, name)
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
@@ -114,7 +121,12 @@ func (d secureDir) ReadDir(name string) ([]fs.DirEntry, error) {
 	if err != nil {
 		return nil, &fs.PathError{Op: "readdir", Path: name, Err: err}
 	}
-	entries, err := os.ReadDir(p)
+	f, err := d.Open(name)
+	if err != nil {
+		return nil, &fs.PathError{Op: "readdir", Path: name, Err: err}
+	}
+	defer f.Close()
+	entries, err := f.(*os.File).ReadDir(-1)
 	if err != nil {
 		return nil, &fs.PathError{Op: "readdir", Path: name, Err: err}
 	}
@@ -134,21 +146,19 @@ func (d secureDir) ReadDir(name string) ([]fs.DirEntry, error) {
 		}
 		out = append(out, e)
 	}
+	// File.ReadDir returns filesystem order; fs.ReadDir promises lexical order.
+	slices.SortFunc(out, func(a, b fs.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
 	return out, nil
 }
 
-// ReadFile reads through the memory package's no-follow reader, so a
-// link swapped in between the walk and the read is still refused.
+// ReadFile shares Open's root confinement and final-component no-follow check.
 func (d secureDir) ReadFile(name string) ([]byte, error) {
-	p, err := d.resolve(name)
+	f, err := d.Open(name)
 	if err != nil {
 		return nil, &fs.PathError{Op: "read", Path: name, Err: err}
 	}
-	b, err := memory.ReadFileNoFollow(p)
-	if err != nil {
-		return nil, &fs.PathError{Op: "read", Path: name, Err: err}
-	}
-	return b, nil
+	defer f.Close()
+	return io.ReadAll(f)
 }
 
 var (

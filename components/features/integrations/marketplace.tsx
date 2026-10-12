@@ -9,7 +9,6 @@ import {
   SidebarToolbar, SidebarSearch, SidebarSection, SidebarRow,
 } from "@/components/layout/sidebar-kit"
 import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
 import { MCPLogo } from "@/components/icons/mcp-logos"
 import { apiFetch } from "@/lib/api-fetch"
 import { TrustTierBadge, type TrustTier } from "./trust-tier-badge"
@@ -92,15 +91,17 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
     apiFetch(url, { signal: ctrl.signal })
       .then((r) => r.ok ? r.json() : null)
       .then((data: RegistryResponse | null) => {
+        if (ctrl.signal.aborted) return
         if (!data) { setServers([]); setTotal(0); return }
         setServers(data.servers)
         setTotal(data.total)
       })
       .catch((err) => {
-        if (err instanceof DOMException && err.name === "AbortError") return
+        if (ctrl.signal.aborted || (err instanceof DOMException && err.name === "AbortError")) return
         setServers([])
+        setTotal(0)
       })
-      .finally(() => setLoading(false))
+      .finally(() => { if (!ctrl.signal.aborted) setLoading(false) })
     return () => ctrl.abort()
   }, [debouncedQuery, trust])
 
@@ -120,7 +121,7 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
         if (transport === "stdio" && s.transport !== "stdio") return false
         if (transport === "streamable-http" && s.transport !== "streamable-http") return false
       }
-      if (category && s.category !== category) return false
+      if (category && (s.category || "uncategorised") !== category) return false
       return true
     })
   }, [servers, transport, category])

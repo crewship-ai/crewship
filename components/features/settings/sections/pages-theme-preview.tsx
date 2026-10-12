@@ -51,7 +51,7 @@ export function PagesThemePreviewPanel({
       <div className="flex items-center gap-3 border-b border-border bg-card px-4 py-3">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold tracking-[-0.01em]">Page preview</div>
-          <div className="text-[12px] text-muted-foreground">
+          <div className="text-label text-muted-foreground">
             {dirty ? "Showing unsaved colours — Save on the card applies them." : "How a Page application looks with this palette."}
           </div>
         </div>
@@ -63,7 +63,7 @@ export function PagesThemePreviewPanel({
       {editable && (
         <div className="flex flex-wrap items-center gap-3 border-b border-border bg-surface-subtle px-4 py-2.5" aria-label="Palette">
           {(Object.keys(LABELS) as (keyof PageTheme)[]).map((key) => (
-            <span key={key} className="flex items-center gap-1.5 text-[11px] text-muted-foreground" title={LABELS[key]}>
+            <span key={key} className="flex items-center gap-1.5 text-label text-muted-foreground" title={LABELS[key]}>
               <input
                 type="color"
                 aria-label={`${LABELS[key]} colour`}

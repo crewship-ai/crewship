@@ -98,6 +98,9 @@ export interface OverviewResponse {
   workspaces?: WorkspaceCoverage[]
   /** For the scope bar: "5 workspaces, 7 users, instance settings, …". */
   instance_summary?: string | null
+  /** Selected workspaces that hold no crew: left out of `workspaces` and
+   *  summed up in one needs_attention item ("crewless"). */
+  crewless_workspaces?: number
 }
 
 export type RunStatus = "running" | "done" | "incomplete" | "failed" | "interrupted" | "skipped"
@@ -509,7 +512,15 @@ export interface RetentionChange {
 export interface RetentionPutResponse { dry_run: boolean; changes: RetentionChange[]; preview_id?: string }
 
 /** The workspaces the scope bar lists (GET /api/v1/admin/workspaces). */
-export interface ScopeWorkspace { id: string; name: string; slug: string }
+export interface ScopeWorkspace {
+  id: string
+  name: string
+  slug: string
+  /** The workspace's own logo, when one was set. */
+  logoUrl?: string | null
+  /** Crews it holds; the panel folds workspaces with none away. */
+  crews?: number
+}
 
 // ─── Sections ───────────────────────────────────────────────────────────────
 
@@ -661,9 +672,22 @@ export function contentsFromPreview(p: PreviewContentsResponse): ContentsRow[] {
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 const WDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
-/** "29 Sep" — fixed English short months (ICU now writes "Sept" for en-GB). */
+/**
+ * "29 Sep" — fixed English short months (ICU now writes "Sept" for en-GB).
+ * An invalid Date is "—", never "NaN undefined".
+ */
 export function shortDate(d: Date, utc = false): string {
+  if (Number.isNaN(d.getTime())) return "—"
   return utc ? `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}` : `${d.getDate()} ${MONTHS[d.getMonth()]}`
+}
+
+/**
+ * The day a restore's source bundle was made. The server sends "" once the
+ * bundle has left the catalog, so an empty or unparsable value is unknown.
+ */
+export function formatSourceDate(iso: string | null | undefined): string {
+  const d = iso ? new Date(iso) : null
+  return d && !Number.isNaN(d.getTime()) ? shortDate(d) : "source date unknown"
 }
 
 export interface StripCell {

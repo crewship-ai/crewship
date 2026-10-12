@@ -51,20 +51,31 @@ function CrewGroupNodeInner({ data, id }: NodeProps) {
     >
       {/* Header — interactive, receives pointer events */}
       <div
+        role="button"
+        tabIndex={0}
+        aria-label={`${collapsed ? "Expand" : "Collapse"} ${d.label} crew`}
+        aria-expanded={!collapsed}
         className="flex items-center gap-2.5 px-3 py-2 cursor-pointer select-none"
         style={headerStyle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault()
+            e.stopPropagation()
+            d.onToggleCollapse?.(d.crewId)
+          }
+        }}
         onClick={(e) => {
           e.stopPropagation()
           d.onToggleCollapse?.(d.crewId)
         }}
       >
-        <button className="shrink-0 text-foreground/40 hover:text-foreground/70 transition-colors">
+        <span aria-hidden="true" className="shrink-0 text-foreground/40 hover:text-foreground/70 transition-colors">
           {collapsed ? (
             <ChevronRight className="h-3.5 w-3.5" />
           ) : (
             <ChevronDown className="h-3.5 w-3.5" />
           )}
-        </button>
+        </span>
 
         {d.icon ? (
           <CrewIcon icon={d.icon} color={d.color} size="sm" className="!h-5 !w-5 !rounded-md" />

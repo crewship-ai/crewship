@@ -14,7 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"modernc.org/sqlite"
+
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // migratedImages is one fully-migrated database, captured in the two on-disk
@@ -32,16 +35,33 @@ type migratedImages struct {
 	err    error
 }
 
-// migratedFixture runs the migrations ONCE per test binary.
+// migratedFixture builds the two images ONCE per test binary, from the
+// process-wide migrated template in internal/testutil.
 //
 // Five fixtures in this file used to call database.Migrate themselves. That is
 // ~1 s each without -race and ~30 s each WITH it — ~150 s of the Go Race job's
 // 25-minute budget spent rebuilding the same database, since the migration set
-// is compile-time constant and so are the bytes it produces. Copying the file
-// in reproduces each state exactly: the crash pair is captured the same way
-// crashedDatabase captured it (from under a live writer), and every test that
-// needs a live writer still opens one, it just does not migrate again.
+// is compile-time constant and so are the bytes it produces. Collapsing them
+// into one migration here was the first step; the second is not to run that
+// one either. testutil.MigratedTemplatePath is a database built by the same
+// database.Open + database.Migrate, and nearly every shard of this package
+// builds it anyway for its MigratedDB fixtures, so a private migration here
+// was a second ~30-60 s run of the identical chain.
+//
+// The crash pair is still captured from under a live writer: the template is
+// restored, page by page through SQLite's online-backup API, into a fresh
+// database.Open handle in WAL mode. Every page of the schema therefore lands
+// in the "-wal" and none in the main file — a reader that ignored or lost the
+// WAL would find no tables at all, which is at least as sharp as the migration
+// it replaces (that one had already auto-checkpointed most pages into the
+// main file). Every test that needs a live writer still opens one.
 var migratedFixture = sync.OnceValue(buildMigratedFixture)
+
+// sqliteRestorer is the modernc.org/sqlite driver connection's online-backup
+// entry point that copies another database INTO this connection.
+type sqliteRestorer interface {
+	NewRestore(srcURI string) (*sqlite.Backup, error)
+}
 
 func buildMigratedFixture() migratedImages {
 	var m migratedImages
@@ -50,6 +70,10 @@ func buildMigratedFixture() migratedImages {
 		return m
 	}
 
+	template, err := testutil.MigratedTemplate()
+	if err != nil {
+		return failed("migrated template: %w", err)
+	}
 	dir, err := os.MkdirTemp("", "crewship-doctor-fixture-")
 	if err != nil {
 		return failed("temp dir: %w", err)
@@ -61,9 +85,39 @@ func buildMigratedFixture() migratedImages {
 	if err != nil {
 		return failed("seed open: %w", err)
 	}
-	if err := database.Migrate(context.Background(), seed.DB, covLogger()); err != nil {
+	ctx := context.Background()
+	conn, err := seed.DB.Conn(ctx)
+	if err != nil {
 		seed.Close()
-		return failed("seed migrate: %w", err)
+		return failed("seed conn: %w", err)
+	}
+	err = conn.Raw(func(driverConn any) error {
+		r, ok := driverConn.(sqliteRestorer)
+		if !ok {
+			return fmt.Errorf("sqlite driver connection %T has no NewRestore method", driverConn)
+		}
+		bk, err := r.NewRestore("file:" + template + "?mode=ro")
+		if err != nil {
+			return fmt.Errorf("open template for restore: %w", err)
+		}
+		more, stepErr := bk.Step(-1)
+		finErr := bk.Finish()
+		switch {
+		case stepErr != nil:
+			return fmt.Errorf("restore template: %w", stepErr)
+		case more:
+			return fmt.Errorf("restore template: pages left after a full step")
+		case finErr != nil:
+			return fmt.Errorf("finish restore: %w", finErr)
+		}
+		return nil
+	})
+	if cerr := conn.Close(); err == nil && cerr != nil {
+		err = cerr
+	}
+	if err != nil {
+		seed.Close()
+		return failed("seed: %w", err)
 	}
 	// Read before the close, or the WAL is already gone.
 	if m.live, err = os.ReadFile(path); err != nil {
@@ -73,6 +127,10 @@ func buildMigratedFixture() migratedImages {
 	if m.liveWAL, err = os.ReadFile(path + "-wal"); err != nil {
 		seed.Close()
 		return failed("read live -wal: %w", err)
+	}
+	if len(m.liveWAL) == 0 {
+		seed.Close()
+		return failed("live -wal is empty; the crash state would not carry the schema in the WAL")
 	}
 	if err := seed.Close(); err != nil {
 		return failed("seed close: %w", err)

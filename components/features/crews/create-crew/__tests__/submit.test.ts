@@ -196,6 +196,7 @@ describe("submitCrew — browse (template) mode", () => {
       body: { crew_id: "crew_42", crew_name: "Engineering", crew_slug: "engineering" },
     })
     fetcher.queueResponse({ ok: true, body: {} }) // PATCH
+    fetcher.queueResponse({ ok: true, body: [] }) // the new crew's agents
 
     const result = await submitCrew(WS, fullState({
       mode: "browse",
@@ -203,7 +204,7 @@ describe("submitCrew — browse (template) mode", () => {
     }))
 
     expect(result).toMatchObject({ id: "crew_42", slug: "engineering", name: "Engineering" })
-    expect(fetcher.calls).toHaveLength(2)
+    expect(fetcher.calls).toHaveLength(3)
 
     // Call 1: POST /api/v1/crew-templates/{slug}/deploy
     expect(fetcher.calls[0].url).toContain("/api/v1/crew-templates/software-development/deploy")
@@ -226,6 +227,27 @@ describe("submitCrew — browse (template) mode", () => {
       container_ttl_hours: 4,
       network_mode: "restricted",
     })
+
+    // Call 3: the template's agents, to store their avatar renders (#2876).
+    expect(fetcher.calls[2].method).toBe("GET")
+    expect(fetcher.calls[2].url).toContain("/api/v1/agents?workspace_id=ws_123")
+    expect(fetcher.calls[2].url).toContain("crew_id=crew_42")
+  })
+
+  // #2876 — the template created the agents server-side, which cannot draw
+  // their faces. The person creating the crew stores them, so nobody's later
+  // page view has to.
+  it("stores avatar renders for the agents the template created", async () => {
+    fetcher.queueResponse({ ok: true, body: { crew_id: "crew_42", crew_name: "Engineering", crew_slug: "engineering" } })
+    fetcher.queueResponse({ ok: true, body: {} }) // PATCH
+    fetcher.queueResponse({ ok: true, body: [{ id: "ag_1", slug: "lead" }, { id: "ag_2", slug: "dev", avatar_url: "/stored" }] })
+    fetcher.queueResponse({ ok: true, body: { avatar_url: "/x" } }) // PUT
+
+    await submitCrew(WS, fullState({ mode: "browse", pickedTemplateSlug: "software-development" }))
+
+    const puts = fetcher.calls.filter((c) => c.method === "PUT")
+    expect(puts.map((c) => c.url)).toEqual(["/api/v1/agents/ag_1/avatar?workspace_id=ws_123"])
+    expect(String(puts[0].body?.svg)).toMatch(/^<svg/)
   })
 
   it("URL-encodes the template slug to defend against weird chars", async () => {
@@ -425,13 +447,14 @@ describe("submitCrew — dispatcher", () => {
   })
   afterEach(() => { vi.unstubAllGlobals() })
 
-  it("routes 'browse' to template flow (deploy + patch = 2 calls)", async () => {
+  it("routes 'browse' to template flow (deploy + patch + avatar list = 3 calls)", async () => {
     fetcher.queueResponse({ ok: true, body: { crew_id: "x", crew_name: "X", crew_slug: "x" } })
     fetcher.queueResponse({ ok: true, body: {} })
+    fetcher.queueResponse({ ok: true, body: [] })
 
     await submitCrew(WS, fullState({ mode: "browse", pickedTemplateSlug: "any" }))
 
-    expect(fetcher.calls).toHaveLength(2)
+    expect(fetcher.calls).toHaveLength(3)
     expect(fetcher.calls[0].url).toContain("/crew-templates/")
   })
 

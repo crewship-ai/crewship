@@ -41,6 +41,16 @@ type Runtime interface {
 	Close() error
 }
 
+// BindVolumeRuntime reclaims only unused, labelled local noexec bind records.
+// Persistent managed volumes and unattributed legacy records are excluded.
+type BindVolumeRuntime interface {
+	ReapBindVolumes(context.Context, string, int) error
+}
+
+// ErrBindVolumeYielded means a backup admission wait was interrupted. The
+// writer is outside its registration, so the tick must not write diagnostics.
+var ErrBindVolumeYielded = errors.New("bind volume cleanup yielded")
+
 // NetworkKind labels a per-crew Docker network (#2240).
 const NetworkKind = "crew-network"
 
@@ -416,6 +426,18 @@ func (c *Controller) Tick(ctx context.Context) {
 			// Interrupted inside a backup window: the recount did not run, so
 			// no state may be derived from Remaining. Like the container loop,
 			// write nothing; a quiesce is not a scan failure.
+			return
+		}
+	}
+	if vr, ok := rt.(BindVolumeRuntime); ok {
+		reapCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err := vr.ReapBindVolumes(reapCtx, c.InstanceID, cap)
+		cancel()
+		if errors.Is(err, ErrBindVolumeYielded) {
+			return
+		}
+		if err != nil {
+			failAll("bind_volume_cleanup_failed")
 			return
 		}
 	}

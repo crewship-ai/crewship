@@ -221,3 +221,43 @@ func TestAcceptance_IssueEvents_PagesPastTheServerCap(t *testing.T) {
 		}
 	}
 }
+
+// #2983: one backward page — the newest `limit` events below a cursor, the
+// shape Activity's "Load older" uses. One call, no forward paging, and the
+// page's has_older reaches -f json.
+func TestAcceptance_IssueEvents_BeforeSeqReadsOneOlderPage(t *testing.T) {
+	stub := &issueEventsStub{eventsBody: `{
+  "events": [
+    {"id":"act_3","mission_id":"iss_1","seq":3,"actor_type":"user","actor_id":"u1","actor_name":"Jamie Lee",
+     "action":"commented","details":"third","created_at":"2026-09-04T11:00:00Z"}
+  ],
+  "after_seq": 0, "latest_seq": 9, "before_seq": 4, "has_older": true
+}`}
+	srv := stub.start(t)
+
+	out, err := runIssueEventsCLI(t, srv.URL, "issue", "events", "BE-42", "--before-seq", "4", "--limit", "1", "--format", "json")
+	if err != nil {
+		t.Fatalf("issue events: %v\noutput: %s", err, out)
+	}
+	queries := stub.queries(t)
+	if len(queries) != 1 || queries[0].Get("before_seq") != "4" || queries[0].Get("limit") != "1" || queries[0].Get("after_seq") != "" {
+		t.Fatalf("queries = %v, want exactly one call with before_seq=4&limit=1", queries)
+	}
+	for _, want := range []string{`"seq": 3`, `"has_older": true`, `"before_seq": 4`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("json output missing %s:\n%s", want, out)
+		}
+	}
+}
+
+func TestAcceptance_IssueEvents_BeforeSeqAndAfterSeqAreExclusive(t *testing.T) {
+	stub := &issueEventsStub{eventsBody: issueEventsFixture}
+	srv := stub.start(t)
+	out, err := runIssueEventsCLI(t, srv.URL, "issue", "events", "BE-42", "--before-seq", "4", "--after-seq", "1")
+	if err == nil {
+		t.Fatalf("both cursors accepted:\n%s", out)
+	}
+	if len(stub.calls(t)) != 0 {
+		t.Errorf("the server was called despite the conflicting flags")
+	}
+}

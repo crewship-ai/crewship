@@ -68,7 +68,8 @@ project:
         "type": "module",
         "packageManager": "pnpm@10.11.0",
         "dependencies": {"react": "19.2.8", "react-dom": "19.2.8"},
-        "devDependencies": {"vite": "8.2.2", "typescript": "7.0.2", "@types/react": "19.2.14", "@types/react-dom": "19.2.3"}
+        "devDependencies": {"vite": "8.2.2", "typescript": "7.0.2", "@types/react": "19.2.14", "@types/react-dom": "19.2.3"},
+        "pnpm": {"overrides": {"source-map-js": "1.2.2"}}
       }
   - path: pnpm-lock.yaml
     encoding: utf8
@@ -78,6 +79,9 @@ project:
       settings:
         autoInstallPeers: true
         excludeLinksFromLockfile: false
+
+      overrides:
+        source-map-js: 1.2.2
 
       importers:
 
@@ -453,8 +457,8 @@ project:
         scheduler@0.27.0:
           resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
 
-        source-map-js@1.2.1:
-          resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
+        source-map-js@1.2.2:
+          resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
           engines: {node: '>=0.10.0'}
 
         tinyglobby@0.2.17:
@@ -698,7 +702,7 @@ project:
           dependencies:
             nanoid: 3.3.18
             picocolors: 1.1.1
-            source-map-js: 1.2.1
+            source-map-js: 1.2.2
 
         react-dom@19.2.8(react@19.2.8):
           dependencies:
@@ -730,7 +734,7 @@ project:
 
         scheduler@0.27.0: {}
 
-        source-map-js@1.2.1: {}
+        source-map-js@1.2.2: {}
 
         tinyglobby@0.2.17:
           dependencies:

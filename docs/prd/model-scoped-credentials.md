@@ -230,7 +230,7 @@ a support ticket.
 
 ## References
 
-- [Czech original with the post-verification revision](PRD-MODEL-SCOPED-CREDENTIALS-2026.md)
+- [Czech original with the post-verification revision](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/PRD-MODEL-SCOPED-CREDENTIALS-2026.md)
   (superseded by this document; kept as the record of the review pass) — this
   document is a translation of the original and **does not replace it
   silently**: the revision's two decisions are summarised in the addendum below.
@@ -253,7 +253,7 @@ exists without verifying first.
 
 The Czech original was revised after a pass over the code; the revision answers
 Q2 above and sets sequencing. Full text in the
-[original §7 and §10](PRD-MODEL-SCOPED-CREDENTIALS-2026.md); the decisions:
+[original §7 and §10](https://github.com/crewship-ai/crewship/blob/1a0116796acd7c1250965a9c172b90391e20e3fb/docs/prd/PRD-MODEL-SCOPED-CREDENTIALS-2026.md); the decisions:
 
 - **Enforce at assignment time, not only at request time (answers Q2).** The
   model an agent runs with is set by `agent update --llm-model`; assigning a

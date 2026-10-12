@@ -64,7 +64,7 @@ func (o *Orchestrator) StopDeletedAgentRuns(ctx context.Context, agentID string,
 		if slug == "" {
 			slug = slugs[st.AgentID]
 		}
-		stopped, err := o.StopRunAt(ctx, RunLocation{ContainerID: st.ContainerID, AgentSlug: slug, RunID: st.ID})
+		stopped, err := o.StopRunAt(ctx, RunLocation{ContainerID: st.ContainerID, AgentSlug: slug, RunID: st.ID, Managed: st.ManagedLaunch != nil})
 		if err != nil || !stopped {
 			res.Pending++
 			if err != nil {

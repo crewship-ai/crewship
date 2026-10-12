@@ -352,3 +352,18 @@ func TestDebugLogsFiltering(t *testing.T) {
 		t.Errorf("agent_id filter: expected 3 entries (2 service + 1 matching), got %d", len(logs2))
 	}
 }
+
+func (m *mockState) Update(ctx context.Context, bucket, key string, update func([]byte) ([]byte, error)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	raw, err := m.Get(ctx, bucket, key)
+	if err != nil {
+		return err
+	}
+	raw, err = update(raw)
+	if err != nil {
+		return err
+	}
+	return m.Set(ctx, bucket, key, raw)
+}

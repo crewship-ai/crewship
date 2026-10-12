@@ -175,6 +175,7 @@ func crewNetExecUser(ctx context.Context, t *testing.T, p *Provider, cid, user, 
 	t.Helper()
 	res, err := p.Exec(ctx, provider.ExecConfig{ContainerID: cid, Cmd: []string{"sh", "-c", cmd}, User: user + ":" + user})
 	if err != nil {
+		fenceLogContainerState(t, p, cid)
 		t.Fatalf("exec %q: %v", cmd, err)
 	}
 	b, _ := readAllAndClose(res.Reader)

@@ -298,8 +298,10 @@ func Convert(ctx context.Context, opts Options) (*Report, error) {
 	}
 	var inner io.Reader = plain
 	var rewriteErr chan error
+	var rewriteReader *io.PipeReader
 	if rewrite {
 		pr, pw := io.Pipe()
+		rewriteReader = pr
 		rewriteErr = make(chan error, 1)
 		stepReports := report.Steps
 		go func() {
@@ -311,6 +313,11 @@ func Convert(ctx context.Context, opts Options) (*Report, error) {
 	}
 	sum, size, err := backup.SealPayload(sealedTmp, inner, sealOpts)
 	if rewriteErr != nil {
+		// Sealing can fail before consuming the rewrite stream (for example,
+		// when a recipient refuses the key or the destination fills). Release
+		// the producer before joining it; otherwise its pipe write can block
+		// forever while this goroutine waits for the producer's result.
+		_ = rewriteReader.CloseWithError(err)
 		if rerr := <-rewriteErr; rerr != nil && err == nil {
 			err = rerr
 		}

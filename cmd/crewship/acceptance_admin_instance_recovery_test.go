@@ -149,6 +149,11 @@ func TestAcceptance_AdminInstanceRecovery(t *testing.T) {
 	if out := must("admin", "instance", "backups", "restore-checks", bundle, "--target", "empty_server", "--identity", keyFile); !strings.Contains(out, "crewship recover") {
 		t.Fatalf("restore-checks:\n%s", out)
 	}
+	// A new name is sent and judged by the restore's own rule: an instance
+	// backup never lands as a new workspace, whatever it is called.
+	if out := must("admin", "instance", "backups", "restore-checks", bundle, "--target", "new_workspace", "--as-workspace", "lab-restored"); !strings.Contains(out, "FAIL conflicts") || !strings.Contains(out, "instance backup restores only") {
+		t.Fatalf("restore-checks --as-workspace:\n%s", out)
+	}
 
 	// A drill offline, recorded on the server.
 	if out := must("backup", "drill", "--bundle", bundle, "--identity", keyFile, "--post"); !strings.Contains(out, "Result: ok") || !strings.Contains(out, "proof level 3") {

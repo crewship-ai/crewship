@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useAuth } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useRestrictedSurfaces } from "@/hooks/use-access-mode"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { apiFetch } from "@/lib/api-fetch"
 import { SubBar } from "@/components/layout/sub-bar"
@@ -19,14 +20,17 @@ import { ProfileSection } from "./sections/profile-section"
 import { PrivacySection } from "./sections/privacy-section"
 import { GeneralSection } from "./sections/general-section"
 import { MembersSection } from "./sections/members-section"
+import { useFocusSettingsCard } from "./use-focus-settings-card"
 import { AccessSecretsSection } from "./sections/access-secrets-section"
 import { HooksSection } from "./sections/hooks-section"
 import { SectionMoved } from "./sections/section-moved"
+import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
 
 interface Org {
   id: string
   name: string
   slug: string
+  logo_url?: string | null
   preferred_language: string | null
   _count: { crews: number; agents: number; members: number }
 }
@@ -35,6 +39,7 @@ interface Member {
   id: string
   role: string
   created_at: string
+  access_mode?: "trusted" | "restricted"
   user: { id: string; email: string; full_name: string | null; avatar_url: string | null }
 }
 
@@ -108,7 +113,43 @@ export function initialFocusedMember(search: string): string {
   return new URLSearchParams(search).get("member") ?? ""
 }
 
+/** The card a `?card=<slug>` deep link names (see settingsCardSlug), or "". */
+export function initialFocusedCard(search: string): string {
+  return new URLSearchParams(search).get("card") ?? ""
+}
+
 export function SettingsLayout() {
+  // A restricted session gets account security and nothing else (#2861): the
+  // workspace, members and every other section are off its allowlist, so not
+  // even their requests are made.
+  const surfaces = useRestrictedSurfaces()
+  if (surfaces) return <RestrictedAccountSettings />
+  // One Save for the whole page: every card's edits join the floating bar,
+  // and leaving with edits pending asks first (components/ui/page-save-bar).
+  return (
+    <PageSaveProvider>
+      <SettingsPage />
+    </PageSaveProvider>
+  )
+}
+
+function RestrictedAccountSettings() {
+  const { session, signOut } = useAuth()
+  return (
+    <div className="mx-auto w-full max-w-3xl space-y-4 p-4 md:p-6">
+      <h1 className="text-xl font-semibold">Account security</h1>
+      <ProfileSection
+        restricted
+        userName={session?.user?.name}
+        userEmail={session?.user?.email}
+        sessionExpires={session?.expires}
+        onSignOut={() => signOut().then(() => { window.location.href = "/login" })}
+      />
+    </div>
+  )
+}
+
+function SettingsPage() {
   const { session, signOut } = useAuth()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
 
@@ -138,6 +179,7 @@ export function SettingsLayout() {
   const search = searchParams.toString()
   const [requestedTab, _setActiveTab] = useState(() => initialSettingsTab(search))
   const [focusedMember, setFocusedMember] = useState(() => initialFocusedMember(search))
+  const [focusedCard, setFocusedCard] = useState(() => initialFocusedCard(search))
   const appliedSearch = useRef(search)
 
   useEffect(() => {
@@ -145,6 +187,7 @@ export function SettingsLayout() {
     appliedSearch.current = search
     _setActiveTab(initialSettingsTab(search))
     setFocusedMember(initialFocusedMember(search))
+    setFocusedCard(initialFocusedCard(search))
   }, [search])
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -156,6 +199,7 @@ export function SettingsLayout() {
   // pane for a frame. While the role is loading nothing is judged, so an
   // OWNER's deep link survives the round trip.
   const activeTab = wsLoading || isSettingsSectionVisible(requestedTab, role) ? requestedTab : "profile"
+  useFocusSettingsCard(focusedCard, activeTab)
 
   // A section that moved forwards immediately — before the workspace fetch,
   // before the role is known, before anything renders — so a stale link costs
@@ -172,11 +216,14 @@ export function SettingsLayout() {
   // state directly, so the store round-trip is gone along with the breadcrumb.
   const setActiveTab = useCallback((tab: string) => {
     _setActiveTab(tab)
+    // A card belongs to the tab the link opened; another tab has none.
+    setFocusedCard("")
     // Keep the URL in sync so the active tab is shareable/bookmarkable and
     // the back button works, without triggering a route navigation.
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href)
       url.searchParams.set("tab", tab)
+      url.searchParams.delete("card")
       window.history.replaceState(null, "", url.toString())
     }
   }, [])
@@ -282,12 +329,14 @@ export function SettingsLayout() {
           workspaceId={workspaceId}
           orgName={org.name}
           orgSlug={org.slug}
+          logoUrl={org.logo_url ?? null}
           preferredLanguage={org.preferred_language}
           agentCount={org._count?.agents ?? 0}
           crewCount={org._count?.crews ?? 0}
           memberCount={org._count?.members ?? 0}
           role={role}
           onUpdated={handleOrgUpdated}
+          onLogoChange={(logo_url) => setOrg((prev) => (prev ? { ...prev, logo_url } : prev))}
           onDelete={() => { window.location.href = "/" }}
         />
       )
@@ -367,9 +416,10 @@ export function SettingsLayout() {
       )}
 
       {/* Content */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div className="relative flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full">
-          <div className="max-w-3xl mx-auto p-4 md:p-6 space-y-4">
+          {/* pb-24: room under the last card for the floating Save bar. */}
+          <div className="max-w-3xl mx-auto p-4 pb-24 md:p-6 md:pb-24 space-y-4">
             {/* The mobile nav trigger used to live here, above the content, and
                 doubled as the section label. Both jobs moved to the sub-bar. */}
 
@@ -387,6 +437,7 @@ export function SettingsLayout() {
             </AnimatePresence>
           </div>
         </ScrollArea>
+        <PageSaveBar />
       </div>
       </div>
     </div>

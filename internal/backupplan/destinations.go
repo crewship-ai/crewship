@@ -129,6 +129,10 @@ func ListDestinations(ctx context.Context, db *sql.DB) ([]Destination, error) {
 // GetDestination returns one destination (with its sealed secret) or
 // ErrNotFound.
 func GetDestination(ctx context.Context, db *sql.DB, id string) (*Destination, error) {
+	return getDestination(ctx, db, id)
+}
+
+func getDestination(ctx context.Context, db queryer, id string) (*Destination, error) {
 	return scanDestination(db.QueryRowContext(ctx, `SELECT `+destinationColumns+` FROM backup_offsite_destinations WHERE id = ?`, id))
 }
 
@@ -182,11 +186,12 @@ func InsertDestination(ctx context.Context, ex execer, d *Destination, secretEnc
 
 // DeleteDestination removes a destination no plan uses, with its copy
 // records (the remote objects stay; they are the admin's to delete).
-func DeleteDestination(ctx context.Context, db *sql.DB, ex execer, id string) ([]string, error) {
-	if _, err := GetDestination(ctx, db, id); err != nil {
+// Reads and writes use ex; the DB argument is retained for existing callers.
+func DeleteDestination(ctx context.Context, _ *sql.DB, ex queryExecer, id string) ([]string, error) {
+	if _, err := getDestination(ctx, ex, id); err != nil {
 		return nil, err
 	}
-	plans, err := ListPlans(ctx, db)
+	plans, err := listPlans(ctx, ex)
 	if err != nil {
 		return nil, err
 	}

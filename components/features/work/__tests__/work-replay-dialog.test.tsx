@@ -12,7 +12,7 @@ import { describe, it, expect, afterEach } from "vitest"
 import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 
 import { ReplayButton, ReplayUnavailableReason, WorkReplayDialog } from "../work-replay-dialog"
-import type { ReplayAvailability, WorkItemDetail } from "@/hooks/use-work-items"
+import { replayAvailability, type ReplayAvailability, type WorkItemDetail } from "@/hooks/use-work-items"
 
 afterEach(cleanup)
 
@@ -77,6 +77,23 @@ describe("the replay button", () => {
     )
     expect(screen.getByTestId("replay-button").hasAttribute("disabled")).toBe(false)
     expect(screen.queryByTestId("replay-unavailable-reason")).toBeNull()
+  })
+
+  it("is disabled for finished restricted workflow work and states the server's reason (#2865)", () => {
+    const availability = replayAvailability(
+      item({ domain_kind: "restricted_workflow", source: "schedule", source_ref: "" }),
+      { delivery: null, loading: false, notFound: false },
+    )
+    render(
+      <>
+        <ReplayButton availability={availability} onClick={() => {}} />
+        <ReplayUnavailableReason availability={availability} />
+      </>,
+    )
+    expect(screen.getByTestId("replay-button").hasAttribute("disabled")).toBe(true)
+    expect(screen.getByTestId("replay-unavailable-reason").textContent).toContain(
+      "Private workflow replay requires a new authorized routine or Page admission.",
+    )
   })
 })
 

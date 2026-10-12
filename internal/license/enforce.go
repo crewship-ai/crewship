@@ -9,7 +9,9 @@ import (
 // v0.1 ships fully Apache-2.0 with no edition gating, so all enforcement
 // returns nil. The package is preserved as a kostra (skeleton) so v0.2
 // can re-enable tiered limits without re-introducing types and call
-// sites; flip the early-return to a real count check when that lands.
+// sites. When enabling enforcement, update EffectiveClaims as well so all
+// API, CLI and UI surfaces report the same effective capacity. Zero means
+// unlimited and must never be treated as a zero-seat cap.
 
 // CheckCrewLimit is a no-op in v0.1 — see file-level note.
 func (l *License) CheckCrewLimit(_ context.Context, _ *sql.DB, _ string) error {

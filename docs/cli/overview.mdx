@@ -71,7 +71,11 @@ Extension members from RFC 7807 responses (e.g. `missing_integrations`) pass thr
 
 ```bash
 crewship commands --format json | jq '.commands[].path'
+crewship commands agent --format json
 ```
+
+For the full embedded API catalog, input/output schemas, and authenticated HTTP
+requests, use [`crewship api`](/cli/api). Discovery works offline.
 
 <Warning>
 **Token-host binding.** Your CLI bearer token is bound to the host it was
@@ -816,3 +820,10 @@ reference.
 
 Anything missing from this table that you reach for often is a docs
 bug — open an issue or PR.
+
+## AI client integration
+
+The binary bundles an MCP server and Agent Skill. Use `crewship ai connect codex`
+or `crewship ai connect claude` for native client registration. For other clients,
+`crewship ai config` prints a token-free MCP configuration. See [AI clients](/cli/ai)
+for skill installation, supported transports and write permissions.

@@ -133,6 +133,22 @@ describe("Admin overview — capacity against the licence", () => {
   })
 })
 
+describe("Admin overview — unlimited open-source license", () => {
+  it("shows unlimited capacity above historical caps and explains future changes", () => {
+    renderTab({
+      license: { ...LICENSE, max_crews: 0, max_members: 0, max_agents_per_crew: 0 },
+      stats: { workspaces: 1, running: 0, crews: 25, users: 12, agents: 40 },
+    })
+    expect(screen.getAllByText("Unlimited")).toHaveLength(3)
+    expect(screen.getByText(/Resource licensing may change in future releases/)).toBeInTheDocument()
+    expect(screen.queryByText(/refused/)).toBeNull()
+    expect(screen.queryByText(/up to 0/)).toBeNull()
+    const panel = screen.getByRole("region", { name: /capacity/i })
+    expect(within(panel).getByText("25")).toBeInTheDocument()
+    expect(within(panel).getByText("12")).toBeInTheDocument()
+  })
+})
+
 // The verdict line reads the same probes as the cards below it, and the one
 // slow probe says it is still running instead of claiming a result.
 describe("Admin overview — health checks", () => {

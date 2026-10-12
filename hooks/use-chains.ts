@@ -41,6 +41,22 @@ export interface ChainSummary {
    */
   running_runs?: number
   waiting_runs?: number
+  /**
+   * Terminal outcomes besides failed (#2981). Optional for the same reason as
+   * the live counts: an older server does not send them. Cancelled (somebody
+   * stopped it) and interrupted (the process died) are kept apart.
+   */
+  /**
+   * What the chain is rooted in (#2989): "run" for a routine run and what it
+   * caused, "assignment" for agent work started outside any routine. Absent
+   * from an older server, which only ever sent run chains.
+   */
+  kind?: "run" | "assignment"
+  /** An assignment root's task — the name of agent work. */
+  task?: string
+  completed_runs?: number
+  cancelled_runs?: number
+  interrupted_runs?: number
   first_activity: string
   last_activity: string
   /**
@@ -146,9 +162,19 @@ export function useChains(workspaceId: string | null, limit = 25): UseChainsResu
   // Guards against an older response landing after a newer one and overwriting
   // it — the same reason use-journal-list keeps a request id.
   const reqIdRef = useRef(0)
+  const scopeRef = useRef<{ workspaceId: string | null; limit: number } | null>(null)
+  const invalidatePending = useCallback(() => {
+    scopeRef.current = null
+    reqIdRef.current++
+  }, [])
 
   const refresh = useCallback(async () => {
-    if (!workspaceId) return
+    if (!scopeRef.current || scopeRef.current.workspaceId !== workspaceId || scopeRef.current.limit !== limit) return
+    if (!workspaceId) {
+      setLoading(false)
+      setError(null)
+      return
+    }
     const reqId = ++reqIdRef.current
     setLoading(true)
     setError(null)
@@ -178,8 +204,13 @@ export function useChains(workspaceId: string | null, limit = 25): UseChainsResu
   }, [workspaceId, limit])
 
   useEffect(() => {
+    scopeRef.current = { workspaceId, limit }
+    setChains([])
+    setHasMore(true)
+    setHasUnrecordedRuns(false)
     void refresh()
-  }, [refresh])
+    return invalidatePending
+  }, [refresh, workspaceId, limit, invalidatePending])
 
   return { chains, loading, error, hasUnrecordedRuns, hasMore, refresh }
 }

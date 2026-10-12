@@ -214,6 +214,9 @@ describe("scopeOf", () => {
     expect(scopeOf(entry({ entry_type: "peer.escalation" }))).toBe("waiting")
     expect(scopeOf(entry({ entry_type: "run.failed", severity: "error" }))).toBe("failed")
     expect(scopeOf(entry({ entry_type: "run.completed" }))).toBe("done")
+    // #2981: somebody stopped it — not "done", and not a failure.
+    expect(scopeOf(entry({ entry_type: "run.cancelled" }))).toBe("stopped")
+    expect(scopeOf(entry({ entry_type: "assignment.cancelled" }))).toBe("stopped")
   })
 
   it("treats any error severity as failed, whatever emitted it", () => {
