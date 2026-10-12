@@ -8,7 +8,7 @@ import { GROUNDS, blend, contrast, deriveAccent, hexToRgb, rgbToOklch, workspace
 // These are the floors theme-contrast.test.ts holds the presets to.
 
 const INPUTS = [
-  "#9FE5BD", // the Pages default mint — far too light for white text
+  "#9FE5BD", // the old Pages mint — far too light for white text
   "#1E7BFE", "#FF0000", "#FFFF00", "#00FF00", "#00FFFF", "#FF00FF",
   "#FFFFFF", "#000000", "#808080", "#F97316", "#7C3AED", "#0EA5C4",
   "#14532D", "#FDE68A", "#E11D48", "#1F2937", "#C0FFEE", "#123456",

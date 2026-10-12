@@ -55,7 +55,15 @@ Restricted sessions are not offered Notification preferences or Connect CLI.
 
 ## Settings → General → Pages appearance
 
-The workspace palette for Page applications (ADMIN and up edit, everyone reads): start from a preset — **Mint**, **Midnight blue**, **Paper**, **Graphite** — then adjust Brand, Surfaces and Text colours with a swatch or hex. Text and Secondary text show their live contrast on the background and on cards (`AA 12.3:1`, or `Low 3.1:1` below 4.5:1), and a live mini Page previews the result. The Brand accent is also what everyone can pick as the **Workspace** accent in Appearance.
+The palette agents use when they build Page applications (ADMIN and up edit, everyone reads). Until an admin picks something else, every Page wears the **Crewship** palette — the product's own dark theme with its brand blue (`#1E7BFE` on `#0A0B0E`); a workspace that never customised stores `{}` and so follows any later change to that default. A badge in the card header says what is in use: *Crewship default*, a preset's name, or *Custom*.
+
+- **Theme** — Crewship (default), Crewship light, Midnight, Paper, or **Custom…**. Picking a preset sets all six colours; editing any colour makes it Custom.
+- **Colours** — Accent, Background, Cards, Borders, Text, Secondary text, each with a swatch (opens the colour picker) and a hex field. Text colours carry one **AA** / **Low** badge for the worse of their contrast on background and cards; the exact ratios are in its tooltip.
+- **Live sample** — a small Page in the palette: header, three figures, a card with a button and a link. **Preview** opens a full sample Page.
+- **Reset to Crewship default** — shown for a customised palette; saves `{}` so the workspace follows the default again.
+- The Accent is also everyone's **Team colour** option in Appearance.
+
+The card stacks to one column on phones and tablets (presets two or three across, colours above the sample) and goes side by side from desktop width.
 
 ## Where personal settings are stored
 

@@ -4,14 +4,17 @@ import { PagesAppearanceCard } from "../pages-appearance-card"
 
 const api = vi.fn()
 const refresh = vi.fn()
+let saved: unknown = { accent: "#123abc" }
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => api(...args) }))
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspacePagesTheme: () => ({ accent: "#123abc" }), refreshWorkspaceSettings: () => refresh() }))
-beforeEach(() => { cleanup(); api.mockReset(); refresh.mockReset() })
+vi.mock("@/hooks/use-workspace", () => ({ useWorkspacePagesTheme: () => saved, refreshWorkspaceSettings: () => refresh() }))
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+beforeEach(() => { cleanup(); api.mockReset(); refresh.mockReset(); saved = { accent: "#123abc" } })
+
 it("reads workspace colors and saves only the palette through the workspace API", async () => {
  api.mockResolvedValue({ ok: true }); refresh.mockResolvedValue(undefined)
  render(<PagesAppearanceCard workspaceId="ws1" role="ADMIN" />)
- expect(screen.getByLabelText("Brand accent")).toHaveValue("#123abc")
- fireEvent.change(screen.getByLabelText("Brand accent"), { target: { value: "#ff6000" } })
+ expect(screen.getByLabelText("Accent")).toHaveValue("#123abc")
+ fireEvent.change(screen.getByLabelText("Accent"), { target: { value: "#ff6000" } })
  fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
  await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
  expect(api.mock.calls[0][0]).toBe("/api/v1/workspaces/ws1?workspace_id=ws1")
@@ -19,67 +22,81 @@ it("reads workspace colors and saves only the palette through the workspace API"
  expect(Object.keys(body)).toEqual(["pages_theme"])
  expect(body.pages_theme.accent).toBe("#ff6000")
 })
+
 it("keeps an unsuccessful draft and blocks invalid color values", async () => {
  api.mockResolvedValue({ ok: false, json: async () => ({ error: "Permission revoked" }) })
  render(<PagesAppearanceCard workspaceId="ws1" role="OWNER" />)
- fireEvent.change(screen.getByLabelText("Brand accent"), { target: { value: "invalid" } })
+ fireEvent.change(screen.getByLabelText("Accent"), { target: { value: "invalid" } })
  expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled()
- fireEvent.change(screen.getByLabelText("Brand accent"), { target: { value: "#ff6000" } })
+ fireEvent.change(screen.getByLabelText("Accent"), { target: { value: "#ff6000" } })
  fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
  await screen.findByText("Permission revoked")
- expect(screen.getByLabelText("Brand accent")).toHaveValue("#ff6000")
+ expect(screen.getByLabelText("Accent")).toHaveValue("#ff6000")
  expect(refresh).not.toHaveBeenCalled()
 })
+
 it("does not offer write controls to a member", () => {
  render(<PagesAppearanceCard workspaceId="ws1" role="MEMBER" />)
  expect(screen.queryByRole("textbox")).toBeNull()
- expect(screen.queryByLabelText("Brand accent picker")).toBeNull()
- expect(screen.queryByRole("radiogroup", { name: "Start from" })).toBeNull()
+ expect(screen.queryByLabelText("Accent picker")).toBeNull()
  expect(screen.queryByRole("radio")).toBeNull()
  expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull()
+ expect(screen.queryByRole("button", { name: /reset to crewship default/i })).toBeNull()
  expect(screen.getByText("#123abc")).toBeInTheDocument()
- // The palette is still shown, contrast included.
+ // The palette is still shown, contrast included: one badge per text colour.
  expect(screen.getByTestId("pages-mini-preview")).toBeInTheDocument()
- expect(screen.getAllByTestId("contrast-badge")).toHaveLength(4)
+ expect(screen.getAllByTestId("contrast-badge")).toHaveLength(2)
 })
 
-// "Start from" tiles replace "Use default colors": a tile sets all six
-// colours, and the tile whose palette the draft matches is the checked one.
-it("sets the whole draft from a preset and marks the matching tile", async () => {
+// A workspace that never customised stores `{}` and wears the Crewship
+// palette — the product's own dark theme with its brand blue.
+it("defaults to the Crewship palette and says so", () => {
+ saved = {}
+ render(<PagesAppearanceCard workspaceId="ws1" role="ADMIN" />)
+ expect(screen.getByTestId("pages-theme-status")).toHaveTextContent("Crewship default")
+ expect(screen.getByRole("radio", { name: "Crewship" })).toHaveAttribute("aria-checked", "true")
+ expect(screen.getByLabelText("Accent")).toHaveValue("#1e7bfe")
+ expect(screen.getByLabelText("Background")).toHaveValue("#0a0b0e")
+ // Nothing to reset when already following the default.
+ expect(screen.queryByRole("button", { name: /reset to crewship default/i })).toBeNull()
+})
+
+it("sets the whole draft from a preset, marks it, and falls back to Custom on an edit", async () => {
  api.mockResolvedValue({ ok: true }); refresh.mockResolvedValue(undefined)
  render(<PagesAppearanceCard workspaceId="ws1" role="ADMIN" />)
- const group = screen.getByRole("radiogroup", { name: "Start from" })
- expect(group).toBeInTheDocument()
- // The saved accent (#123abc) is not any preset's.
- for (const name of ["Mint", "Midnight blue", "Paper", "Graphite"]) expect(screen.getByRole("radio", { name })).toHaveAttribute("aria-checked", "false")
+ // The saved accent (#123abc) is no preset's, so Custom is the pressed tile.
+ expect(screen.getByRole("radio", { name: "Custom" })).toHaveAttribute("aria-checked", "true")
+ expect(screen.getByTestId("pages-theme-status")).toHaveTextContent("Custom")
  fireEvent.click(screen.getByRole("radio", { name: "Paper" }))
  expect(screen.getByRole("radio", { name: "Paper" })).toHaveAttribute("aria-checked", "true")
- expect(screen.getByRole("radio", { name: "Mint" })).toHaveAttribute("aria-checked", "false")
- const paper = { "Brand accent": "#2563eb", Background: "#fafaf7", Cards: "#ffffff", Text: "#1c2430", "Secondary text": "#566072", Borders: "#e2e4e8" }
+ expect(screen.getByRole("radio", { name: "Custom" })).toHaveAttribute("aria-checked", "false")
+ const paper = { Accent: "#1d4ed8", Background: "#fbfaf7", Cards: "#ffffff", Text: "#1c2430", "Secondary text": "#566072", Borders: "#e7e3da" }
  for (const [label, value] of Object.entries(paper)) expect(screen.getByLabelText(label)).toHaveValue(value)
- // Editing one colour leaves the preset.
  fireEvent.change(screen.getByLabelText("Cards"), { target: { value: "#fefefe" } })
  expect(screen.getByRole("radio", { name: "Paper" })).toHaveAttribute("aria-checked", "false")
- // Mint is the default palette.
- fireEvent.click(screen.getByRole("radio", { name: "Mint" }))
- expect(screen.getByRole("radio", { name: "Mint" })).toHaveAttribute("aria-checked", "true")
- expect(screen.getByLabelText("Brand accent")).toHaveValue("#9fe5bd")
- expect(screen.getByLabelText("Background")).toHaveValue("#0c1410")
- fireEvent.click(screen.getByRole("radio", { name: "Graphite" }))
+ expect(screen.getByRole("radio", { name: "Custom" })).toHaveAttribute("aria-checked", "true")
+ fireEvent.click(screen.getByRole("radio", { name: "Midnight" }))
  fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
  await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
- expect(JSON.parse(api.mock.calls[0][1].body)).toEqual({ pages_theme: { accent: "#5eead4", background: "#141516", surface: "#1d1e20", text: "#ececed", muted: "#a1a1a8", border: "#323438" } })
+ expect(JSON.parse(api.mock.calls[0][1].body)).toEqual({ pages_theme: { accent: "#6ea8ff", background: "#0b1220", surface: "#141e33", text: "#e6edf7", muted: "#9fb0c8", border: "#27344f" } })
 })
 
-it("shows live contrast of each text colour on background and cards", () => {
+it("resets a custom palette to the Crewship default by saving an empty one", async () => {
+ api.mockResolvedValue({ ok: true }); refresh.mockResolvedValue(undefined)
  render(<PagesAppearanceCard workspaceId="ws1" role="ADMIN" />)
- expect(screen.getByLabelText("Contrast on background: AA 16.8:1")).toHaveTextContent("AA 16.8:1")
- expect(screen.getByLabelText("Contrast on cards: AA 15.7:1")).toBeInTheDocument()
+ fireEvent.click(screen.getByRole("button", { name: /reset to crewship default/i }))
+ await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
+ expect(JSON.parse(api.mock.calls[0][1].body)).toEqual({ pages_theme: {} })
+})
+
+it("shows one contrast badge per text colour, low when either surface fails", () => {
+ render(<PagesAppearanceCard workspaceId="ws1" role="ADMIN" />)
+ const [text] = screen.getAllByTestId("contrast-badge")
+ expect(text).toHaveTextContent("AA")
+ expect(text.getAttribute("title")).toMatch(/:1 on background · .*:1 on cards/)
  expect(screen.queryByText(/below 4\.5:1/)).toBeNull()
  fireEvent.change(screen.getByLabelText("Text"), { target: { value: "#444444" } })
- const badges = screen.getAllByTestId("contrast-badge").map(b => b.textContent)
- expect(badges[0]).toMatch(/^Low \d+\.\d:1$/)
- expect(badges[0]).toBe("Low 1.9:1")
+ expect(screen.getAllByTestId("contrast-badge")[0]).toHaveTextContent("Low")
  expect(screen.getByText(/below 4\.5:1/)).toHaveAttribute("role", "status")
 })
 
@@ -91,7 +108,7 @@ it("previews the unsaved palette on a sample page, live, and closes without savi
  fireEvent.click(screen.getByRole("button", { name: /^preview$/i }))
  const page = await screen.findByTestId("pages-theme-preview")
  expect(page.style.getPropertyValue("--crewship-page-accent")).toBe("#123abc")
- fireEvent.change(screen.getByLabelText("Background"), { target: { value: "#f4f7fb" } })
+ fireEvent.change(screen.getAllByLabelText("Background")[0], { target: { value: "#f4f7fb" } })
  await waitFor(() => expect(screen.getByTestId("pages-theme-preview").style.getPropertyValue("--crewship-page-background")).toBe("#f4f7fb"))
  fireEvent.click(screen.getByRole("button", { name: /close preview/i }))
  await waitFor(() => expect(screen.queryByTestId("pages-theme-preview")).toBeNull())

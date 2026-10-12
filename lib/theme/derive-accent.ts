@@ -4,7 +4,7 @@
  *
  * A preset accent in app/styles/accents.css is seven hand-tuned tokens per
  * mode, each pinned to WCAG AA by lib/__tests__/theme-contrast.test.ts. A
- * colour an admin typed has no such guarantee — #9FE5BD (the Pages default)
+ * colour an admin typed has no such guarantee — #9FE5BD (the old Pages mint)
  * under white button text is 1.4:1 — so it is never used as-is. Its HUE and
  * CHROMA are kept and each token's LIGHTNESS is searched, in OKLCH, until the
  * token meets the same floor against every ground it can be drawn on (the
