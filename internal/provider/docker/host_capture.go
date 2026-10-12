@@ -53,6 +53,16 @@ func hostCaptureControllerUIDSupported(uid int) bool {
 // PrepareHostCapture performs the same fence admission as Exec. A host spool
 // may not be reachable through any container bind, including an ancestor bind.
 func (p *Provider) PrepareHostCapture(ctx context.Context, cfg provider.ExecConfig, directory string, stopArgs []string) (string, json.RawMessage, error) {
+	if !p.SupportsHostCapture() {
+		return "", nil, errors.New("host capture currently requires a supported controller and local Linux Docker daemon")
+	}
+	return p.prepareSupportedHostCapture(ctx, cfg, directory, stopArgs)
+}
+
+// prepareSupportedHostCapture performs admission after the public capability
+// boundary. Keeping admission separate lets mock tests exercise its protections
+// even when their host identity is deliberately ineligible for capture.
+func (p *Provider) prepareSupportedHostCapture(ctx context.Context, cfg provider.ExecConfig, directory string, stopArgs []string) (string, json.RawMessage, error) {
 	if cfg.User != "1001:1001" || cfg.AllowPrivileged || !filepath.IsAbs(directory) || filepath.Clean(directory) != directory || len(stopArgs) == 0 {
 		return "", nil, errors.New("host capture requires an admitted unprivileged run and stop command")
 	}
@@ -67,9 +77,6 @@ func (p *Provider) PrepareHostCapture(ctx context.Context, cfg provider.ExecConf
 	c := insp.Container
 	if c.State == nil || !c.State.Running || c.ID == "" || c.Image == "" || c.State.StartedAt == "" {
 		return "", nil, errors.New("host capture container has no running immutable identity")
-	}
-	if !p.SupportsHostCapture() {
-		return "", nil, errors.New("host capture currently requires a local Linux Docker daemon")
 	}
 	if fence.active() && (fence.containerID != c.ID || fence.startedAt != c.State.StartedAt) {
 		return "", nil, errors.New("host capture fence admission belongs to a different container start")

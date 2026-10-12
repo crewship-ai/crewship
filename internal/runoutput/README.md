@@ -54,7 +54,9 @@ provider identity. It reconstructs framing from sequence one, then projects stab
 line identities into the journal. Each source acknowledgement follows synchronous
 projection. Journal projection receipts survive normal history pruning, so a lost
 ACK cannot append the same event again or re-run commit observers. They do not make
-external side effects transactional. Structured CLI analysis independently
+external side effects transactional. Workspace bundles preserve visible journal
+history but exclude source-installation replay receipts and execution authority;
+whole-instance database copies retain the receipts. Structured CLI analysis independently
 reconstructs terminal envelopes, in-band failures, session and usage metadata;
 exit zero without a required terminal envelope remains unresolved.
 

@@ -20,6 +20,8 @@ func seedHostOutput(t *testing.T, s *Server, runID string, output ...string) orc
 		t.Fatal("required capture qualification needs distinct unprivileged host UID")
 	}
 	if uid := os.Geteuid(); uid == 1001 || uid == 1002 {
+		// SKIP-WAIVER(#3055): workload identities cannot own protected spools;
+		// every guarded fixture runs in the required distinct-UID lane.
 		t.Skip("protected capture requires host UID distinct from workload/sidecar; required qualification uses distinct unprivileged UID")
 	}
 	// A private sibling under sticky /tmp also works inside the resource

@@ -55,6 +55,8 @@ func hostFixtureInput(t *testing.T) HostInput {
 		t.Fatal("required capture qualification needs distinct unprivileged host UID")
 	}
 	if uid := os.Geteuid(); uid == 1001 || uid == 1002 {
+		// SKIP-WAIVER(#3055): these identities are the untrusted workloads;
+		// every guarded fixture must run in the required distinct-UID lane.
 		t.Skip("protected capture requires a host UID distinct from workload/sidecar; required qualification runs under a distinct unprivileged UID")
 	}
 	return hostFixtureInputUnchecked(t)
@@ -334,17 +336,16 @@ func TestHostCaptureNaturalCompletionWinsLateCancellation(t *testing.T) {
 	}
 }
 
-func TestHostCaptureRefusesWorkloadHostUID(t *testing.T) {
-	if uid := os.Geteuid(); uid != 1001 && uid != 1002 {
-		t.Skip("refusal applies to workload and sidecar host UIDs")
-	}
+func TestHostCaptureHonorsHostUIDBoundary(t *testing.T) {
 	input := hostFixtureInputUnchecked(t)
 	createHostFixtureDir(t, input)
 	executor := &hostFixtureExecutor{}
-	if _, err := CaptureHost(t.Context(), input, executor); err == nil {
-		t.Fatal("workload/sidecar host UID admitted")
-	}
-	if executor.starts != 0 {
-		t.Fatal("unsafe UID created execution")
+	result, err := CaptureHost(t.Context(), input, executor)
+	if uid := os.Geteuid(); uid == 1001 || uid == 1002 {
+		if err == nil || executor.starts != 0 {
+			t.Fatalf("unsafe host UID admitted: result=%+v err=%v starts=%d", result, err, executor.starts)
+		}
+	} else if err != nil || executor.starts != 1 || result.Reason != "exited" || result.ExitCode != 0 {
+		t.Fatalf("trusted host UID refused: result=%+v err=%v starts=%d", result, err, executor.starts)
 	}
 }

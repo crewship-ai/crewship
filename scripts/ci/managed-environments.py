@@ -34,38 +34,89 @@ TESTS = {
 }
 HOST_TESTS = {
     'internal/runoutput': {
-        'TestHostCaptureSeparatesStreamsScrubsAndRejectsDuplicate',
-        'TestHostCaptureSurvivesActualControllerKill',
-        'TestHostCaptureNaturalCompletionWinsLateCancellation',
+        'TestHostCapacityDoesNotDiscountUnresolvedClaim',
         'TestHostCapacityReservationsSerializeAndCollectionReleases',
         'TestHostCapacitySettlesOnlyValidatedTerminalOutput',
-        'TestReplayRetainsStableKeysAcrossLostProjectionAcknowledgements',
-        'TestReplayRefusesRewrittenAcknowledgedPrefix',
-        'TestReplayCleansOnlyPrivateKnownCrashTemps',
+        'TestHostCaptureHonorsHostUIDBoundary',
+        'TestHostCaptureInspectFailureNeverInventsTerminal',
+        'TestHostCaptureNaturalCompletionWinsLateCancellation',
+        'TestHostCaptureOverflowStopsOnlyOwnedExecutionAndRetainsTerminal',
+        'TestHostCaptureRefusesWorkloadWritableOrSymlinkDirectory',
+        'TestHostCaptureSeparatesStreamsScrubsAndRejectsDuplicate',
+        'TestHostCaptureSurvivesActualControllerKill',
+        'TestHostReplayExcludesConcurrentProjector',
+        'TestHostRetentionRequiresTerminalAcknowledgementAndKeepsClaim',
         'TestHostRetentionResumesAfterLastSourceUnlinkBeforeReservationRelease',
+        'TestHostRetentionResumesInterruptedUnlink',
+        'TestReplayCleansOnlyPrivateKnownCrashTemps',
+        'TestReplayDoesNotAcknowledgeIncompleteLineOrInventTerminal',
+        'TestReplayRefusesRewrittenAcknowledgedPrefix',
+        'TestReplayRetainsStableKeysAcrossLostProjectionAcknowledgements',
     },
     'internal/orchestrator': {
         'TestHostCaptureQualificationFallsBackOnlyWhenUnsupported',
+        'TestHostDetachedHoldDoesNotRestopOrOverwriteTerminalOutcome',
+        'TestHostForcedLeaderExitRetainsOccupancyUntilWholeContainerAbsent',
         'TestHostRunAgentCompletesThroughDetachedHelperAndPreservesLiteralLaunch',
         'TestHostRunAgentObserverCancellationRetainsHomeThenRecoversResult',
-        'TestRetainedAnalysisUsesSemanticFailureInsteadOfZeroExit',
+        'TestRetainedAcknowledgementRefusesActiveOwnerAndForeignRoot',
+        'TestRetainedAcknowledgementRespectsAuthoritativeNonSuccess',
         'TestRetainedAnalysisIgnoresStderrAndRequiresStructuredTerminal',
+        'TestRetainedAnalysisUsesSemanticFailureInsteadOfZeroExit',
         'TestRetainedAuthoritativeStatusMirrorsOverLocalTerminalObservation',
-        'TestHostForcedLeaderExitRetainsOccupancyUntilWholeContainerAbsent',
     },
     'internal/provider/docker': {
-        'TestHostCaptureDockerSurvivesControllerSIGKILL',
-        'TestHostCaptureDockerStopsOnlyAdmittedExec',
+        'TestHostCaptureAdmissionBindsConfirmedFenceStart',
+        'TestHostCaptureAuthorityRejectsAmbiguousOrMismatchedInput',
+        'TestHostCaptureAuthorityRetainsConfirmedContainerStart',
+        'TestHostCaptureControllerUIDSupport',
         'TestHostCaptureDockerQualifiesTrustedStopHelper',
+        'TestHostCaptureDockerStopsOnlyAdmittedExec',
+        'TestHostCaptureDockerSurvivesControllerSIGKILL',
+        'TestHostCapturePrepareRequiresSupportedControllerTransport',
+        'TestHostCaptureRejectsBindAliasExposingSpoolAncestor',
+        'TestHostCaptureRejectsBindBackedVolumeExposingSpool',
+        'TestHostCaptureRejectsExposedSpoolBeforeAuthority',
+        'TestHostCaptureRestoreRejectsForeignExecIdentity',
+        'TestHostCaptureStartRefusesChangedContainerBeforeExecCreate',
+        'TestHostCaptureStopRefusesRestartBeforeSignal',
     },
     'internal/server': {
         'TestRetainedDockerServerRestartProjectsActualProviderExit',
-        'TestRetainedOutputZeroExitInBandFailureCannotSucceed',
-        'TestRetainedOutputTerminalReceiptSurvivesPruningAndLostACK',
-        'TestRetainedOutputCannotSettleForeignWork',
         'TestRetainedOutputCannotSettleAnotherAgentWork',
+        'TestRetainedOutputCannotSettleForeignWork',
+        'TestRetainedOutputRefusesConflictingExitAfterTerminalPruning',
+        'TestRetainedOutputRefusesForeignOwnership',
+        'TestRetainedOutputReplaysAcrossAcknowledgementFailure',
+        'TestRetainedOutputTerminalReceiptSurvivesPruningAndLostACK',
+        'TestRetainedOutputZeroExitInBandFailureCannotSucceed',
     },
 }
+
+# All tests guarded by the three shared host-UID fixtures are mandatory here.
+# The subprocess helper is invoked by the controller-kill test; running it
+# without its private child environment deliberately performs no fixture work.
+HOST_FIXTURE_GROUPS = {
+    'internal/runoutput': ('host_unix_test.go', 'host_capacity_test.go', 'replay_test.go'),
+    'internal/orchestrator': ('run_output_analysis_test.go', 'run_output_host_test.go',
+                              'run_output_runagent_test.go'),
+    'internal/server': ('retained_output_test.go',),
+    'internal/provider/docker': ('host_capture_test.go', 'host_capture_linux_test.go'),
+}
+HOST_FIXTURE_HELPERS = {('internal/runoutput', 'TestHostCaptureSubprocess')}
+
+
+def host_source_inventory_errors(root='.'):
+    errors = []
+    for package, files in HOST_FIXTURE_GROUPS.items():
+        for filename in files:
+            with open(os.path.join(root, package, filename)) as source:
+                names = set(re.findall(r'^func (Test\w+)\(', source.read(), re.MULTILINE))
+            for name in sorted(names):
+                if (package, name) not in HOST_FIXTURE_HELPERS and name not in HOST_TESTS[package]:
+                    errors.append(f'{package}/{name}: guarded fixture missing from required lane')
+    return errors
+
 REQUIRED = {(PREFIX + package, name)
             for suites in (TESTS, HOST_TESTS)
             for package, names in suites.items() for name in names}
@@ -215,6 +266,9 @@ def main():
                         malformed = True
                 code = process.wait() or code
     try:
+        inventory_errors = host_source_inventory_errors()
+        if inventory_errors:
+            raise RuntimeError('; '.join(inventory_errors))
         go_binary = active_go_binary()
         run_suite(commands(go_binary))
         with prepared_host_commands(go_binary) as suite:

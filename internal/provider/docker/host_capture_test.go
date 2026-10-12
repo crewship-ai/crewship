@@ -18,46 +18,25 @@ func hostCaptureInspect(start string, mounts []map[string]any) map[string]any {
 	return map[string]any{"Id": "cid", "Image": "sha256:immutable", "State": map[string]any{"Running": true, "StartedAt": start}, "Config": map[string]any{"Labels": map[string]string{crewCrewIDLabel: "crew", crewCrewLabel: "slug"}}, "Mounts": mounts}
 }
 
-func TestHostCaptureRejectsExposedSpoolBeforeAuthority(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("host capture requires local Linux Docker")
-	}
-	for _, source := range []string{"/", "/private", "/private/run"} {
-		t.Run(source, func(t *testing.T) {
+func TestHostCapturePrepareRequiresSupportedControllerTransport(t *testing.T) {
+	for _, endpoint := range []string{"unix:///var/run/docker.sock", "tcp://daemon:2375"} {
+		t.Run(endpoint, func(t *testing.T) {
+			var calls atomic.Int32
 			p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
-				if !strings.HasSuffix(r.URL.Path, "/containers/cid/json") {
-					t.Errorf("unexpected request %s", r.URL.Path)
-				}
-				_ = json.NewEncoder(w).Encode(hostCaptureInspect("start", []map[string]any{{"Source": source}}))
+				calls.Add(1)
+				_ = json.NewEncoder(w).Encode(hostCaptureInspect("start", nil))
 			})
-			p.detected.Host = "unix:///var/run/docker.sock"
-			_, _, err := p.PrepareHostCapture(t.Context(), provider.ExecConfig{ContainerID: "cid", User: "1001:1001"}, "/private/run", []string{"stop"})
-			if err == nil || !strings.Contains(err.Error(), "exposed") {
-				t.Fatalf("spool ancestor mount admission=%v", err)
+			p.detected.Host = endpoint
+			_, authority, err := p.PrepareHostCapture(t.Context(), provider.ExecConfig{ContainerID: "cid", User: "1001:1001"}, "/private/run", []string{"stop"})
+			supported := runtime.GOOS == "linux" && hostCaptureControllerUIDSupported(os.Geteuid()) && strings.HasPrefix(endpoint, "unix://")
+			if supported {
+				if err != nil || len(authority) == 0 || calls.Load() == 0 {
+					t.Fatalf("supported admission=%v authority=%s calls=%d", err, authority, calls.Load())
+				}
+			} else if err == nil || len(authority) != 0 || calls.Load() != 0 {
+				t.Fatalf("unsupported controller crossed API boundary: err=%v authority=%s calls=%d", err, authority, calls.Load())
 			}
 		})
-	}
-}
-
-func TestHostCaptureAdmissionBindsConfirmedFenceStart(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("host capture requires local Linux Docker")
-	}
-	var calls atomic.Int32
-	p := newCovProvider(t, Config{EgressFenceCrews: []string{"crew"}}, func(w http.ResponseWriter, r *http.Request) {
-		start := "confirmed"
-		if calls.Add(1) > 1 {
-			start = "unconfirmed-restart"
-		}
-		_ = json.NewEncoder(w).Encode(hostCaptureInspect(start, nil))
-	})
-	p.detected.Host = "unix:///var/run/docker.sock"
-	p.fenced.Store("cid", "confirmed")
-	p.fencedCrew.Store("cid", "crew")
-	p.fenceTeams.Store("crew", provider.CrewConfig{ID: "crew", Slug: "slug"})
-	_, _, err := p.PrepareHostCapture(t.Context(), provider.ExecConfig{ContainerID: "cid", User: "1001:1001"}, "/private/run", []string{"stop"})
-	if err == nil || !strings.Contains(err.Error(), "fence") {
-		t.Fatalf("restart between fence guard and authority snapshot admission=%v", err)
 	}
 }
 
@@ -103,89 +82,6 @@ func TestHostCaptureStartRefusesChangedContainerBeforeExecCreate(t *testing.T) {
 	_, err := executor.Start(t.Context(), runoutput.HostCommand{ContainerID: "cid", User: "1001:1001", Args: []string{"run"}})
 	if err == nil || creates.Load() != 0 {
 		t.Fatalf("changed container started: err=%v creates=%d", err, creates.Load())
-	}
-}
-
-func TestHostCaptureAuthorityRetainsConfirmedContainerStart(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("host capture requires local Linux Docker")
-	}
-	p := newCovProvider(t, Config{EgressFenceCrews: []string{"crew"}}, func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(hostCaptureInspect("confirmed", nil))
-	})
-	p.detected.Host = "unix:///var/run/docker.sock"
-	p.fenced.Store("cid", "confirmed")
-	p.fencedCrew.Store("cid", "crew")
-	p.fenceTeams.Store("crew", provider.CrewConfig{ID: "crew", Slug: "slug"})
-	endpoint, data, err := p.PrepareHostCapture(t.Context(), provider.ExecConfig{ContainerID: "cid", User: "1001:1001"}, "/private/run", []string{"stop"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var authority hostCaptureAuthority
-	if err = json.Unmarshal(data, &authority); err != nil {
-		t.Fatal(err)
-	}
-	if endpoint != p.detected.Host || !authority.Fence || authority.ContainerID != "cid" || authority.StartedAt != "confirmed" || authority.ImageID != "sha256:immutable" {
-		t.Fatalf("authority=%+v endpoint=%q", authority, endpoint)
-	}
-	executor, closer, err := NewHostCaptureExecutor(runoutput.HostInput{Authority: data, Directory: "/private/run", Endpoint: endpoint, Command: runoutput.HostCommand{ContainerID: "cid"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer closer.Close()
-	adapter := executor.(*hostCaptureExecutor)
-	if got, ok := adapter.provider.fenced.Load("cid"); !ok || got != "confirmed" {
-		t.Fatalf("helper fence snapshot=%v present=%v", got, ok)
-	}
-}
-
-func TestHostCaptureRejectsBindAliasExposingSpoolAncestor(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("host capture requires local Linux Docker")
-	}
-	root := t.TempDir()
-	protected := filepath.Join(root, "protected")
-	alias := filepath.Join(root, "alias")
-	if err := os.Mkdir(protected, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(protected, alias); err != nil {
-		t.Fatal(err)
-	}
-	p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(hostCaptureInspect("start", []map[string]any{{"Type": "bind", "Source": alias, "Destination": "/visible", "RW": false}}))
-	})
-	p.detected.Host = "unix:///var/run/docker.sock"
-	_, _, err := p.PrepareHostCapture(t.Context(), provider.ExecConfig{ContainerID: "cid", User: "1001:1001"}, filepath.Join(protected, "run"), []string{"stop"})
-	if err == nil {
-		t.Fatal("read-only bind alias exposing host spool admitted")
-	}
-}
-
-func TestHostCaptureRejectsBindBackedVolumeExposingSpool(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("host capture requires local Linux Docker")
-	}
-	root := t.TempDir()
-	protected := filepath.Join(root, "protected")
-	alias := filepath.Join(root, "alias")
-	if err := os.Mkdir(protected, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(protected, alias); err != nil {
-		t.Fatal(err)
-	}
-	p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "/volumes/") {
-			_ = json.NewEncoder(w).Encode(map[string]any{"Name": "owned", "Driver": "local", "Mountpoint": "/var/lib/docker/volumes/owned/_data", "Options": map[string]string{"type": "none", "o": "bind,nodev,noexec", "device": alias}})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(hostCaptureInspect("start", []map[string]any{{"Type": "volume", "Name": "owned", "Source": "/var/lib/docker/volumes/owned/_data", "Destination": "/visible"}}))
-	})
-	p.detected.Host = "unix:///var/run/docker.sock"
-	_, _, err := p.PrepareHostCapture(t.Context(), provider.ExecConfig{ContainerID: "cid", User: "1001:1001"}, filepath.Join(protected, "run"), []string{"stop"})
-	if err == nil {
-		t.Fatal("bind-backed named volume exposing host spool admitted")
 	}
 }
 

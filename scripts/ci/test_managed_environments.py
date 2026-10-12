@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest import mock
 
 spec = importlib.util.spec_from_file_location('managed', Path(__file__).with_name('managed-environments.py'))
 managed = importlib.util.module_from_spec(spec)
@@ -8,6 +9,16 @@ spec.loader.exec_module(managed)
 
 
 class ManagedEnvironmentEvidenceTests(unittest.TestCase):
+    def test_all_guarded_host_fixture_sources_are_mandatory(self):
+        root = Path(__file__).resolve().parents[2]
+        self.assertEqual(managed.host_source_inventory_errors(root), [])
+        package = 'internal/runoutput'
+        name = 'TestHostCaptureHonorsHostUIDBoundary'
+        with mock.patch.dict(managed.HOST_TESTS,
+                             {package: managed.HOST_TESTS[package] - {name}}):
+            errors = managed.host_source_inventory_errors(root)
+            self.assertTrue(any(name in error for error in errors))
+
     def passing(self):
         return [{'Package': package, 'Test': name, 'Action': action}
                 for package, name in managed.REQUIRED for action in ('run', 'pass')]
