@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Enabling privileged runtime access requires an instance administrator.** Workspace OWNER/ADMIN rights alone no longer enable `allow_privileged_credentials`. Scoped CLI tokens also need `instance:admin`. Workspace administrators may still disable the opt-in; existing privileged containers require separate review and recreation.
+
 - ⚠️ **Behaviour change: demo RBAC accounts now use English role/profile names (#3058).** `seed --with-users` adds 40 VIEWER/MEMBER/MANAGER/ADMIN profiles alongside four English role-labeled baseline accounts in the selected workspace. `seed rbac-matrix` adds those English accounts to an existing demo without resetting data. The former personal-name fixtures are no longer created. Existing passwords, roles and grants are preserved and fixture drift is reported. Skill import now honors `skill.create`, matching generation. Authenticated API acceptance tests cover allowed and denied actions, workspace isolation and live grant/revoke. `memory.write` remains reserved without a public write endpoint.
 
 - **Local Linux Docker runs retain output across controller loss (#2845).** A private host helper keeps the actual CLI execution and redacted output independent of its reader. Recovery projects output and terminal results with durable acknowledgements, preserves work-generation ownership, and refuses duplicate launches. Capture has per-run and aggregate bounds and acknowledgement-based retention. Unsupported providers keep the existing transport; uncertain forced stops retain reconciliation rather than report completion.

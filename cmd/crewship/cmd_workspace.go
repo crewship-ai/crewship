@@ -843,7 +843,7 @@ func init() {
 	workspaceUpdateCmd.Flags().String("slug", "", "Workspace slug")
 	workspaceUpdateCmd.Flags().String("language", "", "Preferred language (e.g. cs, en)")
 	workspaceUpdateCmd.Flags().Bool("allow-privileged-credentials", false,
-		"Load credentials into a --privileged crew's sidecar despite the collapsed UID 1001/1002 isolation boundary (#1032, default false — fails closed)")
+		"Allow privileged runtime configuration and credential delivery (enabling requires instance admin authority; default false)")
 	workspaceUpdateCmd.Flags().Int("credential-audit-retention-days", 0,
 		"Days of credential_audit history to keep; 0 means keep forever. Unset uses the 90-day default (#1887)")
 	workspaceUpdateCmd.Flags().Int("audit-log-retention-days", 0,

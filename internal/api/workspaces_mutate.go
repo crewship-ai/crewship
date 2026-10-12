@@ -178,6 +178,15 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// This flag also authorizes privileged container configurations, whose
+	// authority reaches beyond a workspace. A workspace administrator may
+	// disable the opt-in, but only an instance administrator may enable it.
+	if req.AllowPrivilegedCredentials != nil && *req.AllowPrivilegedCredentials &&
+		(!isInstanceAdmin(r, h.db) || !canScope(r.Context(), scopeInstanceAdmin)) {
+		replyError(w, http.StatusForbidden, "Only an instance administrator can enable privileged runtime access")
+		return
+	}
+
 	if req.Name != nil && (len(*req.Name) < 2 || len(*req.Name) > 100) {
 		replyError(w, http.StatusBadRequest, "name must be 2-100 characters")
 		return
