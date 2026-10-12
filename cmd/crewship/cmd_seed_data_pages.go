@@ -193,7 +193,7 @@ func seedPageProducerRoutines(ctx context.Context, client *cli.Client, wsID stri
 // panels' `producer:` fields, in first-seen order.
 //
 // Deduplicated because one routine writing several panels of a page is the
-// normal shape — page-watch writes both of Hlídka's — and firing its run once
+// normal shape — page-watch writes both of Lookout's — and firing its run once
 // per panel would bill the same work twice and race two runs at one page.
 // Order is preserved rather than sorted so the seed's output reads in the order
 // the catalogue is authored.

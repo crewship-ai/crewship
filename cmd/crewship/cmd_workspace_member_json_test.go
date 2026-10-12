@@ -29,7 +29,7 @@ const memberJSONBody = `[
   {"id":"m-owner","user_id":"u-owner","role":"OWNER","created_at":"2026-07-23T13:15:24Z",
    "user":{"id":"u-owner","email":"demo@crewship.ai","full_name":"Demo User"}},
   {"id":"m-viewer","user_id":"u-viewer","role":"VIEWER","created_at":"2026-08-07T19:05:04Z",
-   "user":{"id":"u-viewer","email":"viewer1@crewship.local","full_name":"Ivana Viewer"}}
+   "user":{"id":"u-viewer","email":"viewer-baseline@crewship.local","full_name":"RBAC VIEWER baseline"}}
 ]`
 
 func memberListJSON(t *testing.T, body string) []map[string]any {
@@ -62,7 +62,7 @@ func TestWorkspaceMemberList_JSONCarriesTheEmail(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2", len(rows))
 	}
-	want := map[string]string{"m-owner": "demo@crewship.ai", "m-viewer": "viewer1@crewship.local"}
+	want := map[string]string{"m-owner": "demo@crewship.ai", "m-viewer": "viewer-baseline@crewship.local"}
 	for _, r := range rows {
 		id, _ := r["id"].(string)
 		if got, _ := r["email"].(string); got != want[id] {
@@ -74,7 +74,7 @@ func TestWorkspaceMemberList_JSONCarriesTheEmail(t *testing.T) {
 // The name column has the same problem, and the same fix must cover it.
 func TestWorkspaceMemberList_JSONCarriesTheFullName(t *testing.T) {
 	rows := memberListJSON(t, memberJSONBody)
-	want := map[string]string{"m-owner": "Demo User", "m-viewer": "Ivana Viewer"}
+	want := map[string]string{"m-owner": "Demo User", "m-viewer": "RBAC VIEWER baseline"}
 	for _, r := range rows {
 		id, _ := r["id"].(string)
 		if got, _ := r["full_name"].(string); got != want[id] {
@@ -187,7 +187,7 @@ func TestWorkspaceMemberList_ShowsAccessModeApartFromRole(t *testing.T) {
 		}
 	}
 	for _, line := range strings.Split(table(memberJSONBody), "\n") {
-		if strings.Contains(line, "viewer1@crewship.local") && (strings.Contains(line, "trusted") || strings.Contains(line, "restricted")) {
+		if strings.Contains(line, "viewer-baseline@crewship.local") && (strings.Contains(line, "trusted") || strings.Contains(line, "restricted")) {
 			t.Errorf("withheld access mode was invented: %q", line)
 		}
 	}

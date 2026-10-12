@@ -21,11 +21,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "..", "scripts", "replica_check.py")
 
 GOOD = """<!doctype html>
-<html lang="cs"><head><meta charset="utf-8"><title>Seznam replica</title>
+<html lang="en"><head><meta charset="utf-8"><title>News Portal replica</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>body{font-family:sans-serif}</style></head>
-<body><h1>Seznam</h1><nav>Zprávy Počasí Email</nav>
-<section>Zprávy dne</section><section>Počasí</section><footer>Sport</footer>
+<body><h1>News Portal</h1><nav>News Weather Email</nav>
+<section>Daily News</section><section>Weather</section><footer>Sports</footer>
 </body></html>"""
 
 
@@ -62,7 +62,7 @@ class TestNotBuilt(unittest.TestCase):
 
 class TestGoodReplica(unittest.TestCase):
     def test_self_contained_page_with_full_coverage_passes(self):
-        out, _ = run(GOOD, {"sections": ["Zprávy", "Počasí", "Sport"]})
+        out, _ = run(GOOD, {"sections": ["News", "Weather", "Sports"]})
         self.assertTrue(out["ok"], out)
         self.assertEqual(out["failed"], 0)
         self.assertEqual(out["coverage"], 1.0)
@@ -79,41 +79,41 @@ class TestGoodReplica(unittest.TestCase):
 class TestFailures(unittest.TestCase):
     def test_external_script_fails_self_containment(self):
         html = GOOD.replace("</head>", '<script src="https://cdn.example.com/x.js"></script></head>')
-        out, _ = run(html, {"sections": ["Zprávy"]})
+        out, _ = run(html, {"sections": ["News"]})
         self.assertIn("no external runtime requests", names(out, False))
         self.assertIn("no inline scripts", names(out, False))
         self.assertEqual(out["panel"]["state"], "critical")
 
     def test_protocol_relative_url_counts_as_external(self):
         html = GOOD.replace("</head>", '<img src="//cdn.example.com/a.png"></head>')
-        out, _ = run(html, {"sections": ["Zprávy"]})
+        out, _ = run(html, {"sections": ["News"]})
         self.assertIn("no external runtime requests", names(out, False))
 
     def test_relative_and_data_urls_are_fine(self):
         html = GOOD.replace("</head>", '<img src="logo.png"><img src="data:image/png;base64,AAAA"></head>')
-        out, _ = run(html, {"sections": ["Zprávy"]})
+        out, _ = run(html, {"sections": ["News"]})
         self.assertIn("no external runtime requests", names(out, True))
 
     def test_missing_viewport_and_title_fail(self):
         html = GOOD.replace('<meta name="viewport" content="width=device-width, initial-scale=1">', "") \
-                   .replace("<title>Seznam replica</title>", "")
-        out, _ = run(html, {"sections": ["Zprávy"]})
+                   .replace("<title>News Portal replica</title>", "")
+        out, _ = run(html, {"sections": ["News"]})
         self.assertIn("viewport meta", names(out, False))
         self.assertIn("title present", names(out, False))
 
     def test_two_h1_fail(self):
-        html = GOOD.replace("<h1>Seznam</h1>", "<h1>Seznam</h1><h1>Again</h1>")
-        out, _ = run(html, {"sections": ["Zprávy"]})
+        html = GOOD.replace("<h1>News Portal</h1>", "<h1>News Portal</h1><h1>Again</h1>")
+        out, _ = run(html, {"sections": ["News"]})
         self.assertIn("exactly one h1", names(out, False))
 
     def test_low_section_coverage_fails_and_names_the_missing(self):
-        out, _ = run(GOOD, {"sections": ["Zprávy", "Počasí", "Sport", "Horoskopy", "TV program"]})
+        out, _ = run(GOOD, {"sections": ["News", "Weather", "Sports", "Horoscopes", "TV guide"]})
         self.assertIn("sections covered", names(out, False))
         missing = [c for c in out["checks"] if c["name"] == "sections covered"][0]["missing"]
-        self.assertEqual(sorted(missing), ["Horoskopy", "TV program"])
+        self.assertEqual(sorted(missing), ["Horoscopes", "TV guide"])
 
     def test_coverage_threshold_is_configurable(self):
-        out, _ = run(GOOD, {"sections": ["Zprávy", "Počasí", "Sport", "Horoskopy", "TV program"]},
+        out, _ = run(GOOD, {"sections": ["News", "Weather", "Sports", "Horoscopes", "TV guide"]},
                      extra=["--min-coverage", "0.5"])
         self.assertIn("sections covered", names(out, True))
 
@@ -129,7 +129,7 @@ class TestExitCode(unittest.TestCase):
 
     def test_exit_code_flag(self):
         _, bad = run("<p>not a document</p>", {"sections": ["x"]}, exit_code=True)
-        _, good = run(GOOD, {"sections": ["Zprávy"]}, exit_code=True)
+        _, good = run(GOOD, {"sections": ["News"]}, exit_code=True)
         self.assertEqual(bad, 1)
         self.assertEqual(good, 0)
 

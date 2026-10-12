@@ -23,7 +23,7 @@ const memberIDRoster = `[
   {"id":"m-owner","user_id":"u-owner","role":"OWNER",
    "user":{"id":"u-owner","email":"demo@crewship.ai","full_name":"Demo User"}},
   {"id":"m-viewer","user_id":"u-viewer","role":"VIEWER",
-   "user":{"id":"u-viewer","email":"viewer1@crewship.local","full_name":"Ivana Viewer"}}
+   "user":{"id":"u-viewer","email":"viewer-baseline@crewship.local","full_name":"RBAC VIEWER baseline"}}
 ]`
 
 // TestWorkspaceMemberRemove_AcceptsAUserID is the red-first case: the exact

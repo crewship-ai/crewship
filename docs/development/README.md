@@ -29,6 +29,8 @@ rule's full text in both places.
 
 ## Implementation and testing
 
+- [`demo-rbac.md`](demo-rbac.md) — real demo accounts, named capability variants, workspace visibility and authenticated API acceptance.
+
 - [`sentry-vitest-alias.md`](sentry-vitest-alias.md) — why `vitest.config.ts` aliases `@sentry/nextjs` to its browser build.
 - [`house-rules-background.md`](house-rules-background.md) — the reasoning and incident history behind the house rules.
 - [`frontend-data-fetching.md`](frontend-data-fetching.md) — React Query conventions: keys, transport, realtime freshness, tests.

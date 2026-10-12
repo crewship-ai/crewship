@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Deterministic acceptance check for a static site replica built by the
-engineering crew (the "copy seznam.cz" demo).
+engineering crew (the "copy a news portal" demo).
 
 The crew writes its work under one directory in the crew's shared volume:
 
