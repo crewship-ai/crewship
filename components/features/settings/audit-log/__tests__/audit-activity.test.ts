@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { addDays, chartBuckets, dayInBounds, facetCounts, lastDays, monthGrid, tallyByDay, type ActivityEvent } from "../audit-activity"
+import { addDays, auditSeverity, dayInBounds, facetCounts, lastDays, monthGrid, tallyByDay, type ActivityEvent } from "../audit-activity"
 import { DEFAULT_AUDIT_FILTERS, type AuditFilters } from "../audit-filters"
 
 const f = (over: Partial<AuditFilters> = {}): AuditFilters => ({ ...DEFAULT_AUDIT_FILTERS, ...over })
@@ -69,33 +69,12 @@ describe("facetCounts", () => {
   })
 })
 
-describe("chartBuckets — the chart covers exactly the range listed", () => {
-  const now = new Date("2026-09-15T12:30:00Z")
-  const ev = (at: string, action = "agent.update") => ({ at, action, entityType: "AGENT", userId: null })
-
-  it("draws a day per bar for a week, counting runs that finished or failed", () => {
-    const { buckets, unit, clipped } = chartBuckets(
-      [ev("2026-09-14T10:00:00Z", "agent.run.failed"), ev("2026-09-14T11:00:00Z"), ev("2026-09-15T01:00:00Z", "agent.run.completed")],
-      { from: "2026-09-08T12:30:00.000Z" }, "2026-08-12", now,
-    )
-    expect(unit).toBe("day")
-    expect(clipped).toBe(false)
-    expect(buckets.map((b) => b.day)).toEqual(["2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11", "2026-09-12", "2026-09-13", "2026-09-14", "2026-09-15"])
-    expect(buckets[6]).toMatchObject({ total: 2, failed: 1, completed: 0 })
-    expect(buckets[7]).toMatchObject({ total: 1, completed: 1 })
-  })
-
-  it("draws hours for a day and five-minute bars for an hour", () => {
-    expect(chartBuckets([], { from: "2026-09-14T12:30:00.000Z" }, "2026-08-12", now).unit).toBe("hour")
-    const hour = chartBuckets([ev("2026-09-15T12:07:00Z")], { from: "2026-09-15T11:30:00.000Z" }, "2026-08-12", now)
-    expect(hour.unit).toBe("minute")
-    expect(hour.buckets).toHaveLength(12)
-    expect(hour.buckets.reduce((n, b) => n + b.total, 0)).toBe(1)
-  })
-
-  it("starts at the sampled window and says so for a longer range", () => {
-    const r = chartBuckets([], { from: "2026-06-17T12:30:00.000Z" }, "2026-08-12", now)
-    expect(r.clipped).toBe(true)
-    expect(r.buckets[0].day).toBe("2026-08-12")
+describe("auditSeverity — the Journal's scale", () => {
+  it("reads failures as errors, removals as warnings, changes as notices and the rest as info", () => {
+    expect(auditSeverity("agent.run.failed")).toBe("error")
+    expect(auditSeverity("hook.delete")).toBe("warn")
+    expect(auditSeverity("member.removed")).toBe("warn")
+    expect(auditSeverity("hook.create")).toBe("notice")
+    expect(auditSeverity("agent.run.completed")).toBe("info")
   })
 })

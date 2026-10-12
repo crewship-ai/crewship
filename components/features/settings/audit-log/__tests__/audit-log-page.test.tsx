@@ -81,32 +81,28 @@ describe("Audit log page", () => {
     expect(auditCalls().at(-1)).toContain(`date_from=${a}T00%3A00%3A00.000Z`)
   })
 
-  // Like the Journal's chart: the bars cover the range the table lists, and
-  // dragging across days picks them as a custom range.
-  it("charts exactly the chosen range and picks days by dragging", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] })
-    vi.setSystemTime(new Date("2026-09-15T12:00:00Z"))
+  // The Crew Journal's chart, as is: a bar picked on it narrows the table to
+  // that slice of the range, the range itself stays, and the same bar again
+  // clears it.
+  it("narrows the table to a bar picked on the Journal's chart", async () => {
     render(<AuditLogPage />)
-    const chart = await waitFor(() => {
-      const el = document.querySelector<HTMLElement>("[data-slot=audit-histogram]")
-      if (!el) throw new Error("no chart")
-      return el
-    })
-    expect(chart.getAttribute("data-unit")).toBe("day")
-    const bars = chart.querySelectorAll<HTMLButtonElement>("[data-bucket]")
-    expect(bars).toHaveLength(8)
-    expect(bars[0].dataset.bucket).toBe("2026-09-08")
-    fireEvent.pointerDown(bars[1])
-    fireEvent.pointerEnter(bars[3])
-    fireEvent.pointerUp(bars[3])
-    await waitFor(() => expect(new URLSearchParams(window.location.search).get("audit_from")).toBe("2026-09-09"))
-    expect(new URLSearchParams(window.location.search).get("audit_to")).toBe("2026-09-11")
+    const chart = await screen.findByRole("application", { name: /Event volume histogram/ })
+    await waitFor(() => expect(auditCalls().length).toBeGreaterThan(0))
+    fireEvent.keyDown(chart, { key: "End" })
+    fireEvent.keyDown(chart, { key: "Enter" })
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("audit_at")).toMatch(/^\d{4}-\d{2}-\d{2}T/))
+    const q = new URLSearchParams(window.location.search)
+    expect(q.get("audit_range")).toBeNull()
+    expect(auditCalls().at(-1)).toContain(`date_from=${encodeURIComponent(q.get("audit_at")!)}`)
+    expect(screen.getByRole("button", { name: /^Remove filter .* – / })).toBeInTheDocument()
+    fireEvent.keyDown(chart, { key: "Enter" })
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("audit_at")).toBeNull())
   })
 
-  it("draws hours, not days, for the last 24 hours", async () => {
+  it("lays the chart over the picked range", async () => {
     window.history.replaceState(null, "", "/settings/audit?audit_range=24h")
     render(<AuditLogPage />)
-    await waitFor(() => expect(document.querySelector("[data-slot=audit-histogram]")?.getAttribute("data-unit")).toBe("hour"))
+    expect(await screen.findByText(/stacked by severity/i)).toBeInTheDocument()
   })
 
   // The numbers next to each value are what picking it would show, read from

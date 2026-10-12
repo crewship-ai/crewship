@@ -1,8 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { ChevronRight } from "lucide-react"
-import { Activity, Building2, Cpu, KeyRound, Link2, Settings as SettingsIcon, Shield, SlidersHorizontal, X, type LucideIcon } from "lucide-react"
+import { Activity, Bot, Building2, ChevronRight, Cpu, KeyRound, Link2, Settings as SettingsIcon, Shield, SlidersHorizontal, UserRound, X, type LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -11,6 +10,10 @@ import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/dr
 import { SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { CrewAuditSection } from "@/components/features/settings/sections/crew-audit-section"
+import { LogsHistogram, type BucketRange } from "@/components/features/logs/logs-histogram"
+import type { TimeRange } from "@/components/features/logs/time-range-picker"
+import type { JournalEntry } from "@/lib/types/journal"
+import { CONCEPT_ICON } from "@/lib/concept-icons"
 
 import {
   AUDIT_CATEGORIES,
@@ -19,17 +22,29 @@ import {
   DEFAULT_AUDIT_FILTERS,
   activeFilterChips,
   rangeBounds,
+  windowBounds,
   rangeLabel,
   sourceSupports,
   type AuditSource,
 } from "./audit-filters"
-import { addDays, facetCounts, tallyByDay, utcDay } from "./audit-activity"
-import { AuditHistogram, AuditTimePicker } from "./audit-time"
+import { addDays, auditSeverity, facetCounts, tallyByDay, utcDay } from "./audit-activity"
+import { AuditTimePicker } from "./audit-time"
 import { useAuditActivity } from "./use-audit-activity"
 import { useAuditFilters } from "./use-audit-filters"
 import { useWorkspacePeople } from "./use-workspace-people"
 
 const TRAIL_ICONS: Record<AuditSource, LucideIcon> = { workspace: Building2, crews: Link2, credentials: KeyRound, keeper: Shield }
+/** Each category wears the product's icon for what it records (lib/concept-icons). */
+const CATEGORY_ICON: Record<string, LucideIcon> = {
+  all: CONCEPT_ICON.activity,
+  agent_run: CONCEPT_ICON.runs,
+  AGENT: Bot,
+  CREW: CONCEPT_ICON.crews,
+  CREW_LINK: Link2,
+  CREDENTIAL: CONCEPT_ICON.credentials,
+  WorkspaceMember: UserRound,
+  WORKSPACE: Building2,
+}
 const RESULT_DOT: Record<string, string> = { completed: "bg-success", failed: "bg-destructive", cancelled: "bg-muted-foreground" }
 /** The activity window: long enough to cover every preset up to 30 days. */
 const RECENT_DAYS = 35
@@ -72,7 +87,20 @@ export function AuditLogPage() {
   const pickSource = (source: AuditSource) =>
     // A new trail keeps the time range; the other filters belong to the old one.
     setFilters({ ...DEFAULT_AUDIT_FILTERS, source, range: filters.range, from: filters.from, to: filters.to })
-  const pickRange = (from: string, to: string) => setFilters({ range: "custom", from, to })
+  // The chart: the Journal's histogram over the picked range, fed the events
+  // the other filters keep, each with a Journal severity.
+  const win = windowBounds(filters, now)
+  const customWindow = filters.range === "custom" && win.from ? { fromMs: Date.parse(win.from), toMs: win.to ? Date.parse(win.to) : now.getTime() } : null
+  const chartEntries = useMemo(() => activity.events
+    .filter((e) => (filters.category === "all" || e.entityType === filters.category)
+      && (!filters.userId || e.userId === filters.userId)
+      && (!filters.result || e.action === `agent.run.${filters.result}`))
+    .map((e) => ({ ts: e.at, severity: auditSeverity(e.action) }) as unknown as JournalEntry),
+  [activity.events, filters.category, filters.userId, filters.result])
+  const slice: BucketRange | null = filters.sliceFrom && filters.sliceTo ? { fromMs: Date.parse(filters.sliceFrom), toMs: Date.parse(filters.sliceTo) } : null
+  const pickSlice = (r: BucketRange | null) => setFilters(r
+    ? { sliceFrom: new Date(r.fromMs).toISOString(), sliceTo: new Date(r.toMs).toISOString() }
+    : { sliceFrom: "", sliceTo: "" })
   const [showIdle, setShowIdle] = useState(false)
   // People busiest first, with their share of the events as a small bar.
   // While the counts can be trusted (`countable`), people with nothing in the
@@ -84,7 +112,7 @@ export function AuditLogPage() {
     const idle = withN.filter((x) => x.n === 0 && x.p.id !== filters.userId).map((x) => x.p)
     return { active, idle, top: Math.max(1, ...withN.map((x) => x.n)) }
   }, [people, counts, countable, filters.userId])
-  const clearFilters = () => setFilters({ q: "", userId: "", category: "all", result: "" })
+  const clearFilters = () => setFilters({ q: "", userId: "", category: "all", result: "", sliceFrom: "", sliceTo: "" })
 
   const personName = Object.fromEntries(people.map((p) => [p.id, p.label]))
   const avatarById = useMemo(() => Object.fromEntries(people.map((p) => [p.id, p.avatarUrl])), [people])
@@ -129,7 +157,7 @@ export function AuditLogPage() {
             return (
               <DrillNavItem key={c.value} index={i} selected={filters.category === c.value} onSelect={() => setFilters({ category: c.value })}
                 label={c.value === "all" ? "All events" : c.label} meta={count} muted={count === 0}
-                icon={<span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", c.value === "all" ? "bg-border" : c.value === "agent_run" ? "bg-primary" : "bg-muted-foreground/60")} aria-hidden />} />
+                icon={(() => { const Icon = CATEGORY_ICON[c.value] ?? Activity; return <Icon className={cn("h-3.5 w-3.5 shrink-0", filters.category === c.value ? "text-foreground" : "text-muted-foreground")} aria-hidden /> })()} />
             )
           })}
         </DrillNavSection>
@@ -194,7 +222,7 @@ export function AuditLogPage() {
       icon={Activity}
       description="Every state-changing action, immutably recorded"
       toolbar={allowed ? toolbar : undefined}
-      actions={allowed ? <AuditTimePicker filters={filters} onChange={setFilters} bounds={bounds} tally={tally} now={now} /> : undefined}
+      actions={allowed ? <AuditTimePicker filters={filters} onChange={setFilters} bounds={win} tally={tally} now={now} /> : undefined}
       nav={allowed ? nav : null}
       mobileNav={mobileNav}
       filterCount={filterCount}
@@ -211,7 +239,7 @@ export function AuditLogPage() {
                 <span key={c.key} className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-micro font-medium text-primary-hover motion-safe:animate-in motion-safe:zoom-in-95">
                   {c.label}
                   <button type="button" aria-label={`Remove filter ${c.label}`}
-                    onClick={() => setFilters(c.key === "range" ? { range: DEFAULT_AUDIT_FILTERS.range, from: "", to: "" } : { [c.key]: DEFAULT_AUDIT_FILTERS[c.key] })}
+                    onClick={() => setFilters(c.key === "range" ? { range: DEFAULT_AUDIT_FILTERS.range, from: "", to: "", sliceFrom: "", sliceTo: "" } : c.key === "slice" ? { sliceFrom: "", sliceTo: "" } : { [c.key]: DEFAULT_AUDIT_FILTERS[c.key] })}
                     className="grid h-4 w-4 place-items-center rounded-full hover:bg-primary/20">
                     <X className="h-3 w-3" />
                   </button>
@@ -221,7 +249,13 @@ export function AuditLogPage() {
                 <button type="button" onClick={clearFilters} className="px-1.5 text-label text-muted-foreground hover:text-foreground">Clear filters</button>
               )}
             </div>}
-            <AuditHistogram events={activity.events} bounds={bounds} windowFrom={recentFrom} onPickRange={pickRange} now={now} truncated={activity.truncated} />
+            {/* The Crew Journal's chart, as is: sixty bars across the range,
+                stacked by severity; a click picks a bar, a drag a range, and
+                that slice narrows the table without changing the range. */}
+            <div className="overflow-hidden rounded-card border border-border bg-card [&>div]:border-b-0 [&>div]:bg-transparent [&>div]:px-4 [&>div]:py-3" data-slot="audit-histogram">
+              <LogsHistogram entries={chartEntries} timeRange={filters.range as TimeRange} customRange={customWindow}
+                selected={slice} onSelect={pickSlice} height={72} />
+            </div>
             <CrewAuditSection
               workspaceId={workspaceId}
               filters={filters}
