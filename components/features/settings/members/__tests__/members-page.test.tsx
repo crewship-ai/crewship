@@ -17,7 +17,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
  *   - a capability toggle and a role change still PATCH the same endpoints,
  *     and still surface a refusal — apiFetch RESOLVES on 4xx, so a dropped
  *     `res.ok` check would read as success;
- *   - ?member=<userId> (the ⌘K palette's link) opens that person.
+ *   - ?member=<userId> (the ⌘K palette's link) opens that person;
+ *   - the matrix describes each person as an access profile plus its
+ *     exceptions, and a profile is one `{"preset"}` PATCH.
  */
 
 const api = vi.fn()
@@ -44,7 +46,6 @@ vi.mock("next/navigation", () => ({
 }))
 
 import { MembersPage } from "../members-page"
-import { MembersMatrix } from "../members-matrix"
 
 beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn()
@@ -109,363 +110,162 @@ function renderPage(url = "/settings/members") {
   return render(<QueryClientProvider client={qc}><MembersPage /></QueryClientProvider>)
 }
 
-/** The people in the side panel, in order — each row's title is
- *  "<name> · <email>". */
-const personRows = () => Array.from(document.querySelectorAll<HTMLElement>("nav button[title]"))
-const names = () => personRows().map((b) => b.getAttribute("title")!.split(" · ")[0])
-const rowFor = (name: string) => personRows().find((b) => b.getAttribute("title")!.startsWith(`${name} · `))!
-const detail = () => screen.queryByRole("region", { name: /^Member details:/ })
-const roster$ = () => screen.findByRole("region", { name: /^Member details:/ })
-/** Wait for the capability read to land (Mel's row says "1 extra"). */
-async function capsLoaded() {
-  await waitFor(() => expect(rowFor("Mel Member")).toHaveTextContent("1 extra"))
-}
-function openCapabilityFilter() {
-  fireEvent.click(document.querySelector<HTMLElement>('[aria-haspopup="dialog"]')!)
-}
-const capOption = (label: string) => screen.getAllByRole("button").find((b) => b.getAttribute("aria-pressed") !== null && b.textContent?.startsWith(label))!
+const matrix = () => screen.findByRole("table", { name: "People and what they may do" })
+const rowOf = (userId: string) => document.querySelector<HTMLElement>(`tr[data-member="${userId}"]`)!
+const sheet = () => waitFor(() => {
+  const el = document.querySelector<HTMLElement>("[data-slot=member-detail]")
+  if (!el) throw new Error("no person open")
+  return el
+})
+const confirmWith = async (name: RegExp) => fireEvent.click(await screen.findByRole("button", { name }))
 
-describe("Members page — the sub-bar and summary", () => {
-  it("states the numbers first and offers Bulk edit and Add member to an ADMIN", async () => {
+describe("Members — the access matrix", () => {
+  it("groups people by role and describes each as a profile plus exceptions", async () => {
     renderPage()
-    await roster$()
+    await matrix()
+    await waitFor(() => expect(within(rowOf("u-ada")).getByRole("button", { name: /Access profile for Ada Admin/ })).toBeInTheDocument())
+    expect(within(rowOf("u-ada")).getByRole("button", { name: /Access profile for Ada Admin: Chat only \+Reveal/ })).toBeInTheDocument()
+    expect(within(rowOf("u-vic")).getByRole("button", { name: /Chat only$/ })).toBeInTheDocument()
+    expect(within(rowOf("u-olive")).getByText("Owner · fixed")).toBeInTheDocument()
+    const groups = screen.getAllByRole("rowheader").filter((h) => h.getAttribute("scope") === "rowgroup").map((h) => h.textContent)
+    expect(groups).toEqual(["Owners1", "Admins1", "Managers1", "Members1", "Viewers1"])
     const summary = document.querySelector("[data-slot=members-summary]")!
     expect(summary).toHaveTextContent("5 people")
-    expect(summary).toHaveTextContent("2 owners and admins")
-    await waitFor(() => expect(summary).toHaveTextContent("1 can reveal secrets"))
-    expect(screen.getByTestId("invite-dialog")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Bulk edit capabilities" })).toBeInTheDocument()
+    expect(summary).toHaveTextContent("1 can reveal secrets")
   })
 
-  it("offers neither to a MANAGER — both are ADMIN+ routes", async () => {
-    h.role = "MANAGER"
+  it("marks an exception and grants a plain capability at once", async () => {
     renderPage()
-    await roster$()
-    expect(screen.queryByTestId("invite-dialog")).toBeNull()
-    expect(screen.queryByRole("button", { name: "Bulk edit capabilities" })).toBeNull()
-    expect(screen.getByText(/only admins can invite or remove members/i)).toBeInTheDocument()
+    await matrix()
+    const reveal = await within(rowOf("u-ada")).findByRole("checkbox", { name: "Revoke credentials:reveal from Ada Admin" })
+    expect(reveal).toHaveAttribute("data-state", "added")
+    fireEvent.click(within(rowOf("u-mel")).getByRole("checkbox", { name: "Grant memory.write to Mel Member" }))
+    await waitFor(() => expect(writes()).toHaveLength(1))
+    expect(writes()[0][0]).toBe("/api/v1/workspaces/ws1/members/u-mel/capabilities?workspace_id=ws1")
+    expect(JSON.parse(String((writes()[0][1] as RequestInit).body))).toEqual({ grant: ["memory.write"] })
+  })
+
+  it("asks before granting anything high-stakes", async () => {
+    renderPage()
+    await matrix()
+    fireEvent.click(await within(rowOf("u-mel")).findByRole("checkbox", { name: "Grant credentials:reveal to Mel Member" }))
+    expect(writes()).toHaveLength(0)
+    await confirmWith(/Grant Reveal secrets/)
+    await waitFor(() => expect(writes()).toHaveLength(1))
+    expect(JSON.parse(String((writes()[0][1] as RequestInit).body))).toEqual({ grant: ["credentials:reveal"] })
+  })
+
+  it("sets a profile with one preset call, confirming when it replaces exceptions", async () => {
+    renderPage()
+    await matrix()
+    fireEvent.pointerDown(await within(rowOf("u-ada")).findByRole("button", { name: /Access profile for Ada Admin/ }), { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Power user/ }))
+    await confirmWith(/Set to Power user/)
+    await waitFor(() => expect(writes()).toHaveLength(1))
+    expect(writes()[0][0]).toBe("/api/v1/workspaces/ws1/members/u-ada/capabilities?workspace_id=ws1")
+    expect(JSON.parse(String((writes()[0][1] as RequestInit).body))).toEqual({ preset: "power" })
+  })
+
+  it("locks the owner and the caller's own row", async () => {
+    h.userId = "u-ada"
+    renderPage()
+    await matrix()
+    await waitFor(() => expect(within(rowOf("u-olive")).getByRole("checkbox", { name: /OWNER capabilities are immutable: memory.write/ })).toBeDisabled())
+    expect(within(rowOf("u-ada")).getByRole("checkbox", { name: /You cannot modify your own capabilities: memory.write/ })).toBeDisabled()
+    expect(within(rowOf("u-ada")).getByRole("checkbox", { name: "Select Ada Admin" })).toBeDisabled()
+  })
+
+  it("changes many people at once from the selection bar", async () => {
+    renderPage()
+    await matrix()
+    fireEvent.click(await within(rowOf("u-mel")).findByRole("checkbox", { name: "Select Mel Member" }))
+    fireEvent.click(within(rowOf("u-vic")).getByRole("checkbox", { name: "Select vic@example.com" }))
+    const bar = await screen.findByRole("toolbar", { name: "Change the selected people" })
+    expect(bar).toHaveTextContent("2 selected")
+    fireEvent.pointerDown(within(bar).getByRole("button", { name: /Revoke/ }), { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Create issues" }))
+    await confirmWith(/^Revoke$/)
+    await waitFor(() => expect(writes()).toHaveLength(2))
+    expect(writes().map(([u]) => u)).toEqual([
+      "/api/v1/workspaces/ws1/members/u-mel/capabilities?workspace_id=ws1",
+      "/api/v1/workspaces/ws1/members/u-vic/capabilities?workspace_id=ws1",
+    ])
+    expect(JSON.parse(String((writes()[0][1] as RequestInit).body))).toEqual({ revoke: ["issue.create"] })
+  })
+
+  it("filters by profile, by exceptions and by who can reveal", async () => {
+    renderPage("/settings/members?flag=reveal")
+    await matrix()
+    await waitFor(() => expect(document.querySelectorAll("tr[data-member]")).toHaveLength(1))
+    expect(rowOf("u-ada")).toBeInTheDocument()
+    cleanup()
+    renderPage("/settings/members?profile=chat")
+    await matrix()
+    await waitFor(() => expect([...document.querySelectorAll("tr[data-member]")].map((r) => r.getAttribute("data-member"))).toEqual(["u-mo", "u-vic"]))
   })
 })
 
-describe("Members page — the side panel", () => {
-  it("lists every person once, grouped by role, by email when they have no name", async () => {
+describe("Members — one person", () => {
+  it("opens from the name with role, profile and capabilities", async () => {
     renderPage()
-    await roster$()
-    expect(names()).toEqual(["Olive Owner", "Ada Admin", "Mo Manager", "Mel Member", "vic@example.com"])
-    for (const g of ["Owners", "Admins", "Managers", "Members", "Viewers"]) expect(screen.getByRole("button", { name: new RegExp(`^${g}`) })).toBeInTheDocument()
+    await matrix()
+    fireEvent.click(within(rowOf("u-mel")).getByTitle(/^Mel Member/))
+    const d = await sheet()
+    expect(d).toHaveAccessibleName("Member details: Mel Member")
+    expect(within(d).getByRole("radio", { name: "Member" })).toHaveAttribute("aria-checked", "true")
+    expect(within(d).getByText(/1 exception: \+ Issues/)).toBeInTheDocument()
   })
 
-  it("says under each name what they hold beyond the role", async () => {
-    renderPage()
-    await capsLoaded()
-    expect(rowFor("Olive Owner")).toHaveTextContent("Everything")
-    expect(rowFor("Ada Admin")).toHaveTextContent("1 extra · 1 high-stakes")
-    expect(rowFor("Mel Member")).toHaveTextContent("1 extra")
-    expect(rowFor("vic@example.com")).toHaveTextContent("Role defaults")
+  it("opens the person a ?member= link names", async () => {
+    renderPage("/settings/members?member=u-ada")
+    expect(await sheet()).toHaveAccessibleName("Member details: Ada Admin")
+    // Read once, then dropped: closing the panel must not bring it back.
+    await waitFor(() => expect(window.location.search).toBe(""))
   })
 
-  it("never reads capabilities below ADMIN, or with an unknown role (the #866.3 regression)", async () => {
-    for (const role of ["MEMBER", null]) {
-      cleanup()
-      api.mockClear()
-      h.role = role
-      renderPage()
-      await roster$()
-      expect(api.mock.calls.every(([url]) => !String(url).includes("/capabilities"))).toBe(true)
-      expect(writes()).toHaveLength(0)
-    }
-  })
-
-  it("filters by role, with counts, kept in the URL", async () => {
-    renderPage()
-    await capsLoaded()
-    const viewer = screen.getByRole("button", { name: /^Viewer\s*1$/ })
-    fireEvent.click(viewer)
-    expect(viewer).toHaveAttribute("aria-pressed", "true")
-    expect(names()).toEqual(["vic@example.com"])
-    expect(window.location.search).toContain("role=VIEWER")
-    expect(screen.getByRole("button", { name: /^All people\s*5$/ })).toBeInTheDocument()
-  })
-
-  it("filters by capability from the Filter popover, high-stakes ones in the destructive tone", async () => {
-    renderPage()
-    await capsLoaded()
-    openCapabilityFilter()
-    const reveal = capOption("Reveal secrets")
-    expect(reveal).toHaveTextContent("1")
-    expect(within(reveal).getByText("Reveal secrets")).toHaveClass("text-destructive")
-    fireEvent.click(reveal)
-    expect(names()).toEqual(["Ada Admin"])
-  })
-
-  it("combines role, capability and search, and clears them all", async () => {
-    renderPage()
-    await capsLoaded()
-    openCapabilityFilter()
-    fireEvent.click(capOption("Create issues"))
-    expect(names()).toEqual(["Olive Owner", "Mel Member"])
-    fireEvent.change(screen.getByRole("textbox", { name: "Search members" }), { target: { value: "mel" } })
-    expect(names()).toEqual(["Mel Member"])
-    fireEvent.click(screen.getByRole("button", { name: /^Owner\s*0$/ }))
-    expect(names()).toEqual([])
-    expect(screen.getAllByText("Nobody matches these filters.").length).toBeGreaterThan(0)
-    // Close the filter popover (it has a Clear all of its own), then clear
-    // from the chips row.
-    fireEvent.keyDown(document, { key: "Escape" })
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "Clear all" })).toHaveLength(1))
-    fireEvent.click(screen.getByRole("button", { name: "Clear all" }))
-    expect(names()).toHaveLength(5)
-  })
-
-  it("searches by email too", async () => {
-    renderPage()
-    await roster$()
-    fireEvent.change(screen.getByRole("textbox", { name: "Search members" }), { target: { value: "example.com" } })
-    expect(names()).toEqual(["vic@example.com"])
-  })
-
-  it("offers no capability filter or matrix below ADMIN", async () => {
-    h.role = "MANAGER"
-    renderPage()
-    await roster$()
-    expect(document.querySelector('[aria-haspopup="dialog"]')).toBeNull()
-    expect(screen.queryByRole("group", { name: "View" })).toBeNull()
-  })
-})
-
-describe("Members page — one person", () => {
-  it("always has someone open — the first person, then whoever is picked", async () => {
-    renderPage()
-    expect(await roster$()).toHaveAccessibleName("Member details: Olive Owner")
-    fireEvent.click(rowFor("Mel Member"))
-    expect(detail()).toHaveAccessibleName("Member details: Mel Member")
-    expect(rowFor("Mel Member")).toHaveAttribute("aria-current", "true")
-    expect(window.location.search).toBe("?member=u-mel")
-    // The person's profile and what their role means, side by side.
-    expect(within(detail()!).getByRole("region", { name: "Mel Member profile" })).toBeInTheDocument()
-    expect(within(detail()!).getByText(/Own resource access only/i)).toBeInTheDocument()
-  })
-
-  it("opens the person a ?member= link names (the ⌘K palette's link)", async () => {
-    renderPage("/settings/members?member=u-mo")
-    expect(await screen.findByRole("region", { name: "Member details: Mo Manager" })).toBeInTheDocument()
-  })
-
-  it("falls back to the first person when the link names someone who is not a member", async () => {
-    renderPage("/settings/members?member=u-ghost")
-    expect(await roster$()).toHaveAccessibleName("Member details: Olive Owner")
-  })
-})
-
-describe("Members page — role", () => {
-  it("gives an ADMIN a role choice for those below them, and plain text for the OWNER", async () => {
+  it("changes a role through a confirmation, and surfaces a refusal", async () => {
+    nextWrite = { ok: false, status: 403, json: async () => ({ detail: "Cannot modify this member" }), text: async () => "" }
     renderPage("/settings/members?member=u-mel")
-    const group = await screen.findByRole("radiogroup", { name: "Role for Mel Member" })
-    expect(within(group).getByRole("radio", { name: "Member" })).toHaveAttribute("aria-checked", "true")
-    expect(within(group).getByRole("radio", { name: "Manager" })).toBeEnabled()
-    expect(within(group).getByRole("radio", { name: "Admin" })).toBeDisabled()
-
-    fireEvent.click(rowFor("Olive Owner"))
-    expect(screen.queryByRole("radiogroup")).toBeNull()
-    expect(within(detail()!).getByText(/immutable/)).toBeInTheDocument()
+    const d = await sheet()
+    fireEvent.click(within(d).getByRole("radio", { name: "Manager" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Change role" }))
+    await waitFor(() => expect(writes()).toHaveLength(1))
+    expect(writes()[0][0]).toBe("/api/v1/workspaces/ws1/members/m-mel?workspace_id=ws1")
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Cannot modify this member"))
   })
 
-  it("gives a MANAGER a role choice only over people they outrank", async () => {
+  it("lets a MANAGER change roles below them but never capabilities", async () => {
     h.role = "MANAGER"
     renderPage("/settings/members?member=u-mel")
-    expect(await screen.findByRole("radiogroup", { name: "Role for Mel Member" })).toBeInTheDocument()
-    fireEvent.click(rowFor("Ada Admin"))
-    expect(screen.queryByRole("radiogroup")).toBeNull()
+    const d = await sheet()
+    expect(within(d).getByRole("radio", { name: "Viewer" })).toBeEnabled()
+    expect(within(d).getByRole("radio", { name: "Manager" })).toBeDisabled()
+    expect(within(d).queryByText(/Access profile/)).toBeNull()
+    expect(screen.queryByRole("checkbox", { name: /Select/ })).toBeNull()
+    expect(api.mock.calls.some(([u]) => String(u).includes("/members/capabilities"))).toBe(false)
   })
 
-  it("gives a MEMBER no control at all — read-only, with no switches either", async () => {
+  it("is read-only for a MEMBER", async () => {
     h.role = "MEMBER"
     renderPage("/settings/members?member=u-vic")
-    await roster$()
-    expect(screen.queryByRole("radiogroup")).toBeNull()
-    expect(screen.queryAllByRole("switch")).toHaveLength(0)
-    expect(screen.queryByRole("button", { name: /remove member/i })).toBeNull()
-    expect(screen.getByText(/read-only — managers and admins make changes/i)).toBeInTheDocument()
-  })
-
-  it("never offers a change on the caller's own row", async () => {
-    h.role = "OWNER"
-    h.userId = "u-olive"
-    renderPage("/settings/members?member=u-olive")
-    await roster$()
-    expect(screen.queryByRole("radiogroup")).toBeNull()
-  })
-
-  async function changeMelTo(role: string) {
-    renderPage("/settings/members?member=u-mel")
-    const group = await screen.findByRole("radiogroup", { name: "Role for Mel Member" })
-    fireEvent.click(within(group).getByRole("radio", { name: role }))
-    // Approval first: a confirm dialog gates the PATCH.
-    expect(writes()).toHaveLength(0)
-    fireEvent.click(await screen.findByRole("button", { name: /^Change role$/i }))
-  }
-
-  it("PATCHes the membership after the confirmation and reports success", async () => {
-    await changeMelTo("Manager")
-    await waitFor(() => expect(writes()).toHaveLength(1))
-    const [url, init] = writes()[0] as [string, RequestInit]
-    expect(init.method).toBe("PATCH")
-    expect(url).toBe("/api/v1/workspaces/ws1/members/m-mel?workspace_id=ws1")
-    expect(JSON.parse(String(init.body))).toEqual({ role: "MANAGER" })
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Role changed to MANAGER"))
-  })
-
-  it("surfaces the server's problem detail instead of reporting success", async () => {
-    nextWrite = { ok: false, status: 403, json: async () => ({ detail: "cannot grant a role at or above your own" }) }
-    await changeMelTo("Manager")
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("cannot grant a role at or above your own"))
-    expect(toast.success).not.toHaveBeenCalled()
+    const d = await sheet()
+    expect(within(d).getByText(/Your role cannot change this person's role/)).toBeInTheDocument()
+    expect(within(d).queryByRole("button", { name: /Remove member/ })).toBeNull()
   })
 })
 
-describe("Members page — capabilities", () => {
-  it("shows one person's switches, grouped, with Credentials marked high-stakes", async () => {
-    renderPage("/settings/members?member=u-mel")
-    await capsLoaded()
-    const panel = detail()!
-    for (const g of ["Routines", "Content", "Credentials"]) expect(within(panel).getByRole("region", { name: g })).toBeInTheDocument()
-    expect(within(panel).getByRole("heading", { name: /Credentials/ })).toHaveClass("text-destructive")
-    expect(within(panel).getByRole("switch", { name: "Revoke issue.create from Mel Member" })).toHaveAttribute("aria-checked", "true")
-    expect(within(panel).getByRole("switch", { name: "Grant memory.write to Mel Member" })).toHaveAttribute("aria-checked", "false")
-    const chat = within(panel).getByRole("switch", { name: /Chat is always granted/ })
-    expect(chat).toHaveAttribute("aria-checked", "true")
-    expect(chat).toBeDisabled()
-  })
-
-  it("shows an OWNER the grants they actually hold, locked — immutable is not full", async () => {
-    renderPage("/settings/members?member=u-olive")
-    await capsLoaded()
-    const reveal = screen.getByRole("switch", { name: /OWNER capabilities are immutable: credentials:reveal/ })
-    expect(reveal).toHaveAttribute("aria-checked", "false")
-    expect(reveal).toBeDisabled()
-    expect(screen.getByRole("switch", { name: /OWNER capabilities are immutable: memory.write/ })).toHaveAttribute("aria-checked", "true")
-  })
-
-  it("PATCHes one grant for the open person and keeps the server's set", async () => {
-    nextWrite = ok({ user_id: "u-mel", role: "MEMBER", capabilities: ["chat", "issue.create", "memory.write"] })
-    renderPage("/settings/members?member=u-mel")
-    await capsLoaded()
-    fireEvent.click(screen.getByRole("switch", { name: "Grant memory.write to Mel Member" }))
-    await waitFor(() => expect(writes()).toHaveLength(1))
-    const [url, init] = writes()[0] as [string, RequestInit]
-    expect(url).toBe("/api/v1/workspaces/ws1/members/u-mel/capabilities?workspace_id=ws1")
-    expect(JSON.parse(String(init.body))).toEqual({ grant: ["memory.write"] })
-    await waitFor(() => expect(screen.getByRole("switch", { name: "Revoke memory.write from Mel Member" })).toBeInTheDocument())
-  })
-
-  it("rolls back and says why when the server refuses — never the raw text", async () => {
-    nextWrite = { ok: false, status: 403, text: async () => "forbidden: caller lost admin", json: async () => ({}) }
-    renderPage("/settings/members?member=u-mel")
-    await capsLoaded()
-    fireEvent.click(screen.getByRole("switch", { name: "Grant memory.write to Mel Member" }))
-    await waitFor(() => expect(toast.error).toHaveBeenCalled())
-    expect(String(toast.error.mock.calls[0][0])).toMatch(/permission denied/i)
-    expect(String(toast.error.mock.calls[0][0])).not.toMatch(/caller lost admin/)
-    await waitFor(() => expect(screen.getByRole("switch", { name: "Grant memory.write to Mel Member" })).toBeInTheDocument())
-  })
-
-  it("keeps resource access with the person, for an ADMIN", async () => {
-    renderPage("/settings/members?member=u-mel")
-    await roster$()
-    expect(screen.getByRole("region", { name: "Resource access for Mel Member" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Edit resource access" })).toBeInTheDocument()
-  })
-})
-
-describe("Members page — removal", () => {
-  it("removes after the confirmation with the same DELETE, then opens someone else", async () => {
-    renderPage("/settings/members?member=u-mel")
-    await roster$()
-    fireEvent.click(screen.getByRole("button", { name: /remove member/i }))
-    expect(writes()).toHaveLength(0)
-    roster = ROSTER.filter((m) => m.id !== "m-mel")
-    fireEvent.click(await screen.findByRole("button", { name: /^Remove$/ }))
-    await waitFor(() => expect(writes()).toHaveLength(1))
-    const [url, init] = writes()[0] as [string, RequestInit]
-    expect(init.method).toBe("DELETE")
-    expect(url).toBe("/api/v1/workspaces/ws1/members/m-mel?workspace_id=ws1")
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Member removed"))
-    await waitFor(() => expect(detail()).not.toHaveAccessibleName("Member details: Mel Member"))
-  })
-
-  it("offers no removal for the OWNER, for yourself, or below ADMIN", async () => {
-    renderPage("/settings/members?member=u-olive")
-    await roster$()
-    expect(screen.queryByRole("button", { name: /remove member/i })).toBeNull()
-    cleanup()
-    h.role = "MANAGER"
-    renderPage("/settings/members?member=u-mel")
-    await roster$()
-    expect(screen.queryByRole("button", { name: /remove member/i })).toBeNull()
-  })
-})
-
-describe("Members page — on a phone", () => {
-  it("moves the actions into the page and picks the person from a list", async () => {
+describe("Members — on a phone", () => {
+  it("lists people by role with their profile, and opens one full screen", async () => {
     h.mobile = true
     renderPage()
-    await roster$()
-    // The sub-bar has room for the Filters button only; the actions sit in
-    // the page instead of overflowing it.
+    const list = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-slot=members-list]")
+      if (!el) throw new Error("no list")
+      return el
+    })
+    await waitFor(() => expect(within(list).getByText("+Reveal")).toBeInTheDocument())
     expect(document.querySelector("[data-slot=members-actions]")).toContainElement(screen.getByTestId("invite-dialog"))
-    const pick = screen.getByRole("combobox", { name: "Person" })
-    fireEvent.change(pick, { target: { value: "u-mo" } })
-    expect(detail()).toHaveAccessibleName("Member details: Mo Manager")
-  })
-})
-
-describe("Members page — matrix", () => {
-  it("draws each cell as comes-with-role, granted or off, and toggles with the same PATCH", async () => {
-    renderPage("/settings/members?view=matrix")
-    const grid = await screen.findByRole("region", { name: "Capability matrix" })
-    await waitFor(() => expect(within(grid).getByRole("checkbox", { name: "Revoke issue.create from Mel Member" })).toBeInTheDocument())
-    const melRow = grid.querySelector('tr[data-member="u-mel"]')!
-    expect(melRow.querySelector('[data-state="role"]')).toBeTruthy()
-    expect(within(melRow as HTMLElement).getByRole("checkbox", { name: /Chat is always granted/ })).toBeDisabled()
-    expect(within(melRow as HTMLElement).getByRole("checkbox", { name: "Revoke issue.create from Mel Member" })).toHaveAttribute("data-state", "granted")
-    expect(within(melRow as HTMLElement).getByRole("checkbox", { name: "Grant memory.write to Mel Member" })).toHaveAttribute("data-state", "off")
-    // The OWNER row is locked whatever it holds.
-    expect(screen.getByRole("checkbox", { name: /OWNER capabilities are immutable: memory.write/ })).toBeDisabled()
-
-    fireEvent.click(screen.getByRole("checkbox", { name: "Grant memory.write to Mel Member" }))
-    await waitFor(() => expect(writes()).toHaveLength(1))
-    const [url, init] = writes()[0] as [string, RequestInit]
-    expect(url).toBe("/api/v1/workspaces/ws1/members/u-mel/capabilities?workspace_id=ws1")
-    expect(JSON.parse(String(init.body))).toEqual({ grant: ["memory.write"] })
-  })
-
-  it("follows the side panel's filters and opens a person from their name", async () => {
-    renderPage("/settings/members?view=matrix&role=MEMBER")
-    const grid = await screen.findByRole("region", { name: "Capability matrix" })
-    expect(grid.querySelectorAll("tbody tr")).toHaveLength(1)
-    fireEvent.click(within(grid).getByRole("button", { name: "Show Mel Member" }))
-    expect(await screen.findByRole("region", { name: "Member details: Mel Member" })).toBeInTheDocument()
-  })
-
-  it("opens People instead for a caller who cannot read capabilities", async () => {
-    h.role = "MANAGER"
-    renderPage("/settings/members?view=matrix")
-    await screen.findByRole("region", { name: /^Member details:/ })
-    expect(screen.queryByRole("region", { name: "Capability matrix" })).toBeNull()
-  })
-
-  it("is read-only when the caller cannot edit", () => {
-    const qc = new QueryClient()
-    render(
-      <QueryClientProvider client={qc}>
-        <MembersMatrix members={ROSTER.slice(3)} workspaceId="ws1" currentUserId="u-caller"
-          capsByUser={{ "u-mel": ["chat", "issue.create"] }} canEdit={false} onSelect={vi.fn()} />
-      </QueryClientProvider>,
-    )
-    const cells = screen.getAllByRole("checkbox")
-    expect(cells.length).toBeGreaterThan(0)
-    for (const c of cells) expect(c).toBeDisabled()
-    expect(screen.getByRole("checkbox", { name: "Mel Member has issue.create" })).toHaveAttribute("aria-checked", "true")
-    expect(screen.getByText(/Read-only — only admins change capabilities/)).toBeInTheDocument()
+    fireEvent.click(within(list).getByTitle(/^Mel Member/))
+    expect(await sheet()).toHaveAccessibleName("Member details: Mel Member")
   })
 })

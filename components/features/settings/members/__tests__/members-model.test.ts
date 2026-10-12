@@ -6,7 +6,10 @@ import {
   DEFAULT_MEMBER_FILTERS,
   activeFilterCount,
   byRoleThenName,
-  capabilityState,
+  accessProfile,
+  cellState,
+  profileText,
+  CAPABILITY_COLUMNS,
   extraCapabilities,
   memberMatches,
   membersUrlQuery,
@@ -75,11 +78,53 @@ describe("extraCapabilities — only what the role does not bring", () => {
   })
 })
 
-describe("capabilityState", () => {
-  it("separates comes-with-role, granted and off", () => {
-    expect(capabilityState([], "chat")).toBe("role")
-    expect(capabilityState(["issue.create"], "issue.create")).toBe("granted")
-    expect(capabilityState(["issue.create"], "memory.write")).toBe("off")
+describe("accessProfile — the nearest preset plus what differs", () => {
+  const POWER = ["chat", "routine.create", "routine.run", "issue.create", "memory.write"]
+  const BUILDER = [...POWER, "skill.create", "credential.create", "credential.rotate", "credentials:reveal"]
+
+  it("names an exact preset with no exceptions", () => {
+    expect(profileText(accessProfile(["chat"]))).toBe("Chat only")
+    expect(profileText(accessProfile(POWER))).toBe("Power user")
+    expect(profileText(accessProfile(BUILDER))).toBe("Builder")
+  })
+
+  it("spells out what was added and taken away", () => {
+    const p = accessProfile([...POWER, "credentials:reveal"])
+    expect(p).toEqual({ key: "power", added: ["credentials:reveal"], removed: [] })
+    expect(profileText(p)).toBe("Power user +Reveal")
+    expect(profileText(accessProfile(POWER.filter((c) => c !== "routine.run")))).toBe("Power user −Run")
+  })
+
+  it("prefers the larger preset on a tie", () => {
+    // Builder −Skills (1) beats Power user plus three credential grants.
+    expect(accessProfile(BUILDER.filter((c) => c !== "skill.create")).key).toBe("admin")
+    // Power user +Skills +Create credentials (2) ties Builder −Rotate −Reveal (2).
+    expect(accessProfile([...POWER, "skill.create", "credential.create"]).key).toBe("admin")
+  })
+
+  it("marks each cell as from the profile, an exception, or off", () => {
+    const granted = [...POWER.filter((c) => c !== "routine.run"), "page.create"]
+    const p = accessProfile(granted)
+    expect(cellState(p, granted, "routine.create")).toBe("profile")
+    expect(cellState(p, granted, "routine.run")).toBe("removed")
+    expect(cellState(p, granted, "page.create")).toBe("added")
+    expect(cellState(p, granted, "credential.create")).toBe("off")
+  })
+
+  it("lays every capability but chat out in exactly one column", () => {
+    const cols = CAPABILITY_COLUMNS.flatMap((g) => g.caps.map((c) => c.cap))
+    expect([...cols].sort()).toEqual(ALL_CAPABILITIES.filter((c) => c !== "chat").sort())
+  })
+})
+
+describe("memberMatches — profile and needs-a-look filters", () => {
+  const f = (over: Partial<typeof DEFAULT_MEMBER_FILTERS>) => ({ ...DEFAULT_MEMBER_FILTERS, ...over })
+  it("finds exact profiles, exceptions, revealers and high-stakes below Manager", () => {
+    const all = [olive, mel, vic]
+    expect(all.filter((m) => memberMatches(m, f({ profile: "chat" }), caps)).map((m) => m.user.id)).toEqual(["u-vic"])
+    expect(all.filter((m) => memberMatches(m, f({ profile: "custom" }), caps)).map((m) => m.user.id)).toEqual(["u-mel"])
+    expect(all.filter((m) => memberMatches(m, f({ flag: "reveal" }), caps)).map((m) => m.user.id)).toEqual(["u-mel"])
+    expect(all.filter((m) => memberMatches(m, f({ flag: "risky-low-role" }), caps)).map((m) => m.user.id)).toEqual(["u-mel"])
   })
 })
 
@@ -116,13 +161,13 @@ describe("roleChoices — the server's ladder, drawn the same way", () => {
 })
 
 describe("URL state", () => {
-  it("round-trips the view, the person and the filters", () => {
-    const state = { view: "matrix" as const, member: "u-mel", filters: { role: "ADMIN", cap: "credentials:reveal", q: "ann" } }
+  it("round-trips the person and the filters", () => {
+    const state = { member: "u-mel", filters: { role: "ADMIN", cap: "credentials:reveal", profile: "custom", flag: "reveal" as const, q: "ann" } }
     expect(parseMembersUrl(membersUrlQuery(state))).toEqual(state)
   })
 
   it("keeps defaults out of the URL", () => {
-    expect(membersUrlQuery({ view: "people", member: "", filters: DEFAULT_MEMBER_FILTERS })).toBe("")
+    expect(membersUrlQuery({ member: "", filters: DEFAULT_MEMBER_FILTERS })).toBe("")
   })
 
   it("drops a role or capability it does not know", () => {
