@@ -56,7 +56,7 @@ import { useAccessWrites } from "./use-access"
 import { MemberDetail } from "./member-detail"
 import { AREA_ICON, ROLE_ICON } from "./member-bits"
 import { InvitationList, PeopleList, PeopleTable, type PeopleGroup } from "./people-table"
-import { MembersAttention, membersFindings } from "./members-attention"
+import { MembersAttention, RevealCard, membersFindings } from "./members-attention"
 import { useInvitations, useRevealPolicy } from "./use-invitations"
 
 type GroupBy = "role" | "name"
@@ -449,6 +449,12 @@ export function MembersPage() {
           )}
 
           {findings && !filters.status && <MembersAttention findings={findings} />}
+
+          {capsReadable && caps && filters.flag === "reveal" && !filters.status && (
+            <RevealCard revealEnabled={revealEnabled} holders={revealers ?? 0} canGrant={isAdmin}
+              candidates={sorted.filter((m) => m.role !== "OWNER" && m.user.id !== currentUserId && !(caps[m.user.id] ?? []).includes(Capability.CredentialReveal))}
+              onGrant={(m) => onCell(m, Capability.CredentialReveal, true)} />
+          )}
 
           {filters.status === "invited" ? (
             <SettingsCard icon={Mail} title="Invitations" description="Sent, not accepted yet. An expired one cannot be accepted — invite again.">

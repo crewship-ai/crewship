@@ -21,17 +21,12 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { AlertTriangle, ChevronRight, Eye, FolderLock, LockOpen, ShieldAlert, ShieldCheck, UserCheck } from "lucide-react"
-import { toast } from "sonner"
+import { AlertTriangle, ChevronRight, Eye, FolderLock, ShieldAlert, ShieldCheck, UserCheck } from "lucide-react"
 
 import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
-import { RolePill } from "@/components/features/settings/members/member-bits"
-import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Spinner } from "@/components/ui/spinner"
-import { SettingsCard, SettingsEmpty, SettingsRow, nativeSelect } from "@/components/features/settings/shared"
-import { isAdminTier } from "@/lib/permissions/tiers"
-import { cn } from "@/lib/utils"
+import { SettingsCard, SettingsEmpty, SettingsRow } from "@/components/features/settings/shared"
 import { apiFetch } from "@/lib/api-fetch"
 import { toastSwitchError } from "@/components/ui/page-save-bar"
 import { Capability } from "@/lib/capabilities"
@@ -99,10 +94,6 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
   // The bulk capabilities read is ADMIN+; a MANAGER cannot see the grants.
   const [capsHidden, setCapsHidden] = React.useState(false)
   const [capsFailed, setCapsFailed] = React.useState(false)
-  // Who may grant or revoke: the capabilities PATCH is ADMIN+ server-side.
-  const canEditGrants = isAdminTier(role)
-  const [busyUser, setBusyUser] = React.useState<string | null>(null)
-  const [grantTo, setGrantTo] = React.useState("")
   // The credentials this caller can see, and the crews they belong to — for
   // the class counts and the "where they live" overview. Both are reads the
   // Credentials page already makes; a failure just hides the summaries.
@@ -170,39 +161,6 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
     return () => { cancelled = true }
   }, [workspaceId])
 
-  /** Grant or revoke credentials:reveal for one person — the same PATCH the
-   *  Members page uses, so the two pages can never disagree. */
-  async function setReveal(userId: string, grant: boolean) {
-    setBusyUser(userId)
-    try {
-      const res = await apiFetch(
-        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}/capabilities?workspace_id=${encodeURIComponent(workspaceId)}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(grant ? { grant: [Capability.CredentialReveal] } : { revoke: [Capability.CredentialReveal] }),
-        },
-      )
-      if (!res.ok) {
-        toast.error(res.status === 403 ? "Your role cannot change who may reveal." : `Could not ${grant ? "grant" : "revoke"} reveal (${res.status}).`)
-        return
-      }
-      const body = (await res.json().catch(() => null)) as { capabilities?: string[] } | null
-      setCapsByUser((prev) => {
-        const current = prev?.[userId] ?? []
-        const next = body?.capabilities
-          ?? (grant ? [...new Set([...current, Capability.CredentialReveal])] : current.filter((c) => c !== Capability.CredentialReveal))
-        return { ...(prev ?? {}), [userId]: next }
-      })
-      setGrantTo("")
-      toast.success(grant ? "Reveal granted" : "Reveal revoked")
-    } catch {
-      toast.error("Network error — nothing was changed.")
-    } finally {
-      setBusyUser(null)
-    }
-  }
-
   async function toggle(next: boolean) {
     setSaving(true)
     try {
@@ -231,10 +189,6 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
     if (!capsByUser) return null
     return members.filter((m) => (capsByUser[m.user.id] ?? []).includes(Capability.CredentialReveal))
   }, [capsByUser, members])
-  const nonHolders = React.useMemo(
-    () => (capsByUser ? members.filter((m) => !(capsByUser[m.user.id] ?? []).includes(Capability.CredentialReveal)) : []),
-    [capsByUser, members],
-  )
 
   // Where credentials live: workspace-wide, or with a crew. A crew is the
   // folder — its members see its credentials (credentialVisibilityFilter).
@@ -293,14 +247,12 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
         )}
       </SettingsCard>
 
+      {/* Who holds the grant is a question about people, so it is answered —
+          and changed — in Members; this card only says how many and links
+          there, instead of keeping a second editable list of the same rows. */}
       <SettingsCard icon={UserCheck}
         title="Who may reveal"
-        description="OWNER and ADMIN receive reveal by default unless their membership has an explicit capability set. Individual grants and revocations take precedence; workspace policy still applies."
-        actions={!capsHidden ? (
-          <Link href="/settings/members?flag=reveal" className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2.5 text-xs font-medium text-foreground/90 transition-colors hover:border-primary/50 hover:text-primary-hover">
-            In Members<ChevronRight className="h-3 w-3" aria-hidden />
-          </Link>
-        ) : undefined}
+        description="Reveal is granted per person in Members. OWNER and ADMIN hold it by default unless their membership has an explicit set."
       >
         {capsHidden ? (
           <SettingsEmpty>
@@ -317,66 +269,27 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
             on, no value can be revealed until someone is granted it in Members.
           </SettingsEmpty>
         ) : (
-          holders.map((m) => {
-            const label = personLabel(m.user.full_name, m.user.email)
-            return (
-              <div key={m.id} data-holder={m.user.id} className="flex items-center gap-3 border-b border-border px-4 py-2.5">
-                <UserAvatar name={m.user.full_name} email={m.user.email} src={m.user.avatar_url ?? null} className="h-7 w-7" textClassName="text-micro" />
-                {/* w-0: Settings scrolls in a table-display viewport that
-                    sizes to its content, and a long email would widen the
-                    whole page on a phone. */}
-                <span className="w-0 min-w-0 flex-1">
-                  <span className="block truncate text-control">{label}</span>
-                  {m.user.full_name?.trim() && <span className="block truncate font-mono text-micro text-muted-foreground-soft">{m.user.email}</span>}
-                </span>
-                <RolePill role={m.role} />
-                <span className="hidden h-[22px] items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 text-label text-destructive sm:inline-flex">
-                  <LockOpen className="h-3 w-3" aria-hidden />can reveal
-                </span>
-                {canEditGrants && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 px-2.5 text-xs hover:border-destructive/40 hover:text-destructive"
-                    disabled={busyUser !== null}
-                    aria-label={`Revoke reveal from ${label}`}
-                    onClick={() => void setReveal(m.user.id, false)}
-                  >
-                    {busyUser === m.user.id ? <Spinner className="h-3 w-3" /> : "Revoke"}
-                  </Button>
-                )}
-              </div>
-            )
-          })
-        )}
-        {canEditGrants && !capsHidden && !capsFailed && holders !== null && nonHolders.length > 0 && (
-          <div className="flex flex-col gap-2 border-b border-border px-4 py-2.5 sm:flex-row sm:items-center sm:gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="text-control text-foreground">Grant reveal</div>
-              <div className="mt-0.5 text-label leading-snug text-muted-foreground">Pick a person; they can reveal while the switch above is on.</div>
-            </div>
-            <span className="flex items-center gap-2">
-              {/* w-0 + flex-1 on a phone: an option's full name would
-                  otherwise set the select's width and widen the page. */}
-              <select
-                aria-label="Person to grant reveal to"
-                className={cn(nativeSelect, "w-0 min-w-0 flex-1 sm:w-56 sm:flex-none")}
-                value={grantTo}
-                onChange={(e) => setGrantTo(e.target.value)}
-              >
-                <option value="">Choose a person…</option>
-                {nonHolders.map((m) => (
-                  <option key={m.id} value={m.user.id}>{(m.user.full_name || m.user.email) + " · " + m.role}</option>
-                ))}
-              </select>
-              <Button size="sm" variant="outline" className="h-8 text-xs" disabled={!grantTo || busyUser !== null} onClick={() => void setReveal(grantTo, true)}>
-                Grant
-              </Button>
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3" data-slot="reveal-holders">
+            <span className="flex shrink-0 -space-x-1.5" aria-hidden>
+              {holders.slice(0, 5).map((m) => (
+                <UserAvatar key={m.id} name={m.user.full_name} email={m.user.email} src={m.user.avatar_url ?? null} className="h-7 w-7 ring-2 ring-card" textClassName="text-micro" />
+              ))}
             </span>
+            <span className="w-0 min-w-0 flex-1">
+              <span className="block text-control">
+                <span className="font-mono tabular-nums">{holders.length}</span> {holders.length === 1 ? "person can" : "people can"} reveal secrets
+              </span>
+              <span className="block truncate text-label text-muted-foreground">
+                {holders.slice(0, 4).map((m) => personLabel(m.user.full_name, m.user.email)).join(", ")}{holders.length > 4 ? ` and ${holders.length - 4} more` : ""}
+              </span>
+            </span>
+            <Link href="/settings/members?flag=reveal" className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border px-2.5 text-xs font-medium text-foreground/90 transition-colors hover:border-primary/50 hover:text-primary-hover">
+              Manage in Members<ChevronRight className="h-3 w-3" aria-hidden />
+            </Link>
           </div>
         )}
         {holders && holders.length > 2 && (
-          <p className="flex items-start gap-1.5 px-4 py-2.5 text-label text-warn">
+          <p className="flex items-start gap-1.5 border-t border-border px-4 py-2.5 text-label text-warn">
             <AlertTriangle className="mt-[1px] h-3 w-3 shrink-0" />
             {holders.length} people can read secrets in plaintext. The recommendation for a
             corporate workspace is two.

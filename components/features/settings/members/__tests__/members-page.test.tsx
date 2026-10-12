@@ -100,6 +100,7 @@ beforeEach(() => {
     if (url.includes("/members/capabilities")) return ok(CAPS)
     if (url.includes("/members?")) return ok(roster)
     if (url.includes("/invitations")) return ok(invitations)
+    if (url.includes("/reveal-policy")) return ok({ enabled: false })
     return ok({})
   })
   h.role = "ADMIN"
@@ -286,6 +287,20 @@ describe("Members — the roster", () => {
     renderPage("/settings/members?area=routines")
     await table()
     await waitFor(() => expect([...document.querySelectorAll("tr[data-member]")].map((r) => r.getAttribute("data-member"))).toEqual(["u-olive"]))
+  })
+
+  it("lists who can reveal with the workspace switch, and grants reveal as a draft", async () => {
+    renderPage("/settings/members?flag=reveal")
+    await table()
+    const card = await slot("[data-slot=members-reveal-policy]")
+    await waitFor(() => expect(card).toHaveTextContent("Reveal is off for this workspace"))
+    fireEvent.change(screen.getByLabelText("Person to grant reveal to"), { target: { value: "u-mel" } })
+    fireEvent.click(screen.getByRole("button", { name: "Grant" }))
+    await confirmWith(/Grant Reveal secrets/)
+    await save()
+    await waitFor(() => expect(writes()).toHaveLength(1))
+    expect(writes()[0][0]).toBe("/api/v1/workspaces/ws1/members/u-mel/capabilities?workspace_id=ws1")
+    expect(bodyOf()).toEqual({ set: ["chat", "credentials:reveal", "issue.create"] })
   })
 
   it("lists pending invitations with when each runs out", async () => {

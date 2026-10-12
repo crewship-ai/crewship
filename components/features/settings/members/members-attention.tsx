@@ -1,11 +1,14 @@
 "use client"
 
-import type { CSSProperties } from "react"
-import { Check, ChevronRight, Info, TriangleAlert } from "lucide-react"
+import { useState, type CSSProperties } from "react"
+import Link from "next/link"
+import { Check, ChevronRight, Info, LockOpen, TriangleAlert } from "lucide-react"
+
+import { cn } from "@/lib/utils"
 
 import { StatusPill } from "@/components/ui/status-pill"
 import { personLabel } from "@/components/ui/user-avatar"
-import { SettingsCard } from "@/components/features/settings/shared"
+import { SettingsCard, nativeSelect } from "@/components/features/settings/shared"
 import { CAPABILITY_LABELS, Capability, hasCapability } from "@/lib/capabilities"
 
 import { ROLE_LABEL, aboveRole, type Member } from "./members-model"
@@ -44,7 +47,7 @@ export function membersFindings({ members, caps, invitations, revealEnabled = nu
       title: `${revealers.length} ${revealers.length === 1 ? "person can" : "people can"} reveal secrets in plaintext.`,
       body: revealEnabled === false
         ? "Reveal is switched off for this workspace (Access & Secrets), so nobody can use the grant until the Owner turns it on."
-        : `${admins ? `${admins} of them ${admins === 1 ? "is an owner or admin" : "are owners or admins"}. ` : ""}Reveal is granted per person — check each one still needs it.`,
+        : `${admins ? `${admins} of them ${admins === 1 ? "is an owner or admin" : "are owners or admins"}. ` : ""}Reveal is granted per person — check each one still needs it${revealers.length > 2 ? "; the recommendation is two" : ""}.`,
       verb: `Review ${revealers.length}`, run: () => onFlag("reveal"),
     })
   }
@@ -108,6 +111,56 @@ export function MembersAttention({ findings }: { findings: Finding[] }) {
           </button>
         </div>
       ))}
+    </SettingsCard>
+  )
+}
+
+/**
+ * Shown over the roster while it lists who can reveal: the workspace switch
+ * (it lives in Access & Secrets — only the Owner moves it), the rule for who
+ * holds the grant, and one way to grant it to someone else. A grant goes
+ * through the page's draft and its high-stakes question like any other.
+ */
+export function RevealCard({ revealEnabled, holders, candidates, canGrant, onGrant }: {
+  revealEnabled: boolean | null
+  holders: number
+  candidates: Member[]
+  canGrant: boolean
+  onGrant: (m: Member) => void
+}) {
+  const [pick, setPick] = useState("")
+  return (
+    <SettingsCard icon={LockOpen} tint="var(--destructive)" title="Reveal secrets"
+      description={`Read a stored secret back in plaintext. Granted per person; OWNER and ADMIN hold it by default unless their membership has an explicit set. ${holders > 2 ? `${holders} people hold it — the recommendation is two.` : ""}`}>
+      <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-4 py-2.5 text-label" data-slot="members-reveal-policy">
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", revealEnabled ? "bg-success" : "bg-muted-foreground")} aria-hidden />
+        <span className="min-w-0 flex-1 text-muted-foreground">
+          {revealEnabled === null ? "The workspace switch is set in Access & Secrets." : <>Reveal is <span className="font-medium text-foreground">{revealEnabled ? "on" : "off"}</span> for this workspace{revealEnabled ? "." : " — a grant does nothing until the Owner turns it on."}</>}
+        </span>
+        <Link href="/settings?tab=access-secrets" className="inline-flex shrink-0 items-center gap-1 font-medium text-primary-hover hover:underline">
+          Access &amp; Secrets<ChevronRight className="h-3 w-3" aria-hidden />
+        </Link>
+      </div>
+      {canGrant && candidates.length > 0 && (
+        <div className="flex flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="text-control">Grant reveal</div>
+            <div className="text-label text-muted-foreground">Asks first, then waits for Save like every change here.</div>
+          </div>
+          <span className="flex items-center gap-2">
+            <select aria-label="Person to grant reveal to" value={pick} onChange={(e) => setPick(e.target.value)}
+              className={cn(nativeSelect, "w-0 min-w-0 flex-1 sm:w-56 sm:flex-none")}>
+              <option value="">Choose a person…</option>
+              {candidates.map((m) => <option key={m.id} value={m.user.id}>{personLabel(m.user.full_name, m.user.email)} · {ROLE_LABEL[m.role]}</option>)}
+            </select>
+            <button type="button" disabled={!pick}
+              onClick={() => { const m = candidates.find((c) => c.user.id === pick); if (m) { onGrant(m); setPick("") } }}
+              className="inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-xs font-medium hover:border-primary/50 hover:text-primary-hover disabled:opacity-50">
+              Grant
+            </button>
+          </span>
+        </div>
+      )}
     </SettingsCard>
   )
 }

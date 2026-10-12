@@ -141,8 +141,9 @@ describe("who holds credentials:reveal", () => {
     route({ caps: { u1: ["chat", "credentials:reveal"], u2: ["chat"] } })
     renderSection("OWNER")
 
-    expect(await screen.findByText("Pavel")).toBeInTheDocument()
-    expect(screen.queryByText("tom@firma.cz")).not.toBeInTheDocument()
+    expect(await screen.findByText(/person can reveal secrets/)).toHaveTextContent("1 person can reveal secrets")
+    expect(screen.getByText("Pavel")).toBeInTheDocument()
+    expect(screen.queryByText(/tom@firma.cz/)).not.toBeInTheDocument()
   })
 
   // Reveal being ON with nobody holding the capability is a real and common
@@ -215,46 +216,24 @@ describe("who may reveal, when the grants cannot be read", () => {
   })
 })
 
-// The card used to be read-only: the list said "can reveal" and that was all.
-// Grants and revocations now happen here, through the same PATCH the Members
-// page uses, and the class and placement summaries link to the credentials.
+// Who holds reveal is a question about people: it is changed in Members, and
+// this card says how many and links there instead of keeping a second
+// editable list of the same rows. The class and placement summaries link to
+// the credentials.
 describe("acting on who may reveal", () => {
   function routeWith(extra: (url: string, init?: RequestInit) => Response | undefined) {
     const base = h.apiFetch.getMockImplementation()!
     h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => extra(String(url), init) ?? base(url, init))
   }
 
-  it("revokes reveal from a holder with the capabilities PATCH", async () => {
-    route({ caps: { u2: ["credentials:reveal"] } })
-    routeWith((url, init) => (init?.method === "PATCH" ? ok({ capabilities: [] }) : undefined))
-    renderSection("ADMIN")
-    fireEvent.click(await screen.findByRole("button", { name: "Revoke reveal from tom@firma.cz" }))
-    await waitFor(() => expect(h.apiFetch).toHaveBeenCalledWith(
-      "/api/v1/workspaces/ws1/members/u2/capabilities?workspace_id=ws1",
-      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ revoke: ["credentials:reveal"] }) }),
-    ))
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Revoke reveal from tom@firma.cz" })).toBeNull())
-  })
-
-  it("grants reveal to a chosen person", async () => {
-    route({ caps: { u2: ["credentials:reveal"] } })
-    routeWith((url, init) => (init?.method === "PATCH" ? ok({ capabilities: ["credentials:reveal"] }) : undefined))
+  it("counts the holders and sends grants and revocations to Members", async () => {
+    route({ caps: { u1: ["credentials:reveal"], u2: ["credentials:reveal"] } })
     renderSection("OWNER")
-    fireEvent.change(await screen.findByLabelText("Person to grant reveal to"), { target: { value: "u3" } })
-    fireEvent.click(screen.getByRole("button", { name: "Grant" }))
-    await waitFor(() => expect(h.apiFetch).toHaveBeenCalledWith(
-      "/api/v1/workspaces/ws1/members/u3/capabilities?workspace_id=ws1",
-      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ grant: ["credentials:reveal"] }) }),
-    ))
-    expect(await screen.findByRole("button", { name: "Revoke reveal from eva@firma.cz" })).toBeInTheDocument()
-  })
-
-  it("offers no grant or revoke controls to a MANAGER", async () => {
-    route({ caps: { u2: ["credentials:reveal"] } })
-    renderSection("MANAGER")
-    await screen.findByText(/who may reveal/i)
+    expect(await screen.findByText(/people can reveal secrets/)).toHaveTextContent("2 people can reveal secrets")
+    expect(screen.getByRole("link", { name: /Manage in Members/ })).toHaveAttribute("href", "/settings/members?flag=reveal")
     expect(screen.queryByRole("button", { name: /^Revoke reveal/ })).toBeNull()
     expect(screen.queryByLabelText("Person to grant reveal to")).toBeNull()
+    expect(h.apiFetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")).toBe(false)
   })
 
   it("counts credentials per class and per crew, linking to each", async () => {
