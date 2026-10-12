@@ -45,6 +45,13 @@ running the full suite with a deliberately adjusted timeout. Mutation tests
 | [entrypoint.sh](entrypoint.sh) | Agent-container startup; distinct from the server entrypoint under `docker/` |
 | [ci/](ci/) | CI planning/verdict, test budgets, browser report comparison, release smoke and publishing helpers; callers in `.github/workflows/` define their environment |
 
+`ci/prepare-native-release.sh /absolute/new/context-directory` prepares the
+independent native worker release context: authenticated upstream bytes, runner,
+recipe and license bundle. It performs downloads and Go builds, never Docker
+publication or provider calls. The main-only `Native Worker Release` workflow
+owns candidate publication and signing; see the
+[release procedure](../docs/guides/restricted-native-codex.md#independent-release-candidates).
+
 Publishing helpers under `ci/` are workflow components, not general local test
 commands. They may publish or remove release/package artifacts.
 
