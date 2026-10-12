@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useSearchParams } from "next/navigation"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { ChevronDown, Crown, Download, Mail, MessageSquare, Settings as SettingsIcon, Shield, Users, X } from "lucide-react"
+import { ChevronDown, Download, Mail, MessageSquare, Settings as SettingsIcon, Users, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -54,10 +54,10 @@ import {
 import { useMembers } from "./use-members"
 import { useAccessWrites } from "./use-access"
 import { MemberDetail } from "./member-detail"
-import { AREA_ICON } from "./member-bits"
+import { AREA_ICON, ROLE_ICON } from "./member-bits"
 import { InvitationList, PeopleList, PeopleTable, type PeopleGroup } from "./people-table"
 import { MembersAttention, membersFindings } from "./members-attention"
-import { useInvitations } from "./use-invitations"
+import { useInvitations, useRevealPolicy } from "./use-invitations"
 
 type GroupBy = "role" | "name"
 
@@ -169,6 +169,7 @@ export function MembersPage() {
 
   const invitationsQuery = useInvitations(workspaceId, isManager)
   const invitations = invitationsQuery.data ?? []
+  const revealEnabled = useRevealPolicy(workspaceId, isManager).data ?? null
 
   const groups: PeopleGroup[] = React.useMemo(() => {
     if (groupBy === "name") {
@@ -286,7 +287,6 @@ export function MembersPage() {
 
   const dot = (cls: string) => <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", cls)} aria-hidden />
   const ico = (Icon: React.ElementType, cls = "text-muted-foreground") => <Icon className={cn("h-3.5 w-3.5 shrink-0", cls)} aria-hidden />
-  const roleIcon: Record<string, React.ReactNode> = { OWNER: ico(Crown), ADMIN: ico(Shield) }
   const pick = (next: Partial<MemberFilters>) => setFilters({ ...next, status: "" })
   const nav = (
     <>
@@ -304,7 +304,7 @@ export function MembersPage() {
           const n = countWith({ role: r })
           return (
             <DrillNavItem key={r} index={i} selected={filters.role === r && !filters.status} pressed={filters.role === r} muted={!n}
-              onSelect={() => pick({ role: filters.role === r ? "" : r })} icon={roleIcon[r] ?? dot("bg-muted-foreground/50")} label={ROLE_LABEL[r]} meta={n} />
+              onSelect={() => pick({ role: filters.role === r ? "" : r })} icon={ico(ROLE_ICON[r])} label={ROLE_LABEL[r]} meta={n} />
           )
         })}
       </DrillNavSection>
@@ -349,7 +349,7 @@ export function MembersPage() {
   const aboveCount = caps ? members.filter((m) => aboveRole(m, caps[m.user.id]).length > 0).length : null
   const chatOnlyCount = caps ? countWith({ ...DEFAULT_MEMBER_FILTERS, area: "chat" }) : null
   const findings = capsReadable && caps && !capsLoading ? membersFindings({
-    members, caps: caps as Record<string, string[]>, invitations,
+    members, caps: caps as Record<string, string[]>, invitations, revealEnabled,
     onFlag: (flag) => pick({ ...DEFAULT_MEMBER_FILTERS, flag }),
     onOpen: open,
     onInvited: () => setFilters({ status: "invited" }),
@@ -490,7 +490,7 @@ export function MembersPage() {
           {opened && (
             <MemberDetail member={opened} workspaceId={ws} currentUserId={currentUserId} callerRole={role} isAdmin={isAdmin}
               granted={caps?.[opened.user.id] ?? []} serverGranted={serverCaps?.[opened.user.id] ?? []} capsLoading={capsLoading} busy={busy}
-              onChangeRole={roster.changeRole} onRemove={onRemove} onCell={onCell} onProfile={onProfile} onRevoke={onRevoke} />
+              onChangeRole={roster.changeRole} onRemove={onRemove} onCell={onCell} onProfile={onProfile} onRevoke={onRevoke} revealEnabled={revealEnabled} />
           )}
           {/* The page's own save bar sits under the sheet's overlay; the same
               bar, from the same context, docks to the bottom of the sheet. */}

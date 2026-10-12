@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { Boxes, Lock, Shield, Sparkles, Trash2, TriangleAlert } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -20,7 +21,7 @@ import {
   ACCESS_PROFILES, AREAS, ASSIGNABLE_ROLES, CAPABILITY_HINT, CAPABILITY_SHORT, ROLE_LABEL, ROLE_SUMMARY_BY_ROLE,
   aboveRole, accessProfile, exceptionCount, roleChoices, type Member,
 } from "./members-model"
-import { AREA_ICON, CAPABILITY_ICON, RolePill } from "./member-bits"
+import { AREA_ICON, CAPABILITY_ICON, MemberDialogIcon, RolePill } from "./member-bits"
 import { joinedDate } from "./people-table"
 
 export { RolePill } from "./member-bits"
@@ -50,6 +51,7 @@ export function MemberDetail({
   onCell,
   onProfile,
   onRevoke,
+  revealEnabled = null,
 }: {
   member: Member
   workspaceId: string
@@ -67,6 +69,8 @@ export function MemberDetail({
   onCell: (m: Member, cap: CapabilityValue, next: boolean) => void
   onProfile: (m: Member, profile: CapabilityBundle) => void
   onRevoke: (m: Member, caps: CapabilityValue[]) => void
+  /** The workspace's reveal switch (Access & Secrets); null when unknown. */
+  revealEnabled?: boolean | null
 }) {
   const label = personLabel(member.user.full_name, member.user.email)
   const isSelf = currentUserId === member.user.id
@@ -161,6 +165,13 @@ export function MemberDetail({
                   <AreaIcon className="h-3 w-3" aria-hidden />{a.label}
                   <span className="ml-auto normal-case tracking-normal">{held} of {a.caps.length}</span>
                 </p>
+                {a.key === "secrets" && revealEnabled !== null && (
+                  <p className="flex items-center gap-2 border-b border-border/60 px-4 py-2 text-label text-muted-foreground" data-slot="member-reveal-policy">
+                    <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", revealEnabled ? "bg-success" : "bg-muted-foreground")} aria-hidden />
+                    <span className="min-w-0 flex-1">Reveal is {revealEnabled ? "on" : "off"} for this workspace{revealEnabled ? "" : " — the grant does nothing until the Owner turns it on"}.</span>
+                    <Link href="/settings?tab=access-secrets" className="shrink-0 font-medium text-primary-hover hover:underline">Access &amp; Secrets</Link>
+                  </p>
+                )}
                 {a.caps.map(({ cap }) => {
                   const on = granted.includes(cap)
                   const lock = capabilityLock(member, cap, currentUserId, isAdmin)
@@ -204,7 +215,7 @@ export function MemberDetail({
       {isAdmin && !isOwner && !isSelf && (
         <SettingsDangerCard title="Remove from workspace">
           <SettingsRow label={`${label} loses access at once`} description="Every crew, routine and page here. This cannot be undone." border={false}>
-            <RemoveMember label={label} onConfirm={() => onRemove(member)} />
+            <RemoveMember member={member} label={label} onConfirm={() => onRemove(member)} />
           </SettingsRow>
         </SettingsDangerCard>
       )}
@@ -310,7 +321,7 @@ function SwitchTrack({ on, red, locked }: { on: boolean; red?: boolean; locked: 
   )
 }
 
-function RemoveMember({ label, onConfirm }: { label: string; onConfirm: () => Promise<boolean> }) {
+function RemoveMember({ member, label, onConfirm }: { member: Member; label: string; onConfirm: () => Promise<boolean> }) {
   const [removing, setRemoving] = useState(false)
   return (
     <AlertDialog>
@@ -320,24 +331,40 @@ function RemoveMember({ label, onConfirm }: { label: string; onConfirm: () => Pr
           Remove member
         </Button>
       </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle className="text-sm">Remove member</AlertDialogTitle>
-          <AlertDialogDescription className="text-xs">
-            Are you sure you want to remove <span className="font-medium text-foreground">{label}</span> from this
-            workspace? This action cannot be undone.
-          </AlertDialogDescription>
+      <AlertDialogContent className="min-w-0 sm:max-w-lg">
+        <AlertDialogHeader className="min-w-0 flex-row items-start gap-3 space-y-0 text-left sm:text-left">
+          <MemberDialogIcon icon={Trash2} tint="var(--destructive)" />
+          <div className="min-w-0 space-y-1">
+            <AlertDialogTitle>Remove member</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove <span className="break-words font-medium text-foreground">{label}</span> from this
+              workspace? This cannot be undone.
+            </AlertDialogDescription>
+          </div>
         </AlertDialogHeader>
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-subtle px-3 py-2.5">
+          <UserAvatar name={member.user.full_name} email={member.user.email} src={member.user.avatar_url} className="h-8 w-8" textClassName="text-micro" />
+          <span className="w-0 min-w-0 flex-1">
+            <span className="block truncate text-control">{label}</span>
+            <span className="block truncate font-mono text-micro text-muted-foreground">{member.user.email}</span>
+          </span>
+          <RolePill role={member.role} />
+        </div>
+        <ul className="space-y-1 text-label text-muted-foreground">
+          <li>· They lose access to this workspace and every crew in it at once.</li>
+          <li>· Pages they own move to another owner first; if none can be found, nothing is removed.</li>
+          <li>· Adding them again starts from the role&apos;s default access.</li>
+        </ul>
         <AlertDialogFooter>
-          <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            className="h-7 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            variant="destructive"
             onClick={() => {
               setRemoving(true)
               void onConfirm().finally(() => setRemoving(false))
             }}
           >
-            Remove
+            Remove member
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

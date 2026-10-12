@@ -21,10 +21,11 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { AlertTriangle, Eye, FolderLock, ShieldAlert, ShieldCheck, UserCheck } from "lucide-react"
+import { AlertTriangle, ChevronRight, Eye, FolderLock, LockOpen, ShieldAlert, ShieldCheck, UserCheck } from "lucide-react"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
+import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
+import { RolePill } from "@/components/features/settings/members/member-bits"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Spinner } from "@/components/ui/spinner"
@@ -38,7 +39,7 @@ import { Capability } from "@/lib/capabilities"
 export interface AccessSecretsMember {
   id: string
   role: string
-  user: { id: string; email: string; full_name: string | null }
+  user: { id: string; email: string; full_name: string | null; avatar_url?: string | null }
 }
 
 export interface AccessSecretsSectionProps {
@@ -280,16 +281,14 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
           )}
         </SettingsRow>
         {!isOwner && (
-          <SettingsRow label="Read-only for your role" border={false}>
-            <span className="text-label text-muted-foreground text-right">
-              Only a workspace OWNER can move this switch — the API refuses everyone else, including
-              ADMIN.
-            </span>
+          <SettingsRow label="Read-only for your role" border={false}
+            description="Only a workspace OWNER can move this switch — the API refuses everyone else, including ADMIN.">
+            <span />
           </SettingsRow>
         )}
         {policyError && (
-          <SettingsRow label="Problem" border={false}>
-            <span role="alert" className="text-label text-destructive text-right">{policyError}</span>
+          <SettingsRow label="Problem" border={false} description={<span role="alert" className="text-destructive">{policyError}</span>}>
+            <span />
           </SettingsRow>
         )}
       </SettingsCard>
@@ -297,6 +296,11 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
       <SettingsCard icon={UserCheck}
         title="Who may reveal"
         description="OWNER and ADMIN receive reveal by default unless their membership has an explicit capability set. Individual grants and revocations take precedence; workspace policy still applies."
+        actions={!capsHidden ? (
+          <Link href="/settings/members?flag=reveal" className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2.5 text-xs font-medium text-foreground/90 transition-colors hover:border-primary/50 hover:text-primary-hover">
+            In Members<ChevronRight className="h-3 w-3" aria-hidden />
+          </Link>
+        ) : undefined}
       >
         {capsHidden ? (
           <SettingsEmpty>
@@ -313,33 +317,50 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
             on, no value can be revealed until someone is granted it in Members.
           </SettingsEmpty>
         ) : (
-          holders.map((m) => (
-            <SettingsRow key={m.id} label={m.user.full_name || m.user.email} description={m.user.email}>
-              <Badge variant="outline" className="text-micro px-1.5">{m.role}</Badge>
-              <Badge variant="outline" className="text-micro px-1.5 border-warn/40 text-warn">
-                can reveal
-              </Badge>
-              {canEditGrants && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-                  disabled={busyUser !== null}
-                  aria-label={`Revoke reveal from ${m.user.full_name || m.user.email}`}
-                  onClick={() => void setReveal(m.user.id, false)}
-                >
-                  {busyUser === m.user.id ? <Spinner className="h-3 w-3" /> : "Revoke"}
-                </Button>
-              )}
-            </SettingsRow>
-          ))
+          holders.map((m) => {
+            const label = personLabel(m.user.full_name, m.user.email)
+            return (
+              <div key={m.id} data-holder={m.user.id} className="flex items-center gap-3 border-b border-border px-4 py-2.5">
+                <UserAvatar name={m.user.full_name} email={m.user.email} src={m.user.avatar_url ?? null} className="h-7 w-7" textClassName="text-micro" />
+                {/* w-0: Settings scrolls in a table-display viewport that
+                    sizes to its content, and a long email would widen the
+                    whole page on a phone. */}
+                <span className="w-0 min-w-0 flex-1">
+                  <span className="block truncate text-control">{label}</span>
+                  {m.user.full_name?.trim() && <span className="block truncate font-mono text-micro text-muted-foreground-soft">{m.user.email}</span>}
+                </span>
+                <RolePill role={m.role} />
+                <span className="hidden h-[22px] items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 text-label text-destructive sm:inline-flex">
+                  <LockOpen className="h-3 w-3" aria-hidden />can reveal
+                </span>
+                {canEditGrants && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2.5 text-xs hover:border-destructive/40 hover:text-destructive"
+                    disabled={busyUser !== null}
+                    aria-label={`Revoke reveal from ${label}`}
+                    onClick={() => void setReveal(m.user.id, false)}
+                  >
+                    {busyUser === m.user.id ? <Spinner className="h-3 w-3" /> : "Revoke"}
+                  </Button>
+                )}
+              </div>
+            )
+          })
         )}
         {canEditGrants && !capsHidden && !capsFailed && holders !== null && nonHolders.length > 0 && (
-          <SettingsRow label="Grant reveal" description="Pick a person; they can reveal while the switch above is on.">
-            <span className="flex w-full items-center justify-end gap-2 sm:w-auto">
+          <div className="flex flex-col gap-2 border-b border-border px-4 py-2.5 sm:flex-row sm:items-center sm:gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="text-control text-foreground">Grant reveal</div>
+              <div className="mt-0.5 text-label leading-snug text-muted-foreground">Pick a person; they can reveal while the switch above is on.</div>
+            </div>
+            <span className="flex items-center gap-2">
+              {/* w-0 + flex-1 on a phone: an option's full name would
+                  otherwise set the select's width and widen the page. */}
               <select
                 aria-label="Person to grant reveal to"
-                className={cn(nativeSelect, "min-w-0 flex-1 sm:w-56 sm:flex-none")}
+                className={cn(nativeSelect, "w-0 min-w-0 flex-1 sm:w-56 sm:flex-none")}
                 value={grantTo}
                 onChange={(e) => setGrantTo(e.target.value)}
               >
@@ -352,16 +373,14 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
                 Grant
               </Button>
             </span>
-          </SettingsRow>
+          </div>
         )}
         {holders && holders.length > 2 && (
-          <SettingsRow label="" border={false}>
-            <span className="inline-flex items-start gap-1.5 text-label text-warn text-right">
-              <AlertTriangle className="mt-[1px] h-3 w-3 shrink-0" />
-              {holders.length} people can read secrets in plaintext. The recommendation for a
-              corporate workspace is two.
-            </span>
-          </SettingsRow>
+          <p className="flex items-start gap-1.5 px-4 py-2.5 text-label text-warn">
+            <AlertTriangle className="mt-[1px] h-3 w-3 shrink-0" />
+            {holders.length} people can read secrets in plaintext. The recommendation for a
+            corporate workspace is two.
+          </p>
         )}
       </SettingsCard>
 
@@ -381,10 +400,8 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
             </SettingsRow>
           )
         })}
-        <SettingsRow label="Changing a class" description="Raise it at any time; lowering is audited." border={false}>
-          <span className="text-label text-muted-foreground text-right">
-            Manager and up can raise · Owner or Admin can lower
-          </span>
+        <SettingsRow label="Changing a class" description="Raise it at any time; lowering is audited. Manager and up can raise · Owner or Admin can lower." border={false}>
+          <span />
         </SettingsRow>
       </SettingsCard>
 

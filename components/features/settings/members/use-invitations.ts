@@ -49,3 +49,22 @@ export function expiryText(iso: string, now = Date.now()): string {
   if (d === 0) return "Expires today"
   return d === -1 ? "Expired yesterday" : `Expired ${-d} days ago`
 }
+
+/**
+ * The workspace's reveal switch (GET /credentials/reveal-policy, MANAGER+):
+ * true, false, or null while unknown. Members shows it beside the Reveal
+ * grants — a grant does nothing while the switch is off.
+ */
+export function useRevealPolicy(workspaceId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["reveal-policy", workspaceId],
+    enabled: Boolean(workspaceId) && enabled,
+    staleTime: 60_000,
+    queryFn: async ({ signal }): Promise<boolean | null> => {
+      const res = await apiFetch(`/api/v1/credentials/reveal-policy?workspace_id=${encodeURIComponent(workspaceId ?? "")}`, { signal })
+      if (!res.ok) return null
+      const body = (await res.json().catch(() => null)) as { enabled?: boolean } | null
+      return typeof body?.enabled === "boolean" ? body.enabled : null
+    },
+  })
+}

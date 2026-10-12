@@ -25,10 +25,12 @@ export interface Finding {
  * in plaintext, who holds more than their role suggests, and invitations about
  * to run out. Each finding carries the verb that deals with it.
  */
-export function membersFindings({ members, caps, invitations, onFlag, onOpen, onInvited }: {
+export function membersFindings({ members, caps, invitations, revealEnabled = null, onFlag, onOpen, onInvited }: {
   members: Member[]
   caps: Record<string, string[]>
   invitations: Invitation[]
+  /** The workspace's reveal switch; null when unknown. */
+  revealEnabled?: boolean | null
   onFlag: (flag: "reveal" | "risky-low-role") => void
   onOpen: (m: Member) => void
   onInvited: () => void
@@ -38,9 +40,11 @@ export function membersFindings({ members, caps, invitations, onFlag, onOpen, on
   if (revealers.length > 0) {
     const admins = revealers.filter((m) => m.role === "OWNER" || m.role === "ADMIN").length
     out.push({
-      key: "reveal", severity: revealers.length > 3 ? "high" : "medium",
+      key: "reveal", severity: revealEnabled === false ? "low" : revealers.length > 3 ? "high" : "medium",
       title: `${revealers.length} ${revealers.length === 1 ? "person can" : "people can"} reveal secrets in plaintext.`,
-      body: `${admins ? `${admins} of them ${admins === 1 ? "is an owner or admin" : "are owners or admins"}. ` : ""}Reveal is granted per person — check each one still needs it.`,
+      body: revealEnabled === false
+        ? "Reveal is switched off for this workspace (Access & Secrets), so nobody can use the grant until the Owner turns it on."
+        : `${admins ? `${admins} of them ${admins === 1 ? "is an owner or admin" : "are owners or admins"}. ` : ""}Reveal is granted per person — check each one still needs it.`,
       verb: `Review ${revealers.length}`, run: () => onFlag("reveal"),
     })
   }

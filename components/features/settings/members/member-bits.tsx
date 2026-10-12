@@ -1,30 +1,34 @@
 "use client"
 
-import {
-  Bookmark, CircleDot, Crown, Eye, FileText, KeyRound, MessageSquare, PanelsTopLeft, Play, Plus, RotateCcw,
-  Shield, Sparkles, Workflow, type LucideIcon,
-} from "lucide-react"
+import type { CSSProperties, ElementType } from "react"
+
+import { Briefcase, Crown, Eye, FileText, LockOpen, MessageSquare, RotateCcw, Shield, User, type LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Capability, hasCapability } from "@/lib/capabilities"
+import { CONCEPT_ICON } from "@/lib/concept-icons"
 
 import { ROLE_LABEL, areasHeld, chatOnly, type AreaKey } from "./members-model"
 
 /** An icon per area and per capability, the same in the roster, the panel and
- *  the phone list. */
-export const AREA_ICON: Record<AreaKey, LucideIcon> = { routines: Workflow, content: FileText, secrets: KeyRound }
+ *  the phone list. Where the product already has an icon for the concept
+ *  (lib/concept-icons) it is that one — Routines is the rail's ScrollText,
+ *  an issue its CircleDot — so a grant wears the face of what it grants. */
+export const AREA_ICON: Record<AreaKey, LucideIcon> = { routines: CONCEPT_ICON.routines, content: FileText, secrets: CONCEPT_ICON.credentials }
 export const CAPABILITY_ICON: Record<string, LucideIcon> = {
-  [Capability.RoutineCreate]: Plus,
-  [Capability.RoutineRun]: Play,
-  [Capability.IssueCreate]: CircleDot,
-  [Capability.PageCreate]: PanelsTopLeft,
-  [Capability.MemoryWrite]: Bookmark,
-  [Capability.SkillCreate]: Sparkles,
-  [Capability.CredentialCreate]: Plus,
+  [Capability.RoutineCreate]: CONCEPT_ICON.routines,
+  [Capability.RoutineRun]: CONCEPT_ICON.triggers,
+  [Capability.IssueCreate]: CONCEPT_ICON.issues,
+  [Capability.PageCreate]: CONCEPT_ICON.pages,
+  [Capability.MemoryWrite]: CONCEPT_ICON.memory,
+  [Capability.SkillCreate]: CONCEPT_ICON.skills,
+  [Capability.CredentialCreate]: CONCEPT_ICON.credentials,
   [Capability.CredentialRotate]: RotateCcw,
-  [Capability.CredentialReveal]: Eye,
+  [Capability.CredentialReveal]: LockOpen,
 }
-const ROLE_ICON: Record<string, LucideIcon> = { OWNER: Crown, ADMIN: Shield }
+/** One icon per role, highest first: the crown, the shield, the briefcase of
+ *  someone who runs crews, a person, an eye that only looks. */
+export const ROLE_ICON: Record<string, LucideIcon> = { OWNER: Crown, ADMIN: Shield, MANAGER: Briefcase, MEMBER: User, VIEWER: Eye }
 
 /** A role, neutral: severity on this page belongs to the access chips and the
  *  findings, so a role never competes with them for colour. */
@@ -83,6 +87,16 @@ export function AreaIcons({ granted }: { granted: readonly string[] | undefined 
         const danger = a.key === "secrets" && reveal
         return <Icon key={a.key} data-area={a.key} className={cn("h-3.5 w-3.5", danger ? "text-destructive" : "text-primary-hover")} aria-label={danger ? "Secrets, can reveal" : a.label} />
       })}
+    </span>
+  )
+}
+
+/** The icon tile every member dialog opens with — Add in the brand tint,
+ *  Remove in red — so the two read as one family. */
+export function MemberDialogIcon({ icon: Icon, tint = "var(--primary)" }: { icon: ElementType; tint?: string }) {
+  return (
+    <span className="icon-tile grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ "--ic": tint } as CSSProperties} aria-hidden>
+      <Icon className="h-[18px] w-[18px]" />
     </span>
   )
 }
