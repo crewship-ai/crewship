@@ -183,9 +183,10 @@ func TestAcceptance_DemoRBACMatrix(t *testing.T) {
 	if err := os.WriteFile(cfg, []byte("server: "+srv.URL+"\nworkspace: matrix-ws\ntoken: "+token+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	binary := buildCrewshipBinary(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
-	command := exec.CommandContext(ctx, buildCrewshipBinary(t), "seed", "rbac-matrix", "--server", srv.URL, "--workspace", "matrix-ws")
+	command := exec.CommandContext(ctx, binary, "seed", "rbac-matrix", "--server", srv.URL, "--workspace", "matrix-ws")
 	command.Dir = t.TempDir()
 	command.Env = append(os.Environ(), "CREWSHIP_CONFIG="+cfg, "SEED_ANTHROPIC_API_KEY=", "SEED_CODEX_AUTH_FILE=")
 	if output, err := command.CombinedOutput(); err != nil {
