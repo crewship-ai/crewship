@@ -13,6 +13,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // mockAsyncDispatcher records dispatches into a channel for async verification.
@@ -1405,50 +1407,41 @@ func TestE2E_BUG_DeletedAgentDuringMission(t *testing.T) {
 }
 
 // ============================================================
-// BUG TEST: Dispatch Failure in Goroutine Uses Parent Context
-// When dispatch fails asynchronously, updateTaskStatus uses the
-// parent ctx which may be cancelled, silently losing the FAILED update.
+// A canceled scheduling caller cannot cancel accepted durable work or poison
+// its wake context. Wake failure leaves terminal ownership with the dispatcher.
 // ============================================================
 
-func TestE2E_BUG_DispatchFailureCtx(t *testing.T) {
+func TestE2E_AcceptedTaskSurvivesCanceledCallerAndWakeFailure(t *testing.T) {
 	db := setupTestDB(t)
-	db.Exec(`CREATE TABLE crew_connections (
-		id TEXT PRIMARY KEY, workspace_id TEXT, from_crew_id TEXT, to_crew_id TEXT,
-		direction TEXT DEFAULT 'bidirectional', status TEXT DEFAULT 'active',
-		created_at TEXT, updated_at TEXT)`)
-
 	wsID, crewID, leadID, agentID := seedTestData(t, db)
 	missionID := createTestMission(t, db, wsID, crewID, leadID)
-
-	insertTask(t, db, "t1", missionID, &agentID, "Will fail dispatch", "PENDING", 1, nil)
-
-	// Use a dispatcher that fails
-	failDisp := &failingDispatcher{}
+	insertTask(t, db, "t1", missionID, &agentID, "Accepted task", "PENDING", 1, nil)
+	failDisp := &failingDispatcher{release: make(chan struct{}), observed: make(chan error, 1)}
 	engine := newTestEngine(t, db)
 	engine.SetDispatcher(failDisp)
-
-	// Use a context that we'll cancel before the dispatch goroutine runs
 	ctx, cancel := context.WithCancel(context.Background())
-
+	defer cancel()
 	ms := makeMissionState(missionID, crewID, "dev-crew", leadID, wsID, "trace-ctxfail")
 	engine.mu.Lock()
 	engine.active[missionID] = ms
 	engine.mu.Unlock()
-
-	// Schedule the task — this spawns a goroutine that will fail
-	engine.scheduleReadyTasks(ctx, ms)
-
-	// Cancel the context immediately
+	if err := engine.scheduleReadyTasks(ctx, ms); err != nil {
+		t.Fatal(err)
+	}
 	cancel()
-
-	// Give goroutine time to execute
-	time.Sleep(500 * time.Millisecond)
-
-	// FIXED: The goroutine now uses context.Background() for updateTaskStatus,
-	// so the FAILED update should succeed even if the parent ctx is cancelled.
-	status := getTaskStatus(t, db, "t1")
-	if status != "FAILED" {
-		t.Errorf("expected task FAILED after dispatch failure (ctx leak fix), got %s", status)
+	close(failDisp.release)
+	select {
+	case err := <-failDisp.observed:
+		if err != nil {
+			t.Fatalf("wake inherited canceled parent: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("accepted work never woke")
+	}
+	settleUntil(t, func() bool { return quiesce.Default().Runs() == 0 }, "failed wake completed")
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM mission_tasks mt JOIN assignments a ON a.id=mt.assignment_id JOIN work_items w ON w.domain_id=a.id AND w.workspace_id=a.workspace_id WHERE mt.id='t1' AND mt.status='IN_PROGRESS' AND a.status='PENDING' AND w.source='assignment' AND w.domain_kind='assignment' AND w.state='queued' AND w.generation=0 AND w.attempts=0`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("accepted identity lost: n=%d err=%v", n, err)
 	}
 }
 
@@ -1541,9 +1534,14 @@ func TestE2E_AutoAssign_RoundRobin(t *testing.T) {
 }
 
 // failingDispatcher always returns an error.
-type failingDispatcher struct{}
+type failingDispatcher struct {
+	release  chan struct{}
+	observed chan error
+}
 
-func (d *failingDispatcher) DispatchAssignment(_ context.Context, _ DispatchRequest) error {
+func (d *failingDispatcher) DispatchAssignment(ctx context.Context, _ DispatchRequest) error {
+	<-d.release
+	d.observed <- ctx.Err()
 	return fmt.Errorf("simulated dispatch failure: container not running")
 }
 

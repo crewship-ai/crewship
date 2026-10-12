@@ -65,7 +65,7 @@ func (h *AssignmentHandler) dispatchByID(ctx context.Context, assignmentID strin
 	// truth: InFlight and TryStart are not one atomic operation, so a race
 	// where the lock is claimed between this check and TryStart is still
 	// caught there, just after paying for the load).
-	if h.agentRunLock != nil && h.agentRunLock.InFlight(assignedToID) {
+	if ownedAssignmentExecution(ctx) == nil && h.agentRunLock != nil && h.agentRunLock.InFlight(assignedToID) {
 		crewID, cerr := h.crewIDForAssignment(ctx, assignmentID)
 		if cerr == nil && crewID != "" {
 			h.logger.Info("dispatchByID: agent busy (cross-surface), requeuing without loading target",

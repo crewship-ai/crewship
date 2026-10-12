@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 func TestResolveReadyTasks_SelfHealsBlockedWithCompletedDeps(t *testing.T) {
@@ -296,8 +298,7 @@ func TestScheduleTask_CrossCrewRequiresConnection(t *testing.T) {
 	}
 }
 
-func TestScheduleTask_CrossCrewConnectedDispatchFailureFailsTask(t *testing.T) {
-	t.Parallel()
+func TestScheduleTask_CrossCrewConnectedWakeFailurePreservesAcceptedTask(t *testing.T) {
 	db := covMissionDB(t)
 	covSeed(t, db)
 	ms := covMission(t, db, "m1", "IN_PROGRESS")
@@ -336,21 +337,10 @@ func TestScheduleTask_CrossCrewConnectedDispatchFailureFailsTask(t *testing.T) {
 		t.Fatal("dispatcher never invoked")
 	}
 
-	// The failing dispatch must mark the task FAILED (async — poll briefly).
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if covTaskStatus(t, db, "t-x") == "FAILED" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("task status = %q, want FAILED after dispatch error", covTaskStatus(t, db, "t-x"))
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	var errMsg string
-	db.QueryRow(`SELECT error_message FROM mission_tasks WHERE id = 't-x'`).Scan(&errMsg)
-	if !strings.Contains(errMsg, "container provisioning failed") {
-		t.Errorf("dispatch error must be persisted, got %q", errMsg)
+	settleUntil(t, func() bool { return quiesce.Default().Runs() == 0 }, "cross-crew wake completed")
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM mission_tasks mt JOIN assignments a ON a.id=mt.assignment_id JOIN work_items w ON w.domain_id=a.id AND w.workspace_id=a.workspace_id WHERE mt.id='t-x' AND mt.status='IN_PROGRESS' AND a.status='PENDING' AND w.state='queued' AND w.agent_id='agent-remote' AND w.crew_id='crew-2'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("cross-crew accepted work lost after hint failure: count=%d err=%v", count, err)
 	}
 }
 

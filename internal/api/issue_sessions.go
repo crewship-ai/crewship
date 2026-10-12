@@ -59,6 +59,7 @@ const issueAgentSessionsFlagKey = "issue_agent_sessions"
 // path issues a multi-row query through the interface (ListSessions reads
 // via h.db directly), so it is not part of the contract.
 type dbConn interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }

@@ -703,30 +703,8 @@ func WriteThreaded(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item
 		}
 	}()
 
-	var existing threadedRow
-	var bodyMD sql.NullString
-	err = tx.QueryRowContext(ctx, `
-		SELECT id, title, body_md, payload_json, actions_json
-		  FROM inbox_items
-		 WHERE workspace_id = ? AND thread_key = ? AND state != 'resolved'
-		 ORDER BY created_at ASC, id ASC LIMIT 1`,
-		in.WorkspaceID, in.ThreadKey).Scan(&existing.id, &existing.title, &bodyMD, &existing.payloadJSON, &existing.actionsJSON)
-	existing.bodyMD = bodyMD
-
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		if err := upsertRow(ctx, tx, in); err != nil {
-			logger.Warn("inbox write-threaded: insert", "error", err, "thread_key", in.ThreadKey)
-			return err
-		}
-	case err != nil:
-		logger.Warn("inbox write-threaded: lookup", "error", err, "thread_key", in.ThreadKey)
+	if err := WriteThreadedTx(ctx, tx, in); err != nil {
 		return err
-	default:
-		if err := mergeThreadedRowTx(ctx, tx, existing, in); err != nil {
-			logger.Warn("inbox write-threaded: merge", "error", err, "thread_key", in.ThreadKey, "id", existing.id)
-			return err
-		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -738,6 +716,38 @@ func WriteThreaded(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item
 	// event (a new occurrence, or new information about an open one), never
 	// a retried duplicate, so it always notifies.
 	notifyExternal(ctx, in)
+	return nil
+}
+
+// WriteThreadedTx persists one new occurrence in the caller transaction.
+// The caller owns a durable source receipt and postcommit notification.
+func WriteThreadedTx(ctx context.Context, tx *sql.Tx, in Item) error {
+	if in.ThreadKey == "" {
+		return upsertRow(ctx, tx, in)
+	}
+	var existing threadedRow
+	var bodyMD sql.NullString
+	err := tx.QueryRowContext(ctx, `
+		SELECT id, title, body_md, payload_json, actions_json
+		  FROM inbox_items
+		 WHERE workspace_id = ? AND thread_key = ? AND state != 'resolved'
+		 ORDER BY created_at ASC, id ASC LIMIT 1`,
+		in.WorkspaceID, in.ThreadKey).Scan(&existing.id, &existing.title, &bodyMD, &existing.payloadJSON, &existing.actionsJSON)
+	existing.bodyMD = bodyMD
+
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if err := upsertRow(ctx, tx, in); err != nil {
+			return err
+		}
+	case err != nil:
+		return err
+	default:
+		if err := mergeThreadedRowTx(ctx, tx, existing, in); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

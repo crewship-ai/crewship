@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"net/url"
 	"regexp"
 	"strings"
@@ -40,7 +39,7 @@ type conversationRoutineState struct {
 
 var conversationIssueReference = regexp.MustCompile(`(?i)\b[a-z][a-z0-9]{1,15}-[0-9]+\b`)
 
-func conversationWorkSnapshot(ctx context.Context, conn *sql.Conn, workspace, latest string) (conversationWorkContext, error) {
+func conversationWorkSnapshot(ctx context.Context, conn dbConn, workspace, latest string) (conversationWorkContext, error) {
 	out := conversationWorkContext{CapturedAt: isoMillisNow(), Issues: []conversationIssueState{}, Routines: []conversationRoutineState{}}
 	// Named references take precedence over the recent sample, including an old
 	// issue which would otherwise disappear beyond the page boundary.

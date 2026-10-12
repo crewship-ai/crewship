@@ -21,9 +21,8 @@ package api
 //
 // Deliveries stay 'pending' on any failure along this path (dispatch
 // refused, a DB fault, a session-busy result racing back in) — never
-// marked 'consumed' for work nothing has done. The next run to finish on
-// this session tries again; nothing here retries on a timer, because the
-// next natural trigger (another run finishing) is always coming.
+// marked 'consumed' for work nothing has done. Owned terminal projection
+// retries a failed dispatch until its durable completion marker is written.
 
 import (
 	"context"
@@ -50,14 +49,10 @@ type pendingFollowUp struct {
 // combining their comment text into one brief, the same shape
 // mentionTaskBrief gives an ordinary single-comment mention.
 //
-// Best-effort throughout, matching every other post-completion write in
-// finishAssignment: a read or dispatch failure here must not fail (or
-// retry-loop) the completion this is a side effect of. A failure leaves
-// the deliveries 'pending' — the honest state, since nothing consumed
-// them — and logs; the NEXT run to finish on this session (this one, if a
-// human mentions the agent again, or the requeue this dispatch attempt
-// itself might have started) gets another chance.
-func (h *AssignmentHandler) dispatchQueuedFollowUpsForSession(ctx context.Context, finishedAssignmentID, workspaceID string) {
+// The domain projection retries failures before acknowledging completion.
+// Exact digest delivery claims share the new assignment/work transaction, so
+// a controller crash cannot leave accepted input without its delivery binding.
+func (h *AssignmentHandler) dispatchQueuedFollowUpsForSession(ctx context.Context, finishedAssignmentID, workspaceID string) error {
 	// DispatchMention starts execution asynchronously. A fast completion can
 	// re-enter here before its caller claims the pending deliveries, selecting
 	// the same batch again. Keep selection, dispatch and claim attachment in
@@ -73,7 +68,7 @@ func (h *AssignmentHandler) dispatchQueuedFollowUpsForSession(ctx context.Contex
 			h.logger.Warn("dispatch queued follow-ups: read finished assignment",
 				"error", err, "assignment_id", finishedAssignmentID)
 		}
-		return
+		return err
 	}
 	// No session on this run (a mission task, a root /assign predating B1,
 	// or the issue_agent_sessions flag was off at dispatch time) — nothing
@@ -83,17 +78,17 @@ func (h *AssignmentHandler) dispatchQueuedFollowUpsForSession(ctx context.Contex
 	// 'pending' on a *sessionBusyError, which only a session-bearing
 	// insert can produce), so there is nothing to find here either way.
 	if !sessionID.Valid || sessionID.String == "" || missionID == "" || agentID == "" {
-		return
+		return nil
 	}
 
 	pending, err := pendingFollowUpsFor(ctx, h.db, missionID, agentID)
 	if err != nil {
 		h.logger.Warn("dispatch queued follow-ups: query pending deliveries",
 			"error", err, "mission_id", missionID, "agent_id", agentID)
-		return
+		return err
 	}
 	if len(pending) == 0 {
-		return
+		return nil
 	}
 
 	var identifier, issueTitle, issueCrewID string
@@ -101,7 +96,7 @@ func (h *AssignmentHandler) dispatchQueuedFollowUpsForSession(ctx context.Contex
 		`SELECT COALESCE(identifier,''), COALESCE(title,''), COALESCE(crew_id,'') FROM missions WHERE id = ? AND workspace_id = ?`,
 		missionID, workspaceID).Scan(&identifier, &issueTitle, &issueCrewID); err != nil {
 		h.logger.Warn("dispatch queued follow-ups: read issue", "error", err, "mission_id", missionID)
-		return
+		return err
 	}
 
 	// No separate "does this agent exist" read here: DispatchMention
@@ -141,6 +136,7 @@ func (h *AssignmentHandler) dispatchQueuedFollowUpsForSession(ctx context.Contex
 		AuthorType:    "user",
 		AuthorName:    "Crewship (queued follow-ups)",
 		TargetAgentID: agentID,
+		DeliveryIDs:   includedIDs,
 	})
 	if dispatchErr != nil {
 		// Includes another *sessionBusyError (a fresh mention raced in and
@@ -149,15 +145,10 @@ func (h *AssignmentHandler) dispatchQueuedFollowUpsForSession(ctx context.Contex
 		// will trigger this same function again when IT finishes.
 		h.logger.Info("dispatch queued follow-ups: not dispatched, deliveries stay pending",
 			"error", dispatchErr, "mission_id", missionID, "agent_id", agentID, "count", len(pending))
-		return
+		return dispatchErr
 	}
 
-	n, err := claimPendingDeliveriesByID(ctx, h.db, includedIDs, runID)
-	if err != nil {
-		h.logger.Warn("dispatch queued follow-ups: claim under new run",
-			"error", err, "run_id", runID, "mission_id", missionID, "agent_id", agentID)
-		return
-	}
+	n := int64(len(includedIDs)) // domain, work input and delivery claims committed together
 	h.logger.Info("queued follow-ups dispatched as one run",
 		"run_id", runID, "mission_id", missionID, "agent_id", agentID, "claimed", n, "found", len(pending), "included", len(includedIDs))
 	if len(includedIDs) < len(pending) {
@@ -169,37 +160,7 @@ func (h *AssignmentHandler) dispatchQueuedFollowUpsForSession(ctx context.Contex
 			"mission_id", missionID, "agent_id", agentID, "included", len(includedIDs), "found", len(pending))
 	}
 
-	// Catch-up for a real race, not a theoretical one: DispatchMention
-	// spawns runID's exec in a background goroutine and returns before it
-	// runs, so a run that fails (or finishes) fast enough — no resolver
-	// wired, an immediate refusal — can reach finishAssignment's own
-	// consumeDeliveriesForRun call BEFORE the claim above has landed. That
-	// call finds nothing (these deliveries were still 'pending' at that
-	// moment) and consumeDeliveriesForRun is never invoked for runID
-	// again, so a delivery claimed here a moment later would stay
-	// 'claimed' forever — nothing left to trigger its own consumption.
-	// Detected by re-checking runID's status: if it is already terminal,
-	// this claim landed after finishAssignment's own attempt, so run the
-	// same consumeDeliveriesForRun ourselves. Safe to call unconditionally
-	// on a terminal run: it only touches rows already 'claimed' under
-	// runID, which by construction is exactly (and only) the set this call
-	// just claimed — it cannot mark anything 'consumed' that a real run
-	// did not actually reach.
-	var status string
-	if err := h.db.QueryRowContext(ctx, `SELECT status FROM assignments WHERE id = ?`, runID).Scan(&status); err != nil {
-		h.logger.Warn("dispatch queued follow-ups: read new run status for catch-up", "error", err, "run_id", runID)
-		return
-	}
-	switch status {
-	case "COMPLETED", "FAILED", "CANCELLED":
-		if cn, cErr := consumeDeliveriesForRun(ctx, h.db, runID); cErr != nil {
-			h.logger.Warn("dispatch queued follow-ups: catch-up consume for already-terminal run",
-				"error", cErr, "run_id", runID)
-		} else if cn > 0 {
-			h.logger.Info("dispatch queued follow-ups: caught up a run that finished before the claim landed",
-				"run_id", runID, "consumed", cn)
-		}
-	}
+	return nil
 }
 
 // pendingFollowUpsFor reads every 'pending' mission_comment_mentions row

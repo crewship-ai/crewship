@@ -678,6 +678,9 @@ func workActorID(r *http.Request) string {
 }
 
 func (h *WorkItemsHandler) replayAvailability(r *http.Request, workspaceID string, item workItemView) (string, bool, error) {
+	if item.DomainKind == work.DomainAssignment {
+		return "Assignment replay requires a new assignment admission; replaying its terminal domain row is unsupported.", false, nil
+	}
 	if item.DomainKind == "restricted_workflow" {
 		return "Private workflow replay requires a new authorized routine or Page admission.", false, nil
 	}

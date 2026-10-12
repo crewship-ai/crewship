@@ -553,6 +553,7 @@ type cappedAssignment struct {
 	// every other optional column on this struct.
 	ContextPackCompaction string
 	ContextPackTokens     int
+	DeliveryIDs           []string // exact follow-up texts carried by this accepted input
 }
 
 // insertCappedAssignment writes the PENDING assignment row with the fan-out
@@ -597,6 +598,27 @@ func insertCappedAssignment(
 	caller dispatchCaller,
 	a cappedAssignment,
 ) (string, error) {
+	// Domain and queue acceptance have one commit, including callers that used
+	// to perform a standalone insert. Existing session transactions are reused.
+	if pooled, ok := db.(*sql.DB); ok {
+		tx, err := pooled.BeginTx(ctx, nil)
+		if err != nil {
+			return "", err
+		}
+		defer tx.Rollback()
+		id, err := insertCappedAssignment(ctx, tx, scope, lim, caller, a)
+		if err != nil {
+			return "", err
+		}
+		if err = tx.Commit(); err != nil {
+			return "", err
+		}
+		return id, nil
+	}
+	tx, ok := db.(*sql.Tx)
+	if !ok {
+		return "", fmt.Errorf("assignment acceptance requires a transaction")
+	}
 	assignmentID := generateCUID()
 	var parentVal any
 	if scope.ParentID != "" {
@@ -682,6 +704,18 @@ func insertCappedAssignment(
 				"(fan-out limit, instance setting %s). Wait for one to finish and read it with "+
 				"/results/<assignment_id>, or do the remaining work yourself.",
 			lim.MaxFanout, SettingDelegationMaxFanout)}
+	}
+	if len(a.DeliveryIDs) > 0 {
+		n, err := claimPendingDeliveriesByID(ctx, tx, a.DeliveryIDs, assignmentID)
+		if err != nil {
+			return "", err
+		}
+		if n != int64(len(a.DeliveryIDs)) {
+			return "", errors.New("follow-up deliveries changed during admission")
+		}
+	}
+	if _, err := acceptAssignmentTx(ctx, tx, assignmentID); err != nil {
+		return "", err
 	}
 	return assignmentID, nil
 }

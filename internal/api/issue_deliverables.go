@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -14,22 +16,28 @@ import (
 // Publish only explicitly declared shared deliverables. OpenRoot confines all
 // reads, including symlinks, to this issue's crew; arbitrary host paths are never
 // read. Existing attachment validation, size limits and digest dedupe still apply.
-func (h *AssignmentHandler) publishIssueDeliverables(ctx context.Context, assignmentID, result string) {
+func (h *AssignmentHandler) publishIssueDeliverables(ctx context.Context, assignmentID, result string) error {
 	if h.attachments == nil || h.attachments.storagePath == "" {
-		return
+		return nil
 	}
 	handoff := orchestrator.ParseHandoff(result)
 	if !handoff.Parsed || handoff.Artifacts == "" {
-		return
+		return nil
 	}
 	var mission, workspace, crew, agent string
 	err := h.db.QueryRowContext(ctx, `SELECT m.id,m.workspace_id,m.crew_id,a.assigned_to_id FROM assignments a JOIN missions m ON m.id=a.mission_id WHERE a.id=? AND a.workspace_id=m.workspace_id`, assignmentID).Scan(&mission, &workspace, &crew, &agent)
-	if err != nil || !safeIDPattern.MatchString(crew) {
-		return
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !safeIDPattern.MatchString(crew) {
+		return nil
 	}
 	root, err := os.OpenRoot(filepath.Join(h.attachments.storagePath, "crews", crew, "shared"))
 	if err != nil {
-		return
+		return err
 	}
 	defer root.Close()
 	for i, raw := range strings.FieldsFunc(handoff.Artifacts, func(r rune) bool { return r == ',' || r == '\n' || r == ';' }) {
@@ -48,26 +56,33 @@ func (h *AssignmentHandler) publishIssueDeliverables(ctx context.Context, assign
 		}
 		file, err := root.Open(relative)
 		if err != nil {
-			continue
+			return err
 		}
 		info, err := file.Stat()
-		if err != nil || !info.Mode().IsRegular() || info.Size() > agentAttachmentUploadBytes {
+		if err != nil {
+			file.Close()
+			return err
+		}
+		if !info.Mode().IsRegular() || info.Size() > agentAttachmentUploadBytes {
 			file.Close()
 			continue
 		}
 		data, err := io.ReadAll(io.LimitReader(file, agentAttachmentUploadBytes+1))
 		file.Close()
-		if err != nil || len(data) > agentAttachmentUploadBytes {
+		if err != nil {
+			return err
+		}
+		if len(data) > agentAttachmentUploadBytes {
 			continue
 		}
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/", nil)
 		att, created, err := h.attachments.attachBytes(req, workspace, mission, filepath.Base(relative), data, "", agent)
 		if err != nil {
-			h.logger.Warn("could not publish issue deliverable", "assignment_id", assignmentID, "error", err)
-			continue
+			return err
 		}
 		if created {
 			h.attachments.recordAttachmentEvent(req, mission, workspace, "agent", agent, actionAttachmentAdded, att)
 		}
 	}
+	return nil
 }

@@ -1270,6 +1270,10 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("%w: exec %s still running after %s", ErrDetachedStillRunning, result.ExecID, o.detachedWaitBudget)
 	}
 
+	if req.OnExecTerminal != nil {
+		req.OnExecTerminal(exitCode)
+	}
+
 	o.emitExecEnd(ctx, req, result.ExecID, journalCmd, endSeverity,
 		fmt.Sprintf("%s: exit %d (%dms)", req.AgentSlug, exitCode, time.Since(execStart).Milliseconds()),
 		execStart, endPayload)

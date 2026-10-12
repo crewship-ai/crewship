@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 // assignmentMatch is the same heuristic Stop has always used to find the
@@ -55,6 +56,26 @@ type txQueryExecer interface {
 // lockout.go, issue_create_core.go) so the exact rows this stamp reached are
 // known without a second, TOCTOU-prone SELECT.
 func stampCancelRequested(ctx context.Context, q txQueryExecer, now, missionID string) ([]cancelTarget, error) {
+	if db, ok := q.(*sql.DB); ok {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		targets, err := stampCancelRequested(ctx, tx, now, missionID)
+		if err != nil {
+			return nil, err
+		}
+		if err = tx.Commit(); err != nil {
+			return nil, err
+		}
+		return targets, nil
+	}
+	tx, ok := q.(*sql.Tx)
+	if !ok {
+		return nil, errors.New("assignment cancellation requires a transaction")
+	}
+
 	rows, err := q.QueryContext(ctx, `
 		UPDATE assignments SET cancel_requested_at = ?, cancel_reason = 'issue stopped'
 		 WHERE `+assignmentMatch+`
@@ -72,7 +93,29 @@ func stampCancelRequested(ctx context.Context, q txQueryExecer, now, missionID s
 		}
 		out = append(out, t)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	// Close RETURNING before issuing another statement on this transaction.
+	// Durable work cancellation serializes against MarkRuntimeRequested.
+	store := work.NewStore(nil)
+	for _, target := range out {
+		var workID string
+		err := tx.QueryRowContext(ctx, `SELECT w.id FROM work_items w JOIN assignments a ON a.id=w.domain_id AND a.workspace_id=w.workspace_id WHERE a.id=? AND w.source='assignment' AND w.domain_kind='assignment' AND w.replay_of IS NULL`, target.ID).Scan(&workID)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if _, err = store.RequestCancelTx(ctx, tx, workID, "assignment", "issue stopped"); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // Result vocabulary for assignments.hard_stop_result — must match the CHECK
@@ -142,6 +185,17 @@ const hardStopExecAppearTimeout = 2 * time.Second
 func (h *IssueHandler) hardStopTargets(ctx context.Context, wsID, ident string, targets []cancelTarget) {
 	var wg sync.WaitGroup
 	for _, t := range targets {
+		workID, ownershipErr := assignmentWorkID(ctx, h.db, t.ID)
+		if ownershipErr != nil {
+			h.logger.Error("resolve hard stop ownership", "error", ownershipErr)
+			continue
+		}
+		if workID != "" {
+			if _, err := work.NewStore(h.db).RequestCancel(ctx, workID, "assignment", "issue stopped"); err != nil {
+				h.logger.Error("request owned assignment stop", "error", err)
+			}
+			continue
+		}
 		// A row that never reached RUNNING has no exec to signal, ever —
 		// Tier 1 alone already keeps it from starting one. A RUNNING row
 		// WITHOUT an exec_id yet is different: it may simply not have

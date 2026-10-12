@@ -10,6 +10,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/untrusted"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 // ResolveReadyTasks returns tasks that have all dependencies completed
@@ -493,26 +494,6 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 		)
 	}
 
-	// Transition task to IN_PROGRESS (idempotency: only if still PENDING)
-	res, err := e.db.ExecContext(ctx,
-		`UPDATE mission_tasks SET status = 'IN_PROGRESS', started_at = ?, updated_at = ? WHERE id = ? AND status = 'PENDING'`,
-		now, now, task.ID)
-	if err != nil {
-		return fmt.Errorf("update task status: %w", err)
-	}
-	affected, _ := res.RowsAffected()
-	if affected == 0 {
-		return nil // already claimed by another tick — skip silently
-	}
-
-	e.broadcastTaskStatus(ms, task.ID, "IN_PROGRESS")
-	e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
-		Type:      "task_started",
-		TaskID:    task.ID,
-		AgentSlug: agentSlug,
-		Title:     task.Title,
-	})
-
 	// Build rich mission brief with full context for the agent
 	taskBrief := e.buildMissionBrief(ctx, ms, task, allTasks)
 
@@ -533,7 +514,7 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 	// TestMissionAssignmentRowsCarryDepthZero — do not stamp a depth here
 	// without changing that file too.
 	//
-	// The row and the link that makes it findable are ONE transaction. Split,
+	// The task claim, assignment, work owner and link are ONE transaction. Split,
 	// a failure (or a crash) between them left an assignment nothing pointed
 	// at while the task sat IN_PROGRESS — and resolveReadyFromTasks only
 	// re-picks PENDING/BLOCKED, so that task was stranded forever with no
@@ -558,7 +539,22 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 		}
 		return s
 	}
+	accepted := false
 	if err := database.WithTx(ctx, e.db, func(tx *sql.Tx) error {
+		// Take the task and current mission authority under the same write
+		// lock as acceptance. Stop/handoff either runs first and prevents this
+		// claim, or runs after commit and cancels its persisted work owner.
+		res, err := tx.ExecContext(ctx, `UPDATE mission_tasks SET status='IN_PROGRESS',started_at=?,updated_at=? WHERE id=? AND mission_id=? AND status='PENDING' AND COALESCE(assignment_id,'')='' AND assigned_agent_id=? AND EXISTS(SELECT 1 FROM missions m WHERE m.id=mission_tasks.mission_id AND m.workspace_id=? AND m.status='IN_PROGRESS')`, now, now, task.ID, ms.ID, *task.AssignedAgentID, ms.WorkspaceID)
+		if err != nil {
+			return fmt.Errorf("claim mission task: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return nil
+		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, created_at, mission_id, author_agent_id, created_by_user_id)
 			VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?, ?, ?, ?)`,
@@ -570,17 +566,32 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 		); err != nil {
 			return fmt.Errorf("create assignment: %w", err)
 		}
+		if _, err := work.AcceptAssignmentTx(ctx, tx, assignmentID); err != nil {
+			return err
+		}
 		// Link assignment to the mission task.
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE mission_tasks SET assignment_id = ?, updated_at = ? WHERE id = ?`,
 			assignmentID, now, task.ID); err != nil {
 			return fmt.Errorf("link assignment to task: %w", err)
 		}
+		accepted = true
 		return nil
 	}); err != nil {
 		e.logger.Error("create assignment", "task_id", task.ID, "error", err)
 		return err
 	}
+	if !accepted {
+		return nil
+	}
+
+	e.broadcastTaskStatus(ms, task.ID, "IN_PROGRESS")
+	e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
+		Type:      "task_started",
+		TaskID:    task.ID,
+		AgentSlug: agentSlug,
+		Title:     task.Title,
+	})
 
 	// Dispatch the assignment to the correct crew's container.
 	// Audit #481 follow-up: WithoutCancel preserves the scheduler's
@@ -609,28 +620,10 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 				CreatedByUserID: ms.CreatedByUserID,
 			})
 			if dispatchErr != nil {
-				// The door said "wait for an operator". The admission check
-				// above already refuses a hold it can see, but the read and
-				// this write are not one statement, so an agent staged in
-				// between arrives here — with the row and the IN_PROGRESS
-				// flip already done. Unwind both: the task goes back to the
-				// state the next tick expects, and the row does not linger
-				// PENDING in the ledger forever.
-				if isDeferredDispatch(dispatchErr) {
-					e.logger.Info("mission dispatch deferred — target agent is held for an operator's approval",
-						"assignment_id", assignmentID, "task_id", task.ID, "reason", dispatchErr.Error())
-					e.unwindDeferredTaskDispatch(dispatchCtx, ms, task.ID, assignmentID, dispatchErr.Error())
-					return
-				}
-				e.logger.Error("dispatch assignment failed",
-					"assignment_id", assignmentID,
-					"error", dispatchErr,
-				)
-				// Audit #481 follow-up: was context.Background() with
-				// a comment about parent-ctx cancellation. dispatchCtx
-				// (WithoutCancel above) keeps trace + auth values;
-				// cancellation is shed regardless.
-				e.updateTaskStatus(dispatchCtx, ms, task.ID, "FAILED", dispatchErr.Error())
+				// Acceptance already committed both domain and work owner. This
+				// call is a wake-up hint; its failure cannot undo that owner or
+				// make the task terminal. Shared polling and authorization retry.
+				e.logger.Warn("accepted mission work wake failed", "assignment_id", assignmentID, "task_id", task.ID, "error", dispatchErr)
 			}
 		}()
 	}
@@ -644,52 +637,6 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 	)
 
 	return nil
-}
-
-// unwindDeferredTaskDispatch puts a task back the way scheduleTask found it
-// after the dispatch door deferred (agent_hold.go).
-//
-// Both halves are load-bearing:
-//
-//   - the assignment row is CANCELLED, not left PENDING. A PENDING row that
-//     nothing will ever run is a permanent entry in the chat's ledger and, on
-//     the /assign side, was the row that quietly consumed a slot of the
-//     fan-out budget forever.
-//   - the task goes back to PENDING with its started_at and assignment_id
-//     cleared, which is exactly the shape resolveReadyFromTasks re-selects.
-//     Leaving it IN_PROGRESS would park the mission until the two-hour
-//     timeout with nothing running.
-//
-// Both writes are conditional on the state this function believes it is
-// unwinding, so a run that started concurrently (or a completion that raced
-// in) is never clobbered.
-func (e *MissionEngine) unwindDeferredTaskDispatch(ctx context.Context, ms *missionState, taskID, assignmentID, reason string) {
-	now := time.Now().UTC().Format(time.RFC3339)
-	e.cancelDeferredAssignment(ctx, assignmentID, reason)
-	res, err := e.db.ExecContext(ctx, `
-		UPDATE mission_tasks
-		   SET status = 'PENDING', started_at = NULL, assignment_id = NULL, updated_at = ?
-		 WHERE id = ? AND status = 'IN_PROGRESS'`, now, taskID)
-	if err != nil {
-		e.logger.Error("unwind deferred task", "task_id", taskID, "error", err)
-		return
-	}
-	if n, _ := res.RowsAffected(); n == 1 {
-		e.broadcastTaskStatus(ms, taskID, "PENDING")
-	}
-}
-
-// cancelDeferredAssignment retires the PENDING row a deferred dispatch left
-// behind. Conditional on PENDING so a row a concurrent claim already moved to
-// RUNNING is never cancelled out from under a live run.
-func (e *MissionEngine) cancelDeferredAssignment(ctx context.Context, assignmentID, reason string) {
-	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := e.db.ExecContext(ctx, `
-		UPDATE assignments
-		   SET status = 'CANCELLED', finished_at = ?, error_message = ?
-		 WHERE id = ? AND status = 'PENDING'`, now, reason, assignmentID); err != nil {
-		e.logger.Error("cancel deferred assignment", "assignment_id", assignmentID, "error", err)
-	}
 }
 
 // areCrewsConnected checks if two crews have an active connection.

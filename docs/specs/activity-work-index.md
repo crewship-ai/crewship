@@ -51,3 +51,38 @@ A chat turn that dispatches nothing has a run id but no stored "piece of work" a
 
 - New node and row kind `assignment` as a chain origin.
 - An edge from chat → assignment would need `assignments.chat_id`, which is typed only as "the dispatching chat or the mission id". It stays context ("from chat"), not a causal edge, until a typed column exists.
+
+## Assignment execution ownership
+
+Assignment producers commit their domain row and `work.AcceptAssignmentTx` in
+one transaction, including mission task and lead-planning producers. Accepted
+assignment work uses `{source: assignment, domain_kind: assignment}` and pins
+workspace, target, crew, assigning agent, creator, task and the actual assignment
+session. A parent chat does not become a shared session lock for delegated peers.
+`Router.StartAgentWorkDispatcher` routes this pair through `AssignmentRuntime`;
+legacy assignment pumps cannot execute linked rows.
+
+The dispatcher mints the CLI run ID and generation before launch. The final
+creation gate rechecks immutable authority and durable cancellation. The same
+attempt grants run-bound memory access while current and live; assignment
+acceptance alone does not grant a mutation capability. Execution limits include
+legacy running assignments during cutover and apply to agent, session, crew,
+server and background capacity in the claim transaction.
+
+An observed result is not terminal authority. Assignment projection requires the
+latest ended attempt and confirmed terminal work, persists the domain result,
+checkpoint and consumed deliveries atomically, and acknowledges a separate
+projection outbox only after journal receipts, required inbox/deliverable writes,
+follow-up admission and mission completion succeed. Threaded NEEDS_HUMAN inbox
+updates commit a source receipt in the same transaction, preserving operator
+read/resolution state on replay; external notification remains best-effort.
+Follow-up delivery claims commit atomically with the accepted digest assignment
+and work input. Lead planning reuses a mission-persisted assignment identity
+after restart instead of admitting a duplicate planner. Its reservation requires
+current `IN_PROGRESS` in the same transaction, serialized with stop and human
+handoff; terminal planners are not automatically replayed.
+Mission task effects and loop iteration changes share a transaction and an
+assignment receipt. Protected retained output can reconstruct the text and CLI
+metadata after observer loss. Unknown execution continues to hold admission.
+See [the upgrade runbook](../runbooks/assignment-work-upgrade.md) for the
+conservative migration boundary and refused ambiguous legacy records.

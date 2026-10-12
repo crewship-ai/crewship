@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/dispatch"
 	"net/http"
 	"os"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/work"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -357,6 +359,11 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			CreatedByUserID: body.CreatedByUserID,
 		})
 	if err != nil {
+		if work.IsIngressFull(err) {
+			w.Header().Set("Retry-After", "5")
+			replyError(w, http.StatusTooManyRequests, err.Error())
+			return
+		}
 		var refusal *delegationRefusal
 		if errors.As(err, &refusal) {
 			h.logger.Info("assignment refused by delegation fan-out cap at insert",
@@ -535,6 +542,21 @@ func (h *AssignmentHandler) runAssignment(
 	body createAssignmentBody,
 	target targetAgentInfo,
 ) {
+	// New assignments are executed exclusively by the durable dispatcher.
+	// The compatibility body remains available only for unlinked legacy runs.
+	if ownedAssignmentExecution(ctx) == nil {
+		workID, err := assignmentWorkID(ctx, h.db, assignmentID)
+		if err != nil {
+			h.logger.Error("assignment work ownership unavailable", "error", err)
+			return
+		}
+		if workID != "" {
+			if h.workHint != nil {
+				h.workHint(workID)
+			}
+			return
+		}
+	}
 	// Channel work can wait in the general assignment queue. Revalidate its
 	// permission at the execution door as every queue pump can reach us.
 	if allowed, err := h.authorizeConversationAssignment(ctx, assignmentID); err != nil {
@@ -606,12 +628,23 @@ func (h *AssignmentHandler) runAssignment(
 	lockReleased := false
 	releaseLock := func() {
 		if h.agentRunLock != nil && !lockReleased {
+			if execution := ownedAssignmentExecution(ctx); execution != nil {
+				execution.launch.mu.Lock()
+				requested := execution.launch.requested
+				execution.launch.mu.Unlock()
+				if requested && execution.exitCode == nil {
+					execution.release = func() { h.agentRunLock.End(target.ID) }
+					return
+				}
+			}
 			lockReleased = true
 			h.agentRunLock.End(target.ID)
 		}
 	}
 	if h.agentRunLock != nil {
-		if !h.agentRunLock.TryStart(target.ID) {
+		if ownedAssignmentExecution(ctx) != nil && !h.agentRunLock.Acquire(ctx, target.ID) {
+			return
+		} else if ownedAssignmentExecution(ctx) == nil && !h.agentRunLock.TryStart(target.ID) {
 			reason := fmt.Sprintf(
 				"agent %s already has a live run in progress; queuing this dispatch behind it "+
 					"instead of starting a second concurrent exec into the same agent "+
@@ -708,6 +741,9 @@ func (h *AssignmentHandler) runAssignment(
 	// truth for "run started" post Phase J. trace_id == runID groups
 	// every entry the assignment will produce.
 	runID := generateCUID()
+	if execution := ownedAssignmentExecution(ctx); execution != nil {
+		runID = execution.assignment.RunID
+	}
 	// body.MissionID is set only for mission (issue) dispatches — the mission
 	// engine threads ms.ID through DispatchRequest.MissionID. For a lead's
 	// `curl localhost:9119/assign` chat run it is empty. Setting it on the
@@ -732,7 +768,7 @@ func (h *AssignmentHandler) runAssignment(
 	if body.AuthorAgentID != "" {
 		runStartedPayload["author_agent_id"] = body.AuthorAgentID
 	}
-	if _, err := h.journal.Emit(ctx, journal.Entry{
+	if _, err := h.emitAssignmentRunStarted(ctx, journal.Entry{
 		WorkspaceID: body.WorkspaceID,
 		CrewID:      body.CrewID, // target was resolved within this crew
 		AgentID:     target.ID,
@@ -746,6 +782,12 @@ func (h *AssignmentHandler) runAssignment(
 		TraceID:     runID,
 	}); err != nil {
 		h.logger.Error("create run record for assignment", "error", err, "assignment_id", assignmentID)
+		if execution := ownedAssignmentExecution(ctx); execution != nil {
+			execution.runErr = err
+			releaseLock()
+			h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", "run start journal persistence failed", nil)
+			return
+		}
 		runID = "" // prevent finishAssignment from emitting a terminal entry
 	}
 
@@ -788,11 +830,15 @@ func (h *AssignmentHandler) runAssignment(
 	// legacy process-start heuristic; see stampInitialLease's own doc
 	// comment for why the fuller fix (status-aware cleanup before the exec
 	// spends anything) is out of this PR's scope.
-	stamped, stampErr := stampInitialLease(ctx, h.db, assignmentID, time.Now(), defaultLeaseTTL)
+	var stamped bool
+	var stampErr error
+	if ownedAssignmentExecution(ctx) == nil {
+		stamped, stampErr = stampInitialLease(ctx, h.db, assignmentID, time.Now(), defaultLeaseTTL)
+	}
 	if stampErr != nil {
 		h.logger.Warn("stamp initial lease", "error", stampErr, "assignment_id", assignmentID)
 	}
-	if stampErr == nil && stamped {
+	if stampErr == nil && stamped && ownedAssignmentExecution(ctx) == nil {
 		stopHeartbeat := h.startLeaseHeartbeat(ctx, assignmentID, defaultLeaseHeartbeatInterval, defaultLeaseTTL)
 		defer stopHeartbeat()
 	}
@@ -991,13 +1037,15 @@ func (h *AssignmentHandler) runAssignment(
 	}
 
 	agentRole := "AGENT"
-	skipSidecar := true
+	// Every assignment can be the first run in a cold crew container. The
+	// orchestrator's serialized settle operation reuses a compatible warm
+	// sidecar; skipping it instead delivered provider credentials directly to
+	// worker CLIs and left cold mentions without the network/auth boundary.
 	if body.LeadPlanning {
 		agentRole = "LEAD" // Lead planning: full LEAD privileges with sidecar
-		skipSidecar = false
 	}
 
-	req, buildErr := h.buildAssignmentRunRequest(ctx, body, target, containerID, agentRole, runID, skipSidecar)
+	req, buildErr := h.buildAssignmentRunRequest(ctx, body, target, containerID, agentRole, runID)
 	req.RuntimeUse = runtimeUse
 	if buildErr != nil {
 		// Fail closed: the single builder could not assemble the request (no
@@ -1019,9 +1067,42 @@ func (h *AssignmentHandler) runAssignment(
 	// finds a row to read. Best-effort like every other side-write in this
 	// path: a failed UPDATE degrades Tier 2 to "unsupported for this run",
 	// never blocks or fails the run itself.
+	if execution := ownedAssignmentExecution(ctx); execution != nil {
+		location := orchestrator.RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID}
+		if err := execution.launch.Launch(location); err != nil {
+			execution.runErr = err
+			h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", err.Error(), acc)
+			return
+		}
+		req.ExecGate = func(gateCtx context.Context) error {
+			decision, err := (assignmentWorkAuthorizer{h: h}).Authorize(gateCtx, execution.assignment)
+			if err != nil {
+				return err
+			}
+			if decision != dispatch.Allow() {
+				return fmt.Errorf("%w: assignment permission changed before creation", orchestrator.ErrExecRefused)
+			}
+			return requestWebhookCreation(gateCtx, h.orch, location, execution.launch)
+		}
+	}
+	req.OnExecTerminal = func(code int) {
+		if execution := ownedAssignmentExecution(ctx); execution != nil {
+			execution.exitCode = &code
+		}
+	}
 	req.OnExecStarted = func(execID string) {
 		if execID == "" {
 			return
+		}
+		if execution := ownedAssignmentExecution(ctx); execution != nil {
+			execution.launch.mu.Lock()
+			execution.launch.confirmed = true
+			execution.launch.mu.Unlock()
+			execution.once.Do(func() {
+				if execution.started != nil {
+					execution.started()
+				}
+			})
 		}
 		if _, err := h.db.ExecContext(context.Background(),
 			`UPDATE assignments SET exec_id = ?, exec_container_id = ? WHERE id = ?`,
@@ -1044,6 +1125,10 @@ func (h *AssignmentHandler) runAssignment(
 	defer guardRelease()
 
 	if err := h.orch.RunAgentForAssignment(ctx, req, handler); err != nil {
+		if execution := ownedAssignmentExecution(ctx); execution != nil {
+			execution.runErr = err
+		}
+
 		h.logger.Error("assignment execution failed", "error", err, "assignment_id", assignmentID)
 		// In-band failure: the CLI exited 0 and then reported its own turn
 		// failed, so unlike a crashed exec this run usually DID produce text —
@@ -1054,9 +1139,10 @@ func (h *AssignmentHandler) runAssignment(
 		// on errMsg first — but the delegating agent and the mission timeline can
 		// still read what the sub-agent managed to say. Matches the chat path's
 		// persistInBandFailureTurn; without it the correct FAILED status would
-		// silently discard the output.
+		// silently discard the output. Owned work retains partial text for every
+		// failed observed exec as well, matching protected replay analysis.
 		partial := ""
-		if errors.Is(err, orchestrator.ErrAgentInBandFailure) {
+		if errors.Is(err, orchestrator.ErrAgentInBandFailure) || ownedAssignmentExecution(ctx) != nil {
 			partial = joinAssignmentOutput(outputParts)
 		}
 		releaseLock()
@@ -1107,7 +1193,6 @@ func (h *AssignmentHandler) buildAssignmentRunRequest(
 	body createAssignmentBody,
 	target targetAgentInfo,
 	containerID, agentRole, runID string,
-	skipSidecar bool,
 ) (orchestrator.AgentRunRequest, error) {
 	if h.resolver == nil {
 		return orchestrator.AgentRunRequest{}, fmt.Errorf("assignment dispatch: no agent resolver wired")
@@ -1133,14 +1218,15 @@ func (h *AssignmentHandler) buildAssignmentRunRequest(
 	req.MissionID = body.MissionID
 	req.RunID = runID // E0 run identity — see the doc comment above.
 
-	// Dispatch-specific fields. AgentRole/SkipSidecar are decided by the caller
-	// (LEAD planning vs. worker), not the agent's stored role; SkipConvHistory
-	// is always true for sub-agent runs.
+	// Dispatch-specific fields. AgentRole distinguishes LEAD planning from a
+	// worker. Every assignment settles its sidecar, including a cold mention
+	// and a delegated worker; a compatible warm sidecar is reused safely.
+	// SkipConvHistory is always true for sub-agent runs.
 	req.ChatID = body.ChatID
 	req.ContainerID = containerID
 	req.UserMessage = body.Task + orchestrator.AssignmentOutcomeInstructions
 	req.AgentRole = agentRole
-	req.SkipSidecar = skipSidecar
+	req.SkipSidecar = false
 	req.SkipConvHistory = true
 	// Mission dispatches pass an explicit peer-context member list; prefer it
 	// so a LEAD sees exactly the teammates the engine intends.
@@ -1250,6 +1336,13 @@ func (h *AssignmentHandler) finishAssignment(
 	assignmentID, runID, chatID, targetSlug, workspaceID, result, errMsg string,
 	acc *orchestrator.Accumulator,
 ) bool {
+	if h.stageAssignmentResult(ctx, assignmentID, runID, result, errMsg, acc) {
+		return true
+	}
+	if workID, err := assignmentWorkID(ctx, h.db, assignmentID); err != nil || workID != "" {
+		h.logger.Warn("legacy assignment finalizer refuses owned or unreadable work", "assignment_id", assignmentID, "error", err)
+		return false
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	status := "COMPLETED"
 	if errMsg != "" {

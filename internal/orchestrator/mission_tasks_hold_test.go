@@ -27,6 +27,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // ── fixtures ────────────────────────────────────────────────────────────────
@@ -74,9 +76,8 @@ func (d *holdDispatcher) waitForDispatch(t *testing.T, n int) {
 	}
 }
 
-// settleUntil gives the dispatch goroutine (and any unwind it performs) a
-// bounded window to finish before the test reads the DB. Used only where the
-// assertion is about what that goroutine WROTE.
+// settleUntil gives asynchronous dispatch work a bounded window to finish
+// before its durable effects are inspected.
 func settleUntil(t *testing.T, cond func() bool, what string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -261,96 +262,37 @@ func TestDispatchLeadPlanning_HeldLeadWritesNoRowPerTick(t *testing.T) {
 	}
 }
 
-// ── 4. the door's deferral unwinds the row the caller already wrote ─────────
-//
-// The admission read and the INSERT are not one statement, so an agent staged
-// in between reaches DispatchAssignment, which refuses. That refusal arrives
-// at the goroutine AFTER the row exists and after the task is IN_PROGRESS. It
-// must unwind both — otherwise the task is stuck IN_PROGRESS forever and the
-// orphan PENDING row sits in the ledger.
-//
-// The deferral is constructed by a type declared HERE, implementing only
-// DispatchDeferred(), to prove the classification is structural: the real one
-// on this path is api's *agentHeldError, which this package cannot import.
-
+// A post-commit wake is not an execution owner. Either kind of hint error
+// leaves the exact accepted domain/work identity available to shared polling.
 type doorDeferral struct{}
 
 func (doorDeferral) Error() string     { return "agent x is PENDING_REVIEW" }
 func (doorDeferral) DispatchDeferred() {}
 
-func TestScheduleTask_DoorDeferralUnwindsTheRowAndLeavesTheTaskPending(t *testing.T) {
-	db := covMissionDB(t)
-	_, _, _, workerID := covSeed(t, db)
-	ms := covMission(t, db, "m-race", "IN_PROGRESS")
-	e := newLifecycleEngine(t, db)
-	// Wrapped, so a classification that only type-asserts the top-level error
-	// fails here the way errors.As would not.
-	disp := newHoldDispatcher(fmt.Errorf("dispatch: %w", doorDeferral{}))
-	e.SetDispatcher(disp)
-	holdActivate(e, ms)
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	mustExec(t, db, `INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
-		VALUES ('t-race', ?, ?, 'Raced', 'PENDING', 1, '[]', ?, ?)`, ms.ID, workerID, now, now)
-
-	task := TaskInfo{ID: "t-race", MissionID: ms.ID, AssignedAgentID: &workerID, Title: "Raced", Status: "PENDING"}
-	if err := e.scheduleTask(context.Background(), ms, task, nil); err != nil {
-		t.Fatalf("scheduleTask: %v", err)
+func TestScheduleTask_AcceptedWorkSurvivesWakeFailure(t *testing.T) {
+	for _, wakeErr := range []error{fmt.Errorf("dispatch: %w", doorDeferral{}), errors.New("wake transport unavailable")} {
+		t.Run(wakeErr.Error(), func(t *testing.T) {
+			db := covMissionDB(t)
+			_, _, _, workerID := covSeed(t, db)
+			ms := covMission(t, db, "m-wake", "IN_PROGRESS")
+			e := newLifecycleEngine(t, db)
+			disp := newHoldDispatcher(wakeErr)
+			e.SetDispatcher(disp)
+			holdActivate(e, ms)
+			now := time.Now().UTC().Format(time.RFC3339)
+			mustExec(t, db, `INSERT INTO mission_tasks(id,mission_id,assigned_agent_id,title,status,task_order,depends_on,created_at,updated_at) VALUES('t-wake',?,?,'Wake','PENDING',1,'[]',?,?)`, ms.ID, workerID, now, now)
+			task := TaskInfo{ID: "t-wake", MissionID: ms.ID, AssignedAgentID: &workerID, Title: "Wake", Status: "PENDING"}
+			if err := e.scheduleTask(context.Background(), ms, task, nil); err != nil {
+				t.Fatal(err)
+			}
+			disp.waitForDispatch(t, 1)
+			settleUntil(t, func() bool { return quiesce.Default().Runs() == 0 }, "post-commit wake completed")
+			var n int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM mission_tasks mt JOIN assignments a ON a.id=mt.assignment_id JOIN work_items w ON w.domain_id=a.id AND w.workspace_id=a.workspace_id WHERE mt.id='t-wake' AND mt.status='IN_PROGRESS' AND a.status='PENDING' AND w.source='assignment' AND w.domain_kind='assignment' AND w.state='queued' AND w.generation=0 AND w.attempts=0 AND json_extract(w.input_json,'$.task')=a.task`).Scan(&n); err != nil || n != 1 {
+				t.Fatalf("accepted identity lost after wake failure: n=%d err=%v", n, err)
+			}
+		})
 	}
-	disp.waitForDispatch(t, 1)
-	settleUntil(t, func() bool { return covTaskStatus(t, db, "t-race") != "IN_PROGRESS" },
-		"the task left IN_PROGRESS after the door deferred")
-
-	if got := covTaskStatus(t, db, "t-race"); got != "PENDING" {
-		t.Fatalf("task status after a deferral from the door = %q, want PENDING — "+
-			"a wait was recorded as a terminal failure", got)
-	}
-	// COALESCE + MAX rather than a bare scan: an unwind that DELETES the row
-	// is an acceptable outcome too, and a plain QueryRow would then fail with
-	// "sql: no rows in result set" — a message that reads like the test could
-	// not run, on a run where the code did the right thing. What must not
-	// happen is a row left PENDING, so ask exactly that.
-	var status string
-	if err := db.QueryRow(`SELECT COALESCE(MAX(status),'<deleted>') FROM assignments`).Scan(&status); err != nil {
-		t.Fatalf("read assignment: %v", err)
-	}
-	if status == "PENDING" {
-		t.Errorf("the unwound assignment is still PENDING — it will sit in the ledger forever")
-	}
-	var linked string
-	if err := db.QueryRow(`SELECT COALESCE(assignment_id,'') FROM mission_tasks WHERE id = 't-race'`).Scan(&linked); err != nil {
-		t.Fatalf("read task link: %v", err)
-	}
-	if linked != "" {
-		t.Errorf("task still points at the unwound assignment %q", linked)
-	}
-}
-
-// ── 5. an ORDINARY dispatch failure is still terminal ───────────────────────
-//
-// The deferral must be narrow. A dispatch that genuinely broke still fails the
-// task loudly — otherwise every broken dispatch becomes an invisible retry.
-
-func TestScheduleTask_OrdinaryDispatchFailureStillFailsTheTask(t *testing.T) {
-	db := covMissionDB(t)
-	_, _, _, workerID := covSeed(t, db)
-	ms := covMission(t, db, "m-boom", "IN_PROGRESS")
-	e := newLifecycleEngine(t, db)
-	disp := newHoldDispatcher(errors.New("container refused to start"))
-	e.SetDispatcher(disp)
-	holdActivate(e, ms)
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	mustExec(t, db, `INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
-		VALUES ('t-boom', ?, ?, 'Boom', 'PENDING', 1, '[]', ?, ?)`, ms.ID, workerID, now, now)
-
-	task := TaskInfo{ID: "t-boom", MissionID: ms.ID, AssignedAgentID: &workerID, Title: "Boom", Status: "PENDING"}
-	if err := e.scheduleTask(context.Background(), ms, task, nil); err != nil {
-		t.Fatalf("scheduleTask: %v", err)
-	}
-	disp.waitForDispatch(t, 1)
-	settleUntil(t, func() bool { return covTaskStatus(t, db, "t-boom") == "FAILED" },
-		"an ordinary dispatch failure marked the task FAILED")
 }
 
 // ── 6. the discriminator: mission rows carry depth 0 ────────────────────────
