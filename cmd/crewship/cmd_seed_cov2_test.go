@@ -128,8 +128,8 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	}
 	// --with-users placed the whole fixture: one signup per demo user, and
 	// the credential table printed for each.
-	if n := len(s.CallsFor("POST", "/api/v1/workspaces/"+covSeedWSID+"/members/provision")); n != len(demoUsers)+len(demoCapabilityUsers()) {
-		t.Errorf("signups = %d, want %d", n, len(demoUsers)+len(demoCapabilityUsers()))
+	if n := len(s.CallsFor("POST", "/api/v1/workspaces/"+covSeedWSID+"/members/provision")); n != len(demoUsers) {
+		t.Errorf("signups = %d, want %d", n, len(demoUsers))
 	}
 	for _, u := range demoUsers {
 		if !strings.Contains(out, u.Email) {

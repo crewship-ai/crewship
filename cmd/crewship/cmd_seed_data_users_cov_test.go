@@ -23,7 +23,7 @@ const (
 
 func fixtureRoster() []map[string]any {
 	var rows []map[string]any
-	for i, u := range append(append([]demoUser{}, demoUsers...), demoCapabilityUsers()...) {
+	for i, u := range demoUsers {
 		rows = append(rows, map[string]any{"id": fmt.Sprintf("u%d", i), "email": u.Email, "role": u.Role})
 	}
 	return rows
@@ -31,11 +31,6 @@ func fixtureRoster() []map[string]any {
 func stubSeedUserProvision(s *clitest.StubServer, path string) {
 	s.OnPost(path, clitest.JSONResponse(201, map[string]any{"user_id": "new-user", "created_user": true, "setup_url": "https://untrusted.invalid/reset-password?token=setup%2Btoken"}))
 	s.OnPost("/api/v1/auth/reset", clitest.JSONResponse(200, map[string]bool{"ok": true}))
-	for i, u := range append(append([]demoUser{}, demoUsers...), demoCapabilityUsers()...) {
-		capPath := fmt.Sprintf("%s/u%d/capabilities", strings.TrimSuffix(path, "/provision"), i)
-		s.OnPatch(capPath, clitest.JSONResponse(200, map[string]any{"capabilities": u.Capabilities}))
-		s.OnGet(capPath, clitest.JSONResponse(200, map[string]any{"capabilities": u.Capabilities}))
-	}
 }
 func TestSeedRBACUsers_RequiresWorkspace(t *testing.T) {
 	if err := seedRBACUsers(context.Background(), cli.NewClient("http://127.0.0.1:1", "tok", "")); err == nil || !strings.Contains(err.Error(), "workspace_id") {
