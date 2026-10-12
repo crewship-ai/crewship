@@ -61,7 +61,11 @@ func hostFixtureInput(t *testing.T) HostInput {
 }
 func hostFixtureInputUnchecked(t *testing.T) HostInput {
 	t.Helper()
-	return HostInput{Directory: filepath.Join(t.TempDir(), "run"), Deadline: time.Now().Add(5 * time.Second), MaxBytes: DefaultLimit, Command: HostCommand{ContainerID: "container", User: "1001:1001", Args: []string{"/fixture", "literal; $(never)"}}}
+	root := t.TempDir()
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return HostInput{Directory: filepath.Join(root, "run"), Deadline: time.Now().Add(5 * time.Second), MaxBytes: DefaultLimit, Command: HostCommand{ContainerID: "container", User: "1001:1001", Args: []string{"/fixture", "literal; $(never)"}}}
 }
 func createHostFixtureDir(t *testing.T, input HostInput) {
 	t.Helper()

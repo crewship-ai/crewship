@@ -43,6 +43,15 @@ func init() {
 
 type runAgentHostExecutor struct{ delay bool }
 
+func runAgentHostOutputRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 func (e runAgentHostExecutor) Start(context.Context, runoutput.HostCommand) (*runoutput.HostExecution, error) {
 
 	stdout := `{"type":"result","subtype":"success","is_error":false,"result":"complete","usage":{"input_tokens":5,"output_tokens":2}}` + "\n"
@@ -89,7 +98,7 @@ func TestHostRunAgentCompletesThroughDetachedHelperAndPreservesLiteralLaunch(t *
 	p := &runAgentHostProvider{covContainer: covNewRunContainer(covRunOpts{})}
 	o := New(p, state, covQuietLogger())
 	o.ipcToken = "fixture-key"
-	o.SetHostOutputRoot(t.TempDir())
+	o.SetHostOutputRoot(runAgentHostOutputRoot(t))
 	req := covRunReq()
 	req.UserMessage = "literal $(never); ' quoted"
 	req.RunID = "host-runagent-fixture"
@@ -156,7 +165,7 @@ func TestHostRunAgentObserverCancellationRetainsHomeThenRecoversResult(t *testin
 	p := &runAgentHostProvider{covContainer: covNewRunContainer(covRunOpts{}), delay: true}
 	o := New(p, state, covQuietLogger())
 	o.ipcToken = "fixture-key"
-	o.SetHostOutputRoot(t.TempDir())
+	o.SetHostOutputRoot(runAgentHostOutputRoot(t))
 	o.detachedPollInterval = time.Millisecond
 	req := covRunReq()
 	req.RunID = "host-runagent-detach"
