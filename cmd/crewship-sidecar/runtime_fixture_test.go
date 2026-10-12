@@ -170,7 +170,15 @@ func TestMain(m *testing.M) {
 }
 
 func fixtureProductionHelper(args []string) bool {
-	return len(args) >= 2 && (args[1] == "--host-capture-probe-v1" || args[1] == "run-stop-process")
+	if len(args) < 2 {
+		return false
+	}
+	switch args[1] {
+	case "--host-capture-probe-v1", "run-stop-process", "run-launch", "run-execute", "run-capture", "run-read", "run-result", "--managed-launch":
+		return true
+	default:
+		return false
+	}
 }
 
 func TestFixtureProductionHelperDispatch(t *testing.T) {
@@ -180,9 +188,16 @@ func TestFixtureProductionHelperDispatch(t *testing.T) {
 	}{
 		{[]string{"sidecar", "--host-capture-probe-v1"}, true},
 		{[]string{"sidecar", "run-stop-process", "--input-fd", "0"}, true},
+		{[]string{"sidecar", "run-launch", "--dir", "/owned/run"}, true},
+		{[]string{"sidecar", "run-execute", "--dir", "/owned/run"}, true},
+		{[]string{"sidecar", "run-capture", "--dir", "/owned/run"}, true},
+		{[]string{"sidecar", "run-read", "--dir", "/owned/run"}, true},
+		{[]string{"sidecar", "run-result", "--dir", "/owned/run"}, true},
+		{[]string{"sidecar", "--managed-launch", "/owned/descriptor", "claude"}, true},
 		{[]string{"sidecar"}, false},
 		{[]string{"sidecar", "--runtime-fixture-child", "run-stop-process"}, false},
 		{[]string{"sidecar", "--host-capture-probe-v1=other"}, false},
+		{[]string{"sidecar", "run-launch-other"}, false},
 		{[]string{"sidecar", "--version"}, false},
 	} {
 		if got := fixtureProductionHelper(tc.args); got != tc.want {
