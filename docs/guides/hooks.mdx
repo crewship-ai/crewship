@@ -8,6 +8,10 @@ tag: Experimental
 
 # Lifecycle Hooks
 
+<Warning>
+  **Paused — work in progress.** Lifecycle hooks are switched off: hooks do not fire, every `/api/v1/hooks` endpoint answers `503` with the reason, `crewship hooks` is hidden, and Settings no longer links to the page. Hooks registered earlier are kept in `hooks_config` and do not run. The feature returns once hooks can reach tools like Slack or Teams directly. For development, `CREWSHIP_HOOKS_ENABLED=1` on the server process turns them back on. The rest of this page describes the feature as built.
+</Warning>
+
 Hooks let workspace admins run arbitrary logic when platform events fire -- pre/post task delegation, agent start/stop, tool calls, LLM calls, memory writes, peer conversations, approvals, budget overruns, guardrail trips. They are the orchestration-layer equivalent of Claude Code's shell hooks but generalised across three handler kinds: **shell**, **http**, and **subagent**.
 
 ## Events

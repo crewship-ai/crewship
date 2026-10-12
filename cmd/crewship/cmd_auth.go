@@ -104,7 +104,7 @@ again afterwards (crewship login).`,
 			return err
 		}
 		var result struct {
-			CLITokensRevoked int `json:"cli_tokens_revoked"`
+			CLITokensRevoked int `json:"cli_tokens_revoked" yaml:"cli_tokens_revoked"`
 		}
 		_ = json.NewDecoder(resp.Body).Decode(&result)
 		resp.Body.Close()

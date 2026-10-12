@@ -307,7 +307,7 @@ describe("SettingsNav — nested pages", () => {
   it("lists the workspace sections in order, Members right after Crew links", () => {
     renderNav("OWNER")
     const labels = Array.from(document.querySelectorAll("nav [role=button]")).map((el) => el.getAttribute("aria-label"))
-    expect(labels.slice(labels.indexOf("General"))).toEqual(["General", "Crew links", "Members", "Access & Secrets", "Lifecycle hooks", "Audit Log"])
+    expect(labels.slice(labels.indexOf("General"))).toEqual(["General", "Crew links", "Members", "Access & Secrets", "Audit Log"])
   })
 
   it("opens Members as its own page, with the chevron a nested page carries", () => {

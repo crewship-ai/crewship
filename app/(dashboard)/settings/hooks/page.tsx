@@ -1,15 +1,7 @@
-"use client"
+import { HooksPaused } from "@/components/features/settings/hooks/hooks-paused"
 
-import { Suspense } from "react"
-
-import { HooksPage } from "@/components/features/settings/hooks/hooks-page"
-
-// HooksPage reads ?hook= through useSearchParams, which a static export only
-// renders inside a Suspense boundary.
+// Lifecycle hooks are paused (internal/hooks/paused.go). The page for them,
+// HooksPage, is kept as work in progress; this route says why it is off.
 export default function SettingsHooksPage() {
-  return (
-    <Suspense>
-      <HooksPage />
-    </Suspense>
-  )
+  return <HooksPaused />
 }
