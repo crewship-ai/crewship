@@ -14,22 +14,23 @@ func boardSchemaCatalog() map[string]DomainSchema {
 	element := map[string]any{"type": "object", "additionalProperties": true, "description": "Validated Excalidraw 0.18.1 drawing element. Images reference Board-owned immutable files; URLs, arbitrary embeddables and customData are forbidden; see the versioned Board profile."}
 	geometry := map[string]any{"x": number, "y": number, "width": number, "height": number}
 	placement := obj(mergeProps(geometry, map[string]any{
-		"id": str, "placement_rev": integer, "source": obj(map[string]any{"page_slug": str, "revision": integer, "title": str}, "page_slug", "revision", "title"),
-	}), "id", "x", "y", "width", "height")
+		"id": str, "placement_rev": integer, "mode": map[string]any{"type": "string", "enum": []string{"fixed", "follow_latest"}}, "source": obj(map[string]any{"page_slug": str, "revision": integer, "pinned_revision": integer, "title": str}, "page_slug", "revision", "pinned_revision", "title"),
+	}), "id", "x", "y", "width", "height", "mode", "placement_rev")
 	placement["description"] = "Source is omitted unless the viewer can read both the Board and the artifact. Geometry remains as an unavailable placeholder."
 	snapshot := obj(map[string]any{
 		"format": map[string]any{"type": "string", "enum": []string{"crewship-board-excalidraw-0.18.1-v1"}},
-		"seq":    integer, "can_write": boolean, "placements": array(placement),
+		"seq": integer, "can_write": boolean, "write_scope": map[string]any{"type": "string", "enum": []string{"all-elements", "own-elements"}}, "placements": array(placement),
 		"placement_tombstones": array(obj(map[string]any{"id": str, "placement_rev": integer, "deleted": boolean}, "id", "placement_rev", "deleted")),
-		"records":              array(obj(map[string]any{"element_id": str, "element_rev": integer, "deleted": boolean, "author_user_id": str, "author_agent_id": str, "author_run_id": str, "element": map[string]any{"oneOf": []any{element, map[string]any{"type": "null"}}}}, "element_id", "element_rev", "deleted", "element")),
+		"records":              array(obj(map[string]any{"element_id": str, "element_rev": integer, "deleted": boolean, "author_user_id": str, "author_agent_id": str, "author_run_id": str, "element": mergeProps(element, map[string]any{"nullable": true})}, "element_id", "element_rev", "deleted", "element")),
 	}, "format", "seq", "can_write", "placements", "records")
-	receipt := obj(map[string]any{"seq": integer, "result_seq": integer, "placement_id": str, "placement_revs": map[string]any{"type": "object", "additionalProperties": integer}}, "seq", "result_seq")
+	receipt := obj(map[string]any{"seq": integer, "result_seq": integer, "placement_id": str, "placement_revs": map[string]any{"type": "object", "additionalProperties": integer}, "element_revs": map[string]any{"type": "object", "additionalProperties": integer}, "undo_expires_at": str}, "seq", "result_seq")
 	mutation := map[string]any{"mutation_id": str, "base_seq": integer}
 	batch := obj(mergeProps(mutation, map[string]any{
 		"upserts":               array(obj(map[string]any{"element": element, "expected_rev": integer}, "element", "expected_rev")),
 		"deletes":               array(obj(map[string]any{"id": str, "expected_rev": integer}, "id", "expected_rev")),
 		"placement_updates":     array(obj(mergeProps(geometry, map[string]any{"id": str, "expected_rev": integer}), "id", "x", "y", "width", "height")),
 		"placement_deletes":     array(obj(map[string]any{"id": str, "expected_rev": integer}, "id")),
+		"placement_modes":       array(obj(map[string]any{"id": str, "expected_rev": integer, "mode": map[string]any{"type": "string", "enum": []string{"fixed", "follow_latest"}}, "source_revision": map[string]any{"type": "integer", "minimum": 1}}, "id", "expected_rev", "mode", "source_revision")),
 		"element_permission_id": str,
 		"placement_restores":    array(obj(map[string]any{"id": str, "expected_rev": integer}, "id", "expected_rev")),
 	}), "mutation_id", "base_seq")

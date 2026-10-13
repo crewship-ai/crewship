@@ -231,3 +231,43 @@ describe("InviteMemberDialog — existing account", () => {
     expect(screen.queryByRole("button", { name: /copy/i })).toBeNull()
   })
 })
+
+// What the person may do is chosen with the role: a preset is the full set,
+// sent as one `{"set"}` PATCH once the account exists. "Role default" sends
+// nothing, and a preset that could not be applied is said next to the link —
+// the person is added either way.
+describe("InviteMemberDialog — what they can do", () => {
+  beforeEach(() => { cleanup(); apiFetch.mockReset() })
+
+  async function addWith(access: string, patchStatus = 200) {
+    apiFetch.mockImplementation(async (_url: string, init?: RequestInit) =>
+      init?.method === "PATCH"
+        ? jsonResponse({}, patchStatus)
+        : jsonResponse({ setup_url: SETUP_URL, created_user: true, email: "new@example.com", user_id: "u-new" }, 201))
+    render(<InviteMemberDialog workspaceId="ws1" onInvited={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /add member/i }))
+    fireEvent.change(await screen.findByLabelText(/email/i), { target: { value: "new@example.com" } })
+    fireEvent.click(screen.getByRole("radio", { name: "Manager" }))
+    fireEvent.click(screen.getByRole("radio", { name: access }))
+    fireEvent.click(screen.getByRole("button", { name: /^add member$/i }))
+    await screen.findByDisplayValue(SETUP_URL)
+  }
+
+  it("provisions with the picked role, then sets the preset", async () => {
+    await addWith("Power user")
+    expect(JSON.parse(String(apiFetch.mock.calls[0][1].body)).role).toBe("MANAGER")
+    expect(apiFetch.mock.calls[1][0]).toBe("/api/v1/workspaces/ws1/members/u-new/capabilities?workspace_id=ws1")
+    expect(JSON.parse(String(apiFetch.mock.calls[1][1].body))).toEqual({ set: ["chat", "routine.create", "routine.run", "issue.create", "memory.write"] })
+  })
+
+  it("sends no capabilities for the role's default", async () => {
+    await addWith("Role default")
+    expect(apiFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("says so when the preset could not be applied, and still shows the link", async () => {
+    await addWith("Builder", 403)
+    expect(await screen.findByText(/preset could not be applied/)).toBeTruthy()
+    expect(screen.getByDisplayValue(SETUP_URL)).toBeTruthy()
+  })
+})

@@ -15506,6 +15506,13 @@
           "id": {
             "type": "string"
           },
+          "kind": {
+            "enum": [
+              "team",
+              "personal"
+            ],
+            "type": "string"
+          },
           "logo_url": {
             "nullable": true,
             "type": "string"
@@ -15544,6 +15551,9 @@
             },
             "type": "object"
           },
+          "personal_owner_id": {
+            "type": "string"
+          },
           "preferred_language": {
             "nullable": true,
             "type": "string"
@@ -15564,6 +15574,7 @@
           "id",
           "name",
           "slug",
+          "kind",
           "created_at",
           "updated_at",
           "allow_privileged_credentials",
@@ -28706,6 +28717,9 @@
                           "workspace_id": {
                             "type": "string"
                           },
+                          "workspace_logo_url": {
+                            "type": "string"
+                          },
                           "workspace_name": {
                             "type": "string"
                           },
@@ -28923,6 +28937,9 @@
                             "type": "array"
                           },
                           "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_logo_url": {
                             "type": "string"
                           },
                           "workspace_name": {
@@ -29759,6 +29776,9 @@
                             "type": "integer"
                           },
                           "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_logo_url": {
                             "type": "string"
                           },
                           "workspace_name": {
@@ -31020,6 +31040,9 @@
                           "workspace_id": {
                             "type": "string"
                           },
+                          "workspace_logo_url": {
+                            "type": "string"
+                          },
                           "workspace_name": {
                             "type": "string"
                           },
@@ -31266,6 +31289,9 @@
                             "type": "array"
                           },
                           "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_logo_url": {
                             "type": "string"
                           },
                           "workspace_name": {
@@ -32175,6 +32201,175 @@
           }
         ],
         "summary": "Delete admin instance workspace",
+        "tags": [
+          "admin"
+        ],
+        "x-crewship-read-only": false
+      },
+      "patch": {
+        "description": "Update admin instance workspace (PATCH /api/v1/admin/instance/workspaces/{workspaceId}).",
+        "operationId": "patch_api_v1_admin_instance_workspaces_workspaceId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "slug": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "slug",
+                    "kind"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Update admin instance workspace",
         "tags": [
           "admin"
         ],
@@ -41420,6 +41615,9 @@
                       "id": {
                         "type": "string"
                       },
+                      "kind": {
+                        "type": "string"
+                      },
                       "last_activity_at": {
                         "nullable": true,
                         "type": "string"
@@ -41456,6 +41654,9 @@
                       },
                       "pending_invitations": {
                         "type": "integer"
+                      },
+                      "personal_owner_id": {
+                        "type": "string"
                       },
                       "preferred_language": {
                         "nullable": true,
@@ -117693,7 +117894,13 @@
                           "comments": {
                             "items": {
                               "properties": {
+                                "author_agent_id": {
+                                  "type": "string"
+                                },
                                 "author_name": {
+                                  "type": "string"
+                                },
+                                "author_run_id": {
                                   "type": "string"
                                 },
                                 "author_user_id": {
@@ -118129,7 +118336,13 @@
                     "comments": {
                       "items": {
                         "properties": {
+                          "author_agent_id": {
+                            "type": "string"
+                          },
                           "author_name": {
+                            "type": "string"
+                          },
+                          "author_run_id": {
                             "type": "string"
                           },
                           "author_user_id": {
@@ -118304,7 +118517,13 @@
                     "comments": {
                       "items": {
                         "properties": {
+                          "author_agent_id": {
+                            "type": "string"
+                          },
                           "author_name": {
+                            "type": "string"
+                          },
+                          "author_run_id": {
                             "type": "string"
                           },
                           "author_user_id": {
@@ -118731,7 +118950,13 @@
                     "comments": {
                       "items": {
                         "properties": {
+                          "author_agent_id": {
+                            "type": "string"
+                          },
                           "author_name": {
+                            "type": "string"
+                          },
+                          "author_run_id": {
                             "type": "string"
                           },
                           "author_user_id": {
@@ -119160,7 +119385,13 @@
                     "comments": {
                       "items": {
                         "properties": {
+                          "author_agent_id": {
+                            "type": "string"
+                          },
                           "author_name": {
+                            "type": "string"
+                          },
+                          "author_run_id": {
                             "type": "string"
                           },
                           "author_user_id": {
@@ -119335,7 +119566,13 @@
                     "comments": {
                       "items": {
                         "properties": {
+                          "author_agent_id": {
+                            "type": "string"
+                          },
                           "author_name": {
+                            "type": "string"
+                          },
+                          "author_run_id": {
                             "type": "string"
                           },
                           "author_user_id": {
@@ -119694,6 +119931,13 @@
                           "id": {
                             "type": "string"
                           },
+                          "mode": {
+                            "enum": [
+                              "fixed",
+                              "follow_latest"
+                            ],
+                            "type": "string"
+                          },
                           "placement_rev": {
                             "minimum": 0,
                             "type": "integer"
@@ -119703,6 +119947,10 @@
                             "properties": {
                               "page_slug": {
                                 "type": "string"
+                              },
+                              "pinned_revision": {
+                                "minimum": 0,
+                                "type": "integer"
                               },
                               "revision": {
                                 "minimum": 0,
@@ -119715,6 +119963,7 @@
                             "required": [
                               "page_slug",
                               "revision",
+                              "pinned_revision",
                               "title"
                             ],
                             "type": "object"
@@ -119734,7 +119983,9 @@
                           "x",
                           "y",
                           "width",
-                          "height"
+                          "height",
+                          "mode",
+                          "placement_rev"
                         ],
                         "type": "object"
                       },
@@ -119757,16 +120008,10 @@
                             "type": "boolean"
                           },
                           "element": {
-                            "oneOf": [
-                              {
-                                "additionalProperties": true,
-                                "description": "Validated Excalidraw 0.18.1 drawing element. Images reference Board-owned immutable files; URLs, arbitrary embeddables and customData are forbidden; see the versioned Board profile.",
-                                "type": "object"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
+                            "additionalProperties": true,
+                            "description": "Validated Excalidraw 0.18.1 drawing element. Images reference Board-owned immutable files; URLs, arbitrary embeddables and customData are forbidden; see the versioned Board profile.",
+                            "nullable": true,
+                            "type": "object"
                           },
                           "element_id": {
                             "type": "string"
@@ -119789,6 +120034,13 @@
                     "seq": {
                       "minimum": 0,
                       "type": "integer"
+                    },
+                    "write_scope": {
+                      "enum": [
+                        "all-elements",
+                        "own-elements"
+                      ],
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -119995,6 +120247,13 @@
                           "id": {
                             "type": "string"
                           },
+                          "mode": {
+                            "enum": [
+                              "fixed",
+                              "follow_latest"
+                            ],
+                            "type": "string"
+                          },
                           "placement_rev": {
                             "minimum": 0,
                             "type": "integer"
@@ -120004,6 +120263,10 @@
                             "properties": {
                               "page_slug": {
                                 "type": "string"
+                              },
+                              "pinned_revision": {
+                                "minimum": 0,
+                                "type": "integer"
                               },
                               "revision": {
                                 "minimum": 0,
@@ -120016,6 +120279,7 @@
                             "required": [
                               "page_slug",
                               "revision",
+                              "pinned_revision",
                               "title"
                             ],
                             "type": "object"
@@ -120035,7 +120299,9 @@
                           "x",
                           "y",
                           "width",
-                          "height"
+                          "height",
+                          "mode",
+                          "placement_rev"
                         ],
                         "type": "object"
                       },
@@ -120058,16 +120324,10 @@
                             "type": "boolean"
                           },
                           "element": {
-                            "oneOf": [
-                              {
-                                "additionalProperties": true,
-                                "description": "Validated Excalidraw 0.18.1 drawing element. Images reference Board-owned immutable files; URLs, arbitrary embeddables and customData are forbidden; see the versioned Board profile.",
-                                "type": "object"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
+                            "additionalProperties": true,
+                            "description": "Validated Excalidraw 0.18.1 drawing element. Images reference Board-owned immutable files; URLs, arbitrary embeddables and customData are forbidden; see the versioned Board profile.",
+                            "nullable": true,
+                            "type": "object"
                           },
                           "element_id": {
                             "type": "string"
@@ -120090,6 +120350,13 @@
                     "seq": {
                       "minimum": 0,
                       "type": "integer"
+                    },
+                    "write_scope": {
+                      "enum": [
+                        "all-elements",
+                        "own-elements"
+                      ],
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -120355,6 +120622,39 @@
                     },
                     "type": "array"
                   },
+                  "placement_modes": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "expected_rev": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "mode": {
+                          "enum": [
+                            "fixed",
+                            "follow_latest"
+                          ],
+                          "type": "string"
+                        },
+                        "source_revision": {
+                          "minimum": 1,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "expected_rev",
+                        "mode",
+                        "source_revision"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
                   "placement_restores": {
                     "items": {
                       "additionalProperties": false,
@@ -120450,6 +120750,13 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "element_revs": {
+                      "additionalProperties": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    },
                     "placement_id": {
                       "type": "string"
                     },
@@ -120467,6 +120774,9 @@
                     "seq": {
                       "minimum": 0,
                       "type": "integer"
+                    },
+                    "undo_expires_at": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -120485,6 +120795,13 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "element_revs": {
+                      "additionalProperties": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    },
                     "placement_id": {
                       "type": "string"
                     },
@@ -120502,6 +120819,9 @@
                     "seq": {
                       "minimum": 0,
                       "type": "integer"
+                    },
+                    "undo_expires_at": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -122699,6 +123019,13 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "element_revs": {
+                      "additionalProperties": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    },
                     "placement_id": {
                       "type": "string"
                     },
@@ -122716,6 +123043,9 @@
                     "seq": {
                       "minimum": 0,
                       "type": "integer"
+                    },
+                    "undo_expires_at": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -123010,6 +123340,9 @@
                           "error": {
                             "type": "string"
                           },
+                          "has_preview": {
+                            "type": "boolean"
+                          },
                           "human_user_id": {
                             "type": "string"
                           },
@@ -123060,10 +123393,8 @@
                             "type": "string"
                           },
                           "result_seq": {
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
+                            "nullable": true,
+                            "type": "integer"
                           },
                           "run_id": {
                             "type": "string"
@@ -123233,6 +123564,9 @@
                           "error": {
                             "type": "string"
                           },
+                          "has_preview": {
+                            "type": "boolean"
+                          },
                           "human_user_id": {
                             "type": "string"
                           },
@@ -123283,10 +123617,8 @@
                             "type": "string"
                           },
                           "result_seq": {
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
+                            "nullable": true,
+                            "type": "integer"
                           },
                           "run_id": {
                             "type": "string"
@@ -123456,6 +123788,9 @@
                           "error": {
                             "type": "string"
                           },
+                          "has_preview": {
+                            "type": "boolean"
+                          },
                           "human_user_id": {
                             "type": "string"
                           },
@@ -123506,10 +123841,8 @@
                             "type": "string"
                           },
                           "result_seq": {
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
+                            "nullable": true,
+                            "type": "integer"
                           },
                           "run_id": {
                             "type": "string"
@@ -123822,6 +124155,11 @@
                       "diagram",
                       "artifact"
                     ],
+                    "type": "string"
+                  },
+                  "preview_png": {
+                    "description": "Optional untrusted PNG illustration, \u003c=1MiB decoded, \u003c=1024x1024. Canonical snapshot alone provides authority.",
+                    "format": "byte",
                     "type": "string"
                   },
                   "selected_element_ids": {
@@ -124169,6 +124507,9 @@
                     "error": {
                       "type": "string"
                     },
+                    "has_preview": {
+                      "type": "boolean"
+                    },
                     "human_user_id": {
                       "type": "string"
                     },
@@ -124228,10 +124569,8 @@
                       "type": "string"
                     },
                     "result_seq": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ]
+                      "nullable": true,
+                      "type": "integer"
                     },
                     "run_id": {
                       "type": "string"
@@ -124348,6 +124687,9 @@
                     "error": {
                       "type": "string"
                     },
+                    "has_preview": {
+                      "type": "boolean"
+                    },
                     "human_user_id": {
                       "type": "string"
                     },
@@ -124407,10 +124749,8 @@
                       "type": "string"
                     },
                     "result_seq": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ]
+                      "nullable": true,
+                      "type": "integer"
                     },
                     "run_id": {
                       "type": "string"
@@ -124527,6 +124867,9 @@
                     "error": {
                       "type": "string"
                     },
+                    "has_preview": {
+                      "type": "boolean"
+                    },
                     "human_user_id": {
                       "type": "string"
                     },
@@ -124586,10 +124929,8 @@
                       "type": "string"
                     },
                     "result_seq": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ]
+                      "nullable": true,
+                      "type": "integer"
                     },
                     "run_id": {
                       "type": "string"
@@ -124922,6 +125263,9 @@
                     "error": {
                       "type": "string"
                     },
+                    "has_preview": {
+                      "type": "boolean"
+                    },
                     "human_user_id": {
                       "type": "string"
                     },
@@ -124981,10 +125325,8 @@
                       "type": "string"
                     },
                     "result_seq": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ]
+                      "nullable": true,
+                      "type": "integer"
                     },
                     "run_id": {
                       "type": "string"
@@ -125101,6 +125443,9 @@
                     "error": {
                       "type": "string"
                     },
+                    "has_preview": {
+                      "type": "boolean"
+                    },
                     "human_user_id": {
                       "type": "string"
                     },
@@ -125160,10 +125505,8 @@
                       "type": "string"
                     },
                     "result_seq": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ]
+                      "nullable": true,
+                      "type": "integer"
                     },
                     "run_id": {
                       "type": "string"
@@ -125280,6 +125623,9 @@
                     "error": {
                       "type": "string"
                     },
+                    "has_preview": {
+                      "type": "boolean"
+                    },
                     "human_user_id": {
                       "type": "string"
                     },
@@ -125339,10 +125685,8 @@
                       "type": "string"
                     },
                     "result_seq": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ]
+                      "nullable": true,
+                      "type": "integer"
                     },
                     "run_id": {
                       "type": "string"

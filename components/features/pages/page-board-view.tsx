@@ -8,6 +8,8 @@ import type { BoardImageUpload } from "@/lib/boards/files"
 import { BoardElementPermissions } from "./board-element-permissions"
 import { BoardComments } from "./board-comments"
 import { BoardImageUploadDialog } from "./board-image-upload-dialog"
+import { useBoardFollow } from "@/hooks/use-board-follow"
+import { BoardFollowControls } from "./board-follow-controls"
 import { useIssuePeople } from "@/hooks/use-issue-people"
 import { useContentPresence } from "@/hooks/use-content-presence"
 import { ContentPresenceStatus } from "./content-presence"
@@ -22,6 +24,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { BoardAgentWork } from "./board-agent-work"
 import { BoardToolbar } from "./board-toolbar"
 import { BoardPlacementLink } from "./board-artifact-placement"
+import { previewPlacements } from "@/lib/boards/preview-placements"
+import { BoardPinModeDialog, pinModeIntent, type BoardPinModeIntent } from "./board-pin-mode-dialog"
 import { BoardPinDialog } from "./board-pin-dialog"
 const Editor = dynamic(async () => {
   window.EXCALIDRAW_ASSET_PATH = "/excalidraw-assets/"
@@ -38,9 +42,12 @@ export function PageBoardView({ workspaceId, slug, pageId, onDirtyChange }: { wo
   const observed = useRef<string | null>(null)
   const [confirmReload, setConfirmReload] = useState(false)
   const [pinning, setPinning] = useState(false)
+  const [modeIntent, setModeIntent] = useState<BoardPinModeIntent | null>(null)
+  const previewSnapshot = useRef<import("@/hooks/use-page-board").BoardPlacement[]>([])
   const [imageDialog, setImageDialog] = useState(false)
   const [insertImage, setInsertImage] = useState<BoardImageUpload | null>(null)
   const [imageAccessLost, setImageAccessLost] = useState(false)
+  const [focusLabel, setFocusLabel] = useState<string>()
   const [focusPoint, setFocusPoint] = useState<{ x: number; y: number; requestId: string }>()
   const [permissionDirty, setPermissionDirty] = useState(false)
   const [commentDirty, setCommentDirty] = useState(false)
@@ -81,7 +88,7 @@ export function PageBoardView({ workspaceId, slug, pageId, onDirtyChange }: { wo
     observed.current = signature
     setDraft(structuredClone(elements))
   }, [generation])
-  useEffect(() => { onDirtyChange?.(dirty || uncertain || imageUpload.pending || commentDirty || permissionDirty || requestDirty); return () => onDirtyChange?.(false) }, [dirty, uncertain, imageUpload.pending, commentDirty, permissionDirty, requestDirty, onDirtyChange])
+  useEffect(() => { onDirtyChange?.(dirty || uncertain || imageUpload.pending || Boolean(modeIntent) || commentDirty || permissionDirty || requestDirty); return () => onDirtyChange?.(false) }, [dirty, uncertain, imageUpload.pending, modeIntent, commentDirty, permissionDirty, requestDirty, onDirtyChange])
   const presenceContext = { kind: "board" as const, pageId: pageId ?? "", boardSeq: base?.seq ?? 0 }
   const presence = useContentPresence(presenceContext, Boolean(pageId && query.data))
   const { people } = useIssuePeople(workspaceId, presence.available)
@@ -93,10 +100,16 @@ export function PageBoardView({ workspaceId, slug, pageId, onDirtyChange }: { wo
     }
     return result
   }, [presence.members, presence.currentUserId, people])
+  const follow = useBoardFollow(presence.members, presence.currentUserId, presence.available, base?.seq ?? 0, Boolean(query.data) && !imageAccessLost)
+  const stopFollow = follow.stop
+  const selectFollow = follow.select
+  const stopFollowing = useCallback(() => { stopFollow(); setFocusPoint(undefined); setFocusLabel(undefined) }, [stopFollow])
+  const selectFollowing = useCallback((connection: string) => { setFocusPoint(undefined); setFocusLabel(undefined); selectFollow(connection) }, [selectFollow])
+  const viewerNames = useMemo(() => Object.fromEntries(people.map(person => [person.id, person.name])), [people])
   const sendCursor = presence.setCursor
   const onPointer = useCallback((x: number, y: number) => sendCursor({ x, y, coordinate_space: "board" }), [sendCursor])
   const denied = query.error instanceof PageBoardError && [401, 403, 404].includes(query.error.status)
-  useEffect(() => { if (denied) { epoch.current++; setBase(null); setDraft(null); setPinning(false); setImageDialog(false); setInsertImage(null); setCommands([]); undoAttempt.current = null; saveAttempt.current = null; setEditorScene(undefined) } }, [denied])
+  useEffect(() => { if (denied) { epoch.current++; setBase(null); setDraft(null); setPinning(false); setModeIntent(null); previewSnapshot.current = []; setImageDialog(false); setInsertImage(null); setCommands([]); undoAttempt.current = null; saveAttempt.current = null; setEditorScene(undefined) } }, [denied])
   const localDraft = useMemo<BoardDraft | null>(() => base && draft ? { elements: drawing, placements: base.placements.flatMap(item => {
     const projection = draft.find(element => element.id === placementId(item.id) && !element.isDeleted)
     const { source: _source, ...geometry } = item
@@ -104,7 +117,7 @@ export function PageBoardView({ workspaceId, slug, pageId, onDirtyChange }: { wo
   }) } : null, [base, draft, drawing])
   useEffect(() => {
     const latest = query.data
-    if (!latest || latest === base || write.isPending || imageUpload.pending || uncertain || busy || (base && latest.seq < base.seq)) return
+    if (!latest || latest === base || write.isPending || imageUpload.pending || modeIntent || uncertain || busy || (base && latest.seq < base.seq)) return
     if (!base || !dirty || !localDraft) { replace(latest); return }
     if (latest.seq <= base.seq) return
     const plan = planBoardMerge(base, localDraft, latest)
@@ -115,7 +128,13 @@ export function PageBoardView({ workspaceId, slug, pageId, onDirtyChange }: { wo
       ...plan.draft.elements as ExcalidrawElement[],
       ...plan.draft.placements.map(item => ({ ...(draft?.find(element => element.id === placementId(item.id)) ?? { id: placementId(item.id), type: "embeddable", groupIds: [], angle: 0, frameId: null }), x: item.x, y: item.y, width: item.width, height: item.height }) as ExcalidrawElement),
     ]); setCollaborationError(null)
-  }, [query.data, base, dirty, localDraft, draft, write.isPending, imageUpload.pending, uncertain, busy, replace])
+  }, [query.data, base, dirty, localDraft, draft, write.isPending, imageUpload.pending, modeIntent, uncertain, busy, replace])
+  const previewFrozen = busy || dirty || uncertain || write.isPending || imageUpload.pending || Boolean(modeIntent)
+  const authorizedSnapshot = query.data ?? base
+  const modeSourceAllowed = Boolean(modeIntent && authorizedSnapshot?.can_write && authorizedSnapshot.placements.some(item => item.id === modeIntent.placement.id && item.source && item.source.page_slug === modeIntent.placement.source?.page_slug))
+  useEffect(() => { if (modeIntent && authorizedSnapshot && !modeSourceAllowed && !write.isPending && !uncertain) { setModeIntent(null); write.reset() } }, [modeIntent, authorizedSnapshot, modeSourceAllowed, write, uncertain])
+  const shownPlacements = useMemo(() => previewPlacements(previewSnapshot.current, authorizedSnapshot?.placements ?? [], previewFrozen), [authorizedSnapshot?.placements, previewFrozen])
+  useEffect(() => { if (!previewFrozen && authorizedSnapshot) previewSnapshot.current = authorizedSnapshot.placements }, [previewFrozen, authorizedSnapshot])
   const reload = async () => {
     const response = await query.refetch()
     if (response.data && !response.error) { replace(response.data); write.reset(); setConfirmReload(false) }
@@ -124,7 +143,7 @@ export function PageBoardView({ workspaceId, slug, pageId, onDirtyChange }: { wo
   const authorization = query.data ?? base
   const selectedSavedIds = selectedIds.filter(id => base.records.some(record => record.element_id === id && !record.deleted))
   // Stable selection is shared by explicit comments and agent actions.
-  return <section className="overflow-hidden rounded-xl border bg-card" aria-label="Board">
+  return <section onKeyDownCapture={event => { if (event.key === "Escape") stopFollowing() }} className="overflow-hidden rounded-xl border bg-card" aria-label="Board">
     <BoardToolbar seq={base.seq} dirty={dirty} writable={authorization.can_write} pending={write.isPending} invalid={invalid} onSave={async () => {
       if (!batch || !dirty) return
       try {
@@ -137,6 +156,8 @@ export function PageBoardView({ workspaceId, slug, pageId, onDirtyChange }: { wo
       } catch (error) { if (error instanceof PageBoardError && error.status < 500) saveAttempt.current = null }
     }} onReload={() => { if (uncertain) { setCollaborationError("Retry the pending operation to confirm its outcome before reloading or editing."); return }; if (dirty) setConfirmReload(true); else void reload() }} onPin={() => { if (uncertain) return; write.reset(); setPinning(true) }} />
     {pageId && <div className="px-4 pb-3"><ContentPresenceStatus presence={presence} context={presenceContext} /></div>}
+    {pageId && <BoardFollowControls follow={follow} names={viewerNames} onSelect={selectFollowing} />}
+    {focusLabel && !follow.active && <p role="status" className="px-4 pb-3 text-xs text-muted-foreground">{focusLabel}</p>}
     {authorization.can_write && <div className="px-4 pb-3"><Button variant="outline" size="sm" disabled={dirty || write.isPending || uncertain || imageUpload.pending || busy} onClick={() => setImageDialog(true)}>Add image</Button></div>}
     {images.error && <p role="alert" className="px-4 pb-3 text-sm text-warn">{images.error}</p>}
     {collaborationError && <p role="alert" className="px-4 pb-3 text-sm text-warn">{collaborationError}</p>}
@@ -168,14 +189,21 @@ export function PageBoardView({ workspaceId, slug, pageId, onDirtyChange }: { wo
     {write.error && !pinning && <p role="alert" className="px-4 pb-3 text-sm text-destructive">{write.error.message} Your unsaved drawing is retained. Reload latest deliberately to discard it.</p>}
     {invalid && <p role="alert" className="px-4 pb-3 text-sm text-destructive">Only local drawing shapes, text and approved artifact placements can be saved. Remove unsupported links or embeds. Artifact pins support moving and resizing; remove rotation, groups or frame membership before saving.</p>}
     {!authorization.can_write && <p className="px-4 pb-3 text-sm text-muted-foreground">Read-only board. Your access does not allow saving changes.</p>}
-    {!imageAccessLost && <Editor focusPoint={focusPoint} onSelection={onSelection} files={images.files} insertImage={insertImage} onImageInserted={imageInserted} scene={editorScene} onBusy={setBusy} key={generation} base={base} authorization={authorization} workspaceId={workspaceId} disabled={!authorization.can_write || write.isPending || imageUpload.pending || uncertain} onChange={onChange} collaborators={collaborators} onPointer={onPointer} />}
-    <div className="space-y-2 border-t p-4"><p className="text-xs text-muted-foreground">Undo applies to the current unsaved drawing. Saving or reloading resets drawing history. Remote disjoint changes merge when drawing is idle. Overlapping changes require review; saving stays explicit.</p>{authorization.placements.map(item => <BoardPlacementLink key={item.id} workspaceId={workspaceId} placement={item} />)}</div>
+    {!imageAccessLost && <Editor onInteraction={stopFollowing} focusPoint={follow.focusPoint ?? focusPoint} onSelection={onSelection} files={images.files} insertImage={insertImage} onImageInserted={imageInserted} scene={editorScene} onBusy={setBusy} key={generation} base={base} authorization={{ ...authorization, placements: shownPlacements }} workspaceId={workspaceId} disabled={!authorization.can_write || write.isPending || imageUpload.pending || uncertain} onChange={onChange} collaborators={collaborators} onPointer={onPointer} />}
+    <div className="space-y-2 border-t p-4"><p className="text-xs text-muted-foreground">Undo applies to the current unsaved drawing. Saving or reloading resets drawing history. Remote disjoint changes merge when drawing is idle. Overlapping changes require review; saving stays explicit.</p>{previewFrozen && <p className="text-xs text-muted-foreground">Artifact previews stay on their displayed revisions while you edit.</p>}{shownPlacements.map(item => <BoardPlacementLink key={item.id} workspaceId={workspaceId} placement={item} disabled={!authorization.can_write || previewFrozen} onModeChange={authorization.can_write ? placement => { write.reset(); setModeIntent(pinModeIntent(base.seq, placement)) } : undefined} />)}</div>
     <BoardElementPermissions key={`permissions:${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} board={authorization} selectedIds={selectedSavedIds} disabled={dirty || busy || write.isPending || uncertain || imageUpload.pending} onDirtyChange={setPermissionDirty} />
-    <BoardComments key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} board={base} selectedElementId={selectedSavedIds.length === 1 ? selectedSavedIds[0] : undefined} onDirtyChange={setCommentDirty} onViewAnchor={anchor => { if (anchor.type === "board-element" && anchor.snapshot) setFocusPoint({ x: anchor.snapshot.x + anchor.snapshot.width / 2, y: anchor.snapshot.y + anchor.snapshot.height / 2, requestId: crypto.randomUUID() }) }} />
+    <BoardComments key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} board={base} selectedElementId={selectedSavedIds.length === 1 ? selectedSavedIds[0] : undefined} onDirtyChange={setCommentDirty} onViewAnchor={anchor => { if (anchor.type === "board-element" && anchor.snapshot) { stopFollow(); setFocusLabel(undefined); setFocusPoint({ x: anchor.snapshot.x + anchor.snapshot.width / 2, y: anchor.snapshot.y + anchor.snapshot.height / 2, requestId: crypto.randomUUID() }) } }} />
     {pinning && <BoardPinDialog workspaceId={workspaceId} pending={write.isPending} error={write.error?.message ?? null} onClose={() => { if (uncertain) return; setPinning(false); write.reset() }} onPin={async (source_page_slug, source_revision) => {
       try { replace(await write.mutateAsync({ base_seq: base.seq, operation: { kind: "pin", source_page_slug, source_revision, x: 80 + base.placements.length * 40, y: 100 + base.placements.length * 40, width: 420, height: 300 } })); setPinning(false) } catch { /* The selected source stays available for explicit retry. */ }
     }} />}
-    <BoardAgentWork workspaceId={workspaceId} slug={slug} board={base} selectedIds={selectedIds} disabled={dirty || uncertain || busy || write.isPending || imageUpload.pending || !authorization.can_write} onDirtyChange={setRequestDirty} />
+    <BoardAgentWork onFocusWorkArea={(target, label) => { stopFollow(); setFocusLabel(`${label} · showing its saved target area, not a live agent cursor`); setFocusPoint({ x: target.x + target.width / 2, y: target.y + target.height / 2, requestId: crypto.randomUUID() }) }} files={images.files} workspaceId={workspaceId} slug={slug} board={base} selectedIds={selectedIds} disabled={dirty || uncertain || busy || write.isPending || imageUpload.pending || !authorization.can_write} onDirtyChange={setRequestDirty} />
+    {modeIntent && <BoardPinModeDialog intent={modeSourceAllowed ? modeIntent : { ...modeIntent, placement: { ...modeIntent.placement, source: undefined } }} pending={write.isPending} uncertain={uncertain} error={write.error?.message ?? null} onClose={() => { if (!uncertain && !write.isPending) { setModeIntent(null); write.reset() } }} onConfirm={async () => {
+      try {
+        const canonical = await write.mutateAsync({ base_seq: modeIntent.base_seq, operation: { kind: "batch", batch: modeIntent.batch } })
+        try { if (!receipt.current) throw new Error("Missing save receipt"); const command = savedBoardCommand(base, modeIntent.batch, receipt.current, canonical); setUndoNotice(null); setCommands(previous => { const next = [...previous, command].slice(-16); while (next.length && JSON.stringify(next).length > 4 * 1024 * 1024) next.shift(); return next }) } catch { setCommands([]); setUndoNotice("Pin mode saved. Saved undo is unavailable because its original mode or receipt could not be confirmed.") }
+        setModeIntent(null); replace(canonical)
+      } catch { /* Keep captured baseline, CAS and mutation identity. */ }
+    }} />}
     {imageDialog && <BoardImageUploadDialog baseSeq={base.seq} pending={imageUpload.pending} error={imageUpload.error} onClose={() => setImageDialog(false)} onUpload={async intent => {
       if (dirty || uncertain || write.isPending) return null
       const result = await imageUpload.upload(intent)

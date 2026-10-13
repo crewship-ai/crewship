@@ -508,6 +508,17 @@ func attachmentBlobIsUnreferenced(ctx context.Context, db *sql.DB, workspaceID, 
 			return false, err
 		}
 	}
+	if refs > 0 {
+		return false, nil
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE name='page_board_request_previews'`).Scan(&present); err != nil {
+		return false, err
+	}
+	if present > 0 {
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM page_board_request_previews p JOIN page_board_requests r ON r.id=p.request_id WHERE r.workspace_id=? AND p.sha256=?`, workspaceID, sha).Scan(&refs); err != nil {
+			return false, err
+		}
+	}
 	return refs == 0, nil
 }
 

@@ -18,7 +18,7 @@ export function savedBoardCommand(before: BoardHead, forward: CollaborativeBatch
   const applied = copy(before); applied.seq = receipt.result_seq
   // History needs geometry and opaque IDs, never cached source titles/URLs.
   applied.placements = applied.placements.map(({ source: _source, ...item }) => item)
-  const inverse: CollaborativeBatch = { base_seq: receipt.result_seq, upserts: [], deletes: [], placement_updates: [], placement_deletes: [], placement_restores: [] }
+  const inverse: CollaborativeBatch = { base_seq: receipt.result_seq, upserts: [], deletes: [], placement_updates: [], placement_deletes: [], placement_restores: [], placement_modes: [] }
   const records = new Map(applied.records.map(record => [record.element_id, record]))
   const original = new Map(before.records.map(record => [record.element_id, record]))
   for (const item of forward.upserts) {
@@ -68,6 +68,15 @@ export function savedBoardCommand(before: BoardHead, forward: CollaborativeBatch
     const { source: _source, ...geometry } = restored
     pins.set(item.id, copy(geometry)); tombstones.delete(item.id)
     inverse.placement_deletes!.push({ id: item.id, expected_rev: rev })
+  }
+  for (const item of forward.placement_modes ?? []) {
+    const previous = before.placements.find(pin => pin.id === item.id)
+    if (!previous || previous.placement_rev !== item.expected_rev) throw new Error('Invalid forward placement mode authority')
+    const baseline = previous.source?.pinned_revision ?? (previous.mode !== 'follow_latest' ? previous.source?.revision : undefined)
+    if (!Number.isSafeInteger(baseline) || baseline! < 1) throw new Error('Cannot establish original pin mode baseline')
+    const rev = acceptedRev(item.id, item.expected_rev)
+    inverse.placement_modes!.push({ id: item.id, expected_rev: rev, mode: previous.mode ?? 'fixed', source_revision: baseline! })
+    pins.set(item.id, { ...pins.get(item.id)!, mode: item.mode, placement_rev: rev })
   }
   applied.placements = [...pins.values()]; applied.placement_tombstones = [...tombstones.values()]
   const sanitizedBefore = copy(before); sanitizedBefore.placements = sanitizedBefore.placements.map(({ source: _source, ...item }) => item)

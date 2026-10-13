@@ -56,6 +56,14 @@ export interface BarMenuProps {
   /** Full sentence for screen readers: "Inbox: 3 awaiting a decision, 6 unread". */
   ariaLabel: string
   badge?: { count: number; tone: BarMenuBadgeTone }
+  /**
+   * Tints the trigger itself while something is happening behind it. The
+   * badge alone is a 16px dot in the corner of a 28px icon; on a busy bar the
+   * eye finds a tinted button faster than a number. Additive — the badge and
+   * its tone are unchanged — and quiet (primary at low alpha), because the
+   * badge already carries severity and this must not compete with it.
+   */
+  active?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
   /**
@@ -70,7 +78,7 @@ export interface BarMenuProps {
  * Trigger + panel. Controlled, because Activity ticks its elapsed times only
  * while the panel is open.
  */
-export function BarMenu({ icon: Icon, ariaLabel, badge, open, onOpenChange, testId, children }: BarMenuProps) {
+export function BarMenu({ icon: Icon, ariaLabel, badge, active = false, open, onOpenChange, testId, children }: BarMenuProps) {
   const triggerRef = React.useRef<HTMLButtonElement>(null)
   const count = badge?.count ?? 0
 
@@ -95,7 +103,11 @@ export function BarMenu({ icon: Icon, ariaLabel, badge, open, onOpenChange, test
         ref={triggerRef}
         variant="ghost"
         size="icon-sm"
-        className="relative"
+        className={cn(
+          "relative",
+          active && "bg-primary/10 text-primary ring-1 ring-inset ring-primary/25 hover:bg-primary/15",
+        )}
+        data-active={active ? "true" : undefined}
         aria-label={ariaLabel}
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -172,6 +184,67 @@ export function BarMenuHeader({ title, pill, meta }: BarMenuHeaderProps) {
  */
 export function BarMenuBody({ children, className }: { children: React.ReactNode; className?: string }) {
   return <div className={cn("max-h-[420px] overflow-y-auto", className)}>{children}</div>
+}
+
+export interface BarMenuChip<T extends string = string> {
+  id: T
+  label: string
+  /** Rendered as "Label (n)". Omit for a chip that names a view, not a tally. */
+  count?: number
+  /** "warn" for the chip whose rows are blocking someone. */
+  tone?: "warn"
+}
+
+/**
+ * A row of filter chips under the header: one chip per section the panel can
+ * show, exactly one selected. The panel renders the selected section only.
+ *
+ * Toggle buttons (aria-pressed), not tabs: a tablist promises arrow-key roving
+ * and a tabpanel relationship, and this is three filter buttons over one list.
+ * The caller decides which chips exist — a chip with nothing behind it is the
+ * caller's to hide, because "zero" means different things per panel.
+ */
+export function BarMenuChips<T extends string>({
+  chips, value, onChange, ariaLabel, testId,
+}: {
+  chips: BarMenuChip<T>[]
+  value: T
+  onChange: (id: T) => void
+  ariaLabel: string
+  testId?: string
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={ariaLabel}
+      data-testid={testId}
+      className="flex flex-wrap items-center gap-1.5 border-b border-foreground/[0.06] px-3 py-1.5"
+    >
+      {chips.map((chip) => {
+        const selected = chip.id === value
+        return (
+          <button
+            key={chip.id}
+            type="button"
+            aria-pressed={selected}
+            data-testid={testId ? `${testId}-${chip.id}` : undefined}
+            onClick={() => onChange(chip.id)}
+            className={cn(
+              "type-meta rounded-full border px-2 py-0.5 tabular-nums transition-colors",
+              selected
+                ? chip.tone === "warn"
+                  ? "border-warn/40 bg-warn/15 text-warn"
+                  : "border-primary/40 bg-primary/10 text-primary"
+                : "border-foreground/[0.08] text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground",
+            )}
+          >
+            {chip.label}
+            {chip.count != null ? ` (${chip.count})` : ""}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 export interface BarMenuSectionProps {

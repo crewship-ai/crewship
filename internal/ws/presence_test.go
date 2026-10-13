@@ -54,10 +54,8 @@ func TestPresenceContentAuthorizationAndRevocation(t *testing.T) {
 func TestPresenceBoundsTTLAndSlowConsumer(t *testing.T) {
 	h := NewHub(testLogger(), nil, NopValidatorForTests, NopSessionsForTests)
 	now := time.Now()
-	clients := []*Client{}
 	for i := 0; i < 64; i++ {
 		c := &Client{userID: fmt.Sprint(i)}
-		clients = append(clients, c)
 		if !h.joinPresence(c, "board:one", now) {
 			t.Fatal("valid room capacity denied")
 		}

@@ -103,6 +103,8 @@ export function usePeople(workspaceId: string | null, workspaceLoading = false) 
         { name, slug, owner_user_id: ownerUserId }, `${name} created`, "The workspace could not be created")
       return out?.id ?? null
     },
+    updateWorkspace: (wsId: string, change: { name?: string; kind?: "team" | "personal" }, done: string) =>
+      act(`w:${wsId}`, `${INSTANCE}/workspaces/${enc(wsId)}`, "PATCH", change, done, "The workspace could not be changed"),
     transfer: (wsId: string, userId: string, done: string) =>
       act(`t:${wsId}`, `${INSTANCE}/workspaces/${enc(wsId)}/transfer-ownership`, "POST", { user_id: userId }, done, "Ownership could not be transferred"),
     deleteWorkspace: (wsId: string, slug: string, done: string) =>

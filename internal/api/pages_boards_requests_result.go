@@ -112,7 +112,16 @@ func (h *PageHandler) GetBoardRequestAgent(w http.ResponseWriter, r *http.Reques
 		h.boardError(w, e)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"id": r.PathValue("requestId"), "kind": kind, "instruction": instruction, "snapshot": json.RawMessage(snapshot), "target": json.RawMessage(target), "file_ids": files, "source_ids": sources, "source_refs": sourceRefs, "dialect": boardMermaidDialect, "converter_version": boardMermaidConverter})
+	var previewExists int
+	if tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM page_board_request_previews WHERE request_id=?`, r.PathValue("requestId")).Scan(&previewExists) != nil {
+		replyError(w, 503, "preview metadata unavailable")
+		return
+	}
+	var preview any
+	if previewExists > 0 {
+		preview = map[string]any{"kind": "untrusted-human-illustration", "authority": "canonical-snapshot-only", "path": "/board-requests/" + r.PathValue("requestId") + "/preview"}
+	}
+	writeJSON(w, 200, map[string]any{"id": r.PathValue("requestId"), "kind": kind, "instruction": instruction, "snapshot": json.RawMessage(snapshot), "target": json.RawMessage(target), "file_ids": files, "source_ids": sources, "source_refs": sourceRefs, "preview": preview, "dialect": boardMermaidDialect, "converter_version": boardMermaidConverter})
 }
 func (h *PageHandler) PublishBoardRequestMermaid(w http.ResponseWriter, r *http.Request) {
 	artifactCommentHeaders(w)

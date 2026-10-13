@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { Clock } from "lucide-react"
 import {
   Select,
@@ -23,6 +23,7 @@ export type TimeRange =
   | "24h"
   | "7d"
   | "30d"
+  | "90d"
   | "all"
   | "custom"
 
@@ -49,6 +50,7 @@ const SHORT_LABEL: Record<Exclude<TimeRange, "custom">, string> = {
   "24h": "24h",
   "7d": "7d",
   "30d": "30d",
+  "90d": "90d",
   all: "All",
 }
 
@@ -57,7 +59,20 @@ interface TimeRangePickerProps {
   onChange: (v: TimeRange) => void
   customRange?: CustomRange | null
   onCustomRangeChange?: (r: CustomRange) => void
+  /** The presets offered, in order; the Journal's set by default. A page
+   *  whose server reads further back (Audit log: 90 days) passes its own. */
+  presets?: TimeRange[]
+  /** What "Custom…" opens instead of the from/to form — the Audit log's
+   *  month calendar. `close` dismisses the popover. */
+  renderCustom?: (close: () => void) => ReactNode
+  /** The trigger's text while a custom range is active, when the page
+   *  formats it itself ("5 Oct – 11 Oct"). */
+  customLabel?: string
+  /** Sizing for the trigger — the Journal's toolbar is h-7, a sub-bar h-8. */
+  triggerClassName?: string
 }
+
+const LONG_LABEL: Record<TimeRange, string> = { ...Object.fromEntries(PRESETS.map((p) => [p.value, p.label])), "90d": "Last 90 days" } as Record<TimeRange, string>
 
 /**
  * Compact time-range select for the LogsPanel toolbar. Presets cover
@@ -69,17 +84,27 @@ export function TimeRangePicker({
   onChange,
   customRange,
   onCustomRangeChange,
+  presets,
+  renderCustom,
+  customLabel,
+  triggerClassName,
 }: TimeRangePickerProps) {
   const [customOpen, setCustomOpen] = useState(false)
+  const options = presets ? presets.map((v) => ({ value: v, label: LONG_LABEL[v] })) : PRESETS
 
   const triggerLabel =
-    value === "custom" && customRange
-      ? formatCustomLabel(customRange)
-      : SHORT_LABEL[(value === "custom" ? "1h" : value) as Exclude<TimeRange, "custom">]
+    value === "custom" && customLabel
+      ? customLabel
+      : value === "custom" && customRange
+        ? formatCustomLabel(customRange)
+        : SHORT_LABEL[(value === "custom" ? "1h" : value) as Exclude<TimeRange, "custom">]
 
   const handlePreset = (next: string) => {
     if (next === "custom") {
-      setCustomOpen(true)
+      // After the menu has closed: the Select dismisses on the same pointer
+      // event, and the popover opened inside it read that as an outside click
+      // and closed again at once.
+      setTimeout(() => setCustomOpen(true), 0)
       return
     }
     onChange(next as TimeRange)
@@ -92,14 +117,14 @@ export function TimeRangePicker({
           <Select value={value} onValueChange={handlePreset}>
             <SelectTrigger
               size="sm"
-              className="h-7 px-2 text-[11px] gap-1 font-mono [&>svg]:opacity-60"
+              className={triggerClassName ?? "h-7 px-2 text-[11px] gap-1 font-mono [&>svg]:opacity-60"}
               aria-label="Time range"
             >
               <Clock className="h-3 w-3 opacity-70" />
               <SelectValue>{triggerLabel}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {PRESETS.map((o) => (
+              {options.map((o) => (
                 <SelectItem key={o.value} value={o.value} className="text-xs">
                   {o.label}
                 </SelectItem>
@@ -108,8 +133,8 @@ export function TimeRangePicker({
           </Select>
         </div>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-72 p-3">
-        <CustomRangeForm
+      <PopoverContent align={renderCustom ? "end" : "start"} className={renderCustom ? "w-80 p-3" : "w-72 p-3"}>
+        {renderCustom ? renderCustom(() => setCustomOpen(false)) : <CustomRangeForm
           initial={customRange}
           onCancel={() => setCustomOpen(false)}
           onApply={(r) => {
@@ -117,7 +142,7 @@ export function TimeRangePicker({
             onChange("custom")
             setCustomOpen(false)
           }}
-        />
+        />}
       </PopoverContent>
     </Popover>
   )
@@ -248,6 +273,7 @@ export function sinceFromTimeRange(
     case "24h": return new Date(now - 24 * 60 * 60 * 1000).toISOString()
     case "7d": return new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString()
     case "30d": return new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString()
+    case "90d": return new Date(now - 90 * 24 * 60 * 60 * 1000).toISOString()
     case "custom":
       return customRange ? new Date(customRange.fromMs).toISOString() : undefined
     default: return undefined

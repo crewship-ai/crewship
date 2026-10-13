@@ -776,7 +776,7 @@ still cannot widen who reaches it, not even to another agent in its own crew.
 |---|---|---|
 | `subject_type` | string | `user`, `crew`, `agent`, or `workspace` (every current human member of the workspace, never an agent). |
 | `subject` | string | The subject's slug or id. Omitted for `workspace`. |
-| `level` | string | `read`, `comment`, `produce`, or `write`. The `agent` subject cannot hold `comment`. The `workspace` subject carries `read`, `comment` or `write` only; `produce` names a producer, and everyone is not one. |
+| `level` | string | `read`, `comment`, `produce`, or `write`. Agents may hold `comment`; their replies additionally require a live verified human run and that human’s current comment permission. The `workspace` subject carries `read`, `comment` or `write` only; `produce` names a producer, and everyone is not one. |
 | `panels` | string[] | Optional. Restricts a `produce` grant to named panels; omitted means every panel on the page. |
 
 ### What each level decides
@@ -2565,8 +2565,11 @@ source title, slug or revision. Public sharing is not available for Boards.
 **Request:** initialization takes `{"mutation_id":"init-1"}`. Every other mutation
 requires a stable `mutation_id` and the currently observed nonnegative `base_seq`.
 Batch bodies additionally contain `upserts:[{element,expected_rev}]` and
-`deletes:[{id,expected_rev}]`, optionally `placement_updates:[{id,x,y,width,height}]`
-and `placement_deletes:[{id}]`. New elements use `expected_rev:0`; updates,
+`deletes:[{id,expected_rev}]`, optionally `placement_updates:[{id,expected_rev,x,y,width,height}]`,
+`placement_deletes:[{id,expected_rev}]`, `placement_restores:[{id,expected_rev}]`,
+and `placement_modes:[{id,expected_rev,mode,source_revision}]`. Pin modes are
+`fixed` (default) or explicitly selected `follow_latest`. Mode changes preserve
+the source Page identity and name a retained baseline revision. New elements use `expected_rev:0`; updates,
 deletions and restorations use the server element revision. Excalidraw's own
 version metadata is not concurrency authority. A pin body supplies
 `source_page_slug`, positive `source_revision`, `x`, `y`, `width` and `height`.
@@ -2578,8 +2581,10 @@ against a different sequence.
 **Response:** GET and initialization return `{format,seq,records,placements,can_write}`.
 The format is `crewship-board-excalidraw-0.18.1-v1`. Records contain `element_id`,
 server `element_rev`, `deleted`, and `element` (null for tombstones). Placements
-contain `id,x,y,width,height` and optional authorized
-`source:{page_slug,revision,title}`. Other mutations return `{seq,result_seq}`,
+contain `id,x,y,width,height,placement_rev,mode` and optional authorized
+`source:{page_slug,revision,pinned_revision,title}`. In follow mode `revision`
+is the effective source head, while `pinned_revision` is the retained baseline.
+Source head advances do not change Board sequence or placement revision. Other mutations return `{seq,result_seq}`,
 with `placement_id` for a pin. Drawing batches additionally return canonical
 `element_revs`, `placement_revs` and the original `undo_expires_at`; clients must
 not infer revisions for saved undo. Exact retries return the original result
@@ -2733,6 +2738,18 @@ captures the selection; the client cannot substitute arbitrary scene content.
 Insertion takes `mutation_id`, `base_seq`, `source_hash`, `converter_version`
 and `upserts:[{element,expected_rev:0}]`. It is a separate human-authorized write.
 Cancellation has no required body. Retain submission/mutation IDs for retries.
+
+Dispatch may include optional `preview_png` (base64 PNG, at most 1 MiB decoded,
+1024×1024 pixels). The server re-encodes it, strips metadata and stores an immutable
+illustration with the job; canonical output is bounded to 2 MiB and retained
+previews to 128 MiB per workspace. It is untrusted auxiliary input, never proof
+of the selected scene. The UI exports only the captured drawings and selected
+raster assets; pins are generic empty rectangles, not iframe screenshots.
+`has_preview` indicates whether a job retained this helper. After admission,
+the assigned run can retrieve it through the job-scoped sidecar preview path,
+subject to current job, human and all captured source permissions. Retrying a
+submission preserves the exact original image and IDs.
+
 
 **Response:** dispatch returns 202 `{id}`. Listing returns
 `{can_dispatch,eligible_chats,converter_url,requests}`. Detail includes status,

@@ -43,7 +43,7 @@ func newPageBoardRequestsCommand() *cobra.Command {
 					defer input.Close()
 					reader = input
 				}
-				limit := int64(64 << 10)
+				limit := int64((1<<20)*4/3 + 65536 + 16)
 				if verb == "insert" {
 					limit = 256 << 10
 				}

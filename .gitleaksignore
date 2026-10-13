@@ -87,3 +87,10 @@ f8bbfe66789c1d410434fd40ae7e0d2d2f0e477a:internal/orchestrator/exec_sidecar_toke
 # ENCRYPTION_KEY fixture (`test-encryption-key-…`). Not a real secret; line
 # carries //gitleaks:allow at HEAD, this covers the original commit in history.
 391253f1abf87bbfd1e8861729475be5d7c7327c:internal/journal/verify_test.go:generic-api-key:45
+
+# age's own published test vector (filippo.io/age testkit, x25519): the
+# identity of the all-0x42 scalar, used to check that keys made in the browser
+# are encoded exactly as age encodes them. Public, protects nothing.
+78e372927060b2d14a06f4092c2bb36a57619f44:components/features/admin/backups/__tests__/age-key.test.ts:age-secret-key:8
+# Same unchanged public age test vector after settings PR #3056 moved its line.
+a41d725e0d02a7a806308f7fdb01af116b99d509:components/features/admin/backups/__tests__/age-key.test.ts:age-secret-key:9

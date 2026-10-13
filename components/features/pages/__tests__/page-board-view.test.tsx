@@ -18,11 +18,14 @@ let lost: boolean
 let initFail: boolean
 let missingUndoProof: boolean
 let expiredUndo: boolean
+let sourceHead: number
+let loseModeResponse: boolean
+const modeReceipts = new Map<string, object>()
 const writes: { path: string; body: Record<string, unknown> }[] = []
 const clients: QueryClient[] = []
 beforeEach(() => {
   canonical = { format: "board/v1", seq: 1, records: [{ element_id: "shape", element_rev: 1, deleted: false, element: { id: "shape", type: "rectangle", x: 0, y: 0, width: 100, height: 100, boundElements: null } }], placements: [], can_write: true }
-  readStatus = 200; lost = false; initFail = false; missingUndoProof = false; expiredUndo = false; writes.length = 0
+  readStatus = 200; lost = false; initFail = false; missingUndoProof = false; expiredUndo = false; sourceHead = 3; loseModeResponse = false; modeReceipts.clear(); writes.length = 0
   vi.mocked(apiFetch).mockImplementation(async (url, options) => {
     const path = new URL(String(url), "https://studio.test").pathname
     if (options?.method) {
@@ -36,12 +39,21 @@ beforeEach(() => {
         canonical = { ...canonical, seq: canonical.seq + 1, placements: [{ id: "pin1", x: Number(body.x), y: Number(body.y), width: Number(body.width), height: Number(body.height), source: { page_slug: String(body.source_page_slug), revision: Number(body.source_revision), title: "Report" } }] }
         return new Response(JSON.stringify({ seq: canonical.seq, result_seq: canonical.seq, placement_id: "pin1" }))
       }
+      if (modeReceipts.has(String(body.mutation_id))) return new Response(JSON.stringify(modeReceipts.get(String(body.mutation_id))))
       if (lost) { lost = false; throw new Error("Lost response") }
       if (body.base_seq !== canonical.seq) return new Response(JSON.stringify({ error: "board changed; reload before saving" }), { status: 409 })
       const records = new Map(canonical.records.map(record => [record.element_id, record]))
       for (const item of (body.upserts ?? []) as { element: { id: string }; expected_rev: number }[]) records.set(item.element.id, { element_id: item.element.id, element_rev: item.expected_rev + 1, element: item.element, deleted: false })
       for (const item of (body.deletes ?? []) as { id: string; expected_rev: number }[]) records.set(item.id, { element_id: item.id, element_rev: item.expected_rev + 1, element: null, deleted: true })
-      canonical = { ...canonical, seq: canonical.seq + 1, records: [...records.values()] }
+      const modes = (body.placement_modes ?? []) as { id: string; mode: "fixed" | "follow_latest"; source_revision: number }[]
+      const placements = canonical.placements.map(item => { const mode = modes.find(change => change.id === item.id); return mode ? { ...item, mode: mode.mode, placement_rev: (item.placement_rev ?? 0) + 1, source: { ...item.source!, pinned_revision: mode.source_revision, revision: mode.mode === "fixed" ? mode.source_revision : sourceHead } } : item })
+      canonical = { ...canonical, seq: canonical.seq + 1, records: [...records.values()], placements }
+      if (modes.length) {
+        const receipt = { seq: canonical.seq, result_seq: canonical.seq, placement_revs: Object.fromEntries(placements.map(item => [item.id, item.placement_rev])), undo_expires_at: new Date(Date.now() + 86400000).toISOString() }
+        modeReceipts.set(String(body.mutation_id), receipt)
+        if (loseModeResponse) { loseModeResponse = false; throw new Error("Mode response lost") }
+        return new Response(JSON.stringify(receipt))
+      }
       return new Response(JSON.stringify({ seq: canonical.seq, result_seq: canonical.seq, ...(missingUndoProof ? {} : { element_revs: Object.fromEntries(canonical.records.map(item => [item.element_id, item.element_rev])), undo_expires_at: new Date(Date.now() + (expiredUndo ? -1 : 86400000)).toISOString() }) }))
     }
     if (path.endsWith("/board/threads")) return new Response(JSON.stringify({ threads: [], can_comment: true, can_resolve: true }))
@@ -186,4 +198,52 @@ it('disables saved undo at the original expired server deadline', async () => {
   await screen.findByText('Canvas sequence 2')
   expect(screen.getByRole('button', { name: 'Undo last saved change' })).toBeDisabled()
   expect(screen.getByText(/Saved undo expires after 24 hours/)).toBeTruthy()
+})
+
+it("confirms follow-latest explicitly, preserves committed-unknown mode identity and undoes to the original baseline", async () => {
+  canonical.placements = [{ id: "pin", placement_rev: 1, mode: "fixed", x: 0, y: 0, width: 100, height: 100, source: { page_slug: "report", title: "Report", revision: 3, pinned_revision: 3 } }]
+  const view = mount(); sourceHead = 7
+  fireEvent.click(await screen.findByRole("button", { name: "Follow latest" }))
+  await screen.findByText("Follow latest artifact revision?")
+  expect(writes).toHaveLength(0)
+  loseModeResponse = true
+  fireEvent.click(screen.getByRole("button", { name: "Follow latest" }))
+  await screen.findAllByText(/Mode response lost/)
+  await act(async () => { await view.client.invalidateQueries({ queryKey: ["page-board"] }) })
+  expect(screen.getByText("Report · Revision 3")).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Retry mode change" }))
+  await screen.findByText("Board · Saved sequence 2")
+  expect(writes[0].body).toEqual(writes[1].body)
+  expect(writes[0].body).toMatchObject({ base_seq: 1, placement_modes: [{ id: "pin", expected_rev: 1, mode: "follow_latest", source_revision: 3 }] })
+  await screen.findByText("Report · Revision 7")
+  fireEvent.click(screen.getByRole("button", { name: "Undo last saved change" }))
+  await screen.findByText("Board · Saved sequence 3")
+  expect(writes[2].body).toMatchObject({ base_seq: 2, placement_modes: [{ id: "pin", expected_rev: 2, mode: "fixed", source_revision: 3 }] })
+})
+it("holds follow-latest preview during a local draft but removes source metadata immediately after revocation", async () => {
+  canonical.placements = [{ id: "pin", placement_rev: 1, mode: "follow_latest", x: 0, y: 0, width: 100, height: 100, source: { page_slug: "report", title: "Report", revision: 3, pinned_revision: 1 } }]
+  const view = mount(); await screen.findByText("Report · Revision 3")
+  fireEvent.click(screen.getByRole("button", { name: "Move pin" }))
+  canonical = { ...canonical, placements: [{ ...canonical.placements[0], source: { ...canonical.placements[0].source!, revision: 7 } }] }
+  await act(async () => { await view.client.invalidateQueries({ queryKey: ["page-board"] }) })
+  expect(screen.getByText("Report · Revision 3")).toBeTruthy()
+  expect(screen.queryByText("Report · Revision 7")).toBeNull()
+  expect(screen.getByRole("button", { name: "Fix displayed revision" })).toBeDisabled()
+  const { source: _source, ...redacted } = canonical.placements[0]
+  canonical = { ...canonical, placements: [redacted] }
+  await act(async () => { await view.client.invalidateQueries({ queryKey: ["page-board"] }) })
+  await screen.findByText("Artifact unavailable")
+  expect(screen.queryByText("Report · Revision 3")).toBeNull()
+  expect(view.dirty).toHaveBeenLastCalledWith(true)
+})
+it("closes an unsubmitted mode choice and removes its title when source access is revoked", async () => {
+  canonical.placements = [{ id: "pin", placement_rev: 1, mode: "fixed", x: 0, y: 0, width: 100, height: 100, source: { page_slug: "report", title: "Private report", revision: 3, pinned_revision: 3 } }]
+  const view = mount(); fireEvent.click(await screen.findByRole("button", { name: "Follow latest" }))
+  await screen.findByText("Private report · Board sequence 1")
+  const { source: _source, ...redacted } = canonical.placements[0]
+  canonical = { ...canonical, placements: [redacted] }
+  await act(async () => { await view.client.invalidateQueries({ queryKey: ["page-board"] }) })
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  expect(screen.queryByText(/Private report/)).toBeNull()
+  expect(writes).toHaveLength(0)
 })

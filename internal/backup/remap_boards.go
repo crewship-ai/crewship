@@ -13,6 +13,8 @@ func remapBoardPageReferences(dump *DBDump, ids map[string]map[string]string) {
 		{"page_board_requests", "original_board_id"},
 		{"page_board_requests", "result_page_id"},
 		{"page_board_request_sources", "source_page_id"},
+		{"page_board_source_history", "board_page_id"},
+		{"page_board_source_history", "source_page_id"},
 		{"page_board_write_audit", "board_page_id"},
 		{"page_board_files", "board_page_id"},
 		{"page_board_elements", "board_page_id"},

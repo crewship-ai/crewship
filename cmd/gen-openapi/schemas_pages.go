@@ -478,7 +478,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	pointAnchor["description"] = "A visible viewport point, bounded by the captured dimensions. Not a DOM anchor or document-scroll coordinate. Always belongs to the specified immutable revision."
 	commentAnchor := map[string]any{"oneOf": []any{documentAnchor, pointAnchor}}
 	commentBody := map[string]any{"type": "string", "minLength": 1, "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Mentions do not authorize or start an agent."}
-	comment := obj(map[string]any{"id": str(), "body": commentBody, "author_user_id": str(), "author_name": str(), "created_at": timeString()})
+	comment := obj(map[string]any{"id": str(), "body": commentBody, "author_user_id": str(), "author_name": str(), "author_agent_id": str(), "author_run_id": str(), "created_at": timeString()})
 	comment["required"] = []string{"id", "body", "author_user_id", "author_name", "created_at"}
 	thread := obj(map[string]any{"id": str(), "revision": integer(), "anchor": commentAnchor, "status": map[string]any{"type": "string", "enum": []string{"open", "resolved"}}, "version": integer(), "created_by_user_id": str(), "created_by_name": str(), "created_at": timeString(), "updated_at": timeString(), "resolved_by_user_id": str(), "resolved_at": timeString(), "comments": arr(comment), "applied_version": integer()})
 	thread["required"] = []string{"id", "revision", "anchor", "status", "version", "created_by_user_id", "created_by_name", "created_at", "updated_at", "comments"}

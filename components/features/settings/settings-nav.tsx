@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react"
 import {
-  User, Building, Users, Volume2,
-  Link2, Activity, Shield, KeyRound, Webhook, ChevronRight,
+  User, Building, Users, Volume2, Palette, MonitorSmartphone,
+  Link2, Activity, Shield, KeyRound, ChevronRight,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -61,7 +61,15 @@ const sections: NavSection[] = [
     label: "Account",
     items: [
       { key: "profile", label: "Profile", icon: User },
+      // Theme, accent, density and motion. The top-bar user menu offers the
+      // two quick ones inline and links here for the rest.
+      { key: "appearance", label: "Appearance", icon: Palette },
       { key: "sounds", label: "Notification sounds", icon: Volume2 },
+      // Browser sessions and CLI tokens: everything that can act as you.
+      // Its own row (it used to be the last card on Profile) so "where do I
+      // revoke that token" has an answer in the nav and a deep link
+      // (/settings?tab=sessions) the user menu can point at.
+      { key: "sessions", label: "Sessions & tokens", icon: MonitorSmartphone },
       // Hidden until peer-card extraction actually exists. The routine runs
       // daily and the endpoints are real, but the extractor wired in
       // production is consolidate.NoopExtractor (cmd/crewship/cmd_start.go)
@@ -101,8 +109,9 @@ const sections: NavSection[] = [
       // instance is wired into.
       { key: "connections", label: "Crew links", icon: Link2, href: "/settings/crew-links" },
       // The roster is readable by every role; the invite/role controls inside
-      // are gated separately.
-      { key: "members", label: "Members", icon: Users },
+      // are gated separately. A nested page (/settings/members) like Crew
+      // links: filtering people by role and capability needs its own panel.
+      { key: "members", label: "Members", icon: Users, href: "/settings/members" },
       // Workspace-wide secret policy (PRD-CREDENTIALS-V2-2026 §2.6). MANAGER
       // reads it — they have to know the rules they work under — and the
       // controls inside go read-only for them and for ADMIN, because the
@@ -110,14 +119,8 @@ const sections: NavSection[] = [
       // read the policy at all (GET is MANAGER+), so the row is hidden
       // rather than rendered over a 403.
       { key: "access-secrets", label: "Access & Secrets", icon: KeyRound, visibleTo: isManagerTier },
-      // Ungated on purpose. GET /api/v1/hooks is `authed(wsCtx(...))` — every
-      // workspace member may read the registry, and a member debugging "why
-      // did my agent's tool call get refused" needs exactly this list. The
-      // enable/disable switch inside is roleManage and renders only for
-      // ADMIN+, matching the read-only-beats-hidden rule at the top of this
-      // file: a shell hook running on the host is information a member is
-      // entitled to, and the switch is the part they are not.
-      { key: "hooks", label: "Lifecycle hooks", icon: Webhook },
+      // Lifecycle hooks are paused (internal/hooks/paused.go) and not listed.
+      // /settings/hooks still answers, with the notice, for old links.
       // GET /api/v1/audit is ADMIN+ (router_admin.go authedAdmin, audit.go
       // canRole("manage")); below that the pane could only show a 403 — the
       // one section where hiding beats read-only.
@@ -194,7 +197,7 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
   const firstMatch = filtered[0]?.items[0]?.key
 
   return (
-    <aside className={cn(SIDEBAR_WIDTH, "shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col")}>
+    <aside className={cn(SIDEBAR_WIDTH, "shrink-0 bg-card border-r border-foreground/[0.06] flex flex-col")}>
       <SidebarToolbar>
         <SidebarSearch
           value={query}

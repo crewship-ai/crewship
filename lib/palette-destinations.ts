@@ -107,11 +107,21 @@ const ENTRIES: Entry[] = [
   settingsCard("general", "General", "Pages appearance", Palette, ["theme", "pages colours", "pages colors", "branding"]),
   settingsCard("general", "General", "Privileged credentials", ShieldAlert, ["security", "privileged", "fail closed"]),
   settingsCard("general", "General", "Danger zone", Trash2, ["delete workspace", "remove workspace"], (ctx) => isOwner(ctx.role)),
-  settingsCard("members", "Members", "Members", Users, ["people", "team", "invite", "roles", "permissions", "role change"]),
+  // Members is a page of its own (/settings/members), not a card in a tab.
+  {
+    id: "settings:members",
+    title: "Members",
+    trail: "Settings",
+    href: "/settings/members",
+    icon: Users,
+    keywords: ["people", "team", "invite", "roles", "permissions", "role change", "access"],
+    visible: (ctx) => isSettingsSectionVisible("members", ctx.role),
+  },
   settingsCard("access-secrets", "Access & Secrets", "Value reveal", KeyRound, ["reveal secrets", "show secret values"]),
   settingsCard("access-secrets", "Access & Secrets", "Who may reveal", KeyRound, ["reveal permission", "secrets access"]),
   settingsCard("access-secrets", "Access & Secrets", "Classification", KeyRound, ["secret classification", "sensitivity"]),
-  settingsCard("hooks", "Lifecycle hooks", "Lifecycle hooks", Webhook, ["hooks", "events", "on start", "on stop"]),
+  settingsCard("access-secrets", "Access & Secrets", "Where credentials live", KeyRound, ["credential storage", "vault", "secret store"]),
+  // Lifecycle hooks are paused (internal/hooks/paused.go), so not offered.
   {
     id: "settings:crew-links",
     title: "Crew links",
@@ -165,7 +175,7 @@ const ENTRIES: Entry[] = [
 
   // ── Actions behind a button ───────────────────────────────────────────
   { id: "act:issue", kind: "action", title: "Create issue", trail: "Issues", href: "/issues?create=1", icon: Plus, keywords: ["new issue", "add issue", "ticket", "task"] },
-  { id: "act:invite", kind: "action", title: "Invite member", trail: "Settings › Members", href: `/settings?tab=members&card=${settingsCardSlug("Members")}`, icon: UserPlus, keywords: ["add person", "add user", "invite"], visible: (ctx) => isAdminTier(ctx.role) },
+  { id: "act:invite", kind: "action", title: "Invite member", trail: "Settings › Members", href: "/settings/members", icon: UserPlus, keywords: ["add person", "add user", "invite"], visible: (ctx) => isAdminTier(ctx.role) },
   { id: "act:token", kind: "action", title: "Create CLI token", trail: "Settings › Profile", href: `/settings?tab=profile&card=${settingsCardSlug("Sessions & access")}`, icon: KeyRound, keywords: ["new token", "api key", "cli login"] },
   { id: "act:password", kind: "action", title: "Change password", trail: "Settings › Profile", href: `/settings?tab=profile&card=${settingsCardSlug("Account")}`, icon: Lock, keywords: ["reset password"] },
   { id: "act:avatars", kind: "action", title: "Store missing avatars", trail: "Settings › General", href: `/settings?tab=general&card=${settingsCardSlug("Usage")}`, icon: Users, keywords: ["agent avatars", "faces"], visible: (ctx) => isAdminTier(ctx.role) },

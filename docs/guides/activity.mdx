@@ -393,17 +393,18 @@ Only the open ledger is mounted, so opening one does not start the journal strea
 
 ## Activity Bar (toolbar)
 
-The `/activity` page answers "what happened" in depth; the **Activity Bar** answers "what is running right now" at a glance, from anywhere in the app. It is the Activity icon in the top toolbar next to the Inbox bell, with a badge counting live runs — amber the moment anything waits on a human approval, blue while routines run.
+The `/activity` page answers "what happened" in depth; the **Activity Bar** answers "what is running right now" at a glance, from anywhere in the app. It is the Activity icon in the top toolbar next to the Inbox bell, with a badge counting live runs — amber the moment anything waits on a human approval, blue while routines run. While anything is live the icon itself is tinted, so a running workspace reads at a glance even before the count is read.
 
-The dropdown speaks the rail's words. It holds two sections:
+The dropdown speaks the rail's words. Three chips under the header — **Live (n)**, **Recent** and **Failed (n)** — each show one section; the panel opens on Live when anything is live and on Recent otherwise.
 
-- **LIVE**: up to six active routine runs, plus any in-flight agent runs. Each routine run shows its current step, elapsed time and cost.
+- **Live**: up to six active routine runs, plus any in-flight agent runs. Each routine run shows its current step, elapsed time and cost. (There is no "step 2/5" progress: a run carries its current step id, but the step total lives on the routine definition, not the run.)
   - A run that waits on a person says **waiting for you**, and **Decide →** opens the run's page, where the approval is.
   - **Open run** opens the run's page.
   - **Cancel** is offered only to OWNER and ADMIN, the roles the cancel API accepts.
-- **RECENT**: the last few finished runs, so "did my run just finish?" costs no page hop. A run reads **Completed**, **Could not finish**, **Cancelled** or **Interrupted**, with the rail's colours; a stopped run is grey, not green.
+- **Recent**: the last finished runs, so "did my run just finish?" costs no page hop. A run reads **Completed**, **Could not finish**, **Cancelled** or **Interrupted**, with the rail's colours; a stopped run is grey, not green.
+- **Failed**: only the runs that could not finish, counted over the recent window — a failure no longer disappears under three newer successes.
 
-The footer opens `/activity?status=waiting` when something waits on a person, `/activity?status=active` while anything is live, and `/activity` otherwise.
+The footer follows the chip: `/activity?status=waiting` when something waits on a person, `/activity?status=failed` on Failed, `/activity?status=active` on Live, and `/activity` otherwise.
 
 The server is the source of truth: `GET /api/v1/runs?status=RUNNING` for agent runs and `GET /api/v1/workspaces/{ws}/pipelines/runs/active` for routine runs, re-fetched on a short poll and immediately on `assignment.updated`, `run.*`, `mission.updated`, `pipeline.run.*` and `pipeline.step.started` — so a dropped frame cannot leave the badge stale. Nothing in flight, and the badge disappears.
 

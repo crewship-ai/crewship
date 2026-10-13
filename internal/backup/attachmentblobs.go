@@ -103,6 +103,16 @@ func attachmentRefs(dump *DBDump) (order []string, byWorkspace map[string][]stri
 		pageID, _ := file["board_page_id"].(string)
 		refs = append(refs, map[string]any{"sha256": file["sha256"], "workspace_id": pageWorkspaces[pageID]})
 	}
+	jobWorkspaces := map[string]string{}
+	for _, job := range dump.Tables["page_board_requests"] {
+		id, _ := job["id"].(string)
+		ws, _ := job["workspace_id"].(string)
+		jobWorkspaces[id] = ws
+	}
+	for _, preview := range dump.Tables["page_board_request_previews"] {
+		id, _ := preview["request_id"].(string)
+		refs = append(refs, map[string]any{"sha256": preview["sha256"], "workspace_id": jobWorkspaces[id]})
+	}
 	for _, row := range refs {
 		sha, _ := row["sha256"].(string)
 		ws, _ := row["workspace_id"].(string)

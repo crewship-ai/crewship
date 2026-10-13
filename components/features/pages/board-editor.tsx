@@ -11,7 +11,9 @@ import type { PageBoard } from "@/hooks/use-page-board"
 import { BoardArtifactPlacement } from "./board-artifact-placement"
 const linkFor = (id: string) => `https://board-placement.invalid/${encodeURIComponent(id)}`
 export const placementElementId = (id: string) => `board-placement:${id}`
-export default function BoardEditor({ base, authorization, workspaceId, disabled, onChange, collaborators, onPointer, scene, onBusy, files, insertImage, onImageInserted, onSelection, focusPoint }: {
+export default function BoardEditor({ base, authorization, workspaceId, disabled, onChange, collaborators, onPointer, scene, onBusy, files, insertImage, onImageInserted, onSelection, focusPoint, onInteraction, onViewportChange }: {
+  onViewportChange?: (scrollX: number, scrollY: number) => void
+  onInteraction?: () => void
   focusPoint?: { x: number; y: number; requestId: string }
   onSelection?: (ids: string[]) => void
   files?: BinaryFileData[]
@@ -56,8 +58,8 @@ export default function BoardEditor({ base, authorization, workspaceId, disabled
     return [...drawings, ...placements]
   }, [base, scene])
   const safeLinks = useMemo(() => new Set(base.placements.map(item => linkFor(placementElementId(item.id)))), [base])
-  return <div className="h-[65dvh] min-h-96 w-full border-t" aria-label="Board drawing canvas"><Excalidraw
-    excalidrawAPI={setApi} isCollaborating={collaborators.size > 0} onPointerUpdate={({ pointer }) => onPointer(pointer.x, pointer.y)}
+  return <div onPointerDownCapture={onInteraction} onWheelCapture={onInteraction} onKeyDownCapture={event => { if (event.key === "Escape") onInteraction?.() }} className="h-[65dvh] min-h-96 w-full border-t" aria-label="Board drawing canvas"><Excalidraw
+    excalidrawAPI={setApi} onScrollChange={onViewportChange} isCollaborating={collaborators.size > 0} onPointerUpdate={({ pointer }) => onPointer(pointer.x, pointer.y)}
     initialData={{ elements: initial }} onChange={(elements, state) => { onChange(elements); onSelection?.(Object.keys(state.selectedElementIds).filter(id => state.selectedElementIds[id])); onBusy?.(Boolean(state.editingTextElement || state.newElement || state.multiElement || state.isResizing || state.isRotating || state.selectedElementsAreBeingDragged)) }}
     viewModeEnabled={disabled} aiEnabled={false} handleKeyboardGlobally={false}
     onPaste={() => false} onLinkOpen={(_element, event) => event.preventDefault()}

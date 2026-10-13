@@ -196,10 +196,6 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 			`level must be "read", "comment", "produce" or "write" (see the page, comment, push into named panels, edit the spec)`)
 		return
 	}
-	if req.SubjectType == pageSubjectAgent && req.Level == pageGrantComment {
-		replyError(w, 400, "comment grants are for humans, not agents")
-		return
-	}
 	// The workspace subject reads or writes, never produces (#2533 §3/14):
 	// produce names a producer, and "everyone in the workspace" is not one.
 	if req.SubjectType == pageSubjectWorkspace && !workspaceSubjectLevelAllowed(req.Level) {

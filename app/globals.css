@@ -86,7 +86,8 @@
 :root {
   /* ── Light surfaces (kept from prior shadcn palette — only Philosophy /
    *    legal pages render light; main app is dark-first) ── */
-  --background: #F4F7FB;
+  /* A quiet grey ground: the white rail, panels and cards sit on it. */
+  --background: #F7F8FA;
   --foreground: #0F1733;
   --scrollbar-thumb: oklch(0.80 0 0);
   --scrollbar-thumb-hover: oklch(0.66 0 0);
@@ -151,13 +152,17 @@
   --chart-4: oklch(0.45 0.108 55);
   --chart-5: oklch(0.62 0.133 105);
 
-  --sidebar: #E6EEF7;
+  /* The light rail is white, like the section panels beside it (Pages,
+   * Routines, Settings); the page ground under the content is the only grey.
+   * It was #E6EEF7, a second blue-grey that read as a separate stripe. The
+   * active row is an accent tint rather than white-on-blue. */
+  --sidebar: #FFFFFF;
   --sidebar-foreground: #0F1733;
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--brand-foreground);
-  --sidebar-accent: #FFFFFF;
+  --sidebar-accent: var(--brand-tint);
   --sidebar-accent-foreground: var(--brand-ink);
-  --sidebar-border: #D8E0EB;
+  --sidebar-border: #E3E7EE;
   --sidebar-ring: var(--brand);
 
   /* ── Semantic palette — Day values. The marketing-site lightness (≥ 0.72)
@@ -968,6 +973,21 @@ body {
     border: 1px solid rgb(255 255 255 / 0.06);
   }
 
+  /* Hero surface: the deep panel in dark, a light card washed with the accent
+     in light. .panel-surface stays deep in BOTH themes, which is right for a
+     terminal and wrong for a page header — the Admin overview's identity card
+     sat as a navy slab on the light theme, with light-theme muted text on it.
+     Text here uses the normal theme tokens. */
+  .hero-surface {
+    background:
+      radial-gradient(120% 140% at 0% 0%, color-mix(in oklab, var(--brand) 9%, var(--card)) 0%, var(--card) 62%);
+    border: 1px solid var(--border);
+  }
+  .dark .hero-surface {
+    background: var(--panel-bg);
+    border-color: rgb(255 255 255 / 0.06);
+  }
+
   /* Card lift for anything clickable that is not a .card-interactive. */
   .lift {
     transition: transform 220ms var(--ease-harbor), border-color 200ms var(--ease-harbor), box-shadow 220ms var(--ease-harbor);
@@ -1563,12 +1583,66 @@ body {
 }
 
 /* Preserve the state and loading label without requiring motion to read it.
- * Covers CSS spinners and Radix enter/exit animations, including pseudo-elements. */
+ * Covers CSS spinners and Radix enter/exit animations, including pseudo-elements.
+ *
+ * Settings › Appearance › Reduce motion (lib/theme/appearance.ts) drives the
+ * same rule from the app: On sets data-motion="reduce" on <html> and applies
+ * it whatever the OS says; Off sets data-motion="full", which lifts this
+ * catch-all for a user who wants motion here although their OS asks for less.
+ * The handful of per-component reduce rules above stay on the OS query — they
+ * only still a pulse or a slide, and the catch-all already covers them for On. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  :root:not([data-motion="full"]) *,
+  :root:not([data-motion="full"]) *::before,
+  :root:not([data-motion="full"]) *::after {
     animation: none !important;
     transition-duration: 0s !important;
     transition-delay: 0s !important;
     scroll-behavior: auto !important;
+  }
+}
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after {
+  animation: none !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
+
+/* Text size — Settings › Appearance › Text size (data-text-size on <html>,
+ * lib/theme/appearance.ts). Every size and most spacing in the app are rem,
+ * so moving the root size scales the interface as one, like browser zoom but
+ * kept with the account. Default is the absence of the attribute. */
+:root[data-text-size="small"] { font-size: 93.75%; }
+:root[data-text-size="large"] { font-size: 112.5%; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Compact density — Settings › Appearance › Density (data-density="compact"
+ * on <html>, lib/theme/appearance.ts).
+ *
+ * Deliberately a short list of SHARED row shapes, not a second size for every
+ * component: tightening the kits moves every surface built on them, and a
+ * surface that spelled out its own padding keeps it. Only vertical padding
+ * changes — text sizes, control heights and touch targets stay as they are,
+ * so nothing gets harder to read or to hit; coarse pointers are excluded
+ * outright, because there the row height IS the touch target (.kit-tap).
+ *
+ *   - Sidebar kit rows (SidebarRow: `.kit-tap.type-nav`) — every rail list.
+ *   - Settings card rows and settings tables (SettingsRow and settingsTd are
+ *     `px-4 py-2.5` inside a [data-slot=settings-card]).
+ *   - shadcn table cells ([data-slot=table-cell]).
+ *
+ * Unlayered on purpose: it then outranks the Tailwind utilities it adjusts
+ * without !important. */
+@media (pointer: fine) {
+  :root[data-density="compact"] .kit-tap.type-nav {
+    padding-block: 0.125rem;
+  }
+  :root[data-density="compact"] [data-slot="settings-card"] .px-4.py-2\.5 {
+    padding-block: 0.375rem;
+  }
+  :root[data-density="compact"] [data-slot="table-cell"] {
+    padding-block: 0.25rem;
   }
 }

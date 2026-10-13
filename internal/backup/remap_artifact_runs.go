@@ -20,6 +20,8 @@ func remapArtifactCreationRuns(dump *DBDump) {
 		{"page_board_write_audit", "actor_run_id"},
 		{"page_board_elements", "author_run_id"},
 		{"page_board_mutations", "author_run_id"},
+		{"page_artifact_comments", "author_run_id"},
+		{"page_artifact_comment_mutations", "actor_run_id"},
 		{"page_artifact_revisions", "author_run_id"},
 		{"page_artifact_mutation_receipts", "author_run_id"},
 		{"page_artifact_requests", "run_id"},

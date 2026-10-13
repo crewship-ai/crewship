@@ -6,6 +6,7 @@ import { CircleCheck, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
+import { registerNavigationGuard } from "@/hooks/use-navigation-guard"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -198,6 +199,21 @@ export function PageSaveProvider({ children, guardLeaving = true }: {
     if (pending) setLeaveTo(() => go)
     else go()
   }, [])
+
+  // Switching workspaces is not a navigation (hooks/use-workspace), nor is a
+  // push from the palette or the bells: without this the page's drafts stayed
+  // on screen and Save wrote them into the workspace switched to. It asks the
+  // same question as leaving; the answer's own retry passes once.
+  const passOnce = React.useRef(false)
+  React.useEffect(() => {
+    if (!dirty || !guardLeaving) return
+    passOnce.current = false
+    return registerNavigationGuard((retry) => {
+      if (passOnce.current) { passOnce.current = false; return true }
+      setLeaveTo(() => () => { passOnce.current = true; retry() })
+      return false
+    })
+  }, [dirty, guardLeaving])
 
   // Once a "Save and leave" lands with nothing left pending, go.
   React.useEffect(() => {

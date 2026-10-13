@@ -7,7 +7,7 @@ import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 import { pagesKeys } from "@/hooks/use-pages"
 import type { BoardElement, BoardBatch } from "@/lib/boards/revision-adapter"
 export interface PageBoardRecord { author_user_id?: string; author_agent_id?: string; author_run_id?: string; element_id: string; element_rev: number; element: BoardElement | null; deleted: boolean }
-export interface BoardPlacement { id: string; placement_rev?: number; x: number; y: number; width: number; height: number; source?: { page_slug: string; revision: number; title: string } }
+export interface BoardPlacement { mode?: "fixed" | "follow_latest"; id: string; placement_rev?: number; x: number; y: number; width: number; height: number; source?: { page_slug: string; revision: number; pinned_revision?: number; title: string } }
 export interface PageBoard { format: string; seq: number; records: PageBoardRecord[]; placements: BoardPlacement[]; placement_tombstones?: { id: string; placement_rev: number; deleted: true }[]; can_write: boolean }
 export class PageBoardError extends Error { constructor(message: string, public status: number) { super(message) } }
 export type BoardWrite = { kind: "batch"; batch: BoardBatch } | { kind: "pin"; source_page_slug: string; source_revision: number; x: number; y: number; width: number; height: number } | { kind: "unpin"; id: string }

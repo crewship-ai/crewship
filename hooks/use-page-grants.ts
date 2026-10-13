@@ -73,7 +73,7 @@ export const PAGE_SUBJECT_TYPE_LABEL: Record<PageSubjectType, string> = {
 /** The levels a subject kind may hold. The workspace never produces: a
  *  payload has an author, and "everyone" is not one (spec §3/14). */
 export function pageGrantLevelsFor(subjectType: PageSubjectType): readonly PageGrantLevel[] {
-  return subjectType === "workspace" ? ["read", "comment", "write"] : subjectType === "agent" ? ["read", "produce", "write"] : PAGE_GRANT_LEVELS
+  return subjectType === "workspace" ? ["read", "comment", "write"] : PAGE_GRANT_LEVELS
 }
 
 /**

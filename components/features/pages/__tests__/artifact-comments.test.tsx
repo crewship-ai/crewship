@@ -30,6 +30,15 @@ function mount(revision = 1, onViewRevision = vi.fn(), onDirtyChange = vi.fn()) 
   const result = render(content(revision))
   return { ...result, client, select: (selected: number) => result.rerender(content(selected)), onViewRevision, onDirtyChange }
 }
+
+it("distinguishes agent replies from the human who authorized the run", async () => {
+  threads = [thread()]
+  threads[0].comments.push({ id: "agent-reply", body: "Updated the report.", author_user_id: "user1", author_name: "Alice", author_agent_id: "agent-1", author_run_id: "run-1", created_at: "2026-10-13T12:01:00Z" })
+  mount()
+  expect(await screen.findByText("Agent reply")).toBeTruthy()
+  expect(screen.getByText("On behalf of Alice")).toBeTruthy()
+  expect(screen.getByTitle("Agent agent-1 · Run run-1")).toBeTruthy()
+})
 async function refresh() {
   const callback = vi.mocked(useRealtimeEventSafe).mock.calls.find(call => call[0] === "page.updated")?.[1]
   await act(async () => { (callback as (() => void))() })

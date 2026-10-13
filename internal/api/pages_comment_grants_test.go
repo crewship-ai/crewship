@@ -58,7 +58,7 @@ func TestPageCommentGrantDiscussionWithoutWriteOrDispatch(t *testing.T) {
 func TestPageCommentGrantCrewWorkspaceAndAgentBoundary(t *testing.T) {
 	for _, subject := range []string{"crew", "workspace"} {
 		t.Run(subject, func(t *testing.T) {
-			h, _, ws, owner, pageID := discussionFixture(t)
+			h, _, ws, owner, _ := discussionFixture(t)
 			pagesSeedUser(t, h, ws, "commenter", "commenter@example.com", "MEMBER")
 			body := `{"subject_type":"workspace","level":"comment"}`
 			if subject == "crew" {
@@ -82,9 +82,10 @@ func TestPageCommentGrantCrewWorkspaceAndAgentBoundary(t *testing.T) {
 			if err != nil || len(grants) != 0 {
 				t.Fatalf("humancomment grant reached agent: %v %v", grants, err)
 			}
-			artifactExpect(t, pagesGrantCall(t, h, "PUT", "/", ws, owner, "OWNER", "report", `{"subject_type":"agent","subject":"comment-agent","level":"comment"}`), 400)
-			if _, err = h.db.Exec(`INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent','comment-agent','comment',?)`, pageID, owner); err == nil {
-				t.Fatal("DB permits agentcomment")
+			artifactExpect(t, pagesGrantCall(t, h, "PUT", "/", ws, owner, "OWNER", "report", `{"subject_type":"agent","subject":"comment-agent","level":"comment"}`), 200)
+			grants, err = h.agentGrants(context.Background(), ws, rec, "comment-agent")
+			if err != nil || len(grants) != 1 || grants[0].Level != pageGrantComment {
+				t.Fatalf("explicit named agent grant missing: %v %v", grants, err)
 			}
 			if _, err = h.db.Exec(`DELETE FROM workspace_members WHERE workspace_id=? AND user_id=?`, ws, owner); err != nil {
 				t.Fatal(err)
