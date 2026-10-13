@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { PageArtifactError, usePageArtifact } from "@/hooks/use-page-artifact"
+import { ArtifactSourceDiff } from "./artifact-source-diff"
 import { staticArtifactDocument } from "@/lib/pages/artifact-static"
 
 function RevisionPanel({ workspaceId, slug, revision }: { workspaceId: string; slug: string; revision: number }) {
@@ -34,5 +35,6 @@ export function ArtifactCompare({ workspaceId, slug, revisions, selected }: { wo
         <RevisionPanel workspaceId={workspaceId} slug={slug} revision={value} />
       </div>)}
     </div>
+    <ArtifactSourceDiff workspaceId={workspaceId} slug={slug} before={left} after={right} />
   </div>
 }

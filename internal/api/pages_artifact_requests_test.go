@@ -205,3 +205,32 @@ func TestArtifactRequestBusyBackoffAllowsAnotherChat(t *testing.T) {
 		t.Fatal("busy oldest request starved independent chat")
 	}
 }
+
+func TestArtifactRequestRejectsInactiveHumanBeforeDispatchAndAdmission(t *testing.T) {
+	for _, column := range []string{"suspended_at"} {
+		t.Run(column, func(t *testing.T) {
+			h, workspace, user, _ := requestFixture(t)
+			id := createArtifactRequestForTest(t, h, workspace, user, requestBody, 202)
+			receipt, err := chataudience.CaptureTrusted(t.Context(), h.db, "artifact-chat", user, nil)
+			if err != nil || receipt == nil {
+				t.Fatalf("receipt: %+v %v", receipt, err)
+			}
+			execOrFatal(t, h.db, `UPDATE users SET `+column+`='2026-10-13T00:00:00Z' WHERE id=?`, user)
+			execOrFatal(t, h.db, `UPDATE page_artifact_requests SET status='running' WHERE id=?`, id)
+			if bindArtifactRequestRun(httptest.NewRequest("POST", "/", nil), h.db, id, "artifact-run", receipt) == nil {
+				t.Fatal("inactivehuman admitted")
+			}
+			execOrFatal(t, h.db, `UPDATE page_artifact_requests SET status='queued' WHERE id=?`, id)
+			called := false
+			h.artifactDispatch = func(context.Context, string, string, string, ws.ChatMessageOption) error { called = true; return nil }
+			h.dispatchNextArtifactRequest(t.Context())
+			if called {
+				t.Fatal("inactivehuman dispatched queuedwork")
+			}
+			var state string
+			if err = h.db.QueryRow(`SELECT status FROM page_artifact_requests WHERE id=?`, id).Scan(&state); err != nil || state != "failed" {
+				t.Fatalf("queued inactivehuman request: %s %v", state, err)
+			}
+		})
+	}
+}

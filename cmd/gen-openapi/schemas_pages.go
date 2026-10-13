@@ -467,11 +467,16 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	artifactRestore["additionalProperties"] = false
 	artifactResult := obj(map[string]any{"revision": integer(), "head_rev": integer()})
 	artifactResult["required"] = []string{"revision", "head_rev"}
-	artifactDocument := obj(map[string]any{"head_rev": integer(), "revision": integer(), "html": str(), "revisions": arr(artifactRevision), "can_write": boolean()})
-	artifactDocument["required"] = []string{"head_rev", "revision", "html", "revisions", "can_write"}
-	commentAnchor := obj(map[string]any{"schema_version": map[string]any{"type": "integer", "enum": []int{1}}, "type": map[string]any{"type": "string", "enum": []string{"document"}}})
-	commentAnchor["required"] = []string{"schema_version", "type"}
-	commentAnchor["additionalProperties"] = false
+	artifactDocument := obj(map[string]any{"head_rev": integer(), "revision": integer(), "html": str(), "revisions": arr(artifactRevision), "can_write": boolean(), "can_comment": boolean()})
+	artifactDocument["required"] = []string{"head_rev", "revision", "html", "revisions", "can_write", "can_comment"}
+	documentAnchor := obj(map[string]any{"schema_version": map[string]any{"type": "integer", "enum": []int{1}}, "type": map[string]any{"type": "string", "enum": []string{"document"}}})
+	documentAnchor["required"] = []string{"schema_version", "type"}
+	documentAnchor["additionalProperties"] = false
+	pointAnchor := obj(map[string]any{"schema_version": map[string]any{"type": "integer", "enum": []int{1}}, "type": map[string]any{"type": "string", "enum": []string{"point"}}, "coordinate_space": map[string]any{"type": "string", "enum": []string{"viewport"}}, "x": map[string]any{"type": "number", "minimum": 0}, "y": map[string]any{"type": "number", "minimum": 0}, "viewport_width": map[string]any{"type": "number", "minimum": 1, "maximum": 16384}, "viewport_height": map[string]any{"type": "number", "minimum": 1, "maximum": 16384}})
+	pointAnchor["required"] = []string{"schema_version", "type", "coordinate_space", "x", "y", "viewport_width", "viewport_height"}
+	pointAnchor["additionalProperties"] = false
+	pointAnchor["description"] = "A visible viewport point, bounded by the captured dimensions. Not a DOM anchor or document-scroll coordinate. Always belongs to the specified immutable revision."
+	commentAnchor := map[string]any{"oneOf": []any{documentAnchor, pointAnchor}}
 	commentBody := map[string]any{"type": "string", "minLength": 1, "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Mentions do not authorize or start an agent."}
 	comment := obj(map[string]any{"id": str(), "body": commentBody, "author_user_id": str(), "author_name": str(), "created_at": timeString()})
 	comment["required"] = []string{"id", "body", "author_user_id", "author_name", "created_at"}
@@ -520,6 +525,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"GET /api/v1/chats/{chatId}/artifact-creation-authorization":     {Response: creationStatus},
 		"POST /api/v1/artifact-creation-authorizations/{runId}":          {Request: emptyCreationAuthorization, RequestRequired: true, Response: creationAuthorization, SuccessStatuses: []string{"200", "201"}},
 		"DELETE /api/v1/artifact-creation-authorizations/{runId}":        {Response: obj(map[string]any{}), SuccessStatuses: []string{"204"}},
+		"GET /api/v1/chats/{chatId}/artifact-results":                    {Response: obj(map[string]any{"results": arr(obj(map[string]any{"page_slug": str(), "title": str(), "revision": integer(), "created_at": timeString(), "agent_id": str(), "agent_name": str(), "run_id": str(), "on_behalf_of_user_id": str()}))})},
 		"GET /api/v1/pages/{slug}/artifact/requests":                     {Response: artifactRequestList},
 		"POST /api/v1/pages/{slug}/artifact/requests":                    {Request: artifactRequestCreate, RequestRequired: true, Response: artifactRequestAccepted, SuccessStatuses: []string{"202"}},
 		"POST /api/v1/pages/{slug}/artifact/requests/{requestId}/cancel": {Request: emptyCreationAuthorization, Response: artifactRequestCancelled, SuccessStatuses: []string{"200"}},

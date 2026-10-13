@@ -4,9 +4,9 @@ import { useEffect, useId, useState } from "react"
 import { ArtifactSendButton, ArtifactThreadRequests } from "./artifact-agent-work"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import type { ArtifactThread } from "@/hooks/use-artifact-threads"
+import type { ArtifactThread, ArtifactAnchor } from "@/hooks/use-artifact-threads"
 
-export function ArtifactThreadCard({ thread, currentRevision, canComment, canResolve, pending, uncertainReplies, onViewRevision, onReply, onResolve, onDirtyChange }: {
+export function ArtifactThreadCard({ thread, currentRevision, canComment, canResolve, pending, uncertainReplies, onViewRevision, onViewAnchor, onReply, onResolve, onDirtyChange }: {
   thread: ArtifactThread
   currentRevision: number
   canComment: boolean
@@ -14,6 +14,7 @@ export function ArtifactThreadCard({ thread, currentRevision, canComment, canRes
   pending: boolean
   uncertainReplies: { base_version: number; body: string }[]
   onViewRevision: (revision: number) => void
+  onViewAnchor?: (revision: number, anchor: ArtifactAnchor) => void
   onReply: (thread: ArtifactThread, body: string) => Promise<boolean>
   onResolve: (thread: ArtifactThread) => void
   onDirtyChange: (id: string, dirty: boolean) => void
@@ -31,9 +32,10 @@ export function ArtifactThreadCard({ thread, currentRevision, canComment, canRes
   useEffect(() => { if (!canComment) setReply("") }, [canComment])
   return <article className="space-y-3 rounded-lg border bg-background p-4" aria-label={`Thread on revision ${thread.revision}`}>
     <div className="flex flex-wrap items-center gap-2">
-      <span className="type-page-meta font-medium">Revision {thread.revision} · Whole document</span>
+      <span className="type-page-meta font-medium">Revision {thread.revision} · {thread.anchor.type === "point" ? `Viewport point (${Math.round(thread.anchor.x)}, ${Math.round(thread.anchor.y)})` : "Whole document"}</span>
       <span className="type-page-meta rounded-full bg-muted px-2 py-0.5">{thread.status === "resolved" ? "Resolved" : "Open"}</span>
       {thread.revision !== currentRevision && <Button size="sm" variant="ghost" className="ml-auto coarse:h-12" onClick={() => onViewRevision(thread.revision)}>View original revision {thread.revision}</Button>}
+      {thread.anchor.type === "point" && onViewAnchor && <Button size="sm" variant="outline" onClick={() => onViewAnchor(thread.revision, thread.anchor)}>Show comment point</Button>}
       {canResolve && <Button size="sm" variant="ghost" disabled={pending} className="coarse:h-12" onClick={() => onResolve(thread)}>{thread.status === "resolved" ? "Reopen thread" : "Resolve thread"}</Button>}
     </div>
     <ArtifactSendButton thread={thread} />

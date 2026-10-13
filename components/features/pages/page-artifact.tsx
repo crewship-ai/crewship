@@ -6,6 +6,9 @@ import { Button } from "@/components/ui/button"
 import { ArtifactAgentWorkProvider, ArtifactAgentRequests, ArtifactSendButton } from "./artifact-agent-work"
 import { ArtifactComments } from "./artifact-comments"
 import { ArtifactSource } from "./artifact-source"
+import { ContentPresence } from "./content-presence"
+import { ArtifactStaticPreview } from "./artifact-static-preview"
+import type { ArtifactAnchor } from "@/hooks/use-artifact-threads"
 import { ArtifactCompare } from "./artifact-compare"
 import { ArtifactHistory } from "./artifact-history"
 import { PageArtifactError, usePageArtifact } from "@/hooks/use-page-artifact"
@@ -13,10 +16,13 @@ import { useArtifactRevision } from "@/hooks/use-artifact-revision"
 import { staticArtifactDocument } from "@/lib/pages/artifact-static"
 
 const MAX_BYTES = 10 * 1024 * 1024
-export function PageArtifactView({ workspaceId, slug, onDirtyChange }: { workspaceId: string; slug: string; onDirtyChange?: (dirty: boolean) => void }) {
+export function PageArtifactView({ workspaceId, slug, pageId, onDirtyChange }: { workspaceId: string; slug: string; pageId?: string; onDirtyChange?: (dirty: boolean) => void }) {
   const [revision, setRevision] = useArtifactRevision()
   const { query, save } = usePageArtifact(workspaceId, slug, revision)
   const [view, setView] = useState<"preview" | "source" | "history" | "compare">("preview")
+  const [pickingPoint, setPickingPoint] = useState(false)
+  const [point, setPoint] = useState<{ revision: number; anchor: Extract<ArtifactAnchor, { type: "point" }> } | null>(null)
+  const [selectedAnchor, setSelectedAnchor] = useState<{ revision: number; anchor: ArtifactAnchor } | null>(null)
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [commentsVisited, setCommentsVisited] = useState(false)
   const [commentsDirty, setCommentsDirty] = useState(false)
@@ -31,7 +37,7 @@ export function PageArtifactView({ workspaceId, slug, onDirtyChange }: { workspa
   const artifact = query.data
   const sourceAccessDenied = query.error instanceof PageArtifactError && [401, 403, 404].includes(query.error.status)
   useEffect(() => {
-    if (sourceAccessDenied) { setDraft(null); setCommentsDirty(false) }
+    if (sourceAccessDenied) { setDraft(null); setCommentsDirty(false); setPoint(null); setSelectedAnchor(null); setPickingPoint(false) }
   }, [sourceAccessDenied])
   const document = useMemo(() => artifact ? staticArtifactDocument(artifact.html) : "", [artifact])
   const error = fileError ?? save.error?.message
@@ -61,6 +67,7 @@ export function PageArtifactView({ workspaceId, slug, onDirtyChange }: { workspa
     <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
       <span className="mr-auto text-sm font-medium">HTML artifact {artifact.head_rev > 0 && <span className="ml-2 text-xs font-normal text-muted-foreground">Revision {artifact.revision}{artifact.revision !== artifact.head_rev ? ` · latest ${artifact.head_rev}` : " · latest"}</span>}</span>
       {([["preview", Eye, "Static preview"], ["source", Code2, "Source"], ["history", History, "History"]] as const).map(([id, Icon, label]) => <Button key={id} variant={view === id ? "secondary" : "ghost"} size="sm" className="coarse:h-12" onClick={() => setView(id)} aria-pressed={view === id}><Icon className="mr-1.5 h-4 w-4" />{label}</Button>)}
+      {pageId && artifact.head_rev > 0 && <ContentPresence context={{ kind: "artifact", pageId, revision: artifact.revision }} />}
       {artifact.revisions.length > 1 && <Button variant={view === "compare" ? "secondary" : "ghost"} size="sm" className="coarse:h-12" aria-pressed={view === "compare"} onClick={() => setView("compare")}><Columns2 className="mr-1.5 h-4 w-4" />Compare</Button>}
       {artifact.head_rev > 0 && <ArtifactSendButton />}
       {artifact.head_rev > 0 && <Button variant={commentsOpen ? "secondary" : "ghost"} size="sm" className="coarse:h-12" aria-pressed={commentsOpen} onClick={() => { setCommentsVisited(true); setCommentsOpen(open => !open) }}><MessageSquare className="mr-1.5 h-4 w-4" />Comments</Button>}
@@ -70,7 +77,15 @@ export function PageArtifactView({ workspaceId, slug, onDirtyChange }: { workspa
     {query.error && <p role="alert" className="m-4 rounded-md border border-warn/30 p-3 text-sm text-warn">The artifact could not refresh. Showing the last authorized revision; drafts are preserved. <Button variant="outline" size="sm" onClick={() => void query.refetch()}>Retry artifact</Button></p>}
     {error && <p role="alert" className="m-4 rounded-md border border-destructive/30 p-3 text-sm text-destructive">{error}<Button variant="outline" size="sm" className="ml-3" onClick={() => { void query.refetch(); save.reset(); setFileError(null) }}>Review latest revision</Button></p>}
     {artifact.head_rev === 0 && draft === null && <div className="space-y-3 p-6"><h2 className="text-base font-medium">Attach an HTML artifact</h2><p className="max-w-xl text-sm text-muted-foreground">Upload a report or paste HTML source. Each save creates an immutable revision on this page.</p>{artifact.can_write && <Button variant="outline" onClick={() => { setDraftBaseRev(artifact.head_rev); setDraft(""); setView("source") }}>Paste HTML</Button>}</div>}
-    {view === "preview" && artifact.head_rev > 0 && <iframe title="Artifact static preview" sandbox="" referrerPolicy="no-referrer" srcDoc={document} className="h-[min(65vh,720px)] min-h-80 w-full border-0 bg-white" />}
+    {view === "preview" && artifact.head_rev > 0 && <>
+      <div className="flex flex-wrap gap-2 px-4 py-2">
+        {artifact.can_comment && <Button size="sm" variant="outline" disabled={commentsDirty} onClick={() => { setPickingPoint(value => !value); setPoint(null) }}>{pickingPoint ? "Cancel point selection" : "Comment on a point"}</Button>}
+        {point && <Button size="sm" variant="ghost" onClick={() => setPoint(null)}>Close point overlay</Button>}
+      </div>
+      <ArtifactStaticPreview document={document} revision={artifact.revision} picking={pickingPoint && artifact.can_comment === true} shown={point} onPick={anchor => {
+        setPoint({ revision: artifact.revision, anchor }); setSelectedAnchor({ revision: artifact.revision, anchor }); setPickingPoint(false); setCommentsVisited(true); setCommentsOpen(true)
+      }} />
+    </>}
     {view === "source" && <ArtifactSource
       html={artifact.html} draft={draft} base={draftBaseRev} head={artifact.head_rev}
       canWrite={artifact.can_write} pending={save.isPending}
@@ -91,7 +106,7 @@ export function PageArtifactView({ workspaceId, slug, onDirtyChange }: { workspa
       }}
     />}
     {artifact.head_rev > 0 && <ArtifactAgentRequests />}
-    {commentsVisited && artifact.head_rev > 0 && <div hidden={!commentsOpen}><ArtifactComments workspaceId={workspaceId} slug={slug} revision={artifact.revision} onViewRevision={selected => { setRevision(selected); setView("preview") }} onDirtyChange={setCommentsDirty} /></div>}
+    {commentsVisited && artifact.head_rev > 0 && <div hidden={!commentsOpen}><ArtifactComments workspaceId={workspaceId} slug={slug} revision={artifact.revision} onViewRevision={selected => { setRevision(selected); setView("preview") }} onDirtyChange={setCommentsDirty} selectedAnchor={selectedAnchor} onAnchorConsumed={() => setSelectedAnchor(null)} onViewAnchor={(selected, anchor) => { setRevision(selected); setView("preview"); setPickingPoint(false); setPoint(anchor.type === "point" ? { revision: selected, anchor } : null) }} /></div>}
   </section>
   return artifact.head_rev > 0 ? <ArtifactAgentWorkProvider workspaceId={workspaceId} slug={slug} revision={artifact.revision} head={artifact.head_rev} onViewRevision={selected => { setRevision(selected); setView("preview") }} onDirtyChange={setAgentDraftDirty}>{content}</ArtifactAgentWorkProvider> : content
 }

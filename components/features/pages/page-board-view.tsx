@@ -1,6 +1,10 @@
 "use client"
 import dynamic from "next/dynamic"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { Collaborator, SocketId } from "@excalidraw/excalidraw/types"
+import { useIssuePeople } from "@/hooks/use-issue-people"
+import { useContentPresence } from "@/hooks/use-content-presence"
+import { ContentPresenceStatus } from "./content-presence"
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types"
 import { usePageBoard, PageBoardError, type PageBoard } from "@/hooks/use-page-board"
 import { manualBoardBatch } from "@/lib/boards/manual-batch"
@@ -15,7 +19,7 @@ const Editor = dynamic(async () => {
 }, { ssr: false, loading: () => <p role="status" className="p-6 text-sm">Loading drawing tools…</p> })
 const placementId = (id: string) => `board-placement:${id}`
 const allowed = new Set(["rectangle", "ellipse", "diamond", "line", "arrow", "freedraw", "text", "frame"])
-export function PageBoardView({ workspaceId, slug, onDirtyChange }: { workspaceId: string; slug: string; onDirtyChange?: (dirty: boolean) => void }) {
+export function PageBoardView({ workspaceId, slug, pageId, onDirtyChange }: { workspaceId: string; slug: string; pageId?: string; onDirtyChange?: (dirty: boolean) => void }) {
   const { query, write } = usePageBoard(workspaceId, slug)
   const [base, setBase] = useState<PageBoard | null>(null)
   const [draft, setDraft] = useState<readonly ExcalidrawElement[] | null>(null)
@@ -45,6 +49,19 @@ export function PageBoardView({ workspaceId, slug, onDirtyChange }: { workspaceI
     setDraft(structuredClone(elements))
   }, [generation])
   useEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false) }, [dirty, onDirtyChange])
+  const presenceContext = { kind: "board" as const, pageId: pageId ?? "", boardSeq: base?.seq ?? 0 }
+  const presence = useContentPresence(presenceContext, Boolean(pageId && query.data))
+  const { people } = useIssuePeople(workspaceId, presence.available)
+  const collaborators = useMemo(() => {
+    const result = new Map<SocketId, Collaborator>()
+    for (const member of presence.members) {
+      if (member.user_id === presence.currentUserId || member.cursor?.coordinate_space !== "board") continue
+      result.set(member.connection_id as SocketId, { id: member.user_id, username: people.find(person => person.id === member.user_id)?.name ?? "Viewer", pointer: { x: member.cursor.x, y: member.cursor.y, tool: "pointer" } })
+    }
+    return result
+  }, [presence.members, presence.currentUserId, people])
+  const sendCursor = presence.setCursor
+  const onPointer = useCallback((x: number, y: number) => sendCursor({ x, y, coordinate_space: "board" }), [sendCursor])
   const denied = query.error instanceof PageBoardError && [401, 403, 404].includes(query.error.status)
   useEffect(() => { if (denied) { epoch.current++; setBase(null); setDraft(null); setPinning(false) } }, [denied])
   useEffect(() => { if (query.data && !dirty && !write.isPending && query.data !== base) replace(query.data) }, [query.data, dirty, write.isPending, base, replace])
@@ -59,12 +76,13 @@ export function PageBoardView({ workspaceId, slug, onDirtyChange }: { workspaceI
       if (!batch || !dirty) return
       try { replace(await write.mutateAsync({ base_seq: base.seq, operation: { kind: "batch", batch: { ...batch, placement_updates, placement_deletes } } })) } catch { /* Preserve the original draft and CAS base. */ }
     }} onReload={() => { if (dirty) setConfirmReload(true); else void reload() }} onPin={() => { write.reset(); setPinning(true) }} />
+    {pageId && <div className="px-4 pb-3"><ContentPresenceStatus presence={presence} context={presenceContext} /></div>}
     {query.error && <p role="alert" className="px-4 pb-3 text-sm text-warn">Could not refresh board access or changes. Showing the last authorized snapshot. {query.error.message}</p>}
     {query.data && query.data.seq !== base.seq && dirty && <p role="status" className="px-4 pb-3 text-sm text-warn">New changes are available. Your drawing stays on sequence {base.seq}; saving will check for conflicts.</p>}
     {write.error && !pinning && <p role="alert" className="px-4 pb-3 text-sm text-destructive">{write.error.message} Your unsaved drawing is retained. Reload latest deliberately to discard it.</p>}
     {invalid && <p role="alert" className="px-4 pb-3 text-sm text-destructive">Only local drawing shapes, text and approved artifact placements can be saved. Remove unsupported links or embeds. Artifact pins support moving and resizing; remove rotation, groups or frame membership before saving.</p>}
     {!authorization.can_write && <p className="px-4 pb-3 text-sm text-muted-foreground">Read-only board. Your access does not allow saving changes.</p>}
-    <Editor key={generation} base={base} authorization={authorization} workspaceId={workspaceId} disabled={!authorization.can_write || write.isPending} onChange={onChange} />
+    <Editor key={generation} base={base} authorization={authorization} workspaceId={workspaceId} disabled={!authorization.can_write || write.isPending} onChange={onChange} collaborators={collaborators} onPointer={onPointer} />
     <div className="space-y-2 border-t p-4"><p className="text-xs text-muted-foreground">Undo applies to the current unsaved drawing. Saving or reloading resets drawing history. Images and live collaboration are not available yet.</p>{authorization.placements.map(item => <BoardPlacementLink key={item.id} workspaceId={workspaceId} placement={item} />)}</div>
     {pinning && <BoardPinDialog workspaceId={workspaceId} pending={write.isPending} error={write.error?.message ?? null} onClose={() => { setPinning(false); write.reset() }} onPin={async (source_page_slug, source_revision) => {
       try { replace(await write.mutateAsync({ base_seq: base.seq, operation: { kind: "pin", source_page_slug, source_revision, x: 80 + base.placements.length * 40, y: 100 + base.placements.length * 40, width: 420, height: 300 } })); setPinning(false) } catch { /* The selected source stays available for explicit retry. */ }

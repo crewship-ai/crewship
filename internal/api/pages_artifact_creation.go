@@ -336,7 +336,7 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 		replyInternalError(w, h.logger, "delegate created artifact run", err)
 		return
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,created_at,author_agent_id,author_run_id) VALUES (?,?,1,?,?,?,?,?,?,?)`, generateCUID(), pageID, sha, a.HumanUserID, req.MutationID, attachmentDigest([]byte(fmt.Sprintf("%d/%t/%d/%s", 0, false, 0, sha))), stamp, a.AgentID, a.RunID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,created_at,author_agent_id,author_run_id,source_chat_id) VALUES (?,?,1,?,?,?,?,?,?,?,?)`, generateCUID(), pageID, sha, a.HumanUserID, req.MutationID, attachmentDigest([]byte(fmt.Sprintf("%d/%t/%d/%s", 0, false, 0, sha))), stamp, a.AgentID, a.RunID, a.ChatID); err != nil {
 		replyInternalError(w, h.logger, "save created artifact revision", err)
 		return
 	}

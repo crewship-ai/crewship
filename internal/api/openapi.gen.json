@@ -56047,6 +56047,184 @@
         "x-crewship-read-only": true
       }
     },
+    "/api/v1/chats/{chatId}/artifact-results": {
+      "get": {
+        "description": "List chat artifact results (GET /api/v1/chats/{chatId}/artifact-results).",
+        "operationId": "get_api_v1_chats_chatId_artifact-results",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {
+                      "items": {
+                        "properties": {
+                          "agent_id": {
+                            "type": "string"
+                          },
+                          "agent_name": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "on_behalf_of_user_id": {
+                            "type": "string"
+                          },
+                          "page_slug": {
+                            "type": "string"
+                          },
+                          "revision": {
+                            "type": "integer"
+                          },
+                          "run_id": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List chat artifact results",
+        "tags": [
+          "chats"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/chats/{chatId}/execution-profile": {
       "get": {
         "description": "Get chat execution profile (GET /api/v1/chats/{chatId}/execution-profile).",
@@ -115535,6 +115713,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "can_comment": {
+                      "type": "boolean"
+                    },
                     "can_write": {
                       "type": "boolean"
                     },
@@ -115585,7 +115766,8 @@
                     "revision",
                     "html",
                     "revisions",
-                    "can_write"
+                    "can_write",
+                    "can_comment"
                   ],
                   "type": "object"
                 }
@@ -117386,26 +117568,82 @@
                       "items": {
                         "properties": {
                           "anchor": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "schema_version": {
-                                "enum": [
-                                  1
+                            "oneOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "schema_version": {
+                                    "enum": [
+                                      1
+                                    ],
+                                    "type": "integer"
+                                  },
+                                  "type": {
+                                    "enum": [
+                                      "document"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "schema_version",
+                                  "type"
                                 ],
-                                "type": "integer"
+                                "type": "object"
                               },
-                              "type": {
-                                "enum": [
-                                  "document"
+                              {
+                                "additionalProperties": false,
+                                "description": "A visible viewport point, bounded by the captured dimensions. Not a DOM anchor or document-scroll coordinate. Always belongs to the specified immutable revision.",
+                                "properties": {
+                                  "coordinate_space": {
+                                    "enum": [
+                                      "viewport"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "schema_version": {
+                                    "enum": [
+                                      1
+                                    ],
+                                    "type": "integer"
+                                  },
+                                  "type": {
+                                    "enum": [
+                                      "point"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "viewport_height": {
+                                    "maximum": 16384,
+                                    "minimum": 1,
+                                    "type": "number"
+                                  },
+                                  "viewport_width": {
+                                    "maximum": 16384,
+                                    "minimum": 1,
+                                    "type": "number"
+                                  },
+                                  "x": {
+                                    "minimum": 0,
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "minimum": 0,
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "schema_version",
+                                  "type",
+                                  "coordinate_space",
+                                  "x",
+                                  "y",
+                                  "viewport_width",
+                                  "viewport_height"
                                 ],
-                                "type": "string"
+                                "type": "object"
                               }
-                            },
-                            "required": [
-                              "schema_version",
-                              "type"
-                            ],
-                            "type": "object"
+                            ]
                           },
                           "applied_version": {
                             "type": "integer"
@@ -117655,26 +117893,82 @@
                 "additionalProperties": false,
                 "properties": {
                   "anchor": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "schema_version": {
-                        "enum": [
-                          1
+                    "oneOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "schema_version": {
+                            "enum": [
+                              1
+                            ],
+                            "type": "integer"
+                          },
+                          "type": {
+                            "enum": [
+                              "document"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "schema_version",
+                          "type"
                         ],
-                        "type": "integer"
+                        "type": "object"
                       },
-                      "type": {
-                        "enum": [
-                          "document"
+                      {
+                        "additionalProperties": false,
+                        "description": "A visible viewport point, bounded by the captured dimensions. Not a DOM anchor or document-scroll coordinate. Always belongs to the specified immutable revision.",
+                        "properties": {
+                          "coordinate_space": {
+                            "enum": [
+                              "viewport"
+                            ],
+                            "type": "string"
+                          },
+                          "schema_version": {
+                            "enum": [
+                              1
+                            ],
+                            "type": "integer"
+                          },
+                          "type": {
+                            "enum": [
+                              "point"
+                            ],
+                            "type": "string"
+                          },
+                          "viewport_height": {
+                            "maximum": 16384,
+                            "minimum": 1,
+                            "type": "number"
+                          },
+                          "viewport_width": {
+                            "maximum": 16384,
+                            "minimum": 1,
+                            "type": "number"
+                          },
+                          "x": {
+                            "minimum": 0,
+                            "type": "number"
+                          },
+                          "y": {
+                            "minimum": 0,
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "schema_version",
+                          "type",
+                          "coordinate_space",
+                          "x",
+                          "y",
+                          "viewport_width",
+                          "viewport_height"
                         ],
-                        "type": "string"
+                        "type": "object"
                       }
-                    },
-                    "required": [
-                      "schema_version",
-                      "type"
-                    ],
-                    "type": "object"
+                    ]
                   },
                   "body": {
                     "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Mentions do not authorize or start an agent.",
@@ -117710,26 +118004,82 @@
                 "schema": {
                   "properties": {
                     "anchor": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "schema_version": {
-                          "enum": [
-                            1
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "document"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type"
                           ],
-                          "type": "integer"
+                          "type": "object"
                         },
-                        "type": {
-                          "enum": [
-                            "document"
+                        {
+                          "additionalProperties": false,
+                          "description": "A visible viewport point, bounded by the captured dimensions. Not a DOM anchor or document-scroll coordinate. Always belongs to the specified immutable revision.",
+                          "properties": {
+                            "coordinate_space": {
+                              "enum": [
+                                "viewport"
+                              ],
+                              "type": "string"
+                            },
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "point"
+                              ],
+                              "type": "string"
+                            },
+                            "viewport_height": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "viewport_width": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "x": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "y": {
+                              "minimum": 0,
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type",
+                            "coordinate_space",
+                            "x",
+                            "y",
+                            "viewport_width",
+                            "viewport_height"
                           ],
-                          "type": "string"
+                          "type": "object"
                         }
-                      },
-                      "required": [
-                        "schema_version",
-                        "type"
-                      ],
-                      "type": "object"
+                      ]
                     },
                     "applied_version": {
                       "type": "integer"
@@ -117829,26 +118179,82 @@
                 "schema": {
                   "properties": {
                     "anchor": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "schema_version": {
-                          "enum": [
-                            1
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "document"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type"
                           ],
-                          "type": "integer"
+                          "type": "object"
                         },
-                        "type": {
-                          "enum": [
-                            "document"
+                        {
+                          "additionalProperties": false,
+                          "description": "A visible viewport point, bounded by the captured dimensions. Not a DOM anchor or document-scroll coordinate. Always belongs to the specified immutable revision.",
+                          "properties": {
+                            "coordinate_space": {
+                              "enum": [
+                                "viewport"
+                              ],
+                              "type": "string"
+                            },
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "point"
+                              ],
+                              "type": "string"
+                            },
+                            "viewport_height": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "viewport_width": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "x": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "y": {
+                              "minimum": 0,
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type",
+                            "coordinate_space",
+                            "x",
+                            "y",
+                            "viewport_width",
+                            "viewport_height"
                           ],
-                          "type": "string"
+                          "type": "object"
                         }
-                      },
-                      "required": [
-                        "schema_version",
-                        "type"
-                      ],
-                      "type": "object"
+                      ]
                     },
                     "applied_version": {
                       "type": "integer"
@@ -118200,26 +118606,82 @@
                 "schema": {
                   "properties": {
                     "anchor": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "schema_version": {
-                          "enum": [
-                            1
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "document"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type"
                           ],
-                          "type": "integer"
+                          "type": "object"
                         },
-                        "type": {
-                          "enum": [
-                            "document"
+                        {
+                          "additionalProperties": false,
+                          "description": "A visible viewport point, bounded by the captured dimensions. Not a DOM anchor or document-scroll coordinate. Always belongs to the specified immutable revision.",
+                          "properties": {
+                            "coordinate_space": {
+                              "enum": [
+                                "viewport"
+                              ],
+                              "type": "string"
+                            },
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "point"
+                              ],
+                              "type": "string"
+                            },
+                            "viewport_height": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "viewport_width": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "x": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "y": {
+                              "minimum": 0,
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type",
+                            "coordinate_space",
+                            "x",
+                            "y",
+                            "viewport_width",
+                            "viewport_height"
                           ],
-                          "type": "string"
+                          "type": "object"
                         }
-                      },
-                      "required": [
-                        "schema_version",
-                        "type"
-                      ],
-                      "type": "object"
+                      ]
                     },
                     "applied_version": {
                       "type": "integer"
@@ -118573,26 +119035,82 @@
                 "schema": {
                   "properties": {
                     "anchor": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "schema_version": {
-                          "enum": [
-                            1
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "document"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type"
                           ],
-                          "type": "integer"
+                          "type": "object"
                         },
-                        "type": {
-                          "enum": [
-                            "document"
+                        {
+                          "additionalProperties": false,
+                          "description": "A visible viewport point, bounded by the captured dimensions. Not a DOM anchor or document-scroll coordinate. Always belongs to the specified immutable revision.",
+                          "properties": {
+                            "coordinate_space": {
+                              "enum": [
+                                "viewport"
+                              ],
+                              "type": "string"
+                            },
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "point"
+                              ],
+                              "type": "string"
+                            },
+                            "viewport_height": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "viewport_width": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "x": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "y": {
+                              "minimum": 0,
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type",
+                            "coordinate_space",
+                            "x",
+                            "y",
+                            "viewport_width",
+                            "viewport_height"
                           ],
-                          "type": "string"
+                          "type": "object"
                         }
-                      },
-                      "required": [
-                        "schema_version",
-                        "type"
-                      ],
-                      "type": "object"
+                      ]
                     },
                     "applied_version": {
                       "type": "integer"
@@ -118692,26 +119210,82 @@
                 "schema": {
                   "properties": {
                     "anchor": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "schema_version": {
-                          "enum": [
-                            1
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "document"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type"
                           ],
-                          "type": "integer"
+                          "type": "object"
                         },
-                        "type": {
-                          "enum": [
-                            "document"
+                        {
+                          "additionalProperties": false,
+                          "description": "A visible viewport point, bounded by the captured dimensions. Not a DOM anchor or document-scroll coordinate. Always belongs to the specified immutable revision.",
+                          "properties": {
+                            "coordinate_space": {
+                              "enum": [
+                                "viewport"
+                              ],
+                              "type": "string"
+                            },
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "point"
+                              ],
+                              "type": "string"
+                            },
+                            "viewport_height": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "viewport_width": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "x": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "y": {
+                              "minimum": 0,
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type",
+                            "coordinate_space",
+                            "x",
+                            "y",
+                            "viewport_width",
+                            "viewport_height"
                           ],
-                          "type": "string"
+                          "type": "object"
                         }
-                      },
-                      "required": [
-                        "schema_version",
-                        "type"
-                      ],
-                      "type": "object"
+                      ]
                     },
                     "applied_version": {
                       "type": "integer"
@@ -119100,6 +119674,15 @@
                       "items": {
                         "additionalProperties": false,
                         "properties": {
+                          "author_agent_id": {
+                            "type": "string"
+                          },
+                          "author_run_id": {
+                            "type": "string"
+                          },
+                          "author_user_id": {
+                            "type": "string"
+                          },
                           "deleted": {
                             "type": "boolean"
                           },
@@ -119107,7 +119690,7 @@
                             "oneOf": [
                               {
                                 "additionalProperties": true,
-                                "description": "Validated Excalidraw 0.18.1 drawing element. Images, URLs, embeddables and customData are forbidden; see the versioned Board profile.",
+                                "description": "Validated Excalidraw 0.18.1 drawing element. Images reference Board-owned immutable files; URLs, arbitrary embeddables and customData are forbidden; see the versioned Board profile.",
                                 "type": "object"
                               },
                               {
@@ -119364,6 +119947,15 @@
                       "items": {
                         "additionalProperties": false,
                         "properties": {
+                          "author_agent_id": {
+                            "type": "string"
+                          },
+                          "author_run_id": {
+                            "type": "string"
+                          },
+                          "author_user_id": {
+                            "type": "string"
+                          },
                           "deleted": {
                             "type": "boolean"
                           },
@@ -119371,7 +119963,7 @@
                             "oneOf": [
                               {
                                 "additionalProperties": true,
-                                "description": "Validated Excalidraw 0.18.1 drawing element. Images, URLs, embeddables and customData are forbidden; see the versioned Board profile.",
+                                "description": "Validated Excalidraw 0.18.1 drawing element. Images reference Board-owned immutable files; URLs, arbitrary embeddables and customData are forbidden; see the versioned Board profile.",
                                 "type": "object"
                               },
                               {
@@ -119695,7 +120287,7 @@
                       "properties": {
                         "element": {
                           "additionalProperties": true,
-                          "description": "Validated Excalidraw 0.18.1 drawing element. Images, URLs, embeddables and customData are forbidden; see the versioned Board profile.",
+                          "description": "Validated Excalidraw 0.18.1 drawing element. Images reference Board-owned immutable files; URLs, arbitrary embeddables and customData are forbidden; see the versioned Board profile.",
                           "type": "object"
                         },
                         "expected_rev": {
@@ -119958,6 +120550,835 @@
           "pages"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/board/delegations": {
+      "post": {
+        "description": "Create page board delegations (POST /api/v1/pages/{slug}/board/delegations).",
+        "operationId": "post_api_v1_pages_slug_board_delegations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "run_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "run_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "agent_id": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "run_id",
+                    "agent_id",
+                    "expires_at",
+                    "scope"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create page board delegations",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/board/delegations/{runId}": {
+      "delete": {
+        "description": "Delete page board delegation (DELETE /api/v1/pages/{slug}/board/delegations/{runId}).",
+        "operationId": "delete_api_v1_pages_slug_board_delegations_runId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Delete page board delegation",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/board/files": {
+      "post": {
+        "description": "Create page board files (POST /api/v1/pages/{slug}/board/files).",
+        "operationId": "post_api_v1_pages_slug_board_files",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "base_seq",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mutation_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "image/jpeg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "content_type": {
+                      "type": "string"
+                    },
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "height": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "result_seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "width": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "file_id",
+                    "content_type",
+                    "width",
+                    "height",
+                    "bytes",
+                    "seq",
+                    "result_seq"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "content_type": {
+                      "type": "string"
+                    },
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "height": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "result_seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "width": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "file_id",
+                    "content_type",
+                    "width",
+                    "height",
+                    "bytes",
+                    "seq",
+                    "result_seq"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create page board files",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/board/files/{fileId}": {
+      "get": {
+        "description": "Get page board file (GET /api/v1/pages/{slug}/board/files/{fileId}).",
+        "operationId": "get_api_v1_pages_slug_board_files_fileId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "fileId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page board file",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/pages/{slug}/board/placements": {
@@ -161926,6 +163347,24 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "500": {
             "content": {

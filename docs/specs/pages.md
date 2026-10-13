@@ -60,6 +60,34 @@ placeholders, not screenshots of iframe content. Production selection export,
 live collaboration, agent Board editing and untrusted Mermaid conversion
 remain subsequent implementation work.
 
+## Private content presence
+
+Authenticated humans subscribe to dedicated `artifact:{page_id}` or
+`board:{page_id}` WebSocket rooms. The ordinary `page:` channel still carries
+identifiers only. A central Page resolver checks current workspace membership,
+Page type and live read grants at subscription and before every delivered
+frame; the existing reauthorization sweep removes revoked subscriptions within
+30 seconds. An agent context cannot mint a human WebSocket ticket.
+
+Clients send `presence` with `schema_version: 1` and either an artifact
+`revision` or a `board_seq`. Optional cursor coordinates are explicitly in the
+Board scene or an artifact viewport. The server supplies connection/user
+identities and emits bounded `presence.snapshot` lists; client identity fields,
+content and arbitrary payload keys are rejected. The UI only renders Board
+cursors at the same saved sequence and clears disconnected/stale presence.
+Artifact presence currently shows viewers and their revision, without claiming
+cursor access inside a sandboxed iframe.
+
+Presence is ephemeral process memory: heartbeat every 5 seconds, expiry after
+15 seconds, at most 64 room members, four connections per user/room, eight
+content subscriptions per connection and 1,000 memberships overall. Updates are
+limited to 10/second per connection and user/room; snapshot fanout is bounded
+to 20/second per room and 200/second overall. Dropped transient updates recover
+on the next heartbeat. No cursor movement writes to the database. Multiple
+server replicas still require a shared presence transport and the platform's
+writer migration; these rooms do not make the current single-writer platform
+horizontally writable.
+
 ## HTML artifacts: current first slice
 
 A human-owned empty Page can hold an immutable history of HTML documents.
@@ -112,7 +140,7 @@ with an `.html.txt` filename. This static presentation boundary does not claim
 to safely execute arbitrary interactive HTML.
 
 Revision-bound discussion threads are stored separately from artifact source.
-Human Page commenters can start a whole-document thread and reply; editors can
+Human Page commenters can start a revision-bound document or viewport-point thread and reply; editors can
 also resolve and reopen. Readers can view discussions. The `comment` grant is
 available to users, crews and the workspace, and never grants edit, production
 or agent-dispatch authority. Agent comment grants are not enabled. Thread writes require an expected version and an
@@ -131,8 +159,10 @@ run stop. Restored request history cannot restart old work. A separate live-chat
 control permits one private artifact from that specific trusted run; creation
 is off by default. The agent's operational prompt documents the sidecar protocol.
 
-Point/element anchors, presence, live collaborative Board editing
-and interactive runtime are not part of this implemented slice. The runtime
+DOM element anchors, live collaborative Board editing and interactive runtime
+are not part of this implemented slice. Static point capture reloads the preview
+to the top, records CSS viewport dimensions, and never silently repositions a
+point onto another revision or responsive layout. The runtime
 matrix measures known iframe unresponsiveness in Firefox/WebKit explicitly;
 a passing capability experiment is not authorization to enable scripts. The
 separate-tab experiment and sanitized production preview remain tested in all

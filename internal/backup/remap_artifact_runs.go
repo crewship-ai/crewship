@@ -17,6 +17,8 @@ func remapArtifactCreationRuns(dump *DBDump) {
 	}
 	for _, ref := range []struct{ table, column string }{
 		{"page_artifact_creations", "run_id"},
+		{"page_board_elements", "author_run_id"},
+		{"page_board_mutations", "author_run_id"},
 		{"page_artifact_revisions", "author_run_id"},
 		{"page_artifact_mutation_receipts", "author_run_id"},
 		{"page_artifact_requests", "run_id"},

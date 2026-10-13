@@ -52,6 +52,9 @@ import (
 
 func (r *Router) registerPageRoutes() {
 	p := NewPageHandler(r.db, r.hub, r.logger).SetJournal(r.Journal())
+	if r.hub != nil {
+		r.hub.SetPageContentAuthorizer(p.CanReadPageContent)
+	}
 	p.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
 	// Held on the Router so cmd_start can reach THIS instance: it owns the
 	// create/update/delete paths that write wake-gate rules, and the freshness
@@ -117,6 +120,14 @@ func (r *Router) registerPageRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/board/placements", roleSelf, p.AddBoardPlacement)
 	// openapi: responses 200,400,401,403,404,409,413,422,429,500
 	r.authedMut("DELETE", "/api/v1/pages/{slug}/board/placements/{placementId}", roleSelf, p.DeleteBoardPlacement)
+	// openapi: query base_seq:integer! mutation_id:string!; responses 200,201,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/files", roleSelf, p.UploadBoardFile)
+	// openapi: responses 200,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/board/files/{fileId}", authed(wsCtx(http.HandlerFunc(p.GetBoardFile))))
+	// openapi: responses 200,201,400,401,403,404,413,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/delegations", roleSelf, p.GrantBoardRun)
+	// openapi: responses 204,401,403,404,500
+	r.authedMut("DELETE", "/api/v1/pages/{slug}/board/delegations/{runId}", roleSelf, p.RevokeBoardRun)
 	// openapi: query revision:integer; responses 200,400,401,404,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/artifact", authed(wsCtx(http.HandlerFunc(p.GetArtifact))))
 	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
@@ -147,6 +158,8 @@ func (r *Router) registerPageRoutes() {
 	r.authedMut("DELETE", "/api/v1/artifact-creation-authorizations/{runId}", roleSelf, p.RevokeArtifactCreation)
 	// openapi: responses 200,401,403,404,500
 	r.mux.Handle("GET /api/v1/chats/{chatId}/artifact-creation-authorization", authed(wsCtx(http.HandlerFunc(p.ArtifactCreationStatus))))
+	// openapi: responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/chats/{chatId}/artifact-results", authed(wsCtx(http.HandlerFunc(p.ListChatArtifactResults))))
 	r.authedMut("POST", "/api/v1/pages", roleInline, p.Create)
 	r.authedMut("PATCH", "/api/v1/pages/{slug}", roleSelf, p.Update)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}", roleSelf, p.Delete)

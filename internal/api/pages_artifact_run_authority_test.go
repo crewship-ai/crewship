@@ -71,6 +71,8 @@ func TestArtifactRunPublicationRefusesStaleAuthority(t *testing.T) {
 		{"membership epoch", `UPDATE workspace_members SET access_revision=access_revision+1`},
 		{"chat epoch", `UPDATE chats SET authority_revision=authority_revision+1`},
 		{"removed human", `DELETE FROM workspace_members`},
+		{"suspended human", `UPDATE users SET suspended_at='2026-10-13T00:00:00Z' WHERE id=(SELECT owner_user_id FROM pages WHERE slug='report')`},
+
 		{"deleted workspace", `UPDATE workspaces SET deleted_at='2026-01-01T00:00:00Z'`},
 		{"deleted crew", `UPDATE crews SET deleted_at='2026-01-01T00:00:00Z' WHERE id='artifact-crew'`},
 		{"deleted agent", `UPDATE agents SET deleted_at='2026-01-01T00:00:00Z' WHERE id='artifact-agent'`},
@@ -159,5 +161,20 @@ func TestArtifactRunRevocationDuringUpload(t *testing.T) {
 	var count int
 	if err := h.db.QueryRow(`SELECT COUNT(*) FROM page_artifact_revisions WHERE page_id=?`, page).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("revoked upload committed: %d %v", count, err)
+	}
+}
+
+func TestArtifactCreationRejectsInactivePrincipal(t *testing.T) {
+	for _, column := range []string{"suspended_at"} {
+		t.Run(column, func(t *testing.T) {
+			h, workspace, user, _, token := artifactRunFixture(t)
+			artifactExpect(t, artifactCreationOptIn(t, h, workspace, user, "POST"), 201)
+			execOrFatal(t, h.db, `UPDATE users SET `+column+`='2026-10-13T00:00:00Z' WHERE id=?`, user)
+			artifactExpect(t, artifactCreateAgent(t, h, workspace, token, creationBody), 403)
+			var count int
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM pages WHERE slug='agent-created'`).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("inactiveprincipal created: %d %v", count, err)
+			}
+		})
 	}
 }

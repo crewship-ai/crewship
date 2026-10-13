@@ -68,6 +68,17 @@ beforeEach(() => {
 afterEach(() => { cleanup(); for (const client of clients.splice(0)) client.clear() })
 
 describe("artifact revision comment threads", () => {
+  it("posts the captured viewport anchor unchanged and keeps its original revision", async () => {
+    const anchor = { schema_version: 1 as const, type: "point" as const, coordinate_space: "viewport" as const, x: 120, y: 90, viewport_width: 800, viewport_height: 500 }
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); clients.push(client)
+    const consumed = vi.fn()
+    render(<QueryClientProvider client={client}><ArtifactComments workspaceId="ws1" slug="report" revision={2} selectedAnchor={{ revision: 1, anchor }} onAnchorConsumed={consumed} onViewRevision={vi.fn()} onDirtyChange={vi.fn()} /></QueryClientProvider>)
+    fireEvent.change(await screen.findByLabelText("New thread"), { target: { value: "Clarify this point." } })
+    fireEvent.click(screen.getByRole("button", { name: "Post comment" }))
+    await waitFor(() => expect(consumed).toHaveBeenCalledOnce())
+    expect(requests[0].body).toMatchObject({ revision: 1, anchor })
+  })
+
   it("posts a document anchor to the revision where drafting began, even after preview changes", async () => {
     const view = mount(1)
     fireEvent.change(await screen.findByLabelText("New thread"), { target: { value: "Keep this with the first revision." } })

@@ -52,6 +52,8 @@ const (
 // The keys are derived mechanically from the source (see routeKeysFromSource),
 // so this table cannot drift from the router without the test failing.
 var sidecarRouteGuards = map[string]routeGuardKind{
+	"POST /boards/ /batches":      guardHandlerIdentity,
+	"GET /boards/":                guardHandlerIdentity,
 	"POST /artifacts":             guardHandlerIdentity,
 	"POST /artifacts/ /revisions": guardHandlerIdentity,
 	"GET /artifacts/":             guardHandlerIdentity,

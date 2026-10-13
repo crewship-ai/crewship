@@ -12,6 +12,11 @@ func TestPageCommentGrantDiscussionWithoutWriteOrDispatch(t *testing.T) {
 	h, _, ws, owner, pageID := discussionFixture(t)
 	pagesSeedUser(t, h, ws, "commenter", "commenter@example.com", "MEMBER")
 	pagesGrant(t, h, ws, owner, "report", `{"subject_type":"user","subject":"commenter@example.com","level":"comment"}`)
+	source := artifactCall(t, h, ws, "commenter", "MEMBER", "GET", "", "")
+	artifactExpect(t, source, 200)
+	if !strings.Contains(source.Body.String(), `"can_comment":true`) || !strings.Contains(source.Body.String(), `"can_write":false`) {
+		t.Fatal("commenter artifact capabilities incorrect: " + source.Body.String())
+	}
 	rr := artifactDiscussionCall(t, h, ws, "commenter", "MEMBER", "list", "", nil)
 	artifactExpect(t, rr, 200)
 	if !strings.Contains(rr.Body.String(), `"can_comment":true`) || !strings.Contains(rr.Body.String(), `"can_resolve":false`) {
@@ -110,5 +115,55 @@ func TestPageCommentGrantMigrationPreservesExistingRows(t *testing.T) {
 	}
 	if before != after {
 		t.Fatalf("existing grants changed %q -> %q", before, after)
+	}
+}
+
+func TestPageCommentGrantArtifactReadCapabilities(t *testing.T) {
+	h, _, ws, user, _ := discussionFixture(t)
+	pagesSeedUser(t, h, ws, "plain-reader", "plain-reader@example.com", "MEMBER")
+	pagesGrant(t, h, ws, user, "report", `{"subject_type":"user","subject":"plain-reader@example.com","level":"read"}`)
+	rr := artifactCall(t, h, ws, "plain-reader", "MEMBER", "GET", "", "")
+	artifactExpect(t, rr, 200)
+	if !strings.Contains(rr.Body.String(), `"can_comment":false`) {
+		t.Fatal("read implied comment")
+	}
+	rr = artifactCall(t, h, ws, user, "OWNER", "GET", "", "")
+	artifactExpect(t, rr, 200)
+	if !strings.Contains(rr.Body.String(), `"can_comment":true`) {
+		t.Fatal("owner cannot comment")
+	}
+}
+
+func TestPageCommentGrantAgentReadNeverClaimsCommentAuthority(t *testing.T) {
+	h, workspace, _, _, token := artifactRunFixture(t)
+	artifactExpect(t, artifactAgentSave(t, h, workspace, token, `{"html":"<p>agent</p>","base_rev":0,"mutation_id":"first"}`), 201)
+	r := httptest.NewRequest("GET", "/", nil)
+	r.SetPathValue("slug", "report")
+	r.Header.Set("Authorization", "Bearer "+token)
+	ctx := context.WithValue(r.Context(), ctxInternalTokenWS, workspace)
+	ctx = context.WithValue(ctx, ctxInternalTokenCrew, "artifact-crew")
+	rr := httptest.NewRecorder()
+	h.GetArtifactAgent(rr, r.WithContext(ctx))
+	artifactExpect(t, rr, 200)
+	if !strings.Contains(rr.Body.String(), `"can_comment":false`) {
+		t.Fatal("agent on behalf of human received comment capability")
+	}
+}
+
+func TestPageGrantsInactiveIssuerDoesNotDelegateAuthority(t *testing.T) {
+	for _, column := range []string{"suspended_at"} {
+		t.Run(column, func(t *testing.T) {
+			h, _, ws, owner, _ := discussionFixture(t)
+			pagesSeedUser(t, h, ws, "grant-admin", "grant-admin@example.com", "ADMIN")
+			pagesSeedUser(t, h, ws, "commenter", "commenter@example.com", "MEMBER")
+			pagesGrant(t, h, ws, "grant-admin", "report", `{"subject_type":"user","subject":"commenter@example.com","level":"comment"}`)
+			rr := artifactDiscussionCall(t, h, ws, "commenter", "MEMBER", "list", "", nil)
+			artifactExpect(t, rr, 200)
+			execOrFatal(t, h.db, `UPDATE users SET `+column+`='2026-10-13T00:00:00Z' WHERE id='grant-admin'`)
+			artifactExpect(t, artifactDiscussionCall(t, h, ws, "commenter", "MEMBER", "list", "", nil), 404)
+			// Another active owner may issue a fresh grant; no role is widened.
+			pagesGrant(t, h, ws, owner, "report", `{"subject_type":"user","subject":"commenter@example.com","level":"comment"}`)
+			artifactExpect(t, artifactDiscussionCall(t, h, ws, "commenter", "MEMBER", "list", "", nil), 200)
+		})
 	}
 }

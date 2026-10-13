@@ -139,7 +139,7 @@ func ValidateBoardScene(scene BoardScene) error {
 		for _, binding := range []*BoardBinding{element.StartBinding, element.EndBinding} {
 			if binding != nil {
 				target, ok := elements[binding.ElementID]
-				if !ok || !member(target.Type, "rectangle", "ellipse", "diamond", "text", "frame") || !boardHasBound(target, id, element.Type) {
+				if !ok || !member(target.Type, "rectangle", "ellipse", "diamond", "text", "frame", "image") || !boardHasBound(target, id, element.Type) {
 					return fmt.Errorf("element %s has absent or invalid binding", id)
 				}
 			}

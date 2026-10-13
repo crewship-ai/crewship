@@ -16,6 +16,7 @@ export interface PageArtifact {
   html: string
   revisions: { revision: number; created_at: string; author_user_id: string; author_agent_id?: string; author_run_id?: string }[]
   can_write: boolean
+  can_comment?: boolean
 }
 export function usePageArtifact(workspace: string, slug: string, revision?: number) {
   const client = useQueryClient()

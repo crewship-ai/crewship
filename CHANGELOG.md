@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Artifact discussions and results stay linked to their source (#3069).** Point comments retain their original revision and viewport. Chat result cards use verified publication links and current Page access. Private presence rooms show viewers and Board cursors only to authorized readers; suspended accounts cannot retain writing authority.
+
 - **Pages can store Boards with drawings and pinned artifacts (#3069).** Create a Board, draw with Excalidraw and save with conflict protection. Pins retain an exact artifact revision and respect its separate access rules. Workspace backups preserve Boards and their source links. This first Board slice uses explicit saving; live collaboration and agent drawing follow separately in the same feature rollout.
 
 - **Artifact collaboration now distinguishes commenting from editing (#3069).** A comment grant allows human discussion without publication or agent dispatch. Saved revisions can be compared side by side and opened by revision URL; retrying an uncertain source save preserves its mutation identity.

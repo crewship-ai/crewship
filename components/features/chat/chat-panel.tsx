@@ -1,5 +1,6 @@
 "use client"
 
+import { ArtifactResultCards } from "./artifact-result-cards"
 import { ArtifactCreationControl } from "./artifact-creation-control"
 import { ChatSessionSource } from "./chat-session-source"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -961,7 +962,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       onEditUserMessage={!isStreaming ? editAndResendWithPin : undefined}
       resolveAuthorName={resolveAuthorName}
       resolveAskProvenance={resolveAskProvenance}
-      footer={<StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />}
+      footer={<><StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />{workspaceId && sessionId && <ArtifactResultCards key={`${workspaceId}:${sessionId}`} workspaceId={workspaceId} chatId={sessionId} isStreaming={isStreaming} currentUserId={currentUserId} />}</>}
     />
   ) : (
     <Conversation>
@@ -1012,7 +1013,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
             />
           ))}
         </AnimatePresence>
-        <StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />
+        <><StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />{workspaceId && sessionId && <ArtifactResultCards key={`${workspaceId}:${sessionId}`} workspaceId={workspaceId} chatId={sessionId} isStreaming={isStreaming} currentUserId={currentUserId} />}</>
         <PinToTopSpacer pinNonce={pinNonce} pinTurnId={lastUserTurnId} sessionId={sessionId} />
       </ConversationContent>
       <ConversationScrollButton />

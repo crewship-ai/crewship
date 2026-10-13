@@ -21,13 +21,6 @@ const maxArtifactThreadComments = 50
 const maxArtifactCommentMutations = 10000
 const maxArtifactCommentHourlyMutations = 60
 
-// The opaque static preview cannot reliably observe inner scroll or DOM
-// selection. Only whole-document anchors are accepted until a real capture
-// contract exists; a revision never follows a later head implicitly.
-type artifactCommentAnchor struct {
-	SchemaVersion int    `json:"schema_version"`
-	Type          string `json:"type"`
-}
 type artifactCommentWire struct {
 	ID           string `json:"id"`
 	Body         string `json:"body"`
@@ -201,6 +194,10 @@ func (h *PageHandler) mutateArtifactThread(w http.ResponseWriter, r *http.Reques
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
+		if errors.Is(err, errInvalidArtifactAnchor) {
+			replyError(w, 422, "invalid comment anchor")
+			return
+		}
 		replyError(w, 400, "invalid comment request")
 		return
 	}
@@ -213,8 +210,8 @@ func (h *PageHandler) mutateArtifactThread(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if operation == "create" {
-		if req.Revision < 1 || req.Anchor == nil || req.Anchor.SchemaVersion != 1 || req.Anchor.Type != "document" || req.BaseVersion != nil || req.Resolved != nil {
-			replyError(w, 422, "a revision and schema_version 1 document anchor are required")
+		if req.Revision < 1 || validateArtifactCommentAnchor(req.Anchor) != nil || req.BaseVersion != nil || req.Resolved != nil {
+			replyError(w, 422, "a revision and valid schema_version 1 document or viewport point anchor are required")
 			return
 		}
 	} else {

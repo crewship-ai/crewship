@@ -6,7 +6,7 @@ import { NewBoardDialog } from "../new-board-dialog"
 import { apiFetch } from "@/lib/api-fetch"
 import type { PageBoard } from "@/hooks/use-page-board"
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
-vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: vi.fn() }))
+vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: vi.fn(), useRealtimeChannelSafe: vi.fn(), usePresenceTransportSafe: () => ({ status: null }) }))
 vi.mock("@/hooks/use-pages", async original => ({ ...await original<typeof import("@/hooks/use-pages")>(), usePages: () => ({ pages: [{ slug: "report", name: "Report", hasArtifact: true }], loading: false, error: null, refresh: vi.fn() }) }))
 vi.mock("next/dynamic", () => ({ default: () => function Editor({ base, onChange, disabled }: { base: PageBoard; onChange: (elements: unknown[]) => void; disabled: boolean }) {
   return <div aria-label="Mock drawing canvas"><span>Canvas sequence {base.seq}</span><button disabled={disabled} onClick={() => onChange([{ ...base.records[0].element, x: 150 }])}>Draw rectangle</button><button disabled={disabled} onClick={() => onChange([...base.records.filter(item => item.element).map(item => item.element), ...base.placements.map(item => ({ id: `board-placement:${item.id}`, type: "embeddable", x: item.x + 20, y: item.y, width: item.width, height: item.height, angle: 0, groupIds: [], frameId: null }))])}>Move pin</button></div>

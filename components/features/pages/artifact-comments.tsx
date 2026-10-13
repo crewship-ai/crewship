@@ -3,19 +3,24 @@
 import { useCallback, useEffect, useId, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { ArtifactCommentError, useArtifactThreads, type ArtifactThread } from "@/hooks/use-artifact-threads"
+import { ArtifactCommentError, useArtifactThreads, type ArtifactThread, type ArtifactAnchor } from "@/hooks/use-artifact-threads"
 import { ArtifactThreadCard } from "./artifact-thread-card"
 
-export function ArtifactComments({ workspaceId, slug, revision, onViewRevision, onDirtyChange }: {
+export function ArtifactComments({ workspaceId, slug, revision, onViewRevision, onDirtyChange, selectedAnchor, onAnchorConsumed, onViewAnchor }: {
   workspaceId: string
   slug: string
   revision: number
   onViewRevision: (revision: number) => void
+  selectedAnchor?: { revision: number; anchor: ArtifactAnchor } | null
+  onAnchorConsumed?: () => void
+  onViewAnchor?: (revision: number, anchor: ArtifactAnchor) => void
   onDirtyChange: (dirty: boolean) => void
 }) {
   const { query, write, uncertainReplies } = useArtifactThreads(workspaceId, slug)
   const [body, setBody] = useState("")
   const [draftRevision, setDraftRevision] = useState<number | null>(null)
+  const [draftAnchor, setDraftAnchor] = useState<ArtifactAnchor>()
+  useEffect(() => { if (selectedAnchor) { setDraftRevision(selectedAnchor.revision); setDraftAnchor(selectedAnchor.anchor) } }, [selectedAnchor])
   const [replyDrafts, setReplyDrafts] = useState<Record<string, boolean>>({})
   const composerId = useId()
   const dirty = body.trim().length > 0 || Object.values(replyDrafts).some(Boolean)
@@ -29,7 +34,7 @@ export function ArtifactComments({ workspaceId, slug, revision, onViewRevision, 
   const data = query.data
   const accessDenied = [query.error, write.error].some(error => error instanceof ArtifactCommentError && [401, 403, 404].includes(error.status))
   useEffect(() => {
-    if (accessDenied || data?.can_comment === false) { setBody(""); setDraftRevision(null); setReplyDrafts({}) }
+    if (accessDenied || data?.can_comment === false) { setBody(""); setDraftRevision(null); setDraftAnchor(undefined); setReplyDrafts({}) }
   }, [accessDenied, data?.can_comment])
   async function submitReply(thread: ArtifactThread, text: string) {
     try { await write.mutateAsync({ action: "reply", threadId: thread.id, base_version: thread.version, body: text }); return true }
@@ -51,7 +56,7 @@ export function ArtifactComments({ workspaceId, slug, revision, onViewRevision, 
     key={thread.id} thread={thread} currentRevision={revision}
     uncertainReplies={uncertainReplies.filter(input => input.threadId === thread.id)}
     canComment={data.can_comment} canResolve={data.can_resolve} pending={write.isPending}
-    onViewRevision={onViewRevision} onReply={submitReply}
+    onViewRevision={onViewRevision} onViewAnchor={onViewAnchor} onReply={submitReply}
     onResolve={item => void changeResolution(item)} onDirtyChange={markReplyDirty}
   />
   return <section aria-label="Artifact comments" className="space-y-4 border-t p-4 md:p-6">
@@ -74,15 +79,15 @@ export function ArtifactComments({ workspaceId, slug, revision, onViewRevision, 
         {data.can_comment ? <form className="space-y-3 rounded-lg border bg-muted/20 p-4" onSubmit={async event => {
           event.preventDefault()
           try {
-            await write.mutateAsync({ action: "create", revision: draftRevision ?? revision, body })
-            setBody(""); setDraftRevision(null)
+            await write.mutateAsync({ action: "create", revision: draftRevision ?? revision, body, ...(draftAnchor ? { anchor: draftAnchor } : {}) })
+            setBody(""); setDraftRevision(null); setDraftAnchor(undefined); onAnchorConsumed?.()
           } catch { /* Preserve private draft in memory for an authorized retry. */ }
         }}>
           <label htmlFor={composerId} className="text-sm font-medium">New thread</label>
-          <p className="text-xs text-muted-foreground">Revision {draftRevision ?? revision} · Whole document</p>
+          <p className="text-xs text-muted-foreground">Revision {draftRevision ?? revision} · {draftAnchor?.type === "point" ? `Viewport point (${Math.round(draftAnchor.x)}, ${Math.round(draftAnchor.y)}) at ${Math.round(draftAnchor.viewport_width)} × ${Math.round(draftAnchor.viewport_height)}` : "Whole document"}</p>
           {draftRevision !== null && draftRevision !== revision && <p className="text-xs text-warn">This draft stays anchored to revision {draftRevision}. Switching the preview does not move it.</p>}
           <Textarea id={composerId} disabled={write.isPending} value={body} maxLength={4096} placeholder="What should change or be discussed?" className="min-h-32 text-sm" onChange={event => {
-            if (!body.trim()) setDraftRevision(revision)
+            if (draftRevision === null) setDraftRevision(revision)
             setBody(event.target.value)
           }} />
           <p className="text-xs text-muted-foreground">Plain text · Up to 4 KiB · Visible to people who can read this page.</p>

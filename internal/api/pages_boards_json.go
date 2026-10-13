@@ -15,7 +15,7 @@ import (
 
 var boardWireKeys = func() map[string]bool {
 	keys := map[string]bool{}
-	for _, key := range []string{"mutation_id", "placement_updates", "placement_deletes", "source_page_slug", "source_revision"} {
+	for _, key := range []string{"run_id", "mutation_id", "placement_updates", "placement_deletes", "source_page_slug", "source_revision"} {
 		keys[key] = true
 	}
 	var add func(reflect.Type)
