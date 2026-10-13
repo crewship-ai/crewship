@@ -178,6 +178,7 @@ var virtualForeignKeys = map[string][]foreignKeyEdge{
 // SSE fan-out, and the trace_id that journal_entries and eval_runs carry is an
 // agent RUN id (journal/runs.go groups runs by it), never a mission's.
 var forkRegeneratedColumns = map[string][]forkRegeneratedColumn{
+	"chat_entity_refs": {{column: "event_id", regenerate: func(string) string { return newRemapCUID() }}},
 	// missions.trace_id is `TEXT NOT NULL UNIQUE` with no workspace in the
 	// key (migrate_consts_v02_v15.go). Its sibling `identifier` is NOT here:
 	// #1733 rescoped that one to UNIQUE(workspace_id, identifier), which is
@@ -401,5 +402,6 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 	if err := remapConversationMetadata(dump, idMap); err != nil {
 		return err
 	}
+	remapChatEntityHistory(dump, idMap)
 	return nil
 }

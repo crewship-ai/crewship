@@ -102,6 +102,8 @@ var BackupTables = []string{
 	"environment_revisions",
 	"service_runtime_intents",
 	"chats",
+	"agent_operations",
+	"chat_entity_refs",
 	"workspace_files",
 	"journal_entries",
 	// journal_entry_priorities (v166) FKs journal_entries(id), so it must land
@@ -485,6 +487,8 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 		return "source_conversation_id IN (SELECT id FROM workspace_conversations WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "workspace_conversation_activity", "workspace_conversation_members", "workspace_conversation_messages", "workspace_conversation_agents", "workspace_conversation_agent_jobs", "workspace_conversation_outbox":
 		return "conversation_id IN (SELECT id FROM workspace_conversations WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "chat_entity_refs":
+		return "chat_id IN (SELECT id FROM chats WHERE workspace_id = ?) AND operation_id IN (SELECT id FROM agent_operations WHERE workspace_id = ?)", []any{workspaceID, workspaceID}, true
 	case "chat_participants", "chat_read_cursors":
 		// No workspace_id column — scoped via the chat.
 		return "chat_id IN (SELECT id FROM chats WHERE workspace_id = ?)", []any{workspaceID}, true
@@ -1151,6 +1155,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				return stats, err
 			}
 		}
+		if table == "chat_entity_refs" {
+			rows = orderedChatEntityRefs(rows)
+		}
 		tableInserted := 0
 		for _, originalRow := range rows {
 			// main's conversation sanitiser runs FIRST: it rebuilds the row
@@ -1193,6 +1200,11 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			sortStrings(keys)
 			tallyDroppedColumns(&dropped, table, keys, allowed)
 			for _, k := range keys {
+				// Sequence is an installation-local scan position, not event identity.
+				// Let SQLite allocate it so imports cannot collide with another tenant.
+				if table == "chat_entity_refs" && k == "chat_seq" {
+					continue
+				}
 				if !allowed[k] {
 					continue
 				}

@@ -205,6 +205,7 @@ var TableCategory = map[string]string{
 
 	// Chats.
 	"chats": CategoryChats, "chat_branches": CategoryChats, "message_reactions": CategoryChats,
+	"agent_operations": CategoryChats, "chat_entity_refs": CategoryChats, // durable card history and its receipt parents
 	"message_feedback": CategoryChats, "chat_participants": CategoryChats, "chat_read_cursors": CategoryChats,
 	"captain_chats": CategoryChats, "workspace_conversations": CategoryChats,
 	"workspace_conversation_direct_pairs": CategoryChats, "workspace_conversation_members": CategoryChats,
