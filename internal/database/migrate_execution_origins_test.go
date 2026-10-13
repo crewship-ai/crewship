@@ -20,7 +20,7 @@ func TestExecutionOriginsUpgradeFencesUnknownQueuedWork(t *testing.T) {
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := applyMigrationsUpTo(t.Context(), db, 20261013162000-1, logger); err != nil {
+	if err := applyMigrationsUpTo(t.Context(), db, 20261013174958-1, logger); err != nil {
 		t.Fatal(err)
 	}
 	exec := func(q string, args ...any) {

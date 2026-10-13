@@ -9,10 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Agent Issue actions produce durable chat references (#3068).** Typed MCP tools create, update, comment on and show issues with host-verified requester authority and stable retry keys. `crewship chat refs` reads authorized replacement snapshots; `crewship operation get` exposes sanitized metadata. Issue responses include revisions and viewer actions, and human deletion retains minimal authorized receipts. Interactive frontend cards, proposals and dedicated entity WebSocket events remain follow-ups. Limited CLI tokens cannot acquire unrestricted chat authority; existing WebSocket tickets must be refreshed after this update.
 
-- ⚠️ **Behaviour change:** Chat-requested issue writes keep the original requester’s authority through delegation and deferred routines (#3068). Unattributed legacy queued assignments and resumable missions require a fresh authorized request after upgrade; their records are preserved. Restoring or forking data does not grant copied human work autonomous rights.
-
+- ⚠️ **Behaviour change:** Signup invitation handoff requires the matching invitation link; existing accounts can explicitly accept after signing in or through `workspace invite accept`. Invitation listings retain metadata without redemption tokens; pending links can be reissued or revoked. Legacy unaccepted invitation links stored as raw tokens are invalidated on upgrade; an authorized inviter must create a new invitation or reissue the pending invitation. Accepted invitation history is preserved. New proofs are stored hashed, and browser/CLI handoff avoids putting proof in redirect URLs or command arguments (#3071).
 - **Restricted navigation follows each member’s grants (#3072).** Chat, Routines and Pages appear only when the selected workspace membership can access their catalog; account security remains available. Switching workspaces no longer borrows another membership’s screens. A missing execution runtime does not hide otherwise authorized navigation. Open screens recheck changed access through the existing foreground polling interval.
 
 - ⚠️ **Behaviour change:** Manual schedule runs record the requesting operator and follow their current workspace execution authority (#3070).
@@ -27,6 +25,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   - missions, routine schedules and automations, each crew tool on its own row, and your other workspaces to switch to
 
   Several words now match in any order. Every row is gated the way its page is. See [Search (⌘K)](docs/guides/search.mdx).
+
+- **Agent Issue actions produce durable chat references (#3068).** Typed MCP tools create, update, comment on and show issues with host-verified requester authority and stable retry keys. `crewship chat refs` reads authorized replacement snapshots; `crewship operation get` exposes sanitized metadata. Issue responses include revisions and viewer actions, and human deletion retains minimal authorized receipts. Interactive frontend cards, proposals and dedicated entity WebSocket events remain follow-ups. Limited CLI tokens cannot acquire unrestricted chat authority; existing WebSocket tickets must be refreshed after this update.
+
+- ⚠️ **Behaviour change:** Chat-requested issue writes keep the original requester’s authority through delegation and deferred routines (#3068). Unattributed legacy queued assignments and resumable missions require a fresh authorized request after upgrade; their records are preserved. Restoring or forking data does not grant copied human work autonomous rights.
 
 - **The Crews sidebar has Status, Filter and View, like Routines and Skills (#3043).** Status counts agents (Needs you, Working, Idle, Expired hires) and lists the ones you pick. Filter narrows by role, model, runtime, hire type, activity and crew health, with removable chips. View groups by crew, by status or not at all and sorts by crew size, name or last active. Leads come first with a crown; rows show each agent's role and when it last worked, and each crew's running missions or last activity. Hover adds Chat on an agent and Add agent on a crew, and the collapsed sidebar keeps the crew icons with an attention dot. Status, filters and view are kept in the URL (`?status=needs&role=lead&group=status`).
 

@@ -139,11 +139,10 @@ address hashed.
   oracle behind an `OWNER`/`ADMIN` gate. To put someone in your
   workspace when the address is all you have, create a [workspace
   invitation](/api-reference/workspaces#create-invitation) first: signup
-  redeems every live invitation for the address inside the same
+  redeems only the presented matching invitation proof inside the same
   transaction that creates the account, so the new user lands in the
   inviting workspace at the invited role — and gets no workspace of their
-  own. Only a signup with no live invitation (to a workspace that still
-  exists) gets a default workspace, as its OWNER. `POST
+  own. Only a signup with no usable presented invitation gets a default workspace, as its OWNER. `POST
   /api/v1/workspaces/{workspaceId}/members` still takes a `user_id` and
   nothing else.
 </Note>
@@ -701,3 +700,9 @@ Consumes the reset token and sets a new password. The token row is burned inside
 - [Internal API](/api-reference/internal) -- the NextAuth-compatible `/api/auth/*` surface used by the browser session cookie flow.
 - [Security overview](/security/rbac) -- how the session token feeds into RBAC.
 - [`crewship login`](/cli/login) -- CLI commands that consume `/pair/start` + `/pair/redeem` and store the resulting token in `~/.crewship/cli-config.yaml`.
+
+## Invitation handoff
+
+`POST /api/v1/auth/signup` accepts optional `invitation_token` alongside `full_name`, `email` and `password`. A new account redeems only that matching unexpired invitation; no token means ordinary standalone signup. Existing-account signup remains a no-op with the same generic `202` response.
+
+`POST /api/v1/auth/invitation/accept` requires authentication and an unrestricted credential. Body: `{"token":"<invitation-token>"}`. It checks the inviter's live trusted issuance authority, the live account email, the invitation's email, current workspace, expiry and pending state transactionally. Returns `200 {"ok":true}` on acceptance or same-account no-op retry; `401` unauthenticated, `403` narrowed credential, `400` malformed request, `404` unavailable invitation, `409` existing membership with a different role or a lost claim. Membership and token consumption commit together. This endpoint never changes an existing member's role. After acceptance, same-account retries are no-op success even if the invitation later expires; removed membership, suspended account, changed email or deleted workspace cannot be restored by retrying.

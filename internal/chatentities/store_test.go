@@ -24,7 +24,7 @@ func testDB(t *testing.T) *sql.DB {
 	if _, err = db.Exec(`CREATE TABLE workspaces(id TEXT PRIMARY KEY); INSERT INTO workspaces VALUES('ws'),('other-ws'); CREATE TABLE chats(id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE);INSERT INTO chats VALUES('chat','ws'),('other','other-ws');CREATE TABLE mutations(id TEXT PRIMARY KEY)`); err != nil {
 		t.Fatal(err)
 	}
-	applyMigration(t, db, "20261013120000_chat_entity_operations.sql")
+	applyMigration(t, db, "20261013174955_chat_entity_operations.sql")
 	return db
 }
 func applyMigration(t *testing.T, db *sql.DB, name string) {

@@ -25,7 +25,7 @@ func TestIssueRevisionTriggers(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	applyMigration(t, db, "20261013120100_issue_revisions.sql")
+	applyMigration(t, db, "20261013174956_issue_revisions.sql")
 	exec := func(query string) {
 		t.Helper()
 		if _, e := db.Exec(query); e != nil {
