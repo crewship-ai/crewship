@@ -379,14 +379,14 @@ function getWsUrl(): string {
  * session-expired event, which the AuthProvider turns into a hard redirect.
  */
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
-  const { workspaceId, refresh: refreshWorkspaces } = useWorkspace()
+  const { workspaceId, workspaceUnavailable, refresh: refreshWorkspaces } = useWorkspace()
   // Realtime exists only for a trusted session. A restricted account's
   // allowlist refuses /ws-token (404), so for it the socket is never opened
   // and the status is the terminal "unavailable" — no ticket request, no retry
   // loop, no "Reconnecting…" banner. While the mode is still loading nothing is
   // requested either: the socket opens once the session is known to be trusted.
   const accessMode = useAccessMode()
-  const realtimeEnabled = accessMode === "trusted"
+  const realtimeEnabled = accessMode === "trusted" && !workspaceUnavailable
   const { data: session } = useSessionSafe()
   const userId = session?.user.id
   const listenersRef = useRef<Map<string, Set<EventCallback>>>(new Map())
@@ -490,7 +490,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   // A disabled socket keeps whatever status it last had, so the session's
   // mode decides what consumers see while it is off.
   const status: WSStatus =
-    accessMode === "restricted" ? "unavailable" : accessMode === "loading" ? "connecting" : socketStatus
+    accessMode === "restricted" || workspaceUnavailable ? "unavailable" : accessMode === "loading" ? "connecting" : socketStatus
 
   useEffect(() => { statusRef.current = status }, [status])
 

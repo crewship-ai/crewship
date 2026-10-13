@@ -26,6 +26,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Pages can store versioned HTML artifacts (#3069).** Create an artifact page, upload or paste a self-contained HTML document, inspect its static preview and source, and restore an older revision as a new revision. Existing Page permissions apply; simultaneous saves cannot silently overwrite each other. Revision-bound discussion threads support replies, resolution and reopening without being lost when the source changes. Owners can explicitly delegate an existing artifact to their own live chat run; agent updates require its run token, a separate Page write grant and current human authority, and stop after revocation or run completion. Scripts and external resources stay disabled in this first preview. The chat attachment tab is now called **Files**.
 
 - **Routine output files survive backup and restore (#3069).** Workspace backups now include immutable file blobs referenced by routine runs, even when no chat or issue attachment references the same file. Restoring into a new workspace remaps their storage paths along with the run metadata.
+- **A temporarily missing workspace no longer silently switches context or discards a draft (#3083).** Retry preserves the selected workspace and local draft while content and workspace requests remain unavailable; choosing another workspace uses the existing unsaved-change confirmation.
+
 - Invitation creation, reissue, withdrawal and acceptance record non-secret workspace activity atomically with their state changes (#3084).
 - **Private workflow dispatch follows current account status.** Queued and recovered work retains its existing resource, role and execution safety checks.
 

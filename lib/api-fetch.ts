@@ -23,6 +23,7 @@
  * fetch-with-retry.ts.
  */
 
+import { assertWorkspaceRequest, captureWorkspaceRequest, workspaceFetch } from "./workspace-availability"
 import { bodyIsReplayable, inputIsReplayable } from "./fetch-with-retry"
 import { getAuthMode, getBearerToken, getServerOrigin, withServerBase } from "./server-base"
 
@@ -125,6 +126,7 @@ function reportBadStatus(target: RequestInfo | URL, res: Response): void {
 
 export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): Promise<Response> {
   assertSameOrigin(input)
+  const workspaceRequest = captureWorkspaceRequest(input, init)
   // Remote-server mode (desktop shell): prefix relative /api/* string paths
   // with the configured base. Same-origin default leaves input untouched.
   const target: RequestInfo | URL = typeof input === "string" ? withServerBase(input) : input
@@ -144,7 +146,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
     delete (initWithCreds as ApiFetchInit).skipRefresh
   }
 
-  const res = await fetch(target, initWithCreds)
+  const res = await workspaceFetch(target, initWithCreds)
   reportBadStatus(target, res)
   // Bearer tokens are long-lived CLI-class credentials: there is no cookie
   // rotation to attempt, so a 401 is terminal for this request. Emit the
@@ -219,7 +221,8 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
 
   // Refresh wrote new cookies; the retry inherits them via the same
   // `credentials: include` and lands on a fresh access token.
-  return fetch(target, initWithCreds)
+  assertWorkspaceRequest(workspaceRequest)
+  return workspaceFetch(target, initWithCreds)
 }
 
 /** bearerHeaders merges the shell token into caller headers without

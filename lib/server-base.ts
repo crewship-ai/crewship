@@ -1,3 +1,5 @@
+import { workspaceFetch } from "./workspace-availability"
+
 /**
  * Server-base abstraction — the seam that lets the frontend run from a
  * non-same-origin shell (Tauri v2 desktop app) against a user-chosen
@@ -131,7 +133,7 @@ export function applyAuthInit(init?: RequestInit): RequestInit | undefined {
  *  server. Not a substitute for apiFetch — no refresh-on-401 here; these
  *  call sites are pre-auth or explicitly session-probing. */
 export function serverFetch(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(withServerBase(path), applyAuthInit(init))
+  return workspaceFetch(withServerBase(path), applyAuthInit(init))
 }
 
 /** resolveWsBase returns the "ws(s)://host[:port]" prefix WS URL builders
