@@ -46,6 +46,68 @@ try {
     })
     pages[actor] = await contexts[actor].newPage()
   }
+  // A real directory omission must preserve selection and a mounted portal draft.
+  // Soft-delete is fixture-only; transient catalog errors are covered separately.
+  async function availability(omit) {
+    const response = await contexts.owner.request.post(`${fixture.server}/__fixture/workspace-availability`, {
+      headers: {'X-Fixture-Control':'synthetic-workspace-availability'}, data:{omit},
+    })
+    if(response.status()!==204) throw new Error(`fixture availability ${response.status()}`)
+    const directory=await contexts.owner.request.get(`${fixture.server}/api/v1/workspaces`)
+    const rows=await directory.json()
+    await check(`real directory ${omit?'omits':'restores'} selected workspace and retains sibling`,
+      directory.status()===200 && rows.some(row=>row.id===fixture.workspace)===!omit && rows.some(row=>row.id===fixture.empty_workspace))
+  }
+  await open('owner','/pages')
+  await pages.owner.getByRole('button',{name:'New page',exact:true}).first().click()
+  let editor=pages.owner.getByRole('dialog',{name:/New page/})
+  await expect(editor).toBeVisible()
+  const code=editor.locator('.cm-content')
+  await code.click()
+  await pages.owner.keyboard.press('ControlOrMeta+End')
+  await pages.owner.keyboard.insertText('\n# preserved workspace draft')
+  await expect(code).toContainText('preserved workspace draft')
+  let writes=0
+  const countWrites=request=>{if(request.method()!=='GET'&&new URL(request.url()).pathname.startsWith('/api/v1/pages'))writes++}
+  pages.owner.on('request',countWrites)
+  await availability(true)
+  let unavailable=pages.owner.getByRole('dialog',{name:'Selected workspace is unavailable'})
+  await expect(unavailable).toBeVisible({timeout:70000})
+  await expect(editor).toHaveCount(0)
+  await expect.poll(()=>unavailable.evaluate(element=>element.contains(document.activeElement))).toBe(true)
+  await check('omission preserves persisted selected workspace',await pages.owner.evaluate(()=>localStorage.getItem('crewship.workspaceId'))===fixture.workspace)
+  await unavailable.press('Escape')
+  await expect(unavailable).toBeVisible()
+  await pages.owner.evaluate(()=>{
+    const button=[...document.querySelectorAll('button')].find(button=>button.textContent?.trim()==='Create page')
+    if(!button) throw new Error('Mounted old editor submit control missing')
+    button.click()
+  })
+  await unavailable.press('ControlOrMeta+Enter')
+  await check('unavailable portal and keyboard send no Page write',writes===0)
+  pages.owner.once('dialog',dialog=>dialog.dismiss())
+  await unavailable.getByRole('button',{name:'Choose Empty workspace',exact:true}).click()
+  await expect(unavailable).toBeVisible()
+  await check('cancelled explicit choice retains selected workspace',await pages.owner.evaluate(()=>localStorage.getItem('crewship.workspaceId'))===fixture.workspace)
+  await availability(false)
+  await unavailable.getByRole('button',{name:'Retry workspace',exact:true}).click()
+  await expect(unavailable).toHaveCount(0)
+  editor=pages.owner.getByRole('dialog',{name:/New page/})
+  await expect(editor.locator('.cm-content')).toContainText('preserved workspace draft')
+  await check('same workspace recovery restores original portal draft',true)
+  await availability(true)
+  unavailable=pages.owner.getByRole('dialog',{name:'Selected workspace is unavailable'})
+  await expect(unavailable).toBeVisible({timeout:70000})
+  pages.owner.once('dialog',dialog=>dialog.accept())
+  await unavailable.getByRole('button',{name:'Choose Empty workspace',exact:true}).click()
+  await expect(unavailable).toHaveCount(0)
+  await expect(pages.owner.getByRole('dialog',{name:/New page/})).toHaveCount(0)
+  await check('confirmed explicit choice changes context and discards old draft',await pages.owner.evaluate(()=>localStorage.getItem('crewship.workspaceId'))===fixture.empty_workspace)
+  await availability(false)
+  pages.owner.off('request',countWrites)
+  await pages.owner.evaluate(id=>localStorage.setItem('crewship.workspaceId',id),fixture.workspace)
+  // Subsequent preexisting scenarios load the selected fixture workspace anew.
+  await pages.owner.reload()
   // Page creation uses the existing role-or-capability contract; reads remain available.
   await open('reader', '/pages')
   await expect(pages.reader.getByRole('button', {name:'New page', exact:true})).toHaveCount(0)
