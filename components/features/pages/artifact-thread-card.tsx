@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useId, useState } from "react"
+import { ArtifactSendButton, ArtifactThreadRequests } from "./artifact-agent-work"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import type { ArtifactThread } from "@/hooks/use-artifact-threads"
@@ -35,6 +36,7 @@ export function ArtifactThreadCard({ thread, currentRevision, canComment, canRes
       {thread.revision !== currentRevision && <Button size="sm" variant="ghost" className="ml-auto coarse:h-12" onClick={() => onViewRevision(thread.revision)}>View original revision {thread.revision}</Button>}
       {canResolve && <Button size="sm" variant="ghost" disabled={pending} className="coarse:h-12" onClick={() => onResolve(thread)}>{thread.status === "resolved" ? "Reopen thread" : "Resolve thread"}</Button>}
     </div>
+    <ArtifactSendButton thread={thread} />
     <ol className="space-y-3">
       {thread.comments.map(comment => <li key={comment.id} className="space-y-1">
         <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground"><span title={comment.author_user_id}>{comment.author_name || "Workspace member"}</span><time dateTime={comment.created_at}>{new Date(comment.created_at).toLocaleString()}</time></div>
@@ -55,5 +57,6 @@ export function ArtifactThreadCard({ thread, currentRevision, canComment, canRes
       {versionChanged && <div className="flex flex-wrap items-center gap-2"><p className="text-xs text-warn">Replies changed while you were writing. Review them before continuing.</p><Button type="button" variant="outline" size="sm" onClick={() => setBaseVersion(thread.version)}>Use latest thread version</Button></div>}
       <Button type="submit" size="sm" className="coarse:h-12" disabled={pending || !reply.trim() || versionChanged}>{retryOriginal ? "Retry reply" : "Reply"}</Button>
     </form>}
+    <ArtifactThreadRequests threadId={thread.id} />
   </article>
 }

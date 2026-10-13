@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Code2, Eye, History, MessageSquare, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ArtifactAgentWorkProvider, ArtifactAgentRequests, ArtifactSendButton } from "./artifact-agent-work"
 import { ArtifactComments } from "./artifact-comments"
 import { ArtifactSource } from "./artifact-source"
 import { ArtifactHistory } from "./artifact-history"
@@ -17,13 +18,14 @@ export function PageArtifactView({ workspaceId, slug, onDirtyChange }: { workspa
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [commentsVisited, setCommentsVisited] = useState(false)
   const [commentsDirty, setCommentsDirty] = useState(false)
+  const [agentDraftDirty, setAgentDraftDirty] = useState(false)
   const [draftBaseRev, setDraftBaseRev] = useState(0)
   const [draft, setDraft] = useState<string | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
   useEffect(() => {
-    onDirtyChange?.(draft !== null || commentsDirty)
+    onDirtyChange?.(draft !== null || commentsDirty || agentDraftDirty)
     return () => onDirtyChange?.(false)
-  }, [draft, commentsDirty, onDirtyChange])
+  }, [draft, commentsDirty, agentDraftDirty, onDirtyChange])
   const artifact = query.data
   const sourceAccessDenied = query.error instanceof PageArtifactError && [401, 403, 404].includes(query.error.status)
   useEffect(() => {
@@ -53,10 +55,11 @@ export function PageArtifactView({ workspaceId, slug, onDirtyChange }: { workspa
   }
   if (query.error && (sourceAccessDenied || !artifact)) return <div role="alert" className="rounded-lg border border-destructive/30 p-4 text-sm text-destructive">{query.error.message}<Button variant="outline" className="ml-3" onClick={() => void query.refetch()}>Retry</Button></div>
   if (!artifact) return <p role="status" className="p-6 text-sm text-muted-foreground">Loading artifact…</p>
-  return <section className="overflow-hidden rounded-xl border bg-card" aria-label="HTML artifact">
+  const content = <section className="overflow-hidden rounded-xl border bg-card" aria-label="HTML artifact">
     <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
       <span className="mr-auto text-sm font-medium">HTML artifact {artifact.head_rev > 0 && <span className="ml-2 text-xs font-normal text-muted-foreground">Revision {artifact.revision}{artifact.revision !== artifact.head_rev ? ` · latest ${artifact.head_rev}` : " · latest"}</span>}</span>
       {([["preview", Eye, "Static preview"], ["source", Code2, "Source"], ["history", History, "History"]] as const).map(([id, Icon, label]) => <Button key={id} variant={view === id ? "secondary" : "ghost"} size="sm" className="coarse:h-12" onClick={() => setView(id)} aria-pressed={view === id}><Icon className="mr-1.5 h-4 w-4" />{label}</Button>)}
+      {artifact.head_rev > 0 && <ArtifactSendButton />}
       {artifact.head_rev > 0 && <Button variant={commentsOpen ? "secondary" : "ghost"} size="sm" className="coarse:h-12" aria-pressed={commentsOpen} onClick={() => { setCommentsVisited(true); setCommentsOpen(open => !open) }}><MessageSquare className="mr-1.5 h-4 w-4" />Comments</Button>}
       {artifact.can_write && <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted coarse:min-h-12"><Upload className="h-4 w-4" />Upload HTML<input aria-label="Upload HTML" type="file" accept=".html,.htm,text/html" className="sr-only" disabled={save.isPending} onChange={event => { void upload(event.target.files?.[0]); event.target.value = "" }} /></label>}
     </div>
@@ -83,6 +86,8 @@ export function PageArtifactView({ workspaceId, slug, onDirtyChange }: { workspa
         } catch { /* Keep the mutation error visible. */ }
       }}
     />}
+    {artifact.head_rev > 0 && <ArtifactAgentRequests />}
     {commentsVisited && artifact.head_rev > 0 && <div hidden={!commentsOpen}><ArtifactComments workspaceId={workspaceId} slug={slug} revision={artifact.revision} onViewRevision={selected => { setRevision(selected); setView("preview") }} onDirtyChange={setCommentsDirty} /></div>}
   </section>
+  return artifact.head_rev > 0 ? <ArtifactAgentWorkProvider workspaceId={workspaceId} slug={slug} revision={artifact.revision} head={artifact.head_rev} onViewRevision={selected => { setRevision(selected); setView("preview") }} onDirtyChange={setAgentDraftDirty}>{content}</ArtifactAgentWorkProvider> : content
 }

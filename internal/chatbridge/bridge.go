@@ -1161,9 +1161,16 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		"tags":                      []string{"chat", info.CLIAdapter},
 		"artifact_human_receipt":    info.HumanAuthority,
 		"artifact_human_message_id": humanMessageID,
+		"artifact_request_id":       msgOpt.ArtifactRequestID,
 	}
 	if err := b.resolver.CreateRun(ctx, runID, info.AgentID, chatID, info.WorkspaceID, "USER", runMeta); err != nil {
 		b.logger.Warn("failed to create run record", "error", err)
+		if msgOpt.ArtifactRequestID != "" {
+			message := "artifact request admission failed before execution"
+			_ = b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &message, nil)
+			streamFn(ws.ChatEvent{Type: "error", Content: message})
+			return fmt.Errorf("artifact request admission: %w", err)
+		}
 	}
 	// Put the run on the context so every journal entry emitted beneath it
 	// inherits trace_id = runID. The orchestrator's JournalEntry has no

@@ -1,5 +1,6 @@
 "use client"
 
+import { ArtifactCreationControl } from "./artifact-creation-control"
 import { ChatSessionSource } from "./chat-session-source"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "motion/react"
@@ -1054,6 +1055,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return (
       <div className="relative flex flex-col h-full">
         <ReconnectBanner status={connectionStatus} />
+        <ArtifactCreationControl key={sessionId} workspaceId={workspaceId} sessionId={sessionId} isStreaming={isStreaming} />
         {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
           <ConnectionBadge status={connectionStatus} />
@@ -1151,6 +1153,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     <div className="relative flex h-full">
       <div className={cn("flex flex-col overflow-hidden min-w-0", executionProfile === "trusted" && artifactFocus && artifactOpen ? "hidden" : "flex-1")}>
         <ReconnectBanner status={connectionStatus} />
+        <ArtifactCreationControl key={sessionId} workspaceId={workspaceId} sessionId={sessionId} isStreaming={isStreaming} />
         {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         {/* Who you are talking to, not the session id. The strip carries the
             agent (face, status, role, crew, model, skills, credentials); the

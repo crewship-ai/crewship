@@ -38,10 +38,15 @@ same author with the same payload returns its original revision; reusing it
 for another request is rejected. The UI retains the draft and its original
 base until the editor explicitly chooses to use a newer revision as the base.
 
-Limits are 10 MiB of nonempty UTF-8 source, 200 revisions per artifact and
-30 committed revisions per rolling hour. Restore counts as a revision. These
-are server-enforced limits, not automatic pruning: historical source remains
-available. Blobs use the existing attachment store; artifact references pin
+Limits are 10 MiB of nonempty UTF-8 source, 200 retained source revisions per artifact,
+30 committed revisions per artifact per rolling hour and 200 per workspace per
+rolling hour. Restore counts as a revision. Old unpinned source revisions are
+pruned before admitting a new revision; discussion, request and restore references
+protect their original source. If all slots are pinned, publication is refused
+with a retention-specific error. Up to 10,000 durable mutation receipts preserve
+retry identity independently of source retention; an expired source returns 404.
+Workspace rate receipts survive Page deletion. Two upload slots bound concurrent
+JSON decoding, and the decoder reads the bounded request stream directly. Blobs use the existing attachment store; artifact references pin
 historical blobs against collection and are included in workspace backup and
 restore. Revision author, source digest and optional restored-from revision are
 stored with the revision. Workspace notifications contain identifiers only.
@@ -64,9 +69,21 @@ revision. UI drafts remain in memory, comments are escaped text, and mentions
 never start an agent or grant authority. See [the discussion API](../api-reference/pages.mdx#artifact-discussion-threads)
 for endpoint shapes and hard bounds.
 
-Agent dispatch, point/element anchors, presence, collaborative Boards and
-interactive runtime are not part of this implemented slice. Runtime experiments are separate from enabling
-those capabilities.
+Owners can explicitly **Send to agent** from the artifact or a current-revision
+thread. Only server-filtered private, unshared owner chats with an existing
+agent write grant are eligible. Durable requests capture the source revision,
+comments and instruction, recheck authority at execution, and link success to an
+atomically published revision. Cancellation revokes publication and requests a
+run stop. Restored request history cannot restart old work. A separate live-chat
+control permits one private artifact from that specific trusted run; creation
+is off by default. The agent's operational prompt documents the sidecar protocol.
+
+Point/element anchors, separate commenter grants, presence, collaborative Boards
+and interactive runtime are not part of this implemented slice. The runtime
+matrix measures known iframe unresponsiveness in Firefox/WebKit explicitly;
+a passing capability experiment is not authorization to enable scripts. The
+separate-tab experiment and sanitized production preview remain tested in all
+engines; an interactive separate-tab product flow still requires acceptance.
 
 ## 0. Verdict
 

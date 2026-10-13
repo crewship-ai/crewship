@@ -108,7 +108,7 @@ test('separate runtime tab loop leaves Studio responsive and can be closed', asy
   await expect.poll(() => page.evaluate(() => (window as unknown as { ticks: number }).ticks)).toBeGreaterThan(after + 5)
 })
 
-test('cross-site iframe loop leaves Studio responsive and can be removed', async ({ page, fixture }) => {
+test('cross-site iframe loop characterizes supported and unsupported host isolation', async ({ page, fixture, browserName }, info) => {
   fixture.documents.set('/loop', script('setTimeout(()=>{console.log("artifact-loop-started");for(;;){}},300)'))
   await page.goto(studio)
   const started = page.waitForEvent('console', { predicate: message => message.text() === 'artifact-loop-started', timeout: 5000 })
@@ -119,7 +119,31 @@ test('cross-site iframe loop leaves Studio responsive and can be removed', async
   await expect.poll(() => page.evaluate(() => (window as unknown as { ready: string[] }).ready.includes('/loop'))).toBe(true)
   await started
   await page.waitForTimeout(700)
-  const baseline = await page.evaluate(() => (window as unknown as { ticks: number }).ticks)
+  // This is a capability experiment, not permission to enable scripts. In the
+  // pinned Firefox/WebKit builds the host shares the blocked renderer. Measure
+  // that exact limitation; never treat an arbitrary setup/assertion failure as
+  // an expected pass. The separate-tab and production-static tests remain
+  // mandatory in all engines. Interactive product execution is still disabled.
+  let probeTimer: ReturnType<typeof setTimeout> | undefined
+  const probe = page.evaluate(() => (window as unknown as { ticks: number }).ticks)
+    .then(ticks => ({ kind: 'responsive' as const, ticks }), error => ({ kind: 'error' as const, error: String(error) }))
+  const result = await Promise.race([
+    probe,
+    new Promise<{ kind: 'blocked' }>(resolve => { probeTimer = setTimeout(() => resolve({ kind: 'blocked' }), 2000) }),
+  ])
+  clearTimeout(probeTimer)
+  await info.attach('iframe-host-isolation.json', {
+    body: JSON.stringify({ browserName, result, productMode: 'static', observationMs: 2000 }),
+    contentType: 'application/json',
+  })
+  if (browserName !== 'chromium') {
+    expect(result.kind, 'Known unsupported iframe isolation changed; review the runtime policy and measurements').toBe('blocked')
+    info.annotations.push({ type: 'known-limitation', description: 'Scripted iframe freezes the host in this engine. Inline interactive runtime must remain disabled; a future separate-tab fallback needs its own product acceptance.' })
+    return
+  }
+  expect(result.kind, 'Chromium host must stay responsive during the artifact loop').toBe('responsive')
+  if (result.kind !== 'responsive') throw new Error('Host renderer did not respond')
+  const baseline = result.ticks
   await expect.poll(() => page.evaluate(() => (window as unknown as { ticks: number }).ticks)).toBeGreaterThan(baseline + 5)
   await page.locator('#artifact').evaluate(el => el.remove())
   await expect(page.locator('#artifact')).toHaveCount(0)

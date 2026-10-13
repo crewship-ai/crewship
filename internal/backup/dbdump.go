@@ -306,6 +306,9 @@ var BackupTables = []string{
 	"page_versions",   // FK page_id → pages
 	"page_artifacts",
 	"page_artifact_revisions",
+	"page_artifact_creations",
+	"page_artifact_mutation_receipts",
+	"page_artifact_requests",
 	"page_artifact_threads",
 	"page_artifact_comments",
 	"page_artifact_comment_mutations",
@@ -450,7 +453,7 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "pipeline_run_step_outputs", "pipeline_step_executions", "pipeline_run_artifacts":
 		// No workspace_id column — scoped via its run.
 		return "run_id IN (SELECT id FROM pipeline_runs WHERE workspace_id = ?)", []any{workspaceID}, true
-	case "page_artifact_threads", "page_artifact_comment_mutations", "page_artifacts", "page_artifact_revisions", "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
+	case "page_artifact_mutation_receipts", "page_artifact_requests", "page_artifact_creations", "page_artifact_threads", "page_artifact_comment_mutations", "page_artifacts", "page_artifact_revisions", "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
 		// Scope through the owning page, never the nullable (or cross-workspace) editor.
 		return "page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "page_artifact_comments":
@@ -1165,6 +1168,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			// copies whatever row is current — has to come after it or its
 			// CANCELLED status would be thrown away.
 			row := safeConversationRestoreRow(table, originalRow, conversationAssignments)
+			row = safeArtifactRequestRestoreRow(table, row)
 			// Restoring a held issue must not restart work that was still stopping
 			// at backup time. Preserve historical terminal runs and their brief
 			// snapshots; import nonterminal held runs as cancelled.

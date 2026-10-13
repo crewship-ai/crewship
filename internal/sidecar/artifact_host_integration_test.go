@@ -89,8 +89,24 @@ func TestArtifactHostHTTPDelegatedLifecycle(t *testing.T) {
 	admission := map[string]any{"id": r6RunA, "workspace_id": r6WS, "agent_id": r6AgentID, "chat_id": "artifact-chat", "trigger_type": "USER", "artifact_human_receipt": receipt, "artifact_human_message_id": "artifact-message"}
 	crew := internaltoken.DeriveCrewToken(r6Master, r6WS, r6Crew)
 	// Even a genuine receipt cannot turn crew transport into human admission.
-	call("POST", "/api/v1/internal/runs", crew, "", admission, 403)
+	admission["id"] = "crew-run-no-principal"
+	call("POST", "/api/v1/internal/runs", crew, "", admission, 201)
+	var principals int
+	if h.db.QueryRow(`SELECT COUNT(*) FROM artifact_run_principals WHERE run_id='crew-run-no-principal'`).Scan(&principals) != nil || principals != 0 {
+		t.Fatal("crew minted human principal")
+	}
+	admission["id"] = r6RunA
 	call("POST", "/api/v1/internal/runs", r6Master, "", admission, 201)
+	ordinary := map[string]any{"id": "ordinary-no-receipt", "workspace_id": r6WS, "agent_id": r6AgentID, "chat_id": "artifact-chat", "trigger_type": "USER"}
+	call("POST", "/api/v1/internal/runs", r6Master, "", ordinary, 201)
+	var records int
+	if h.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE trace_id='ordinary-no-receipt' AND entry_type='run.started'`).Scan(&records) != nil || records != 1 {
+		t.Fatal("ordinary chat lost durable run record")
+	}
+	if h.db.QueryRow(`SELECT COUNT(*) FROM artifact_run_principals WHERE run_id='ordinary-no-receipt'`).Scan(&principals) != nil || principals != 0 {
+		t.Fatal("missing receipt minted artifact authority")
+	}
+
 	call("POST", "/api/v1/pages/report/artifact/delegations?workspace_id="+r6WS, "", human, map[string]any{"run_id": r6RunA}, 201)
 	call("POST", "/api/v1/internal/artifacts/report/revisions", r6Master, r6RunToken(r6RunA), map[string]any{"html": "x", "base_rev": 0, "mutation_id": "master-denied"}, 403)
 	s, _ := newR6Sidecar(t, upstream.URL)

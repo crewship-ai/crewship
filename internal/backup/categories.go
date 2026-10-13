@@ -240,7 +240,10 @@ var TableCategory = map[string]string{
 	// Pages and their files.
 	"page_folders": CategoryPages, "page_folder_acl": CategoryPages, "pages": CategoryPages,
 	"page_artifact_threads": CategoryPages, "page_artifact_comments": CategoryPages, "page_artifact_comment_mutations": CategoryPages,
-	"page_artifacts": CategoryPages, "page_artifact_revisions": CategoryPages,
+	"page_artifact_mutation_receipts": CategoryPages,
+	"page_artifact_creations":         CategoryPages,
+	"page_artifact_requests":          CategoryPages,
+	"page_artifacts":                  CategoryPages, "page_artifact_revisions": CategoryPages,
 	"page_panels": CategoryPages, "page_panel_data": CategoryPages, "page_versions": CategoryPages,
 	"page_project_builds": CategoryPages, "page_project_publications": CategoryPages,
 	"page_project_live": CategoryPages, "page_project_withdrawals": CategoryPages,

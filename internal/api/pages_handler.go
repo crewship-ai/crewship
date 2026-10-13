@@ -41,6 +41,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -60,6 +61,8 @@ type PageHandler struct {
 	restrictedWorkflow               func() *restrictedworkflow.Service
 	artifactStoragePath              string
 	artifactMasterToken              string
+	artifactRequestCancels           sync.Map
+	artifactDispatch                 func(context.Context, string, string, string, ws.ChatMessageOption) error
 	projectStore                     *pages.ProjectStore
 	builds                           *pageBuildCoordinator
 	pageArtifacts                    *pagebuild.Store
