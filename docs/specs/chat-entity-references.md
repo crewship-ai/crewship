@@ -35,8 +35,9 @@ existing mutation behavior without generating a human chat card. Explicitly
 keyed autonomous operations also persist retry results; keyless autonomous
 HTTP calls retain legacy behavior. Agentless autonomous routine actions must
 come from authenticated host dispatch, match a persisted running routine in
-its live workspace and crew, and remain within that crew for both mutations
-and replay. A missing agent never removes a stored human origin. Human-origin
+its live workspace and crew. Keyless autonomous actions retain their legacy
+workspace reach; explicitly keyed mutations and replay remain within the
+admitting crew. A missing agent never removes a stored human origin. Human-origin
 routine mutations still require an identified agent. Explicit show requires a
 human chat origin.
 
@@ -281,6 +282,8 @@ include `Operation-ID`. Changed intent returns `409 operation_key_conflict`.
 Current account and membership authority are checked before replay; a successful
 old response cannot authorize access after revocation. Replays do not repeat
 comments, activity or mention dispatch. PATCH labels and fields are atomic.
+Label membership changes advance the field revision as well as the aggregate
+revision, so concurrent labels-only editors cannot overwrite a newer label set.
 
 These parameters remain optional for old clients. Chat card editors MUST send
 both an explicit expected revision and stable retry key; they retain the same

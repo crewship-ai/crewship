@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,28 +129,55 @@ func TestAgentlessPipelineIssueUpdateAndKeyedReplay(t *testing.T) {
 }
 
 func TestAutonomousPipelineAgentRetainsCrossCrewIssueUpdates(t *testing.T) {
-	f := newChatIssueFixture(t)
-	execOrFatal(t, f.h.db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('automation-other',?,'Other','automation-other')`, f.workspace)
-	seedAgentRow(t, f.h.db, "automation-other-agent", f.workspace, "automation-other", "Other", "other", "LEAD")
-	seedIssue(t, f.h.db, f.workspace, "automation-other", "automation-other-agent", "OTHER-1", "BACKLOG")
-	store := pipeline.NewStore(f.h.db)
-	now := time.Now()
-	recipe, err := store.Save(t.Context(), pipeline.SaveInput{WorkspaceID: f.workspace, Slug: "cross-crew-automation", Name: "Automation", DefinitionJSON: `{"name":"Automation","steps":[{"id":"update","type":"crewship","action":"issue.update","args":{"identifier":"OTHER-1","status":"TODO"}}]}`, Author: pipeline.AuthorMeta{CrewID: f.crew, AgentID: f.agent, Via: pipeline.AuthoredViaAgent}, LastTestRunAt: &now, LastTestRunPassed: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	host := NewInternalHandler(f.h.db, "cross-crew-host", newTestLogger())
-	mux := http.NewServeMux()
-	mux.Handle("PATCH /api/v1/internal/issues/{identifier}", host.requireInternal(withHostChatOrigin(http.HandlerFunc(f.h.UpdateStatus))))
-	server := httptest.NewServer(mux)
-	defer server.Close()
-	executor := pipeline.NewExecutor(store, pipeline.NewResolver(f.h.db), nil, nil).WithRunStore(pipeline.NewRunStore(f.h.db)).WithCrewshipActions(newCrewshipActions(server.URL, "cross-crew-host", policy.NewResolver(f.h.db), f.h.db, newTestLogger()))
-	result, err := executor.Run(t.Context(), pipeline.RunInput{PipelineID: recipe.ID, WorkspaceID: f.workspace, Mode: pipeline.ModeRun})
-	if err != nil || result.Status != "COMPLETED" {
-		t.Fatalf("standing automation regression: %+v %v", result, err)
-	}
-	var status string
-	if err = f.h.db.QueryRow(`SELECT status FROM missions WHERE identifier='OTHER-1' AND workspace_id=?`, f.workspace).Scan(&status); err != nil || status != "TODO" {
-		t.Fatalf("foreign crew issue not updated: %s %v", status, err)
+	for _, tc := range []struct {
+		name             string
+		agentless, keyed bool
+	}{{"agent", false, false}, {"agentless", true, false}, {"agentless-keyed-fenced", true, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newChatIssueFixture(t)
+			execOrFatal(t, f.h.db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('automation-other',?,'Other','automation-other')`, f.workspace)
+			seedAgentRow(t, f.h.db, "automation-other-agent", f.workspace, "automation-other", "Other", "other", "LEAD")
+			seedIssue(t, f.h.db, f.workspace, "automation-other", "automation-other-agent", "OTHER-1", "BACKLOG")
+			store := pipeline.NewStore(f.h.db)
+			now := time.Now()
+			author := pipeline.AuthorMeta{CrewID: f.crew, AgentID: f.agent, Via: pipeline.AuthoredViaAgent}
+			if tc.agentless {
+				author = pipeline.AuthorMeta{CrewID: f.crew, UserID: f.user, Via: pipeline.AuthoredViaUser}
+			}
+			args := map[string]any{"identifier": "OTHER-1", "status": "TODO"}
+			if tc.keyed {
+				args["operation_key"] = "cross-crew-explicit-key"
+			}
+			definition, _ := json.Marshal(map[string]any{"name": "Automation", "steps": []any{map[string]any{"id": "update", "type": "crewship", "action": "issue.update", "args": args}}})
+			recipe, err := store.Save(t.Context(), pipeline.SaveInput{WorkspaceID: f.workspace, Slug: "cross-crew-automation", Name: "Automation", DefinitionJSON: string(definition), Author: author, LastTestRunAt: &now, LastTestRunPassed: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			host := NewInternalHandler(f.h.db, "cross-crew-host", newTestLogger())
+			mux := http.NewServeMux()
+			mux.Handle("PATCH /api/v1/internal/issues/{identifier}", host.requireInternal(withHostChatOrigin(http.HandlerFunc(f.h.UpdateStatus))))
+			server := httptest.NewServer(mux)
+			defer server.Close()
+			executor := pipeline.NewExecutor(store, pipeline.NewResolver(f.h.db), nil, nil).WithRunStore(pipeline.NewRunStore(f.h.db)).WithCrewshipActions(newCrewshipActions(server.URL, "cross-crew-host", policy.NewResolver(f.h.db), f.h.db, newTestLogger()))
+			result, err := executor.Run(t.Context(), pipeline.RunInput{PipelineID: recipe.ID, WorkspaceID: f.workspace, Mode: pipeline.ModeRun})
+			if tc.keyed {
+				if err != nil || result.Status != "FAILED" || !strings.Contains(result.ErrorMessage, "operation_entity_unavailable") {
+					t.Fatalf("keyed system crew fence lost: %+v %v", result, err)
+				}
+				var status string
+				if err = f.h.db.QueryRow(`SELECT status FROM missions WHERE identifier='OTHER-1' AND workspace_id=?`, f.workspace).Scan(&status); err != nil || status != "BACKLOG" {
+					t.Fatalf("keyed cross-crew mutation happened: %s %v", status, err)
+				}
+				return
+			}
+			if err != nil || result.Status != "COMPLETED" {
+				t.Fatalf("standing automation regression: %+v %v", result, err)
+			}
+			var status string
+			if err = f.h.db.QueryRow(`SELECT status FROM missions WHERE identifier='OTHER-1' AND workspace_id=?`, f.workspace).Scan(&status); err != nil || status != "TODO" {
+				t.Fatalf("foreign crew issue not updated: %s %v", status, err)
+			}
+
+		})
 	}
 }

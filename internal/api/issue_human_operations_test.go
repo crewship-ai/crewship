@@ -10,6 +10,41 @@ import (
 	"testing"
 )
 
+func TestHumanIssueLabelsRejectStaleEdit(t *testing.T) {
+	h, user, ws, crew, lead, _ := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, ws, crew, lead, "ENG-1", "BACKLOG")
+	for _, label := range []string{"label-a", "label-b"} {
+		execOrFatal(t, h.db, `INSERT INTO labels(id,workspace_id,name,color) VALUES(?,?,?,'#abcdef')`, label, ws, label)
+	}
+	var revision int64
+	if err := h.db.QueryRow(`SELECT revision FROM missions WHERE id=?`, id).Scan(&revision); err != nil {
+		t.Fatal(err)
+	}
+	for i, label := range []string{"label-a", "label-b"} {
+		req := httptest.NewRequest("PATCH", "/", strings.NewReader(fmt.Sprintf(`{"labels":[%q],"expected_revision":%d}`, label, revision)))
+		req.SetPathValue("crewId", crew)
+		req.SetPathValue("identifier", "ENG-1")
+		req.Header.Set("Idempotency-Key", "labels-"+label)
+		req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: user}), ws, "OWNER"))
+		rr := httptest.NewRecorder()
+		h.Update(rr, req)
+		want := http.StatusOK
+		if i == 1 {
+			want = http.StatusConflict
+		}
+		if rr.Code != want {
+			t.Fatalf("labels edit %d: status %d, want %d: %s", i, rr.Code, want, rr.Body.String())
+		}
+	}
+	var label string
+	if err := h.db.QueryRow(`SELECT label_id FROM mission_labels WHERE mission_id=?`, id).Scan(&label); err != nil {
+		t.Fatal(err)
+	}
+	if label != "label-a" {
+		t.Fatalf("stale edit overwrote labels: %q", label)
+	}
+}
+
 func TestHumanIssueRevisionAndTimeoutReplay(t *testing.T) {
 	h, user, ws, crew, lead, _ := newTestIssueHandler(t)
 	id := seedIssue(t, h.db, ws, crew, lead, "ENG-1", "BACKLOG")

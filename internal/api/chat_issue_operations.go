@@ -201,18 +201,15 @@ func (h *InternalIssueHandler) authorizeChatIssue(ctx context.Context, q issueOp
 			return nil, err
 		}
 	}
-	if a.HumanAuthority == nil && key == "" && actorType == "agent" {
+	if a.HumanAuthority == nil && key == "" {
 		return nil, nil
-	} // admitted autonomous agents retain existing workspace mutation reach
+	} // admitted keyless autonomous executions retain existing workspace mutation reach
 	op := &chatIssueOperation{authority: a, actorType: actorType, actorID: actorID, crewID: crewID}
 	if entityID != "" {
 		if err := verifyChatIssueOperationEntity(ctx, q, op, workspaceID, entityID); err != nil {
 			return nil, err
 		}
 	}
-	if a.HumanAuthority == nil && key == "" {
-		return nil, nil
-	} // keyless host-admitted autonomous compatibility
 	if key == "" {
 		return nil, chatentities.ErrKeyRequired
 	}
