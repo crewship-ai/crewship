@@ -20,6 +20,8 @@ import (
 // browser sessions. It creates no runtime, Docker containers or external users.
 func TestMemberNavigationBrowser(t *testing.T) {
 	if os.Getenv("CREWSHIP_MEMBER_NAV_BROWSER") != "1" {
+		// SKIP-WAIVER(#3077): ordinary Go runners lack a built static export and
+		// provisioned Chromium; this acceptance check runs explicitly in the browser lane.
 		t.Skip("opt-in production frontend browser check")
 	}
 	repo, err := filepath.Abs("../..")
