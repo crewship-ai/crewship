@@ -26,6 +26,7 @@ func (r *capabilityRevoker) RunStep(ctx context.Context, req AgentStepRequest) (
 func TestInvocationAuthorityPolicy(t *testing.T) {
 	db := openFactoryTestDB(t)
 	defer db.Close()
+	mustExec(t, db, `INSERT INTO users(id) VALUES('human')`)
 	mustExec(t, db, `CREATE TABLE workspace_members(workspace_id TEXT,user_id TEXT,role TEXT,capabilities TEXT,access_mode TEXT NOT NULL DEFAULT 'trusted')`)
 	check := NewInvocationAuthorityChecker(db)
 	for _, tc := range []struct {
@@ -84,6 +85,7 @@ func TestInvocationAuthorityStopsAfterRevocation(t *testing.T) {
 		t.Run(change, func(t *testing.T) {
 			db := openFactoryTestDB(t)
 			defer db.Close()
+			mustExec(t, db, `INSERT INTO users(id) VALUES('human')`)
 			mustExec(t, db, `CREATE TABLE workspace_members(workspace_id TEXT,user_id TEXT,role TEXT,capabilities TEXT,access_mode TEXT NOT NULL DEFAULT 'trusted')`)
 			mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role,capabilities) VALUES('ws_test','human','MEMBER','["routine.run"]')`)
 			mock := newMockRunner()
