@@ -12,7 +12,10 @@ END;
 CREATE TRIGGER missions_parent_revision AFTER UPDATE OF revision ON missions
 WHEN NEW.revision <> OLD.revision
 BEGIN
- UPDATE missions SET aggregate_revision = aggregate_revision + 1 WHERE id = NEW.parent_issue_id;
+ UPDATE missions SET aggregate_revision = aggregate_revision + 1 WHERE id = NEW.parent_issue_id OR id IN (
+ SELECT target_id FROM mission_relations WHERE source_id = NEW.id
+ UNION SELECT source_id FROM mission_relations WHERE target_id = NEW.id
+ );
 END;
 CREATE TRIGGER missions_parent_insert AFTER INSERT ON missions
 BEGIN
@@ -86,4 +89,22 @@ END;
 CREATE TRIGGER attachments_aggregate_delete AFTER DELETE ON attachments
 BEGIN
  UPDATE missions SET aggregate_revision = aggregate_revision + 1 WHERE id IN (OLD.mission_id, (SELECT mission_id FROM mission_comments WHERE id = OLD.comment_id));
+END;
+CREATE TRIGGER mission_activity_aggregate_insert AFTER INSERT ON mission_activity
+BEGIN
+ UPDATE missions SET aggregate_revision = aggregate_revision + 1 WHERE id IN (NEW.mission_id);
+END;
+CREATE TRIGGER mission_activity_aggregate_update AFTER UPDATE ON mission_activity
+BEGIN
+ UPDATE missions SET aggregate_revision = aggregate_revision + 1 WHERE id IN (NEW.mission_id, OLD.mission_id);
+END;
+CREATE TRIGGER mission_activity_aggregate_delete AFTER DELETE ON mission_activity
+BEGIN
+ UPDATE missions SET aggregate_revision = aggregate_revision + 1 WHERE id IN (OLD.mission_id);
+END;
+-- Labels are joined into the issue response; a rename changes that view.
+CREATE TRIGGER labels_aggregate_update AFTER UPDATE ON labels
+BEGIN
+ UPDATE missions SET aggregate_revision = aggregate_revision + 1 WHERE id IN
+ (SELECT mission_id FROM mission_labels WHERE label_id IN (OLD.id,NEW.id));
 END;

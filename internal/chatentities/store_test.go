@@ -21,7 +21,7 @@ func testDB(t *testing.T) *sql.DB {
 	}
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
-	if _, err = db.Exec(`CREATE TABLE chats(id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL);INSERT INTO chats VALUES('chat','ws'),('other','other-ws');CREATE TABLE mutations(id TEXT PRIMARY KEY)`); err != nil {
+	if _, err = db.Exec(`CREATE TABLE workspaces(id TEXT PRIMARY KEY); INSERT INTO workspaces VALUES('ws'),('other-ws'); CREATE TABLE chats(id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE);INSERT INTO chats VALUES('chat','ws'),('other','other-ws');CREATE TABLE mutations(id TEXT PRIMARY KEY)`); err != nil {
 		t.Fatal(err)
 	}
 	applyMigration(t, db, "20261013120000_chat_entity_operations.sql")
@@ -209,5 +209,37 @@ func TestBoundedScan(t *testing.T) {
 	}
 	if _, _, e = ScanRefs(ctx, db, "chat", -1, 2); !errors.Is(e, ErrInvalid) {
 		t.Fatal(e)
+	}
+}
+
+func TestWorkspaceDeletionRemovesOperationResults(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	tx, e := db.BeginTx(ctx, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	o, _, e := BeginOperation(ctx, tx, spec("op"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	finish(t, tx, o.ID)
+	if _, e = AppendRef(ctx, tx, RefSpec{"event", "chat", o.ID, "run", "msg"}); e != nil {
+		t.Fatal(e)
+	}
+	if e = tx.Commit(); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Exec(`DELETE FROM workspaces WHERE id='ws'`); e != nil {
+		t.Fatal(e)
+	}
+	for _, table := range []string{"agent_operations", "chat_entity_refs"} {
+		var n int
+		if e = db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); e != nil {
+			t.Fatal(e)
+		}
+		if n != 0 {
+			t.Fatalf("workspace deletion retained %s", table)
+		}
 	}
 }

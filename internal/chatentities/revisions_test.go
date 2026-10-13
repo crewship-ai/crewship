@@ -17,6 +17,8 @@ func TestIssueRevisionTriggers(t *testing.T) {
  CREATE TABLE missions(id TEXT PRIMARY KEY,parent_issue_id TEXT,title TEXT,updated_at TEXT);
  CREATE TABLE mission_comments(id TEXT PRIMARY KEY,mission_id TEXT,body TEXT);
  CREATE TABLE mission_labels(mission_id TEXT,label_id TEXT);
+ CREATE TABLE labels(id TEXT PRIMARY KEY,name TEXT);
+ CREATE TABLE mission_activity(id TEXT PRIMARY KEY,mission_id TEXT,details TEXT);
  CREATE TABLE mission_code_links(id TEXT PRIMARY KEY,mission_id TEXT,state TEXT);
  CREATE TABLE mission_relations(id TEXT PRIMARY KEY,source_id TEXT,target_id TEXT,relation_type TEXT);
  CREATE TABLE attachments(id TEXT PRIMARY KEY,mission_id TEXT,comment_id TEXT,filename TEXT);`)
@@ -56,7 +58,11 @@ func TestIssueRevisionTriggers(t *testing.T) {
 	if pn <= paAfter || on <= oa {
 		t.Fatal("parent move not tracked")
 	}
+	exec(`INSERT INTO labels VALUES('label','Old')`)
 	changes := []string{
+		`INSERT INTO mission_activity VALUES('act','child','before')`,
+		`UPDATE mission_activity SET details='after' WHERE id='act'`,
+		`DELETE FROM mission_activity WHERE id='act'`,
 		`INSERT INTO mission_comments VALUES('comment','child','body')`,
 		`UPDATE mission_comments SET body='changed' WHERE id='comment'`,
 		`INSERT INTO attachments VALUES('attachment',NULL,'comment','a.txt')`,
@@ -64,11 +70,13 @@ func TestIssueRevisionTriggers(t *testing.T) {
 		`DELETE FROM attachments WHERE id='attachment'`,
 		`DELETE FROM mission_comments WHERE id='comment'`,
 		`INSERT INTO mission_labels VALUES('child','label')`,
+		`UPDATE labels SET name='New' WHERE id='label'`,
 		`DELETE FROM mission_labels WHERE mission_id='child'`,
 		`INSERT INTO mission_code_links VALUES('code','child','open')`,
 		`UPDATE mission_code_links SET state='closed' WHERE id='code'`,
 		`DELETE FROM mission_code_links WHERE id='code'`,
 		`INSERT INTO mission_relations VALUES('relation','child','parent','blocks')`,
+		`UPDATE missions SET title='parent renamed' WHERE id='parent'`,
 		`UPDATE mission_relations SET relation_type='relates_to' WHERE id='relation'`,
 		`DELETE FROM mission_relations WHERE id='relation'`,
 	}

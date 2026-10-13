@@ -2,7 +2,7 @@
 -- Actor scope prevents a guessed key from retrieving another actor's result.
 CREATE TABLE agent_operations (
  id TEXT PRIMARY KEY,
- workspace_id TEXT NOT NULL,
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
  operation_key TEXT NOT NULL CHECK(length(operation_key) BETWEEN 1 AND 200),
  request_hash TEXT NOT NULL,
  actor_type TEXT NOT NULL CHECK(actor_type IN ('agent','human','system')),
@@ -28,7 +28,7 @@ CREATE TABLE chat_entity_refs (
  chat_seq INTEGER PRIMARY KEY AUTOINCREMENT,
  event_id TEXT NOT NULL UNIQUE,
  chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
- operation_id TEXT NOT NULL REFERENCES agent_operations(id),
+ operation_id TEXT NOT NULL REFERENCES agent_operations(id) ON DELETE CASCADE,
  run_id TEXT NOT NULL,
  trigger_message_id TEXT NOT NULL,
  created_at TEXT NOT NULL,
