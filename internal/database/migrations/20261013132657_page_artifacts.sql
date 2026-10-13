@@ -18,6 +18,7 @@ CREATE TABLE page_artifact_revisions (
  UNIQUE(page_id,mutation_id)
 );
 CREATE INDEX idx_page_artifact_blobs ON page_artifact_revisions(sha256);
+CREATE INDEX idx_page_artifact_authors ON page_artifact_revisions(author_user_id);
 -- Enforce the type boundary even when a concurrent legacy writer has already
 -- passed its application-level checks. A failed transaction leaves both intact.
 CREATE TRIGGER page_artifact_empty_page BEFORE INSERT ON page_artifacts

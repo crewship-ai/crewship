@@ -267,7 +267,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // Guessing a longer delay would only move the race. The callback ref fires
   // when the node actually attaches, which is the moment that matters.
   const wantsFocus = React.useRef(false)
+  const viewHeadingNode = React.useRef<HTMLHeadingElement | null>(null)
   const viewHeading = React.useCallback((node: HTMLHeadingElement | null) => {
+    viewHeadingNode.current = node
     if (node === null || !wantsFocus.current) return
     wantsFocus.current = false
     node.focus()
@@ -577,7 +579,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
       {/* Only creation opens the document editor from here now. Editing an
           existing Page's document belongs to the editor's Content section,
           beside the panels it changes. */}
-      {!editing && <UnsavedWorkDialog pending={nav.pending} onDiscard={() => {}} onReturnFocus={() => viewHeading.current?.focus()} />}
+      {!editing && <UnsavedWorkDialog pending={nav.pending} onDiscard={() => {}} onReturnFocus={() => viewHeadingNode.current?.focus()} />}
       {creatingArtifact && <NewArtifactDialog workspaceId={workspaceId} onClose={() => setCreatingArtifact(false)} onCreated={openPage} />}
       {creating && (
         <PageEditor
