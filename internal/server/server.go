@@ -59,6 +59,8 @@ type Server struct {
 	recoveredRuntimesMu     sync.Mutex
 	recoveredRuntimes       map[string]orchestrator.RunState
 	recoveredRuntimesCursor string
+	retainedOutputMu        sync.Mutex
+	retainedOutputCursor    string
 
 	httpServer    *http.Server
 	ipcServer     *http.Server
@@ -1208,6 +1210,8 @@ func (s *Server) mountAPIRouter(
 // orchestrator and the IPC base URL containers use to reach this server.
 func buildOrchestrator(cfg *config.Config, logger *slog.Logger, ctr provider.ContainerProvider, sta provider.StateProvider) (*orchestrator.Orchestrator, string) {
 	orch := orchestrator.New(ctr, sta, logger, orchestrator.WithMaxConcurrentRuns(cfg.Orchestrator.MaxConcurrentRuns))
+	orch.SetHostOutputRoot(cfg.Storage.RunOutputPath)
+	orch.SetHostOutputCapacity(cfg.Storage.RunOutputMaxBytes, cfg.Storage.RunOutputMaxRuns)
 	if managed, ok := ctr.(interface {
 		SetRuntimeIdleVerifier(func(context.Context, string, string) error)
 	}); ok {

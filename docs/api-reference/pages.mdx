@@ -31,6 +31,49 @@ responses exist to keep them true:
 Implementation: `internal/api/pages_*.go`, `internal/pages` for the schemas and
 validation.
 
+## Static HTML artifacts
+
+A human-owned empty Page can hold versioned HTML instead of panels or an App.
+Create that shell through `POST /api/v1/pages` with `slug`, `name`, `panels: []`
+and `allow_empty: true`; omit `owner` to use the authenticated human. Ordinary
+panel Pages still require panels. A shell can be renamed before its first upload.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/v1/pages/{slug}/artifact` | Source, selected revision and history |
+| POST | `/api/v1/pages/{slug}/artifact/revisions` | Append a source revision |
+| POST | `/api/v1/pages/{slug}/artifact/restore` | Append a copy of an older revision |
+
+The existing workspace context and Page permissions apply. These routes require
+a human session or human CLI credential; agent and public-link credentials do
+not authorize this surface.
+
+`GET` accepts an optional positive integer `revision` query parameter. It returns
+`head_rev`, selected `revision`, original `html`, `can_write`, and `revisions`
+ordered newest first. Each history item has `revision`, `created_at`,
+`author_user_id`, and optional `restored_from`. An empty shell returns revision 0
+and an empty source/history. Source is escaped JSON with `no-store` and
+`nosniff`; it is not a directly navigable HTML endpoint.
+
+Publish body: `{"html":"<h1>Report</h1>","base_rev":0,"mutation_id":"first-save"}`.
+Restore body: `{"revision":1,"base_rev":2,"mutation_id":"restore-first"}`.
+Both return `revision` and `head_rev`, with 201 for a new revision or 200 for an
+identical retry. The server rechecks live membership and Page write permission
+within the writer transaction. A stale base or conflicting mutation ID is 409;
+it never forces an overwrite. The same mutation ID may be replayed only by the
+same author with the same operation and content.
+
+Limits: 10 MiB decoded nonempty UTF-8 source (413 if too large,422 if invalid),
+200 committed revisions (409 with `code: revision_limit`), and 30 per rolling
+hour (429 with `code: rate_limited` and `Retry-After`). Restore uses the same
+limits. Missing/corrupt stored source returns 503. Access to another Page's
+history is never inferred from knowing its revision number.
+
+Studio renders only a sanitized static preview: scripts, navigation, forms and
+external resources are disabled. Original source can be downloaded as plain
+text. Images and downloaded fonts are not rendered in this first slice. Public
+artifact sharing, agent publication and interactive execution are not enabled.
+
 ## Endpoints
 
 | Method | Endpoint | Purpose |

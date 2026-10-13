@@ -35,6 +35,67 @@ empty, and a line saying so would be read as a key. `page export` is the
 exception in the other direction: it prints YAML unless you ask for
 `--format json`.
 
+## Artifact commands
+
+The first artifact surface stores HTML on a human-owned Page. Its preview is
+static: scripts and external resources stay disabled. These commands use your
+existing human CLI profile and the Page's read/write permissions; they do not
+provide agent-run publication authority.
+
+### crewship page artifact create
+
+```bash
+crewship page artifact create report --name "Weekly report"
+```
+
+`--name` supplies the Page name. This stages an empty Page owned by you, using
+`POST /api/v1/pages` with `allow_empty: true`. Publish its first source separately;
+an unsuccessful upload leaves the shell available for retry.
+
+### crewship page artifact show
+
+```bash
+crewship page artifact show report --format json
+crewship page artifact show report --revision 1 --format json
+```
+
+`--revision` selects a positive historical revision; omission selects the head.
+`GET /api/v1/pages/{slug}/artifact` returns source, history, selected revision
+and current head in a JSON envelope. Reading source does not execute it.
+
+### crewship page artifact publish
+
+```bash
+crewship page artifact publish report --file report.html --base-rev 0
+cat report.html | crewship page artifact publish report --file - --base-rev 1
+```
+
+`--file` selects an HTML source file or `-` for stdin. `--base-rev` is required,
+including explicit 0 for the first revision. The command calls
+`POST /api/v1/pages/{slug}/artifact/revisions`; a stale base fails instead of
+replacing somebody else's revision. Inspect the current revision and reconcile
+your source before submitting with a newer base.
+
+`--mutation-id` optionally supplies a retry identifier; otherwise the command
+generates one. Reuse an explicit identifier only for the identical operation,
+base revision and source under the same human identity. The server returns the
+original result for an identical retry and rejects conflicting reuse.
+
+### crewship page artifact restore
+
+```bash
+crewship page artifact restore report --revision 1 --base-rev 2
+```
+
+`--revision` selects the positive historical revision to copy. `--base-rev` is
+required and must match the current head. `--mutation-id` follows the same retry
+rules as publish. `POST /api/v1/pages/{slug}/artifact/restore` appends a new
+revision; it does not discard intervening history.
+
+Source is limited to 10 MiB UTF-8; each artifact retains up to 200 revisions and
+accepts up to 30 committed revisions per hour, including restores. Public
+links and agent credentials do not authorize these artifact routes.
+
 ## Subcommands
 
 | Command | Purpose |

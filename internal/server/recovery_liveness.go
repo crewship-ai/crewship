@@ -17,6 +17,9 @@ import (
 // inspected container or exact run probe can establish absence; unavailable
 // providers, legacy locations and work-owned outcomes remain untouched.
 func (s *Server) reconcileRecoveredRuntimeAtBoot(ctx context.Context, key string, run orchestrator.RunState) orchestrator.RunState {
+	if run.Output != nil {
+		return s.captureRecoveredRunResult(ctx, key, run)
+	}
 	if run.Status == "running" && run.ContainerID == "" {
 		s.logger.Warn("recovered runtime has no recorded container identity; absence requires operator verification", "run_id", run.ID)
 		return run
@@ -35,7 +38,29 @@ func (s *Server) reconcileRecoveredRuntimeAtBoot(ctx context.Context, key string
 	return run
 }
 
+func (s *Server) captureRecoveredRunResult(ctx context.Context, key string, run orchestrator.RunState) orchestrator.RunState {
+	if run.Status != "running" || run.Output == nil || run.Output.RetainedResult != nil || s.orchestrator == nil {
+		return run
+	}
+	snapshot, err := s.orchestrator.ReadRetainedRunResult(ctx, run)
+	if err != nil || !snapshot.Complete {
+		return run
+	}
+	updated, err := s.orchestrator.RecordRetainedRunResult(ctx, key, run, snapshot)
+	if err != nil {
+		s.logger.Warn("preserve recovered run result", "run_id", run.ID, "error", err)
+		return run
+	}
+	return updated
+}
+
 func (s *Server) recoveredRuntimeAbsent(ctx context.Context, run orchestrator.RunState) bool {
+	if run.Output != nil {
+		// Capture may have completed while the controller was absent. Its
+		// retained terminal result must be replayed before any absence-based
+		// fallback. Unknown versions/locations also stay unresolved.
+		return false
+	}
 	if run.Status != "running" || run.ID == "" || run.ID == run.AgentID || run.ContainerID == "" || run.AgentSlug == "" || s.container == nil || s.orchestrator == nil || ctx.Err() != nil {
 		return false
 	}
@@ -96,6 +121,10 @@ func (s *Server) reconcileRecoveredRuntimes(ctx context.Context) {
 		}
 		if current.Status != "running" || !orchestrator.SameRecoveredIdentity(current, expected) {
 			delete(s.recoveredRuntimes, key)
+			continue
+		}
+		if current.Output != nil {
+			s.captureRecoveredRunResult(ctx, key, current)
 			continue
 		}
 		if !s.recoveredRuntimeAbsent(ctx, current) {

@@ -60,12 +60,13 @@ import type { PanelState } from "@/components/features/pages/panels/types"
 import { PagesRail } from "@/components/features/pages/pages-rail"
 import { PagesOverview } from "@/components/features/pages/pages-overview"
 import { PageView } from "@/components/features/pages/page-view"
+import { NewArtifactDialog } from "./new-artifact-dialog"
 import { PageEditor } from "@/components/features/pages/page-editor"
 import { PageImportDialog } from "@/components/features/pages/page-import-dialog"
 import { useEditorRoute } from "@/components/features/pages/editor/use-editor-route"
 import { usePageCapabilities } from "@/components/features/pages/editor/use-page-capabilities"
 import { usePageGrants } from "@/hooks/use-page-grants"
-import { PageEditorShell } from "@/components/features/pages/editor/page-editor-shell"
+import { PageEditorShell, UnsavedWorkDialog } from "@/components/features/pages/editor/page-editor-shell"
 import { usePageFolderMutations, usePageFolders } from "@/hooks/use-page-folders"
 import { FolderDeleteDialog, FolderEditDialog, MoveToFolderDialog } from "@/components/features/pages/folder-dialogs"
 import { FolderSharingDialog } from "@/components/features/pages/folder-sharing-dialog"
@@ -82,6 +83,7 @@ export interface PagesLayoutProps {
 
 export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const isMobile = useIsMobile()
+  const [creatingArtifact, setCreatingArtifact] = React.useState(false)
 
   // WHICH PAGE IS OPEN, WHETHER THE EDITOR IS OPEN, AND WHICH SECTION IT SHOWS
   // ARE ONE PIECE OF STATE, AND THE ADDRESS BAR IS ITS MIRROR.
@@ -350,6 +352,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             <SubBarSecondary icon={Upload} onClick={() => setImporting(true)}>
               Import
             </SubBarSecondary>
+            <SubBarSecondary icon={FilePlus2} onClick={() => setCreatingArtifact(true)}>
+              New artifact
+            </SubBarSecondary>
             <SubBarPrimary icon={FilePlus2} onClick={() => setCreating(true)}>
               New page
             </SubBarPrimary>
@@ -473,6 +478,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   now={now}
                   workspaceId={workspaceId}
                   mayEditAvatar={capabilities.mayEditMetadata}
+                  onArtifactDirtyChange={nav.setDirty}
                   // Straight from the subscription `usePage` registered — the
                   // header indicator is lit only while this page's channel is
                   // on a live socket, never on a timer of its own (epic #1935).
@@ -571,6 +577,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
       {/* Only creation opens the document editor from here now. Editing an
           existing Page's document belongs to the editor's Content section,
           beside the panels it changes. */}
+      {!editing && <UnsavedWorkDialog pending={nav.pending} onDiscard={() => {}} onReturnFocus={() => viewHeading.current?.focus()} />}
+      {creatingArtifact && <NewArtifactDialog workspaceId={workspaceId} onClose={() => setCreatingArtifact(false)} onCreated={openPage} />}
       {creating && (
         <PageEditor
           workspaceId={workspaceId}

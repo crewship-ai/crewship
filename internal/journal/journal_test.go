@@ -16,6 +16,7 @@ import (
 // fresh in-memory DB and applies this directly instead of pulling in the
 // whole migrate package — keeps the unit test fast and self-contained.
 const schemaSQL = `
+CREATE TABLE journal_replay_receipts (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, workspace_id TEXT NOT NULL, agent_id TEXT NOT NULL, trace_id TEXT NOT NULL, entry_type TEXT NOT NULL, terminal_exit_code INTEGER);
 CREATE TABLE workspaces (id TEXT PRIMARY KEY);
 INSERT INTO workspaces (id) VALUES ('ws_test');
 

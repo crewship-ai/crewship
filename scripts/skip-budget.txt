@@ -202,4 +202,9 @@
 # 2026-10-02 (#1368+#2240): +1 — fenceSvcHarness (address change, unavailable
 #                     service, failed network move) needs real bridges and
 #                     nftables; SKIP-WAIVER on the Docker guard.
-156
+# 2026-10-12 (#3055): 156 -> 159. Three shared protected-host UID guards
+#                     refuse workload/sidecar identities. All guarded test
+#                     groups execute as UID65534 in the required managed lane;
+#                     its source-list check and verifier reject omissions/skips.
+#                     Track an ordinary/race isolated-UID runner in #3055.
+159

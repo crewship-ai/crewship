@@ -253,6 +253,16 @@ storage:
 
 The `base_path` stores crew workspace files, agent output, and persistent data. The `log_path` stores agent execution logs. `memory_root` is the parent of the per-workspace memory tier; leave it empty and that tier (and memory versioning) is off.
 
+`run_output_path` selects a host-private directory for protected execution output
+on supported local Linux Docker runtimes. Startup derives `<data-root>/run-output`
+when unset; explicit YAML `run_output_path: ""` disables capture.
+`CREWSHIP_RUN_OUTPUT_PATH` overrides the path. Never mount it into a crew.
+`run_output_max_bytes` and `run_output_max_runs` bound aggregate retained captures;
+zero selects the defaults of 1 GiB and 4096 runs. Each active run reserves 64 MiB
+plus 64 KiB of metadata; verified terminal captures release unused reserved bytes.
+Fully acknowledged natural terminal sources are collected after seven days.
+Incomplete or forced output remains available for reconciliation.
+
 The five `page_*` keys configure custom [Page applications](/guides/pages-apps-operations). They are the file-config form of `CREWSHIP_PAGE_PROJECTS_PATH`, `CREWSHIP_PAGE_BUILD_IMAGE`, `CREWSHIP_PAGE_STUDIO_ORIGIN`, `CREWSHIP_PAGE_RUNTIME_ORIGIN` and `CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN`, and the env var wins when both are set. Validation is the same on both paths: `page_projects_path` must be absolute and must not sit inside (or contain) `base_path`; `page_build_image` needs `page_projects_path` and an immutable `sha256:…` ID or `repository@sha256:…` digest; `page_runtime_origin` must be a different site from the Studio origin unless `page_runtime_development_same_origin` is `true`. See the [Environment Reference](/configuration/environment#storage) for what each one guards.
 
 ### State

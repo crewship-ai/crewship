@@ -80,6 +80,12 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"chats":                    IntentInclude,
 	"agent_mcp_bindings":       IntentInclude,
 	"journal_entries":          IntentInclude,
+	// Replay receipts authenticate execution against this installation's
+	// protected spool and run identities, which workspace bundles do not carry.
+	// Their opaque fingerprints cannot be re-keyed for a forked workspace.
+	// Visible output remains in journal_entries; whole-instance DB copies retain
+	// receipts without transplanting them through the workspace restore path.
+	"journal_replay_receipts": IntentExcludeRuntime,
 	// journal_entry_priorities (v166) is the append-only ledger of operator
 	// pin/permanent edits. It rides with journal_entries: without it a restored
 	// bundle's live `priority` values would have no ledger to reconcile against,
@@ -169,10 +175,12 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// page_folder_acl is the folder's sharing (#2533), inherited by every
 	// page in it: a restore that lost it would silently narrow who reaches
 	// those pages, the same audit-trail loss page_grants guards against.
-	"page_folder_acl": IntentInclude,
-	"pages":           IntentInclude,
-	"page_panels":     IntentInclude,
-	"page_versions":   IntentInclude,
+	"page_folder_acl":         IntentInclude,
+	"pages":                   IntentInclude,
+	"page_panels":             IntentInclude,
+	"page_versions":           IntentInclude,
+	"page_artifacts":          IntentInclude,
+	"page_artifact_revisions": IntentInclude,
 	// Durable draft metadata and revision audit. Source files live outside
 	// SQLite; until file-phase integration, back up page_projects_path alongside
 	// the DB (docs/prd/pages-apps-v1.md). Never silently drop the metadata.

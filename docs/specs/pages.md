@@ -1,4 +1,4 @@
-# Pages — panel implementation reference
+# Pages — panels and HTML artifacts
 
 {/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 
@@ -8,6 +8,55 @@ that every feature shipped. The current custom-application contract is
 [Pages Apps](pages-apps.md), with [architecture context](../prd/pages-apps-architecture.md).
 Internal research, work allocation and session evidence are maintained in
 [private context](../development/private-context.md).
+
+## HTML artifacts: current first slice
+
+A human-owned empty Page can hold an immutable history of HTML documents.
+Pages exposes **New artifact**, an upload/source editor, static preview, revision
+history and restore. The chat attachment tab is called **Files** to distinguish
+those files from these Pages artifacts. Existing panel Pages and Apps cannot
+be converted by uploading an artifact over them. The create request explicitly
+sets `allow_empty: true` with no panels and the authenticated human as owner;
+ordinary panel-page validation still requires a panel.
+
+The authenticated API lives under `/api/v1/pages/{slug}/artifact`:
+
+- `GET` returns the selected source (optional positive `revision`), current
+  `head_rev`, revision metadata and `can_write`.
+- `POST /revisions` accepts `html`, `base_rev` and `mutation_id`.
+- `POST /restore` accepts `revision`, `base_rev` and `mutation_id`; it appends
+  a new revision containing the selected older source.
+
+All routes require a human identity and the existing Page read/write checks.
+There is no public artifact-source endpoint or agent publication route in this
+slice. A publication takes the database writer fence and rechecks current
+membership and Page permissions within that transaction. The expected head
+must match: a stale save returns 409. Replaying the same mutation ID by the
+same author with the same payload returns its original revision; reusing it
+for another request is rejected. The UI retains the draft and its original
+base until the editor explicitly chooses to use a newer revision as the base.
+
+Limits are 10 MiB of nonempty UTF-8 source, 200 revisions per artifact and
+30 committed revisions per rolling hour. Restore counts as a revision. These
+are server-enforced limits, not automatic pruning: historical source remains
+available. Blobs use the existing attachment store; artifact references pin
+historical blobs against collection and are included in workspace backup and
+restore. Revision author, source digest and optional restored-from revision are
+stored with the revision. Workspace notifications contain identifiers only.
+
+The stored original is delivered as JSON text, never inserted directly into
+Studio. Static preview sanitizes it with DOMPurify, then renders it in an
+iframe with no sandbox permissions and a restrictive CSP. Scripts, navigation,
+forms, nested frames and external resources are disabled. This deliberately
+limits visual fidelity (including images and downloaded fonts). An unsupported
+sanitizer environment displays escaped source. Source download is plain text
+with an `.html.txt` filename. This static presentation boundary does not claim
+to safely execute arbitrary interactive HTML.
+
+This is the initial artifact storage/editor surface. Agent dispatch, anchored
+comments, presence, collaborative Boards and interactive runtime are not part
+of this implemented slice. Runtime experiments are separate from enabling
+those capabilities.
 
 ## 0. Verdict
 

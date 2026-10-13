@@ -193,6 +193,7 @@ These are read by the **sidecar process** in the crew container, not by `crewshi
 | `CREWSHIP_PAGE_STUDIO_ORIGIN` | Falls back to `CREWSHIP_NEXTJS_URL` | Public browser origin allowed to initialize Page applications. Set explicitly behind a proxy; keep `CREWSHIP_NEXTJS_URL` on the internal API transport used by token sync and agent IPC. |
 | `CREWSHIP_PAGE_RUNTIME_ORIGIN` | *(unset)* | Dedicated HTTP(S) origin on a different site from the browser origin (`CREWSHIP_PAGE_STUDIO_ORIGIN`, falling back to `CREWSHIP_NEXTJS_URL`), e.g. `https://apps.example.net` for `https://studio.example.com`. Expose only `/api/v1/pages/runtime/bootstrap` on its proxy alias. Required to preview/publish/serve custom applications. |
 | `CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN` | `false` | Reviewed-code development demos only. Literal `true` permits the runtime and the browser origin to be the exact same origin. Preserves sandbox/CSP/RBAC, but a stuck Page can freeze the tab the app runs in; no browser process isolation guarantee. Never enabled by a Page author. |
+| `CREWSHIP_RUN_OUTPUT_PATH` | `<data root>/run-output` at server startup | Absolute host-private directory for protected execution output on supported local Linux Docker runtimes. Never mount it into crews. YAML `storage.run_output_path: ""` disables capture; aggregate limits are configured in [YAML](/configuration/yaml-config#storage). |
 | `CREWSHIP_LOG_PATH` | `/var/log/crewship` | Path for log files |
 
 ## State

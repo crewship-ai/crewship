@@ -315,7 +315,10 @@ func TestRetainManagedRunLocationAtCreation(t *testing.T) {
 	state := newLockedMemState()
 	o := New(&launchContainer{}, state, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	req := AgentRunRequest{CrewID: "pilot-crew", ContainerID: "c1", AgentSlug: "agent-1", RunID: "retained-managed"}
-	ctx, finish := o.trackAgentRun(context.Background(), &req)
+	ctx, finish, trackErr := o.trackAgentRun(context.Background(), &req)
+	if trackErr != nil {
+		t.Fatal(trackErr)
+	}
 	location := RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID}
 	if _, err := o.RetainManagedRunLocation(ctx, location); err == nil {
 		t.Fatal("missing persisted admission accepted")

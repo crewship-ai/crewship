@@ -51,7 +51,7 @@ describe("chat artifact entry points", () => {
     expect(screen.queryByTestId("context-tab")).not.toBeInTheDocument()
     expect(screen.getByText("No output files in this conversation.")).toBeInTheDocument()
   })
-  it("opens Artifacts on the mobile context page", async () => {
+  it("opens Files on the mobile context page", async () => {
     render(<ChatPanel {...props} mobilePanel="artifacts" />)
     expect(await screen.findByTestId("context-tab")).toHaveTextContent("artifacts")
   })
@@ -73,6 +73,6 @@ describe("chat artifact entry points", () => {
     await screen.findByTestId("context-tab")
     fireEvent.click(await screen.findByRole("button", { name: "Preview agent configuration" }))
     expect(useArtifactStore.getState().open).toBe(false)
-    expect(toastError).toHaveBeenCalledWith("This file is not available in Artifacts")
+    expect(toastError).toHaveBeenCalledWith("This file is not available in Files")
   })
 })

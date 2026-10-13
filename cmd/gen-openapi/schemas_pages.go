@@ -166,7 +166,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	}
 
 	page := obj(map[string]any{
-		"has_project": map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
+		"has_artifact": boolean(),
+		"has_project":  map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
 		"owner": map[string]any{"type": "string",
 			"description": "`user/<id>` or `crew/<slug>` — exactly one of the two (§7.1 rule 1)."},
@@ -179,7 +180,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	})
 
 	pageRow := obj(map[string]any{
-		"has_project": map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
+		"has_artifact": boolean(),
+		"has_project":  map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
 		"owner": str(), "owner_crew_slug": str(),
 		"panel_count": map[string]any{"type": "integer",
@@ -453,7 +455,24 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"ref":                               obj(map[string]any{"kind": str(), "id": str()}),
 	})
 
+	artifactRevision := obj(map[string]any{"revision": integer(), "created_at": timeString(), "author_user_id": str(), "restored_from": integer()})
+	artifactRevision["required"] = []string{"revision", "created_at", "author_user_id"}
+	artifactMutation := obj(map[string]any{"html": map[string]any{"type": "string", "minLength": 1, "description": "Original UTF-8 HTML, at most 10 MiB in bytes. Returned only as JSON source; interactive execution is disabled."}, "base_rev": map[string]any{"type": "integer", "minimum": 0}, "mutation_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}})
+	artifactMutation["required"] = []string{"html", "base_rev", "mutation_id"}
+	artifactMutation["additionalProperties"] = false
+	artifactRestore := obj(map[string]any{"revision": map[string]any{"type": "integer", "minimum": 1}, "base_rev": map[string]any{"type": "integer", "minimum": 0}, "mutation_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}})
+	artifactRestore["required"] = []string{"revision", "base_rev", "mutation_id"}
+	artifactRestore["additionalProperties"] = false
+	artifactResult := obj(map[string]any{"revision": integer(), "head_rev": integer()})
+	artifactResult["required"] = []string{"revision", "head_rev"}
+	artifactDocument := obj(map[string]any{"head_rev": integer(), "revision": integer(), "html": str(), "revisions": arr(artifactRevision), "can_write": boolean()})
+	artifactDocument["required"] = []string{"head_rev", "revision", "html", "revisions", "can_write"}
+	createProps := mergeProps(writeBody["properties"].(map[string]any), map[string]any{"allow_empty": map[string]any{"type": "boolean", "description": "Stage an empty human-owned Page for its first HTML artifact revision. Requires human authentication, the normal page.create permission, no panels and self ownership."}})
+	createBody := obj(createProps)
 	return map[string]DomainSchema{
+		"GET /api/v1/pages/{slug}/artifact":            {Response: artifactDocument},
+		"POST /api/v1/pages/{slug}/artifact/revisions": {Request: artifactMutation, RequestRequired: true, Response: artifactResult, SuccessStatuses: []string{"200", "201"}},
+		"POST /api/v1/pages/{slug}/artifact/restore":   {Request: artifactRestore, RequestRequired: true, Response: artifactResult, SuccessStatuses: []string{"200", "201"}},
 		"GET /api/v1/pages": {
 			Response: arr(pageRow),
 		},
@@ -640,7 +659,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			Response: page,
 		},
 		"POST /api/v1/pages": {
-			Request: writeBody, Response: page,
+			Request: createBody, Response: page,
 		},
 		"PATCH /api/v1/pages/{slug}": {
 			Request: writeBody, Response: page,

@@ -11,7 +11,7 @@ import type { FileEntry } from "./chat-tree-row"
 import type { EditorScope } from "./hooks/use-file-editor"
 
 const TABS = [
-  { id: "artifacts", label: "Artifacts", icon: LayoutGrid },
+  { id: "artifacts", label: "Files", icon: LayoutGrid },
   { id: "work", label: "Work", icon: ListTodo },
 ] as const
 
@@ -45,7 +45,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
 
   return <div className="flex min-h-0 flex-col overflow-hidden bg-accent/30" style={style}>
     <header className="shrink-0 border-b px-3 py-3">
-      <h2 className="text-sm font-semibold">{activeTab === "artifacts" ? "Artifacts" : "Work"}</h2>
+      <h2 className="text-sm font-semibold">{activeTab === "artifacts" ? "Files" : "Work"}</h2>
       <p className="mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</p>
     </header>
     {!hideTabs && <div className="flex h-[41px] shrink-0 items-end border-b">

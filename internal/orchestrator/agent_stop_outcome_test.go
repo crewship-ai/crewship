@@ -219,7 +219,10 @@ func TestStopAgentOutcome_MixedRefusalIsNotConfirmed(t *testing.T) {
 func TestStopAgentOutcome_OwnedInvocationIsStopped(t *testing.T) {
 	o := New(nil, newMemState(), slog.Default())
 	req := AgentRunRequest{AgentID: "a", RunID: "preparation"}
-	_, finish := o.trackAgentRun(context.Background(), &req)
+	_, finish, trackErr := o.trackAgentRun(context.Background(), &req)
+	if trackErr != nil {
+		t.Fatal(trackErr)
+	}
 	go func() {
 		time.Sleep(20 * time.Millisecond)
 		finish()

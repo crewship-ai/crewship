@@ -737,6 +737,12 @@ func TestVertical_OnlyAProvablySafeFailureIsRetried(t *testing.T) {
 		wantRuns  int64
 	}{
 		{
+			name:      "protected capture reattachment preserves an unconfirmed outcome",
+			classify:  OutcomeRetained,
+			wantState: work.StateNeedsReconciliation,
+			wantRuns:  1,
+		},
+		{
 			name:      "a failure the runtime cannot vouch for goes to reconciliation",
 			classify:  OutcomeUnclear,
 			wantState: work.StateNeedsReconciliation,
@@ -784,6 +790,15 @@ func TestVertical_OnlyAProvablySafeFailureIsRetried(t *testing.T) {
 			h.waitForState(r.WorkID, tc.wantState)
 			if got := h.rt.starts.Load(); got != tc.wantRuns {
 				t.Errorf("%d runtimes created, want %d", got, tc.wantRuns)
+			}
+			if tc.classify == OutcomeRetained {
+				var runID, status, reason string
+				if err := h.db.QueryRow(`SELECT run_id,run_status,end_reason FROM work_attempts WHERE work_id=?`, r.WorkID).Scan(&runID, &status, &reason); err != nil {
+					t.Fatal(err)
+				}
+				if status != "" || reason != RetainedCapturePendingReason {
+					t.Fatalf("reattachment became terminal: status=%q reason=%q", status, reason)
+				}
 			}
 		})
 	}

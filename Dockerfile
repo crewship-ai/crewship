@@ -163,6 +163,28 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     -o /crewship ./cmd/crewship
 
 # -- Runner --
+# The docker CLI (page builds, devcontainer images) comes from Docker's static
+# release, not Alpine's docker-cli package: Alpine rebuilds that package on its
+# own schedule, and alpine:3.24 shipped it built with go1.26.8, which the image
+# scan fails critical on (#3047). Bump the version and both checksums together;
+# check the archive's Go with `strings docker/docker | grep -m1 '^go1\.'`.
+FROM alpine:3.24 AS dockercli
+ARG TARGETARCH
+ARG DOCKER_CLI_VERSION=29.9.0
+ARG DOCKER_CLI_SHA256_amd64=33e1ab8b63d14bca449f7a3d30d7f6aa669daa544e60a86b17fec87f61afe2b4
+ARG DOCKER_CLI_SHA256_arm64=811f6eee271678fc98dbe5c4d896c00fc5fe2daa4f7a37069c17abc036eab85b
+RUN set -eu; \
+    case "$TARGETARCH" in \
+      amd64) arch=x86_64; sum="$DOCKER_CLI_SHA256_amd64" ;; \
+      arm64) arch=aarch64; sum="$DOCKER_CLI_SHA256_arm64" ;; \
+      *) echo "no pinned docker CLI for $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    wget -q -O /tmp/docker.tgz "https://download.docker.com/linux/static/stable/${arch}/docker-${DOCKER_CLI_VERSION}.tgz"; \
+    echo "${sum}  /tmp/docker.tgz" | sha256sum -c -; \
+    tar -xzf /tmp/docker.tgz -C /tmp docker/docker; \
+    install -m 0755 /tmp/docker/docker /docker; \
+    /docker --version
+
 FROM alpine:3.24 AS runtime
 ARG VERSION=dev
 ARG COMMIT=none
@@ -174,12 +196,13 @@ LABEL org.opencontainers.image.source="https://github.com/crewship-ai/crewship" 
 
 # Refresh inherited libraries too: apk add alone retains vulnerable base packages.
 RUN apk --no-cache upgrade && \
-    apk --no-cache add ca-certificates git docker-cli && \
+    apk --no-cache add ca-certificates git && \
     addgroup -g 1001 -S crewship && adduser -u 1001 -S crewship -G crewship
 
 RUN mkdir -p /var/lib/crewship /var/log/crewship /data && \
     chown -R crewship:crewship /var/lib/crewship /var/log/crewship /data
 
+COPY --from=dockercli /docker /usr/local/bin/docker
 COPY --from=backend /crewship /usr/local/bin/crewship
 COPY --from=backend /crewship-sidecar /usr/local/bin/crewship-sidecar
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh

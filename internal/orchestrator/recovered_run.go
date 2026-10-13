@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -31,7 +32,7 @@ func (o *Orchestrator) RecordRecoveredAbsence(ctx context.Context, key string, e
 		if err := json.Unmarshal(raw, &current); err != nil {
 			return nil, err
 		}
-		if current.Status != "running" || !SameRecoveredIdentity(current, expected) {
+		if current.Status != "running" || current.Output != nil || !SameRecoveredIdentity(current, expected) {
 			return raw, nil
 		}
 		current.Status, current.LastActivity = "cancelled", time.Now()
@@ -47,6 +48,13 @@ func (o *Orchestrator) RecordRecoveredAbsence(ctx context.Context, key string, e
 
 // SameRecoveredIdentity prevents an old probe from acting on a replaced record.
 func SameRecoveredIdentity(a, b RunState) bool {
-	return a.ID == b.ID && a.WorkspaceID == b.WorkspaceID && a.AgentID == b.AgentID && a.ContainerID == b.ContainerID &&
-		a.AgentSlug == b.AgentSlug && a.StartedAt.Equal(b.StartedAt)
+	return a.ID == b.ID && a.CrewID == b.CrewID && a.MissionID == b.MissionID && a.WorkspaceID == b.WorkspaceID && a.AgentID == b.AgentID && a.ContainerID == b.ContainerID &&
+		a.AgentSlug == b.AgentSlug && a.StartedAt.Equal(b.StartedAt) && sameRunOutput(a.Output, b.Output)
+}
+
+func sameRunOutput(a, b *RunOutputState) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Endpoint == b.Endpoint && bytes.Equal(a.Authority, b.Authority) && a.Version == b.Version && a.Directory == b.Directory && a.Adapter == b.Adapter && a.Deadline.Equal(b.Deadline)
 }
