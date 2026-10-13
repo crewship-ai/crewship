@@ -70,13 +70,43 @@ func TestRoutinesMCP_ToolsList_ValidSchema(t *testing.T) {
 			t.Errorf("tool %q inputSchema.type = %v, want object", tl.Name, schema["type"])
 		}
 	}
-	want := []string{"save_routine", "list_routines", "run_routine", "page_project", "save_page", "discover_capabilities", "workspace_overview", "validate_manifest", "get_routine_draft", "save_routine_draft", "artifact_list", "artifact_diff", "artifact_restore", "board_request_file_read", "board_request_source_read", "board_request_preview_read", "artifact_create", "artifact_publish", "artifact_read", "artifact_comments", "artifact_reply", "board_read", "board_apply", "board_diagram_submit", "artifact_request_read", "board_request_read"}
+	want := []string{"save_routine", "list_routines", "run_routine", "page_project", "save_page", "discover_capabilities", "workspace_overview", "validate_manifest", "get_routine_draft", "save_routine_draft", "artifact_request_update", "artifact_list", "artifact_diff", "artifact_restore", "board_request_file_read", "board_request_source_read", "board_request_preview_read", "artifact_create", "artifact_publish", "artifact_read", "artifact_comments", "artifact_reply", "board_read", "board_apply", "board_diagram_submit", "artifact_request_read", "board_request_read"}
 	if len(got) != len(want) {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("tools[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// The new typed report tool is part of the public routines catalog, but
+	// caller-supplied identity/run fields must never become schema inputs.
+	for _, tool := range resp.Result.Tools {
+		if tool.Name != "artifact_request_update" {
+			continue
+		}
+		var schema struct {
+			Required   []string `json:"required"`
+			Properties map[string]struct {
+				Type string `json:"type"`
+			} `json:"properties"`
+			AdditionalProperties bool `json:"additionalProperties"`
+		}
+		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(schema.Required, ",") != "request_id,mutation_id,operation" {
+			t.Fatalf("update required=%v", schema.Required)
+		}
+		fields := []string{"request_id", "mutation_id", "operation", "phase", "message", "body"}
+		if len(schema.Properties) != len(fields) || schema.AdditionalProperties {
+			t.Fatalf("unexpected update input surface: %s", tool.InputSchema)
+		}
+		for _, field := range fields {
+			if schema.Properties[field].Type != "string" {
+				t.Errorf("update field %s must be string", field)
+			}
 		}
 	}
 
