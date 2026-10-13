@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ARTIFACT_RUNTIME_ENABLED, ArtifactRuntimeChannel, parseArtifactRuntimeTelemetry } from '../artifact-runtime-channel'
-import { artifactRuntimePreparationCSP, artifactRuntimePreparationDocument } from '../artifact-runtime-bootstrap'
 
 function transport() {
   const port = { onmessage: null, onmessageerror: null, start: vi.fn(), close: vi.fn(), postMessage: vi.fn() }
@@ -47,13 +46,6 @@ describe('disabled artifact runtime preparation', () => {
     expect(port.postMessage).not.toHaveBeenCalled()
     expect(parseArtifactRuntimeTelemetry({ type: 'ready' })).toEqual({ type: 'ready' })
   })
-  it('requires response-header sandbox and uses no credential or host RPC', () => {
-    expect(artifactRuntimePreparationCSP('https://studio.example.test')).toContain('sandbox allow-scripts;')
-    expect(() => artifactRuntimePreparationCSP('https://studio.example.test/path')).toThrow()
-    const html = artifactRuntimePreparationDocument('https://studio.example.test')
-    expect(html).toContain("event.source !== parent")
-    expect(html).toContain('event.origin !== parentOrigin')
-    expect(html).toContain('document.open(); document.write(data.html); document.close()')
-    expect(html).not.toContain('fetch(')
-  })
+  // Canonical bootstrap policy/source tests live in internal/pagebuild.
+
 })

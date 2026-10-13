@@ -10,6 +10,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
+env:
+  GO_VERSION: "1.27.2"
 jobs:
   runtime:
     name: Artifact Runtime (${{ matrix.browser }})
@@ -31,8 +33,17 @@ jobs:
         timeout-minutes: 14
         with:
           browser: ${{ matrix.browser }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Compile canonical Go runtime browser harness
+        timeout-minutes: 4
+        run: go test -c -o "$RUNNER_TEMP/pagebuild.test" ./internal/pagebuild
       - name: Run independent HTTPS runtime characterization
         timeout-minutes: 8
+        env:
+          CREWSHIP_TEST_RUNTIME_BINARY: ${{ runner.temp }}/pagebuild.test
         run: pnpm exec playwright test --config=playwright.artifact-runtime.config.ts --project=${{ matrix.browser }}
       - name: Verify Excalidraw public API integration
         timeout-minutes: 8

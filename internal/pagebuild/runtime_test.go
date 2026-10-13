@@ -48,6 +48,12 @@ func TestServeRuntimeBrowserHarness(t *testing.T) {
 		t.Skip("browser harness only")
 	}
 	studio := os.Getenv("CREWSHIP_TEST_STUDIO_ORIGIN")
+	artifactPreparation := os.Getenv("CREWSHIP_TEST_RUNTIME_PROFILE") == "artifact-preparation"
+	runtimeOrigin := os.Getenv("CREWSHIP_TEST_RUNTIME_ORIGIN")
+	runtimePath := RuntimePath
+	if artifactPreparation {
+		runtimePath = ArtifactRuntimePreparationPath
+	}
 	listener, err := net.Listen("tcp", "127.0.0.2:0")
 	if err != nil {
 		t.Fatal(err)
@@ -62,11 +68,15 @@ func TestServeRuntimeBrowserHarness(t *testing.T) {
 			w.WriteHeader(204)
 			return
 		}
-		ServeRuntime(w, studio)
+		if artifactPreparation {
+			ServeArtifactRuntimePreparation(w, r, runtimeOrigin, studio)
+		} else {
+			ServeRuntime(w, studio)
+		}
 	}), ReadHeaderTimeout: 5 * time.Second}
 	defer server.Close()
 	go server.Serve(listener)
-	if err := os.WriteFile(file, []byte("http://"+listener.Addr().String()+RuntimePath), 0600); err != nil {
+	if err := os.WriteFile(file, []byte("http://"+listener.Addr().String()+runtimePath), 0600); err != nil {
 		t.Fatal(err)
 	}
 	select {

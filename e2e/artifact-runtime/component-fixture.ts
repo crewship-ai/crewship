@@ -2,7 +2,7 @@ import { build } from 'vite'
 import path from 'node:path'
 import type { Browser } from '@playwright/test'
 import { startFixture, studio, runtime } from './fixture'
-import { artifactRuntimePreparationCSP, artifactRuntimePreparationDocument } from '../../lib/pages/artifact-runtime-bootstrap'
+import { startGoArtifactBootstrap, artifactPreparationPath } from './go-bootstrap'
 
 let bundle: Promise<string> | undefined
 async function componentBundle(): Promise<string> {
@@ -18,6 +18,7 @@ async function componentBundle(): Promise<string> {
 
 export async function startComponentFixture(browser: Browser) {
   const source = await componentBundle()
+  const bootstrap = await startGoArtifactBootstrap()
   const fixture = await startFixture()
   const context = await browser.newContext({ proxy: { server: fixture.proxy }, ignoreHTTPSErrors: true })
   const unexpected: string[] = []
@@ -28,13 +29,13 @@ export async function startComponentFixture(browser: Browser) {
       await route.fulfill({ contentType: 'text/html', body: `<!doctype html><title>Actual runtime component fixture</title><div id="root"></div><script>${source.replace(/<\/script/gi, '<\\/script')}</script>` })
       return
     }
-    if (url.origin === runtime && url.pathname === '/component-bootstrap') {
-      await route.fulfill({ contentType: 'text/html', headers: { 'Content-Security-Policy': artifactRuntimePreparationCSP(studio), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' }, body: artifactRuntimePreparationDocument(studio) })
+    if (url.origin === runtime && url.pathname === artifactPreparationPath) {
+      await route.fulfill(await bootstrap.response())
       return
     }
     unexpected.push(route.request().url()); await route.abort()
   })
   const page = await context.newPage()
   await page.goto(studio)
-  return { page, unexpected, fixture, close: async () => { await context.close(); await fixture.close() } }
+  return { page, unexpected, fixture, close: async () => { await context.close(); await fixture.close(); await bootstrap.close() } }
 }

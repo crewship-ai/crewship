@@ -28,7 +28,7 @@ function App() {
     <button onClick={() => setAccessible(false)}>Revoke access</button>
     <button onClick={() => { setRevision(2); setHTML('<h1>Exact revision 2</h1>') }}>Load revision 2</button>
     <button onClick={() => { setRevision(3); setHTML('<h1>Loop revision 3</h1><script>setTimeout(()=>{console.log("component-loop-started");for(;;){}},200)</script>') }}>Run infinite artifact</button>
-    <ArtifactInteractiveFrame runtimeUrl="https://runtime.artifacts.test/component-bootstrap" identity={{ artifactId: 'component-page', revision, profile: 'interactive-html-v1' }} html={html} accessible={accessible} lease={lease} />
+    <ArtifactInteractiveFrame runtimeUrl="https://runtime.artifacts.test/api/v1/pages/runtime/artifact-preparation" identity={{ artifactId: 'component-page', revision, profile: 'interactive-html-v1' }} html={html} accessible={accessible} lease={lease} />
   </>
 }
 createRoot(document.getElementById('root')!).render(<App />)

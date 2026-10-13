@@ -1,21 +1,6 @@
-/** Not served by any production route. Header CSP is mandatory: a meta policy
- * cannot enforce sandbox, and must not be the authority for document replacement.
- * self-navigation remains a browser-bound residual risk, not a zero-egress claim. */
-export const artifactRuntimePreparationCSP = (studioOrigin: string) => {
-  const origin = new URL(studioOrigin)
-  if (origin.protocol !== 'https:' || origin.origin !== studioOrigin) throw new Error('Invalid Studio origin.')
-  return `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; media-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors ${origin.origin}`
-}
-
-/** A credentialless constant bootstrap. The response host must independently
- * validate separate registrable sites; this helper does not establish that gate.
- * Fragment nonce is correlation only, never authorization. */
-export function artifactRuntimePreparationDocument(studioOrigin: string): string {
-  artifactRuntimePreparationCSP(studioOrigin)
-  const parentOrigin = JSON.stringify(studioOrigin).replace(/</g, '\\u003c')
-  return `<!doctype html><meta charset="utf-8"><script>
+// Constant preparation-only bootstrap; host injects only the validated Studio origin.
 (() => {
-  const parentOrigin = ${parentOrigin};
+  const parentOrigin = window.__CREWSHIP_ARTIFACT_PARENT_ORIGIN__;
   const nonce = location.hash.slice(1);
   if (!/^[a-zA-Z0-9-]{16,128}$/.test(nonce) || parent === window) return;
   let admitted = false;
@@ -44,5 +29,3 @@ export function artifactRuntimePreparationDocument(studioOrigin: string): string
   addEventListener('message', connect);
   parent.postMessage({type:'artifact.ready',nonce}, parentOrigin);
 })();
-</script>`
-}

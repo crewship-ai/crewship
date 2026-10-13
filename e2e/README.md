@@ -41,6 +41,18 @@ Stop/Restart, revision replacement and lease teardown in full Chromium, includin
 a running infinite loop. They do not establish production domain admission or
 authorize enabling the interactive profile.
 
+The artifact runtime preparation cases require the canonical Go bootstrap
+harness. Precompile it with `go test -c -o /tmp/pagebuild.test ./internal/pagebuild`,
+then set `CREWSHIP_TEST_RUNTIME_BINARY=/tmp/pagebuild.test` when running
+`pnpm exec playwright test --config=playwright.artifact-runtime.config.ts`.
+On the shared development host, wrap builds/tests with `crewship-heavy`.
+The fixture starts the existing Go test server in preparation mode and relays
+its actual response headers and HTML into the distinct local HTTPS runtime site;
+there is no TypeScript copy of bootstrap JavaScript or CSP. The normal Pages
+Apps browser harness mode remains unchanged. These tests do not register a
+production artifact runtime route, accept an interactive publication profile,
+or establish a zero-egress or renderer termination guarantee.
+
 ## What fails CI
 
 The authoritative nightly membership is `GATE_SPECS` and `DRIFT_SPECS` in the
