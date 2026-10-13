@@ -1,0 +1,259 @@
+package api
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"net/http"
+
+	"github.com/crewship-ai/crewship/internal/chatentities"
+	"github.com/crewship-ai/crewship/internal/runauthority"
+)
+
+type issueOperationQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+type chatIssueOperation struct {
+	authority   runauthority.Authority
+	operation   *chatentities.Operation
+	requestHash string
+}
+
+// issueRequesterAllowed uses the same role/capability decision as the public
+// issue routes, with a fresh snapshot rather than the capability TTL cache.
+// Public update/comment routes require create; only creation has the explicit
+// issue.create capability alternative. It must not become a write-all grant.
+func issueRequesterAllowed(ctx context.Context, q issueOperationQueryer, userID, workspaceID, verb string) (bool, error) {
+	var role, mode string
+	var caps sql.NullString
+	err := q.QueryRowContext(ctx, `SELECT role, capabilities, access_mode FROM workspace_members
+		WHERE workspace_id=? AND user_id=?`, workspaceID, userID).Scan(&role, &caps, &mode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if mode == "restricted" {
+		return false, nil
+	}
+	if verb == "shown" {
+		return canRole(role, "read"), nil
+	}
+	if canRole(role, "create") {
+		return true, nil
+	}
+	return verb == "created" && HasCapability(resolveCapabilitiesFromRow(caps, role), CapabilityIssueCreate), nil
+}
+
+func issueViewerActions(ctx context.Context, q issueOperationQueryer, userID, workspaceID, crewID string) ([]string, error) {
+	allowed, err := issueRequesterAllowed(ctx, q, userID, workspaceID, "shown")
+	if err != nil || !allowed {
+		return []string{}, err
+	}
+	actions := []string{"view"}
+	write, err := issueRequesterAllowed(ctx, q, userID, workspaceID, "updated")
+	if err != nil {
+		return nil, err
+	}
+	if write {
+		actions = append(actions, "comment", "edit_fields", "assign", "change_status", "change_workflow", "attach_files", "link", "start_work", "delete")
+	}
+	return actions, nil
+}
+
+func chatIssueRequestHash(verb, entityID string, payload any) (string, error) {
+	b, err := json.Marshal(struct {
+		Verb, EntityID string
+		Payload        any
+	}{verb, entityID, payload})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// authorizeChatIssue never derives a chat or human from tool arguments. A
+// legacy call with no run keeps its old API contract; a supplied run must have
+// durable host authority, including on a replay and after sidecar restart.
+func (h *InternalIssueHandler) authorizeChatIssue(ctx context.Context, q issueOperationQueryer, workspaceID, agentID, runID, key, verb, entityID string, payload any) (*chatIssueOperation, error) {
+	if runID == "" {
+		if key != "" {
+			return nil, runauthority.ErrUnavailable
+		}
+		return nil, nil
+	}
+	a, err := runauthority.Resolve(ctx, q, runID, agentID, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if a.HumanAuthority == nil {
+		return nil, nil
+	} // host-admitted autonomous work
+	if entityID != "" {
+		if err := verifyChatIssueReplayEntity(ctx, q, agentID, workspaceID, entityID); err != nil {
+			return nil, err
+		}
+	}
+	if key == "" {
+		return nil, chatentities.ErrKeyRequired
+	}
+	if len(key) > 200 {
+		return nil, chatentities.ErrInvalid
+	}
+	allowed, err := issueRequesterAllowed(ctx, q, a.HumanAuthority.UserID, workspaceID, verb)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, errChatIssueRequesterForbidden
+	}
+	hash, err := chatIssueRequestHash(verb, entityID, payload)
+	if err != nil {
+		return nil, err
+	}
+	return &chatIssueOperation{authority: a, requestHash: hash}, nil
+}
+
+var errChatIssueRequesterForbidden = errors.New("requester_forbidden")
+var errChatIssueEntityUnavailable = errors.New("operation_entity_unavailable")
+
+func verifyChatIssueReplayEntity(ctx context.Context, q issueOperationQueryer, agentID, workspaceID, entityID string) error {
+	var readable bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM missions m JOIN agents a ON a.id=? AND a.workspace_id=m.workspace_id AND a.crew_id=m.crew_id AND a.deleted_at IS NULL WHERE m.id=? AND m.workspace_id=? AND m.mission_type='issue')`, agentID, entityID, workspaceID).Scan(&readable); err != nil {
+		return err
+	}
+	if !readable {
+		return errChatIssueEntityUnavailable
+	}
+	return nil
+}
+
+// checkChatIssueReplay runs before state-transition validation. A valid retry
+// must not be rejected because its first successful mutation changed the state.
+func (h *InternalIssueHandler) checkChatIssueReplay(w http.ResponseWriter, r *http.Request, workspaceID, agentID, runID, key, verb, entityID string, payload any) bool {
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeChatIssueError(w, err)
+		return true
+	}
+	defer tx.Rollback()
+	op, err := h.authorizeChatIssue(r.Context(), tx, workspaceID, agentID, runID, key, verb, entityID, payload)
+	if err != nil {
+		writeChatIssueError(w, err)
+		return true
+	}
+	if op == nil {
+		return false
+	}
+	stored, err := chatentities.FindOperation(r.Context(), tx, workspaceID, "agent", agentID, key)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false
+	}
+	if err != nil {
+		writeChatIssueError(w, err)
+		return true
+	}
+	if stored.RequestHash != op.requestHash || stored.RunID != runID {
+		writeChatIssueError(w, chatentities.ErrKeyConflict)
+		return true
+	}
+	if err := verifyChatIssueReplayEntity(r.Context(), tx, agentID, workspaceID, stored.EntityID); err != nil {
+		writeChatIssueError(w, err)
+		return true
+	}
+	writeChatIssueReplay(w, stored)
+	return true
+}
+
+func (h *InternalIssueHandler) beginChatIssueOperation(ctx context.Context, tx *sql.Tx, workspaceID, agentID, runID, key, verb, entityID string, payload any) (*chatIssueOperation, bool, error) {
+	op, err := h.authorizeChatIssue(ctx, tx, workspaceID, agentID, runID, key, verb, entityID, payload)
+	if err != nil || op == nil {
+		return op, false, err
+	}
+	authorityJSON, err := json.Marshal(op.authority.HumanAuthority)
+	if err != nil {
+		return nil, false, err
+	}
+	stored, replay, err := chatentities.BeginOperation(ctx, tx, chatentities.OperationSpec{
+		ID: generateCUID(), WorkspaceID: workspaceID, Key: key, RequestHash: op.requestHash,
+		ActorType: "agent", ActorID: agentID, RunID: runID, HumanAuthority: authorityJSON,
+		Provenance: "verified", Kind: "issue", Verb: verb,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if stored.RunID != runID {
+		return nil, false, chatentities.ErrKeyConflict
+	}
+	if replay {
+		if err := verifyChatIssueReplayEntity(ctx, tx, agentID, workspaceID, stored.EntityID); err != nil {
+			return nil, false, err
+		}
+	}
+	op.operation = stored
+	return op, replay, nil
+}
+
+func completeChatIssueOperation(ctx context.Context, tx *sql.Tx, op *chatIssueOperation, entityID string, result any) error {
+	if op == nil {
+		return nil
+	}
+	var revision, aggregate int64
+	if err := tx.QueryRowContext(ctx, `SELECT revision, aggregate_revision FROM missions WHERE id=? AND workspace_id=?`, entityID, op.authority.WorkspaceID).Scan(&revision, &aggregate); err != nil {
+		return err
+	}
+	body, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	if err := chatentities.CompleteOperation(ctx, tx, op.operation.ID, chatentities.ResultSpec{
+		EntityID: entityID, Revision: revision, AggregateRevision: aggregate, Result: body,
+	}); err != nil {
+		return err
+	}
+	_, err = chatentities.AppendRef(ctx, tx, chatentities.RefSpec{
+		EventID: generateCUID(), ChatID: op.authority.ChatID, OperationID: op.operation.ID,
+		RunID: op.authority.RunID, TriggerMessageID: op.authority.TriggerMessageID,
+	})
+	return err
+}
+
+func writeChatIssueReplay(w http.ResponseWriter, op *chatentities.Operation) {
+	var result map[string]any
+	if err := json.Unmarshal(op.Result, &result); err != nil {
+		replyError(w, 500, "operation_result_unavailable")
+		return
+	}
+	result["operation_id"] = op.ID
+	result["replayed"] = true
+	writeJSON(w, http.StatusOK, result)
+}
+
+func writeChatIssueError(w http.ResponseWriter, err error) {
+	status, code := http.StatusInternalServerError, "chat_operation_unavailable"
+	switch {
+	case errors.Is(err, errChatIssueEntityUnavailable):
+		status, code = 404, "operation_entity_unavailable"
+	case errors.Is(err, chatentities.ErrKeyRequired):
+		status, code = 400, "operation_key_required"
+	case errors.Is(err, chatentities.ErrKeyConflict):
+		status, code = 409, "operation_key_conflict"
+	case errors.Is(err, chatentities.ErrInvalid):
+		status, code = 400, "operation_invalid"
+	case errors.Is(err, runauthority.ErrUnavailable):
+		status, code = 403, "run_authority_unavailable"
+	case errors.Is(err, runauthority.ErrIdentityMismatch):
+		status, code = 403, "run_identity_mismatch"
+	case errors.Is(err, runauthority.ErrRequesterStale):
+		status, code = 403, "requester_authority_stale"
+	case errors.Is(err, errChatIssueRequesterForbidden):
+		status, code = 403, "requester_forbidden"
+	}
+	replyError(w, status, code)
+}

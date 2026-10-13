@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/untrusted"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -406,6 +407,8 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		AuthorAgentID string   `json:"author_agent_id"`
 		AuthorChatID  string   `json:"author_chat_id"`
 		AuthorRunID   string   `json:"author_run_id"`
+		OperationKey  string   `json:"operation_key"`
+		ProjectID     *string  `json:"project_id"`
 		Labels        []string `json:"labels"`
 	}
 	if err := readJSON(r, &req); err != nil {
@@ -454,12 +457,51 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A chat origin is resolved from durable run authority, never this field.
+	if req.AuthorRunID != "" {
+		req.AuthorChatID = ""
+	}
+	if h.checkChatIssueReplay(w, r, req.WorkspaceID, req.AuthorAgentID, req.AuthorRunID, req.OperationKey, "created", "", req) {
+		return
+	}
+	if req.ProjectID != nil && *req.ProjectID != "" {
+		var present int
+		if err := h.db.QueryRowContext(r.Context(), `SELECT 1 FROM projects WHERE id=? AND workspace_id=?`, *req.ProjectID, req.WorkspaceID).Scan(&present); err != nil {
+			writeProblem(w, r, http.StatusBadRequest, "project not found in workspace")
+			return
+		}
+	}
+
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		internalError(w, r, h.logger, "begin tx", err)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
+	op, replay, err := h.beginChatIssueOperation(r.Context(), tx, req.WorkspaceID, req.AuthorAgentID, req.AuthorRunID, req.OperationKey, "created", "", req)
+	if err != nil {
+		writeChatIssueError(w, err)
+		return
+	}
+	if replay {
+		writeChatIssueReplay(w, op.operation)
+		return
+	}
+	if op != nil {
+		var validAgent bool
+		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM agents WHERE id=? AND workspace_id=? AND crew_id=? AND deleted_at IS NULL)`, req.AuthorAgentID, req.WorkspaceID, req.CrewID).Scan(&validAgent); err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if !validAgent {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+	}
+	authorChatID := req.AuthorChatID
+	if op != nil {
+		authorChatID = op.authority.ChatID
+	}
 
 	// Creator attribution (v129): this endpoint is only reachable through
 	// the sidecar's trusted IPC identity, so a supplied author_agent_id
@@ -486,8 +528,9 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Labels:        req.Labels,
 		AuthoredVia:   "agent_tool_call",
 		AuthorAgentID: req.AuthorAgentID,
-		AuthorChatID:  req.AuthorChatID,
+		AuthorChatID:  authorChatID,
 		AuthorRunID:   req.AuthorRunID,
+		ProjectID:     req.ProjectID,
 	})
 	switch {
 	case errors.Is(err, errIssueCrewNotFound):
@@ -505,6 +548,14 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	result := map[string]string{"id": id, "identifier": identifier, "status": "BACKLOG"}
+	if op != nil {
+		result["operation_id"] = op.operation.ID
+	}
+	if err := completeChatIssueOperation(r.Context(), tx, op, id, result); err != nil {
+		writeChatIssueError(w, err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		internalError(w, r, h.logger, "commit issue", err)
 		return
@@ -512,11 +563,7 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.created", map[string]string{"id": id, "identifier": identifier, "title": req.Title, "crew_id": req.CrewID})
 
-	writeJSON(w, http.StatusCreated, map[string]string{
-		"id":         id,
-		"identifier": identifier,
-		"status":     "BACKLOG",
-	})
+	writeJSON(w, http.StatusCreated, result)
 }
 
 // UpdateStatus handles PATCH /api/v1/internal/issues/{identifier}
@@ -562,7 +609,8 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		// the resulting journal entry named no cause. That is what made the
 		// composition depth cap unreachable — see
 		// TestInternalIssue_UpdateStatus_StampsTheCausingRunOnTheJournalEntry.
-		AuthorRunID string `json:"author_run_id"`
+		AuthorRunID  string `json:"author_run_id"`
+		OperationKey string `json:"operation_key"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -628,6 +676,9 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		actorID = "system"
 	}
 
+	if h.checkChatIssueReplay(w, r, req.WorkspaceID, req.AgentID, req.AuthorRunID, req.OperationKey, "updated", missionID, req) {
+		return
+	}
 	ub := newUpdate()
 	statusChanged := false
 
@@ -737,6 +788,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	// Set inside the transaction, read after it commits, by the @mention
 	// trigger. Empty means no inline comment was written, so nothing to parse.
 	var inlineCommentID string
+	operationResult := map[string]string{"status": "ok"}
 
 	// The column update, the label replacement and the comment go in ONE
 	// transaction, the same shape Create already uses. Label replacement is
@@ -750,13 +802,22 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	// label bug, ten lines below it — and this PR makes the comment the agent's
 	// primary way of reporting progress to a human. "Moved to IN_PROGRESS" with
 	// the explanation silently dropped is worse than the whole call failing.
-	if !ub.Empty() || req.Labels != nil || hasComment {
+	if !ub.Empty() || req.Labels != nil || hasComment || req.AuthorRunID != "" {
 		tx, err := h.db.BeginTx(r.Context(), nil)
 		if err != nil {
 			internalError(w, r, h.logger, "begin issue update tx", err)
 			return
 		}
 		defer tx.Rollback() //nolint:errcheck
+		op, replay, err := h.beginChatIssueOperation(r.Context(), tx, req.WorkspaceID, req.AgentID, req.AuthorRunID, req.OperationKey, "updated", missionID, req)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if replay {
+			writeChatIssueReplay(w, op.operation)
+			return
+		}
 		if req.Status != "" || req.AssigneeID != nil {
 			var held bool
 			if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM issue_work WHERE mission_id=? AND mode='human')`, missionID).Scan(&held); err != nil {
@@ -830,6 +891,14 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			}
 		}
 
+		result := operationResult
+		if op != nil {
+			result["operation_id"] = op.operation.ID
+		}
+		if err := completeChatIssueOperation(r.Context(), tx, op, missionID, result); err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
 		if err := tx.Commit(); err != nil {
 			internalError(w, r, h.logger, "commit issue update", err)
 			return
@@ -909,7 +978,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		})
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, operationResult)
 }
 
 // CreateComment handles POST /api/v1/internal/issues/{identifier}/comments
@@ -918,9 +987,11 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 	ident := r.PathValue("identifier")
 
 	var req struct {
-		WorkspaceID string `json:"workspace_id"`
-		AgentID     string `json:"agent_id"`
-		Body        string `json:"body"`
+		WorkspaceID  string `json:"workspace_id"`
+		AgentID      string `json:"agent_id"`
+		Body         string `json:"body"`
+		AuthorRunID  string `json:"author_run_id"`
+		OperationKey string `json:"operation_key"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -965,18 +1036,49 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if h.checkChatIssueReplay(w, r, req.WorkspaceID, req.AgentID, req.AuthorRunID, req.OperationKey, "commented", missionID, req) {
+		return
+	}
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, "begin issue comment", err)
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+	op, replay, err := h.beginChatIssueOperation(r.Context(), tx, req.WorkspaceID, req.AgentID, req.AuthorRunID, req.OperationKey, "commented", missionID, req)
+	if err != nil {
+		writeChatIssueError(w, err)
+		return
+	}
+	if replay {
+		writeChatIssueReplay(w, op.operation)
+		return
+	}
 	commentID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 	// agent_id presence was validated above — the author is always a real agent.
 	authorType := "agent"
 	authorID := req.AgentID
 
-	_, err = h.db.ExecContext(r.Context(), `
+	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		commentID, missionID, authorType, authorID, req.Body, now, now)
 	if err != nil {
 		internalError(w, r, h.logger, "insert comment", err)
+		return
+	}
+
+	result := commentResponse{ID: commentID, MissionID: missionID, AuthorType: authorType, AuthorID: authorID, Body: req.Body, CreatedAt: now, UpdatedAt: now}
+	if op != nil {
+		result.OperationID = op.operation.ID
+	}
+	if err := completeChatIssueOperation(r.Context(), tx, op, missionID, result); err != nil {
+		writeChatIssueError(w, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "commit issue comment", err)
 		return
 	}
 
@@ -1002,15 +1104,7 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 
 	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
 
-	writeJSON(w, http.StatusCreated, commentResponse{
-		ID:         commentID,
-		MissionID:  missionID,
-		AuthorType: authorType,
-		AuthorID:   authorID,
-		Body:       req.Body,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	})
+	writeJSON(w, http.StatusCreated, result)
 }
 
 // ListComments handles GET /api/v1/internal/issues/{identifier}/comments —

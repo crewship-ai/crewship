@@ -78,6 +78,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"GET /issue/":           guardHandlerIdentity,
 	"PATCH /issue/":         guardHandlerIdentity,
 	"POST /issue/ /comment": guardHandlerIdentity,
+	"POST /issue/ /show":    guardHandlerIdentity,
 	"POST /issue/ /work":    guardHandlerIdentity,
 	"GET /issue/ /comments": guardHandlerIdentity,
 	"POST /issue/ /link":    guardHandlerIdentity,
@@ -99,6 +100,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	// which keys on the ACTING agent — so this route must resolve identity or
 	// the grant model means nothing.
 	"POST /mcp/notify":            guardHandlerIdentity,
+	"POST /mcp/issues":            guardHandlerIdentity,
 	"POST /pipelines/save":        guardHandlerIdentity,
 	"POST /pipelines/ /run":       guardHandlerIdentity,
 	"POST /connections/ /message": guardHandlerIdentity,

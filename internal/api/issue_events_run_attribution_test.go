@@ -36,8 +36,9 @@ func TestInternalIssue_UpdateStatus_StampsTheCausingRunOnTheJournalEntry(t *test
 	h.SetJournal(rec)
 
 	const runID = "run_the_one_that_did_it"
+	seedAutonomousIssueRun(t, h, wsID, leadID, runID)
 	body := bytes.NewBufferString(`{"workspace_id":"` + wsID +
-		`","status":"TODO","author_run_id":"` + runID + `"}`)
+		`","status":"TODO","agent_id":"` + leadID + `","author_run_id":"` + runID + `"}`)
 	req := httptest.NewRequest("PATCH", "/", body)
 	req.SetPathValue("identifier", "ENG-1")
 	rr := httptest.NewRecorder()

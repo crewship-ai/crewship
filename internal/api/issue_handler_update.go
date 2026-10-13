@@ -1,12 +1,15 @@
 package api
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/chatentities"
 )
 
 // ── Update — PATCH /api/v1/issues/{id} ──────────────────────────────────────
@@ -487,6 +490,12 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	user := UserFromContext(r.Context())
+	if user == nil || user.ID == "" {
+		replyError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
 	crewID := r.PathValue("crewId")
 	ident := r.PathValue("identifier")
 	wsID := WorkspaceIDFromContext(r.Context())
@@ -534,6 +543,14 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(r.Context(), `PRAGMA defer_foreign_keys = ON`); err != nil {
 		internalError(w, r, h.logger, "delete issue: defer foreign keys", err)
+		return
+	}
+	// Capture only identity and revisions before hard deletion. The receipt
+	// stores no title, identifier, description or arbitrary mutation response.
+	var deletedID string
+	var deletedRevision, deletedAggregate int64
+	if err := tx.QueryRowContext(r.Context(), `SELECT id,revision,aggregate_revision FROM missions WHERE identifier=? AND crew_id=? AND workspace_id=?`, ident, crewID, wsID).Scan(&deletedID, &deletedRevision, &deletedAggregate); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		internalError(w, r, h.logger, "delete issue: read receipt identity", err)
 		return
 	}
 	// Scoped by the same status filter as the DELETE below, so an issue this
@@ -588,6 +605,30 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		// created issue can always be got rid of; it just takes the status
 		// changes first. Say which ones.
 		writeProblem(w, r, http.StatusBadRequest, issueDeleteRefusal(ident, currentStatus))
+		return
+	}
+	// The human delete and every chat receipt commit together. Original run
+	// IDs are anchors only; the operation records the actual human deleter.
+	operationID := generateCUID()
+	op, _, err := chatentities.BeginOperation(r.Context(), tx, chatentities.OperationSpec{
+		ID: operationID, WorkspaceID: wsID, Key: "delete:" + operationID,
+		RequestHash: fmt.Sprintf("%x", sha256.Sum256([]byte(deletedID))),
+		ActorType:   "human", ActorID: user.ID, Provenance: "human", Kind: "issue", Verb: "deleted",
+	})
+	if err != nil {
+		internalError(w, r, h.logger, "delete issue: begin receipt", err)
+		return
+	}
+	snapshot, _ := json.Marshal(chatentities.DeletionAccessSnapshot{Version: 1, WorkspaceID: wsID, Visibility: "trusted_workspace"})
+	if err := chatentities.CompleteOperation(r.Context(), tx, op.ID, chatentities.ResultSpec{
+		EntityID: deletedID, Revision: deletedRevision, AggregateRevision: deletedAggregate,
+		AccessSnapshot: snapshot, Result: json.RawMessage(`{"deleted":true}`),
+	}); err != nil {
+		internalError(w, r, h.logger, "delete issue: complete receipt", err)
+		return
+	}
+	if _, err := chatentities.AppendDeletionRefs(r.Context(), tx, op.ID, wsID, deletedID); err != nil {
+		internalError(w, r, h.logger, "delete issue: append receipt", err)
 		return
 	}
 	// Commit before the blob sweep: the deferred foreign-key checks run here,

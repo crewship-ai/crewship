@@ -43,6 +43,7 @@ type EntityRefEntity struct {
 	ID          string `json:"id"`
 	Identifier  string `json:"identifier"`
 	WorkspaceID string `json:"workspace_id"`
+	Deleted     bool   `json:"deleted,omitempty"`
 }
 type EntityRefActor struct {
 	Type string `json:"type"`
@@ -138,6 +139,18 @@ func (r *Router) entityRefAudience(req *http.Request, chat string) (*chataudienc
 	}
 	return receipt, nil
 }
+
+// Only the current trusted-workspace boundary has a tombstone evaluator.
+// Validate shape in SQL before pagination so hidden rows never affect page
+// counts. Exactly three keys excludes unknown fields and duplicate-key tricks.
+const entityRefVisibilitySQL = `((m.id IS NOT NULL AND op.verb<>'deleted') OR
+ (m.id IS NULL AND op.verb='deleted' AND op.actor_type='human' AND op.provenance='human' AND op.run_id=''
+ AND json_type(op.access_snapshot)='object'
+ AND json_type(op.access_snapshot,'$.version')='integer' AND json_extract(op.access_snapshot,'$.version')=1
+ AND json_extract(op.access_snapshot,'$.workspace_id')=op.workspace_id
+ AND json_extract(op.access_snapshot,'$.visibility')='trusted_workspace'
+ AND (SELECT COUNT(*) FROM json_each(op.access_snapshot))=3))`
+
 func (r *Router) chatEntityRefs(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	chat := req.PathValue("chatId")
@@ -179,15 +192,15 @@ func (r *Router) chatEntityRefs(w http.ResponseWriter, req *http.Request) {
 		}
 		c.Snapshot = base64.RawURLEncoding.EncodeToString(token)
 		// Visibility is the existing trusted issue GET predicate: exact workspace.
-		// Unknown kinds and deleted objects fail closed until an exact tombstone
-		// authorization evaluator exists. Never page/count unauthorized raw refs.
-		err = tx.QueryRowContext(req.Context(), `SELECT COALESCE(MAX(cr.chat_seq),0) FROM chat_entity_refs cr JOIN agent_operations op ON op.id=cr.operation_id JOIN missions m ON m.id=op.entity_id AND m.workspace_id=op.workspace_id WHERE cr.chat_id=? AND op.workspace_id=? AND op.kind='issue' AND op.status='completed'`, chat, audience.WorkspaceID).Scan(&c.Upper)
+		// Only exact versioned deletion snapshots are accepted for missing issues.
+		// Never page/count unauthorized raw refs.
+		err = tx.QueryRowContext(req.Context(), `SELECT COALESCE(MAX(cr.chat_seq),0) FROM chat_entity_refs cr JOIN agent_operations op ON op.id=cr.operation_id LEFT JOIN missions m ON m.id=op.entity_id AND m.workspace_id=op.workspace_id WHERE cr.chat_id=? AND op.workspace_id=? AND op.kind='issue' AND op.status='completed' AND `+entityRefVisibilitySQL, chat, audience.WorkspaceID).Scan(&c.Upper)
 		if err != nil {
 			replyError(w, 503, "entity_refs_unavailable")
 			return
 		}
 	}
-	rows, err := tx.QueryContext(req.Context(), `SELECT cr.event_id,cr.chat_seq,cr.operation_id,cr.run_id,cr.trigger_message_id,cr.created_at,m.identifier FROM chat_entity_refs cr JOIN agent_operations op ON op.id=cr.operation_id JOIN missions m ON m.id=op.entity_id AND m.workspace_id=op.workspace_id WHERE cr.chat_id=? AND op.workspace_id=? AND op.kind='issue' AND op.status='completed' AND cr.chat_seq>? AND cr.chat_seq<=? ORDER BY cr.chat_seq LIMIT ?`, chat, audience.WorkspaceID, c.After, c.Upper, limit+1)
+	rows, err := tx.QueryContext(req.Context(), `SELECT cr.event_id,cr.chat_seq,cr.operation_id,cr.run_id,cr.trigger_message_id,cr.created_at,COALESCE(m.identifier,''),m.id IS NULL FROM chat_entity_refs cr JOIN agent_operations op ON op.id=cr.operation_id LEFT JOIN missions m ON m.id=op.entity_id AND m.workspace_id=op.workspace_id WHERE cr.chat_id=? AND op.workspace_id=? AND op.kind='issue' AND op.status='completed' AND `+entityRefVisibilitySQL+` AND cr.chat_seq>? AND cr.chat_seq<=? ORDER BY cr.chat_seq LIMIT ?`, chat, audience.WorkspaceID, c.After, c.Upper, limit+1)
 	if err != nil {
 		replyError(w, 503, "entity_refs_unavailable")
 		return
@@ -195,11 +208,12 @@ func (r *Router) chatEntityRefs(w http.ResponseWriter, req *http.Request) {
 	type entry struct {
 		ref        chatentities.Ref
 		identifier string
+		deleted    bool
 	}
 	entries := []entry{}
 	for rows.Next() {
 		var e entry
-		err = rows.Scan(&e.ref.EventID, &e.ref.Seq, &e.ref.OperationID, &e.ref.RunID, &e.ref.TriggerMessageID, &e.ref.CreatedAt, &e.identifier)
+		err = rows.Scan(&e.ref.EventID, &e.ref.Seq, &e.ref.OperationID, &e.ref.RunID, &e.ref.TriggerMessageID, &e.ref.CreatedAt, &e.identifier, &e.deleted)
 		if err != nil {
 			break
 		}
@@ -224,7 +238,7 @@ func (r *Router) chatEntityRefs(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		e.ref.Operation = *op
-		card := EntityRefResponse{EventID: e.ref.EventID, Kind: op.Kind, Verb: op.Verb, Entity: EntityRefEntity{ID: op.EntityID, Identifier: e.identifier, WorkspaceID: op.WorkspaceID}, Provenance: EntityRefProvenance{Actor: EntityRefActor{Type: op.ActorType, ID: op.ActorID}, At: op.CreatedAt}, Anchor: EntityRefAnchor{TriggerMessageID: e.ref.TriggerMessageID, RunID: e.ref.RunID}, RevisionAtAction: EntityRefRevision{Revision: op.Revision, AggregateRevision: op.AggregateRevision}}
+		card := EntityRefResponse{EventID: e.ref.EventID, Kind: op.Kind, Verb: op.Verb, Entity: EntityRefEntity{ID: op.EntityID, Identifier: e.identifier, WorkspaceID: op.WorkspaceID, Deleted: e.deleted}, Provenance: EntityRefProvenance{Actor: EntityRefActor{Type: op.ActorType, ID: op.ActorID}, At: op.CreatedAt}, Anchor: EntityRefAnchor{TriggerMessageID: e.ref.TriggerMessageID, RunID: e.ref.RunID}, RevisionAtAction: EntityRefRevision{Revision: op.Revision, AggregateRevision: op.AggregateRevision}}
 		card.Anchor.RunStatus, err = entityRunStatus(req.Context(), tx, op.WorkspaceID, e.ref.RunID)
 		if err != nil {
 			replyError(w, 503, "entity_refs_unavailable")
@@ -286,8 +300,9 @@ func (r *Router) chatEntityOperation(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	var identifier string
-	err = r.db.QueryRowContext(req.Context(), `SELECT identifier FROM missions WHERE id=? AND workspace_id=?`, op.EntityID, workspace).Scan(&identifier)
-	if err != nil || op.Kind != "issue" {
+	var deleted bool
+	err = r.db.QueryRowContext(req.Context(), `SELECT COALESCE(m.identifier,''),m.id IS NULL FROM agent_operations op LEFT JOIN missions m ON m.id=op.entity_id AND m.workspace_id=op.workspace_id WHERE op.id=? AND op.workspace_id=? AND op.kind='issue' AND `+entityRefVisibilitySQL, op.ID, workspace).Scan(&identifier, &deleted)
+	if err != nil {
 		replyError(w, 404, "Operation not found")
 		return
 	}
@@ -314,7 +329,7 @@ func (r *Router) chatEntityOperation(w http.ResponseWriter, req *http.Request) {
 	}
 	for _, chat := range chats {
 		if _, e := r.entityRefAudience(req, chat); e == nil {
-			writeJSON(w, 200, map[string]any{"id": op.ID, "status": op.Status, "kind": op.Kind, "verb": op.Verb, "entity": EntityRefEntity{ID: op.EntityID, Identifier: identifier, WorkspaceID: workspace}, "provenance": EntityRefProvenance{Actor: EntityRefActor{Type: op.ActorType, ID: op.ActorID}, At: op.CreatedAt}, "revision_at_action": EntityRefRevision{Revision: op.Revision, AggregateRevision: op.AggregateRevision}})
+			writeJSON(w, 200, map[string]any{"id": op.ID, "status": op.Status, "kind": op.Kind, "verb": op.Verb, "entity": EntityRefEntity{ID: op.EntityID, Identifier: identifier, WorkspaceID: workspace, Deleted: deleted}, "provenance": EntityRefProvenance{Actor: EntityRefActor{Type: op.ActorType, ID: op.ActorID}, At: op.CreatedAt}, "revision_at_action": EntityRefRevision{Revision: op.Revision, AggregateRevision: op.AggregateRevision}})
 			return
 		}
 	}

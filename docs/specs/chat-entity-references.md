@@ -1,10 +1,43 @@
 # Chat entity references
 
-This contract covers the durable Issue reference read API and its CLI commands.
+This contract covers durable Issue operations, their reference API and CLI.
 It supplies data for chat cards; it does not provide a frontend card renderer,
-proposal confirmation, tombstone projection or dedicated entity WebSocket events.
+proposal confirmation or dedicated entity WebSocket events.
 Mutation producers must persist operations and references through the host's
 verified authority checks; these read endpoints never create or execute work.
+
+## Agent operations
+
+The sidecar exposes typed tools at `/mcp/issues`, injected into supported CLI
+adapters as `crewship-issues`. Creation, update, comment and explicit show use
+the same handlers as HTTP `/issue/...` calls. Tool arguments cannot supply an
+actor, chat, workspace or human authority; these come from authenticated tokens
+and durable host run admission. Read-only calls do not create cards.
+
+Every human-requested mutation requires an explicit operation key, at most
+200 bytes. HTTP accepts `operation_key` or `Idempotency-Key`; conflicting
+values return `409`. MCP mutation tools require `request_key`. Reuse that key
+when retrying the same operation; never generate another key for a retry.
+The scope is workspace plus agent. The same key with a different request or run
+returns `409 operation_key_conflict`. A successful retry returns the original
+result and operation ID with `replayed: true`, after fresh authorization. An
+issue that is no longer readable is not returned through replay.
+
+The host verifies both the agent's crew scope and the requesting human's
+current authority inside the mutation transaction. A card is anchored to the
+host-admitted run and triggering message. Forged or unavailable run identity,
+ended runs and revoked requester authority fail closed. Mutation, operation
+result and reference commit or roll back together. Successful no-op updates
+also reserve their key. Genuine host-admitted autonomous work retains its
+existing mutation behavior without generating a human chat card.
+
+Once run tokens are enabled, old agent tokens cannot mutate issues. This
+delivery supports human-run create, update, comment and show. Work execution,
+relations and attachment writes from human runs return
+`403 chat_issue_action_not_supported` until their host paths implement the same
+transactional authority contract; autonomous runs retain those existing verbs.
+This guard is intentional and is not a claim that every issue action has been
+migrated.
 
 ## Authorization
 
@@ -25,9 +58,19 @@ one of its source chats is readable in the selected workspace. Missing and
 inaccessible operations both return `404`. Operations without an authorized
 source reference are unavailable through this endpoint.
 
-Deleted issues are omitted. The read API does not infer tombstone access from a
-workspace or project alone. A future tombstone projection requires an exact
-access-snapshot evaluator.
+Hard deletion through the public issue DELETE handler stores a minimal human
+operation and deletion reference in every chat that previously referenced the
+issue, atomically with deletion. Its actor is the actual human deleter; its run
+and message IDs retain the original chat anchor. Old non-deletion references
+are omitted after deletion. Explicit deletion references use `entity.deleted:
+true` and an empty `identifier`; no old title or arbitrary result is returned.
+
+Only exact version-1 snapshots of the current ordinary trusted-workspace access
+boundary are readable, with current workspace membership and chat access.
+Restricted sessions, foreign workspaces, unsupported versions, duplicate or
+additional snapshot fields fail closed. Future narrower issue access requires
+a new evaluator. Issues deleted through other paths without a receipt remain
+omitted.
 
 All responses set `Cache-Control: no-store`.
 
@@ -131,6 +174,11 @@ response is `{ "revision": 1, "aggregate_revision": 1 }`, with current integer
 counters. Missing or inaccessible issues return `404`. Revision counters come
 from the issue and child-data database triggers; they are not timestamps or an
 assertion that unrelated run/automation data has been refreshed.
+
+Existing issue detail responses also include `revision`, `aggregate_revision`
+and `allowed_actions`. Revisions are selected with the issue fields, rather
+than assigned after another query. Actions describe the viewer's current
+permission; mutation endpoints still reauthorize and validate state.
 
 ## CLI
 

@@ -645,6 +645,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				// same savePipeline test_run→save flow as POST /pipelines/save.
 				s.handleRoutinesMCP(w, r)
 				return
+			case r.Method == http.MethodPost && r.URL.Path == "/mcp/issues":
+				s.handleIssuesMCP(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/mcp/notify":
 				// In-container MCP server exposing the notification tools
 				// (list_notification_channels / notify_send). An agent can
@@ -742,6 +745,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			// sibling must not fall back to the boot identity.
 			case r.Method == http.MethodGet && r.URL.Path == "/issues":
 				s.handleIssuesList(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/issue/") && strings.HasSuffix(r.URL.Path, "/show"):
+				s.handleIssueShow(w, r)
 				return
 			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/issue/") && strings.HasSuffix(r.URL.Path, "/work"):
 				s.handleIssueWork(w, r)
