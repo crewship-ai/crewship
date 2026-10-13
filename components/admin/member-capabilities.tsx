@@ -107,7 +107,9 @@ export function useMemberCapabilities(workspaceId: string, enabled: boolean) {
       const res = await apiFetch(
         `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members/capabilities?workspace_id=${encodeURIComponent(workspaceId)}`,
       )
-      if (!res.ok) return {} as Record<string, string[]>
+      // A failed read is unknown, not "holds nothing": an empty map would let
+      // an edit replace what the person really holds (writes send the whole set).
+      if (!res.ok) throw new Error(`Could not read what members may do (${res.status})`)
       const data = (await res.json()) as CapabilitiesBulkResponse
       const map: Record<string, string[]> = {}
       for (const m of data.members ?? []) {

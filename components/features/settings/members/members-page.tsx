@@ -102,8 +102,13 @@ export function MembersPage() {
   const isAdmin = isAdminTier(role)
   const isManager = isManagerTier(role)
   const capsReadable = isAdmin && Boolean(currentUserId)
-  const { data: capsByUser, isLoading: capsLoading } = useMemberCapabilities(ws, capsReadable && members.length > 0)
-  const serverCaps = React.useMemo(() => (capsReadable ? capsByUser ?? {} : undefined), [capsReadable, capsByUser])
+  const capsQuery = useMemberCapabilities(ws, capsReadable && members.length > 0)
+  const { data: capsByUser, isLoading: capsLoading } = capsQuery
+  // Undefined until the server has said what each person holds: an unread or
+  // failed read is never an empty set, because a write sends the whole set
+  // and would take away whatever was not shown.
+  const serverCaps = React.useMemo(() => (capsReadable && capsByUser ? capsByUser : undefined), [capsReadable, capsByUser])
+  const capsFailed = capsReadable && capsQuery.isError
   const access = useAccessWrites(ws, roster.refresh)
 
   // Capability edits are a draft until Save, like every other editor in
@@ -111,10 +116,17 @@ export function MembersPage() {
   // changes `drafts` — user id → the whole set they would hold — and the
   // page's one floating bar commits them all, or Discard drops them. What the
   // matrix, the counts and the filters show is the set WITH the draft.
-  const [drafts, setDrafts] = React.useState<Record<string, string[]>>({})
+  //
+  // A draft belongs to the workspace it was made in. Switching workspaces asks
+  // first (the page's Save guard); should one switch anyway, the drafts of the
+  // old workspace are not shown here and cannot be saved into the new one.
+  const [draftBook, setDraftBook] = React.useState<{ ws: string; users: Record<string, string[]> }>({ ws, users: {} })
+  const drafts = React.useMemo(() => (draftBook.ws === ws ? draftBook.users : {}), [draftBook, ws])
+  const setDrafts = (next: (d: Record<string, string[]>) => Record<string, string[]>) =>
+    setDraftBook((b) => ({ ws, users: next(b.ws === ws ? b.users : {}) }))
   const caps = React.useMemo(() => (serverCaps ? { ...serverCaps, ...drafts } : undefined), [serverCaps, drafts])
   const pendingCount = Object.entries(drafts).reduce((n, [id, set]) => n + capabilityDiff(serverCaps?.[id], set), 0)
-  const stage = (people: Member[], next: (current: string[]) => string[]) => setDrafts((d) => {
+  const stage = (people: Member[], next: (current: string[]) => string[]) => serverCaps && setDrafts((d) => {
     const out = { ...d }
     for (const m of people) {
       const set = canonical(next(out[m.user.id] ?? serverCaps?.[m.user.id] ?? []))
@@ -448,6 +460,12 @@ export function MembersPage() {
             </p>
           )}
 
+          {capsFailed && (
+            <p role="alert" data-slot="members-caps-error" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              Could not read what people may do, so it cannot be changed until it loads. <button type="button" className="underline" onClick={() => void capsQuery.refetch()}>Retry</button>
+            </p>
+          )}
+
           {findings && !filters.status && <MembersAttention findings={findings} />}
 
           {capsReadable && caps && filters.flag === "reveal" && !filters.status && (
@@ -480,7 +498,7 @@ export function MembersPage() {
         </div>
       )}
 
-      <RegisterDraft count={pendingCount} saving={access.busy} save={saveDrafts} discard={() => setDrafts({})} />
+      <RegisterDraft count={pendingCount} saving={access.busy} save={saveDrafts} discard={() => setDrafts(() => ({}))} />
 
       <AnimatePresence>
         {selected.size > 0 && !isMobile && (
@@ -495,7 +513,7 @@ export function MembersPage() {
           <SheetDescription className="sr-only">Role, what they may do and where</SheetDescription>
           {opened && (
             <MemberDetail member={opened} workspaceId={ws} currentUserId={currentUserId} callerRole={role} isAdmin={isAdmin}
-              granted={caps?.[opened.user.id] ?? []} serverGranted={serverCaps?.[opened.user.id] ?? []} capsLoading={capsLoading} busy={busy}
+              granted={caps?.[opened.user.id] ?? []} serverGranted={serverCaps?.[opened.user.id] ?? []} capsLoading={capsLoading || !serverCaps} busy={busy}
               onChangeRole={roster.changeRole} onRemove={onRemove} onCell={onCell} onProfile={onProfile} onRevoke={onRevoke} revealEnabled={revealEnabled} onAccessSaved={roster.refresh} />
           )}
           {/* The page's own save bar sits under the sheet's overlay; the same

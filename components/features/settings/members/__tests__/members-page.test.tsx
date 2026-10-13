@@ -31,9 +31,9 @@ vi.mock("sonner", () => ({ toast }))
 vi.mock("@/components/features/members/invite-member-dialog", () => ({
   InviteMemberDialog: () => <div data-testid="invite-dialog" />,
 }))
-const h = vi.hoisted(() => ({ role: "ADMIN" as string | null, userId: "u-caller", mobile: false }))
+const h = vi.hoisted(() => ({ role: "ADMIN" as string | null, userId: "u-caller", mobile: false, workspaceId: "ws1" }))
 vi.mock("@/hooks/use-workspace", () => ({
-  useWorkspace: () => ({ workspaceId: "ws1", role: h.role, loading: false }),
+  useWorkspace: () => ({ workspaceId: h.workspaceId, role: h.role, loading: false }),
 }))
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({ session: { user: { id: h.userId, name: "Caller", email: "c@x.io" } } }),
@@ -106,6 +106,7 @@ beforeEach(() => {
   h.role = "ADMIN"
   h.userId = "u-caller"
   h.mobile = false
+  h.workspaceId = "ws1"
   window.history.replaceState(null, "", "/settings/members")
 })
 afterEach(() => cleanup())
@@ -410,5 +411,41 @@ describe("Members — access mode", () => {
     expect(await sheet()).toHaveAccessibleName("Member details: Rita Restricted")
     expect(screen.queryByTestId("member-access-mode")).toBeNull()
     expect(screen.queryByText("Restricted")).toBeNull()
+  })
+})
+
+/** Review of #3056: what may a draft write, and where. */
+describe("Members — drafts stay where they were made", () => {
+  it("does not save one workspace's drafts into another", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    window.history.replaceState(null, "", "/settings/members?member=u-mel")
+    const ui = () => <QueryClientProvider client={qc}><MembersPage /></QueryClientProvider>
+    const rendered = render(ui())
+    fireEvent.click(await within(await sheet()).findByRole("switch", { name: "Grant memory.write to Mel Member" }))
+    await saveBar()
+    // The switcher asks first (PageSaveProvider's guard); switched anyway,
+    // ws1's draft is neither shown nor savable in ws2.
+    h.workspaceId = "ws2"
+    rendered.rerender(ui())
+    await waitFor(() => expect(api.mock.calls.some(([url]) => String(url).includes("ws2/members?"))).toBe(true))
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull())
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true })
+    expect(writes()).toHaveLength(0)
+  })
+
+  it("will not edit what people may do until it has been read", async () => {
+    const normal = api.getMockImplementation()!
+    api.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (!init?.method && url.includes("/members/capabilities")) return { ok: false, status: 500, json: async () => ({}), text: async () => "" }
+      return normal(url, init)
+    })
+    renderPage("/settings/members?member=u-mel")
+    expect(await screen.findByText(/Could not read what people may do/)).toBeInTheDocument()
+    const control = await within(await sheet()).findByRole("switch", { name: "Grant memory.write to Mel Member" })
+    // Mel holds issue.create; an empty set here would have revoked it on Save.
+    expect(control).toBeDisabled()
+    fireEvent.click(control)
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
+    expect(writes()).toHaveLength(0)
   })
 })
