@@ -231,7 +231,7 @@ describe("the access matrix", () => {
 
 // Personal workspaces — the empty "<Name>'s Workspace" a sign-up gets — are
 // kept apart from the ones people share, and can still be found by name.
-describe("team and personal workspaces", () => {
+describe("workspaces and personal accounts", () => {
   const IVANA = { id: "u-ivana", email: "ivana@ex.com", full_name: "Ivana Viewer", created_at: "2026-09-04T00:00:00Z", workspace: null, role: null,
     memberships: [m("ws-a", "Acme", "VIEWER"), m("ws-iv", "Ivana Viewer's Workspace", "OWNER")] }
   const IV_WS = { id: "ws-iv", name: "Ivana Viewer's Workspace", slug: "ivana-viewer-s-workspace", kind: "personal", created_at: "2026-09-04T00:00:00Z",
@@ -246,41 +246,45 @@ describe("team and personal workspaces", () => {
     })
   })
 
-  it("lists a personal workspace apart, as 'Personal', and finds it by its owner", async () => {
+  it("lists a personal account under People, not among the workspaces, and finds it by its owner", async () => {
     render(<PeoplePage />)
     const table = await screen.findByRole("region", { name: "People" })
     const row = within(table).getByRole("row", { name: /Ivana Viewer/ })
-    expect(row).toHaveTextContent("Personal")
+    expect(row).toHaveTextContent("Personal account")
     expect(row).not.toHaveTextContent("Ivana Viewer's Workspace")
-    expect(screen.getByRole("region", { name: "Needs attention" })).toHaveTextContent("1 personal workspace has no crews and no runs.")
-    // Folded in the panel until a search names her.
+    expect(screen.getByRole("region", { name: "Needs attention" })).toHaveTextContent("1 personal account is empty.")
+    // Never in the panel's Workspaces.
     expect(screen.queryByRole("button", { name: /^Ivana Viewer/ })).toBeNull()
     fireEvent.change(screen.getByPlaceholderText(/Search people, workspaces/), { target: { value: "ivana" } })
-    fireEvent.click(await screen.findByRole("button", { name: /^Ivana Viewer/ }))
-    expect(await screen.findByRole("radiogroup", { name: "Kind of workspace" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /^Personal accounts/ }))
+    const card = await screen.findByRole("region", { name: "Personal accounts" })
+    fireEvent.click(within(card).getByRole("row", { name: /Ivana Viewer/ }))
+    expect(await screen.findByRole("radiogroup", { name: "Workspace or personal account" })).toBeInTheDocument()
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Personal accounts")
   })
 
-  it("renames a workspace and makes a personal one a team workspace", async () => {
+  it("renames a personal account and turns it into a workspace", async () => {
     window.history.replaceState(null, "", "/admin/people?ws=ws-iv")
     render(<PeoplePage />)
     fireEvent.click(await screen.findByRole("button", { name: /Rename Ivana Viewer's Workspace/ }))
     fireEvent.change(screen.getByLabelText("Workspace name"), { target: { value: "Design" } })
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(body("PATCH", "/api/v1/admin/instance/workspaces/ws-iv")).toEqual({ name: "Design" }))
-    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Kind of workspace" })).getByRole("radio", { name: "Team" }))
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Workspace or personal account" })).getByRole("radio", { name: "Workspace" }))
     await waitFor(() => expect(calls("PATCH", "/api/v1/admin/instance/workspaces/ws-iv")).toHaveLength(2))
     expect(JSON.parse(String((calls("PATCH", "/api/v1/admin/instance/workspaces/ws-iv")[1][1] as RequestInit).body))).toEqual({ kind: "team" })
   })
 
-  it("deletes the empty personal workspaces picked, after asking", async () => {
+  it("removes the empty personal accounts picked, after asking", async () => {
     window.history.replaceState(null, "", "/admin/people?view=workspaces")
     render(<PeoplePage />)
-    const card = await screen.findByRole("region", { name: "Personal workspaces" })
-    expect(screen.getByRole("region", { name: "Team workspaces" })).not.toHaveTextContent("Ivana")
-    fireEvent.click(within(card).getByRole("checkbox", { name: /Ivana Viewer's personal workspace/ }))
-    fireEvent.click(within(card).getByRole("button", { name: /Delete 1 empty/ }))
+    expect(await screen.findByRole("region", { name: "Workspaces" })).not.toHaveTextContent("Ivana")
+    fireEvent.click(screen.getByRole("button", { name: "Show" }))
+    const card = await screen.findByRole("region", { name: "Personal accounts" })
+    fireEvent.click(within(card).getByRole("checkbox", { name: /Ivana Viewer's personal account/ }))
+    fireEvent.click(within(card).getByRole("button", { name: /Remove 1 empty/ }))
     expect(calls("DELETE", "/api/v1/admin/instance/workspaces/ws-iv")).toHaveLength(0)
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Remove" }))
     await waitFor(() => expect(body("DELETE", "/api/v1/admin/instance/workspaces/ws-iv")).toEqual({ confirm_slug: "ivana-viewer-s-workspace" }))
   })
 })

@@ -48,7 +48,7 @@ export const FACETS: { key: Facet; label: string; icon: LucideIcon; tone?: strin
   { key: "admins", label: "Instance admins", icon: ShieldCheck, tone: "text-[var(--purple)]" },
 ]
 
-// ── Team and personal workspaces ──────────────────────────────────────
+// ── Workspaces and personal accounts ──────────────────────────────────────
 
 /**
  * A personal workspace is the empty "<Name>'s Workspace" a sign-up without an

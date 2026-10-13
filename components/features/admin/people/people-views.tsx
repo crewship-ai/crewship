@@ -23,7 +23,7 @@ const td = settingsTd
  * What on the instance needs an admin, most pressing first, each with the
  * verb that deals with it: a locked account (Unlock), an unfinished sign-up
  * (Open — the profile issues a new link), someone who belongs nowhere, and
- * personal workspaces nobody uses. Drawn by Members' "Needs attention" card.
+ * personal accounts nobody uses. Drawn by Members' "Needs attention" card.
  */
 export function peopleFindings({ people, workspaces, actions, onOpen, onFacet, onPersonal }: {
   people: Person[]
@@ -60,19 +60,19 @@ export function peopleFindings({ people, workspaces, actions, onOpen, onFacet, o
   }
   const idle = workspaces.filter((w) => isPersonal(w) && isEmptyWorkspace(w))
   if (idle.length > 0) {
-    out.push({ key: "personal", severity: "low", title: `${idle.length} personal ${idle.length === 1 ? "workspace has" : "workspaces have"} no crews and no runs.`,
-      body: "Each was created when someone signed up without an invitation. Review them, and delete the ones nobody needs.", verb: `Review ${idle.length}`, run: onPersonal })
+    out.push({ key: "personal", severity: "low", title: `${idle.length} personal ${idle.length === 1 ? "account is" : "accounts are"} empty.`,
+      body: "Each was made when someone signed up without an invitation: no crews, no runs. Review them, and remove the ones nobody uses.", verb: `Review ${idle.length}`, run: onPersonal })
   }
   return out
 }
 
 /** A person's place in one workspace, as a chip: the workspace's tile and
- *  name, or — for their own personal workspace — a quiet "Personal". */
+ *  name, or — for their own personal account — a quiet "Personal account". */
 export function MembershipChip({ m, personal }: { m: Person["memberships"][number]; personal: boolean }) {
   if (personal) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-md border border-dashed border-border px-1.5 py-0.5 text-label text-muted-foreground" title={`${m.name} · personal workspace`}>
-        <House className="h-3 w-3" aria-hidden />Personal<span className="text-muted-foreground-soft">{roleLabel(m.role)}</span>
+      <span className="inline-flex items-center gap-1 rounded-md border border-dashed border-border px-1.5 py-0.5 text-label text-muted-foreground" title={`${m.name} · personal account`}>
+        <House className="h-3 w-3" aria-hidden />Personal account<span className="text-muted-foreground-soft">{roleLabel(m.role)}</span>
       </span>
     )
   }
@@ -144,7 +144,7 @@ export function PeopleTable({ people, workspaces, onOpen, selected, onSelect, se
 }
 
 /**
- * The personal workspaces: one row per person who has one, what is in it,
+ * The personal accounts: one row per person who has one, what is in it,
  * and where else they work. Only empty ones can be ticked for removal.
  */
 export function PersonalWorkspacesTable({ workspaces, people, onOpen, selected, onSelect }: {
@@ -158,14 +158,14 @@ export function PersonalWorkspacesTable({ workspaces, people, onOpen, selected, 
   const allOn = empty.length > 0 && empty.every((w) => selected.has(w.id))
   return (
     <div className="overflow-x-auto">
-      <table className={settingsTable} aria-label="Personal workspaces">
+      <table className={settingsTable} aria-label="Personal accounts">
         <thead>
           <tr>
             <th className={cn(th, "w-9")}>
               <input type="checkbox" aria-label="Select every empty one" checked={allOn} disabled={empty.length === 0}
                 onChange={(e) => onSelect(empty.map((w) => w.id), e.target.checked)} className="size-3.5 accent-[var(--primary)]" />
             </th>
-            <th className={th}>Owner</th><th className={cn(th, "text-right")}>Crews</th><th className={cn(th, "text-right")}>Agents</th><th className={cn(th, "text-right")}>Runs · 7 d</th><th className={th}>Also works in</th>
+            <th className={th}>Person</th><th className={cn(th, "text-right")}>Crews</th><th className={cn(th, "text-right")}>Agents</th><th className={cn(th, "text-right")}>Runs · 7 d</th><th className={th}>Also works in</th>
           </tr>
         </thead>
         <tbody>
@@ -176,7 +176,7 @@ export function PersonalWorkspacesTable({ workspaces, people, onOpen, selected, 
             return (
               <tr key={w.id} tabIndex={0} onClick={() => onOpen(w.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(w.id) }} className={settingsTableRowLink} data-workspace={w.id}>
                 <td className={td} onClick={(e) => e.stopPropagation()}>
-                  <input type="checkbox" aria-label={`Select ${personalOwnerName(w, people)}'s personal workspace`} checked={selected.has(w.id)} disabled={!canDelete}
+                  <input type="checkbox" aria-label={`Select ${personalOwnerName(w, people)}'s personal account`} checked={selected.has(w.id)} disabled={!canDelete}
                     title={canDelete ? undefined : "Has crews, agents or runs; open it to decide"}
                     onChange={(e) => onSelect([w.id], e.target.checked)} className="size-3.5 accent-[var(--primary)] disabled:opacity-30" />
                 </td>
@@ -193,7 +193,7 @@ export function PersonalWorkspacesTable({ workspaces, people, onOpen, selected, 
               </tr>
             )
           })}
-          {workspaces.length === 0 && <tr><td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">No personal workspace matches.</td></tr>}
+          {workspaces.length === 0 && <tr><td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">No personal account matches.</td></tr>}
         </tbody>
       </table>
     </div>

@@ -79,7 +79,7 @@ export function AddPersonDialog({ open, onOpenChange, workspaces, actions, busy,
                   </div>
                 ))}
               </div>
-              <p className="flex items-center gap-1.5 text-label text-muted-foreground"><House className="h-3 w-3" aria-hidden />Personal workspaces are not offered. With none picked, they sign in to nothing until added.</p>
+              <p className="flex items-center gap-1.5 text-label text-muted-foreground"><House className="h-3 w-3" aria-hidden />Personal accounts are not offered. With none picked, they sign in to nothing until added.</p>
             </fieldset>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>

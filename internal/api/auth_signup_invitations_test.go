@@ -134,6 +134,22 @@ func TestSignup_WithoutInvitation_GetsItsOwnWorkspace(t *testing.T) {
 	if kind != "personal" {
 		t.Errorf("kind = %q, want personal", kind)
 	}
+	// The switcher reads it from the list, to show it as their personal account.
+	var uid string
+	if err := db.QueryRow(`SELECT id FROM users WHERE email = 'solo@example.com'`).Scan(&uid); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	NewWorkspaceHandler(db, newTestLogger()).List(rr, requestWithUser("GET", "/api/v1/workspaces", uid, ""))
+	var list []struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
+	}
+	if len(list) != 1 || list[0].Kind != "personal" {
+		t.Errorf("listed = %+v, want one personal workspace", list)
+	}
 }
 
 func TestSignup_IgnoresExpiredAndAcceptedInvitations(t *testing.T) {
@@ -240,12 +256,13 @@ func TestSignup_InvitedPersonLandsInTheInvitingWorkspace(t *testing.T) {
 	rr := httptest.NewRecorder()
 	NewWorkspaceHandler(db, newTestLogger()).List(rr, requestWithUser("GET", "/api/v1/workspaces", uid, ""))
 	var list []struct {
-		ID string `json:"id"`
+		ID   string `json:"id"`
+		Kind string `json:"kind"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
 		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
 	}
-	if len(list) != 1 || list[0].ID != wsID {
+	if len(list) != 1 || list[0].ID != wsID || list[0].Kind != "team" {
 		t.Errorf("workspaces = %+v, want only the inviting workspace %s", list, wsID)
 	}
 }

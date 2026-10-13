@@ -6,6 +6,7 @@ import Link from "next/link"
 import { Check, ChevronDown, Plus, Settings, UserPlus } from "lucide-react"
 import { toast } from "sonner"
 import { useWorkspace, type WorkspaceData } from "@/hooks/use-workspace"
+import { useSessionSafe } from "@/hooks/use-auth"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -57,6 +58,24 @@ export function WorkspaceMark({ name, logoUrl, className }: { name: string; logo
   return <span className={className} aria-hidden>{avatarLetter(name)}</span>
 }
 
+/**
+ * The caller's own personal account: the workspace sign-up made for them
+ * alone. It is listed as them, not as a workspace, so "Workspaces" means only
+ * the places people share. Someone else's personal one, opened as a member,
+ * stays a workspace named after its owner.
+ */
+export function isOwnPersonal(ws: Pick<WorkspaceData, "kind" | "currentUserRole"> | null | undefined): boolean {
+  return ws?.kind === "personal" && ws.currentUserRole === "OWNER"
+}
+
+/** What the switcher calls a workspace: the person's name for their personal account. */
+function useSwitcherLabel(ws: WorkspaceData | null, role: string | null): { label: string | null; sub: string } {
+  const { data } = useSessionSafe()
+  if (!ws) return { label: null, sub: "" }
+  if (isOwnPersonal(ws)) return { label: data?.user.name || ws.name, sub: "Personal account" }
+  return { label: ws.name, sub: ROLE_LABEL[role ?? ""] ?? role ?? "" }
+}
+
 function slugify(name: string): string {
   return name
     .toLowerCase()
@@ -69,9 +88,10 @@ function slugify(name: string): string {
 export function WorkspaceSwitcher() {
   const { workspace, role, loading, setWorkspaceId, refresh } = useWorkspace()
   const [createOpen, setCreateOpen] = useState(false)
+  const shown = useSwitcherLabel(workspace, role)
 
-  const triggerLabel = workspace?.name ?? (loading ? "Loading…" : "No workspace")
-  const triggerSub = workspace ? ROLE_LABEL[role ?? ""] ?? role ?? "" : ""
+  const triggerLabel = shown.label ?? (loading ? "Loading…" : "No workspace")
+  const triggerSub = shown.sub
 
   return (
     <>
@@ -86,7 +106,7 @@ export function WorkspaceSwitcher() {
                 className={RAIL_ROW}
               >
                 {workspace ? (
-                  <WorkspaceMark name={workspace.name} logoUrl={workspace.logo_url}
+                  <WorkspaceMark name={triggerLabel} logoUrl={workspace.logo_url}
                     className="rail-tile rail-tile-static bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" />
                 ) : (
                   <span className="rail-tile rail-tile-static bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" aria-hidden>·</span>
@@ -133,17 +153,30 @@ export function WorkspaceSwitcher() {
  */
 function WorkspaceMenuItems({ onCreate, onNavigate }: { onCreate: () => void; onNavigate?: () => void }) {
   const { workspace, workspaces, role, loading, setWorkspaceId } = useWorkspace()
+  const { data } = useSessionSafe()
+  const own = workspaces.filter(isOwnPersonal)
+  const shared = workspaces.filter((ws) => !isOwnPersonal(ws))
+  const sectionLabel = "text-micro uppercase tracking-wider text-muted-foreground font-medium"
   return (
     <>
-      <DropdownMenuLabel className="text-micro uppercase tracking-wider text-muted-foreground font-medium">
-        Workspaces
-      </DropdownMenuLabel>
-      {workspaces.length === 0 && (
+      {/* The personal account first, the way the person is "themselves"
+          before any team; then the workspaces people share. */}
+      {own.length > 0 && (
+        <>
+          <DropdownMenuLabel className={sectionLabel}>Personal account</DropdownMenuLabel>
+          {own.map((ws) => (
+            <WorkspaceRow key={ws.id} ws={ws} active={ws.id === workspace?.id} onSelect={() => setWorkspaceId(ws.id)}
+              label={data?.user.name || ws.name} sub="Personal account" />
+          ))}
+        </>
+      )}
+      <DropdownMenuLabel className={sectionLabel}>Workspaces</DropdownMenuLabel>
+      {shared.length === 0 && (
         <div className="px-2 py-2 text-xs text-muted-foreground">
           {loading ? "Loading workspaces…" : "No workspaces yet"}
         </div>
       )}
-      {workspaces.map((ws) => (
+      {shared.map((ws) => (
         <WorkspaceRow
           key={ws.id}
           ws={ws}
@@ -157,7 +190,7 @@ function WorkspaceMenuItems({ onCreate, onNavigate }: { onCreate: () => void; on
           <DropdownMenuItem asChild className="text-xs gap-2">
             <Link href="/settings?tab=general" onClick={onNavigate}>
               <Settings className="h-3.5 w-3.5" />
-              Workspace settings
+              {isOwnPersonal(workspace) ? "Account settings" : "Workspace settings"}
             </Link>
           </DropdownMenuItem>
           {/* The roster is readable at every role; inviting is ADMIN+ there
@@ -192,8 +225,9 @@ function WorkspaceMenuItems({ onCreate, onNavigate }: { onCreate: () => void; on
 export function MobileWorkspaceSwitcher({ onNavigate }: { onNavigate?: () => void }) {
   const { workspace, role, loading, refresh, setWorkspaceId } = useWorkspace()
   const [createOpen, setCreateOpen] = useState(false)
-  const label = workspace?.name ?? (loading ? "Loading…" : "No workspace")
-  const sub = workspace ? ROLE_LABEL[role ?? ""] ?? role ?? "" : ""
+  const shown = useSwitcherLabel(workspace, role)
+  const label = shown.label ?? (loading ? "Loading…" : "No workspace")
+  const sub = shown.sub
   return (
     <>
       <DropdownMenu>
@@ -204,7 +238,7 @@ export function MobileWorkspaceSwitcher({ onNavigate }: { onNavigate?: () => voi
             className="flex min-h-12 min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-left hover:bg-accent"
           >
             {workspace ? (
-              <WorkspaceMark name={workspace.name} logoUrl={workspace.logo_url}
+              <WorkspaceMark name={label} logoUrl={workspace.logo_url}
                 className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground" />
             ) : (
               <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground" aria-hidden>·</span>
@@ -236,10 +270,14 @@ function WorkspaceRow({
   ws,
   active,
   onSelect,
+  label = ws.name,
+  sub,
 }: {
   ws: WorkspaceData
   active: boolean
   onSelect: () => void
+  label?: string
+  sub?: string
 }) {
   return (
     <DropdownMenuItem
@@ -249,12 +287,12 @@ function WorkspaceRow({
       }}
       className={cn("flex items-center gap-3 py-2", active && "bg-primary/5")}
     >
-      <WorkspaceMark name={ws.name} logoUrl={ws.logo_url}
+      <WorkspaceMark name={label} logoUrl={ws.logo_url}
         className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-micro font-bold text-primary-foreground shrink-0" />
       <div className="min-w-0 flex-1">
-        <div className="text-xs font-medium truncate">{ws.name}</div>
+        <div className="text-xs font-medium truncate">{label}</div>
         <div className="text-micro text-muted-foreground truncate">
-          {ROLE_LABEL[ws.currentUserRole ?? ""] ?? ws.currentUserRole ?? ws.slug}
+          {sub ?? ROLE_LABEL[ws.currentUserRole ?? ""] ?? ws.currentUserRole ?? ws.slug}
         </div>
       </div>
       {active && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}

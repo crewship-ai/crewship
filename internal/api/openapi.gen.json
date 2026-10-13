@@ -15292,6 +15292,13 @@
           "id": {
             "type": "string"
           },
+          "kind": {
+            "enum": [
+              "team",
+              "personal"
+            ],
+            "type": "string"
+          },
           "logo_url": {
             "nullable": true,
             "type": "string"
@@ -15350,6 +15357,7 @@
           "id",
           "name",
           "slug",
+          "kind",
           "created_at",
           "updated_at",
           "allow_privileged_credentials",

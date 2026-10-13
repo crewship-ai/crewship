@@ -106,15 +106,15 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted }: {
         </div>
         <div className="flex flex-wrap items-center gap-3 border-t border-border px-4 py-2.5" data-slot="workspace-kind">
           <span className="min-w-0 flex-1 text-label text-muted-foreground">
-            {personal ? "Personal: created when its owner signed up, for them alone. Listed apart from the workspaces people share."
-              : "Team: a workspace people share."}
+            {personal ? "Personal account: made when its owner signed up, for them alone. Listed under People, not among the workspaces."
+              : "Workspace: a place people share."}
           </span>
-          <div role="radiogroup" aria-label="Kind of workspace" className="inline-flex gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5">
-            {([["team", "Team", Building2], ["personal", "Personal", House]] as const).map(([k, label, Icon]) => {
+          <div role="radiogroup" aria-label="Workspace or personal account" className="inline-flex gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5">
+            {([["team", "Workspace", Building2], ["personal", "Personal account", House]] as const).map(([k, label, Icon]) => {
               const on = (personal ? "personal" : "team") === k
               return (
                 <button key={k} type="button" role="radio" aria-checked={on} disabled={busy === `w:${ws.id}`}
-                  onClick={() => { if (!on) void actions.updateWorkspace(ws.id, { kind: k }, `${ws.name} is now a ${label.toLowerCase()} workspace`) }}
+                  onClick={() => { if (!on) void actions.updateWorkspace(ws.id, { kind: k }, `${ws.name} is now a ${label.toLowerCase()}`) }}
                   className={cn("inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-xs transition-colors",
                     on ? "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--border)]" : "text-muted-foreground hover:text-foreground")}>
                   <Icon className="h-3 w-3" aria-hidden />{label}

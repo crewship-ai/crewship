@@ -29,7 +29,8 @@ import { AddPersonDialog, NewWorkspaceDialog } from "./people-dialogs"
 import { usePeople } from "./use-people"
 import { toast } from "sonner"
 
-type View = "people" | "workspaces" | "access"
+/** "accounts" is the personal accounts, under People: it has no tab of its own. */
+type View = "people" | "accounts" | "workspaces" | "access"
 const VIEWS: { key: View; label: string; icon: typeof Users }[] = [
   { key: "people", label: "People", icon: Users },
   { key: "workspaces", label: "Workspaces", icon: Building2 },
@@ -46,7 +47,7 @@ function readUrl(): UrlState {
   const v = p.get("view")
   const f = p.get("facet")
   return {
-    view: v === "workspaces" || v === "access" ? v : "people",
+    view: v === "workspaces" || v === "access" || v === "accounts" ? v : "people",
     facet: FACETS.some((x) => x.key === f) ? (f as Facet) : "all",
     person: p.get("person") ?? "",
     ws: p.get("ws") ?? "",
@@ -93,6 +94,8 @@ export function PeoplePage() {
   const ws = workspaces.find((w) => w.id === state.ws)
   const shownPeople = people.filter((p) => facetMatches(p, facet) && personMatches(p, q)).sort((a, b) => byAttentionThenName(a, b))
   const shownWorkspaces = workspaces.filter((w) => workspaceMatches(w, q, people)).sort((a, b) => a.name.localeCompare(b.name))
+  // Workspaces are the places people share; a personal account is one
+  // person's own, made at sign-up, and is listed under People.
   const teamShown = shownWorkspaces.filter((w) => !isPersonal(w))
   const personalShown = shownWorkspaces.filter(isPersonal).sort((a, b) => personalOwnerName(a, people).localeCompare(personalOwnerName(b, people)))
   const personalAll = workspaces.filter(isPersonal)
@@ -107,7 +110,7 @@ export function PeoplePage() {
     for (const w of targets) if (await actions.deleteWorkspace(w.id, w.slug, "")) done++
     setPickedWs(new Set())
     setConfirmDelete(false)
-    if (done) toast.success(`Deleted ${done} personal ${done === 1 ? "workspace" : "workspaces"}`)
+    if (done) toast.success(`Removed ${done} empty personal ${done === 1 ? "account" : "accounts"}`)
   }
   const attention = people.filter((p) => personStatus(p) !== "active").length
   const admins = people.filter((p) => p.instance_admin).length
@@ -118,7 +121,7 @@ export function PeoplePage() {
         {VIEWS.map((v) => (
           <button key={v.key} type="button" aria-pressed={view === v.key && !person && !ws} onClick={() => showView(v.key)} data-drill-close
             className={cn("flex h-7 items-center justify-center gap-1 rounded-md text-label font-medium transition-colors",
-              view === v.key && !person && !ws ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
+              (view === v.key || (v.key === "people" && view === "accounts")) && !person && !ws ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
             <v.icon className="h-3.5 w-3.5" />{v.label}
           </button>
         ))}
@@ -134,8 +137,17 @@ export function PeoplePage() {
               label={f.label} sub={f.hint} meta={n} />
           )
         })}
+        {personalAll.length > 0 && (
+          // One per person who signed up on their own; a search ("ivana")
+          // counts hers, and the list it opens is filtered the same way.
+          <DrillNavItem index={FACETS.length} selected={view === "accounts" && !person && !ws} pressed={view === "accounts" && !person && !ws}
+            onSelect={() => showView("accounts")} muted={!personalShown.length}
+            icon={<House className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />}
+            label="Personal accounts" sub="Made at sign-up, one person each"
+            meta={q.trim() ? `${personalShown.length}/${personalAll.length}` : personalAll.length} />
+        )}
       </DrillNavSection>
-      <DrillNavSection label="Team workspaces" count={teamShown.length}>
+      <DrillNavSection label="Workspaces" count={teamShown.length}>
         {teamShown.map((w, i) => (
           <DrillNavItem key={w.id} index={i} selected={ws?.id === w.id} onSelect={() => openWorkspace(w.id)} title={`${w.name} · ${w.slug}`}
             icon={<WorkspaceTile id={w.id} name={w.name} logoUrl={w.logo_url} />}
@@ -146,26 +158,13 @@ export function PeoplePage() {
         <DrillNavItem index={teamShown.length} onSelect={() => setDialog("workspace")}
           icon={<Plus className="h-3.5 w-3.5 text-primary-hover" />} label={<span className="text-primary-hover">New workspace</span>} />
       </DrillNavSection>
-      {personalAll.length > 0 && (
-        // Folded unless searching: there can be one per person, and a search
-        // ("ivana") must still find hers.
-        <DrillNavSection key={q.trim() ? "personal-open" : "personal"} label="Personal" count={q.trim() ? `${personalShown.length} of ${personalAll.length}` : personalAll.length} defaultOpen={Boolean(q.trim()) || Boolean(ws && isPersonal(ws))}>
-          <DrillNavItem index={0} selected={view === "workspaces" && !ws} onSelect={() => showView("workspaces")}
-            icon={<House className="h-3.5 w-3.5 text-muted-foreground" />} label="All personal workspaces" sub="Created at sign-up, one person each" meta={personalAll.length} />
-          {personalShown.map((w, i) => (
-            <DrillNavItem key={w.id} index={i + 1} selected={ws?.id === w.id} onSelect={() => openWorkspace(w.id)} title={`${w.name} · ${w.slug}`}
-              icon={<WorkspaceTile id={w.id} name={personalOwnerName(w, people)} size="xs" logoUrl={w.logo_url} />}
-              label={personalOwnerName(w, people)} sub={isEmptyWorkspace(w) ? "Empty" : `${w._count_crews} crews · ${w._count_agents} agents`} muted={isEmptyWorkspace(w)} />
-          ))}
-        </DrillNavSection>
-      )}
     </>
   )
 
   const mobileNav = (
     <div className="grid grid-cols-3 gap-1 rounded-lg border border-border bg-surface-subtle p-0.5" role="tablist" aria-label="View">
       {VIEWS.map((v) => (
-        <button key={v.key} type="button" role="tab" aria-selected={view === v.key} onClick={() => showView(v.key)}
+        <button key={v.key} type="button" role="tab" aria-selected={view === v.key || (v.key === "people" && view === "accounts")} onClick={() => showView(v.key)}
           className={cn("flex h-8 items-center justify-center gap-1.5 rounded-md text-xs font-medium", view === v.key ? "bg-card text-foreground shadow-xs" : "text-muted-foreground")}>
           <v.icon className="h-3.5 w-3.5" />{v.label}
         </button>
@@ -175,7 +174,9 @@ export function PeoplePage() {
 
   const crumb = (label: string) => (
     <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-label text-muted-foreground">
-      <button type="button" className="hover:text-foreground" onClick={() => showView(ws ? "workspaces" : "people")}>{ws ? "Workspaces" : "People"}</button>
+      <button type="button" className="hover:text-foreground" onClick={() => showView(ws ? (isPersonal(ws) ? "accounts" : "workspaces") : "people")}>
+        {ws ? (isPersonal(ws) ? "Personal accounts" : "Workspaces") : "People"}
+      </button>
       <ChevronRight className="size-3" /><span className="text-foreground">{label}</span>
     </nav>
   )
@@ -190,43 +191,59 @@ export function PeoplePage() {
     // same, and what is per workspace picks one of the person's (below).
     body = <>{crumb(displayName(person))}<PersonProfile person={person} people={people} workspaces={workspaces} workspaceId={workspaceId ?? ""} meId={session?.user.id} busy={busy} actions={actions} onChanged={() => void reload()} /></>
   } else if (ws) {
-    body = <>{crumb(ws.name)}<WorkspaceProfile ws={ws} people={people} busy={busy} actions={actions} onDeleted={() => showView("workspaces")} /></>
+    const personal = isPersonal(ws)
+    body = <>{crumb(personal ? personalOwnerName(ws, people) : ws.name)}<WorkspaceProfile ws={ws} people={people} busy={busy} actions={actions} onDeleted={() => showView(personal ? "accounts" : "workspaces")} /></>
   } else if (view === "workspaces") {
     body = (
       <>
         <SettingsSummary>
-          <SummaryItem n={workspaces.length - personalAll.length}>team workspaces</SummaryItem>
-          <SummaryItem n={personalAll.length}>personal</SummaryItem>
+          <SummaryItem n={teamShown.length}>workspaces</SummaryItem>
           <SummaryItem n={people.length}>people</SummaryItem>
-          <SummaryItem n={workspaces.reduce((a, w) => a + (w._count_agents ?? 0), 0)}>agents</SummaryItem>
+          <SummaryItem n={workspaces.filter((w) => !isPersonal(w)).reduce((a, w) => a + (w._count_agents ?? 0), 0)}>agents</SummaryItem>
         </SettingsSummary>
-        <SettingsCard icon={Building2} title="Team workspaces" description="Where people work together"
+        <SettingsCard icon={Building2} title="Workspaces" description="Where people work together"
           actions={<Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={() => setDialog("workspace")}><Plus />New workspace</Button>}>
           <WorkspacesTable workspaces={teamShown} people={people} onOpen={openWorkspace} />
         </SettingsCard>
-        <SettingsCard icon={House} tint="var(--muted-foreground)" title="Personal workspaces"
-          description="Created automatically when someone signs up without an invitation · one person each"
+        {personalAll.length > 0 && (
+          <p className="flex items-center gap-1.5 text-label text-muted-foreground">
+            <House className="h-3 w-3" aria-hidden />
+            {personalAll.length} personal {personalAll.length === 1 ? "account is" : "accounts are"} listed under People.
+            <button type="button" className="text-primary-hover hover:underline" onClick={() => showView("accounts")}>Show</button>
+          </p>
+        )}
+      </>
+    )
+  } else if (view === "accounts") {
+    body = (
+      <>
+        <SettingsSummary>
+          <SummaryItem n={personalAll.length}>personal accounts</SummaryItem>
+          <SummaryItem n={personalAll.filter(isEmptyWorkspace).length}>empty</SummaryItem>
+        </SettingsSummary>
+        <SettingsCard icon={House} tint="var(--muted-foreground)" title="Personal accounts"
+          description="Made when someone signs up without an invitation · one person each, apart from the workspaces"
           actions={pickedWs.size > 0 ? (
             <Button size="sm" variant="outline" className="h-7 border-destructive/40 px-2.5 text-xs text-destructive" onClick={() => setConfirmDelete(true)}>
-              <Trash2 />Delete {pickedWs.size} empty
+              <Trash2 />Remove {pickedWs.size} empty
             </Button>
           ) : undefined}>
           <PersonalWorkspacesTable workspaces={personalShown} people={people} onOpen={openWorkspace} selected={pickedWs} onSelect={toggle(setPickedWs)} />
           <p className="border-t border-border px-4 py-2.5 text-label text-muted-foreground">
-            Only empty ones can be removed here — no crews, no agents, no runs. Their owners keep their accounts and every other workspace. Open one to make it a team workspace instead.
+            Only empty ones can be removed — no crews, no agents, no runs. The person keeps signing in and keeps every workspace they belong to. Open one to turn it into a workspace instead.
           </p>
         </SettingsCard>
         <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete {pickedWs.size} empty personal {pickedWs.size === 1 ? "workspace" : "workspaces"}?</AlertDialogTitle>
+              <AlertDialogTitle>Remove {pickedWs.size} empty personal {pickedWs.size === 1 ? "account" : "accounts"}?</AlertDialogTitle>
               <AlertDialogDescription>
-                {workspaces.filter((w) => pickedWs.has(w.id)).map((w) => personalOwnerName(w, people)).join(", ")}. Nothing is in them; their owners keep their accounts. This cannot be undone.
+                {workspaces.filter((w) => pickedWs.has(w.id)).map((w) => personalOwnerName(w, people)).join(", ")}. Nothing is in them. The people keep signing in and keep every workspace they belong to. This cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction variant="destructive" onClick={(e) => { e.preventDefault(); void deletePicked() }}>Delete</AlertDialogAction>
+              <AlertDialogAction variant="destructive" onClick={(e) => { e.preventDefault(); void deletePicked() }}>Remove</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -247,8 +264,12 @@ export function PeoplePage() {
       <>
         <SettingsSummary>
           <SummaryItem n={shownPeople.length}>of {people.length} people</SummaryItem>
-          <SummaryItem n={workspaces.length - personalAll.length}>team workspaces</SummaryItem>
-          <SummaryItem n={personalAll.length}>personal</SummaryItem>
+          <SummaryItem n={workspaces.length - personalAll.length}>workspaces</SummaryItem>
+          {personalAll.length > 0 && (
+            <SummaryItem n={personalAll.length}>
+              <button type="button" className="hover:text-foreground hover:underline" onClick={() => showView("accounts")}>personal accounts</button>
+            </SummaryItem>
+          )}
           {attention > 0 && <SummaryItem n={attention} tone="warn">need attention</SummaryItem>}
           <SummaryItem n={admins}>{admins === 1 ? "instance admin" : "instance admins"}</SummaryItem>
         </SettingsSummary>
@@ -256,7 +277,7 @@ export function PeoplePage() {
           <MembersAttention findings={peopleFindings({
             people, workspaces, actions, onOpen: openPerson,
             onFacet: (f) => update({ view: "people", facet: f, person: "", ws: "" }),
-            onPersonal: () => showView("workspaces"),
+            onPersonal: () => showView("accounts"),
           })} />
         )}
         <SettingsCard icon={Users} title="People" description="Everyone who can sign in to this instance · who needs a hand first">
@@ -309,7 +330,7 @@ export function PeoplePage() {
 
 /**
  * The ticked people, and what can be done to all of them at once: give them a
- * role in a team workspace, or suspend them. Each person is one call; the
+ * role in a workspace, or suspend them. Each person is one call; the
  * toast counts what went through.
  */
 function BulkPeopleBar({ people, workspaces, actions, busy, onClear }: {

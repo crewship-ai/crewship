@@ -9,11 +9,15 @@ beforeEach(() => {
 })
 
 let role = "OWNER"
+let kind: "team" | "personal" = "team"
+vi.mock("@/hooks/use-auth", () => ({
+  useSessionSafe: () => ({ data: { user: { id: "u-1", name: "Demo User" } }, status: "authenticated" }),
+}))
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({
-    workspace: { id: "ws-1", name: "Demo User's Workspace", logo_url: null },
+    workspace: { id: "ws-1", name: "Demo User's Workspace", logo_url: null, kind, currentUserRole: "OWNER" },
     workspaces: [
-      { id: "ws-1", name: "Demo User's Workspace", slug: "demo", currentUserRole: "OWNER" },
+      { id: "ws-1", name: "Demo User's Workspace", slug: "demo", currentUserRole: "OWNER", kind },
       { id: "ws-2", name: "Acme", slug: "acme", currentUserRole: "MEMBER" },
     ],
     role,
@@ -31,6 +35,22 @@ function open() {
 }
 
 describe("MobileWorkspaceSwitcher", () => {
+  beforeEach(() => { kind = "team" })
+
+  it("shows the sign-up workspace as the person's own account, apart from the workspaces", async () => {
+    kind = "personal"
+    role = "OWNER"
+    render(<MobileWorkspaceSwitcher />)
+    const trigger = screen.getByRole("button", { name: "Current workspace: Demo User" })
+    expect(trigger).toHaveTextContent("Personal account")
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
+    expect(await screen.findByText("Acme")).toBeInTheDocument()
+    const labels = screen.getAllByText(/^(Personal account|Workspaces)$/, { selector: "[data-slot='dropdown-menu-label']" }).map((n) => n.textContent)
+    expect(labels).toEqual(["Personal account", "Workspaces"])
+    expect(screen.queryByText("Demo User's Workspace")).not.toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Account settings" })).toHaveAttribute("href", "/settings?tab=general")
+  })
+
   it("names the real workspace instead of a placeholder", () => {
     render(<MobileWorkspaceSwitcher />)
     expect(screen.getByRole("button", { name: "Current workspace: Demo User's Workspace" })).toBeInTheDocument()

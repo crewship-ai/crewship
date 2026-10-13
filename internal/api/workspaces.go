@@ -149,16 +149,19 @@ type workspaceCounts struct {
 }
 
 type workspaceResponse struct {
-	pagesThemeJSON    string
-	PagesTheme        json.RawMessage `json:"pages_theme"`
-	ID                string          `json:"id"`
-	Name              string          `json:"name"`
-	Slug              string          `json:"slug"`
-	LogoURL           *string         `json:"logo_url"`
-	PreferredLanguage *string         `json:"preferred_language"`
-	CreatedAt         string          `json:"created_at"`
-	UpdatedAt         string          `json:"updated_at"`
-	CurrentUserRole   *string         `json:"currentUserRole,omitempty"`
+	pagesThemeJSON string
+	PagesTheme     json.RawMessage `json:"pages_theme"`
+	ID             string          `json:"id"`
+	Name           string          `json:"name"`
+	Slug           string          `json:"slug"`
+	// Kind is "team" or "personal": a personal one was made at sign-up for
+	// its owner alone, and the switcher shows it as their personal account.
+	Kind              string  `json:"kind"`
+	LogoURL           *string `json:"logo_url"`
+	PreferredLanguage *string `json:"preferred_language"`
+	CreatedAt         string  `json:"created_at"`
+	UpdatedAt         string  `json:"updated_at"`
+	CurrentUserRole   *string `json:"currentUserRole,omitempty"`
 	// CurrentUserCapabilities (#1034) — the caller's resolved per-membership
 	// capability grants (v109), sorted. The frontend ability layer reads
 	// these so UI can gate on capability (e.g. show Rotate for a MANAGER
@@ -228,7 +231,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
+		SELECT w.id, w.name, w.slug, w.kind, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			wm.role, wm.capabilities, w.allow_privileged_credentials,
 			w.run_retention_days, w.credential_audit_retention_days, w.audit_log_retention_days,
 			w.approvals_retention_days, w.pages_theme,
@@ -250,7 +253,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var ws workspaceResponse
 		var capsJSON sql.NullString
-		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
+		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Kind, &ws.LogoURL, &ws.PreferredLanguage,
 			&ws.CreatedAt, &ws.UpdatedAt, &ws.CurrentUserRole, &capsJSON, &ws.AllowPrivilegedCredentials,
 			&ws.RunRetentionDays, &ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
 			&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON,
@@ -284,7 +287,7 @@ func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	var ws workspaceResponse
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
+		SELECT w.id, w.name, w.slug, w.kind, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			w.allow_privileged_credentials,
 			w.run_retention_days, w.credential_audit_retention_days, w.audit_log_retention_days,
 			w.approvals_retention_days, w.pages_theme,
@@ -293,7 +296,7 @@ func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
 		FROM workspaces w
 		WHERE w.id = ? AND w.deleted_at IS NULL
-	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
+	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Kind, &ws.LogoURL, &ws.PreferredLanguage,
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials,
 		&ws.RunRetentionDays, &ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
 		&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON,
