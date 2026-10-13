@@ -418,6 +418,10 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 			replyError(w, 409, "artifact request changed")
 			return
 		}
+		if err := h.pageRequestNoticeTx(ctx, tx, "artifact", req.RequestID); err != nil {
+			replyInternalError(w, h.logger, "record artifact result notice", err)
+			return
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit artifact revision", err)

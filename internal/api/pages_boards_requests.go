@@ -23,6 +23,7 @@ const boardMermaidDialect = "flowchart-v1"
 const boardMermaidConverter = "2.2.2"
 
 type boardRequestCreate struct {
+	RetryOfRequestID     string                 `json:"retry_of_request_id,omitempty"`
 	PreviewPNG           []byte                 `json:"preview_png,omitempty"`
 	Kind                 string                 `json:"kind"`
 	ChatID               string                 `json:"chat_id"`
@@ -168,7 +169,7 @@ func (h *PageHandler) CreateBoardRequest(w http.ResponseWriter, r *http.Request)
 			replyError(w, 409, "submission_id was already used for another request")
 			return
 		}
-		writeJSON(w, 202, map[string]any{"id": prior})
+		writeJSON(w, 202, pageRequestCreateResponse(prior, req.RetryOfRequestID, h.pageRequestRetryWarning(r.Context(), tx, "board", req.RetryOfRequestID)))
 		return
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -186,6 +187,11 @@ func (h *PageHandler) CreateBoardRequest(w http.ResponseWriter, r *http.Request)
 	}
 	if err = pages.ValidateBoardScene(scene); err != nil {
 		h.boardError(w, err)
+		return
+	}
+	retryWarning, err := h.validatePageRequestRetry(r.Context(), tx, "board", req.RetryOfRequestID, rec.ID, receipt.WorkspaceID, user.ID, req.Kind)
+	if err != nil {
+		replyError(w, 409, err.Error())
 		return
 	}
 	var active, hour, total, workspaceTotal int
@@ -213,7 +219,7 @@ func (h *PageHandler) CreateBoardRequest(w http.ResponseWriter, r *http.Request)
 	receiptJSON, _ := json.Marshal(receipt)
 	id := generateCUID()
 	now := tsformat.Format(time.Now())
-	if _, err = tx.ExecContext(r.Context(), `INSERT INTO page_board_requests(id,workspace_id,board_page_id,original_board_id,human_user_id,agent_id,chat_id,kind,base_seq,submission_id,fingerprint,instruction,selected_element_ids_json,selected_placement_ids_json,snapshot_json,target_json,dialect,converter_version,receipt_json,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'queued',?,?)`, id, receipt.WorkspaceID, rec.ID, rec.ID, user.ID, receipt.AgentID, req.ChatID, req.Kind, *req.BaseSeq, req.SubmissionID, digest, req.Instruction, string(idsJSON), string(pinsJSON), string(snapshotJSON), string(targetJSON), req.Dialect, req.ConverterVersion, string(receiptJSON), now, now); err != nil {
+	if _, err = tx.ExecContext(r.Context(), `INSERT INTO page_board_requests(id,workspace_id,board_page_id,original_board_id,human_user_id,agent_id,chat_id,kind,base_seq,submission_id,fingerprint,instruction,selected_element_ids_json,selected_placement_ids_json,snapshot_json,target_json,dialect,converter_version,receipt_json,status,created_at,updated_at,retry_of_request_id,notice_pending) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'queued',?,?,NULLIF(?,''),1)`, id, receipt.WorkspaceID, rec.ID, rec.ID, user.ID, receipt.AgentID, req.ChatID, req.Kind, *req.BaseSeq, req.SubmissionID, digest, req.Instruction, string(idsJSON), string(pinsJSON), string(snapshotJSON), string(targetJSON), req.Dialect, req.ConverterVersion, string(receiptJSON), now, now, req.RetryOfRequestID); err != nil {
 		h.boardError(w, err)
 		return
 	}
@@ -242,7 +248,7 @@ func (h *PageHandler) CreateBoardRequest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	broadcastWorkspaceEvent(h.hub, receipt.WorkspaceID, "page.updated", map[string]any{"page_id": rec.ID})
-	writeJSON(w, 202, map[string]any{"id": id})
+	writeJSON(w, 202, pageRequestCreateResponse(id, req.RetryOfRequestID, retryWarning))
 }
 
 type boardRequestSource struct {

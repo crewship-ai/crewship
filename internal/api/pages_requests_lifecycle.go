@@ -249,6 +249,9 @@ func (h *PageHandler) settlePageRequest(ctx context.Context, kind, id, unboundFa
 	if _, err = tx.ExecContext(ctx, `UPDATE `+table+` SET status=?,error=?,updated_at=? WHERE id=? AND status=?`, next, message, tsformat.Format(now), id, job.Status); err != nil {
 		return err
 	}
+	if err = h.pageRequestNoticeTx(ctx, tx, kind, id); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

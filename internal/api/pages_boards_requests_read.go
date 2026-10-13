@@ -15,11 +15,11 @@ import (
 )
 
 func (h *PageHandler) boardRequestRecord(ctx context.Context, q pageAuthQueryer, id, board string, detail bool) (map[string]any, error) {
-	var deadlineRaw string
+	var deadlineRaw, retryOf string
 	var kind, status, instruction, selected, placements, target, agent, name, run, human, created, updated, message, dialect, converter, hash, source, inserted, insertedBy string
 	var resultSeq sql.NullInt64
 	var base int64
-	err := q.QueryRowContext(ctx, `SELECT r.kind,r.status,r.base_seq,r.instruction,r.selected_element_ids_json,r.selected_placement_ids_json,r.target_json,COALESCE(r.agent_id,''),COALESCE(a.name,''),COALESCE(r.run_id,''),COALESCE(r.human_user_id,''),r.created_at,r.updated_at,r.error,r.dialect,r.converter_version,r.source_hash,r.mermaid_source,r.result_seq,r.inserted_element_ids_json,COALESCE(r.inserted_by_user_id,''),r.deadline_at FROM page_board_requests r LEFT JOIN agents a ON a.id=r.agent_id WHERE r.id=? AND r.board_page_id=? AND r.workspace_id=?`, id, board, WorkspaceIDFromContext(ctx)).Scan(&kind, &status, &base, &instruction, &selected, &placements, &target, &agent, &name, &run, &human, &created, &updated, &message, &dialect, &converter, &hash, &source, &resultSeq, &inserted, &insertedBy, &deadlineRaw)
+	err := q.QueryRowContext(ctx, `SELECT r.kind,r.status,r.base_seq,r.instruction,r.selected_element_ids_json,r.selected_placement_ids_json,r.target_json,COALESCE(r.agent_id,''),COALESCE(a.name,''),COALESCE(r.run_id,''),COALESCE(r.human_user_id,''),r.created_at,r.updated_at,r.error,r.dialect,r.converter_version,r.source_hash,r.mermaid_source,r.result_seq,r.inserted_element_ids_json,COALESCE(r.inserted_by_user_id,''),r.deadline_at,COALESCE(r.retry_of_request_id,'') FROM page_board_requests r LEFT JOIN agents a ON a.id=r.agent_id WHERE r.id=? AND r.board_page_id=? AND r.workspace_id=?`, id, board, WorkspaceIDFromContext(ctx)).Scan(&kind, &status, &base, &instruction, &selected, &placements, &target, &agent, &name, &run, &human, &created, &updated, &message, &dialect, &converter, &hash, &source, &resultSeq, &inserted, &insertedBy, &deadlineRaw, &retryOf)
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +54,12 @@ func (h *PageHandler) boardRequestRecord(ctx context.Context, q pageAuthQueryer,
 	}
 	if lifecycle.RunStatus != "" {
 		out["run_status"] = lifecycle.RunStatus
+	}
+	if retryOf != "" {
+		out["retry_of_request_id"] = retryOf
+		if warning := h.pageRequestRetryWarning(ctx, q, "board", retryOf); warning != "" {
+			out["retry_warning"] = warning
+		}
 	}
 	if resultSeq.Valid {
 		out["result_seq"] = resultSeq.Int64
@@ -218,6 +224,10 @@ func (h *PageHandler) CancelBoardRequest(w http.ResponseWriter, r *http.Request)
 	}
 	out, err := h.boardRequestRecord(r.Context(), tx, id, rec.ID, true)
 	if err != nil {
+		h.boardError(w, err)
+		return
+	}
+	if err = h.pageRequestNoticeTx(r.Context(), tx, "board", id); err != nil {
 		h.boardError(w, err)
 		return
 	}

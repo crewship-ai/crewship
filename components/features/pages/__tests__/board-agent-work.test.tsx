@@ -106,3 +106,15 @@ it('focuses only the persisted job target with its actual state and starts no wo
   expect(focus).toHaveBeenCalledWith({ x: 20, y: 30, width: 120, height: 80 }, 'Artifact request · running · saved sequence 3')
   expect(writes).toHaveLength(0)
 })
+
+it('links an explicitly reviewed retry to its parent using the current board selection', async () => {
+  rows = [{ id: 'old', kind: 'diagram', status: 'failed', base_seq: 1, instruction: 'Try again', agent_name: 'Builder' }]
+  mount()
+  fireEvent.click(await screen.findByRole('button', { name: 'New request' }))
+  expect(screen.getByText(/previous runtime may still be running/)).toBeTruthy()
+  expect(writes).toHaveLength(0)
+  fireEvent.change(screen.getByLabelText('Private chat for board request'), { target: { value: 'private' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Send request' }))
+  await waitFor(() => expect(writes).toHaveLength(1))
+  expect(writes[0].body).toMatchObject({ retry_of_request_id: 'old', base_seq: 4, selected_element_ids: ['shape'], instruction: 'Try again', submission_id: expect.any(String) })
+})

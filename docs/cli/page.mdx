@@ -252,6 +252,10 @@ flag is omitted, the CLI generates an ID and includes it in an error so it can
 be reused. A new intentional request uses a new ID. Completion is confirmed by
 an actual published result revision, not by an agent saying it finished.
 
+Use `--retry-of REQUEST_ID` only for a new intentional attempt after a failed or
+cancelled request. Review the current revision and use a new submission ID.
+The previous runtime may still be running; this can duplicate work.
+
 ### crewship page artifact requests cancel
 
 ```bash
@@ -2252,3 +2256,16 @@ currently authorized Board image. `--output` is required and must be a new local
 path. Existing files are not overwritten; binary image bytes are never printed
 to the terminal. The canonical image may differ from the uploaded file because
 metadata and trailing bytes are stripped by the server.
+
+
+### crewship page request-result
+
+```bash
+crewship page request-result artifact REQUEST_ID --format json
+crewship page request-result board REQUEST_ID --format json
+```
+
+Calls `GET /api/v1/page-request-results/{kind}/{requestId}` using your current
+workspace and human identity. Returns a current accessible Page slug and optional
+retained result revision. Only the initiating human can resolve the result;
+missing or revoked access returns 404. This reads a result and starts no work.

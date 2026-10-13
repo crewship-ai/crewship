@@ -115,6 +115,9 @@ func (r *Router) registerPageRoutes() {
 	r.mux.Handle("GET /api/v1/pages/{slug}/access", authed(wsCtx(http.HandlerFunc(p.PageAccess))))
 	// openapi: query subject:string! subject_type:string limit:integer cursor:string; responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/pages/access", authed(wsCtx(http.HandlerFunc(p.SubjectAccess))))
+	// Request notices are opaque pointers; the resolver rechecks current human access.
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/page-request-results/{kind}/{requestId}", authed(wsCtx(http.HandlerFunc(p.ResolvePageRequestResult))))
 	// Boards share Page ACLs; every mutation rechecks authority under the writer fence.
 	// openapi: responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/pages/{slug}/board", authed(wsCtx(http.HandlerFunc(p.GetBoard))))

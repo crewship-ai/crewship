@@ -67,9 +67,9 @@ export function ArtifactRequestsPanel({ data, error, writeError, loading, pendin
           {request.status === "succeeded" && request.result_revision && <Button size="sm" variant="outline" className="coarse:h-12" onClick={() => onViewRevision(request.result_revision!)}>View result revision {request.result_revision}</Button>}
           {agentSlug && <Button asChild size="sm" variant="ghost" className="coarse:h-12"><a href={`/chat/${encodeURIComponent(agentSlug)}?${new URLSearchParams({ session: request.chat_id })}`}>Open agent chat</a></Button>}
           {data.can_dispatch && active && <Button size="sm" variant="outline" className="coarse:h-12" disabled={pending} onClick={() => onCancel(request.id)}>Cancel request</Button>}
-          {data.can_dispatch && retryable && request.instruction && <Button size="sm" variant="outline" className="coarse:h-12" disabled={pending || request.base_rev !== head} onClick={() => onRetry(request)}>Retry as new request</Button>}
+          {data.can_dispatch && retryable && request.instruction && <Button size="sm" variant="outline" className="coarse:h-12" disabled={pending} onClick={() => onRetry(request)}>Retry as new request</Button>}
         </div>
-        {data.can_dispatch && retryable && request.base_rev !== head && <p className="text-xs text-muted-foreground">The source revision is no longer latest. Review revision {head} and start a new request; this request’s snapshot will not move.</p>}
+        {data.can_dispatch && retryable && request.base_rev !== head && <p className="text-xs text-muted-foreground">A retry will use current revision {head} as a whole-document request. The original thread and snapshot stay unchanged.</p>}
       </li>
     })}</ol>
     {data.requests.length > 5 && <Button variant="ghost" size="sm" onClick={() => setAll(value => !value)}>{all ? "Show fewer requests" : `Show ${data.requests.length} requests`}</Button>}

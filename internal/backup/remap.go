@@ -405,6 +405,7 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			}
 		}
 	}
+	remapPageRequestNotices(dump, idMap)
 	remapBoardPageReferences(dump, idMap)
 	remapArtifactCreationRuns(dump)
 	if err := remapConversationMetadata(dump, idMap); err != nil {

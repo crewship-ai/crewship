@@ -188,6 +188,10 @@ func (h *PageHandler) PublishBoardRequestMermaid(w http.ResponseWriter, r *http.
 		h.boardError(w, err)
 		return
 	}
+	if err = h.pageRequestNoticeTx(r.Context(), tx, "board", r.PathValue("requestId")); err != nil {
+		h.boardError(w, err)
+		return
+	}
 	if err = tx.Commit(); err != nil {
 		h.boardError(w, err)
 		return

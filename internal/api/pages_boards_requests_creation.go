@@ -106,5 +106,8 @@ func (h *PageHandler) completeBoardJobCreation(r *http.Request, tx *sql.Tx, a *a
 		}
 	}
 	_, err = tx.ExecContext(r.Context(), `UPDATE page_board_requests SET result_page_id=?,result_revision=1,status='succeeded',pin_status=?,pin_reason=?,result_placement_id=NULLIF(?,''),updated_at=? WHERE id=? AND status='running'`, page, pinStatus, pinReason, placement, tsformat.Format(time.Now()), id)
-	return err
+	if err != nil {
+		return err
+	}
+	return h.pageRequestNoticeTx(r.Context(), tx, "board", id)
 }

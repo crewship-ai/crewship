@@ -33,6 +33,7 @@ export function ArtifactRequestDialog({ open, onOpenChange, draft, head, targets
           <p className="font-medium">Source: revision {draft.base_rev}{draft.thread_id ? " · Selected thread" : " · Whole document"}</p>
           <p className="mt-1 text-xs text-muted-foreground">The selected chat receives this saved artifact revision and your instructions{draft.thread_id ? ", plus all saved comments in this thread at send time" : ""}. Later replies do not change the request. Other threads are not sent.</p>
         </div>
+        {draft.retry_of_request_id && <p role="alert" className="text-sm text-warn">This is a new request using the current revision and a fresh comment snapshot. The previous runtime may still be running; sending can duplicate work. Review the instructions and source before sending.</p>}
         {stale && <p role="alert" className="text-sm text-warn">Revision {draft.base_rev} is no longer latest. This draft stays on its original revision. Discard it and start a new request from revision {head}.</p>}
         <div className="space-y-2">
           <label htmlFor={`${id}-chat`} className="text-sm font-medium">Private agent chat</label>

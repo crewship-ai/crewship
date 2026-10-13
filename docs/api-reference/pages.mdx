@@ -2880,3 +2880,41 @@ not prove the agent process has stopped, release its runtime capacity or start a
 replacement. A committed revision or inserted diagram remains the authoritative
 successful result even if a later observer fails. New work requires an explicit
 human submission and may duplicate an unconfirmed run's work.
+
+### Request retries and private results
+
+Artifact and Board request creation accept optional `retry_of_request_id` (at
+most 128 characters). It must identify the same human's failed or cancelled
+request on the same workspace, source Page and job kind. The new submission
+uses the current source and a fresh snapshot. It neither resumes nor releases
+the old runtime. If the old runtime outcome is unconfirmed, records and the
+creation receipt include `retry_warning`; repeating work remains an explicit
+human choice. The usual policy, budget and authorization checks still apply.
+Omitting the field preserves existing submission fingerprints.
+
+### GET /api/v1/page-request-results/\{kind\}/\{requestId\}
+
+```http
+GET /api/v1/page-request-results/{kind}/{requestId}?workspace_id=WORKSPACE_ID
+```
+
+**Authentication:** human session or human API token with current workspace
+membership and Page access. Only the request's initiating human can resolve it;
+notification pointers and agent credentials grant no access.
+
+**Request:** `kind` is `artifact` or `board`; `requestId` identifies the request.
+There is no body. The workspace is resolved by the usual workspace middleware.
+
+**Response:** `{ "page_slug": "report", "revision": 3 }`. The positive
+`revision` is optional and appears only for a retained artifact result. A Board
+artifact result resolves to its independently accessible result Page; other
+Board requests resolve to the current source Board.
+
+**Statuses:** 200 resolved; 401 missing human identity; 403 workspace denial;
+404 missing, deleted or inaccessible result, wrong initiator or unsupported kind;
+500 database failure. The response is private and must not be cached as authority.
+
+Completion inserts a generic private Inbox message transactionally. It contains
+opaque pointers, not source content, titles or instructions. No external channel
+is called. Recovery retries pending notices with deduplication; restore suppresses
+pending delivery. The Inbox uses this resolver before rendering a result link.

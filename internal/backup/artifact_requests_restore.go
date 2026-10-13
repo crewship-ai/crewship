@@ -10,6 +10,7 @@ func safeArtifactRequestRestoreRow(table string, row map[string]any) map[string]
 	for k, v := range row {
 		out[k] = v
 	}
+	out["notice_pending"] = 0
 	out["receipt_json"] = "{}"
 	if table == "page_artifact_requests" {
 		out["run_id"] = nil

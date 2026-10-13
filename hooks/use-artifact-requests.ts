@@ -43,6 +43,7 @@ export interface ArtifactRequestDraft {
   thread_id?: string
   instruction: string
   base_rev: number
+  retry_of_request_id?: string
 }
 
 export function useArtifactRequests(workspace: string, slug: string) {
@@ -99,7 +100,7 @@ export function useArtifactRequests(workspace: string, slug: string) {
         if (identities.current.size >= 64) throw new ArtifactRequestError("Too many unconfirmed requests. Retry an existing submission before sending another.", 400)
         identities.current.set(stamp, crypto.randomUUID())
       }
-      const payload = { chat_id: input.chat_id, instruction: input.instruction, base_rev: input.base_rev, ...(input.thread_id ? { thread_id: input.thread_id } : {}) }
+      const payload = { chat_id: input.chat_id, instruction: input.instruction, base_rev: input.base_rev, ...(input.thread_id ? { thread_id: input.thread_id } : {}), ...(input.retry_of_request_id ? { retry_of_request_id: input.retry_of_request_id } : {}) }
       let response: Response
       try {
         response = await apiFetch(`${endpoint}?${params}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, submission_id: identities.current.get(stamp) }), signal: AbortSignal.timeout(20000) })

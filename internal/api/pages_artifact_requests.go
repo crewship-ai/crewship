@@ -20,19 +20,21 @@ import (
 
 type artifactRequestWire struct {
 	pageRequestLifecycle
-	deadline       string
-	Instruction    string `json:"instruction"`
-	ID             string `json:"id"`
-	ChatID         string `json:"chat_id"`
-	AgentID        string `json:"agent_id"`
-	ThreadID       string `json:"thread_id,omitempty"`
-	BaseRev        int64  `json:"base_rev"`
-	Status         string `json:"status"`
-	RunID          string `json:"run_id,omitempty"`
-	ResultRevision *int64 `json:"result_revision,omitempty"`
-	Error          string `json:"error,omitempty"`
-	CreatedAt      string `json:"created_at"`
-	UpdatedAt      string `json:"updated_at"`
+	RetryOfRequestID string `json:"retry_of_request_id,omitempty"`
+	RetryWarning     string `json:"retry_warning,omitempty"`
+	deadline         string
+	Instruction      string `json:"instruction"`
+	ID               string `json:"id"`
+	ChatID           string `json:"chat_id"`
+	AgentID          string `json:"agent_id"`
+	ThreadID         string `json:"thread_id,omitempty"`
+	BaseRev          int64  `json:"base_rev"`
+	Status           string `json:"status"`
+	RunID            string `json:"run_id,omitempty"`
+	ResultRevision   *int64 `json:"result_revision,omitempty"`
+	Error            string `json:"error,omitempty"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 func (h *PageHandler) ListArtifactRequests(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +42,7 @@ func (h *PageHandler) ListArtifactRequests(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	rows, err := h.db.QueryContext(r.Context(), `SELECT id,chat_id,agent_id,COALESCE(thread_id,''),base_rev,status,COALESCE(run_id,''),result_revision,error,created_at,updated_at,instruction,deadline_at FROM page_artifact_requests WHERE page_id=? ORDER BY created_at DESC,id DESC LIMIT 100`, rec.ID)
+	rows, err := h.db.QueryContext(r.Context(), `SELECT id,chat_id,agent_id,COALESCE(thread_id,''),base_rev,status,COALESCE(run_id,''),result_revision,error,created_at,updated_at,instruction,deadline_at,COALESCE(retry_of_request_id,'') FROM page_artifact_requests WHERE page_id=? ORDER BY created_at DESC,id DESC LIMIT 100`, rec.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "list artifact requests", err)
 		return
@@ -49,7 +51,7 @@ func (h *PageHandler) ListArtifactRequests(w http.ResponseWriter, r *http.Reques
 	items := []artifactRequestWire{}
 	for rows.Next() {
 		var v artifactRequestWire
-		if err = rows.Scan(&v.ID, &v.ChatID, &v.AgentID, &v.ThreadID, &v.BaseRev, &v.Status, &v.RunID, &v.ResultRevision, &v.Error, &v.CreatedAt, &v.UpdatedAt, &v.Instruction, &v.deadline); err != nil {
+		if err = rows.Scan(&v.ID, &v.ChatID, &v.AgentID, &v.ThreadID, &v.BaseRev, &v.Status, &v.RunID, &v.ResultRevision, &v.Error, &v.CreatedAt, &v.UpdatedAt, &v.Instruction, &v.deadline, &v.RetryOfRequestID); err != nil {
 			replyInternalError(w, h.logger, "read artifact request", err)
 			return
 		}
@@ -68,6 +70,9 @@ func (h *PageHandler) ListArtifactRequests(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		items[i].pageRequestLifecycle = lifecycle
+		if items[i].RetryOfRequestID != "" {
+			items[i].RetryWarning = h.pageRequestRetryWarning(r.Context(), h.db, "artifact", items[i].RetryOfRequestID)
+		}
 	}
 	canDispatch := h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)
 	targets := []artifactRequestTarget{}
@@ -91,11 +96,12 @@ func (h *PageHandler) CreateArtifactRequest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var body struct {
-		ChatID       string `json:"chat_id"`
-		ThreadID     string `json:"thread_id"`
-		Instruction  string `json:"instruction"`
-		BaseRev      *int64 `json:"base_rev"`
-		SubmissionID string `json:"submission_id"`
+		RetryOfRequestID string `json:"retry_of_request_id,omitempty"`
+		ChatID           string `json:"chat_id"`
+		ThreadID         string `json:"thread_id"`
+		Instruction      string `json:"instruction"`
+		BaseRev          *int64 `json:"base_rev"`
+		SubmissionID     string `json:"submission_id"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16384)
 	dec := json.NewDecoder(r.Body)
@@ -166,11 +172,16 @@ func (h *PageHandler) CreateArtifactRequest(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		artifactCommentHeaders(w)
-		writeJSON(w, 202, map[string]any{"id": prior})
+		writeJSON(w, 202, pageRequestCreateResponse(prior, body.RetryOfRequestID, h.pageRequestRetryWarning(ctx, tx, "artifact", body.RetryOfRequestID)))
 		return
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		replyInternalError(w, h.logger, "read artifact request retry", err)
+		return
+	}
+	retryWarning, err := h.validatePageRequestRetry(ctx, tx, "artifact", body.RetryOfRequestID, rec.ID, wsID, user, "")
+	if err != nil {
+		replyError(w, 409, err.Error())
 		return
 	}
 	var head int64
@@ -209,7 +220,7 @@ func (h *PageHandler) CreateArtifactRequest(w http.ResponseWriter, r *http.Reque
 	now := tsformat.Format(time.Now())
 	snapshotJSON, _ := json.Marshal(snapshot)
 	receiptJSON, _ := json.Marshal(receipt)
-	_, err = tx.ExecContext(ctx, `INSERT INTO page_artifact_requests(id,page_id,human_user_id,chat_id,agent_id,thread_id,base_rev,submission_id,fingerprint,instruction,snapshot_json,receipt_json,status,created_at,updated_at) VALUES(?,?,?,?,?,NULLIF(?,''),?,?,?,?,?,?,'queued',?,?)`, id, rec.ID, user, body.ChatID, receipt.AgentID, body.ThreadID, head, body.SubmissionID, fingerprint, body.Instruction, string(snapshotJSON), string(receiptJSON), now, now)
+	_, err = tx.ExecContext(ctx, `INSERT INTO page_artifact_requests(id,page_id,human_user_id,chat_id,agent_id,thread_id,base_rev,submission_id,fingerprint,instruction,snapshot_json,receipt_json,status,created_at,updated_at,retry_of_request_id,notice_pending) VALUES(?,?,?,?,?,NULLIF(?,''),?,?,?,?,?,?,'queued',?,?,NULLIF(?,''),1)`, id, rec.ID, user, body.ChatID, receipt.AgentID, body.ThreadID, head, body.SubmissionID, fingerprint, body.Instruction, string(snapshotJSON), string(receiptJSON), now, now, body.RetryOfRequestID)
 	if err != nil {
 		replyInternalError(w, h.logger, "save artifact request", err)
 		return
@@ -219,7 +230,7 @@ func (h *PageHandler) CreateArtifactRequest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	artifactCommentHeaders(w)
-	writeJSON(w, 202, map[string]any{"id": id})
+	writeJSON(w, 202, pageRequestCreateResponse(id, body.RetryOfRequestID, retryWarning))
 }
 func (h *PageHandler) CancelArtifactRequest(w http.ResponseWriter, r *http.Request) {
 	rec, ok := h.artifactCommentsPage(w, r, true)
@@ -267,6 +278,10 @@ func (h *PageHandler) CancelArtifactRequest(w http.ResponseWriter, r *http.Reque
 			replyError(w, 409, "request is not active")
 			return
 		}
+	}
+	if err := h.pageRequestNoticeTx(ctx, tx, "artifact", r.PathValue("requestId")); err != nil {
+		replyInternalError(w, h.logger, "record request notice", err)
+		return
 	}
 	if tx.Commit() != nil {
 		replyError(w, 500, "could not cancel request")
@@ -317,6 +332,7 @@ func (h *PageHandler) RunArtifactRequests(ctx context.Context, gates ...artifact
 		defer tick.Stop()
 		next := time.Time{}
 		cursor := ""
+		noticeCursor := ""
 		for {
 			select {
 			case <-ctx.Done():
@@ -333,6 +349,10 @@ func (h *PageHandler) RunArtifactRequests(ctx context.Context, gates ...artifact
 				cursor, err = h.reconcilePageRequests(ctx, cursor, now)
 				if err != nil {
 					h.logger.Warn("reconcile page request lifecycles", "error", err)
+				}
+				noticeCursor, err = h.reconcilePageRequestNoticesAfter(ctx, noticeCursor)
+				if err != nil {
+					h.logger.Warn("reconcile page request notices", "error", err)
 				}
 				h.cleanupArtifactRunPrincipals(ctx, now)
 				next = now.Add(time.Minute)

@@ -96,3 +96,15 @@ it("sends cancellation to the server without inventing a terminal result", async
   await waitFor(() => expect(screen.getByText("Running")).toBeTruthy())
   expect(screen.queryByText("Cancelled")).toBeNull()
 })
+
+it("retries a historical failed request with a fresh head and without its historical thread", async () => {
+  data.requests = [{ id: "old", chat_id: "private", agent_id: "a", thread_id: "old-thread", instruction: "Update", base_rev: 1, status: "failed", created_at: "2026-10-13T12:00:00Z", updated_at: "2026-10-13T12:00:00Z" }]
+  mount(2, 2)
+  fireEvent.click(await screen.findByRole("button", { name: "Retry as new request" }))
+  expect(screen.getByText(/previous runtime may still be running/)).toBeTruthy()
+  expect(writes).toHaveLength(0)
+  fireEvent.click(screen.getByRole("button", { name: "Send request" }))
+  await waitFor(() => expect(writes).toHaveLength(1))
+  expect(writes[0]).toMatchObject({ base_rev: 2, retry_of_request_id: "old", submission_id: expect.any(String) })
+  expect(writes[0]).not.toHaveProperty("thread_id")
+})
