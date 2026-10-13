@@ -516,7 +516,7 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 	// database. Revisions, operation-id idempotency and crash recovery are
 	// therefore NOT in force on this path. See the ledgerless section of
 	// internal/memory/mutate.go.
-	res, err := memory.Mutate(r.Context(), nil, memory.MutateRequest{
+	res, err := memory.MutateRooted(r.Context(), nil, memory.MutateRequest{
 		// Legacy, declared rather than defaulted. The sidecar runs inside the
 		// agent container and has no handle on the host ledger, so it cannot
 		// offer revisions, operation-id idempotency, crash recovery or

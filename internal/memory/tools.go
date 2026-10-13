@@ -844,7 +844,7 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 	}
 
 	mreq.Profile = d.profile
-	mres, mErr := Mutate(ctx, d.ledger, mreq)
+	mres, mErr := MutateRooted(ctx, d.ledger, mreq)
 	if mErr != nil {
 		// Cancellation keeps its own wording: the model treats "cancelled"
 		// as "the run is going away, stop", and a generic write failure as
