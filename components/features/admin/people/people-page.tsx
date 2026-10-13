@@ -256,7 +256,7 @@ export function PeoplePage() {
           <SummaryItem>Click a cell to change a role, or to give or take away access.</SummaryItem>
           <SummaryItem>An only owner stays; hand the workspace over first.</SummaryItem>
         </SettingsSummary>
-        <AccessMatrix people={shownPeople} allPeople={people} workspaces={shownWorkspaces} actions={actions} busy={busy} />
+        <AccessMatrix people={shownPeople} allPeople={people} workspaces={teamShown} actions={actions} busy={busy} />
       </>
     )
   } else {

@@ -70,7 +70,8 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"instance_admin", "instance_admin_source", "suspended_at", "suspended_reason", "setup_link_expires_at")
 	adminWorkspace := object(map[string]any{
 		"id": str(), "name": str(), "slug": str(), "kind": str(), "logo_url": nullable(str()), "created_at": str(), "updated_at": str(),
-		"_count_members": integer(), "_count_agents": integer(), "_count_crews": integer(),
+		"personal_owner_id": str(),
+		"_count_members":    integer(), "_count_agents": integer(), "_count_crews": integer(),
 		"preferred_language": nullable(str()), "run_retention_days": nullable(integer()),
 		"allow_privileged_credentials": boolean(), "pending_invitations": integer(),
 		"last_activity_at": nullable(str()), "runs_7d": integer(), "runs_by_day": array(integer()),

@@ -263,6 +263,13 @@ describe("workspaces and personal accounts", () => {
     expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Personal accounts")
   })
 
+  it("leaves personal accounts out of the access grid", async () => {
+    window.history.replaceState(null, "", "/admin/people?view=access")
+    render(<PeoplePage />)
+    expect(await screen.findByRole("columnheader", { name: /Acme/ })).toBeInTheDocument()
+    expect(screen.queryByRole("columnheader", { name: /Ivana Viewer's Workspace/ })).toBeNull()
+  })
+
   it("renames a personal account and turns it into a workspace", async () => {
     window.history.replaceState(null, "", "/admin/people?ws=ws-iv")
     render(<PeoplePage />)

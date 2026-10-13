@@ -61,18 +61,18 @@ export function WorkspaceMark({ name, logoUrl, className }: { name: string; logo
 /**
  * The caller's own personal account: the workspace sign-up made for them
  * alone. It is listed as them, not as a workspace, so "Workspaces" means only
- * the places people share. Someone else's personal one, opened as a member,
- * stays a workspace named after its owner.
+ * the places people share. Someone else's — joined later, even as an owner —
+ * is not theirs: the server names whose it is.
  */
-export function isOwnPersonal(ws: Pick<WorkspaceData, "kind" | "currentUserRole"> | null | undefined): boolean {
-  return ws?.kind === "personal" && ws.currentUserRole === "OWNER"
+export function isOwnPersonal(ws: Pick<WorkspaceData, "kind" | "personal_owner_id"> | null | undefined, userId: string | undefined): boolean {
+  return ws?.kind === "personal" && Boolean(userId) && ws.personal_owner_id === userId
 }
 
 /** What the switcher calls a workspace: the person's name for their personal account. */
 function useSwitcherLabel(ws: WorkspaceData | null, role: string | null): { label: string | null; sub: string; logo: string | null } {
   const { data } = useSessionSafe()
   if (!ws) return { label: null, sub: "", logo: null }
-  if (isOwnPersonal(ws)) return { label: data?.user.name || ws.name, sub: "Personal account", logo: ws.logo_url || data?.user.avatar_url || null }
+  if (isOwnPersonal(ws, data?.user.id)) return { label: data?.user.name || ws.name, sub: "Personal account", logo: ws.logo_url || data?.user.avatar_url || null }
   return { label: ws.name, sub: ROLE_LABEL[role ?? ""] ?? role ?? "", logo: ws.logo_url ?? null }
 }
 
@@ -154,8 +154,9 @@ export function WorkspaceSwitcher() {
 function WorkspaceMenuItems({ onCreate, onNavigate }: { onCreate: () => void; onNavigate?: () => void }) {
   const { workspace, workspaces, role, loading, setWorkspaceId } = useWorkspace()
   const { data } = useSessionSafe()
-  const own = workspaces.filter(isOwnPersonal)
-  const shared = workspaces.filter((ws) => !isOwnPersonal(ws))
+  const mine = (ws: WorkspaceData) => isOwnPersonal(ws, data?.user.id)
+  const own = workspaces.filter(mine)
+  const shared = workspaces.filter((ws) => !mine(ws))
   const sectionLabel = "text-micro uppercase tracking-wider text-muted-foreground font-medium"
   return (
     <>
@@ -182,6 +183,7 @@ function WorkspaceMenuItems({ onCreate, onNavigate }: { onCreate: () => void; on
           ws={ws}
           active={ws.id === workspace?.id}
           onSelect={() => setWorkspaceId(ws.id)}
+          sub={ws.kind === "personal" ? `Personal account · ${ROLE_LABEL[ws.currentUserRole ?? ""] ?? ws.currentUserRole ?? ""}` : undefined}
         />
       ))}
       <DropdownMenuSeparator />
@@ -190,7 +192,7 @@ function WorkspaceMenuItems({ onCreate, onNavigate }: { onCreate: () => void; on
           <DropdownMenuItem asChild className="text-xs gap-2">
             <Link href="/settings?tab=general" onClick={onNavigate}>
               <Settings className="h-3.5 w-3.5" />
-              {isOwnPersonal(workspace) ? "Account settings" : "Workspace settings"}
+              {mine(workspace) ? "Account settings" : "Workspace settings"}
             </Link>
           </DropdownMenuItem>
           {/* The roster is readable at every role; inviting is ADMIN+ there

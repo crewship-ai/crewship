@@ -15337,6 +15337,9 @@
             },
             "type": "object"
           },
+          "personal_owner_id": {
+            "type": "string"
+          },
           "preferred_language": {
             "nullable": true,
             "type": "string"
@@ -41407,6 +41410,9 @@
                       },
                       "pending_invitations": {
                         "type": "integer"
+                      },
+                      "personal_owner_id": {
+                        "type": "string"
                       },
                       "preferred_language": {
                         "nullable": true,

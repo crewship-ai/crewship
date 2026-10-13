@@ -67,7 +67,8 @@ export function isEmptyWorkspace(w: Workspace): boolean {
 
 /** Personal workspaces are named after their owner; the person is the label. */
 export function personalOwnerName(w: Workspace, people: Person[]): string {
-  const owner = people.find((p) => p.memberships.some((m) => m.workspace_id === w.id && m.role === "OWNER"))
+  const owner = people.find((p) => p.id === w.personal_owner_id)
+    ?? people.find((p) => p.memberships.some((m) => m.workspace_id === w.id && m.role === "OWNER"))
   return owner ? displayName(owner) : w.name.replace(/'s Workspace$/, "")
 }
 

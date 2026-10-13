@@ -378,7 +378,7 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *WorkspaceHandler) workspaceByID(ctx context.Context, workspaceID string) (workspaceResponse, error) {
 	var ws workspaceResponse
 	err := h.db.QueryRowContext(ctx, `
-		SELECT w.id, w.name, w.slug, w.kind, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
+		SELECT w.id, w.name, w.slug, w.kind, `+personalOwnerSQL+`, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			w.allow_privileged_credentials, w.run_retention_days,
 			w.credential_audit_retention_days, w.audit_log_retention_days,
 			w.approvals_retention_days, w.pages_theme,
@@ -387,7 +387,7 @@ func (h *WorkspaceHandler) workspaceByID(ctx context.Context, workspaceID string
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
 		FROM workspaces w
 		WHERE w.id = ? AND w.deleted_at IS NULL
-	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Kind, &ws.LogoURL, &ws.PreferredLanguage,
+	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Kind, &ws.PersonalOwnerID, &ws.LogoURL, &ws.PreferredLanguage,
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials, &ws.RunRetentionDays,
 		&ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
 		&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON,

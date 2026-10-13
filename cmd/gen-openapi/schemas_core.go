@@ -53,8 +53,10 @@ func coreResourceSchemas() map[string]any {
 	workspace := object(map[string]any{
 		"id": stringSchema(), "name": stringSchema(), "slug": stringSchema(),
 		// "personal": made at sign-up for its owner alone (their personal account).
-		"kind":     map[string]any{"type": "string", "enum": []string{"team", "personal"}},
-		"logo_url": nullableString(), "preferred_language": nullableString(), "pages_theme": pagesThemeSchema(),
+		"kind": map[string]any{"type": "string", "enum": []string{"team", "personal"}},
+		// Whose personal account it is; absent on a team workspace.
+		"personal_owner_id": stringSchema(),
+		"logo_url":          nullableString(), "preferred_language": nullableString(), "pages_theme": pagesThemeSchema(),
 		"created_at": stringSchema(), "updated_at": stringSchema(),
 		"currentUserRole":              nullableString(),
 		"currentUserCapabilities":      arrayOf(stringSchema()),

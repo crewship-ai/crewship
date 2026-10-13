@@ -15,10 +15,12 @@ vi.mock("@/hooks/use-auth", () => ({
 }))
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({
-    workspace: { id: "ws-1", name: "Demo User's Workspace", logo_url: null, kind, currentUserRole: "OWNER" },
+    workspace: { id: "ws-1", name: "Demo User's Workspace", logo_url: null, kind, currentUserRole: "OWNER", personal_owner_id: "u-1" },
     workspaces: [
-      { id: "ws-1", name: "Demo User's Workspace", slug: "demo", currentUserRole: "OWNER", kind },
+      { id: "ws-1", name: "Demo User's Workspace", slug: "demo", currentUserRole: "OWNER", kind, personal_owner_id: "u-1" },
       { id: "ws-2", name: "Acme", slug: "acme", currentUserRole: "MEMBER" },
+      // Someone else's personal account the caller joined as an owner.
+      { id: "ws-3", name: "Ivana Viewer's Workspace", slug: "ivana", currentUserRole: "OWNER", kind: "personal", personal_owner_id: "u-ivana" },
     ],
     role,
     loading: false,
@@ -48,6 +50,9 @@ describe("MobileWorkspaceSwitcher", () => {
     const labels = screen.getAllByText(/^(Personal account|Workspaces)$/, { selector: "[data-slot='dropdown-menu-label']" }).map((n) => n.textContent)
     expect(labels).toEqual(["Personal account", "Workspaces"])
     expect(screen.queryByText("Demo User's Workspace")).not.toBeInTheDocument()
+    // Only one personal account is theirs; Ivana's, joined as an owner, is a workspace row.
+    expect(screen.getAllByRole("menuitem").filter((i) => i.textContent?.endsWith("Personal account")).map((i) => i.textContent)).toEqual(["DDemo UserPersonal account"]) // initial, name, kind
+    expect(screen.getByText("Ivana Viewer's Workspace").nextElementSibling).toHaveTextContent("Personal account · Owner")
     expect(screen.getByRole("menuitem", { name: "Account settings" })).toHaveAttribute("href", "/settings?tab=general")
   })
 
