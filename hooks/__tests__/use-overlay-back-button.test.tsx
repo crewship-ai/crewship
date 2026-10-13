@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { StrictMode } from "react"
 import { render, cleanup, act } from "@testing-library/react"
 
 import { useOverlayBackButton } from "../use-overlay-back-button"
@@ -69,22 +70,38 @@ describe("back closes an overlay instead of leaving the page", () => {
     expect(seen).toContain("Escape")
   })
 
-  it("unwinds its own entry when the overlay closes by its own button", () => {
+  it("unwinds its own entry when the overlay closes by its own button", async () => {
     // Otherwise opening and closing a drawer five times costs five back
     // presses before the page will leave.
     window.history.replaceState({ __overlay: true }, "")
     const { unmount } = render(<Probe />)
     unmount()
+    await settle()
     expect(backSpy).toHaveBeenCalledTimes(1)
   })
 
-  it("leaves history alone when something inside the overlay navigated", () => {
+  it("survives StrictMode's mount, unmount, mount without closing itself", async () => {
+    // Every dev build double-invokes effects. Unwinding at once spent the
+    // entry, and the second mount answered that back as a real one: a sheet
+    // opened from state closed the moment it opened.
+    const keys = recordKeys()
+    const { unmount } = render(<StrictMode><Probe /></StrictMode>)
+    await settle()
+    expect(backSpy).not.toHaveBeenCalled()
+    expect(keys.escapes()).toBe(0)
+    expect(pushSpy).toHaveBeenCalledTimes(1)
+    keys.stop()
+    unmount()
+  })
+
+  it("leaves history alone when something inside the overlay navigated", async () => {
     // The router has pushed over our marker; going back here would undo that
     // navigation rather than closing anything. Chat writes its selected
     // conversation with replaceState and re-reads it on popstate.
     const { unmount } = render(<Probe />)
     window.history.replaceState({ __NA: "somewhere-else" }, "")
     unmount()
+    await settle()
     expect(backSpy).not.toHaveBeenCalled()
   })
 
@@ -174,7 +191,7 @@ describe("back closes an overlay instead of leaving the page", () => {
     expect(keys.escapes()).toBe(1)
   })
 
-  it("does not answer the popstate its own unwind produces", () => {
+  it("does not answer the popstate its own unwind produces", async () => {
     // Closing an inner sheet by its × unwinds the inner entry with
     // history.back(). That fires popstate like any other, and the outer
     // sheet — now innermost — took it for a back press and closed too.
@@ -184,6 +201,7 @@ describe("back closes an overlay instead of leaving the page", () => {
     const inner = render(<Probe />)
 
     inner.unmount()
+    await settle()
     expect(backSpy, "inner sheet did not unwind its entry").toHaveBeenCalledTimes(1)
     expect(keys.escapes(), "outer sheet answered the unwind").toBe(0)
 

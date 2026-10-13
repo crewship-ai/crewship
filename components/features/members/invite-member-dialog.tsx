@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useState, type FormEvent } from "react"
-import { Check, Copy, UserPlus } from "lucide-react"
+import { Check, Copy, TriangleAlert, UserPlus } from "lucide-react"
 
 import { inviteMemberSchema } from "@/lib/validations"
 import { apiFetch } from "@/lib/api-fetch"
@@ -16,13 +16,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { cn } from "@/lib/utils"
+import { CAPABILITY_BUNDLES, Capability, type CapabilityBundle } from "@/lib/capabilities"
+import { ACCESS_PROFILES, ASSIGNABLE_ROLES, ROLE_LABEL, ROLE_SUMMARY_BY_ROLE } from "@/components/features/settings/members/members-model"
+import { AreaChips, MemberDialogIcon, ROLE_ICON } from "@/components/features/settings/members/member-bits"
 
 /**
  * Add someone to the workspace.
@@ -36,7 +33,15 @@ import {
  * delivers themselves — Slack, SMS, in person. The invitee sets their own
  * password through the reset-password page, so no password is ever chosen
  * by, or visible to, anyone but them.
+ *
+ * The admin also says, up front, what the person may do: the role's default,
+ * or one of the three presets (`{"set"}` PATCH on their capabilities right
+ * after the account exists). A preset that could not be applied is said
+ * plainly next to the link — the person is added either way.
  */
+
+/** "" keeps whatever the server gives a new membership. */
+type Access = "" | CapabilityBundle
 
 interface InviteMemberDialogProps {
   workspaceId: string
@@ -47,13 +52,18 @@ interface ProvisionResult {
   setup_url: string
   created_user: boolean
   email: string
+  user_id?: string
+  /** Set when a preset was asked for: whether it was applied. */
+  access_applied?: boolean
 }
+
 
 export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialogProps) {
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState("")
   const [fullName, setFullName] = useState("")
   const [role, setRole] = useState("MEMBER")
+  const [access, setAccess] = useState<Access>("")
   const [status, setStatus] = useState<"idle" | "saving" | "error">("idle")
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ProvisionResult | null>(null)
@@ -83,6 +93,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
     setEmail("")
     setFullName("")
     setRole("MEMBER")
+    setAccess("")
     setStatus("idle")
     setError(null)
     setResult(null)
@@ -126,7 +137,19 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
         setError(typeof body?.error === "string" ? body.error : `Failed (HTTP ${res.status})`)
         return
       }
-      setResult((await res.json()) as ProvisionResult)
+      const created = (await res.json()) as ProvisionResult
+      if (access && created.user_id) {
+        const ws = encodeURIComponent(workspaceId)
+        const set = await apiFetch(`/api/v1/workspaces/${ws}/members/${encodeURIComponent(created.user_id)}/capabilities?workspace_id=${ws}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ set: [...CAPABILITY_BUNDLES[access]] }),
+        }).then((r) => r.ok, () => false)
+        created.access_applied = set
+      } else if (access) {
+        created.access_applied = false
+      }
+      setResult(created)
       setStatus("idle")
       provisionedAny.current = true
       // Deliberately NOT refreshing the roster here. onInvited makes the
@@ -169,8 +192,10 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
           Add member
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader className="flex-row items-start gap-3 space-y-0 text-left">
+          <MemberDialogIcon icon={result ? Check : UserPlus} tint={result ? "var(--success)" : "var(--primary)"} />
+          <div className="min-w-0 space-y-1">
           {/* Keyed off setup_url like everything else in this dialog. The
               heading is part of the claim: "Send them this link" above a
               dialog that deliberately issues no link says the opposite of
@@ -185,6 +210,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
                 : "They already have an account, so nothing needs setting up."
               : "Creates the account if the email is new, then gives you a setup link to send them."}
           </DialogDescription>
+          </div>
         </DialogHeader>
 
         {result ? (
@@ -204,6 +230,12 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
                   ? `${result.email} already had an account here but had never set it up, so this link is a fresh one. The previous link, if any, no longer works.`
                   : `${result.email} already had an account and has been added to this workspace. They sign in with the credential they already have — no setup link is issued, because one would let anybody holding it take the account over.`}
             </p>
+            {result.access_applied === false && (
+              <p role="status" className="flex items-start gap-2 rounded-lg border border-warn/40 bg-warn/[0.07] px-3 py-2 text-label">
+                <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" aria-hidden />
+                They were added with the role&apos;s default access — the preset could not be applied. Set it from their panel in Members.
+              </p>
+            )}
             {result.setup_url ? (
             <div className="space-y-2">
               <Label htmlFor="setup-link">Setup link</Label>
@@ -251,20 +283,48 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
                 They can change this later. Without it the roster shows their email.
               </p>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="invite-role">Role</Label>
-              <Select value={role} onValueChange={setRole}>
-                <SelectTrigger id="invite-role">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ADMIN">Admin</SelectItem>
-                  <SelectItem value="MANAGER">Manager</SelectItem>
-                  <SelectItem value="MEMBER">Member</SelectItem>
-                  <SelectItem value="VIEWER">Viewer</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <fieldset className="space-y-2">
+              <legend className="mb-2 text-sm font-medium">Role <span className="font-normal text-muted-foreground">· what they manage</span></legend>
+              <div role="radiogroup" aria-label="Role" className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                {ASSIGNABLE_ROLES.slice().reverse().map((r) => {
+                  const Icon = ROLE_ICON[r]
+                  const on = role === r
+                  return (
+                    <button key={r} type="button" role="radio" aria-checked={on} onClick={() => setRole(r)} title={ROLE_SUMMARY_BY_ROLE[r]}
+                      className={cn("flex flex-col items-start gap-1 rounded-lg border px-2.5 py-2 text-left transition-colors coarse:min-h-[52px]",
+                        on ? "border-primary bg-primary/[0.08] ring-1 ring-primary" : "border-border hover:bg-accent")}>
+                      <Icon className={cn("h-3.5 w-3.5", on ? "text-primary-hover" : "text-muted-foreground")} aria-hidden />
+                      <span className="text-xs font-medium">{ROLE_LABEL[r]}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-label text-muted-foreground">{ROLE_SUMMARY_BY_ROLE[role]}.</p>
+            </fieldset>
+
+            <fieldset className="space-y-2">
+              <legend className="mb-2 text-sm font-medium">What they can do</legend>
+              <div role="radiogroup" aria-label="What they can do" className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5">
+                {([{ key: "" as Access, label: "Role default" }, ...ACCESS_PROFILES.map((p) => ({ key: p.key as Access, label: p.label }))]).map((o) => (
+                  <button key={o.key || "default"} type="button" role="radio" aria-checked={access === o.key} onClick={() => setAccess(o.key)}
+                    className={cn("h-7 rounded-md px-2.5 text-xs transition-colors coarse:h-9",
+                      access === o.key ? "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--border)]" : "text-muted-foreground hover:text-foreground")}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              {access ? (
+                <div className="space-y-1.5" data-slot="invite-access-preview">
+                  <AreaChips granted={CAPABILITY_BUNDLES[access]} />
+                  <p className="text-label text-muted-foreground">
+                    {ACCESS_PROFILES.find((p) => p.key === access)?.summary}
+                    {(CAPABILITY_BUNDLES[access] as readonly string[]).includes(Capability.CredentialReveal) && <span className="text-destructive"> Includes reading secrets in plaintext.</span>}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-label text-muted-foreground">What a new {ROLE_LABEL[role]} gets on this server. Change single abilities later in their panel.</p>
+              )}
+            </fieldset>
 
             {status === "error" && error && (
               <p className="text-body text-destructive">{error}</p>

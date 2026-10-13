@@ -14,6 +14,9 @@ vi.mock("@/hooks/use-auth", () => ({
     signOut: vi.fn().mockResolvedValue(undefined),
   }),
 }))
+// The menu reads the session list and the build when it opens; neither is
+// what these tests are about.
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: () => Promise.resolve({ ok: false, json: () => Promise.resolve(null) }) }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtime: () => ({ status: "connected" }) }))
 vi.mock("@/hooks/use-engine-status", () => ({ useEngineStatus: () => ({ status: "connected" }) }))
 vi.mock("@/hooks/use-crews-status", () => ({ useCrewsStatus: () => null }))

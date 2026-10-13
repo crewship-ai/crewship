@@ -141,8 +141,9 @@ describe("who holds credentials:reveal", () => {
     route({ caps: { u1: ["chat", "credentials:reveal"], u2: ["chat"] } })
     renderSection("OWNER")
 
-    expect(await screen.findByText("Pavel")).toBeInTheDocument()
-    expect(screen.queryByText("tom@firma.cz")).not.toBeInTheDocument()
+    expect(await screen.findByText(/person can reveal secrets/)).toHaveTextContent("1 person can reveal secrets")
+    expect(screen.getByText("Pavel")).toBeInTheDocument()
+    expect(screen.queryByText(/tom@firma.cz/)).not.toBeInTheDocument()
   })
 
   // Reveal being ON with nobody holding the capability is a real and common
@@ -194,7 +195,7 @@ describe("classification reference", () => {
   // No control that saves nowhere: the card points to where a class is set.
   it("points to where a credential's class is set", async () => {
     renderSection("OWNER")
-    expect(await screen.findByText(/class on its detail sheet in credentials/i)).toBeInTheDocument()
+    expect(await screen.findByText(/open a credential to change its class/i)).toBeInTheDocument()
   })
 })
 
@@ -212,5 +213,45 @@ describe("who may reveal, when the grants cannot be read", () => {
     renderSection("MANAGER")
     expect(await screen.findByText(/your role cannot see who holds/i)).toBeInTheDocument()
     expect(screen.queryByText(/nobody holds/i)).toBeNull()
+  })
+})
+
+// Who holds reveal is a question about people: it is changed in Members, and
+// this card says how many and links there instead of keeping a second
+// editable list of the same rows. The class and placement summaries link to
+// the credentials.
+describe("acting on who may reveal", () => {
+  function routeWith(extra: (url: string, init?: RequestInit) => Response | undefined) {
+    const base = h.apiFetch.getMockImplementation()!
+    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => extra(String(url), init) ?? base(url, init))
+  }
+
+  it("counts the holders and sends grants and revocations to Members", async () => {
+    route({ caps: { u1: ["credentials:reveal"], u2: ["credentials:reveal"] } })
+    renderSection("OWNER")
+    expect(await screen.findByText(/people can reveal secrets/)).toHaveTextContent("2 people can reveal secrets")
+    expect(screen.getByRole("link", { name: /Manage in Members/ })).toHaveAttribute("href", "/settings/members?flag=reveal")
+    expect(screen.queryByRole("button", { name: /^Revoke reveal/ })).toBeNull()
+    expect(screen.queryByLabelText("Person to grant reveal to")).toBeNull()
+    expect(h.apiFetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")).toBe(false)
+  })
+
+  it("counts credentials per class and per crew, linking to each", async () => {
+    route()
+    routeWith((url) => {
+      if (url.startsWith("/api/v1/credentials?")) return ok([
+        { id: "c1", name: "GITHUB_TOKEN", scope: "WORKSPACE", sensitivity: "STANDARD" },
+        { id: "c2", name: "PROD_DB", scope: "CREW", crew_ids: ["cr1"], sensitivity: "SEALED" },
+        { id: "c3", name: "STRIPE_KEY", scope: "CREW", crew_ids: ["cr1"], sensitivity: "RESTRICTED" },
+      ])
+      if (url.startsWith("/api/v1/crews?")) return ok([{ id: "cr1", name: "Finance", slug: "finance" }])
+      return undefined
+    })
+    renderSection("OWNER")
+    const prod = await screen.findAllByRole("link", { name: "PROD_DB" })
+    expect(prod[0]).toHaveAttribute("href", "/credentials?id=c2")
+    expect(screen.getByText("Finance")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /members of this crew/i })).toHaveAttribute("href", "/crews?crew=finance")
+    expect(screen.getAllByRole("link", { name: "GITHUB_TOKEN" }).length).toBeGreaterThan(0)
   })
 })

@@ -106,6 +106,7 @@ func TestInstanceRoutes_RefuseAWorkspaceAdmin(t *testing.T) {
 		{"POST", "/api/v1/admin/instance/workspaces", `{"name":"X1","slug":"x1","owner_user_id":"wsadmin"}`},
 		{"POST", "/api/v1/admin/instance/workspaces/ws-new/transfer-ownership", `{"user_id":"wsadmin"}`},
 		{"DELETE", "/api/v1/admin/instance/workspaces/ws-new", `{"confirm_slug":"ws-new"}`},
+		{"PATCH", "/api/v1/admin/instance/workspaces/ws-new", `{"name":"Taken over"}`},
 		{"POST", "/api/v1/admin/instance/people/carol/suspend", ""},
 		{"PUT", "/api/v1/admin/instance/admins/wsadmin", ""},
 		{"GET", "/api/v1/admin/instance/audit", ""},
@@ -213,6 +214,67 @@ func TestInstanceWorkspaces(t *testing.T) {
 		t.Errorf("deletion audit row names %q, want %q", target, ws.ID)
 	}
 	wantCode(t, f.do(f.boss, "DELETE", del, `{"confirm_slug":"lab"}`), http.StatusNotFound, "delete again")
+}
+
+// An instance admin renames a workspace they are not a member of, and says
+// what it is for; the slug stays, and each change is audited once.
+func TestInstanceUpdateWorkspace(t *testing.T) {
+	f := newInstanceFixture(t)
+	path := "/api/v1/admin/instance/workspaces/ws-new"
+	for _, c := range []struct {
+		name, body string
+		code       int
+	}{
+		{"nothing to change", `{}`, http.StatusBadRequest},
+		{"name too short", `{"name":" x "}`, http.StatusBadRequest},
+		{"unknown kind", `{"kind":"shared"}`, http.StatusBadRequest},
+		{"not JSON", `nope`, http.StatusBadRequest},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			wantCode(t, f.do(f.boss, "PATCH", path, c.body), c.code, c.name)
+		})
+	}
+	wantCode(t, f.do(f.boss, "PATCH", "/api/v1/admin/instance/workspaces/ghost", `{"name":"Ghost"}`), http.StatusNotFound, "unknown workspace")
+
+	rr := f.do(f.boss, "PATCH", path, `{"name":"  Research lab  ","kind":"personal"}`)
+	wantCode(t, rr, http.StatusOK, "rename and mark personal")
+	var out struct{ ID, Name, Slug, Kind string }
+	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+	if out.Name != "Research lab" || out.Kind != "personal" || out.Slug != "ws-new" {
+		t.Fatalf("response = %+v", out)
+	}
+	var name, slug, kind string
+	_ = f.db.QueryRow(`SELECT name, slug, kind FROM workspaces WHERE id = 'ws-new'`).Scan(&name, &slug, &kind)
+	if name != "Research lab" || slug != "ws-new" || kind != "personal" {
+		t.Fatalf("stored %q/%q/%q", name, slug, kind)
+	}
+	if f.role("ws-new", "boss") != "" {
+		t.Fatal("renaming must not make the admin a member")
+	}
+	if !f.audited("instance.workspace_updated") {
+		t.Fatal("the change was not audited")
+	}
+
+	// The same values again change nothing and write no second audit row.
+	wantCode(t, f.do(f.boss, "PATCH", path, `{"name":"Research lab","kind":"personal"}`), http.StatusOK, "no-op")
+	var n int
+	_ = f.db.QueryRow(`SELECT COUNT(*) FROM instance_audit_logs WHERE action = 'instance.workspace_updated'`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("audit rows = %d, want 1", n)
+	}
+
+	// The admin list reports the kind.
+	rr = f.do(f.boss, "GET", "/api/v1/admin/workspaces", "")
+	wantCode(t, rr, http.StatusOK, "list")
+	var list []struct{ ID, Kind string }
+	_ = json.Unmarshal(rr.Body.Bytes(), &list)
+	kinds := map[string]string{}
+	for _, w := range list {
+		kinds[w.ID] = w.Kind
+	}
+	if kinds["ws-new"] != "personal" || kinds["ws-old"] != "team" {
+		t.Fatalf("kinds = %v", kinds)
+	}
 }
 
 // A suspended account is shut out everywhere at once, and comes back intact.

@@ -24,6 +24,9 @@ import { Button } from "@/components/ui/button"
 import { RealtimeToasts } from "@/components/layout/realtime-toasts"
 import { RealtimeStatusBanner } from "@/components/layout/realtime-status-banner"
 import { NotificationSoundEvents } from "@/components/layout/notification-sound-events"
+import { AppearanceSync } from "@/components/layout/appearance-sync"
+import { WorkspaceAccentStyle } from "@/components/layout/workspace-accent"
+import { SidebarPreference } from "@/components/layout/sidebar-preference"
 
 export default function DashboardLayout({
   children,
@@ -110,6 +113,8 @@ export default function DashboardLayout({
           must sit inside RealtimeProvider (it consumes WS events). */}
       <ActiveRoutineRunsProvider>
         <SidebarProvider>
+          {/* Syncs the rail's mode with Settings › Appearance and the account. */}
+          <SidebarPreference />
           <AppSidebar />
           <SidebarInset>
             <AppToolbar />
@@ -133,6 +138,11 @@ export default function DashboardLayout({
         </SidebarProvider>
         <RealtimeToasts />
         {trusted && <NotificationSoundEvents />}
+        {/* GET/PUT /api/v1/me/preferences are not on the restricted allowlist. */}
+        {trusted && <AppearanceSync />}
+        {/* Paints the workspace brand accent for a user who picked it; reads
+            only the already-loaded workspace list, so no session is refused. */}
+        <WorkspaceAccentStyle />
       </ActiveRoutineRunsProvider>
       </JournalLookupProvider>
     </RealtimeProvider>

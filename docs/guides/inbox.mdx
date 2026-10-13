@@ -11,7 +11,9 @@ tag: Experimental
 
 The **Inbox** is your unified human-in-the-loop feed. Anything an agent — anywhere across your crews — needs you to look at lands here, in one ordered list, with the action you'd take inline on the detail panel. No tab switching, no hunting through `/issues` for the one paused routine, no separate "approvals queue" page to remember.
 
-It lives at `/inbox` in the running web UI and is the first item in the **Plan** group of the sidebar. The bell in the top bar shares its unread count with the sidebar badge — both update over WebSocket so a peer triaging an item in another tab clears your bell instantly.
+It lives at `/inbox` in the running web UI and is the first item in the **Plan** group of the sidebar. The bell in the top bar shares its unread count with the sidebar badge — both update over WebSocket so a peer triaging an item in another tab clears your bell instantly. The badge turns amber only while a blocking decision waits; otherwise it wears the normal accent.
+
+The bell's panel filters by kind — **All (n)**, **Decisions**, **Input**, **Review**, **Repair**, each chip shown only when it has items. A plain routine approval can be decided in the row (**Approve** / **Deny**, MANAGER and up — the same call and the same "already decided elsewhere" handling as the page). Anything that needs more than a yes or no — a decision form, a destructive step, an autonomy gate or a hire — opens the item instead.
 
 ## What lands in the Inbox
 

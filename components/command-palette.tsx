@@ -1128,9 +1128,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           <CommandGroup heading={<GroupLabel>People</GroupLabel>} className={PALETTE_GROUP_CLASS}>
             {members.map((m) => {
               const name = m.user.full_name || m.user.email
-              // Deep-link to the person, not just the roster: the settings
-              // layout reads ?member= and opens that row (and only that row).
-              const href = `/settings?tab=members&member=${encodeURIComponent(m.user.id)}`
+              // Deep-link to the person, not just the roster: the Members
+              // page reads ?member= and opens that person's panel.
+              const href = `/settings/members?member=${encodeURIComponent(m.user.id)}`
               return (
                 <CommandItem
                   key={m.id}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -278,5 +279,62 @@ func TestChangePassword_LegitimateChangeSucceedsAndClearsFailures(t *testing.T) 
 	}
 	if lockedUntil.Valid && lockedUntil.String != "" {
 		t.Fatalf("locked_until = %q after a successful change, want NULL", lockedUntil.String)
+	}
+}
+
+// ── ChangePassword: optionally revoke CLI tokens too ──────────────────
+
+// A password change signs browsers out but never touched CLI tokens, so a
+// laptop or script holding a token stayed authorised after a rotation meant
+// to cut access. `revoke_cli_tokens` lets the caller cut those too; without
+// it nothing changes for tokens (scripts are not broken by surprise).
+func TestChangePassword_RevokeCLITokens(t *testing.T) {
+	cases := []struct {
+		name        string
+		revoke      *bool
+		wantRevoked int
+	}{
+		{name: "omitted keeps tokens", revoke: nil, wantRevoked: 0},
+		{name: "false keeps tokens", revoke: new(bool), wantRevoked: 0},
+		{name: "true revokes every live token", revoke: func() *bool { b := true; return &b }(), wantRevoked: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, store, userID := newProfileRig(t)
+			cur, err := store.Create(t.Context(), userID, "ua", "1.1.1.1", time.Hour)
+			if err != nil {
+				t.Fatalf("create session: %v", err)
+			}
+			now := time.Now().UTC().Format(time.RFC3339)
+			for i, revokedAt := range []any{nil, nil, now} { // two live, one already revoked
+				if _, err := h.db.Exec(`INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, revoked_at, created_at) VALUES (?, ?, ?, ?, 'STANDARD', ?, ?)`,
+					fmt.Sprintf("tok-%d", i), userID, fmt.Sprintf("t%d", i), fmt.Sprintf("hash-%d", i), revokedAt, now); err != nil {
+					t.Fatalf("insert token: %v", err)
+				}
+			}
+
+			body := map[string]any{"current_password": "oldpassword1", "new_password": "brandnew123"}
+			if tc.revoke != nil {
+				body["revoke_cli_tokens"] = *tc.revoke
+			}
+			rr := httptest.NewRecorder()
+			h.ChangePassword(rr, selfReq(t, "POST", "/api/v1/users/me/password", body, userID, cur.ID))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
+			}
+
+			var live int
+			_ = h.db.QueryRow(`SELECT COUNT(*) FROM cli_tokens WHERE user_id = ? AND revoked_at IS NULL`, userID).Scan(&live)
+			if want := 2 - tc.wantRevoked; live != want {
+				t.Fatalf("live tokens = %d, want %d", live, want)
+			}
+			var resp struct {
+				CLITokensRevoked int `json:"cli_tokens_revoked"`
+			}
+			_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+			if resp.CLITokensRevoked != tc.wantRevoked {
+				t.Fatalf("cli_tokens_revoked = %d, want %d", resp.CLITokensRevoked, tc.wantRevoked)
+			}
+		})
 	}
 }

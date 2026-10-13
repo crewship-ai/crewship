@@ -102,6 +102,7 @@ DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId} roleManage
 GET /api/v1/approvals roleManage
 GET /api/v1/approvals/{id} roleManage
 GET /api/v1/memory/export roleManage
+PATCH /api/v1/admin/instance/workspaces/{workspaceId} roleInstance
 PATCH /api/v1/admin/memory/config roleManage
 PATCH /api/v1/agents/{agentId} roleInline
 PATCH /api/v1/agents/{agentId}/chats/{chatId} roleSelf

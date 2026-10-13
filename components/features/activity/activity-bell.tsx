@@ -7,6 +7,7 @@ import { Activity, Bot } from "lucide-react"
 import {
   BarMenu,
   BarMenuBody,
+  BarMenuChips,
   BarMenuEmpty,
   BarMenuFooter,
   BarMenuFooterLink,
@@ -46,8 +47,23 @@ import { roleAtLeast } from "@/lib/routine-governance"
 //             live-run-row.tsx), plus any in-flight agent runs.
 //   RECENT  — the last few terminal routine runs (completed/failed)
 //             so "did my run just finish?" doesn't need a page hop.
-//   footer  — View all activity →, pre-filtered to the active bucket
-//             while anything is live.
+//   FAILED  — the terminal runs whose runTone is failed, on their own.
+//   chips   — Live (n) / Recent / Failed (n) under the header; the panel
+//             shows the selected section only. Default is Live while
+//             anything is live, else Recent. A failure used to be one
+//             red word among three Recent rows and scrolled off the
+//             moment two newer runs finished — the Failed chip is the
+//             place it cannot be pushed out of.
+//   icon    — tinted (BarMenu `active`) while anything is live, on top
+//             of the badge: the badge says how many and how bad, the
+//             tint says "something is moving" at a glance.
+//   footer  — View all activity →, pre-filtered to the bucket the
+//             panel is showing (waiting / active / failed).
+//
+// No step x/y progress bar on live rows: the list feed carries
+// current_step_id only — no step index and no step total on the run
+// (step_count lives on the pipeline definition, not the run) — so a
+// bar would be invented data. See live-run-row.tsx.
 //
 // Routine runs come from the shared useActiveRoutineRuns provider
 // (one fetch/poll/WS stream for every live surface); the legacy
@@ -68,6 +84,7 @@ export function ActivityBell() {
     activeCount,
     awaitingApproval,
     recentRuns,
+    recentDashboardRuns,
     refresh,
   } = useActiveRoutineRuns()
 
@@ -97,6 +114,7 @@ export function ActivityBell() {
       icon={Activity}
       ariaLabel={ariaLabel}
       badge={{ count: liveTotal, tone: badgeTone }}
+      active={liveTotal > 0}
       open={open}
       onOpenChange={setOpen}
       testId="activity"
@@ -108,7 +126,12 @@ export function ActivityBell() {
           agentRuns={agentRuns}
           liveTotal={liveTotal}
           awaitingApproval={awaitingApproval}
-          recentRuns={recentRuns}
+          // The wider (12-run) terminal window, not the 3-row one: the Failed
+          // chip counts failures across it, and a window of three would
+          // report "Failed (0)" as soon as three runs succeeded after one
+          // failed — the exact loss the chip exists to prevent. Falls back
+          // for a provider that predates the wider slice.
+          recentRuns={recentDashboardRuns ?? recentRuns}
           refresh={refresh}
           canCancel={roleAtLeast(role, "ADMIN")}
           onNavigate={() => setOpen(false)}
@@ -122,8 +145,44 @@ export function ActivityBell() {
   )
 }
 
+export type ActivityChip = "live" | "recent" | "failed"
+
+/**
+ * Which chip the panel opens on. Live while anything is live — that is the
+ * question the icon's badge just raised — otherwise Recent. Never Failed by
+ * default: the chip carries its count, and opening on old failures every time
+ * would make the panel read as an alarm when nothing is happening.
+ */
+export function defaultActivityChip(liveTotal: number): ActivityChip {
+  return liveTotal > 0 ? "live" : "recent"
+}
+
+/** The terminal runs the Failed chip shows: runTone failed, in feed order. */
+export function failedRuns(runs: PipelineRun[]): PipelineRun[] {
+  return runs.filter((r) => runTone(r.status) === "failed")
+}
+
+/**
+ * Where "View all activity →" goes. The approval wins whatever the chip —
+ * a run parked on a human is the reason to leave the panel — then the chip
+ * the reader chose, then the live bucket. /activity accepts `failed` as a
+ * scope (lib/activity-deeplink.ts SCOPES).
+ */
+export function activityFooterHref(chip: ActivityChip, liveTotal: number, awaitingApproval: number): string {
+  if (awaitingApproval > 0) return "/activity?status=waiting"
+  if (chip === "failed") return "/activity?status=failed"
+  if (chip === "live" && liveTotal > 0) return "/activity?status=active"
+  return "/activity"
+}
+
+// How many terminal rows a chip shows. Recent was three while it shared the
+// panel with Live; with a chip of its own it gets the LIVE budget.
+const MAX_TERMINAL_ROWS = MAX_LIVE_ROWS
+
 // Body is a separate component, mounted only while the panel is open, so the
-// 1s elapsed tick does not run behind a closed popover.
+// 1s elapsed tick does not run behind a closed popover. That also makes the
+// chip choice per-opening: each open starts from defaultActivityChip, so a
+// panel last left on Failed does not reopen there while runs are live.
 function ActivityDropdownBody({
   workspaceId,
   liveRuns,
@@ -154,8 +213,11 @@ function ActivityDropdownBody({
   // whatever remains of the LIVE budget. Overflow exits via the footer.
   const visibleRoutine = liveRuns.slice(0, MAX_LIVE_ROWS)
   const visibleAgents = agentRuns.slice(0, Math.max(0, MAX_LIVE_ROWS - visibleRoutine.length))
-  const recent = recentRuns.slice(0, 3)
-  const isEmpty = liveTotal === 0 && recent.length === 0
+  const failed = failedRuns(recentRuns)
+  const isEmpty = liveTotal === 0 && recentRuns.length === 0
+
+  const [picked, setPicked] = useState<ActivityChip | null>(null)
+  const chip = picked ?? defaultActivityChip(liveTotal)
 
   const hidden = Math.max(0, liveRuns.length + agentRuns.length - visibleRoutine.length - visibleAgents.length)
 
@@ -175,64 +237,95 @@ function ActivityDropdownBody({
         meta={liveTotal > 0 ? `${liveTotal} live` : "nothing live"}
       />
 
+      {!isEmpty && (
+        <BarMenuChips<ActivityChip>
+          ariaLabel="Show"
+          testId="activity-chip"
+          value={chip}
+          onChange={setPicked}
+          chips={[
+            { id: "live", label: "Live", count: liveTotal, tone: awaitingApproval > 0 ? "warn" : undefined },
+            { id: "recent", label: "Recent" },
+            { id: "failed", label: "Failed", count: failed.length },
+          ]}
+        />
+      )}
+
       <BarMenuBody>
         {isEmpty ? (
           <BarMenuEmpty icon={Activity} message="Nothing running right now" />
+        ) : chip === "live" ? (
+          liveTotal > 0 ? (
+            <BarMenuSection
+              label="Live"
+              count={liveTotal}
+              tone={awaitingApproval > 0 ? "warn" : undefined}
+              overflow={hidden > 0 ? `+${hidden} more running` : undefined}
+            >
+              {visibleRoutine.map((run) => (
+                <LiveRunRow
+                  key={run.id}
+                  run={run}
+                  cancelling={cancellingRunId === run.id}
+                  onCancel={() => cancelRun(run.id)}
+                  onNavigate={onNavigate}
+                  canCancel={canCancel}
+                />
+              ))}
+              {visibleAgents.map((item) => (
+                <AgentRunRow key={item.id} item={item} onClick={() => onOpenItem(item.href)} />
+              ))}
+            </BarMenuSection>
+          ) : (
+            <BarMenuEmpty icon={Activity} message="Nothing running right now" />
+          )
         ) : (
-          <>
-            {liveTotal > 0 && (
-              <BarMenuSection
-                label="Live"
-                count={liveTotal}
-                tone={awaitingApproval > 0 ? "warn" : undefined}
-                overflow={hidden > 0 ? `+${hidden} more running` : undefined}
-              >
-                {visibleRoutine.map((run) => (
-                  <LiveRunRow
-                    key={run.id}
-                    run={run}
-                    cancelling={cancellingRunId === run.id}
-                    onCancel={() => cancelRun(run.id)}
-                    onNavigate={onNavigate}
-                    canCancel={canCancel}
-                  />
-                ))}
-                {visibleAgents.map((item) => (
-                  <AgentRunRow key={item.id} item={item} onClick={() => onOpenItem(item.href)} />
-                ))}
-              </BarMenuSection>
-            )}
-            {recent.length > 0 && (
-              <BarMenuSection label="Recent" count={recent.length}>
-                {recent.map((run) => (
-                  <RecentRunRow
-                    key={run.id}
-                    run={run}
-                    onClick={() => onOpenItem(`/activity?run=${encodeURIComponent(run.id)}`)}
-                  />
-                ))}
-              </BarMenuSection>
-            )}
-          </>
+          <TerminalSection
+            label={chip === "failed" ? "Failed" : "Recent"}
+            runs={chip === "failed" ? failed : recentRuns}
+            emptyMessage={chip === "failed" ? "No recent failures" : "No recent runs"}
+            onOpenItem={onOpenItem}
+          />
         )}
       </BarMenuBody>
 
       <BarMenuFooter>
         <BarMenuFooterLink asChild onClick={onNavigate}>
-          <Link
-            href={
-              awaitingApproval > 0
-                ? "/activity?status=waiting"
-                : liveTotal > 0
-                  ? "/activity?status=active"
-                  : "/activity"
-            }
-          >
+          <Link href={activityFooterHref(chip, liveTotal, awaitingApproval)}>
             View all activity →
           </Link>
         </BarMenuFooterLink>
       </BarMenuFooter>
     </>
+  )
+}
+
+// TerminalSection — the Recent or the Failed chip's list: one section, capped
+// at MAX_TERMINAL_ROWS, overflow pointing at /activity like Live's does.
+function TerminalSection({
+  label, runs, emptyMessage, onOpenItem,
+}: {
+  label: string
+  runs: PipelineRun[]
+  emptyMessage: string
+  onOpenItem: (href: string) => void
+}) {
+  if (runs.length === 0) return <BarMenuEmpty icon={Activity} message={emptyMessage} />
+  const rows = runs.slice(0, MAX_TERMINAL_ROWS)
+  return (
+    <BarMenuSection
+      label={label}
+      count={rows.length}
+      overflow={runs.length > rows.length ? `+${runs.length - rows.length} more in activity` : undefined}
+    >
+      {rows.map((run) => (
+        <RecentRunRow
+          key={run.id}
+          run={run}
+          onClick={() => onOpenItem(`/activity?run=${encodeURIComponent(run.id)}`)}
+        />
+      ))}
+    </BarMenuSection>
   )
 }
 

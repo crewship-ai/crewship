@@ -23,6 +23,7 @@ type govListBody struct {
 	Workspaces []struct {
 		WorkspaceID   string `json:"workspace_id"`
 		WorkspaceName string `json:"workspace_name"`
+		LogoURL       string `json:"workspace_logo_url"`
 		Configured    bool   `json:"configured"`
 		Enabled       bool   `json:"enabled"`
 		DenyMinRisk   int    `json:"deny_notify_min_risk"`
@@ -75,6 +76,10 @@ func TestInstanceKeeperGovernanceListsEveryWorkspace(t *testing.T) {
 	if err := governance.Upsert(context.Background(), f.db, "ws-new", governance.Settings{Enabled: true, DenyNotifyMinRisk: 4}, ""); err != nil {
 		t.Fatal(err)
 	}
+	// A workspace with a logo is drawn with it in the console.
+	if _, err := f.db.Exec(`UPDATE workspaces SET logo_url = '/api/v1/workspaces/ws-new/logo' WHERE id = 'ws-new'`); err != nil {
+		t.Fatal(err)
+	}
 	rr := f.do(f.boss, "GET", "/api/v1/admin/instance/keeper/governance", "")
 	wantCode(t, rr, http.StatusOK, "list")
 	got := decodeAs[govListBody](t, rr.Body.Bytes())
@@ -84,7 +89,10 @@ func TestInstanceKeeperGovernanceListsEveryWorkspace(t *testing.T) {
 		if w.WorkspaceID == "ws-new" && (!w.Configured || !w.Enabled || w.DenyMinRisk != 4 || w.WorkspaceName == "") {
 			t.Fatalf("ws-new row = %+v, want its own settings and name", w)
 		}
-		if w.WorkspaceID == "ws-old" && (w.Configured || w.Enabled) {
+		if w.WorkspaceID == "ws-new" && w.LogoURL != "/api/v1/workspaces/ws-new/logo" {
+			t.Fatalf("ws-new logo = %q, want its logo", w.LogoURL)
+		}
+		if w.WorkspaceID == "ws-old" && (w.Configured || w.Enabled || w.LogoURL != "") {
 			t.Fatalf("ws-old row = %+v, want unconfigured and off", w)
 		}
 	}

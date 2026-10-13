@@ -638,12 +638,16 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// it cannot be declared at the route table.
 	hh := NewHooksHandler(r.db, r.logger)
 	hh.SetJournal(r.Journal())
-	r.mux.Handle("GET /api/v1/hooks", authed(wsCtx(http.HandlerFunc(hh.List))))
-	r.authedMut("POST", "/api/v1/hooks", roleManage, hh.Create)
-	r.authedMut("PATCH", "/api/v1/hooks/{id}", roleManage, hh.Update)
-	r.authedMut("DELETE", "/api/v1/hooks/{id}", roleManage, hh.Delete)
-	r.authedMut("POST", "/api/v1/hooks/{id}/enable", roleManage, hh.Enable)
-	r.authedMut("POST", "/api/v1/hooks/{id}/disable", roleManage, hh.Disable)
+	//
+	// The feature is paused (internal/hooks/paused.go): every route still
+	// authenticates and authorizes as before, then answers 503 instead of
+	// acting, so a client learns why rather than meeting a 404.
+	r.mux.Handle("GET /api/v1/hooks", authed(wsCtx(hooksPausedGate(hh.List))))
+	r.authedMut("POST", "/api/v1/hooks", roleManage, hooksPausedGate(hh.Create))
+	r.authedMut("PATCH", "/api/v1/hooks/{id}", roleManage, hooksPausedGate(hh.Update))
+	r.authedMut("DELETE", "/api/v1/hooks/{id}", roleManage, hooksPausedGate(hh.Delete))
+	r.authedMut("POST", "/api/v1/hooks/{id}/enable", roleManage, hooksPausedGate(hh.Enable))
+	r.authedMut("POST", "/api/v1/hooks/{id}/disable", roleManage, hooksPausedGate(hh.Disable))
 
 	// Watch Roster: per-workspace presence snapshot. Read-only — agent
 	// runtime owns status, so there's no POST here.

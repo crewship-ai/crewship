@@ -439,8 +439,10 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	slug := ""
 	if joined == 0 {
 		slug = slugBase + "-" + workspaceID[:8]
+		// kind = personal: this one person's own space, kept apart from the
+		// workspaces people share in Admin › People & workspaces.
 		_, err = tx.ExecContext(r.Context(),
-			"INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+			"INSERT INTO workspaces (id, name, slug, kind, created_at, updated_at) VALUES (?, ?, ?, 'personal', ?, ?)",
 			workspaceID, req.FullName+"'s Workspace", slug, now, now)
 		if err != nil {
 			replyInternalError(w, h.logger, "insert workspace", err)

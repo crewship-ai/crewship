@@ -105,6 +105,10 @@ func (h *UserProfileHandler) writeProfile(w http.ResponseWriter, r *http.Request
 type changePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
 	NewPassword     string `json:"new_password"`
+	// RevokeCLITokens also revokes every live CLI token of the user —
+	// including the one making the request, when it is a CLI caller.
+	// Opt-in: a password rotation must not silently break scripts.
+	RevokeCLITokens bool `json:"revoke_cli_tokens"`
 }
 
 // ChangePassword rotates the caller's password.
@@ -114,7 +118,8 @@ type changePasswordRequest struct {
 // revokes every OTHER active session for the user (reason
 // "password_change") — the caller's current session is preserved so they
 // are not logged out of the tab they just used. CLI-token callers have no
-// current browser session, so all browser sessions are revoked.
+// current browser session, so all browser sessions are revoked. With
+// `revoke_cli_tokens: true` every live CLI token is revoked as well.
 //
 // The current-password check is a credential-verification oracle: it
 // answers differently for a right and a wrong guess (#1513). Holding a
@@ -228,9 +233,24 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Browser sessions are always cut; CLI tokens only on request. Like the
+	// session revocation, a failure here must fail the request — the caller
+	// asked for their tokens to be dead and would otherwise believe they are.
+	tokensRevoked := int64(0)
+	if req.RevokeCLITokens {
+		res, err := h.db.ExecContext(r.Context(),
+			"UPDATE cli_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL", now, user.ID)
+		if err != nil {
+			replyInternalError(w, h.logger, "revoke cli tokens on password change", err)
+			return
+		}
+		tokensRevoked, _ = res.RowsAffected()
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"success":          true,
-		"sessions_revoked": revoked,
+		"success":            true,
+		"sessions_revoked":   revoked,
+		"cli_tokens_revoked": tokensRevoked,
 	})
 }
 

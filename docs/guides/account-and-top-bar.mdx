@@ -1,0 +1,81 @@
+---
+title: "Top bar & account settings"
+description: "What the status pill, the Activity and Inbox bells and the user menu show, and the personal settings behind them — Appearance, Notification sounds and Sessions & tokens."
+icon: "user-gear"
+stability: experimental
+tag: Experimental
+---
+
+# Top bar & account settings
+
+## Overview
+
+The top bar reads in two halves, split by a thin rule: the **system** (the status pill and Search) and **you** (Activity, Inbox and the user menu). Workspace switching is not in the top bar — it is the top of the left rail, because the workspace is the context of everything in that rail. On a phone, where there is no rail, the switcher heads the navigation sheet.
+
+## Status pill
+
+One message in one tone, the worst state winning:
+
+| Pill | Meaning |
+|---|---|
+| Wi-Fi icon only (green) | Engine and real-time connection are up; nothing needs attention |
+| **N agent errors** (red) | At least one agent is in `ERROR` |
+| **N queued** (amber) | Assignments are waiting in the admission queue |
+| **No agents** (grey) | The workspace has no agents, so nothing can run |
+| **Connecting** / **Reconnecting** (amber), **Offline** (red) | The engine or the real-time channel is not up. Fleet counts are hidden — they would be last-known, not current |
+
+Clicking the pill opens **System status**: engine and real-time state separately, the agent breakdown (total, running, idle, queued) while it is current, and — when agents are in error — the agents themselves, each linking to `/crews?agent=<slug>`. Data comes from `GET /api/v1/agents/crews-status`; the errored list reads `GET /api/v1/agents` only while the popover is open.
+
+## User menu
+
+- The header (avatar, name, e-mail) opens **Settings → Profile**; under it, your role in the current workspace.
+- **Theme** — Dark / Light / System inline. Accent and the rest live in Settings → Appearance.
+- **Notification sounds** — the master on/off switch; detail in Settings → Notification sounds.
+- **Notification preferences** — your category × channel matrix (`/integrations?tab=notifications&section=preferences`).
+- **Sessions & CLI tokens** — with the number of active browser sessions.
+- **Connect CLI…** — signs a terminal in with a one-time code; see [CLI pairing](/guides/cli-pairing).
+- **Help & resources** — Documentation, What's new, Report an issue, GitHub.
+- **Log out**, with the running build (`v0.x` or `dev · <commit>`) beside it.
+
+Restricted sessions are not offered Notification preferences or Connect CLI.
+
+## Settings → Appearance
+
+`/settings?tab=appearance`
+
+- **Theme** — Dark, Light or System (follows the OS).
+  - In light, the left rail, section panels and cards are white on a quiet grey page ground.
+- **Accent** — eight presets as large swatches in spectrum order: Blue (default), Sky, Teal, Indigo, Violet, Fuchsia, Pink, Graphite. They tint buttons, links, chips, switches and the focus ring, shown live in a preview strip. Green, red and amber are never accents — they mean done, failed and needs-attention.
+  - **Team colour** (its own row under the swatches) uses the workspace's brand colour from **Settings → General → Pages appearance → Brand accent**. Its hue and saturation are kept and each shade's lightness is adjusted until it meets WCAG AA (4.5:1) on the background and cards, so a light brand colour like mint still gets readable buttons and links. Switching workspace switches the colour; a workspace without one shows Blue.
+- **Text size** — Small, Default or Large. Scales text, spacing and controls together (the interface is rem-based), like browser zoom but kept with your account.
+- **Density** — Comfortable or Compact. Compact tightens the vertical padding of sidebar rows, settings rows and table cells on mouse/trackpad devices; text size and touch targets do not change.
+- **Sidebar** — Rail · expand on hover (default), Rail, or Pinned open; the same modes as the switch at the bottom of the rail and ⌘B, which now also sync.
+- **Reduce motion** — System (the OS setting), On (no transitions or animations), Off (full motion even if the OS asks for less).
+- **Sync across devices** — on by default. Theme, accent, text size, density, sidebar and motion are stored with your account under the `appearance` key of the per-user preference store (`GET`/`PUT /api/v1/me/preferences/appearance`; CLI: `crewship preferences`). Turning sync on adopts the value already saved on the account; with sync off nothing is sent and the choices stay in this browser.
+
+## Settings → General → Pages appearance
+
+The palette agents use when they build Page applications (ADMIN and up edit, everyone reads). Until an admin picks something else, every Page wears the **Crewship** palette — the product's own dark theme with its brand blue (`#1E7BFE` on `#0A0B0E`); a workspace that never customised stores `{}` and so follows any later change to that default. A badge in the card header says what is in use: *Crewship default*, a preset's name, or *Custom*.
+
+- **Theme** — Crewship (default), Crewship light, Midnight, Paper, or **Custom…**. Picking a preset sets all six colours; editing any colour makes it Custom.
+- **Colours** — Accent, Background, Cards, Borders, Text, Secondary text, each with a swatch (opens the colour picker) and a hex field. Text colours carry one **AA** / **Low** badge for the worse of their contrast on background and cards; the exact ratios are in its tooltip.
+- **Live sample** — a small Page in the palette: header, three figures, a card with a button and a link. **Preview** opens a full sample Page.
+- **Reset to Crewship default** — shown for a customised palette; saves `{}` so the workspace follows the default again.
+- The Accent is also everyone's **Team colour** option in Appearance.
+
+The card stacks to one column on phones and tablets (presets two or three across, colours above the sample) and goes side by side from desktop width.
+
+## Where personal settings are stored
+
+Everything on these pages is stored with **your user**, not with the browser, in the per-user preference store (`user_preferences`, one row per user and key; `GET /api/v1/me/preferences`, CLI `crewship preferences list`):
+
+| Key | What |
+|---|---|
+| `appearance` | theme, accent, text size, density, sidebar mode, reduce motion |
+| `notification-sounds.<workspace-id>` | Notification sounds for that workspace |
+
+A new user starts on the defaults — **Dark**, **Blue**, Default text size, Comfortable, sidebar rail with hover, motion following the OS, sounds off — and gets their own rows on the first change. The browser keeps a copy so the first paint is already right; on sign-in the server copy wins. Two things stay per device on purpose: the **Sync across devices** switch itself, and the browser's permission to play audio.
+
+## Settings → Sessions & tokens
+
+`/settings?tab=sessions` — every browser session and CLI token that can act as you, each revocable. This used to be the bottom card of Profile.
