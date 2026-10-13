@@ -3,6 +3,7 @@ import localFont from "next/font/local"
 import { Providers } from "@/components/providers"
 import { HISTORY_NAVIGATION_GUARD_SCRIPT } from "@/lib/navigation-history-guard"
 import { ACCENT_BOOT_SCRIPT } from "@/lib/theme/accents"
+import { APPEARANCE_BOOT_SCRIPT } from "@/lib/theme/appearance"
 import "./globals.css"
 
 // Harbor typography: the UI runs on the platform's system face (SF on Apple,
@@ -60,6 +61,8 @@ export default function RootLayout({
         <script id="crewship-history-guard" dangerouslySetInnerHTML={{ __html: HISTORY_NAVIGATION_GUARD_SCRIPT }} />
         {/* Paints the stored accent theme before first paint (lib/theme/accents.ts). */}
         <script id="crewship-accent" dangerouslySetInnerHTML={{ __html: ACCENT_BOOT_SCRIPT }} />
+        {/* Paints the stored density and reduce-motion choice the same way (lib/theme/appearance.ts). */}
+        <script id="crewship-appearance" dangerouslySetInnerHTML={{ __html: APPEARANCE_BOOT_SCRIPT }} />
       </head>
       <body className={`${jetbrainsMono.variable} font-sans antialiased`}>
         <Providers>{children}</Providers>

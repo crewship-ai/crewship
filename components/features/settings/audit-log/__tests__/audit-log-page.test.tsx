@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
 
 const api = vi.fn()
@@ -12,6 +12,15 @@ import { AuditLogPage } from "../audit-log-page"
 const ok = (b: unknown) => ({ ok: true, status: 200, json: async () => b })
 const auditCalls = () => api.mock.calls.map(([u]) => String(u)).filter((u) => u.startsWith("/api/v1/audit"))
 
+// Radix Select reads pointer capture and scrolls its list into view; happy-dom
+// has neither.
+beforeAll(() => {
+  Element.prototype.scrollIntoView = vi.fn()
+  Element.prototype.hasPointerCapture = vi.fn(() => false)
+  Element.prototype.setPointerCapture = vi.fn()
+  Element.prototype.releasePointerCapture = vi.fn()
+})
+
 beforeEach(() => {
   api.mockReset()
   api.mockImplementation(async (u: string) => (u.includes("/members") ? ok([]) : ok({ data: [], pagination: { page: 1, limit: 50, total: 0, total_pages: 1 } })))
@@ -20,13 +29,21 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.useRealTimers() })
 
-// The Audit log as a nested page: the side panel picks the trail and the
-// time range, the table is full width, and both live in the URL.
+// The Audit log as a nested page: the side panel picks the trail, the time
+// range is the Crew Journal's picker on the sub-bar (a calendar behind
+// "Custom…"), the table is full width, and all of it lives in the URL.
+/** Open the sub-bar's range menu and choose an entry. */
+async function pickRange(label: string) {
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "Time range" }), { key: "ArrowDown" })
+  fireEvent.click(await screen.findByRole("option", { name: label }))
+}
+
 describe("Audit log page", () => {
-  it("picks the trail from the side panel and keeps the time range", async () => {
+  it("picks the range on the sub-bar, then a trail that keeps it", async () => {
     render(<AuditLogPage />)
     await waitFor(() => expect(auditCalls().length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole("button", { name: "30 days" }))
+    await pickRange("Last 30 days")
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("audit_range")).toBe("30d"))
     fireEvent.click(screen.getByRole("button", { name: /^Keeper/ }))
     await waitFor(() => expect(auditCalls().at(-1)).toContain("source=keeper"))
     expect(auditCalls().at(-1)).toContain("date_from=")
@@ -45,12 +62,14 @@ describe("Audit log page", () => {
   })
 
   // A day in the calendar is a one-day custom range, sent as whole UTC days.
-  it("picks a day from the calendar and stretches it with shift", async () => {
+  it("picks a day from the Custom… calendar and stretches it with shift", async () => {
     // Mid-month, so the current month has past days to pick: on the 1st only
     // today is enabled. Only Date is faked; React's timers stay real.
     vi.useFakeTimers({ toFake: ["Date"] })
     vi.setSystemTime(new Date("2026-09-15T12:00:00Z"))
     render(<AuditLogPage />)
+    await pickRange("Custom…")
+    await waitFor(() => expect(document.querySelector("[data-slot=audit-calendar]")).not.toBeNull())
     const days = document.querySelectorAll<HTMLButtonElement>("[data-slot=audit-calendar] [data-day]")
     const enabled = [...days].filter((d) => !d.disabled)
     const a = enabled[0].dataset.day!, b = enabled[2].dataset.day!
@@ -60,6 +79,30 @@ describe("Audit log page", () => {
     await waitFor(() => expect(new URLSearchParams(window.location.search).get("audit_to")).toBe(b))
     expect(new URLSearchParams(window.location.search).get("audit_range")).toBe("custom")
     expect(auditCalls().at(-1)).toContain(`date_from=${a}T00%3A00%3A00.000Z`)
+  })
+
+  // The Crew Journal's chart, as is: a bar picked on it narrows the table to
+  // that slice of the range, the range itself stays, and the same bar again
+  // clears it.
+  it("narrows the table to a bar picked on the Journal's chart", async () => {
+    render(<AuditLogPage />)
+    const chart = await screen.findByRole("application", { name: /Event volume histogram/ })
+    await waitFor(() => expect(auditCalls().length).toBeGreaterThan(0))
+    fireEvent.keyDown(chart, { key: "End" })
+    fireEvent.keyDown(chart, { key: "Enter" })
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("audit_at")).toMatch(/^\d{4}-\d{2}-\d{2}T/))
+    const q = new URLSearchParams(window.location.search)
+    expect(q.get("audit_range")).toBeNull()
+    expect(auditCalls().at(-1)).toContain(`date_from=${encodeURIComponent(q.get("audit_at")!)}`)
+    expect(screen.getByRole("button", { name: /^Remove filter .* – / })).toBeInTheDocument()
+    fireEvent.keyDown(chart, { key: "Enter" })
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("audit_at")).toBeNull())
+  })
+
+  it("lays the chart over the picked range", async () => {
+    window.history.replaceState(null, "", "/settings/audit?audit_range=24h")
+    render(<AuditLogPage />)
+    expect(await screen.findByText(/stacked by severity/i)).toBeInTheDocument()
   })
 
   // The numbers next to each value are what picking it would show, read from

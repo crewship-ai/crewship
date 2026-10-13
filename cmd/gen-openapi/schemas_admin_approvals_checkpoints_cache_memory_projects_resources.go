@@ -69,8 +69,9 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"last_active_at", "active_sessions", "cli_tokens", "locked_until", "failed_login_count", "email_verified",
 		"instance_admin", "instance_admin_source", "suspended_at", "suspended_reason", "setup_link_expires_at")
 	adminWorkspace := object(map[string]any{
-		"id": str(), "name": str(), "slug": str(), "logo_url": nullable(str()), "created_at": str(), "updated_at": str(),
-		"_count_members": integer(), "_count_agents": integer(), "_count_crews": integer(),
+		"id": str(), "name": str(), "slug": str(), "kind": str(), "logo_url": nullable(str()), "created_at": str(), "updated_at": str(),
+		"personal_owner_id": str(),
+		"_count_members":    integer(), "_count_agents": integer(), "_count_crews": integer(),
 		"preferred_language": nullable(str()), "run_retention_days": nullable(integer()),
 		"allow_privileged_credentials": boolean(), "pending_invitations": integer(),
 		"last_activity_at": nullable(str()), "runs_7d": integer(), "runs_by_day": array(integer()),
@@ -241,7 +242,7 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		}, "id", "name", "scope", "state", "bytes")),
 	}, "source", "peer_generation", "scopes", "documents")
 	// Admin › Security across workspaces (admin_instance_keeper.go).
-	instanceWsRef := map[string]any{"workspace_id": str(), "workspace_name": str(), "workspace_slug": str()}
+	instanceWsRef := map[string]any{"workspace_id": str(), "workspace_name": str(), "workspace_slug": str(), "workspace_logo_url": str()}
 	instanceWsRequired := []string{"workspace_id", "workspace_name", "workspace_slug"}
 	// Admin › Data retention (admin_instance_retention.go). Every window is a
 	// number of days, or null for forever.
@@ -315,6 +316,9 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 			Request: object(map[string]any{"user_id": str()}, "user_id"),
 			Response: object(map[string]any{"workspace_id": str(), "owner_user_id": str(), "previous_owner_user_ids": array(str())},
 				"workspace_id", "owner_user_id", "previous_owner_user_ids")},
+		"PATCH /api/v1/admin/instance/workspaces/{workspaceId}": {
+			Request:  object(map[string]any{"name": str(), "kind": str()}),
+			Response: object(map[string]any{"id": str(), "name": str(), "slug": str(), "kind": str()}, "id", "name", "slug", "kind")},
 		"DELETE /api/v1/admin/instance/workspaces/{workspaceId}": {SuccessStatuses: []string{"204"},
 			Request: object(map[string]any{"confirm_slug": str()}, "confirm_slug")},
 		"GET /api/v1/admin/instance/keeper/governance": {Response: object(map[string]any{

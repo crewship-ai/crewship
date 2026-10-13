@@ -29,6 +29,18 @@ type HooksHandler struct {
 // NewHooksHandler wires a handler with a no-op journal; the router
 // swaps in the real emitter via SetJournal once Router.journal has
 // resolved.
+// hooksPausedGate answers 503 with hooks.PausedMessage while lifecycle
+// hooks are paused, and otherwise hands the request on unchanged.
+func hooksPausedGate(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !hooks.Enabled() {
+			replyError(w, http.StatusServiceUnavailable, hooks.PausedMessage)
+			return
+		}
+		next(w, r)
+	}
+}
+
 func NewHooksHandler(db *sql.DB, logger *slog.Logger) *HooksHandler {
 	return &HooksHandler{db: db, logger: logger, journal: noopEmitter{}}
 }

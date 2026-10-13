@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/diskusage"
 	"github.com/crewship-ai/crewship/internal/logging"
@@ -180,5 +181,50 @@ func TestAdminObservability_LogLevel_RBAC(t *testing.T) {
 	// ADMIN has "manage".
 	if w := obsReq(http.MethodGet, "", "ADMIN"); w.Code != http.StatusOK {
 		t.Errorf("GET as ADMIN = %d, want 200", w.Code)
+	}
+}
+
+// A level change is in the instance audit — who, from what, to what, for how
+// long — and so is the server putting it back when the time runs out.
+func TestAdminObservability_SetLogLevel_IsAudited(t *testing.T) {
+	defer logging.ResetLevel()
+	defer logging.OnAutoRevert(nil)
+	db := setupTestDB(t)
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name, created_at, updated_at) VALUES ('u-ops', 'ops@example.com', 'Ops', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	h := NewAdminObservabilityHandler(db, logging.New("info", "json", nil))
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/admin/log-level", strings.NewReader(`{"level":"error","ttl_seconds":1}`))
+	ctx := context.WithValue(r.Context(), ctxUser, &AuthUser{ID: "u-ops"})
+	ctx = context.WithValue(ctx, ctxRole, "OWNER")
+	w := httptest.NewRecorder()
+	h.SetLogLevel(w, r.WithContext(ctx))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", w.Code, w.Body.String())
+	}
+	var user, meta string
+	if err := db.QueryRow(`SELECT COALESCE(user_id, ''), metadata FROM instance_audit_logs WHERE action = 'instance.log_level_changed'`).Scan(&user, &meta); err != nil {
+		t.Fatalf("no audit row: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(meta), &m); err != nil {
+		t.Fatal(err)
+	}
+	if user != "u-ops" || m["from"] != "info" || m["to"] != "error" || m["ttl_seconds"] != float64(1) || m["expires_at"] == nil {
+		t.Errorf("audit = user %q %v, want u-ops info → error for 1 s with expires_at", user, m)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM instance_audit_logs WHERE action = 'instance.log_level_reverted' AND user_id IS NULL`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the revert at expiry was not audited")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

@@ -24,10 +24,16 @@ import (
 // Registration used to be Go-only, which meant the whole hooks engine was
 // unreachable from a running deployment. `create` / `update` / `delete`
 // are the CLI half of the write API that fixed that.
+// Hidden while lifecycle hooks are paused (internal/hooks/paused.go): the
+// server answers every /api/v1/hooks call with 503 and hooks.PausedMessage,
+// which is what this command then prints. It stays in `crewship commands`
+// (manifestKeep): the docs still describe it, under a paused warning.
 var hooksCmd = &cobra.Command{
-	Use:     "hooks",
-	Aliases: []string{"hook"},
-	Short:   "Lifecycle hooks registry (list/create/update/delete/enable/disable)",
+	Use:         "hooks",
+	Aliases:     []string{"hook"},
+	Hidden:      true,
+	Annotations: map[string]string{manifestKeep: "paused"},
+	Short:       "Lifecycle hooks registry — paused, work in progress",
 	Long: `Manage the lifecycle-hook registry — shell commands, HTTP webhooks, or
 subagents that fire on platform lifecycle events (post_agent_stop,
 on_approval_requested, on_guardrail_triggered, …).

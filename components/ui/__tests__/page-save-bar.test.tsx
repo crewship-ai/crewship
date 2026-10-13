@@ -7,6 +7,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
 const toastError = vi.fn()
 vi.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => toastError(...a) } }))
 
+import { navigationAllowed } from "@/hooks/use-navigation-guard"
 import { PageSaveBar, PageSaveProvider, usePageSave, usePageSaveGuard } from "../page-save-bar"
 import { SaveFooter } from "../save-footer"
 import { SettingsCard, SettingsSaveBar } from "@/components/features/settings/shared"
@@ -193,5 +194,32 @@ describe("PageSaveBar after a failed save", () => {
     render(<Page><Ok /></Page>)
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     expect(await screen.findByText("Saved")).toBeInTheDocument()
+  })
+
+  it("a workspace switch with edits pending asks first, and the answer lets it through once", async () => {
+    // Switching workspaces is not a navigation: without the guard, Save wrote
+    // the old workspace's drafts into the new one.
+    const discard = vi.fn()
+    function Switching() {
+      const [count, setCount] = useState(1)
+      return <Card label="Members" count={count} save={vi.fn()} discard={() => { discard(); setCount(0) }} />
+    }
+    render(<Page><Switching /></Page>)
+    const switchTo = vi.fn()
+    const attempt = () => { if (navigationAllowed(attempt)) switchTo() }
+    act(() => attempt())
+    expect(switchTo).not.toHaveBeenCalled()
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Leave with 1 unsaved change?")
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+    expect(discard).toHaveBeenCalledTimes(1)
+    expect(switchTo).toHaveBeenCalledTimes(1)
+    // Nothing pending any more: the next switch is not asked about.
+    act(() => attempt())
+    expect(switchTo).toHaveBeenCalledTimes(2)
+  })
+
+  it("lets a workspace switch through while nothing is pending", () => {
+    render(<Page><Card label="Members" count={0} save={vi.fn()} /></Page>)
+    expect(navigationAllowed(() => {})).toBe(true)
   })
 })

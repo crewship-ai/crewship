@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -30,6 +31,9 @@ type levelController struct {
 	// set/reset bumps gen; a callback captures its gen and no-ops if it no
 	// longer matches.
 	gen uint64
+	// onRevert hears a timed override run out (from, to), so the server can
+	// say so in its log and its audit. Called without mu held.
+	onRevert func(from, to string)
 }
 
 // ctrl is the single process-wide controller. There is exactly one root
@@ -72,12 +76,18 @@ func (c *levelController) set(l slog.Level, ttl time.Duration) slog.Level {
 		c.expires = time.Now().Add(ttl)
 		c.timer = time.AfterFunc(ttl, func() {
 			c.mu.Lock()
-			defer c.mu.Unlock()
 			if c.gen != gen {
+				c.mu.Unlock()
 				return // superseded by a newer set/reset while this timer fired
 			}
+			from := c.lv.Level()
 			c.lv.Set(c.baseline)
 			c.stopTimerLocked()
+			hook, to := c.onRevert, c.baseline
+			c.mu.Unlock()
+			if hook != nil {
+				hook(levelString(from), levelString(to))
+			}
 		})
 	}
 	return prev
@@ -116,6 +126,26 @@ func SetLevel(level string, ttl time.Duration) (previous string, err error) {
 		return "", fmt.Errorf("unknown log level %q (want debug|info|warn|error)", level)
 	}
 	return levelString(ctrl.set(l, ttl)), nil
+}
+
+// OnAutoRevert registers fn to hear each timed override run out and the
+// level return to the baseline. One listener per process; nil removes it.
+func OnAutoRevert(fn func(from, to string)) {
+	ctrl.mu.Lock()
+	defer ctrl.mu.Unlock()
+	ctrl.onRevert = fn
+}
+
+// Always writes a WARN record whatever the live level is. A change of the
+// level itself must be on record, and the change to "error" would otherwise
+// silence the very line that reports it.
+func Always(l *slog.Logger, msg string, args ...any) {
+	if l == nil {
+		return
+	}
+	r := slog.NewRecord(time.Now(), slog.LevelWarn, msg, 0)
+	r.Add(args...)
+	_ = l.Handler().Handle(context.Background(), r)
 }
 
 // ResetLevel drops any runtime override and returns to the configured level.

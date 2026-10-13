@@ -22,7 +22,7 @@ const SUMMARY_TONE: Record<Tone, "success" | "warn" | "danger" | undefined> = { 
  * deploy-time setup read-only, the judge's recent record, and the last few
  * events. Everything else is one click away in the side panel.
  */
-export function SecurityOverview({ status, posture, postureError, entries, workspaceId, onOpenActivity, counts, health, healthError, activityError, selectedCount }: {
+export function SecurityOverview({ status, posture, postureError, entries, workspaceId, onOpenActivity, counts, health, healthError, activityError, selectedCount, workspaces }: {
   workspaceId: string
   status: KeeperStatus | null
   posture: Posture | null
@@ -39,6 +39,8 @@ export function SecurityOverview({ status, posture, postureError, entries, works
   activityError?: string | null
   /** How many workspaces are ticked, so an empty health table can say why. */
   selectedCount?: number
+  /** How each workspace is watched, drawn under Needs attention. */
+  workspaces?: React.ReactNode
 }) {
   const judge = judgeState(status)
   const list = findings(posture, status, FINDING_ACTIONS)
@@ -90,6 +92,8 @@ export function SecurityOverview({ status, posture, postureError, entries, works
           </div>
         ))}
       </SettingsCard>
+
+      {workspaces}
 
       <SettingsCard icon={Server} tint="var(--purple)" title="Server setup" description="Read from the environment at deploy; change it there, not here"
         actions={<span className="rounded-full bg-primary/10 px-2 font-mono text-micro text-primary-hover" title="Applies to every workspace on this server">Instance</span>}>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { DEFAULT_PAGE_THEME, normalizePageTheme, colorContrast } from "../theme"
+import { DEFAULT_PAGE_THEME, PAGE_THEME_PRESETS, normalizePageTheme, colorContrast, pageThemePreset } from "../theme"
 import { previewSnapshot } from "../preview-runtime"
 
 it("only forwards palette tokens and rejects executable CSS/unknown workspace fields", () => {
@@ -41,5 +41,22 @@ describe("pageThemeVars", () => {
   it("says whether the page reads as light or dark", () => {
     expect(pageThemeVars({ accent: "#000000", background: "#f4f7fb", surface: "#ffffff", text: "#0f1733", muted: "#566079", border: "#d8e0eb" }).colorScheme).toBe("light")
     expect(pageThemeVars({ accent: "#000000", background: "#0c1410", surface: "#121c16", text: "#edf5ef", muted: "#a3b6aa", border: "#2a3b30" }).colorScheme).toBe("dark")
+  })
+})
+
+// Every offered palette keeps text and secondary text readable (AA, 4.5:1)
+// on both its background and its cards; the first is the Crewship default.
+describe("PAGE_THEME_PRESETS", () => {
+  it("starts with the Crewship default", () => {
+    expect(PAGE_THEME_PRESETS[0].id).toBe("crewship")
+    expect(PAGE_THEME_PRESETS[0].theme).toEqual({ ...DEFAULT_PAGE_THEME })
+    expect(DEFAULT_PAGE_THEME.accent).toBe("#1e7bfe")
+  })
+  it.each(PAGE_THEME_PRESETS.map((p) => [p.id, p.theme] as const))("%s keeps text at AA", (_id, t) => {
+    for (const fg of [t.text, t.muted]) for (const bg of [t.background, t.surface]) expect(colorContrast(fg, bg)).toBeGreaterThanOrEqual(4.5)
+  })
+  it("recognises a preset palette and calls anything else custom", () => {
+    expect(pageThemePreset(normalizePageTheme({}))?.id).toBe("crewship")
+    expect(pageThemePreset(normalizePageTheme({ accent: "#123abc" }))).toBeNull()
   })
 })
