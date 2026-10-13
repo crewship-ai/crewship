@@ -55,7 +55,7 @@ func (h *PageHandler) checkArtifactRunPrincipal(ctx context.Context, a *artifact
 	if err := q.QueryRowContext(ctx, `SELECT p.expires_at FROM artifact_run_principals p JOIN workspaces w ON w.id=p.workspace_id AND w.deleted_at IS NULL JOIN crews cr ON cr.id=p.crew_id AND cr.workspace_id=p.workspace_id AND cr.deleted_at IS NULL JOIN agents ag ON ag.id=p.agent_id AND ag.workspace_id=p.workspace_id AND ag.crew_id=p.crew_id AND ag.deleted_at IS NULL AND ag.expired_at IS NULL WHERE p.run_id=? AND p.workspace_id=? AND p.agent_id=? AND p.crew_id=? AND p.human_user_id=?`, a.RunID, a.WorkspaceID, a.AgentID, a.CrewID, a.HumanUserID).Scan(&expiry); err != nil {
 		return errors.New("artifact principal missing")
 	}
-	limit, e := time.Parse(time.RFC3339Nano, expiry)
+	limit, e := time.Parse(time.RFC3339Nano, expiry) // tsformat:allow: parsing a stored expiry for time comparison; no timestamp is written
 	if e != nil || !time.Now().Before(limit) {
 		return errors.New("artifact principal expired")
 	}
@@ -93,7 +93,7 @@ func (h *PageHandler) checkArtifactRun(ctx context.Context, pageID string, a *ar
 	if err := q.QueryRowContext(ctx, `SELECT expires_at,revoked_at,COALESCE(request_id,'') FROM page_artifact_run_delegations WHERE page_id=? AND run_id=? AND granted_by_user_id=?`, pageID, a.RunID, a.HumanUserID).Scan(&expiry, &revoked, &a.RequestID); err != nil {
 		return errors.New("artifact run delegation missing")
 	}
-	limit, e := time.Parse(time.RFC3339Nano, expiry)
+	limit, e := time.Parse(time.RFC3339Nano, expiry) // tsformat:allow: parsing a stored expiry for time comparison; no timestamp is written
 	if e != nil || !time.Now().Before(limit) || revoked.Valid {
 		return errors.New("artifact run delegation expired or revoked")
 	}
