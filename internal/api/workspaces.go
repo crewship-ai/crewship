@@ -9,6 +9,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/license"
+	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 	wshub "github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -118,7 +119,8 @@ type WorkspaceHandler struct {
 	journal journal.Emitter
 	// storageRoot keeps uploaded workspace logos (#3005); the router's
 	// storagePath, set by SetStorageRoot.
-	storageRoot string
+	storageRoot        string
+	restrictedWorkflow func() *restrictedworkflow.Service
 }
 
 // NewWorkspaceHandler creates a WorkspaceHandler with the given database and logger.
@@ -230,7 +232,7 @@ func (ws *workspaceResponse) fillNestedCount() {
 // GET /api/v1/workspaces
 
 func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
-	if restrictedWorkspaceDirectory(h.db, w, r) {
+	if h.restrictedWorkspaceDirectory(w, r) {
 		return
 	}
 	user := UserFromContext(r.Context())

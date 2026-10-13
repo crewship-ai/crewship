@@ -30,17 +30,21 @@ type proofExecutor interface {
 	ExecuteWorkflowRun(context.Context, restricteddispatch.DelegatedRunRequest, func(string, string) error) (restricteddispatch.RunProof, error)
 }
 type Service struct {
-	db            *sql.DB
-	executor      Executor
-	providers     providerAuthority
-	lifecycle     sync.Mutex
-	dispatch      sync.Mutex
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	dispatcher    *dispatch.Dispatcher
-	runtime       *workflowRuntime
-	ledger        *work.Store
-	SourceChecker func(context.Context, pipeline.PageActionQuery, string) error
+	// authorityOnly is used exclusively by read-only navigation projections.
+	// Execution services never enable it; profile installation stays mandatory.
+	authorityOnly    bool
+	declaredProfiles func(string) bool
+	db               *sql.DB
+	executor         Executor
+	providers        providerAuthority
+	lifecycle        sync.Mutex
+	dispatch         sync.Mutex
+	cancel           context.CancelFunc
+	wg               sync.WaitGroup
+	dispatcher       *dispatch.Dispatcher
+	runtime          *workflowRuntime
+	ledger           *work.Store
+	SourceChecker    func(context.Context, pipeline.PageActionQuery, string) error
 }
 type Receipt struct {
 	ID     string `json:"run_id"`

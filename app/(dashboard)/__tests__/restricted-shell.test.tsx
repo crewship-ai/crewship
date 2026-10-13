@@ -138,6 +138,7 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     expect(requests).toEqual(["GET /api/v1/workspaces"])
     expect(sockets).toEqual([])
     expect(screen.queryByTestId("page")).toBeNull()
+    expect(screen.queryByText("Not available with your access")).toBeNull()
   })
 
   it("stays restricted in a workspace where the membership is trusted (mixed membership)", async () => {

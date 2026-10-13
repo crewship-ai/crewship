@@ -2,8 +2,11 @@ package api
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
+
+	"modernc.org/sqlite"
 
 	"github.com/crewship-ai/crewship/internal/access"
 )
@@ -54,7 +57,8 @@ func restrictedDirectory(db *sql.DB, w http.ResponseWriter, r *http.Request) boo
 	writeJSON(w, http.StatusOK, result)
 	return true
 }
-func restrictedWorkspaceDirectory(db *sql.DB, w http.ResponseWriter, r *http.Request) bool {
+func (h *WorkspaceHandler) restrictedWorkspaceDirectory(w http.ResponseWriter, r *http.Request) bool {
+	db := h.db
 	user := UserFromContext(r.Context())
 	if user == nil {
 		return false
@@ -73,10 +77,6 @@ func restrictedWorkspaceDirectory(db *sql.DB, w http.ResponseWriter, r *http.Req
 		return true
 	}
 	defer rows.Close()
-	// The account is behind the restricted allowlist whichever workspace it
-	// names, so every row carries the same session-wide answer: what the shell
-	// may offer (#2861).
-	surfaces := allowedRestrictedSurfaces()
 	result := []map[string]any{}
 	for rows.Next() {
 		var id, name, slug, role, mode string
@@ -84,12 +84,37 @@ func restrictedWorkspaceDirectory(db *sql.DB, w http.ResponseWriter, r *http.Req
 			replyError(w, http.StatusInternalServerError, "directory unavailable")
 			return true
 		}
-		result = append(result, map[string]any{"id": id, "name": name, "slug": slug, "current_user_role": role, "currentUserRole": role, "currentUserAccessMode": mode, "restricted_session": true, "restricted_surfaces": surfaces})
+		result = append(result, map[string]any{"id": id, "name": name, "slug": slug, "current_user_role": role, "currentUserRole": role, "currentUserAccessMode": mode, "restricted_session": true})
 	}
 	if rows.Err() != nil {
 		replyError(w, http.StatusInternalServerError, "directory unavailable")
 		return true
 	}
-	writeJSON(w, http.StatusOK, result)
+	rows.Close()
+	visible := make([]map[string]any, 0, len(result))
+	for _, row := range result {
+		surfaces, e := h.memberRestrictedSurfaces(r.Context(), user.ID, row["id"].(string))
+		if e != nil {
+			// Driver/database infrastructure failures are global, even if a
+			// different workspace happens not to touch the damaged table.
+			var databaseError *sqlite.Error
+			if errors.As(e, &databaseError) || errors.Is(e, r.Context().Err()) && r.Context().Err() != nil {
+				replyError(w, 500, "directory unavailable")
+				return true
+			}
+			if h.logger != nil {
+				h.logger.Warn("omit workspace with unavailable navigation projection")
+			}
+			continue
+		}
+		row["restricted_surfaces"] = surfaces
+		visible = append(visible, row)
+	}
+	if len(result) > 0 && len(visible) == 0 {
+		replyError(w, 500, "directory unavailable")
+		return true
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, visible)
 	return true
 }

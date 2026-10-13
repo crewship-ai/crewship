@@ -1,6 +1,6 @@
 // What a restricted session's shell may offer (#2861).
 //
-// The server derives `restricted_surfaces` from its route allowlist
+// The server derives member/workspace `restricted_surfaces` within its route allowlist
 // (internal/api/restricted_surfaces.go) and puts it on every workspace row of a
 // restricted account. This file only maps those names to the screens that host
 // them; it never decides on its own that a screen is allowed. A restricted row
@@ -21,10 +21,15 @@ export const RESTRICTED_SURFACE_PATHS: Record<RestrictedSurface, string> = {
 /** The surfaces the session may open, or null for a session that is not
  *  restricted. */
 export function restrictedSurfacesOf(
-  workspaces: readonly Pick<WorkspaceData, "currentUserAccessMode" | "restricted_session" | "restricted_surfaces">[] | null | undefined,
+  workspaces: readonly (Pick<WorkspaceData, "currentUserAccessMode" | "restricted_session" | "restricted_surfaces"> & { id?: string })[] | null | undefined,
+  selectedWorkspaceId?: string | null,
 ): RestrictedSurface[] | null {
-  const row = (workspaces ?? []).find((w) => w.restricted_session === true || w.currentUserAccessMode === "restricted")
-  if (!row) return null
+  const rows = workspaces ?? []
+  if (!rows.some(w => w.restricted_session === true || w.currentUserAccessMode === "restricted")) return null
+  const row = selectedWorkspaceId === undefined
+    ? rows.find(w => w.restricted_session === true || w.currentUserAccessMode === "restricted")
+    : rows.find(w => w.id === selectedWorkspaceId)
+  if (!row) return []
   const known = new Set(Object.keys(RESTRICTED_SURFACE_PATHS))
   return (row.restricted_surfaces ?? []).filter((s): s is RestrictedSurface => known.has(s))
 }
