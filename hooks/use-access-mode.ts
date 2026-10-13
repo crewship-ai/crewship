@@ -28,13 +28,13 @@ export type AccessMode = "loading" | "trusted" | "restricted"
 
 /** Pure derivation, exported for tests. */
 export function deriveAccessMode(
-  workspaces: readonly Pick<WorkspaceData, "currentUserAccessMode">[] | null | undefined,
+  workspaces: readonly Pick<WorkspaceData, "currentUserAccessMode" | "restricted_session">[] | null | undefined,
   loading: boolean | undefined,
   error?: boolean,
 ): AccessMode {
   const list = workspaces ?? []
   if (list.length === 0 && (loading || error)) return "loading"
-  return list.some((w) => w.currentUserAccessMode === "restricted") ? "restricted" : "trusted"
+  return list.some((w) => (w.currentUserAccessMode === "restricted" || w.restricted_session === true)) ? "restricted" : "trusted"
 }
 
 export function useAccessMode(): AccessMode {
@@ -62,8 +62,8 @@ export function useRestrictedSurfaces(): RestrictedSurface[] | null {
  * trusted and stop the moment it turns restricted.
  */
 export function useTrustedWorkspaceId(): string | null {
-  const { workspaceId } = useWorkspace()
-  return useAccessMode() === "trusted" ? workspaceId : null
+  const { workspaceId, workspaceUnavailable } = useWorkspace()
+  return useAccessMode() === "trusted" && !workspaceUnavailable ? workspaceId : null
 }
 
 /** Re-check cadence while the tab is visible. Restricted screens have no

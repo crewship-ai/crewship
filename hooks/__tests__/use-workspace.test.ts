@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
+import { workspaceFetch, WorkspaceUnavailableError } from "@/lib/workspace-availability"
 import { registerNavigationGuard } from "@/hooks/use-navigation-guard"
 
 const mockFetch = vi.fn()
 vi.stubGlobal("fetch", mockFetch)
 
 import {
+  bindWorkspaceSession,
   useCurrentWorkspaceId,
   useWorkspacePagesTheme,
   refreshWorkspaceSettings,
@@ -72,6 +74,62 @@ describe("useWorkspace", () => {
       expect(result.current.workspaceId).toBe("ws-b")
       expect(storage.get("crewship.workspaceId")).toBe("ws-b")
     } finally { unregister() }
+  })
+
+  it("does not switch or overwrite selection when a refresh omits its workspace", async () => {
+    storage.set("crewship.workspaceId", "ws-b")
+    mockFetch.mockResolvedValueOnce({ok:true,json:async()=>[WS_A,WS_B]})
+    const {result}=renderHook(()=>useWorkspace())
+    await waitFor(()=>expect(result.current.workspaceId).toBe("ws-b"))
+    mockFetch.mockResolvedValueOnce({ok:true,json:async()=>[WS_A]})
+    await act(async()=>{await result.current.refresh()})
+    expect(result.current.workspaceId).toBe("ws-b")
+    expect(storage.get("crewship.workspaceId")).toBe("ws-b")
+    expect(result.current.workspace).toBeNull()
+    expect(result.current.workspaceUnavailable).toBe(true)
+    expect(result.current.role).toBeNull()
+    mockFetch.mockResolvedValueOnce({ok:true,json:async()=>[WS_A,WS_B]})
+    await act(async()=>{await result.current.refresh()})
+    expect(result.current.workspace).toEqual(WS_B)
+  })
+
+  it("keeps an unavailable selection through an empty reply and failed retry", async () => {
+    storage.set("crewship.workspaceId", "ws-b")
+    mockFetch.mockResolvedValueOnce({ok:true,json:async()=>[WS_B]})
+    const {result}=renderHook(()=>useWorkspace())
+    await waitFor(()=>expect(result.current.workspaceId).toBe("ws-b"))
+    mockFetch.mockResolvedValueOnce({ok:true,json:async()=>[]})
+    await act(async()=>{await result.current.refresh()})
+    let finish!: (response: {ok:boolean;status:number})=>void
+    mockFetch.mockReturnValueOnce(new Promise(resolve=>{finish=resolve}))
+    let retry!: Promise<void>
+    act(()=>{retry=result.current.refresh()})
+    expect(result.current.workspaceUnavailable).toBe(true)
+    expect(result.current.loading).toBe(false)
+    expect(result.current.workspaceId).toBe("ws-b")
+    await act(async()=>{finish({ok:false,status:500});await retry})
+    expect(result.current.workspaceId).toBe("ws-b")
+    expect(result.current.workspaceUnavailable).toBe(true)
+    expect(result.current.error).toBe(true)
+    expect(storage.get("crewship.workspaceId")).toBe("ws-b")
+  })
+
+  it("does not accept a previous identity's late directory response", async () => {
+    storage.set("crewship.workspaceId", "ws-a")
+    let oldReply!: (response: {ok:boolean;json:()=>Promise<unknown>})=>void
+    mockFetch.mockReturnValueOnce(new Promise(resolve=>{oldReply=resolve}))
+      .mockResolvedValueOnce({ok:true,json:async()=>[WS_B]})
+    const {result}=renderHook(()=>useWorkspace())
+    act(()=>bindWorkspaceSession("new-session-user"))
+    await waitFor(()=>expect(result.current.workspaces).toEqual([WS_B]))
+    await act(async()=>{oldReply({ok:true,json:async()=>[WS_A]});await Promise.resolve()})
+    expect(result.current.workspaces).toEqual([WS_B])
+    expect(result.current.workspaceId).toBe("ws-a")
+    expect(result.current.workspaceUnavailable).toBe(true)
+    expect(result.current.role).toBeNull()
+    act(()=>bindWorkspaceSession(null))
+    expect(result.current.workspaceId).toBeNull()
+    expect(result.current.workspaces).toEqual([])
   })
 
   it("reads updated settings after the initial workspace request has finished", async () => {
@@ -179,6 +237,22 @@ describe("useWorkspace", () => {
     expect(result.current.workspaces).toEqual([])
   })
 
+  it("keeps a persisted selection fail closed when its directory returns 404", async () => {
+    storage.set("crewship.workspaceId", "ws-a")
+    mockFetch.mockResolvedValue({ ok: false, status: 404 })
+    const { result } = renderHook(() => useWorkspace())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.workspaceId).toBe("ws-a")
+    expect(result.current.workspaceUnavailable).toBe(true)
+    expect(result.current.role).toBeNull()
+    expect(result.current.capabilities).toBeNull()
+    expect(result.current.error).toBeTruthy()
+    mockFetch.mockClear()
+    await expect(workspaceFetch("/api/v1/pages?workspace_id=ws-a", { method: "POST" }))
+      .rejects.toBeInstanceOf(WorkspaceUnavailableError)
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
   it("handles API error response", async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 500 })
     const { result } = renderHook(() => useWorkspace())
@@ -254,14 +328,18 @@ describe("useWorkspace", () => {
     expect(result.current.role).toBe("MEMBER")
   })
 
-  it("falls back to the first workspace when persisted id is stale", async () => {
+  it("requires an explicit choice when a persisted workspace is unavailable", async () => {
     window.localStorage.setItem("crewship.workspaceId", "ws-gone")
     mockFetch.mockResolvedValue({ ok: true, json: async () => [WS_A, WS_B] })
 
     const { result } = renderHook(() => useWorkspace())
     await waitFor(() => expect(result.current.loading).toBe(false))
 
+    expect(result.current.workspaceId).toBe("ws-gone")
+    expect(result.current.workspaceUnavailable).toBe(true)
+    act(() => result.current.setWorkspaceId("ws-a"))
     expect(result.current.workspaceId).toBe("ws-a")
+    expect(result.current.workspaceUnavailable).toBe(false)
   })
 
   it("shares state across hook instances (module-level store)", async () => {

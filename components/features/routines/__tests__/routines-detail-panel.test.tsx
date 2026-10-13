@@ -667,3 +667,37 @@ describe("active recipe sample testing", () => {
     expect(screen.queryByRole("button", { name: "Test step" })).toBeNull()
   })
 })
+
+
+describe("routine URL path boundaries", () => {
+  beforeEach(() => { cleanup(); vi.mocked(apiFetch).mockClear(); mockApi() })
+
+  it.each(["../auth/session?x=#fragment", "recipe/child", "recipe?query", "recipe#fragment"])("keeps slug %s in one path segment", async (slug) => {
+    render(<RoutinesDetailPanel {...defaultProps} slug={slug} />)
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
+      `/api/v1/workspaces/ws-1/pipelines/${encodeURIComponent(slug)}`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ))
+  })
+
+  it.each([".", ".."]) ("does not request exact dot slug %s", async (slug) => {
+    render(<RoutinesDetailPanel {...defaultProps} slug={slug} />)
+    await waitFor(() => expect(screen.queryByText("Loading routine…")).not.toBeInTheDocument())
+    expect(apiFetch).not.toHaveBeenCalled()
+  })
+})
+
+
+it("keeps workspace and slug data in governance POST paths", async () => {
+  cleanup()
+  vi.mocked(apiFetch).mockClear()
+  vi.mocked(apiFetch).mockResolvedValue(okJSON({ ...ROUTINE, status: "proposed" }))
+  const workspaceId = "workspace/child?x=#fragment"
+  const slug = "recipe/child?x=#fragment"
+  render(<RoutinesDetailPanel {...defaultProps} workspaceId={workspaceId} slug={slug} />)
+  fireEvent.click(await screen.findByRole("button", { name: "Approve" }))
+  await waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}/approve`,
+    expect.objectContaining({ method: "POST" }),
+  ))
+})

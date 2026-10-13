@@ -11,6 +11,7 @@ import { STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from "@/lib/colors"
 import { AgentlessBadge } from "./routine-agentless-badge"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { encodeApiPathSegment } from "@/lib/api-path-segment"
 import { loadRoutineDraft, RoutineDraftError } from "@/lib/routine-drafts"
 import { RoutineStartIntent } from "@/lib/routine-start-intent"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -132,8 +133,10 @@ export function RoutinesDetailPanel({
   const router = useRouter()
   const startIntent = useRef(new RoutineStartIntent())
   const { role } = useAbilities()
+  const workspaceSegment = encodeApiPathSegment(workspaceId)
+  const routineSegment = encodeApiPathSegment(slug)
   const { access: effectiveAccess, loading: accessLoading, error: accessError, refresh: refreshAccess } = useAccessMe(
-    workspaceId && slug ? `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}/access/me` : undefined,
+    workspaceSegment && routineSegment ? `/api/v1/workspaces/${workspaceSegment}/pipelines/${routineSegment}/access/me` : undefined,
   )
   const runAccess = effectiveAccess?.actions.run
   const mayRun = runAccess?.state === "allowed" || runAccess?.state === "conditional"
@@ -170,8 +173,8 @@ export function RoutinesDetailPanel({
   // header. The hook already refreshes on pipeline.run.* WS events, so the
   // banner tracks run starts/finishes without polling.
   const { records: runRecords, refresh: refreshRunRecords } = usePipelineRunRecords(
-    workspaceId,
-    slug,
+    workspaceSegment && routineSegment ? workspaceId : null,
+    workspaceSegment && routineSegment ? slug : null,
   )
   const activeRuns = runRecords.filter((r) => isActiveRunStatus(r.status))
 
@@ -182,7 +185,8 @@ export function RoutinesDetailPanel({
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}`, {
+      if (!workspaceSegment || !routineSegment) throw new Error("Routine unavailable: invalid identifier")
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceSegment}/pipelines/${routineSegment}`, {
         signal: ctrl.signal,
       })
       if (ctrl.signal.aborted) return
@@ -409,8 +413,9 @@ export function RoutinesDetailPanel({
     }
     setBusyGov(action)
     try {
+      if (!workspaceSegment || !routineSegment) throw new Error("Routine unavailable: invalid identifier")
       const res = await apiFetch(
-        `/api/v1/workspaces/${workspaceId}/pipelines/${slug}/${action}`,
+        `/api/v1/workspaces/${workspaceSegment}/pipelines/${routineSegment}/${action}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

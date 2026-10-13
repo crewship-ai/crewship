@@ -66,6 +66,10 @@ beforeEach(() => {
 afterEach(() => { globalThis.WebSocket = NativeWebSocket })
 
 describe("deriveAccessMode", () => {
+  it("keeps the account ceiling when a restricted membership row is omitted", () => {
+    const remaining: WorkspaceData = {...ROW("remaining", "trusted"), restricted_session:true}
+    expect(deriveAccessMode([remaining], false, false)).toBe("restricted")
+  })
   it.each([
     ["no list yet", [], true, false, "loading"],
     ["cold load failed", [], false, true, "loading"],
