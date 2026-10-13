@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -44,12 +43,27 @@ type EntityOperationResponse struct {
 }
 type EntityRefResponse struct {
 	EventID          string              `json:"event_id"`
+	OperationID      string              `json:"operation_id"`
+	Current          *IssueCardCurrent   `json:"current,omitempty"`
 	Kind             string              `json:"kind"`
 	Verb             string              `json:"verb"`
 	Entity           EntityRefEntity     `json:"entity"`
 	Provenance       EntityRefProvenance `json:"provenance"`
 	Anchor           EntityRefAnchor     `json:"anchor"`
 	RevisionAtAction EntityRefRevision   `json:"revision_at_action"`
+}
+
+// IssueCardCurrent is gathered with the reference snapshot in one query.
+// Deleted receipts never contain current or historical issue content.
+type IssueCardCurrent struct {
+	Title             string   `json:"title"`
+	Status            string   `json:"status"`
+	Priority          string   `json:"priority"`
+	AssigneeType      *string  `json:"assignee_type"`
+	AssigneeID        *string  `json:"assignee_id"`
+	Revision          int64    `json:"revision"`
+	AggregateRevision int64    `json:"aggregate_revision"`
+	AllowedActions    []string `json:"allowed_actions"`
 }
 type EntityRefEntity struct {
 	ID          string `json:"id"`
@@ -137,17 +151,20 @@ func (r *Router) decodeEntityCursor(raw string) (entityCursor, error) {
 	}
 	return c, err
 }
+
+var errEntityAudienceDenied = errors.New("entity audience denied")
+
 func (r *Router) entityRefAudience(req *http.Request, chat string) (*chataudience.Receipt, error) {
 	user := UserFromContext(req.Context())
 	if user == nil || !canRole(RoleFromContext(req.Context()), "read") {
-		return nil, errors.New("denied")
+		return nil, errEntityAudienceDenied
 	}
 	receipt, err := chataudience.CaptureTrusted(req.Context(), r.db, chat, user.ID, nil)
 	if err != nil {
 		return nil, err
 	}
 	if receipt == nil || receipt.WorkspaceID != WorkspaceIDFromContext(req.Context()) {
-		return nil, errors.New("denied")
+		return nil, errEntityAudienceDenied
 	}
 	return receipt, nil
 }
@@ -168,7 +185,11 @@ func (r *Router) chatEntityRefs(w http.ResponseWriter, req *http.Request) {
 	chat := req.PathValue("chatId")
 	audience, err := r.entityRefAudience(req, chat)
 	if err != nil {
-		replyError(w, 404, "Chat not found")
+		if errors.Is(err, errEntityAudienceDenied) {
+			replyError(w, 404, "Chat not found")
+		} else {
+			replyError(w, 503, "entity_refs_unavailable")
+		}
 		return
 	}
 	limit := 100
@@ -212,7 +233,11 @@ func (r *Router) chatEntityRefs(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
-	rows, err := tx.QueryContext(req.Context(), `SELECT cr.event_id,cr.chat_seq,cr.operation_id,cr.run_id,cr.trigger_message_id,cr.created_at,COALESCE(m.identifier,''),m.id IS NULL FROM chat_entity_refs cr JOIN agent_operations op ON op.id=cr.operation_id LEFT JOIN missions m ON m.id=op.entity_id AND m.workspace_id=op.workspace_id WHERE cr.chat_id=? AND op.workspace_id=? AND op.kind='issue' AND op.status='completed' AND `+entityRefVisibilitySQL+` AND cr.chat_seq>? AND cr.chat_seq<=? ORDER BY cr.chat_seq LIMIT ?`, chat, audience.WorkspaceID, c.After, c.Upper, limit+1)
+	rows, err := tx.QueryContext(req.Context(), `SELECT cr.event_id,cr.chat_seq,cr.operation_id,cr.run_id,cr.trigger_message_id,cr.created_at,COALESCE(m.identifier,''),m.id IS NULL,
+ op.kind,op.verb,op.entity_id,op.workspace_id,op.actor_type,op.actor_id,op.created_at,op.entity_revision,op.entity_aggregate_revision,
+ COALESCE(m.title,''),COALESCE(m.status,''),COALESCE(m.priority,''),m.assignee_type,m.assignee_id,COALESCE(m.revision,0),COALESCE(m.aggregate_revision,0),`+issueCardBusySQL+`,
+ (SELECT j.entry_type FROM journal_entries j WHERE j.workspace_id=op.workspace_id AND j.trace_id=cr.run_id AND j.entry_type IN ('run.started','run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') ORDER BY CASE WHEN j.entry_type='run.started' THEN 1 ELSE 0 END,j.ts DESC,j.id DESC LIMIT 1)
+ FROM chat_entity_refs cr JOIN agent_operations op ON op.id=cr.operation_id LEFT JOIN missions m ON m.id=op.entity_id AND m.workspace_id=op.workspace_id WHERE cr.chat_id=? AND op.workspace_id=? AND op.kind='issue' AND op.status='completed' AND `+entityRefVisibilitySQL+` AND cr.chat_seq>? AND cr.chat_seq<=? ORDER BY cr.chat_seq LIMIT ?`, chat, audience.WorkspaceID, c.After, c.Upper, limit+1)
 	if err != nil {
 		replyError(w, 503, "entity_refs_unavailable")
 		return
@@ -221,11 +246,16 @@ func (r *Router) chatEntityRefs(w http.ResponseWriter, req *http.Request) {
 		ref        chatentities.Ref
 		identifier string
 		deleted    bool
+		current    IssueCardCurrent
+		busy       bool
+		runEntry   sql.NullString
 	}
 	entries := []entry{}
 	for rows.Next() {
 		var e entry
-		err = rows.Scan(&e.ref.EventID, &e.ref.Seq, &e.ref.OperationID, &e.ref.RunID, &e.ref.TriggerMessageID, &e.ref.CreatedAt, &e.identifier, &e.deleted)
+		err = rows.Scan(&e.ref.EventID, &e.ref.Seq, &e.ref.OperationID, &e.ref.RunID, &e.ref.TriggerMessageID, &e.ref.CreatedAt, &e.identifier, &e.deleted,
+			&e.ref.Operation.Kind, &e.ref.Operation.Verb, &e.ref.Operation.EntityID, &e.ref.Operation.WorkspaceID, &e.ref.Operation.ActorType, &e.ref.Operation.ActorID, &e.ref.Operation.CreatedAt, &e.ref.Operation.Revision, &e.ref.Operation.AggregateRevision,
+			&e.current.Title, &e.current.Status, &e.current.Priority, &e.current.AssigneeType, &e.current.AssigneeID, &e.current.Revision, &e.current.AggregateRevision, &e.busy, &e.runEntry)
 		if err != nil {
 			break
 		}
@@ -243,22 +273,29 @@ func (r *Router) chatEntityRefs(w http.ResponseWriter, req *http.Request) {
 	if page.HasMore {
 		entries = entries[:limit]
 	}
+	actions, err := issueViewerActions(req.Context(), tx, audience.UserID, audience.WorkspaceID)
+	if err != nil {
+		replyError(w, 503, "entity_refs_unavailable")
+		return
+	}
+	if len(actions) > 0 && !canScope(req.Context(), scopeForRoute("/api/v1/crews/{crewId}/issues/{identifier}")) {
+		actions = []string{"view"}
+	}
 	for _, e := range entries {
-		op, e2 := chatentities.GetOperation(req.Context(), tx, audience.WorkspaceID, e.ref.OperationID)
-		if e2 != nil {
-			replyError(w, 503, "entity_refs_unavailable")
-			return
+		op := e.ref.Operation
+		card := EntityRefResponse{EventID: e.ref.EventID, OperationID: e.ref.OperationID, Kind: op.Kind, Verb: op.Verb, Entity: EntityRefEntity{ID: op.EntityID, Identifier: e.identifier, WorkspaceID: op.WorkspaceID, Deleted: e.deleted}, Provenance: EntityRefProvenance{Actor: EntityRefActor{Type: op.ActorType, ID: op.ActorID}, At: op.CreatedAt}, Anchor: EntityRefAnchor{TriggerMessageID: e.ref.TriggerMessageID, RunID: e.ref.RunID}, RevisionAtAction: EntityRefRevision{Revision: op.Revision, AggregateRevision: op.AggregateRevision}}
+		if e.runEntry.Valid {
+			status := map[string]string{"run.started": "running", "run.completed": "completed", "run.failed": "failed", "run.cancelled": "cancelled", "run.timeout": "timeout", "run.recovered_stop": "cancelled"}[e.runEntry.String]
+			card.Anchor.RunStatus = &status
 		}
-		e.ref.Operation = *op
-		card := EntityRefResponse{EventID: e.ref.EventID, Kind: op.Kind, Verb: op.Verb, Entity: EntityRefEntity{ID: op.EntityID, Identifier: e.identifier, WorkspaceID: op.WorkspaceID, Deleted: e.deleted}, Provenance: EntityRefProvenance{Actor: EntityRefActor{Type: op.ActorType, ID: op.ActorID}, At: op.CreatedAt}, Anchor: EntityRefAnchor{TriggerMessageID: e.ref.TriggerMessageID, RunID: e.ref.RunID}, RevisionAtAction: EntityRefRevision{Revision: op.Revision, AggregateRevision: op.AggregateRevision}}
-		card.Anchor.RunStatus, err = entityRunStatus(req.Context(), tx, op.WorkspaceID, e.ref.RunID)
-		if err != nil {
-			replyError(w, 503, "entity_refs_unavailable")
-			return
+		if !e.deleted {
+			e.current.AllowedActions = issueActionsForState(actions, e.current.Status, e.busy)
+			card.Current = &e.current
 		}
 		page.Refs = append(page.Refs, card)
 		c.After = e.ref.Seq
 	}
+
 	c.Complete = !page.HasMore
 	page.SnapshotComplete = c.Complete
 	page.NextCursor, err = r.encodeEntityCursor(c)
@@ -273,26 +310,19 @@ func (r *Router) chatEntityRefs(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	current, err := r.entityRefAudience(req, chat)
-	if err != nil || *current != *audience {
-		replyError(w, 404, "Chat not found")
+	if err != nil {
+		if errors.Is(err, errEntityAudienceDenied) {
+			replyError(w, 404, "Chat not found")
+		} else {
+			replyError(w, 503, "entity_refs_unavailable")
+		}
+		return
+	}
+	if *current != *audience {
+		replyError(w, 503, "entity_refs_authority_changed")
 		return
 	}
 	writeJSON(w, 200, page)
-}
-func entityRunStatus(ctx context.Context, q chatentities.Queryer, workspace, run string) (*string, error) {
-	if run == "" {
-		return nil, nil
-	}
-	var kind string
-	err := q.QueryRowContext(ctx, `SELECT entry_type FROM journal_entries WHERE workspace_id=? AND trace_id=? AND entry_type IN ('run.started','run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') ORDER BY CASE WHEN entry_type='run.started' THEN 1 ELSE 0 END,ts DESC,id DESC LIMIT 1`, workspace, run).Scan(&kind)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	status := map[string]string{"run.started": "running", "run.completed": "completed", "run.failed": "failed", "run.cancelled": "cancelled", "run.timeout": "timeout", "run.recovered_stop": "cancelled"}[kind]
-	return &status, nil
 }
 
 // Operation read never serializes keys, hashes, receipts, access snapshots or

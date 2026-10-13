@@ -242,13 +242,11 @@ func createSchedule(ctx context.Context, x sqlExecQuerier, in SaveScheduleInput)
 	if err != nil {
 		return nil, err
 	}
-	if in.ChatOriginID == "" {
-		var err error
-		if in.TargetPipelineVersion != nil {
-			err = x.QueryRowContext(ctx, `SELECT COALESCE(chat_origin_id,'') FROM pipeline_versions WHERE pipeline_id=? AND version=?`, in.TargetPipelineID, *in.TargetPipelineVersion).Scan(&in.ChatOriginID)
-		} else {
-			err = x.QueryRowContext(ctx, `SELECT COALESCE(chat_origin_id,'') FROM pipelines WHERE id=?`, in.TargetPipelineID).Scan(&in.ChatOriginID)
-		}
+	// Unpinned schedules resolve the current head at dispatch. Only an
+	// explicit requesting chat may freeze an independent schedule binding.
+	// A pinned schedule retains the immutable version's binding.
+	if in.ChatOriginID == "" && in.TargetPipelineVersion != nil {
+		err = x.QueryRowContext(ctx, `SELECT COALESCE(chat_origin_id,'') FROM pipeline_versions WHERE pipeline_id=? AND version=?`, in.TargetPipelineID, *in.TargetPipelineVersion).Scan(&in.ChatOriginID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("insert schedule origin: %w", err)
 		}

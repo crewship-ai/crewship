@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -8,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 
 	"github.com/crewship-ai/crewship/internal/chatentities"
 	"github.com/crewship-ai/crewship/internal/runauthority"
@@ -60,7 +62,7 @@ func issueRequesterAllowed(ctx context.Context, q issueOperationQueryer, userID,
 	return verb == "created" && HasCapability(resolveCapabilitiesFromRow(caps, role), CapabilityIssueCreate), nil
 }
 
-func issueViewerActions(ctx context.Context, q issueOperationQueryer, userID, workspaceID, crewID string) ([]string, error) {
+func issueViewerActions(ctx context.Context, q issueOperationQueryer, userID, workspaceID string) ([]string, error) {
 	allowed, err := issueRequesterAllowed(ctx, q, userID, workspaceID, "shown")
 	if err != nil || !allowed {
 		return []string{}, err
@@ -77,10 +79,43 @@ func issueViewerActions(ctx context.Context, q issueOperationQueryer, userID, wo
 }
 
 func chatIssueRequestHash(verb, entityID string, payload any) (string, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	var normalized any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err = dec.Decode(&normalized); err != nil {
+		return "", err
+	}
+	if fields, ok := normalized.(map[string]any); ok {
+		// Identity is independently bound to the persisted operation scope/run.
+		// Client formatting or unused historical provenance must not alter intent.
+		for _, key := range []string{"operation_key", "author_chat_id", "author_run_id", "agent_id", "author_agent_id", "workspace_id"} {
+			delete(fields, key)
+		}
+		if labels, ok := fields["labels"].([]any); ok {
+			set := map[string]bool{}
+			for _, label := range labels {
+				if id, ok := label.(string); ok {
+					set[id] = true
+				}
+			}
+			ids := make([]string, 0, len(set))
+			for id := range set {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			fields["labels"] = ids
+		} else if verb == "created" && fields["labels"] == nil {
+			fields["labels"] = []string{}
+		}
+	}
 	b, err := json.Marshal(struct {
 		Verb, EntityID string
 		Payload        any
-	}{verb, entityID, payload})
+	}{verb, entityID, normalized})
 	if err != nil {
 		return "", err
 	}
@@ -166,6 +201,9 @@ func (h *InternalIssueHandler) authorizeChatIssue(ctx context.Context, q issueOp
 			return nil, err
 		}
 	}
+	if a.HumanAuthority == nil && key == "" && actorType == "agent" {
+		return nil, nil
+	} // admitted autonomous agents retain existing workspace mutation reach
 	op := &chatIssueOperation{authority: a, actorType: actorType, actorID: actorID, crewID: crewID}
 	if entityID != "" {
 		if err := verifyChatIssueOperationEntity(ctx, q, op, workspaceID, entityID); err != nil {
@@ -350,6 +388,8 @@ func writeChatIssueError(w http.ResponseWriter, err error) {
 		status, code = 409, "operation_key_conflict"
 	case errors.Is(err, chatentities.ErrInvalid):
 		status, code = 400, "operation_invalid"
+	case errors.Is(err, errDelegationExecutionChatUnavailable):
+		status, code = 403, "delegation_execution_chat_unavailable"
 	case errors.Is(err, runauthority.ErrUnavailable):
 		status, code = 403, "run_authority_unavailable"
 	case errors.Is(err, runauthority.ErrIdentityMismatch):

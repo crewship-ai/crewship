@@ -69,6 +69,13 @@ var issueCommentCmd = &cobra.Command{
 		}
 
 		identifier := derefStr(issue.Identifier, issue.ID)
+		if cmd.Flags().Changed("idempotency-key") {
+			key, _ := cmd.Flags().GetString("idempotency-key")
+			if strings.TrimSpace(key) == "" || len(key) > 200 {
+				return fmt.Errorf("--idempotency-key must contain 1–200 bytes")
+			}
+			client = client.WithHeader("Idempotency-Key", key)
+		}
 		resp, err := client.Post(
 			fmt.Sprintf("/api/v1/crews/%s/issues/%s/comments", issue.CrewID, url.PathEscape(identifier)),
 			map[string]interface{}{"body": body},

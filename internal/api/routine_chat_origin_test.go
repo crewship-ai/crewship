@@ -75,7 +75,7 @@ func TestRoutineChatOriginPersistsReauthorizesAndRevokes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if latest.ChatOriginID != fresh || pinned.ChatOriginID != original {
+	if latest.ChatOriginID != "" || pinned.ChatOriginID != original {
 		t.Fatal("schedule lost head/pinned origin distinction")
 	}
 	// Revocation applies after the parent ended and before actual routine execution.

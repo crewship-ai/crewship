@@ -24,14 +24,15 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	var req struct {
-		Title        *string `json:"title"`
-		Description  *string `json:"description"`
-		Status       *string `json:"status"`
-		Priority     *string `json:"priority"`
-		AssigneeType *string `json:"assignee_type"`
-		AssigneeID   *string `json:"assignee_id"`
-		DueDate      *string `json:"due_date"`
-		ProjectID    *string `json:"project_id"`
+		ExpectedRevision *int64  `json:"expected_revision"`
+		Title            *string `json:"title"`
+		Description      *string `json:"description"`
+		Status           *string `json:"status"`
+		Priority         *string `json:"priority"`
+		AssigneeType     *string `json:"assignee_type"`
+		AssigneeID       *string `json:"assignee_id"`
+		DueDate          *string `json:"due_date"`
+		ProjectID        *string `json:"project_id"`
 		// Raw, not *int: a JSON null decodes into a nil *int, which is
 		// indistinguishable from the field being absent — so "clear the
 		// estimate" arrived as an empty patch and 400ed on "No fields to
@@ -56,22 +57,45 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	expected, err := issueExpectedRevision(r, req.ExpectedRevision)
+	if err != nil {
+		replyError(w, 400, "revision_invalid")
+		return
+	}
+	req.ExpectedRevision = expected
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, "begin issue update", err)
+		return
+	}
+	defer tx.Rollback()
+
 	// Look up current status — and the current description, which is what
 	// makes "the description actually changed" answerable. Without it the
 	// handler could only see that a description was SENT, and a client that
 	// PATCHes the whole issue on every keystroke-blur would stamp an
 	// audit row per save with nothing behind it.
 	var missionID, currentStatus string
+	var currentRevision int64
 	var currentDescription sql.NullString
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id, status, description FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
-		ident, crewID, wsID).Scan(&missionID, &currentStatus, &currentDescription)
+	err = tx.QueryRowContext(r.Context(),
+		`SELECT id, status, description, revision FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
+		ident, crewID, wsID).Scan(&missionID, &currentStatus, &currentDescription, &currentRevision)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
 		internalError(w, r, h.logger, "get issue for update", err)
+		return
+	}
+
+	op, handled := h.beginHumanIssueOperation(w, r, tx, "updated", missionID, req)
+	if handled {
+		return
+	}
+	if expected != nil && *expected != currentRevision {
+		writeJSON(w, 409, map[string]any{"error": "revision_conflict", "revision": currentRevision})
 		return
 	}
 
@@ -104,7 +128,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 				writeProblem(w, r, http.StatusBadRequest, "assignee_type must be 'user' or 'agent' when assignee_id is set")
 				return
 			}
-			ok, vErr := validateAssigneeWorkspace(r.Context(), h.db, assigneeType, *req.AssigneeID, wsID)
+			ok, vErr := validateAssigneeWorkspace(r.Context(), tx, assigneeType, *req.AssigneeID, wsID)
 			if vErr != nil {
 				internalError(w, r, h.logger, "validate assignee_id", vErr)
 				return
@@ -125,7 +149,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			// test — there wasn't one covering this branch).
 			var ok bool
 			var rErr error
-			assigneeType, ok, rErr = resolveAssigneeType(r.Context(), h.db, *req.AssigneeID, wsID)
+			assigneeType, ok, rErr = resolveAssigneeType(r.Context(), tx, *req.AssigneeID, wsID)
 			if rErr != nil {
 				internalError(w, r, h.logger, "resolve assignee_type", rErr)
 				return
@@ -171,7 +195,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			// Same fence as parent_issue_id below: without it a caller could
 			// PATCH their own issue into another tenant's project, and the
 			// listing join then renders that project's name back to them.
-			if !fkInWorkspaceOrReject(w, r, h.db, h.logger, "projects", "project_id", *req.ProjectID, wsID) {
+			if !fkInWorkspaceOrReject(w, r, tx, h.logger, "projects", "project_id", *req.ProjectID, wsID) {
 				return
 			}
 			ub.Set("project_id", *req.ProjectID)
@@ -206,7 +230,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			var parentExists int
-			err := h.db.QueryRowContext(r.Context(),
+			err := tx.QueryRowContext(r.Context(),
 				`SELECT COUNT(*) FROM missions WHERE id = ? AND workspace_id = ?`,
 				*req.ParentIssueID, wsID).Scan(&parentExists)
 			if err != nil {
@@ -217,7 +241,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 				writeProblem(w, r, http.StatusBadRequest, "parent_issue_id does not exist in this workspace")
 				return
 			}
-			switch cErr := wouldCycleParent(r.Context(), h.db, missionID, *req.ParentIssueID, wsID); {
+			switch cErr := wouldCycleParent(r.Context(), tx, missionID, *req.ParentIssueID, wsID); {
 			case errors.Is(cErr, errParentCycle):
 				writeProblem(w, r, http.StatusBadRequest, "parent_issue_id would create a cycle")
 				return
@@ -232,7 +256,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if *req.MilestoneID == "" {
 			ub.SetNull("milestone_id")
 		} else {
-			if !fkInWorkspaceOrReject(w, r, h.db, h.logger, "milestones", "milestone_id", *req.MilestoneID, wsID) {
+			if !fkInWorkspaceOrReject(w, r, tx, h.logger, "milestones", "milestone_id", *req.MilestoneID, wsID) {
 				return
 			}
 			ub.Set("milestone_id", *req.MilestoneID)
@@ -251,7 +275,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			ub.Set("routine_inputs_json", "{}")
 		} else {
 			var exists int
-			err = h.db.QueryRowContext(r.Context(),
+			err = tx.QueryRowContext(r.Context(),
 				`SELECT COUNT(*) FROM pipelines WHERE id = ? AND workspace_id = ?`,
 				*req.RoutineID, wsID).Scan(&exists)
 			if err != nil {
@@ -289,35 +313,8 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// §10.4 terminal-children rule (fixes F10, work package B11,
-		// #2368): DONE/REVIEW is refused while a sub-issue or mission_task
-		// is still live, unless the caller passes ?force=true — in which
-		// case the transition proceeds and the blockers are named on the
-		// status_changed event below (the "receipt").
-		//
-		// This only decides whether a TRANSACTION is warranted below; it
-		// is deliberately NOT where the check happens for a transition
-		// that turns out to need one. See the write block for why (review
-		// on #2377: a bare read-then-write here left a window for a child
-		// to appear or reopen between this check and the UPDATE).
+		// The transaction below holds the write lock through the child check.
 		needsTerminalGuard = newStatus != currentStatus && isTerminalIssueTarget(newStatus)
-		if needsTerminalGuard && r.URL.Query().Get("force") != "true" {
-			// Advisory fast path only: most requests against a clean
-			// parent (the common case) can 409 or proceed without ever
-			// opening a transaction. A request that passes this and
-			// still finds blockers at write time gets caught by the
-			// authoritative, transaction-scoped re-check below instead of
-			// silently succeeding.
-			blockers, bErr := openChildBlockers(r.Context(), h.db, missionID)
-			if bErr != nil {
-				internalError(w, r, h.logger, "check open children for terminal transition", bErr)
-				return
-			}
-			if len(blockers) > 0 {
-				writeProblem(w, r, http.StatusConflict, blockersMessage(blockers))
-				return
-			}
-		}
 
 		ub.Set("status", newStatus)
 
@@ -333,76 +330,58 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var forcedPastChildren []string
+	if needsTerminalGuard {
+		blockers, bErr := openChildBlockers(r.Context(), tx, missionID)
+		if bErr != nil {
+			internalError(w, r, h.logger, "check open children", bErr)
+			return
+		}
+		if len(blockers) > 0 {
+			if r.URL.Query().Get("force") != "true" {
+				writeProblem(w, r, 409, blockersMessage(blockers))
+				return
+			}
+			forcedPastChildren = blockers
+		}
+	}
 	if !ub.Empty() {
 		query, args := ub.Build("missions", "id = ?", missionID)
-		switch {
-		case needsTerminalGuard:
-			// §10.4's actual enforcement point. database.Open sets
-			// `_txlock=immediate` on every connection, so BeginTx here
-			// acquires SQLite's single write lock at BEGIN — the same
-			// property missionactivity.Emit's seq allocation and
-			// nextIssueIdentifierTx rely on — which is what makes this
-			// re-check race-free against a concurrent write that creates,
-			// reopens, or resolves a child: nothing else can change a
-			// mission_tasks/sub-issue row between this SELECT and the
-			// UPDATE two lines below.
-			tx, txErr := h.db.BeginTx(r.Context(), nil)
-			if txErr != nil {
-				internalError(w, r, h.logger, "begin terminal-transition tx", txErr)
-				return
-			}
-			committed := false
-			defer func() {
-				if !committed {
-					_ = tx.Rollback()
-				}
-			}()
-			blockers, bErr := openChildBlockers(r.Context(), tx, missionID)
-			if bErr != nil {
-				internalError(w, r, h.logger, "re-check open children for terminal transition", bErr)
-				return
-			}
-			if len(blockers) > 0 {
-				if r.URL.Query().Get("force") != "true" {
-					// The advisory pre-check above passed, but a child
-					// appeared or reopened in the window between it and
-					// this transaction — the exact race this re-check
-					// exists to catch.
-					writeProblem(w, r, http.StatusConflict, blockersMessage(blockers))
-					return
-				}
-				forcedPastChildren = blockers
-			}
-			if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
-				internalError(w, r, h.logger, "update issue", err)
-				return
-			}
-			if err := tx.Commit(); err != nil {
-				internalError(w, r, h.logger, "commit terminal transition", err)
-				return
-			}
-			committed = true
-		default:
-			if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-				internalError(w, r, h.logger, "update issue", err)
+		if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
+			internalError(w, r, h.logger, "update issue", err)
+			return
+		}
+	}
+	if req.Labels != nil {
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM mission_labels WHERE mission_id=?`, missionID); err != nil {
+			internalError(w, r, h.logger, "delete issue labels", err)
+			return
+		}
+		for _, labelID := range *req.Labels {
+			if _, err := tx.ExecContext(r.Context(), `INSERT OR IGNORE INTO mission_labels (mission_id,label_id) VALUES(?,?)`, missionID, labelID); err != nil {
+				internalError(w, r, h.logger, "insert issue label", err)
 				return
 			}
 		}
 	}
-
-	// Update labels if provided
-	if req.Labels != nil {
-		// Replace all labels: delete existing, insert new
-		if _, err := h.db.ExecContext(r.Context(), `DELETE FROM mission_labels WHERE mission_id = ?`, missionID); err != nil {
-			h.logger.Error("delete issue labels", "error", err)
-		}
-		for _, labelID := range *req.Labels {
-			if _, err := h.db.ExecContext(r.Context(),
-				`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
-				missionID, labelID); err != nil {
-				h.logger.Error("insert mission label", "error", err, "mission_id", missionID, "label_id", labelID)
-			}
-		}
+	issue, err := scanIssueRow(tx.QueryRowContext(r.Context(), issueSelectQuery()+` WHERE m.id=?`, missionID))
+	if err != nil {
+		internalError(w, r, h.logger, "read updated issue", err)
+		return
+	}
+	if err = h.loadChatMetadataQuery(r, tx, &issue); err != nil {
+		internalError(w, r, h.logger, "issue capabilities", err)
+		return
+	}
+	if err = completeHumanIssueOperation(r, tx, op, missionID, issue); err != nil {
+		internalError(w, r, h.logger, "complete issue operation", err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "commit issue update", err)
+		return
+	}
+	if op != nil {
+		w.Header().Set("Operation-ID", op.ID)
 	}
 
 	// Log activity for significant changes. Collected into one batch so the
@@ -470,14 +449,6 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			"id": missionID, "identifier": ident, "crew_id": crewID,
 			"status": *req.Status, "from": currentStatus, "to": *req.Status,
 		})
-	}
-
-	// Return updated issue
-	issue, err := scanIssueRow(h.db.QueryRowContext(r.Context(),
-		issueSelectQuery()+` WHERE m.id = ?`, missionID))
-	if err != nil {
-		internalError(w, r, h.logger, "read updated issue", err)
-		return
 	}
 
 	writeJSON(w, http.StatusOK, issue)
@@ -609,27 +580,34 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	// The human delete and every chat receipt commit together. Original run
 	// IDs are anchors only; the operation records the actual human deleter.
-	operationID := generateCUID()
-	op, _, err := chatentities.BeginOperation(r.Context(), tx, chatentities.OperationSpec{
-		ID: operationID, WorkspaceID: wsID, Key: "delete:" + operationID,
-		RequestHash: fmt.Sprintf("%x", sha256.Sum256([]byte(deletedID))),
-		ActorType:   "human", ActorID: user.ID, Provenance: "human", Kind: "issue", Verb: "deleted",
-	})
-	if err != nil {
-		internalError(w, r, h.logger, "delete issue: begin receipt", err)
+	var referenced bool
+	if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM chat_entity_refs cr JOIN agent_operations op ON op.id=cr.operation_id WHERE op.entity_id=? AND op.workspace_id=?)`, deletedID, wsID).Scan(&referenced); err != nil {
+		internalError(w, r, h.logger, "delete issue: read references", err)
 		return
 	}
-	snapshot, _ := json.Marshal(chatentities.DeletionAccessSnapshot{Version: 1, WorkspaceID: wsID, Visibility: "trusted_workspace"})
-	if err := chatentities.CompleteOperation(r.Context(), tx, op.ID, chatentities.ResultSpec{
-		EntityID: deletedID, Revision: deletedRevision, AggregateRevision: deletedAggregate,
-		AccessSnapshot: snapshot, Result: json.RawMessage(`{"deleted":true}`),
-	}); err != nil {
-		internalError(w, r, h.logger, "delete issue: complete receipt", err)
-		return
-	}
-	if _, err := chatentities.AppendDeletionRefs(r.Context(), tx, op.ID, wsID, deletedID); err != nil {
-		internalError(w, r, h.logger, "delete issue: append receipt", err)
-		return
+	if referenced {
+		operationID := generateCUID()
+		op, _, err := chatentities.BeginOperation(r.Context(), tx, chatentities.OperationSpec{
+			ID: operationID, WorkspaceID: wsID, Key: "delete:" + operationID,
+			RequestHash: fmt.Sprintf("%x", sha256.Sum256([]byte(deletedID))),
+			ActorType:   "human", ActorID: user.ID, Provenance: "human", Kind: "issue", Verb: "deleted",
+		})
+		if err != nil {
+			internalError(w, r, h.logger, "delete issue: begin receipt", err)
+			return
+		}
+		snapshot, _ := json.Marshal(chatentities.DeletionAccessSnapshot{Version: 1, WorkspaceID: wsID, Visibility: "trusted_workspace"})
+		if err := chatentities.CompleteOperation(r.Context(), tx, op.ID, chatentities.ResultSpec{
+			EntityID: deletedID, Revision: deletedRevision, AggregateRevision: deletedAggregate,
+			AccessSnapshot: snapshot, Result: json.RawMessage(`{"deleted":true}`),
+		}); err != nil {
+			internalError(w, r, h.logger, "delete issue: complete receipt", err)
+			return
+		}
+		if _, err := chatentities.AppendDeletionRefs(r.Context(), tx, op.ID, wsID, deletedID); err != nil {
+			internalError(w, r, h.logger, "delete issue: append receipt", err)
+			return
+		}
 	}
 	// Commit before the blob sweep: the deferred foreign-key checks run here,
 	// and the sweep below is explicitly best-effort bookkeeping that must not

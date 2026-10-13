@@ -478,6 +478,10 @@ func (h *InternalMissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if contextual := runauthority.OriginIDFromContext(r.Context()); contextual != "" {
+		if originID != "" && originID != contextual {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
 		originID = contextual
 	}
 	if sourceRunID := r.URL.Query().Get("source_run_id"); sourceRunID != "" {
@@ -487,6 +491,10 @@ func (h *InternalMissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if origin.ID != "" {
+			if originID != "" && originID != origin.ID {
+				writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+				return
+			}
 			originID = origin.ID
 		}
 	}

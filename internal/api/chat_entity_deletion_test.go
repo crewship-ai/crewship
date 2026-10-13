@@ -95,6 +95,18 @@ func TestChatEntityDeletionHumanReceiptAcrossChats(t *testing.T) {
 			t.Fatalf("wrong page %+v", page)
 		}
 		r := page.Refs[0]
+		if r.Current != nil {
+			t.Fatal("tombstone leaked current data")
+		}
+		if chat == "delete-chat-one" {
+			normalized := page
+			normalized.Refs = append([]EntityRefResponse(nil), page.Refs...)
+			normalized.Refs[0].OperationID = "<operation id>"
+			normalized.Refs[0].EventID = "<event id>"
+			normalized.Refs[0].Entity.ID = "<issue id>"
+			normalized.Refs[0].Provenance.At = "2026-10-13T09:00:00Z"
+			assertEntityHandlerFixture(t, "deleted.json", normalized)
+		}
 		if r.Verb != "deleted" || !r.Entity.Deleted || r.Entity.Identifier != "" || r.Entity.ID != f.issue {
 			t.Fatalf("wrong tombstone %+v", r)
 		}

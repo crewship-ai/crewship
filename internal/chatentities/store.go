@@ -146,10 +146,10 @@ func AppendRef(ctx context.Context, tx *sql.Tx, s RefSpec) (Ref, error) {
 	return r, nil
 }
 
-// ScanRefs returns a bounded raw scan, not an authorized viewer projection.
+// scanRefs returns a bounded raw scan, not an authorized viewer projection.
 // The caller must filter every row before exposing metadata. Position advances
 // over hidden rows as well, and is carried only by an opaque server cursor.
-func ScanRefs(ctx context.Context, q Queryer, chatID string, afterSeq int64, limit int) ([]Ref, int64, error) {
+func scanRefs(ctx context.Context, q Queryer, chatID string, afterSeq int64, limit int) ([]Ref, int64, error) {
 	if chatID == "" || afterSeq < 0 || limit < 1 || limit > 1000 {
 		return nil, afterSeq, ErrInvalid
 	}

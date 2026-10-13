@@ -7,6 +7,26 @@
   "refs": [
     {
       "event_id": "event-3",
+      "operation_id": "op-3",
+      "current": {
+        "title": "Synthetic title",
+        "status": "PLANNING",
+        "priority": "none",
+        "assignee_type": null,
+        "assignee_id": null,
+        "revision": 1,
+        "aggregate_revision": 1,
+        "allowed_actions": [
+          "view",
+          "comment",
+          "edit_fields",
+          "assign",
+          "change_status",
+          "change_workflow",
+          "attach_files",
+          "link"
+        ]
+      },
       "kind": "issue",
       "verb": "created",
       "entity": {

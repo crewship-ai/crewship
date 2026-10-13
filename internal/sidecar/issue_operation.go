@@ -41,6 +41,10 @@ func (s *Server) issueOperationOrigin(w http.ResponseWriter, r *http.Request, bo
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "operation_invalid"})
 		return "", "", false
 	}
+	if runID == "" {
+		// Legacy crews have no durable run scope for idempotency keys.
+		key = ""
+	}
 	return runID, key, true
 }
 

@@ -348,8 +348,13 @@ func crewshipBody(req pipeline.CrewshipRequest) map[string]any {
 	// states the rule where the next field is added: these keys are not the
 	// author's to supply, and a conditional anywhere in this loop would turn
 	// "the run's identity wins" into "the author's does".
-	for _, k := range crewshipInjected {
-		delete(body, k)
+	for key := range body {
+		for _, reserved := range crewshipInjected {
+			if strings.EqualFold(key, reserved) {
+				delete(body, key)
+				break
+			}
+		}
 	}
 	body["workspace_id"] = req.WorkspaceID
 	body["crew_id"] = req.CrewID

@@ -1203,6 +1203,52 @@
             ],
             "type": "object"
           },
+          "current": {
+            "properties": {
+              "aggregate_revision": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "allowed_actions": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "assignee_id": {
+                "nullable": true,
+                "type": "string"
+              },
+              "assignee_type": {
+                "nullable": true,
+                "type": "string"
+              },
+              "priority": {
+                "type": "string"
+              },
+              "revision": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "status",
+              "priority",
+              "assignee_type",
+              "assignee_id",
+              "revision",
+              "aggregate_revision",
+              "allowed_actions"
+            ],
+            "type": "object"
+          },
           "entity": {
             "$ref": "#/components/schemas/ChatEntityIdentity"
           },
@@ -1210,6 +1256,9 @@
             "type": "string"
           },
           "kind": {
+            "type": "string"
+          },
+          "operation_id": {
             "type": "string"
           },
           "provenance": {
@@ -1224,6 +1273,7 @@
         },
         "required": [
           "event_id",
+          "operation_id",
           "kind",
           "verb",
           "entity",
@@ -2501,6 +2551,11 @@
           },
           "estimate": {
             "nullable": true,
+            "type": "integer"
+          },
+          "expected_revision": {
+            "description": "Optional compare-and-set revision; stale values return 409 revision_conflict. Required by chat card editors.",
+            "minimum": 1,
             "type": "integer"
           },
           "labels": {
@@ -8217,11 +8272,11 @@
       "IssueEntityRevision": {
         "properties": {
           "aggregate_revision": {
-            "minimum": 1,
+            "minimum": 0,
             "type": "integer"
           },
           "revision": {
-            "minimum": 1,
+            "minimum": 0,
             "type": "integer"
           }
         },
@@ -12722,6 +12777,94 @@
           "valid",
           "validation_declared",
           "limitations"
+        ],
+        "type": "object"
+      },
+      "RoutineOriginBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "origin_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "pipeline_id": {
+            "type": "string"
+          },
+          "schedules": {
+            "items": {
+              "$ref": "#/components/schemas/RoutineOriginScheduleBinding"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "pipeline_id",
+          "origin_id",
+          "schedules"
+        ],
+        "type": "object"
+      },
+      "RoutineOriginClearRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "clear"
+            ],
+            "type": "string"
+          },
+          "expected_origin_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "schedules": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "expected_origin_id": {
+                  "nullable": true,
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "expected_origin_id"
+              ],
+              "type": "object"
+            },
+            "maxItems": 100,
+            "type": "array"
+          }
+        },
+        "required": [
+          "action",
+          "reason",
+          "expected_origin_id"
+        ],
+        "type": "object"
+      },
+      "RoutineOriginScheduleBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "origin_id": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "origin_id"
         ],
         "type": "object"
       },
@@ -73315,6 +73458,23 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Stable UTF-8 key of at most 200 bytes, scoped to the authenticated user. Same key with changed intent returns 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Expected positive revision, optionally quoted; must agree with expected_revision when both are provided.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -73341,27 +73501,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -73371,27 +73546,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -73401,27 +73591,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -73431,27 +73636,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -73461,27 +73681,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -73491,27 +73726,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -76058,6 +76308,15 @@
             "name": "identifier",
             "required": true,
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable UTF-8 key of at most 200 bytes, scoped to the authenticated user. Same key with changed intent returns 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "schema": {
+              "maxLength": 200,
               "type": "string"
             }
           }
@@ -149721,6 +149980,327 @@
           "routines"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding": {
+      "get": {
+        "description": "Get workspace pipeline origin binding (GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding).",
+        "operationId": "get_api_v1_workspaces_workspaceId_pipelines_slug_origin-binding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineOriginBinding"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace pipeline origin binding",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": true
+      },
+      "post": {
+        "description": "Submit workspace pipeline origin binding (POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding).",
+        "operationId": "post_api_v1_workspaces_workspaceId_pipelines_slug_origin-binding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineOriginClearRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineOriginBinding"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit workspace pipeline origin binding",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/overrides": {

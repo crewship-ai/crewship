@@ -108,6 +108,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	// bearer token. A valid token overrides any `from` in the body (closing
 	// intra-crew impersonation); a token matching no member is refused. With no
 	// token we fall back to the #796 membership-validated `from`.
+	actorAgentID := ""
 	tokenAuthed := false
 	if actorID, actorSlug, present, ok := s.actingIdentity(r); present {
 		if !ok {
@@ -118,6 +119,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 			s.logger.Warn("query: ignoring spoofed from-slug, attributing to authenticated agent",
 				"claimed_from", req.From, "acting_slug", actorSlug, "acting_agent_id", actorID)
 		}
+		actorAgentID = actorID
 		req.From = actorSlug
 		tokenAuthed = true
 	}
@@ -145,14 +147,15 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	// Build IPC request body
 	body := map[string]interface{}{
-		"source_run_id": sourceRunID,
-		"target_slug":   req.Target,
-		"question":      req.Question,
-		"from_slug":     req.From,
-		"crew_id":       s.ipc.CrewID,
-		"workspace_id":  s.ipc.WorkspaceID,
-		"chat_id":       s.requestChatID(r),
-		"depth":         depth,
+		"source_run_id":  sourceRunID,
+		"actor_agent_id": actorAgentID,
+		"target_slug":    req.Target,
+		"question":       req.Question,
+		"from_slug":      req.From,
+		"crew_id":        s.ipc.CrewID,
+		"workspace_id":   s.ipc.WorkspaceID,
+		"chat_id":        s.requestChatID(r),
+		"depth":          depth,
 	}
 	bodyJSON, err := json.Marshal(body)
 	if err != nil {

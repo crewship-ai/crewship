@@ -29,7 +29,7 @@ func TestAssignmentDirectDSLRetainsHumanOriginAtRealHandler(t *testing.T) {
 	defer server.Close()
 	store := pipeline.NewStore(f.h.db)
 	now := time.Now()
-	definition := `{"name":"Delegate","steps":[{"id":"assign","type":"crewship","action":"assignment.create","args":{"target_slug":"worker","task":"Delegated DSL task","chat_id":"` + f.chat + `","source_run_id":"forged-source","chat_origin_id":"forged-origin"}}]}`
+	definition := `{"name":"Delegate","steps":[{"id":"assign","type":"crewship","action":"assignment.create","args":{"target_slug":"worker","task":"Delegated DSL task","chat_id":"` + f.chat + `","source_run_id":"forged-source","Source_Run_Id":"forged-case-source","ſource_agent_id":"forged-unicode-actor","chat_origin_id":"forged-origin"}}]}`
 	recipe, err := store.Save(t.Context(), pipeline.SaveInput{WorkspaceID: f.workspace, Slug: "dsl-delegate", Name: "Delegate", DefinitionJSON: definition, Author: pipeline.AuthorMeta{CrewID: f.crew, AgentID: f.agent, Via: pipeline.AuthoredViaAgent}, SourceRunID: f.run, SourceAgentID: f.agent, LastTestRunAt: &now, LastTestRunPassed: true})
 	if err != nil {
 		t.Fatal(err)

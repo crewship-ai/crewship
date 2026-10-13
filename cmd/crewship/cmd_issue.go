@@ -538,6 +538,8 @@ func init() {
 	issueCreateCmd.Flags().String("routine-id", "", "Bind to a routine (pipeline ID)")
 
 	// issue update flags
+	issueUpdateCmd.Flags().Int64("expected-revision", 0, "Expected issue revision; stale edits return a conflict")
+	issueUpdateCmd.Flags().String("idempotency-key", "", "Stable operation key; reuse on retry")
 	issueUpdateCmd.Flags().String("title", "", "New title")
 	issueUpdateCmd.Flags().String("description", "", "New description")
 	issueUpdateCmd.Flags().String("status", "", "New status: BACKLOG, TODO, IN_PROGRESS, REVIEW, DONE, FAILED, CANCELLED, DUPLICATE")
@@ -575,6 +577,7 @@ func init() {
 	issueStopCmd.Flags().Bool("hard", false, "also terminate the running process (Tier 2); cooperative stop alone only prevents further work from starting")
 
 	// issue comment flags
+	issueCommentCmd.Flags().String("idempotency-key", "", "Stable operation key; reuse on retry")
 	issueCommentCmd.Flags().String("body", "", "Comment body (alternative to positional args)")
 	issueCommentCmd.Flags().StringArray("mention", nil, "Mention an agent by slug (repeatable) — resolved to the "+
 		"workspace agent and written as the real [@slug](crewship:agent/<id>) link the server requires. "+

@@ -1094,12 +1094,9 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return "", fmt.Errorf("dispatch mention: comment origin: %w", err)
 		}
-		if originID != "" {
-			if current := runauthority.OriginIDFromContext(ctx); current != "" && current != originID {
-				return "", runauthority.ErrIdentityMismatch
-			}
-			ctx = runauthority.WithOriginID(ctx, originID)
-		}
+		// The comment is the authority source even when it says NULL. In
+		// particular, never inherit a finishing assignment's unrelated receipt.
+		ctx = runauthority.WithOriginID(ctx, originID)
 	}
 
 	// The target, re-resolved in the comment's workspace. This repeats

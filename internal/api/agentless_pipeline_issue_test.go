@@ -78,6 +78,13 @@ func TestAgentlessPipelineIssueUpdateAndKeyedReplay(t *testing.T) {
 	if before != after || refs != 0 || actorType != "system" || actorID != "pipeline:"+recipe.ID+":crew:"+f.crew {
 		t.Fatalf("system scope/audit: %d %d refs=%d actor=%s/%s", before, after, refs, actorType, actorID)
 	}
+
+	createBody := map[string]any{"workspace_id": f.workspace, "crew_id": f.crew, "author_run_id": "agentless-retry", "operation_key": "stable-system-create", "title": "System created once"}
+	systemCreated := chatIssueJSON(t, call("/api/v1/internal/issues", "agentless-retry", createBody), 201)
+	systemReplay := chatIssueJSON(t, call("/api/v1/internal/issues", "agentless-retry", createBody), 200)
+	if systemCreated["id"] != systemReplay["id"] || systemReplay["replayed"] != true {
+		t.Fatalf("system create duplicated: %v %v", systemCreated, systemReplay)
+	}
 	changed := map[string]any{"workspace_id": f.workspace, "author_run_id": "agentless-retry", "operation_key": "stable-agentless-update", "status": "IN_PROGRESS"}
 	if rr := call("/api/v1/internal/issues/"+identifier, "agentless-retry", changed); rr.Code != 409 {
 		t.Fatalf("changed key payload: %d %s", rr.Code, rr.Body.String())
@@ -117,5 +124,32 @@ func TestAgentlessPipelineIssueUpdateAndKeyedReplay(t *testing.T) {
 	wrong := map[string]any{"workspace_id": f.workspace, "crew_id": "other-live-crew", "author_run_id": "agentless-retry", "title": "Denied"}
 	if rr := call("/api/v1/internal/issues", "agentless-retry", wrong); rr.Code != 403 {
 		t.Fatalf("cross-crew create: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestAutonomousPipelineAgentRetainsCrossCrewIssueUpdates(t *testing.T) {
+	f := newChatIssueFixture(t)
+	execOrFatal(t, f.h.db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('automation-other',?,'Other','automation-other')`, f.workspace)
+	seedAgentRow(t, f.h.db, "automation-other-agent", f.workspace, "automation-other", "Other", "other", "LEAD")
+	seedIssue(t, f.h.db, f.workspace, "automation-other", "automation-other-agent", "OTHER-1", "BACKLOG")
+	store := pipeline.NewStore(f.h.db)
+	now := time.Now()
+	recipe, err := store.Save(t.Context(), pipeline.SaveInput{WorkspaceID: f.workspace, Slug: "cross-crew-automation", Name: "Automation", DefinitionJSON: `{"name":"Automation","steps":[{"id":"update","type":"crewship","action":"issue.update","args":{"identifier":"OTHER-1","status":"TODO"}}]}`, Author: pipeline.AuthorMeta{CrewID: f.crew, AgentID: f.agent, Via: pipeline.AuthoredViaAgent}, LastTestRunAt: &now, LastTestRunPassed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := NewInternalHandler(f.h.db, "cross-crew-host", newTestLogger())
+	mux := http.NewServeMux()
+	mux.Handle("PATCH /api/v1/internal/issues/{identifier}", host.requireInternal(withHostChatOrigin(http.HandlerFunc(f.h.UpdateStatus))))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	executor := pipeline.NewExecutor(store, pipeline.NewResolver(f.h.db), nil, nil).WithRunStore(pipeline.NewRunStore(f.h.db)).WithCrewshipActions(newCrewshipActions(server.URL, "cross-crew-host", policy.NewResolver(f.h.db), f.h.db, newTestLogger()))
+	result, err := executor.Run(t.Context(), pipeline.RunInput{PipelineID: recipe.ID, WorkspaceID: f.workspace, Mode: pipeline.ModeRun})
+	if err != nil || result.Status != "COMPLETED" {
+		t.Fatalf("standing automation regression: %+v %v", result, err)
+	}
+	var status string
+	if err = f.h.db.QueryRow(`SELECT status FROM missions WHERE identifier='OTHER-1' AND workspace_id=?`, f.workspace).Scan(&status); err != nil || status != "TODO" {
+		t.Fatalf("foreign crew issue not updated: %s %v", status, err)
 	}
 }

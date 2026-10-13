@@ -1110,6 +1110,12 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		return stats, fmt.Errorf("backup: probe issue_work: %w", err)
 	}
 	legacyRestoreOrigins := map[string]string{}
+	type legacyRecoveryRow struct {
+		table   string
+		row     map[string]any
+		allowed map[string]bool
+	}
+	var legacyRecoveryRows []legacyRecoveryRow
 	conversationAssignments := map[string]bool{}
 	for _, job := range dump.Tables["workspace_conversation_agent_jobs"] {
 		if id, _ := job["assignment_id"].(string); id != "" {
@@ -1205,6 +1211,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 					}
 				}
 			}
+			legacySourceRow := row
 			row, err = fenceLegacyRestoredWork(ctx, tx, table, row, allowed, legacyRestoreOrigins)
 			if err != nil {
 				return stats, err
@@ -1317,6 +1324,11 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 					restoredMissions[id] = true
 				}
 			}
+			if landed {
+				if _, present := legacySourceRow["chat_origin_id"]; !present && row["chat_origin_id"] != nil {
+					legacyRecoveryRows = append(legacyRecoveryRows, legacyRecoveryRow{table, legacySourceRow, allowed})
+				}
+			}
 			if pendingClamp != nil && landed {
 				appendSecurityLevelClamp(&stats, *pendingClamp)
 			}
@@ -1325,6 +1337,18 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			stats.RowsInsertedByTable = map[string]int{}
 		}
 		stats.RowsInsertedByTable[table] += tableInserted
+	}
+	// Assignments precede pipeline_runs in FK-safe restore order. Revisit only
+	// newly inserted legacy rows after their complete historical chain lands,
+	// inside this transaction; never rewrite existing target work or renew epochs.
+	for _, candidate := range legacyRecoveryRows {
+		resolved, err := fenceLegacyRestoredWork(ctx, tx, candidate.table, candidate.row, candidate.allowed, legacyRestoreOrigins)
+		if err != nil {
+			return stats, err
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE "+quoteIdent(candidate.table)+" SET chat_origin_id=? WHERE id=? AND workspace_id=?", resolved["chat_origin_id"], candidate.row["id"], candidate.row["workspace_id"]); err != nil {
+			return stats, fmt.Errorf("backup: recover historical origin: %w", err)
+		}
 	}
 	// Settled once the insert pass is done, so the caller sees one number
 	// for the whole restore. On an early error return above, the tx rolls

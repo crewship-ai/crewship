@@ -175,9 +175,7 @@ func TestDelegatedChatRunKeepsMemberRequesterPermissions(t *testing.T) {
 func TestAssignmentIssueMutationSharesAuthorityTransaction(t *testing.T) {
 	f := newChatIssueFixture(t)
 	issue := seedIssue(t, f.h.db, f.workspace, f.crew, f.agent, "ENG-ASSIGN-TX", "TODO")
-	if err := ensureMissionChat(t.Context(), f.h.db, issue, f.workspace, f.agent, "Issue"); err != nil {
-		t.Fatal(err)
-	}
+	seedChatIssueRun(t, f.h, f.workspace, f.agent, f.user, issue, "assignment-issue-source")
 	execOrFatal(t, f.h.db, `CREATE TRIGGER reject_assignment_comment BEFORE INSERT ON mission_comments BEGIN SELECT RAISE(ABORT,'comment refused'); END`)
 	h := NewAssignmentHandler(f.h.db, nil, nil, "host", newTestLogger())
 	t.Cleanup(h.WaitDispatches)
@@ -185,7 +183,7 @@ func TestAssignmentIssueMutationSharesAuthorityTransaction(t *testing.T) {
 	if err := f.h.db.QueryRow(`SELECT slug FROM agents WHERE id='agent-worker'`).Scan(&slug); err != nil {
 		t.Fatal(err)
 	}
-	body := map[string]any{"workspace_id": f.workspace, "crew_id": f.crew, "chat_id": issue, "actor_agent_id": f.agent, "target_slug": slug, "task": "work", "source_run_id": f.run}
+	body := map[string]any{"workspace_id": f.workspace, "crew_id": f.crew, "chat_id": issue, "actor_agent_id": f.agent, "target_slug": slug, "task": "work", "source_run_id": "assignment-issue-source"}
 	rr := httptest.NewRecorder()
 	h.Create(rr, httptest.NewRequest(http.MethodPost, "/", jsonBody(body)))
 	if rr.Code != 500 {

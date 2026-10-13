@@ -83,6 +83,18 @@ Default output is JSON; the global output format also supports YAML and NDJSON.
 Global `--filter` applies a jq expression to the JSON response. This read never
 changes issue state or starts a run.
 
+## Retrying edits and comments
+
+```bash
+crewship issue update ENG-42 --title 'Fix loading' --expected-revision 7 --idempotency-key edit-7
+crewship issue comment ENG-42 --body 'Verified' --idempotency-key comment-7
+```
+
+Keep the key and expected revision unchanged when retrying after a timeout.
+A stale revision or changed payload under the same key returns a conflict.
+Omitting these flags preserves legacy behavior. Use `issue revision` to inspect
+the current revision before making a new edit.
+
 ## `crewship issue list`
 
 List issues in the workspace with optional filters.

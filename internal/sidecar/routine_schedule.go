@@ -46,6 +46,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // handleRoutineScheduleCreate proxies POST /routines/schedules/create
@@ -66,7 +67,7 @@ func (s *Server) handleRoutineScheduleCreate(w http.ResponseWriter, r *http.Requ
 		writeJSONResponse(w, 403, map[string]string{"error": "unrecognized agent token"})
 		return
 	}
-	var payload map[string]any
+	var payload map[string]json.RawMessage
 	if !decodeCappedJSONLimit(w, r, &payload, pipelineMaxBodyBytes) {
 		return
 	}
@@ -74,8 +75,16 @@ func (s *Server) handleRoutineScheduleCreate(w http.ResponseWriter, r *http.Requ
 		writeJSONResponse(w, 400, map[string]string{"error": "schedule object required"})
 		return
 	}
-	payload["source_run_id"] = routineSourceRun(ctx)
-	payload["source_agent_id"] = agent
+	for key := range payload {
+		for _, reserved := range []string{"source_run_id", "source_agent_id", "chat_origin_id", "workspace_id", "crew_id"} {
+			if strings.EqualFold(key, reserved) {
+				delete(payload, key)
+				break
+			}
+		}
+	}
+	payload["source_run_id"], _ = json.Marshal(routineSourceRun(ctx))
+	payload["source_agent_id"], _ = json.Marshal(agent)
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		writeJSONResponse(w, 400, map[string]string{"error": "invalid schedule"})
@@ -86,5 +95,6 @@ func (s *Server) handleRoutineScheduleCreate(w http.ResponseWriter, r *http.Requ
 	r.ContentLength = int64(len(raw))
 	q := url.Values{}
 	q.Set("workspace_id", s.ipc.WorkspaceID)
+	q.Set("crew_id", s.ipc.CrewID)
 	s.proxyToAPI(w, r, http.MethodPost, "/api/v1/internal/routines/schedules?"+q.Encode())
 }

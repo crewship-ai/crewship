@@ -199,15 +199,15 @@ func TestBoundedScan(t *testing.T) {
 	if e := tx.Commit(); e != nil {
 		t.Fatal(e)
 	}
-	first, pos, e := ScanRefs(ctx, db, "chat", 0, 2)
+	first, pos, e := scanRefs(ctx, db, "chat", 0, 2)
 	if e != nil || len(first) != 2 || pos != first[1].Seq {
 		t.Fatalf("first %+v %d %v", first, pos, e)
 	}
-	second, pos2, e := ScanRefs(ctx, db, "chat", pos, 2)
+	second, pos2, e := scanRefs(ctx, db, "chat", pos, 2)
 	if e != nil || len(second) != 1 || pos2 <= pos || second[0].Operation.EntityID != "issue" {
 		t.Fatalf("second %+v %v", second, e)
 	}
-	if _, _, e = ScanRefs(ctx, db, "chat", -1, 2); !errors.Is(e, ErrInvalid) {
+	if _, _, e = scanRefs(ctx, db, "chat", -1, 2); !errors.Is(e, ErrInvalid) {
 		t.Fatal(e)
 	}
 }

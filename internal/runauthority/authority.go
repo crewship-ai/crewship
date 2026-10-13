@@ -70,14 +70,18 @@ func Resolve(ctx context.Context, q Queryer, runID, agentID, workspaceID string)
 		return a, ErrIdentityMismatch
 	}
 	var payload struct {
-		ChatOriginID     string                `json:"chat_origin_id"`
-		TriggerType      string                `json:"trigger_type"`
-		HostAdmitted     bool                  `json:"host_admitted"`
-		ChatID           string                `json:"chat_id"`
-		TriggerMessageID string                `json:"trigger_message_id"`
-		HumanAuthority   *chataudience.Receipt `json:"human_authority"`
+		RequesterAuthorityMissing bool                  `json:"requester_authority_missing"`
+		ChatOriginID              string                `json:"chat_origin_id"`
+		TriggerType               string                `json:"trigger_type"`
+		HostAdmitted              bool                  `json:"host_admitted"`
+		ChatID                    string                `json:"chat_id"`
+		TriggerMessageID          string                `json:"trigger_message_id"`
+		HumanAuthority            *chataudience.Receipt `json:"human_authority"`
 	}
 	if json.Unmarshal([]byte(raw), &payload) != nil {
+		return a, ErrUnavailable
+	}
+	if payload.RequesterAuthorityMissing {
 		return a, ErrUnavailable
 	}
 	a.TriggerType = payload.TriggerType

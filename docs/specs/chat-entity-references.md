@@ -14,7 +14,7 @@ the same handlers as HTTP `/issue/...` calls. Tool arguments cannot supply an
 actor, chat, workspace or human authority; these come from authenticated tokens
 and durable host run admission. Read-only calls do not create cards.
 
-Every human-requested mutation requires an explicit operation key, at most
+Every agent mutation requested by a human requires an explicit operation key, at most
 200 bytes. HTTP accepts `operation_key` or `Idempotency-Key`; conflicting
 values return `409`. MCP mutation tools require `request_key`. Reuse that key
 when retrying the same operation; never generate another key for a retry.
@@ -40,7 +40,7 @@ and replay. A missing agent never removes a stored human origin. Human-origin
 routine mutations still require an identified agent. Explicit show requires a
 human chat origin.
 
-Once run tokens are enabled, old agent tokens cannot mutate issues. This
+Legacy crews without run tokens retain unkeyed HTTP and MCP issue mutations; the sidecar drops keys it cannot bind to a verified run. Once run tokens are enabled, old agent tokens cannot mutate issues. This
 delivery supports human-run create, update, comment and show. Work execution,
 relations and attachment writes from human runs return
 `403 chat_issue_action_not_supported` until their host paths implement the same
@@ -68,7 +68,21 @@ A new chat invocation supplies its own origin even when invoking a previously
 published routine. Non-chat public routine invocation retains the existing
 routine-launch authorization policy and any stored authoring origin; this
 contract does not replace standing automation grants with a new launcher role
-policy. Immutable pinned versions retain their original authoring origin.
+policy. Immutable pinned versions retain their original authoring origin. Unpinned schedules store only their own explicit invocation override; otherwise they resolve the current head at execution, rather than freezing its origin at schedule creation. A fresh chat save can bind the head to a fresh verified source. An authenticated OWNER/ADMIN may explicitly clear the head and selected schedule bindings through the audited [operator origin-binding API](routine-origin-binding.md). This never clears immutable versions or already admitted work. Clearing a binding does not re-enable a circuit-broken schedule; use its ordinary operator enable action afterward.
+
+Channel jobs and human issue mentions without a durable chat receipt may answer,
+but their runs carry a host-derived missing-requester marker. Issue mutations
+and further delegation fail closed; they do not inherit the completing run's
+authority or become autonomous. Queued mentions are grouped by their actual
+stored origin and author, never the preceding run. A delegated execution's
+chat is resolved from its own host admission; the sidecar's boot chat is never
+a substitute for run identity. A verified source lacking a persisted execution
+chat returns `403 delegation_execution_chat_unavailable`; no chat is invented
+and no unrelated issue receives delegation side effects.
+
+Routine agent steps have durable `ROUTINE` journal admissions and publish agent
+RUNNING state. Admission failure fails the step; this is intentional so every
+issued run token has a durable authority record.
 
 Backup and fork include origins alongside their dependent records. Forks clear
 the human receipt rather than silently granting the copied work autonomous
@@ -78,20 +92,20 @@ of a previously admitted human.
 
 ## Upgrade boundary
 
-The migration preserves legacy records and terminal history. Existing
-`PENDING`, `QUEUED` and `RUNNING` assignments and resumable orchestration
-missions receive an immutable invalid origin when their admission provenance
-cannot be recovered. Recovery therefore cannot reinterpret them as autonomous.
-Submit a fresh authenticated request to authorize replacement work; old records
-remain auditable and may settle as failed. Legacy backup imports apply the same
-fence when the origin column is absent, while current explicit autonomous
-`NULL` origins remain autonomous.
+The migration preserves legacy records, terminal history and queue status.
+For unfinished assignments, orchestration missions and routine work, recovery
+requires unique durable host-admission evidence. Exact historical human receipts
+are copied without renewing membership/chat epochs, then checked live at execution.
+Positively host-admitted machine roots retain autonomy. Missing, malformed,
+duplicate, cyclic or excessively deep provenance remains fenced until a fresh
+authenticated request admits replacement work. This includes historical UI/cron
+work without positive evidence; absence of a human receipt is not proof of autonomy.
 
-Standing routine grants remain unchanged. Pending and active pipeline chains
-are fenced only when durable journal evidence identifies a chat-human root.
-Old autonomous run admissions without an explicit host-admission marker also
-fail closed. This rollout boundary is intentional and requires checking queued
-work before deploying.
+Legacy backup imports use the same rule when the origin column is absent.
+Omitting the Journal category does not authorize unknown work. Current backups
+with explicit autonomous `NULL` origins remain unchanged. Standing routine
+grants remain unchanged. Old autonomous journal admissions without an explicit
+host-admission marker also fail closed. Check affected queued work before deployment.
 
 ## Authorization
 
@@ -176,7 +190,7 @@ an expired cursor or a cursor from a previous server process returns
 `400 {"error":"cursor_invalid"}`. Discard local pagination state and retry
 without it. If the captured authority changes while the viewer retains access,
 a valid cursor starts a new replacement snapshot. If access is gone, the
-request returns `404` instead.
+request returns `404` instead. A database failure returns `503`; an authority change while gathering one page returns `503 entity_refs_authority_changed`, requiring a fresh snapshot.
 
 ### Client reconciliation
 
@@ -200,10 +214,16 @@ alone is not evidence that a card is current.
 
 ### Reference record
 
-A reference contains `event_id`, `kind`, `verb`, `entity`, `provenance`, `anchor`
+A reference contains `event_id`, `operation_id`, `kind`, `verb`, `entity`, `provenance`, `anchor`
 and `revision_at_action`. The supported kind is `issue`. The operation records
 its verb and actor identity; the list does not expose operation keys, request
 hashes, authority receipts, access snapshots or stored mutation payloads.
+
+`operation_id` is accepted by `crewship operation get`. Live issues also include
+`current`: title, status, priority, nullable assignee type/ID, current field and
+aggregate revisions, and `allowed_actions`. This bounded batch projection and
+run status are gathered with all references in one query, without per-card
+operation/detail requests. Deleted receipts omit `current` entirely.
 
 `entity` contains `id`, current `identifier` and `workspace_id`.
 `provenance` contains `actor: {type, id}` and `at`. Actor display names are not
@@ -241,7 +261,31 @@ assertion that unrelated run/automation data has been refreshed.
 Existing issue detail responses also include `revision`, `aggregate_revision`
 and `allowed_actions`. Revisions are selected with the issue fields, rather
 than assigned after another query. Actions describe the viewer's current
-permission; mutation endpoints still reauthorize and validate state.
+permission and issue state. Delete is offered only for BACKLOG/CANCELLED;
+start_work only for BACKLOG/TODO with no active assignment/routine or human
+hold; workflow changes are omitted for terminal issues. Mutation endpoints
+still reauthorize and validate state.
+
+## Human card edits and comments
+
+Existing `PATCH /api/v1/crews/{crewId}/issues/{identifier}` accepts optional
+`expected_revision` (positive integer) or `If-Match` (positive integer, optionally
+quoted). If both appear they must agree. A stale edit returns
+`409 {"error":"revision_conflict","revision":2}` without mutation.
+
+PATCH and `POST .../comments` accept `Idempotency-Key` (1–200 UTF-8 bytes),
+scoped to the authenticated human and selected workspace. The reserve, mutation
+and successful response commit together. A retry with unchanged intent returns
+the original response/status and `Idempotency-Replayed: true`; both responses
+include `Operation-ID`. Changed intent returns `409 operation_key_conflict`.
+Current account and membership authority are checked before replay; a successful
+old response cannot authorize access after revocation. Replays do not repeat
+comments, activity or mention dispatch. PATCH labels and fields are atomic.
+
+These parameters remain optional for old clients. Chat card editors MUST send
+both an explicit expected revision and stable retry key; they retain the same
+key/precondition after a timeout and start a new operation after resolving a
+conflict. Comment composers MUST retain their key until success is known.
 
 ## CLI
 
@@ -249,6 +293,9 @@ permission; mutation endpoints still reauthorize and validate state.
 crewship chat refs <chat-id> --limit 100
 crewship chat refs <chat-id> --cursor '<next_cursor>' --limit 100
 crewship operation get <operation-id>
+crewship issue revision ENG-42
+crewship issue update ENG-42 --title 'New title' --expected-revision 7 --idempotency-key edit-7
+crewship issue comment ENG-42 --body 'Result' --idempotency-key comment-7
 ```
 
 The commands use the authenticated API with the configured workspace and print
@@ -266,6 +313,7 @@ work. API authorization failures produce a failing CLI exit status.
 - [Operation and reference storage](../../internal/chatentities/)
 
 Fixtures cover the initial bounded page, continuation, authority reset,
-a failed run, an invalid cursor and the sanitized operation response. Random
+a failed run, an invalid cursor, an empty list, a deleted receipt, an edit
+conflict, a repeated comment and the sanitized operation response. Random
 cursor and snapshot values are normalized in the fixtures; they are not usable
 credentials. Tests compare these fixtures with the production handlers.

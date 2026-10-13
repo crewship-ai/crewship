@@ -90,7 +90,7 @@ func TestDeletionRefsPreserveHumanActorAndOriginalAnchors(t *testing.T) {
 	if e = tx.Commit(); e != nil {
 		t.Fatal(e)
 	}
-	scanned, _, e := ScanRefs(ctx, db, "chat", 0, 10)
+	scanned, _, e := scanRefs(ctx, db, "chat", 0, 10)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -159,7 +159,7 @@ func TestDeletionRefsRollback(t *testing.T) {
 	if e = tx.Rollback(); e != nil {
 		t.Fatal(e)
 	}
-	refs, _, e := ScanRefs(ctx, db, "chat", 0, 10)
+	refs, _, e := scanRefs(ctx, db, "chat", 0, 10)
 	if e != nil || len(refs) != 0 {
 		t.Fatalf("rollback %+v %v", refs, e)
 	}

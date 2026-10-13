@@ -543,6 +543,9 @@ func (s *Server) ipcRequestJSON(ctx context.Context, method, path string, body [
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("X-Internal-Token", s.ipc.Token)
+	if token := routineSourceToken(ctx); token != "" {
+		req.Header.Set("X-Crewship-Run-Token", token)
+	}
 
 	resp, err := ipcClient.Do(req)
 	if err != nil {

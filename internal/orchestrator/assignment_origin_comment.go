@@ -17,10 +17,15 @@ func WriteAssignmentResultComment(ctx context.Context, db *sql.DB, assignmentID,
 		return false, err
 	}
 	defer tx.Rollback()
-	var originID string
-	err = tx.QueryRowContext(ctx, `SELECT COALESCE(a.chat_origin_id,m.chat_origin_id,'') FROM missions m LEFT JOIN assignments a ON a.id=? AND a.workspace_id=m.workspace_id WHERE m.id=? AND m.workspace_id=?`, assignmentID, missionID, workspaceID).Scan(&originID)
+	var originID, requesterID string
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE(a.chat_origin_id,m.chat_origin_id,''),COALESCE(a.created_by_user_id,'') FROM missions m LEFT JOIN assignments a ON a.id=? AND a.workspace_id=m.workspace_id WHERE m.id=? AND m.workspace_id=?`, assignmentID, missionID, workspaceID).Scan(&originID, &requesterID)
 	if err != nil {
 		return false, err
+	}
+	// A human-requested assignment without a verifiable root receipt may
+	// finish, but must not publish automatic issue mutations as autonomous.
+	if originID == "" && requesterID != "" {
+		return false, nil
 	}
 	if originID != "" {
 		authority, err := runauthority.ValidateOrigin(ctx, tx, originID, agentID, workspaceID)

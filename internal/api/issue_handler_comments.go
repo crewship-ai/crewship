@@ -126,10 +126,30 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, "begin comment", err)
+		return
+	}
+	defer tx.Rollback()
+	var exists bool
+	if err = tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM missions WHERE id=? AND workspace_id=? AND crew_id=?)`, missionID, wsID, crewID).Scan(&exists); err != nil {
+		internalError(w, r, h.logger, "recheck comment issue", err)
+		return
+	}
+	if !exists {
+		writeProblem(w, r, 404, "Issue not found")
+		return
+	}
+	op, handled := h.beginHumanIssueOperation(w, r, tx, "commented", missionID, req)
+	if handled {
+		return
+	}
+
 	id := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err = h.db.ExecContext(r.Context(), `
+	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at)
 		VALUES (?, ?, 'user', ?, ?, ?, ?)`,
 		id, missionID, user.ID, req.Body, now, now)
@@ -147,6 +167,18 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		Body:       req.Body,
 		CreatedAt:  now,
 		UpdatedAt:  now,
+	}
+
+	if err = completeHumanIssueOperation(r, tx, op, missionID, resp); err != nil {
+		internalError(w, r, h.logger, "complete comment operation", err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "commit comment", err)
+		return
+	}
+	if op != nil {
+		w.Header().Set("Operation-ID", op.ID)
 	}
 
 	// @mentions (#1768 item 3) — the HUMAN door. Both doors have to parse or

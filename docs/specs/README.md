@@ -35,6 +35,9 @@ public contract here. Superseded a spec? Move it to
 
 ## Work and dispatch
 
+- [Routine authority bindings](routine-origin-binding.md): chat origin inheritance,
+  schedule binding policy and audited operator recovery.
+
 - [Chat entity references](chat-entity-references.md): authorized, bounded Issue
   reference snapshots, operation projections, revision reads and API/CLI fixtures.
 

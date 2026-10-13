@@ -133,3 +133,24 @@ func TestResolveForeignWorkspaceTraceCannotRevokeOriginalRun(t *testing.T) {
 		t.Fatalf("own terminal ignored: %v", e)
 	}
 }
+
+func TestMissingRequesterMarkerCannotBecomeAutonomousOrDelegate(t *testing.T) {
+	db, _ := authorityFixture(t)
+	putEntry(t, db, "human-channel-start", "human-channel", "run.started", "orchestrator", map[string]any{"chat_id": "chat", "trigger_type": "ASSIGNMENT", "host_admitted": true, "created_by_user_id": "human", "requester_authority_missing": true})
+	if _, err := Resolve(t.Context(), db, "human-channel", "agent", "ws"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("missing human authority treated as autonomy: %v", err)
+	}
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := CaptureOrigin(t.Context(), tx, "human-channel", "agent", "ws"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("missing requester laundered via delegation: %v", err)
+	}
+	tx.Rollback()
+	putEntry(t, db, "genuine-auto-start", "genuine-auto", "run.started", "orchestrator", map[string]any{"chat_id": "chat", "trigger_type": "ASSIGNMENT", "host_admitted": true})
+	if a, err := Resolve(t.Context(), db, "genuine-auto", "agent", "ws"); err != nil || a.HumanAuthority != nil {
+		t.Fatalf("genuine autonomous workflow refused: %+v %v", a, err)
+	}
+}

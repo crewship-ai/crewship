@@ -487,7 +487,7 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeChatIssueReplay(w, op.operation)
 		return
 	}
-	if op != nil {
+	if op != nil && op.actorType != "system" {
 		var validAgent bool
 		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM agents WHERE id=? AND workspace_id=? AND crew_id=? AND deleted_at IS NULL)`, req.AuthorAgentID, req.WorkspaceID, req.CrewID).Scan(&validAgent); err != nil {
 			writeChatIssueError(w, err)

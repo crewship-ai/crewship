@@ -96,14 +96,15 @@ func truncate(s string, n int) string {
 }
 
 type createQueryBody struct {
-	SourceRunID string `json:"source_run_id,omitempty"`
-	TargetSlug  string `json:"target_slug"`
-	Question    string `json:"question"`
-	FromSlug    string `json:"from_slug"`
-	CrewID      string `json:"crew_id"`
-	WorkspaceID string `json:"workspace_id"`
-	ChatID      string `json:"chat_id"`
-	Depth       int    `json:"depth"`
+	ActorAgentID string `json:"actor_agent_id,omitempty"`
+	SourceRunID  string `json:"source_run_id,omitempty"`
+	TargetSlug   string `json:"target_slug"`
+	Question     string `json:"question"`
+	FromSlug     string `json:"from_slug"`
+	CrewID       string `json:"crew_id"`
+	WorkspaceID  string `json:"workspace_id"`
+	ChatID       string `json:"chat_id"`
+	Depth        int    `json:"depth"`
 }
 
 // Create handles POST /api/v1/internal/queries.
@@ -114,6 +115,18 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
+	}
+	if body.SourceRunID != "" {
+		chat, err := delegationExecutionChat(r.Context(), h.db, body.SourceRunID, body.ActorAgentID, body.WorkspaceID)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if body.ChatID != "" && body.ChatID != chat {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		body.ChatID = chat
 	}
 	if body.TargetSlug == "" || body.Question == "" || body.CrewID == "" || body.WorkspaceID == "" || body.ChatID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -141,7 +154,13 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Look up the from agent (for logging/DB)
 	var fromAgentID string
-	if body.FromSlug != "" {
+	if body.ActorAgentID != "" {
+		err := h.db.QueryRowContext(r.Context(), `SELECT id,slug FROM agents WHERE id=? AND crew_id=? AND workspace_id=? AND deleted_at IS NULL`, body.ActorAgentID, body.CrewID, body.WorkspaceID).Scan(&fromAgentID, &body.FromSlug)
+		if err != nil {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+	} else if body.FromSlug != "" {
 		err := h.db.QueryRowContext(r.Context(), `
 			SELECT id FROM agents WHERE slug = ? AND crew_id = ? AND deleted_at IS NULL
 		`, body.FromSlug, body.CrewID).Scan(&fromAgentID)
@@ -231,6 +250,17 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	originID := runauthority.OriginIDFromContext(r.Context())
+	if body.SourceRunID != "" {
+		chat, err := delegationExecutionChat(r.Context(), tx, body.SourceRunID, fromAgentID, body.WorkspaceID)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if chat != body.ChatID {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+	}
 	if body.SourceRunID != "" {
 		origin, err := runauthority.CaptureOrigin(r.Context(), tx, body.SourceRunID, fromAgentID, body.WorkspaceID)
 		if err != nil {

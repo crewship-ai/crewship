@@ -79,6 +79,23 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
+	// Pipeline identity comes only from authenticated host context, never
+	// recipe-authored JSON aliases of source_run_id.
+	if hostPipelineRunID(r.Context()) != "" {
+		body.SourceRunID = ""
+	}
+	if body.SourceRunID != "" {
+		chat, err := delegationExecutionChat(r.Context(), h.db, body.SourceRunID, body.ActorAgentID, body.WorkspaceID)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if body.ChatID != "" && body.ChatID != chat {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		body.ChatID = chat
+	}
 	if body.TargetSlug == "" || body.Task == "" || body.CrewID == "" || body.WorkspaceID == "" || body.ChatID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "target_slug, task, crew_id, workspace_id, chat_id required",
@@ -357,6 +374,17 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	originID := runauthority.OriginIDFromContext(r.Context())
 	if body.SourceRunID != "" {
+		chat, err := delegationExecutionChat(r.Context(), tx, body.SourceRunID, assignedByID, body.WorkspaceID)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if chat != body.ChatID {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+	}
+	if body.SourceRunID != "" {
 		origin, err := runauthority.CaptureOrigin(r.Context(), tx, body.SourceRunID, assignedByID, body.WorkspaceID)
 		if err != nil {
 			writeChatIssueError(w, err)
@@ -582,7 +610,7 @@ func (h *AssignmentHandler) runAssignment(
 	target targetAgentInfo,
 ) {
 	var originID string
-	originErr := h.db.QueryRowContext(ctx, `SELECT COALESCE(chat_origin_id,'') FROM assignments WHERE id=? AND workspace_id=?`, assignmentID, body.WorkspaceID).Scan(&originID)
+	originErr := h.db.QueryRowContext(ctx, `SELECT COALESCE(chat_origin_id,''),COALESCE(created_by_user_id,'') FROM assignments WHERE id=? AND workspace_id=?`, assignmentID, body.WorkspaceID).Scan(&originID, &body.CreatedByUserID)
 	if originErr != nil && !errors.Is(originErr, sql.ErrNoRows) {
 		h.logger.Error("load assignment origin", "error", originErr, "assignment_id", assignmentID)
 		return
@@ -796,6 +824,9 @@ func (h *AssignmentHandler) runAssignment(
 	}
 	if body.CreatedByUserID != "" {
 		runStartedPayload["created_by_user_id"] = body.CreatedByUserID
+		if body.ChatOriginID == "" {
+			runStartedPayload["requester_authority_missing"] = true
+		}
 	}
 	if body.AuthorAgentID != "" {
 		runStartedPayload["author_agent_id"] = body.AuthorAgentID

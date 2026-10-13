@@ -45,6 +45,8 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "RoutineOriginBinding", pointer: "/components/schemas/RoutineOriginBinding", value: routineOriginBindingResponse{}},
+	{name: "RoutineOriginScheduleBinding", pointer: "/components/schemas/RoutineOriginScheduleBinding", value: routineOriginScheduleBinding{}},
 	{name: "ChatEntityReferencePage", pointer: "/components/schemas/ChatEntityReferencePage", value: EntityRefPage{}},
 	{name: "ChatEntityOperation", pointer: "/components/schemas/ChatEntityOperation", value: EntityOperationResponse{}},
 	{name: "WorkspacePendingRunResponseV1", pointer: "/components/schemas/WorkspacePendingRunResponseV1", value: pendingRunReceipt{}},

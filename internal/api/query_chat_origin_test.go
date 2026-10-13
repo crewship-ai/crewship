@@ -20,7 +20,7 @@ func TestQueryChatOriginIsDurableAndCannotBecomeAutonomous(t *testing.T) {
 	host := NewInternalHandler(f.h.db, "host", newTestLogger())
 	wireTestJournalForHandler(t, f.h.db, host)
 	h.SetJournal(host.journal)
-	body := map[string]any{"workspace_id": f.workspace, "crew_id": f.crew, "chat_id": f.chat, "from_slug": fromSlug, "target_slug": "query-origin-peer", "question": "work for this user", "source_run_id": f.run}
+	body := map[string]any{"workspace_id": f.workspace, "crew_id": f.crew, "chat_id": f.chat, "from_slug": fromSlug, "actor_agent_id": f.agent, "target_slug": "query-origin-peer", "question": "work for this user", "source_run_id": f.run}
 	rr := httptest.NewRecorder()
 	h.Create(rr, httptest.NewRequest(http.MethodPost, "/", jsonBody(body)))
 	// Admission reached the genuine CLI execution boundary. No executor was

@@ -125,6 +125,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// the parent handler skip the mirror entirely.
 	if pipes != nil {
 		routineAdapter := NewRoutineInternalAdapter(pipes)
+		routineAdapter.SetRunTokenSecret(r.internalToken)
 		// #1768: the autonomy gate. Without this the adapter falls back to
 		// the conservative guided default (every schedule staged disabled),
 		// which is safe but not what an operator on trusted/full configured.

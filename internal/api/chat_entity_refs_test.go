@@ -74,6 +74,23 @@ func TestChatEntityRefsPagingAuthorityAndFixtures(t *testing.T) {
 		t.Fatal("poll must replace bounded snapshot")
 	}
 	assertEntityHandlerFixture(t, "cursor-invalid.json", request("entity-chat", "invalid", 2).Body.Bytes())
+	execOrFatal(t, db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('entity-other-chat',?,'entity-agent',?,'private')`, workspace, user)
+	if rec := request("entity-other-chat", first.NextCursor, 2); rec.Code != 400 {
+		t.Fatalf("cross chat cursor %d", rec.Code)
+	}
+	expired, err := router.decodeEntityCursor(first.NextCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired.Expires = 1
+	expiredCursor, err := router.encodeEntityCursor(expired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := request("entity-chat", expiredCursor, 2); rec.Code != 400 {
+		t.Fatalf("expired cursor %d", rec.Code)
+	}
+	assertEntityHandlerFixture(t, "empty.json", decode(request("entity-other-chat", "", 2)))
 	for name, cursor := range map[string]string{"tampered": first.NextCursor + "x", "invalid": "garbage"} {
 		if rec := request("entity-chat", cursor, 2); rec.Code != 400 {
 			t.Fatalf("%s %d", name, rec.Code)

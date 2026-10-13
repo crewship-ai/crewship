@@ -45,6 +45,7 @@ func TestExecutionOriginsUpgradeFencesUnknownQueuedWork(t *testing.T) {
 
 	exec(`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash) VALUES('upgrade-pipeline','origin-upgrade-ws','upgrade-pipeline','Upgrade','{"steps":[]}','upgrade-hash')`)
 	exec(`INSERT INTO journal_entries(id,workspace_id,agent_id,entry_type,actor_type,summary,trace_id,payload) VALUES('upgrade-human-start','origin-upgrade-ws','origin-upgrade-agent','run.started','orchestrator','Chat root','upgrade-human-root','{"human_authority":{"chat_id":"legacy-chat"},"trigger_message_id":"legacy-trigger"}')`)
+	exec(`INSERT INTO journal_entries(id,workspace_id,agent_id,entry_type,actor_type,summary,trace_id,payload) VALUES('upgrade-machine-start','origin-upgrade-ws','origin-upgrade-agent','run.started','orchestrator','Standing machine root','standing-schedule','{"host_admitted":true,"trigger_type":"CRON"}')`)
 	for _, kind := range []string{"human", "standing"} {
 		source := "standing-schedule"
 		if kind == "human" {
