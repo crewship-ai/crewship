@@ -115,28 +115,32 @@ beforeEach(() => {
 })
 
 
+/** A workspace in the panel (the phone list in the middle has a button too). */
+const panelButtons = (name: RegExp) => screen.queryAllByRole("button", { name }).filter((b) => !b.closest("[data-slot=workspaces-list]"))
+const inPanel = async (name: RegExp) => { await screen.findAllByRole("button", { name }); return panelButtons(name)[0] }
 /** The page's floating Save bar: every Security form saves from there. */
 const saveBar = () => fireEvent.click(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" }))
 
 describe("the panel, like People & workspaces", () => {
   it("offers three views, the instance settings, the activity and every workspace with how it is watched", async () => {
     render(<SecurityPage />)
-    const coolify = await screen.findByRole("button", { name: /^Coolify/ })
+    const coolify = await inPanel(/^Coolify/)
     expect(within(screen.getByRole("group", { name: "View" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["Overview", "Workspaces", "Activity"])
     expect(screen.getByRole("button", { name: /^Credential judge/ })).toHaveTextContent("qwen2.5:7b")
-    expect(screen.getByRole("button", { name: /^New workspaces/ })).toBeInTheDocument()
+    expect(panelButtons(/^New workspaces/)).toHaveLength(1)
     expect(coolify).toHaveTextContent("Watchdog off")
-    expect(screen.getByRole("button", { name: /^Dess/ })).toHaveTextContent("Watchdog on · 1 in 10")
+    expect(await inPanel(/^Dess/)).toHaveTextContent("Watchdog on · 1 in 10")
     // The old tick list of workspaces is gone.
     expect(document.querySelector("[data-slot=workspace-scope]")).toBeNull()
   })
 
   it("finds a workspace by name", async () => {
     render(<SecurityPage />)
-    await screen.findByRole("button", { name: /^Coolify/ })
+    await inPanel(/^Coolify/)
     fireEvent.change(screen.getByPlaceholderText("Search workspaces…"), { target: { value: "dess" } })
-    expect(screen.queryByRole("button", { name: /^Coolify/ })).toBeNull()
-    expect(screen.getByRole("button", { name: /^Dess/ })).toBeInTheDocument()
+    // The overview's list shows every workspace; the panel only the match.
+    expect(panelButtons(/^Coolify/)).toHaveLength(0)
+    expect(await inPanel(/^Dess/)).toBeInTheDocument()
     expect(window.location.search).toContain("q=dess")
   })
 })

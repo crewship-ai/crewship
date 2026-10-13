@@ -71,8 +71,38 @@ export function WhatsOnWhere({ rows, onOpen, defaults, onOpenDefaults, selected,
     tabIndex: 0, onClick: fn,
     onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter") fn() },
   })
+  // A phone gets one line per workspace instead of a table it would scroll.
+  const phoneRow = (r: InstanceGovRow, isDefaults = false) => (
+    <li key={r.workspace_id} className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0">
+      {selectable && !isDefaults && (
+        <input type="checkbox" aria-label={`Select ${r.workspace_name}`} checked={selected!.has(r.workspace_id)}
+          onChange={(e) => onSelect!([r.workspace_id], e.target.checked)} className="size-4 accent-[var(--primary)]" />
+      )}
+      <button type="button" onClick={() => (isDefaults ? onOpenDefaults?.() : onOpen(r.workspace_id))}
+        className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+        {isDefaults
+          ? <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground"><Sparkles className="h-3.5 w-3.5" /></span>
+          : <WorkspaceTile id={r.workspace_id} name={r.workspace_name} />}
+        <span className="min-w-0 flex-1">
+          <span className={cn("flex items-center gap-1.5 text-control", isDefaults ? "text-muted-foreground" : "font-medium")}>
+            <span className="truncate">{r.workspace_name}</span>
+            {!isDefaults && <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", r.enabled ? "bg-success" : "bg-warn")} aria-hidden />}
+          </span>
+          <span className="block truncate text-label text-muted-foreground">
+            {watchSummary(r)} · {leaseLabel(r.auto_lease_seconds).toLowerCase()} · {r.gov_model_provider ? "own judge" : "instance judge"}
+          </span>
+        </span>
+        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
+      </button>
+    </li>
+  )
   return (
-    <div className="overflow-x-auto">
+    <>
+    <ul className="md:hidden" aria-label={label} data-slot="workspaces-list">
+      {rows.map((r) => phoneRow(r))}
+      {defaults && phoneRow(defaults, true)}
+    </ul>
+    <div className="overflow-x-auto max-md:hidden">
       <table className={settingsTable} aria-label={label}>
         <thead>
           <tr>
@@ -140,5 +170,6 @@ export function WhatsOnWhere({ rows, onOpen, defaults, onOpenDefaults, selected,
         </tbody>
       </table>
     </div>
+    </>
   )
 }

@@ -194,7 +194,8 @@ export function SecurityPage() {
             <button key={v.key} type="button" aria-pressed={on} onClick={() => showView(v.key)} data-drill-close
               className={cn("flex h-7 min-w-0 items-center justify-center gap-1 rounded-md px-1 text-label font-medium transition-colors",
                 on ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
-              <v.icon className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{v.label}</span>
+              {/* Words only: three icons left "Workspaces" no room in the panel. */}
+              <span className="truncate">{v.label}</span>
             </button>
           )
         })}
