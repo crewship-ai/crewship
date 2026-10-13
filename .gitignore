@@ -228,3 +228,5 @@ __pycache__/
 
 # Locally generated Excalidraw font assets
 /e2e/board-editor/public/
+# Generated from pinned Excalidraw package; notices are tracked separately.
+/public/excalidraw-assets/

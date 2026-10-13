@@ -75,9 +75,10 @@ recorded in the generated frontend license inventory.
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 > SOFTWARE.
 
-The integration fixture serves font assets locally outside the product's
-`public/` tree. Font licenses are separate from the editor's MIT license;
-production asset packaging must preserve their upstream font notices.
+Board font assets are served locally. Their licenses are separate from the
+editor's MIT license. Copyright and license texts for all nine bundled font
+families are preserved in [the font notices](public/fonts/excalidraw-notices/README.txt)
+and copied alongside the generated assets.
 
 ### Package inventory
 

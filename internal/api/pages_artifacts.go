@@ -29,7 +29,7 @@ type pageAuthQueryer interface {
 }
 
 func (h *PageHandler) pageAuthReader(ctx context.Context) pageAuthQueryer {
-	if tx, ok := ctx.Value(pageAuthReaderKey{}).(*sql.Tx); ok {
+	if tx, ok := ctx.Value(pageAuthReaderKey{}).(*sql.Tx); ok && tx != nil {
 		return tx
 	}
 	return h.db
@@ -69,6 +69,10 @@ func (h *PageHandler) artifactPage(w http.ResponseWriter, r *http.Request, write
 	}
 	if write && !h.mayEditSpec(r.Context(), ws, user.ID, RoleFromContext(r.Context()), rec) {
 		replyError(w, 403, "page write permission required")
+		return nil, false
+	}
+	if rec.HasBoard {
+		replyError(w, 409, "board pages cannot contain artifacts")
 		return nil, false
 	}
 	if write && (rec.OwnerUserID == "" || rec.OwnerCrewID != "") {

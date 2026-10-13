@@ -56,8 +56,12 @@ func (h *PageHandler) artifactCommentsPage(w http.ResponseWriter, r *http.Reques
 		replyError(w, 401, "human authentication required")
 		return nil, false
 	}
-	rec, ok := h.artifactPage(w, r, write)
+	rec, ok := h.artifactPage(w, r, false)
 	if !ok {
+		return nil, false
+	}
+	if write && !h.mayComment(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec) {
+		replyError(w, 403, "page comment permission required")
 		return nil, false
 	}
 	if !rec.HasArtifact {
@@ -153,8 +157,8 @@ func (h *PageHandler) ListArtifactThreads(w http.ResponseWriter, r *http.Request
 		}
 		threads = append(threads, *v)
 	}
-	canComment := h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)
-	writeJSON(w, 200, map[string]any{"threads": threads, "can_comment": canComment, "can_resolve": canComment})
+	canComment := h.mayComment(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)
+	writeJSON(w, 200, map[string]any{"threads": threads, "can_comment": canComment, "can_resolve": h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)})
 }
 
 type artifactCommentMutation struct {
@@ -238,6 +242,10 @@ func (h *PageHandler) mutateArtifactThread(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
+	if operation == "resolve" && !h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec) {
+		replyError(w, 403, "page write permission required to resolve threads")
+		return
+	}
 	threadID := r.PathValue("threadId")
 	encoded, _ := json.Marshal(struct {
 		Operation string
@@ -271,6 +279,10 @@ func (h *PageHandler) mutateArtifactThread(w http.ResponseWriter, r *http.Reques
 	ctx = context.WithValue(ctx, ctxRole, role)
 	rec, ok = h.artifactCommentsPage(w, r.WithContext(ctx), true)
 	if !ok {
+		return
+	}
+	if operation == "resolve" && !h.mayEditSpec(ctx, ws, user.ID, role, rec) {
+		replyError(w, 403, "page write permission required to resolve threads")
 		return
 	}
 	var receiptThread, receiptDigest, receiptActor string

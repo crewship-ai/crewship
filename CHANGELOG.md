@@ -9,7 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Board editor integration is under validation (#3069).** The pinned Excalidraw editor is exercised against conflict and undo scenarios, static artifact frames and selection export. This adds the integration test foundation; Board navigation and persisted collaborative drawing are not enabled yet.
+- **Pages can store Boards with drawings and pinned artifacts (#3069).** Create a Board, draw with Excalidraw and save with conflict protection. Pins retain an exact artifact revision and respect its separate access rules. Workspace backups preserve Boards and their source links. This first Board slice uses explicit saving; live collaboration and agent drawing follow separately in the same feature rollout.
+
+- **Artifact collaboration now distinguishes commenting from editing (#3069).** A comment grant allows human discussion without publication or agent dispatch. Saved revisions can be compared side by side and opened by revision URL; retrying an uncertain source save preserves its mutation identity.
 
 - **Artifacts can be sent back to an agent for a concrete revision (#3069).** Owners select an eligible private chat, send an instruction with a saved discussion snapshot, and see the request state and published result. Cancellation blocks further publication. A live-chat control can also authorize one new private artifact. Chat execution records survive optional artifact-admission failures; agent publication still fails closed. Workspace write limits, bounded upload concurrency and source retention protect the server without stopping ordinary edits at revision 200. Restoring history does not restart old agent work.
 

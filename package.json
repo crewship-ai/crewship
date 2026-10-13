@@ -10,8 +10,8 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "dev": "node scripts/prepare-pdf-assets.mjs && next dev --turbopack",
-    "build": "node scripts/prepare-pdf-assets.mjs && next build",
+    "dev": "node scripts/prepare-pdf-assets.mjs && node scripts/prepare-board-assets.mjs --production && next dev --turbopack",
+    "build": "node scripts/prepare-pdf-assets.mjs && node scripts/prepare-board-assets.mjs --production && next build",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests",
     "test:types": "node scripts/typecheck-tests.mjs",

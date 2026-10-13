@@ -312,6 +312,10 @@ var BackupTables = []string{
 	"page_artifact_threads",
 	"page_artifact_comments",
 	"page_artifact_comment_mutations",
+	"page_boards",
+	"page_board_elements",
+	"page_board_artifact_placements",
+	"page_board_mutations",
 	"page_project_builds",       // FK page_id → pages; nullable requested_by → users
 	"page_project_publications", // Build and Page rows precede immutable publications.
 	"page_project_live",
@@ -453,7 +457,9 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "pipeline_run_step_outputs", "pipeline_step_executions", "pipeline_run_artifacts":
 		// No workspace_id column — scoped via its run.
 		return "run_id IN (SELECT id FROM pipeline_runs WHERE workspace_id = ?)", []any{workspaceID}, true
-	case "page_artifact_mutation_receipts", "page_artifact_requests", "page_artifact_creations", "page_artifact_threads", "page_artifact_comment_mutations", "page_artifacts", "page_artifact_revisions", "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
+	case "page_board_elements", "page_board_mutations", "page_board_artifact_placements":
+		return "board_page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "page_boards", "page_artifact_mutation_receipts", "page_artifact_requests", "page_artifact_creations", "page_artifact_threads", "page_artifact_comment_mutations", "page_artifacts", "page_artifact_revisions", "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
 		// Scope through the owning page, never the nullable (or cross-workspace) editor.
 		return "page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "page_artifact_comments":

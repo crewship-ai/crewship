@@ -71,6 +71,7 @@ DELETE /api/v1/page-folders/{slug}/acl/{subject_type}/{subject_id} roleCreate
 DELETE /api/v1/page-folders/{slug}/pages/{page} roleSelf
 DELETE /api/v1/pages/{slug} roleSelf
 DELETE /api/v1/pages/{slug}/artifact/delegations/{runId} roleSelf
+DELETE /api/v1/pages/{slug}/board/placements/{placementId} roleSelf
 DELETE /api/v1/pages/{slug}/grants roleSelf
 DELETE /api/v1/pages/{slug}/public/{tokenId} roleSelf
 DELETE /api/v1/pages/{slug}/webhooks/{webhookId} roleSelf
@@ -331,6 +332,9 @@ POST /api/v1/pages/{slug}/artifact/restore roleSelf
 POST /api/v1/pages/{slug}/artifact/revisions roleSelf
 POST /api/v1/pages/{slug}/artifact/threads roleSelf
 POST /api/v1/pages/{slug}/artifact/threads/{threadId}/replies roleSelf
+POST /api/v1/pages/{slug}/board roleSelf
+POST /api/v1/pages/{slug}/board/batches roleSelf
+POST /api/v1/pages/{slug}/board/placements roleSelf
 POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId} roleCreate
 POST /api/v1/pages/{slug}/project/build roleSelf
 POST /api/v1/pages/{slug}/project/check roleSelf

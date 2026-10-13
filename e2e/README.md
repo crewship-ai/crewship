@@ -9,7 +9,7 @@ authenticated-server and isolated-fixture tests.
 | Configuration | Tests and prerequisites | Caller |
 | --- | --- | --- |
 | [playwright.artifact-runtime.config.ts](../playwright.artifact-runtime.config.ts) | Public HTTPS CSP/sandbox characterization; suite-owned fixture, no app or credentials; all three engines | [artifact-runtime.yml](../.github/workflows/artifact-runtime.yml) |
-| [playwright.board-editor.config.ts](../playwright.board-editor.config.ts) | Real pinned Excalidraw editor with an isolated test store: conflict/undo correction, static artifact frames, explicit placeholder export and Mermaid conversion; no product server or credentials | [artifact-runtime.yml](../.github/workflows/artifact-runtime.yml) |
+| [playwright.board-editor.config.ts](../playwright.board-editor.config.ts) | Real pinned Excalidraw editor and production Board components: draft saving/retries/conflicts/revocation, static frames, isolated undo/export/Mermaid experiments; explicit mocked API, no product server or credentials | [artifact-runtime.yml](../.github/workflows/artifact-runtime.yml) |
 | [playwright.config.ts](../playwright.config.ts) | Main local suite with an explicit `testIgnore` list; requires an authenticated test instance | `pnpm test:e2e`, `pnpm test:e2e:ui` |
 | [playwright.pr.config.ts](../playwright.pr.config.ts) | `pr-contract.spec.ts`: authenticated desktop workflow and phone contract | [ci.yml](../.github/workflows/ci.yml), `playwright-pr` job |
 | [playwright.fresh.config.ts](../playwright.fresh.config.ts) | `onboarding-wizard.spec.ts`; disposable, never-bootstrapped database, no shared login state | `onboarding-journey` in [ci.yml](../.github/workflows/ci.yml), plus the [devcontainer workflow](../.github/workflows/e2e-devcontainer.yml) |

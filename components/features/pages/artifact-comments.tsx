@@ -87,7 +87,7 @@ export function ArtifactComments({ workspaceId, slug, revision, onViewRevision, 
           }} />
           <p className="text-xs text-muted-foreground">Plain text · Up to 4 KiB · Visible to people who can read this page.</p>
           <Button type="submit" className="coarse:h-12" disabled={write.isPending || !body.trim()}>{write.isPending ? "Saving…" : "Post comment"}</Button>
-        </form> : <p className="rounded-lg border bg-muted/20 p-4 text-sm text-muted-foreground">You can read these threads. Editing permission is required to comment or resolve them.</p>}
+        </form> : <p className="rounded-lg border bg-muted/20 p-4 text-sm text-muted-foreground">You can read these threads. Comment permission is required to reply; editors can also resolve threads.</p>}
       </div>
     </div>
   </section>

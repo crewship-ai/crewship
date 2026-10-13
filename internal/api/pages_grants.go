@@ -193,14 +193,18 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	if !validPageGrantLevel(req.Level) {
 		replyError(w, http.StatusBadRequest,
-			`level must be "read", "produce" or "write" (§7.1b: three verbs — see the page, push into named panels, edit the spec)`)
+			`level must be "read", "comment", "produce" or "write" (see the page, comment, push into named panels, edit the spec)`)
+		return
+	}
+	if req.SubjectType == pageSubjectAgent && req.Level == pageGrantComment {
+		replyError(w, 400, "comment grants are for humans, not agents")
 		return
 	}
 	// The workspace subject reads or writes, never produces (#2533 §3/14):
 	// produce names a producer, and "everyone in the workspace" is not one.
 	if req.SubjectType == pageSubjectWorkspace && !workspaceSubjectLevelAllowed(req.Level) {
 		replyError(w, http.StatusBadRequest,
-			`a grant to everyone in the workspace carries "read" or "write", never "produce": a producer is one named subject, and everyone is not one`)
+			`a grant to everyone in the workspace carries "read", "comment" or "write", never "produce": a producer is one named subject, and everyone is not one`)
 		return
 	}
 	panels := trimPageGrantPanels(req.Panels)
@@ -316,7 +320,7 @@ func (h *PageHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	if level != "" && !validPageGrantLevel(level) {
 		replyError(w, http.StatusBadRequest,
-			`level must be "read", "produce" or "write", or be omitted to revoke every level this subject holds`)
+			`level must be "read", "comment", "produce" or "write", or be omitted to revoke every level this subject holds`)
 		return
 	}
 

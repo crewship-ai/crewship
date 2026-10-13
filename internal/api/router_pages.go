@@ -106,6 +106,17 @@ func (r *Router) registerPageRoutes() {
 	r.mux.Handle("GET /api/v1/pages/{slug}/access", authed(wsCtx(http.HandlerFunc(p.PageAccess))))
 	// openapi: query subject:string! subject_type:string limit:integer cursor:string; responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/pages/access", authed(wsCtx(http.HandlerFunc(p.SubjectAccess))))
+	// Boards share Page ACLs; every mutation rechecks authority under the writer fence.
+	// openapi: responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/board", authed(wsCtx(http.HandlerFunc(p.GetBoard))))
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board", roleSelf, p.InitBoard)
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/batches", roleSelf, p.ApplyBoardBatch)
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/placements", roleSelf, p.AddBoardPlacement)
+	// openapi: responses 200,400,401,403,404,409,413,422,429,500
+	r.authedMut("DELETE", "/api/v1/pages/{slug}/board/placements/{placementId}", roleSelf, p.DeleteBoardPlacement)
 	// openapi: query revision:integer; responses 200,400,401,404,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/artifact", authed(wsCtx(http.HandlerFunc(p.GetArtifact))))
 	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503

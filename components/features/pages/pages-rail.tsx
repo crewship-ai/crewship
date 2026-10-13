@@ -793,6 +793,7 @@ export function PagesRail({
                         <span className="min-w-0 flex-1 truncate text-foreground/80" title={page.name}>
                           {page.name}
                         </span>
+                        {page.hasBoard && <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 type-page-meta font-medium text-muted-foreground" title="Drawing board">Board</span>}
                         {page.hasArtifact && <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 type-page-meta font-medium text-muted-foreground" title="HTML artifact">HTML</span>}
                         {/* The badge is the panel count and only ever the
                             panel count. A badge that means one thing on some

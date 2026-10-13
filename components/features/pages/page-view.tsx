@@ -69,6 +69,7 @@
  */
 
 import * as React from "react"
+import { PageBoardView } from "./page-board-view"
 import { PageArtifactView } from "./page-artifact"
 import Link from "next/link"
 import { refHref, refLabel } from "@/lib/entity-refs"
@@ -513,7 +514,7 @@ function PageBody({
             {page.name}
           </h1>
           <p className="text-xs text-muted-foreground">
-            {page.hasArtifact ? "HTML artifact" : `${panels.length} ${panels.length === 1 ? "panel" : "panels"}`}
+            {page.hasBoard ? "Board" : page.hasArtifact ? "HTML artifact" : `${panels.length} ${panels.length === 1 ? "panel" : "panels"}`}
             {page.description ? ` · ${page.description}` : ""}
           </p>
         </div>
@@ -529,7 +530,7 @@ function PageBody({
         )}
       </div>
 
-      {workspaceId && (page.hasArtifact || page.artifactEligible) ? <PageArtifactView key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} onDirtyChange={onArtifactDirtyChange} /> : panels.length === 0 ? (
+      {workspaceId && page.hasBoard ? <PageBoardView key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} onDirtyChange={onArtifactDirtyChange} /> : workspaceId && (page.hasArtifact || page.artifactEligible) ? <PageArtifactView key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} onDirtyChange={onArtifactDirtyChange} /> : panels.length === 0 ? (
         <EmptyState
           icon={CONCEPT_ICON.pages}
           title="This page declares no panels"
