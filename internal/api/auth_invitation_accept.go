@@ -29,6 +29,8 @@ func (h *AuthHandler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, "Invitation token required")
 		return
 	}
+	ctx, publishAudit := withInvitationAudit(r.Context(), h.invitationJournal)
+	r = r.WithContext(ctx)
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		replyInternalError(w, h.logger, "accept invitation", err)
@@ -68,5 +70,6 @@ func (h *AuthHandler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "accept invitation", err)
 		return
 	}
+	publishAudit()
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }

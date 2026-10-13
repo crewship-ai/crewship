@@ -116,7 +116,8 @@ type WorkspaceHandler struct {
 	// that RemoveMember triggers when the departing member owns a page.
 	// nil is safe: transferDepartingUserPages falls back to a no-op
 	// emitter on its own, matching every other SetJournal in this package.
-	journal journal.Emitter
+	journal           journal.Emitter
+	invitationJournal journal.Emitter
 	// storageRoot keeps uploaded workspace logos (#3005); the router's
 	// storagePath, set by SetStorageRoot.
 	storageRoot        string
